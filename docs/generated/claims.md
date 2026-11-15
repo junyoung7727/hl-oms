@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `c2addecd59bc4a5a`, 검증 결과의 다이제스트 `c2addecd59bc4a5a`.
+> 소스 다이제스트 `4f6788394bb348d6`, 검증 결과의 다이제스트 `4f6788394bb348d6`.
 
-주장 56건: 통과 56, 실패 0, 미실행 0, 이전 버전 결과 0.
+주장 56건: 통과 49, 실패 0, 미실행 1, 이전 버전 결과 6.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -46,20 +46,20 @@
 | V-LINK-1 | 스트림이 끊기면 신규 주문을 막고, 그동안의 취소 요청을 기억했다가 복귀 뒤 보내며, 놓친 체결을 메운 뒤에야 거래를 재개한다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e link_loss` |
 | V-HL-1 | L1 액션의 해시와 서명이 공식 Python SDK의 결과와 같고, 서명 키는 출력되지 않는다 | 단위 | 통과 | `cargo test -p oms-node --lib sign` |
 | V-HL-2 | 문서에 실린 응답 예를 올바르게 해석한다. 문서에 없는 주문 응답 형태와 최상위 오류는 결과 불명으로 두고, 문서의 표에 없는 상태 이름에서는 아무 결론도 내지 않으며, 종결 상태에서 최종 수량을 추정하지 않는다. 체결 조회는 마지막 쪽임이 확실할 때만 완료를 선언한다 | 단위 | 통과 | `cargo test -p oms-node --lib hyperliquid` |
-| V-HL-3 | 실제 testnet에 대해 게이트웨이가 메타를 읽어 종목 규칙을 통과시키고, 사용자 스트림을 구독해 링크를 올리고, 주문 조회(없음)·열린 주문·포지션·체결 조회·참조 가격을 해석한다 | 실제 거래소(읽기 전용) | 통과 | `OMS_LIVE_TESTNET=1 cargo test -p oms-node --test hl_live -- --nocapture` |
+| V-HL-3 | 실제 testnet에 대해 게이트웨이가 메타를 읽어 종목 규칙을 통과시키고, 사용자 스트림을 구독해 링크를 올리고, 주문 조회(없음)·열린 주문·포지션·체결 조회·참조 가격을 해석한다 | 실제 거래소(읽기 전용) | 미실행 | `OMS_LIVE_TESTNET=1 cargo test -p oms-node --test hl_live -- --nocapture` |
 | V-PURE-1 | 도메인 코어의 소스에 시계·파일·네트워크·스레드·난수·해시 컬렉션·부동소수점·unsafe가 없고 의존성은 serde와 serde_json뿐이다 | 소스 검사 | 통과 | `cargo run -p xtask -- verify --quick` |
-| V-PERF-1 | 초당 200건의 open-loop 부하에서 로컬 응답 지연 p99가 20 ms 이하이고 오류와 미응답이 없다 | 측정 | 통과 | `cargo run --release -p xtask -- perf --dir <NVMe 디렉터리> --rates 20,200,2000 --seconds 60 --label nvme-final` |
-| V-PERF-2 | 초당 2000건의 부하에서 (가) 수용 한도를 푼 설정에서는 큐가 상한 안에 머물고 미응답이 없으며, (나) 기본 한도에서는 초과분이 overloaded로 즉시 거절되고 저널에 기록을 남기지 않는다 | 측정 | 통과 | `xtask perf --label nvme-final --rates 20,200,2000 --seconds 60  /  xtask perf --label nvme-default-limits --rates 2000 --seconds 60 --default-limits` |
-| V-PERF-3 | 스냅샷 이후 기록 5만 건의 재생이 5초 이내에 끝난다 | 측정 | 통과 | `cargo run --release -p xtask -- recovery-time --dir <디렉터리>` |
-| V-MUT-1 | 핵심 보호 로직을 일부러 깨뜨리면 관련 시험이 실패한다 | 변이 | 통과 | `cargo run -p xtask -- mutants` |
+| V-PERF-1 | 초당 200건의 open-loop 부하에서 로컬 응답 지연 p99가 20 ms 이하이고 오류와 미응답이 없다 | 측정 | 이전 버전 결과 | `cargo run --release -p xtask -- perf --dir <NVMe 디렉터리> --rates 20,200,2000 --seconds 60 --label nvme-final` |
+| V-PERF-2 | 초당 2000건의 부하에서 (가) 수용 한도를 푼 설정에서는 큐가 상한 안에 머물고 미응답이 없으며, (나) 기본 한도에서는 초과분이 overloaded로 즉시 거절되고 저널에 기록을 남기지 않는다 | 측정 | 이전 버전 결과 | `xtask perf --label nvme-final --rates 20,200,2000 --seconds 60  /  xtask perf --label nvme-default-limits --rates 2000 --seconds 60 --default-limits` |
+| V-PERF-3 | 스냅샷 이후 기록 5만 건의 재생이 5초 이내에 끝난다 | 측정 | 이전 버전 결과 | `cargo run --release -p xtask -- recovery-time --dir <디렉터리>` |
+| V-MUT-1 | 핵심 보호 로직을 일부러 깨뜨리면 관련 시험이 실패한다 | 변이 | 이전 버전 결과 | `cargo run -p xtask -- mutants` |
 | V-HIST-1 | 단계 지연 히스토그램이 보고하는 백분위는 실제 값 이상이고 12.5% 이내로 크다 | 단위 | 통과 | `cargo test -p oms-node --lib util` |
 | V-COMMIT-4 | 커밋 순서의 경계마다 프로세스를 멈추면 결과가 경계별 장애 표와 같다: 쓰기 전에 멈추면 요청이 없었던 것이 되고, 쓴 뒤·flush 뒤·응답 뒤에 멈추면 주문은 남되 한 번도 전송되지 않고 결과 불명을 거쳐 "놓이지 않음"으로 닫히며, 같은 요청을 다시 보내면 같은 주문으로 답한다 | 프로세스 | 통과 | `cargo test -p oms-node --features failpoints --test crash_points` |
 | V-COMMIT-5 | 실제 디스크에 둔 저널로 강제 종료를 60회 반복해도 V-COMMIT-2의 성질이 유지된다 | 프로세스 | 통과 | `cargo run --release -p xtask -- verify --extended <실제 디스크의 디렉터리>` |
 | V-BOOT-2 | 저널이 여러 세그먼트에 걸쳐 있어도 강제 종료 뒤 스냅샷과 저널로 같은 상태로 돌아오고, `verify --re-decide`는 입력과 맞지 않는 기록을 잡아내며, 종료 중의 저널 실패는 정상 종료로 보고되지 않는다 | 프로세스 | 통과 | `cargo test -p oms-node --test review_node` |
 | V-API-3 | 거래 소켓의 연결이 아무리 많아도 운영 소켓은 열리고, 끊긴 구독자는 연결 자리를 돌려주며, 한 연결은 구독을 하나만 가진다 | 프로세스 | 통과 | `cargo test -p oms-node --test review_node` |
 | V-DASH-1 | 대시보드의 문서 열람 경로는 docs/, crates/, registry/ 아래의 .md, .rs, .toml만 읽는다 | 단위 | 통과 | `cargo test -p oms-node --lib http` |
-| V-PERF-4 | 커밋 스레드 구성과 인라인 구성을 같은 조건에서 잰 결과가 보관돼 있다(ADR-012의 비교) | 측정 | 통과 | `xtask perf --label nvme-compare-thread --rates 200,2000,8000 --seconds 10  /  같은 명령에 --inline --label nvme-compare-inline` |
-| V-PERF-5 | 저장 장치의 동기 쓰기 시간과 코어의 판단 시간을 잰 결과가 보관돼 있다 | 측정 | 통과 | `xtask fsync-probe --dir <디렉터리> --label nvme  /  xtask core-bench` |
+| V-PERF-4 | 커밋 스레드 구성과 인라인 구성을 같은 조건에서 잰 결과가 보관돼 있다(ADR-012의 비교) | 측정 | 이전 버전 결과 | `xtask perf --label nvme-compare-thread --rates 200,2000,8000 --seconds 10  /  같은 명령에 --inline --label nvme-compare-inline` |
+| V-PERF-5 | 저장 장치의 동기 쓰기 시간과 코어의 판단 시간을 잰 결과가 보관돼 있다 | 측정 | 이전 버전 결과 | `xtask fsync-probe --dir <디렉터리> --label nvme  /  xtask core-bench` |
 | V-SIM-4 | 프로파일마다 seed 3000개로 V-SIM-1, V-SIM-2, V-EXT-1의 성질이 유지된다 | 시뮬레이션 | 통과 | `cargo run --release -p xtask -- verify --extended <실제 디스크의 디렉터리>` |
 | V-FUZZ-1 | 가정을 지키지 않는 임의의 거래소 입력(순서 역전, 중복, 낡은 상태, 식별자 없는 체결, 부재 응답, 링크 변동, 재시작)에서도 코어는 결함으로 멈추지 않고, 불변조건과 재생 일치가 유지되고, 주문당 전송은 한 번이며, 차단 중 수용이 없고, 새 체결은 반드시 기장되거나 대기하고, 정직하게 정리된 뒤에는 차단이 남지 않는다 | 속성 | 통과 | `cargo test --release -p oms-core --test review_core examined_fuzz` |
 | V-MIS-1 | 불일치 14종 각각을 일으키는 시험이 있고, 같은 대상의 반복은 확인되기 전까지 한 건으로 남는다 | 단위 | 통과 | `cargo test -p oms-core` |
@@ -910,7 +910,7 @@
 
 ## V-HL-3 — 실제 testnet에 대해 게이트웨이가 메타를 읽어 종목 규칙을 통과시키고, 사용자 스트림을 구독해 링크를 올리고, 주문 조회(없음)·열린 주문·포지션·체결 조회·참조 가격을 해석한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 게이트웨이가 파싱하는 형태가 실제 거래소의 응답과 맞는지
 - 수준: 실제 거래소(읽기 전용)
 - 전제와 범위: 계정이 없는 주소. 서명한 요청을 보내지 않는다. 1회
@@ -924,7 +924,7 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `hl-live/the_gateway_reads_the_real_testnet` | 통과 |  |
+| `hl-live/the_gateway_reads_the_real_testnet` | 미실행 |  |
 
 ## V-PURE-1 — 도메인 코어의 소스에 시계·파일·네트워크·스레드·난수·해시 컬렉션·부동소수점·unsafe가 없고 의존성은 serde와 serde_json뿐이다
 
@@ -946,7 +946,7 @@
 
 ## V-PERF-1 — 초당 200건의 open-loop 부하에서 로컬 응답 지연 p99가 20 ms 이하이고 오류와 미응답이 없다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 수용 기준 A-LAT-1, A-LAT-2
 - 수준: 측정
 - 전제와 범위: docs/performance/README.md의 조건. 한 호스트, 한 장치, 가상 거래소
@@ -960,11 +960,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `perf/nvme-final` | 통과 | 20/s: p99 4.06 ms, unanswered 0, error kinds 0; 200/s: p99 9.06 ms, unanswered 0, error kinds 0 |
+| `perf/nvme-final` | 이전 버전 결과 | 20/s: p99 4.06 ms, unanswered 0, error kinds 0; 200/s: p99 9.06 ms, unanswered 0, error kinds 0 |
 
 ## V-PERF-2 — 초당 2000건의 부하에서 (가) 수용 한도를 푼 설정에서는 큐가 상한 안에 머물고 미응답이 없으며, (나) 기본 한도에서는 초과분이 overloaded로 즉시 거절되고 저널에 기록을 남기지 않는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 수용 기준 A-CAP-1
 - 수준: 측정
 - 전제와 범위: 초당 2000건, 60초. 설정 둘: 한도를 푼 것(nvme-final)과 기본 한도(nvme-default-limits). 결과 파일에 노드 설정 전문이 들어 있다
@@ -978,12 +978,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `perf/nvme-final` | 통과 | 2000/s [commit_thread, limits lifted]: p99 19.61 ms, unanswered 0, queues within capacity: true, error kinds 0 |
-| `perf/nvme-default-limits` | 통과 | 2000/s with shipped limits: 116901 refused as overloaded, 3099 decided by the core, 3099 decisions in the journal, unanswered 0, queues within capacity: true |
+| `perf/nvme-final` | 이전 버전 결과 | 2000/s [commit_thread, limits lifted]: p99 19.61 ms, unanswered 0, queues within capacity: true, error kinds 0 |
+| `perf/nvme-default-limits` | 이전 버전 결과 | 2000/s with shipped limits: 116901 refused as overloaded, 3099 decided by the core, 3099 decisions in the journal, unanswered 0, queues within capacity: true |
 
 ## V-PERF-3 — 스냅샷 이후 기록 5만 건의 재생이 5초 이내에 끝난다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 수용 기준 A-REC-2
 - 수준: 측정
 - 전제와 범위: 성능 측정으로 만든 저널을 스냅샷 없이 재시작
@@ -997,11 +997,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `perf/recovery` | 통과 | 54023 records replayed in 135 ms |
+| `perf/recovery` | 이전 버전 결과 | 54023 records replayed in 135 ms |
 
 ## V-MUT-1 — 핵심 보호 로직을 일부러 깨뜨리면 관련 시험이 실패한다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 시험이 실제로 그 로직을 지키고 있는지
 - 수준: 변이
 - 전제와 범위: 선별한 변이 목록(docs/verification/README.md). 각 변이는 소스의 한 곳을 바꾼다
@@ -1015,7 +1015,7 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `mutants/all` | 통과 | 20 mutants, survived: [] |
+| `mutants/all` | 이전 버전 결과 | 20 mutants, survived: [] |
 
 ## V-HIST-1 — 단계 지연 히스토그램이 보고하는 백분위는 실제 값 이상이고 12.5% 이내로 크다
 
@@ -1136,7 +1136,7 @@
 
 ## V-PERF-4 — 커밋 스레드 구성과 인라인 구성을 같은 조건에서 잰 결과가 보관돼 있다(ADR-012의 비교)
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 구성 선택의 근거가 측정이라는 것을 결과 파일로 남긴다
 - 수준: 측정
 - 전제와 범위: 초당 200, 2000, 8000건을 10초씩. 수용 한도를 푼 설정
@@ -1150,12 +1150,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `perf/nvme-compare-thread` | 통과 | 200/s [commit_thread]: p99 8.60 ms, unanswered 0, error kinds 0; 2000/s [commit_thread]: p99 15.05 ms, unanswered 0, error kinds 0; 8000/s [commit_thread]: p99 16.88 ms, unanswered 0, error kinds 0 |
-| `perf/nvme-compare-inline` | 통과 | 200/s [inline]: p99 8.44 ms, unanswered 0, error kinds 0; 2000/s [inline]: p99 11.29 ms, unanswered 0, error kinds 0; 8000/s [inline]: p99 1045.90 ms, unanswered 0, error kinds 1 |
+| `perf/nvme-compare-thread` | 이전 버전 결과 | 200/s [commit_thread]: p99 8.60 ms, unanswered 0, error kinds 0; 2000/s [commit_thread]: p99 15.05 ms, unanswered 0, error kinds 0; 8000/s [commit_thread]: p99 16.88 ms, unanswered 0, error kinds 0 |
+| `perf/nvme-compare-inline` | 이전 버전 결과 | 200/s [inline]: p99 8.44 ms, unanswered 0, error kinds 0; 2000/s [inline]: p99 11.29 ms, unanswered 0, error kinds 0; 8000/s [inline]: p99 1045.90 ms, unanswered 0, error kinds 1 |
 
 ## V-PERF-5 — 저장 장치의 동기 쓰기 시간과 코어의 판단 시간을 잰 결과가 보관돼 있다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 응답 지연의 하한(장치)과 코어의 몫을 구분하는 근거
 - 수준: 측정
 - 전제와 범위: 300바이트 append + fdatasync 300회. 주문 20만 건의 수명을 메모리에서 처리
@@ -1169,8 +1169,8 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `perf/fsync-nvme` | 통과 | write+fdatasync: p50 2505 p99 2897 us; fdatasync: p50 2494 p99 2877 us |
-| `perf/core-bench` | 통과 | handle(new_order): p50 22557 p99 30614 ns; handle(send_result placed): p50 864 p99 1138 ns; handle(fill closing the order): p50 1251 p99 1640 ns; encode record (serde_json): p50 527 p99 1635 ns; record size: p50 467 p99 550 bytes |
+| `perf/fsync-nvme` | 이전 버전 결과 | write+fdatasync: p50 2505 p99 2897 us; fdatasync: p50 2494 p99 2877 us |
+| `perf/core-bench` | 이전 버전 결과 | handle(new_order): p50 22557 p99 30614 ns; handle(send_result placed): p50 864 p99 1138 ns; handle(fill closing the order): p50 1251 p99 1640 ns; encode record (serde_json): p50 527 p99 1635 ns; record size: p50 467 p99 550 bytes |
 
 ## V-SIM-4 — 프로파일마다 seed 3000개로 V-SIM-1, V-SIM-2, V-EXT-1의 성질이 유지된다
 
