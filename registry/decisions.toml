@@ -1,0 +1,171 @@
+# 설계 결정 기록의 요약. 본문은 docs/adr/ 에 있다.
+
+[[adr]]
+id = "ADR-001"
+title = "LMAX 원칙의 채택 범위와 단순화"
+file = "docs/adr/ADR-001-lmax-scope.md"
+problem = "여러 스레드가 주문·한도를 나눠 쓰면 검사와 예약을 원자적으로 묶기 어렵고 장애 뒤 순서를 설명할 수 없다"
+alternatives = ["공유 상태 + 잠금", "DB 트랜잭션 중심", "단일 writer + 저널"]
+chosen = "단일 writer 코어와 저널. 복제 노드, Disruptor, busy-spin은 채택하지 않는다"
+gives_up = "무중단 승격, 코어 수에 따른 확장"
+revisit = "계좌가 여럿이 되거나 자동 승격이 요구될 때"
+
+[[adr]]
+id = "ADR-002"
+title = "결정적 코어: 시간·설정·외부 정보를 입력으로"
+file = "docs/adr/ADR-002-deterministic-core.md"
+problem = "판단이 시계나 파일을 직접 읽으면 재현과 감사가 불가능하다"
+alternatives = ["규칙으로만 금지", "trait 주입", "의존성 경계 + 값으로 전달"]
+chosen = "코어 crate는 I/O 의존성이 없고 시간은 인자, 설정과 가격은 입력"
+gives_up = "기록되지 않는 입력(이벤트 없는 것)의 흔적"
+revisit = "비결정적 계산이 판단에 필요해질 때"
+
+[[adr]]
+id = "ADR-003"
+title = "저널 기록 단위: 입력과 결정된 이벤트를 한 기록으로"
+file = "docs/adr/ADR-003-journal-record.md"
+problem = "입력만 기록하면 판단 로직을 고친 빌드가 과거를 다르게 재생한다"
+alternatives = ["입력만(LMAX 원형)", "이벤트만", "입력 + 이벤트"]
+chosen = "입력 + 이벤트. 복구는 이벤트만 적용한다"
+gives_up = "작은 기록 크기"
+revisit = "기록량이 저장을 압박할 때"
+
+[[adr]]
+id = "ADR-004"
+title = "커밋 게이트: 기록 → 내구화 → 공개·응답·전송"
+file = "docs/adr/ADR-004-commit-gate.md"
+problem = "기록보다 앞선 응답이나 전송은 장애 뒤 모순을 남긴다"
+alternatives = ["먼저 기록 후 판단", "요청마다 순차 처리", "판단은 즉시, 출력은 flush 뒤(그룹 커밋)"]
+chosen = "그룹 커밋. flush 실패는 프로세스 정지"
+gives_up = "응답이 flush 한 번을 기다린다"
+revisit = "로컬 응답 p99가 20 ms를 넘을 때"
+
+[[adr]]
+id = "ADR-005"
+title = "결과를 모르는 전송의 복구"
+file = "docs/adr/ADR-005-unknown-outcome.md"
+problem = "응답이 없을 때 실패로 보면 예약 없는 체결이나 중복 주문이 생긴다"
+alternatives = ["운영자만 해소", "같은 cloid로 재전송", "조회 + 만료 뒤 부재 판정", "noop으로 nonce 소진"]
+chosen = "재전송 금지. 조회로 발견하거나 만료 + 여유 뒤의 부재 확인으로 종결"
+gives_up = "즉시 해소. 불명 동안 계좌 전체의 신규 주문이 막힌다"
+revisit = "testnet에서 expiresAfter나 noop의 동작을 확인했을 때"
+
+[[adr]]
+id = "ADR-006"
+title = "멱등성 키와 식별자"
+file = "docs/adr/ADR-006-idempotency.md"
+problem = "재전송을 구별하지 못하면 주문이 중복되고, 판별 기록을 영원히 들면 메모리가 무한히 자란다"
+alternatives = ["키 영구 보관", "전략별 단조 증가 번호", "불투명 키 + 절대 만료 시각"]
+chosen = "(전략, 키) + 절대 만료 시각. 만료 뒤에만 삭제하고 만료된 요청은 거절"
+gives_up = "거절된 요청에 대한 같은 답 보장"
+revisit = "전략이 다른 호스트에서 접속할 때"
+
+[[adr]]
+id = "ADR-007"
+title = "주문 상태 모델과 체결 식별"
+file = "docs/adr/ADR-007-order-state.md"
+problem = "통보는 중복·역순·누락된다. 상태 이름 하나로는 증거와 실제를 구분할 수 없다"
+alternatives = ["누적 보고 덮어쓰기", "FIX식 단일 상태", "증거 단계 + 체결 건별 기장"]
+chosen = "단계·불명·취소·신선도의 네 축. 포지션은 체결 키로만 움직인다"
+gives_up = "단순한 상태 표"
+revisit = "거래소의 잔량 필드 의미와 체결의 cloid 유무를 확인했을 때"
+
+[[adr]]
+id = "ADR-008"
+title = "리스크: 잠재 체결을 포함한 수량 구간 예약"
+file = "docs/adr/ADR-008-risk-reservation.md"
+problem = "두 전략이 같은 여유를 쓰거나, 반대 방향 미체결을 상계해 한도를 넘는다"
+alternatives = ["주문당 한도만", "순포지션 + 순미체결", "구간 예약"]
+chosen = "매수·매도 가능량을 따로 누적하는 구간 예약을 계좌와 전략에 동시에"
+gives_up = "양방향 호가의 자본 효율. 금액·증거금 한도는 미결"
+revisit = "증거금 모델이 결정될 때, 열린 주문 상한을 1000 이상으로 올릴 때"
+
+[[adr]]
+id = "ADR-009"
+title = "수치 표현: 1e-8 고정소수점과 십진 문자열"
+file = "docs/adr/ADR-009-numeric.md"
+problem = "부동소수점 오차, 넘침, JSON 숫자의 정밀도 손실"
+alternatives = ["f64", "십진 라이브러리", "i64 고정 스케일", "종목별 tick 정수"]
+chosen = "i64 1e-8 newtype, 검사 연산, 한도 비교는 올림, 직렬화는 십진 문자열"
+gives_up = "소수 8자리를 넘는 상품"
+revisit = "여러 통화나 계약 승수를 다룰 때"
+
+[[adr]]
+id = "ADR-010"
+title = "과부하와 저장 실패"
+file = "docs/adr/ADR-010-overload-storage.md"
+problem = "큐가 무한히 자라거나, 과부하를 줄이다 체결을 버리거나, 저장 실패 뒤에도 출력을 낸다"
+alternatives = ["무제한 큐", "하나의 제한 큐", "종류별 제한 큐 3개"]
+chosen = "거래소 입력은 대기, 신규 주문과 제어는 거절. 저장 실패는 정지"
+gives_up = "저장 실패 시 자동 취소"
+revisit = "한 전략의 큐 독점이 관측될 때"
+
+[[adr]]
+id = "ADR-011"
+title = "저널·스냅샷 파일 형식, 손상 처리, 버전 호환"
+file = "docs/adr/ADR-011-file-format.md"
+problem = "불완전한 꼬리와 중간 손상을 구분하지 못하면 손상을 건너뛰고 복구하게 된다"
+alternatives = ["SQLite", "append 파일 + JSON 페이로드", "append 파일 + 바이너리 페이로드"]
+chosen = "고정 프레임(길이·CRC·순번) + JSON 페이로드. 꼬리는 보존 후 자르고 중간 손상은 시작 거부"
+gives_up = "작은 크기. 마지막 기록만의 손상은 꼬리와 구별 못 한다"
+revisit = "저널 크기가 부담이 될 때"
+
+[[adr]]
+id = "ADR-012"
+title = "스레드·큐 구성과 채택하지 않은 최적화"
+file = "docs/adr/ADR-012-threads-crates.md"
+problem = "코어가 flush를 직접 기다리면 그동안 체결도 처리하지 못한다"
+alternatives = ["인라인 커밋", "커밋 스레드", "Disruptor + busy-spin + 코어 고정"]
+chosen = "커밋 스레드. 측정상 요구 부하에서는 인라인과 같고 과부하에서 여유가 있다"
+gives_up = "마이크로초 단위 전달 지연"
+revisit = "수용 기준을 못 맞추는 측정이 나올 때"
+
+[[adr]]
+id = "ADR-013"
+title = "가용성: 단일 인스턴스와 중복 실행 방지"
+file = "docs/adr/ADR-013-availability.md"
+problem = "같은 계좌에 두 인스턴스가 주문하면 한도와 ID가 충돌한다"
+alternatives = ["디렉터리 잠금만", "수동 승격 대기 노드", "합의 기반 자동 승격"]
+chosen = "디렉터리 잠금과 인스턴스 ID. 서버 장애는 수동 복구"
+gives_up = "무중단, 서버 유실 시 기록 보존"
+revisit = "허용 중단이 초 단위로 줄 때"
+
+[[adr]]
+id = "ADR-014"
+title = "거래소 상태 대조"
+file = "docs/adr/ADR-014-reconciliation.md"
+problem = "스냅샷과 로컬 상태를 그대로 비교하면 거짓 불일치가 나고, 덮어쓰면 원인이 사라진다"
+alternatives = ["스냅샷 덮어쓰기", "코어가 대조 절차를 상태로 진행", "코어는 필요만 말하고 무상태 대조기가 가져온다"]
+chosen = "needs + 무상태 대조기. 포지션은 예약으로 설명되는 구간 검사"
+gives_up = "재접속마다 대조가 끝날 때까지 신규 주문 정지"
+revisit = "수동 거래와 병행 운용이 요구될 때"
+
+[[adr]]
+id = "ADR-015"
+title = "로컬 API와 신뢰 경계"
+file = "docs/adr/ADR-015-api-trust.md"
+problem = "누가 주문하고 누가 운영 명령을 내릴 수 있는가"
+alternatives = ["loopback TCP + 토큰", "Unix 소켓 + 파일 권한 + uid", "HTTP/gRPC + TLS + 인증"]
+chosen = "Unix 소켓 둘(거래, 운영). 대시보드는 loopback 읽기 전용"
+gives_up = "같은 OS 사용자 안의 전략 구별, 원격 접속"
+revisit = "전략이나 운영자가 다른 호스트에서 접속할 때"
+
+[[adr]]
+id = "ADR-016"
+title = "관측과 대시보드의 경계"
+file = "docs/adr/ADR-016-observability.md"
+problem = "관측이 처리 경로를 느리게 하거나, 화면이 확인하지 않은 것을 정상으로 보여 준다"
+alternatives = ["로그만", "코어 상태를 직접 읽는 화면", "내구화된 기록으로 만든 읽기 모델 + 읽기 전용 화면"]
+chosen = "읽기 모델. 화면은 출처·기준 시점·판정 종류를 표시하고 상태를 바꾸지 않는다"
+gives_up = "아직 내구화되지 않은 상태의 관측"
+revisit = "원격 열람이나 알림이 요구될 때"
+
+[[adr]]
+id = "ADR-017"
+title = "Hyperliquid 게이트웨이"
+file = "docs/adr/ADR-017-hyperliquid-gateway.md"
+problem = "문서가 침묵하거나 모순되는 부분이 많고 서명 절차는 문서가 아니라 SDK에 있다"
+alternatives = ["공식 Rust SDK 사용", "커뮤니티 SDK 사용", "필요한 부분만 직접 구현하고 SDK 벡터로 검증"]
+chosen = "직접 구현. 문서에 없는 응답에서는 결론을 내지 않는다: 주문 응답은 결과 불명으로, 상태 이름은 전달하지 않고 오류로 남긴다"
+gives_up = "SDK가 제공하는 넓은 기능"
+revisit = "testnet 실주문 실험 결과가 나올 때"

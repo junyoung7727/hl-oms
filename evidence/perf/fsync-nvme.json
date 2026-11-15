@@ -1,0 +1,53 @@
+{
+  "build": "xtask src:c2addecd59bc4a5a",
+  "detail": {
+    "bytes": 300,
+    "count": 300,
+    "dir": "data/perf-fsync"
+  },
+  "environment": {
+    "busiest_processes": "100 ps;24.6 python3; 7.2 xtask;",
+    "cpu": "Intel(R) Core(TM) i9-14900K",
+    "cpus_online": "32",
+    "device_model": "Samsung SSD 970 EVO Plus 2TB",
+    "df": "/dev/nvme0n1    1.8T   55G  1.7T   4% /mnt/nvme",
+    "energy_pref": "balance_performance",
+    "governor": "powersave",
+    "kernel": "7.0.0-34-generic",
+    "loadavg": "1.51 1.37 1.00",
+    "memory": "30Gi",
+    "mount": "/dev/nvme0n1 ext4 rw,relatime",
+    "os": "Ubuntu 26.04 LTS",
+    "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+    "write_cache": "write back"
+  },
+  "label": "fsync-nvme",
+  "results": [
+    {
+      "max": 5745,
+      "mean": 2537,
+      "min": 2348,
+      "name": "write+fdatasync",
+      "p50": 2505,
+      "p90": 2651,
+      "p99": 2897,
+      "p999": 5745,
+      "samples": 300,
+      "unit": "us"
+    },
+    {
+      "max": 5736,
+      "mean": 2527,
+      "min": 2345,
+      "name": "fdatasync",
+      "p50": 2494,
+      "p90": 2642,
+      "p99": 2877,
+      "p999": 5736,
+      "samples": 300,
+      "unit": "us"
+    }
+  ],
+  "taken_at_us": 1791165792601533,
+  "what": "append then fdatasync on one file: the floor for one journal commit on this device"
+}

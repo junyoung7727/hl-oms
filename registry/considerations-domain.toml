@@ -1,0 +1,741 @@
+# 층 2: Rust·LMAX·OMS 특성 고려사항.
+
+[[item]]
+id = "D-OWN-01"
+layer = "domain"
+area = "상태 소유권"
+consideration = "도메인 상태의 writer가 하나이고 그 경계가 코드에서 강제되는가"
+necessity = "두 곳에서 한도를 읽고 쓰면 검사와 예약 사이에 다른 주문이 끼어든다"
+sources = ["LMAX", "BRIEF"]
+applicability = "적용"
+reason = "LMAX 원칙의 핵심이고, 검사와 예약의 원자성이 여기에 기댄다"
+handling = "`Core`는 코어 스레드로 이동(move)되어 다른 스레드가 참조를 가질 수 없다. 변경은 `Core::apply`뿐"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-001"]
+contracts = ["C-COMMIT"]
+code = ["crates/oms-node/src/pipeline.rs", "crates/oms-core/src/core.rs"]
+claims = ["V-NEW-1", "V-SIM-1"]
+
+[[item]]
+id = "D-OWN-02"
+layer = "domain"
+area = "상태 소유권"
+consideration = "조회용 복제본을 주문 판단에 쓰지 않는가"
+necessity = "복제본은 뒤처질 수 있다. 방금 체결된 것이 빠진 채로 한도를 검사하게 된다"
+sources = ["BRIEF"]
+applicability = "적용"
+reason = "대시보드, 로컬 API, 대조기가 읽기 모델을 읽는다"
+handling = "판단은 코어 스레드가 자기 `Core`만 읽는다. 읽기 모델은 API·대시보드·대조기 전용. 대조기의 조회 결과는 입력으로 들어가 코어가 다시 판단한다"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-004", "ADR-014"]
+contracts = ["C-COMMIT", "C-RECON"]
+code = ["crates/oms-node/src/published.rs"]
+claims = ["V-COMMIT-1"]
+open = "구조로 보장하며 전용 시험은 없다. 로컬 API의 빈도 제한과 '알 수 없는 전략' 검사는 읽기 모델을 쓰지만 주문 판단이 아니다. 영향: 나중의 변경이 읽기 모델을 판단에 끌어들여도 시험이 잡지 못한다. 해소: 코어 crate가 노드 crate에 의존할 수 없다는 구조에 기댄다. 추가 조치는 하지 않는다. 단계: 해당 없음(수용)."
+
+[[item]]
+id = "D-DET-01"
+layer = "domain"
+area = "결정적 실행"
+consideration = "코어가 시계·파일·네트워크·난수에 접근하지 않고, 판단에 쓰는 외부 정보가 입력으로 들어오는가"
+necessity = "장애 조합을 재현할 수 없고 판단 근거가 기록에 남지 않는다"
+sources = ["LMAX", "BRIEF"]
+applicability = "적용"
+reason = "재생, 시뮬레이션, 재결정 검사가 결정성에 기댄다"
+handling = "의존성 경계 + 소스 검사. 시간은 `handle(at, …)`, 설정·가격·링크·저장 공간은 입력"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-002"]
+contracts = []
+code = ["crates/oms-core/src/lib.rs", "crates/xtask/src/digest.rs"]
+claims = ["V-PURE-1", "V-REPLAY-1", "V-SIM-3"]
+
+[[item]]
+id = "D-DET-02"
+layer = "domain"
+area = "결정적 실행"
+consideration = "반복 순서나 부동소수점처럼 플랫폼에 따라 달라지는 요소가 판단에 없는가"
+necessity = "같은 저널이 다른 상태를 만든다"
+sources = ["PRACTICE"]
+applicability = "적용"
+reason = "같은 저널이 다른 빌드와 다른 호스트에서 같은 상태를 내야 한다"
+handling = "코어는 `BTreeMap`/`BTreeSet`과 정수만 쓴다. 소스 검사가 `HashMap`, `f64`를 금지한다"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-002", "ADR-009"]
+contracts = []
+code = ["crates/oms-core/src/core.rs"]
+claims = ["V-PURE-1"]
+
+[[item]]
+id = "D-CONC-01"
+layer = "domain"
+area = "동시성"
+consideration = "스레드 사이에 공유하는 상태마다 동기화 근거가 설명돼 있는가"
+necessity = "설명되지 않은 공유 상태는 경합의 원인이다"
+sources = ["BRIEF", "RUST"]
+applicability = "적용"
+reason = "코어 밖에 스레드 셋과 비동기 런타임이 있다"
+handling = "스레드 사이에 공유하는 상태: 입력 큐(`Mutex`+`Condvar`), 읽기 모델(`RwLock`, writer는 커밋 스레드 하나), 구독자 목록(`Mutex`), 치명 사유(`Mutex`), 전략별 빈도 버킷(`Mutex`), 게이트웨이의 종목 표(`RwLock`)·요청 예산(`Mutex`)·연결(`Mutex`, 가상 거래소)·응답 대기 표(`Mutex`, 가상 거래소), 원자 변수(치명 표시, 스냅샷 요청, 내구 순번 표시, 계수기, 게이트웨이의 세션과 nonce). 원자 변수 중 정확성에 관여하는 것은 nonce(CAS로 단조 증가)와 치명 표시(한 번 서면 내려가지 않음)다. 잠금을 쥔 채 다른 잠금을 잡는 곳은 읽기 모델 → 구독자 목록 한 방향뿐이다. 직접 작성한 lock-free 구조와 unsafe는 없다"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-012"]
+contracts = []
+code = ["crates/oms-node/src/queues.rs", "crates/oms-node/src/published.rs", "crates/oms-node/src/util.rs"]
+claims = ["V-OVL-1", "V-COMMIT-1"]
+open = "동시성 모델 검사 도구(loom 등)를 쓰지 않았다. 근거: 공유 구조가 표준 라이브러리의 잠금뿐이고 잠금 순서가 한 방향(읽기 모델 → 구독자 목록)이다. 잠금을 쥔 채 await하거나 다른 잠금을 반대 순서로 잡는 곳이 없다는 것은 코드 검토로만 확인했다. 영향: 잠금 순서를 어기는 변경을 도구가 잡지 못한다. 해소: loom이나 잠금 순서 검사를 도입한다. 단계: 공유 상태가 늘 때."
+
+[[item]]
+id = "D-CONC-02"
+layer = "domain"
+area = "동시성"
+consideration = "비동기 태스크가 취소돼도 데이터가 사라지거나 반쯤 처리된 상태가 남지 않는가"
+necessity = "`select!`에서 버려진 분기가 메시지를 잃을 수 있다"
+sources = ["RUST", "BRIEF"]
+applicability = "적용"
+reason = "tokio 문서: mpsc `send`를 select!에 쓰면 메시지를 잃고, `write_all`은 취소 안전하지 않다"
+handling = "`select!`는 세 곳에 있다. (1) 로컬 API의 줄 읽기 대 연결 종료 신호 대 hello 시간 제한: 읽기는 `fill_buf`/`consume` 기반이라 버려져도 버퍼가 남고, 다른 분기가 이기면 연결을 버린다. (2) Hyperliquid 스트림의 수신 대 ping 타이머: 수신은 `StreamExt::next`. (3) 프로세스 종료 신호 대 치명 표시. 거래소 입력의 전달(`push_venue`)과 소켓 쓰기는 select! 안에 두지 않았다. 구독 전달 태스크는 연결이 끝날 때 중단시킨다"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = []
+contracts = ["C-API", "C-GW"]
+code = ["crates/oms-node/src/server.rs", "crates/oms-node/src/venue/hyperliquid/mod.rs"]
+claims = ["V-API-3"]
+open = "취소 시점을 겨냥한 시험이 없다. 코드 검토에 의존한다. 영향: 취소 시점에만 나타나는 결함이 드물게 생길 수 있다. 해소: 연결 끊김과 종료를 겨냥한 프로세스 시험을 늘린다(구독자 정리는 V-API-3으로 추가했다). 단계: 배포 전."
+
+[[item]]
+id = "D-CONC-03"
+layer = "domain"
+area = "동시성"
+consideration = "종료와 과부하에서 스레드가 서로를 기다리며 멈추지 않는가"
+necessity = "제한 큐로 이어진 단계는 순환 대기가 생기면 영원히 멈춘다"
+sources = ["PRACTICE"]
+applicability = "적용"
+reason = "단계들이 상한 있는 큐로 이어져 있어 순환 대기가 생길 수 있다"
+handling = "대기 방향은 한쪽이다: 진입 → 입력 큐 → 코어 → 커밋 → 게이트웨이 명령 큐. 게이트웨이는 결과를 venue 입력 큐로 넣고 그 큐가 차면 기다린다. 이 고리는 venue 큐(4096)와 명령 큐가 동시에 가득 차야 닫힌다. 진행 중 전송 상한(64)이 명령 큐를 채우지 못하게 한다"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-010", "ADR-012"]
+contracts = ["C-OVERLOAD"]
+code = ["crates/oms-node/src/pipeline.rs"]
+claims = ["V-OVL-2", "V-PERF-2"]
+open = "취소 명령은 진행 중 전송 상한에 들지 않는다. 열린 주문 전부에 취소가 동시에 걸리면 명령 큐 크기(상한 합 + 64) 안에 들어가도록 잡았지만, 재시도가 겹치는 극단은 분석하지 않았다. 영향: 명령 큐가 차면 커밋 스레드가 기다려 응답이 늦어진다. 유실은 없다. 해소: 취소 폭주와 느린 거래소를 겹친 시험. 단계: 배포 전."
+
+[[item]]
+id = "D-ORD-01"
+layer = "domain"
+area = "주문 상태"
+consideration = "주문 상태가 '거래소의 실제'와 '우리가 가진 증거'를 구분하는가"
+necessity = "응답 유실을 주문 없음으로 읽게 된다"
+sources = ["REQ", "FIX-OSC"]
+applicability = "적용"
+reason = "거래소의 실제 상태는 통보와 조회로만 알 수 있다"
+handling = "단계(증거 수준), 결과 불명, 취소, 증거 신선도의 네 축"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-007"]
+contracts = ["C-NEW", "C-SEND", "C-TERM"]
+code = ["crates/oms-core/src/model.rs"]
+claims = ["V-FILL-1", "V-TERM-1", "V-SIM-2"]
+
+[[item]]
+id = "D-ORD-02"
+layer = "domain"
+area = "주문 상태"
+consideration = "부분 체결, 취소 중 체결, 종결 뒤 도착하는 체결을 처리하는가"
+necessity = "취소를 요청했다는 이유로 체결을 버리거나 예약을 일찍 풀게 된다"
+sources = ["FIX-OSC", "REQ"]
+applicability = "적용"
+reason = "FIX 사례 그룹 B, D가 이 경합을 다룬다"
+handling = "취소 요청은 예약을 풀지 않는다. 종결은 체결이 다 모였을 때만. 종결 뒤 체결도 기장하고 불일치로 표시"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-007"]
+contracts = ["C-FILL", "C-CANCEL", "C-TERM"]
+code = ["crates/oms-core/src/decide.rs"]
+claims = ["V-CANCEL-1", "V-TERM-1", "V-FILL-1", "V-MIS-1"]
+
+[[item]]
+id = "D-ORD-03"
+layer = "domain"
+area = "주문 상태"
+consideration = "정정(amend)과 체결 정정·취소(bust)의 지원 범위를 정했는가"
+necessity = "지원하지 않는 사건이 조용히 무시되면 장부가 틀린다"
+sources = ["FIX-OSC", "HL-DOCS", "BRIEF"]
+applicability = "적용"
+reason = "FIX 사례 그룹 C, J. Hyperliquid 문서에는 체결 정정이 없고 정정 후 식별자 승계가 없다"
+handling = "정정은 지원하지 않는다(취소 + 신규). 체결 정정은 모델에 없으며 일어나면 포지션 대조가 범위 이탈로 탐지한다"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-007"]
+contracts = ["C-RECON"]
+code = []
+claims = ["V-RECON-1"]
+open = "체결 정정이 실제로 없는지는 거래소 문서의 침묵에 근거한다. 영향: 체결 정정이 실제로 있으면 장부가 틀린다. 포지션 대조가 탐지한다. 해소: testnet과 운용에서 관찰한다. 단계: testnet 실주문 때."
+
+[[item]]
+id = "D-ORD-04"
+layer = "domain"
+area = "식별자"
+consideration = "식별자마다 발급 주체, 범위, 수명이 정해져 있는가"
+necessity = "ID가 재사용되거나 범위가 겹치면 다른 주문을 조작하게 된다"
+sources = ["FIX-OSC", "HL-DOCS", "BRIEF"]
+applicability = "적용"
+reason = "식별자가 넷이다(전략의 키, 주문 번호, 거래소로 보내는 ID, 거래소 주문 ID)"
+handling = "식별자 표(ADR-006 §7). 주문 ID는 재사용 없음, 인스턴스 ID로 거래소 클라이언트 ID를 구분"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-006"]
+contracts = ["C-IDEM"]
+code = ["crates/oms-core/src/ids.rs"]
+claims = ["V-IDEM-1", "V-JRN-3"]
+
+[[item]]
+id = "D-ORD-05"
+layer = "domain"
+area = "주문 상태"
+consideration = "거래일·세션 경계에서 주문과 식별자가 어떻게 되는가"
+necessity = "장 종료 때 주문이 자동 소멸하는 시장에서는 상태가 어긋난다"
+sources = ["FIX-OSC", "BRIEF"]
+applicability = "비적용"
+reason = "Hyperliquid perp는 24시간 연속 시장이고 일 단위 초기화가 없다"
+handling = "모델에 거래일이 없다"
+design = "결정"
+impl = "해당없음"
+verify = "해당없음"
+adr = []
+contracts = []
+code = []
+claims = []
+open = "거래일이 있는 시장을 추가하면 다시 검토한다(일 단위 한도, 장 종료 시 주문 소멸, ID 재사용). 영향: 없음. 해소: 거래일이 있는 시장을 추가할 때 다시 검토한다. 단계: 두 번째 거래소를 정할 때."
+
+[[item]]
+id = "D-NUM-01"
+layer = "domain"
+area = "수치"
+consideration = "가격·수량·금액의 단위, 정밀도, 반올림 방향, overflow 처리가 정해져 있는가"
+necessity = "부동소수점 오차나 넘침이 한도 검사를 무력화한다"
+sources = ["BRIEF", "HL-DOCS"]
+applicability = "적용"
+reason = "금액의 오차가 한도 검사와 장부를 틀리게 한다"
+handling = "1e-8 고정소수점 `i64`, 검사 연산, 한도 비교는 올림, 직렬화는 십진 문자열"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-009"]
+contracts = []
+code = ["crates/oms-core/src/num.rs"]
+claims = ["V-NUM-1", "V-NUM-2"]
+
+[[item]]
+id = "D-RISK-01"
+layer = "domain"
+area = "리스크"
+consideration = "위험 검사와 예약이 하나의 상태 전이인가"
+necessity = "두 주문이 같은 여유를 쓴다"
+sources = ["FIA24", "REQ"]
+applicability = "적용"
+reason = "요구 R02"
+handling = "한 입력 안에서 검사 후 `OrderAccepted` 적용. 잠재 체결을 포함한 구간 한도를 계좌와 전략에 동시에"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-008"]
+contracts = ["C-NEW"]
+code = ["crates/oms-core/src/decide.rs"]
+claims = ["V-NEW-1", "V-SIM-1"]
+
+[[item]]
+id = "D-RISK-02"
+layer = "domain"
+area = "리스크"
+consideration = "예약을 언제 풀고 체결을 어떻게 반영하는가"
+necessity = "일찍 풀면 한도를 넘고, 안 풀면 한도가 영영 묶인다"
+sources = ["REQ"]
+applicability = "적용"
+reason = "요구 R06"
+handling = "체결 기장이 예약을 포지션으로 옮긴다. 해제는 종결 증거가 있을 때만. 결과 불명 중에는 유지"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-007", "ADR-008"]
+contracts = ["C-FILL", "C-TERM", "C-DOUBT"]
+code = ["crates/oms-core/src/core.rs"]
+claims = ["V-DOUBT-1", "V-TERM-1", "V-SIM-1"]
+
+[[item]]
+id = "D-RISK-03"
+layer = "domain"
+area = "리스크"
+consideration = "검사에 쓰는 시세와 참조 정보가 유효한지 확인하는가"
+necessity = "오래된 가격으로 가격대 검사를 통과시킨다"
+sources = ["FIA24", "REQ"]
+applicability = "적용"
+reason = "요구 R03"
+handling = "가격대 검사는 신선한 참조 가격을 요구한다(기본 15초). 없으면 거절"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-008"]
+contracts = ["C-NEW"]
+code = ["crates/oms-core/src/decide.rs"]
+claims = ["V-NEW-2"]
+open = "참조 가격은 거래소의 중간값 스트림이다. 호가 깊이나 교차 호가 같은 데이터 품질 검사는 없다. 영향: 참조 가격이 얇은 호가에서 튀면 가격대 검사가 틀린다. 해소: 다른 가격 출처와 교차 확인한다. 단계: 실거래 전."
+
+[[item]]
+id = "D-RISK-04"
+layer = "domain"
+area = "리스크"
+consideration = "금액·증거금 기준의 한도가 있는가"
+necessity = "수량 한도 안에서도 증거금 부족이나 청산이 일어난다"
+sources = ["FIA24", "REQ"]
+applicability = "적용"
+reason = "요구 R04, R05. 기존 문서의 미결 D1, D2"
+handling = "남은 결정. 주문당 금액 상한만 있다"
+design = "미결"
+impl = "미구현"
+verify = "해당없음"
+adr = ["ADR-008"]
+contracts = []
+code = []
+claims = []
+open = "영향: 계좌 담보를 보지 않는다. 거래소가 증거금 부족으로 거부·취소하는 것에 의존한다. 해소: U-02(증거금 모델), U-03(긴급 시장가 수치) 결정 뒤 구현. 단계: 실거래 전."
+
+[[item]]
+id = "D-RISK-05"
+layer = "domain"
+area = "리스크"
+consideration = "자동 실행의 반복과 누적 체결량·비용을 제한하는가"
+necessity = "한도 안에서 매수·매도를 반복해 비용만 쓰는 전략 오류를 막지 못한다"
+sources = ["FIA24", "REQ"]
+applicability = "적용"
+reason = "요구 R08"
+handling = "남은 결정. 전략별 요청 빈도 제한(진입 지점)만 있다"
+design = "미결"
+impl = "미구현"
+verify = "해당없음"
+adr = []
+contracts = []
+code = []
+claims = []
+open = "영향: 왕복 거래 폭주를 막지 못한다. 해소: 전략·계좌별 누적 체결량 한도를 코어에 추가. 단계: 실거래 전."
+
+[[item]]
+id = "D-RISK-06"
+layer = "domain"
+area = "리스크"
+consideration = "같은 계좌의 전략끼리 서로 체결되는 것을 다루는가"
+necessity = "자전거래는 수수료만 낸다"
+sources = ["FIA24", "REQ", "HL-DOCS"]
+applicability = "조건부"
+reason = "요구 R10. Hyperliquid는 같은 주소끼리의 체결 대신 대기 주문을 취소한다(문서 명시)"
+handling = "로컬 검사는 없다. 거래소의 방지 기능에 의존하고, 그로 인한 취소(`selfTradeCanceled`)는 거래소 주도 취소로 처리된다"
+design = "결정"
+impl = "부분"
+verify = "미검증"
+adr = []
+contracts = ["C-TERM"]
+code = ["crates/oms-node/src/venue/hyperliquid/wire.rs"]
+claims = ["V-HL-2"]
+open = "실제 거래소에서 확인하지 않았다. 영향: 자기 체결 방지로 대기 주문이 취소되면 전략이 이유를 모른다. 해소: testnet에서 두 전략으로 확인한다. 단계: testnet 실주문 때."
+
+[[item]]
+id = "D-RISK-07"
+layer = "domain"
+area = "리스크"
+consideration = "중지(kill switch)의 효과 시점과 범위가 정의돼 있는가"
+necessity = "중지했다고 믿었는데 이미 풀린 주문이 나간다"
+sources = ["FIA24", "REQ"]
+applicability = "적용"
+reason = "요구 R07"
+handling = "중지는 저널에 기록된 시점 이후의 수용을 막는다. 이미 풀린 전송은 막지 못한다(진행 중 전송 상한 64건이 그 크기). 취소·체결 기장은 계속. 전체 취소 명령은 따로 있다"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-008"]
+contracts = ["C-NEW", "C-CANCEL"]
+code = ["crates/oms-core/src/decide.rs"]
+claims = ["V-CANCEL-1", "V-API-1"]
+open = "OMS 프로세스가 응답하지 않을 때의 독립된 비상 경로는 거래소 화면뿐이다. 영향: OMS가 멈추면 운영 명령으로 중지할 수 없다. 해소: 거래소의 예약 취소(U-05)와 거래소 화면. 단계: 실거래 전."
+
+[[item]]
+id = "D-DUP-01"
+layer = "domain"
+area = "중복·순서"
+consideration = "요청의 재전송이 두 번째 주문을 만들지 않는가"
+necessity = "응답 유실마다 주문이 중복된다"
+sources = ["BRIEF", "REQ"]
+applicability = "적용"
+reason = "전략이 별도 프로세스라 요청 재전송이 생긴다"
+handling = "(전략, 키) + 절대 만료 시각. 삭제는 만료 뒤에만"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-006"]
+contracts = ["C-IDEM"]
+code = ["crates/oms-core/src/decide.rs"]
+claims = ["V-IDEM-1", "V-IDEM-2", "V-IDEM-3"]
+
+[[item]]
+id = "D-DUP-02"
+layer = "domain"
+area = "중복·순서"
+consideration = "거래소 통보의 중복, 지연, 순서 역전을 견디는가"
+necessity = "체결이 두 번 기장되거나 늦은 통보가 상태를 되돌린다"
+sources = ["HL-DOCS", "FIX-OSC"]
+applicability = "적용"
+reason = "Hyperliquid 스트림에는 순번이 없고 재접속 스냅샷이 과거 체결을 다시 보낸다"
+handling = "체결은 키로 한 번만, 누적량은 증가만, 종결은 최종. 체결과 접수 응답의 순서 역전은 대기 목록으로"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-007"]
+contracts = ["C-FILL", "C-SEND"]
+code = ["crates/oms-core/src/decide.rs"]
+claims = ["V-FILL-1", "V-SIM-1"]
+
+[[item]]
+id = "D-DUP-03"
+layer = "domain"
+area = "중복·순서"
+consideration = "메시지 누락을 탐지하고 메우는가"
+necessity = "빠진 체결은 포지션 오차로 남는다"
+sources = ["HL-DOCS"]
+applicability = "적용"
+reason = "순번이 없어 스트림만으로는 누락을 알 수 없다"
+handling = "재접속마다 재확인. 주기적 훑기. 상태 통보의 누적량이 기장보다 크면 체결 재조회. 포지션 구간 검사"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-014"]
+contracts = ["C-RECON"]
+code = ["crates/oms-core/src/needs.rs", "crates/oms-node/src/venue/reconciler.rs"]
+claims = ["V-RECON-1", "V-RECON-2"]
+open = "연결이 유지된 채 스트림이 메시지를 조용히 빠뜨리는 경우는 15초 훑기와 포지션 검사로만 잡힌다. 영향: 조용히 빠진 체결은 최대 15초(훑기 주기) 늦게 기장된다. 해소: 수용한다. 주기는 설정으로 줄일 수 있다. 단계: testnet에서 실제 빈도를 관찰할 때."
+
+[[item]]
+id = "D-UNK-01"
+layer = "domain"
+area = "결과 불확실성"
+consideration = "전송 결과를 모를 때 재전송하지 않고 증거로만 해소하는가"
+necessity = "중복 주문 또는 예약 없는 체결"
+sources = ["REQ", "HL-DOCS", "BRIEF"]
+applicability = "적용"
+reason = "네트워크 너머의 결과는 모를 수 있다"
+handling = "재전송 금지. 조회로 발견하거나 만료 + 여유 뒤의 부재 확인으로 종결"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-005"]
+contracts = ["C-SEND", "C-DOUBT"]
+code = ["crates/oms-core/src/decide.rs"]
+claims = ["V-DOUBT-1", "V-DOUBT-2", "V-DOUBT-3", "V-BOOT-1"]
+open = "실제 거래소의 `expiresAfter` 동작은 확인하지 않았다(가정 A-01, A-02). 영향: 가정이 틀리면 닫은 주문이 놓일 수 있다. 탐지는 된다(OpenAfterClose, FillAfterClose). 해소: testnet 실험. 단계: testnet 실주문 때."
+
+[[item]]
+id = "D-PER-01"
+layer = "domain"
+area = "영속화"
+consideration = "저널에 무엇을 기록하며 그것으로 상태와 전송 의도를 복원할 수 있는가"
+necessity = "판단 로직 변경이 과거를 바꾸거나, 기록이 반쪽으로 남는다"
+sources = ["LMAX", "BRIEF"]
+applicability = "적용"
+reason = "저널이 유일한 영속 근거다"
+handling = "입력 + 결정된 이벤트를 한 기록으로. 복구는 이벤트만 적용. 전송 의도는 `PendingSend` 단계 자체다"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-003"]
+contracts = ["C-COMMIT", "C-JOURNAL"]
+code = ["crates/oms-core/src/record.rs", "crates/oms-core/src/event.rs"]
+claims = ["V-REPLAY-1"]
+
+[[item]]
+id = "D-PER-02"
+layer = "domain"
+area = "영속화"
+consideration = "기록·내구화·적용·응답·전송의 순서가 정해져 있고 경계별 장애 결과가 표로 있는가"
+necessity = "기록보다 앞선 전송이나 응답이 생긴다"
+sources = ["BRIEF", "LMAX"]
+applicability = "적용"
+reason = "지시문 §6이 경계별 표를 요구한다. 순서가 틀리면 기록 없는 주문이 생긴다"
+handling = "커밋 게이트. 경계별 표는 C-COMMIT. 표의 행마다 프로세스를 그 경계에서 멈추는 시험이 있다(V-COMMIT-4, V-BOOT-1)"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-004"]
+contracts = ["C-COMMIT"]
+code = ["crates/oms-node/src/pipeline.rs"]
+claims = ["V-COMMIT-1", "V-COMMIT-2", "V-COMMIT-3", "V-COMMIT-4"]
+
+[[item]]
+id = "D-PER-03"
+layer = "domain"
+area = "영속화"
+consideration = "손상을 감지하고, 불완전한 마지막 기록과 중간 손상을 구분하는가"
+necessity = "손상을 건너뛰고 복구 성공이라고 말하게 된다"
+sources = ["FSYNC-RESEARCH", "BRIEF"]
+applicability = "적용"
+reason = "손상을 건너뛰고 복구했다고 말하면 안 된다"
+handling = "프레임 체크섬·순번, 꼬리는 보존 후 자름, 중간 손상은 시작 거부"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-011"]
+contracts = ["C-JOURNAL"]
+code = ["crates/oms-journal/src/segment.rs", "crates/oms-journal/src/frame.rs"]
+claims = ["V-JRN-1", "V-JRN-2"]
+open = "마지막 기록에만 생긴 손상은 꼬리와 구별하지 못한다(시험으로 고정한 한계). 영향: 마지막 기록의 손상은 꼬리로 잘린다. 그 기록의 응답과 전송이 이미 나갔다면 그 주문은 재시작 뒤 OrphanOrder로 드러난다. 여러 쪽에 걸친 배치가 순서 없이 디스크에 닿으면 중간 손상으로 읽혀 시작을 거부할 수 있다(확인하지 않았다). 해소: 형식의 한계로 수용한다. 단계: 해당 없음(수용)."
+
+[[item]]
+id = "D-PER-04"
+layer = "domain"
+area = "영속화"
+consideration = "스냅샷이 저널과 일관되고 원자적으로 나타나는가"
+necessity = "저널보다 앞선 스냅샷은 없는 기록을 전제한 상태를 만든다"
+sources = ["LMAX", "LINUX"]
+applicability = "적용"
+reason = "스냅샷으로 복구 시간을 줄인다. 저널보다 앞선 스냅샷은 없는 주문을 만든다"
+handling = "내구화된 기록만 반영한 읽기 모델에서 뜬다. 임시 파일 → fsync → rename → 디렉터리 fsync. 체크섬과 상태 다이제스트 확인"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-011"]
+contracts = ["C-SNAP"]
+code = ["crates/oms-journal/src/snapshot.rs", "crates/oms-node/src/pipeline.rs"]
+claims = ["V-JRN-4", "V-COMMIT-2"]
+
+[[item]]
+id = "D-PER-05"
+layer = "domain"
+area = "영속화"
+consideration = "재생이 외부 주문을 다시 보내지 않는가"
+necessity = "재시작마다 주문이 중복된다"
+sources = ["BRIEF"]
+applicability = "적용"
+reason = "재생이 주문을 다시 보내면 중복 주문이다"
+handling = "복구는 `Core::replay`(이벤트 적용)만 쓰고 명령을 만드는 함수를 부르지 않는다. 복구 코드에는 게이트웨이가 없다"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-003", "ADR-005"]
+contracts = ["C-JOURNAL", "C-BOOT"]
+code = ["crates/oms-node/src/recovery.rs", "crates/oms-core/src/record.rs"]
+claims = ["V-BOOT-1", "V-COMMIT-2", "V-SIM-1"]
+
+[[item]]
+id = "D-PER-06"
+layer = "domain"
+area = "영속화"
+consideration = "저널의 보관·삭제·용량 관리가 정해져 있는가"
+necessity = "디스크가 차거나, 필요한 기록을 지운다"
+sources = ["BRIEF"]
+applicability = "적용"
+reason = "저널을 지우지 않으면 디스크가 차고, 지우면 재검증 수단을 잃는다"
+handling = "세그먼트 회전(64 MiB). 자동 삭제 없음. 스냅샷 이전 세그먼트는 수동으로 옮기거나 지울 수 있다(저널 시험이 확인)"
+design = "미결"
+impl = "부분"
+verify = "부분"
+adr = ["ADR-011"]
+contracts = ["C-JOURNAL"]
+code = ["crates/oms-journal/src/segment.rs"]
+claims = ["V-JRN-2"]
+open = "보관 기간과 삭제 도구는 U-04. 삭제하면 `verify --re-decide`와 상태 스키마 변경 시의 전체 재생이 불가능해진다. 영향: 디스크가 차면 신규 주문이 막힌다. 해소: U-04 결정 뒤 보관 도구를 만든다. 단계: 실거래 전."
+
+[[item]]
+id = "D-REC-01"
+layer = "domain"
+area = "복구"
+consideration = "연결이 끊겼다 돌아올 때 무엇을 다시 확인하는가"
+necessity = "끊긴 동안의 변화를 모른 채 주문한다"
+sources = ["HL-DOCS", "FIA24", "REQ"]
+applicability = "적용"
+reason = "요구 R11. 문서: 서버 측 단절은 예고 없이 주기적으로 일어난다"
+handling = "링크 세션과 `Resync` 차단. 주문별 증거, 체결 동기화, 열린 주문, 포지션"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-014"]
+contracts = ["C-LINK", "C-RECON"]
+code = ["crates/oms-core/src/core.rs"]
+claims = ["V-RECON-1", "V-LINK-1"]
+
+[[item]]
+id = "D-REC-02"
+layer = "domain"
+area = "복구"
+consideration = "대조에서 발견한 차이를 덮어쓰지 않고 기록·조정하는가"
+necessity = "원인이 사라지고 귀속이 깨진다"
+sources = ["REQ", "FIA24"]
+applicability = "적용"
+reason = "장부와 거래소의 차이는 원인을 알아야 하는 사건이다"
+handling = "불일치 이벤트, 운영자 확인, 명시적 포지션 조정"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-014"]
+contracts = ["C-MISMATCH"]
+code = ["crates/oms-core/src/decide.rs"]
+claims = ["V-RECON-1", "V-EXT-1", "V-MIS-1"]
+
+[[item]]
+id = "D-AVL-01"
+layer = "domain"
+area = "가용성"
+consideration = "같은 계좌에 두 인스턴스가 동시에 주문하지 못하게 하는가"
+necessity = "한도 계산이 서로를 모르고 ID가 충돌한다"
+sources = ["REQ", "HL-DOCS"]
+applicability = "적용"
+reason = "문서: 프로세스당 API 지갑 하나"
+handling = "데이터 디렉터리 잠금, 인스턴스 ID. 같은 데이터 디렉터리에 대해서만 막는다"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-013"]
+contracts = ["C-JOURNAL"]
+code = ["crates/oms-journal/src/segment.rs"]
+claims = ["V-JRN-3"]
+open = "다른 데이터 디렉터리로 띄운 두 번째 인스턴스, 다른 호스트에서 저널 사본으로 띄운 인스턴스는 막지 못한다(가정 A-06). 영향: 두 인스턴스가 한 계좌에 주문하면 한도가 서로를 모른다. 상대의 주문은 ForeignOrder나 외부 체결로 드러나 신규 주문을 막는다. 해소: 운영 절차로 막고, 거래소에는 인스턴스마다 agent 지갑을 하나만 등록한다. 단계: 실거래 전."
+
+[[item]]
+id = "D-OVL-01"
+layer = "domain"
+area = "과부하"
+consideration = "모든 큐와 진행 요청에 상한이 있고 가득 찼을 때의 동작이 입력 종류별로 정해져 있는가"
+necessity = "메모리 고갈 또는 오래된 요청의 뒤늦은 처리"
+sources = ["LMAX", "BRIEF"]
+applicability = "적용"
+reason = "단일 writer의 처리 한계가 곧 시스템의 한계다"
+handling = "큐 3개와 종류별 정책. 진입 지점의 창과 빈도 제한"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-010"]
+contracts = ["C-OVERLOAD"]
+code = ["crates/oms-node/src/queues.rs", "crates/oms-node/src/server.rs"]
+claims = ["V-OVL-1", "V-OVL-2", "V-PERF-2"]
+
+[[item]]
+id = "D-OVL-02"
+layer = "domain"
+area = "과부하"
+consideration = "과부하와 저장 실패에서 체결 통보를 버리지 않는가"
+necessity = "포지션이 틀어진다"
+sources = ["BRIEF"]
+applicability = "적용"
+reason = "체결을 잃으면 포지션이 틀린다"
+handling = "venue 큐는 대기. 저장 실패는 정지 후 재시작 대조로 다시 가져온다"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-010"]
+contracts = ["C-OVERLOAD", "C-FILL"]
+code = ["crates/oms-node/src/queues.rs"]
+claims = ["V-OVL-1", "V-RECON-2"]
+open = "venue 큐가 실제로 가득 차는 부하 시험은 하지 않았다. 영향: venue 큐가 찼을 때의 동작은 설계만 있고 시험되지 않았다. 해소: 작은 큐로 프로세스 시험을 한다. 단계: 배포 전."
+
+[[item]]
+id = "D-OVL-03"
+layer = "domain"
+area = "과부하"
+consideration = "신규 주문의 폭주가 취소를 막지 않고, 전략 사이에 공정한가"
+necessity = "위험을 줄일 수단이 막힌다"
+sources = ["FIA24", "REQ", "BRIEF"]
+applicability = "적용"
+reason = "요구 R09"
+handling = "취소는 별도 큐와 별도 빈도 한도. 배치마다 큐별 지분. 전략별 토큰 버킷"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-010"]
+contracts = ["C-OVERLOAD"]
+code = ["crates/oms-node/src/queues.rs", "crates/oms-node/src/server.rs"]
+claims = ["V-OVL-1", "V-OVL-2"]
+open = "전략 간 공정성(한 전략이 큐를 독점하지 못함)은 시험하지 않았다. 큐 안에서는 선착순이다. 영향: 한 전략이 빈도 한도 안에서 큐를 채우면 다른 전략이 과부하 응답을 받는다. 해소: 전략별 큐 지분을 둔다. 단계: 전략이 여럿일 때."
+
+[[item]]
+id = "D-OVL-04"
+layer = "domain"
+area = "과부하"
+consideration = "재시도에 횟수와 간격의 상한이 있는가"
+necessity = "실패한 동작이 무한히 반복되며 거래소 한도를 소모한다"
+sources = ["BRIEF", "HL-DOCS"]
+applicability = "적용"
+reason = "문서: 결과가 이미 반환된 취소를 다시 보내지 말라는 권고"
+handling = "신규 주문은 재시도 없음. 취소는 5회, 1초 간격. 조회는 주문별 0.5→1→2→5초, 계좌 단위는 초당 1회"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-005", "ADR-014"]
+contracts = ["C-CANCEL", "C-RECON"]
+code = ["crates/oms-core/src/decide.rs", "crates/oms-node/src/venue/reconciler.rs"]
+claims = ["V-CANCEL-1"]
+open = "대조기의 간격은 시험하지 않았다. 영향: 대조 조회가 거래소 요청 한도를 예상보다 많이 쓸 수 있다. 해소: 조회 횟수를 세는 시험. 단계: testnet 운용 중."
+
+[[item]]
+id = "D-LMAX-01"
+layer = "domain"
+area = "아키텍처"
+consideration = "LMAX에서 무엇을 따르고 무엇을 단순화했으며 그 차이가 어떤 보장을 바꾸는지 밝혔는가"
+necessity = "'LMAX 구조'라는 이름이 근거 없는 성능·가용성 기대를 만든다"
+sources = ["LMAX", "BRIEF"]
+applicability = "적용"
+reason = "지시문이 LMAX 원칙의 적용과 단순화의 설명을 요구한다"
+handling = "원칙별 대조표(ADR-001 §8). Disruptor를 쓰지 않으며 그 성능을 주장하지 않는다"
+design = "결정"
+impl = "해당없음"
+verify = "해당없음"
+adr = ["ADR-001"]
+contracts = []
+code = []
+claims = []
+
+[[item]]
+id = "D-OPT-01"
+layer = "domain"
+area = "최적화"
+consideration = "각 최적화에 병목 근거와 측정, 그리고 중단 조건이 있는가"
+necessity = "측정 없는 최적화는 복잡성만 늘린다"
+sources = ["BRIEF"]
+applicability = "적용"
+reason = "지시문 §7이 근거 없는 최적화를 금한다"
+handling = "채택한 것은 커밋 스레드 분리 하나(측정 비교). 나머지는 채택하지 않은 이유를 표로. 지연의 거의 전부가 장치의 fdatasync이고, 수용 기준을 만족하는 장치(970 EVO Plus)에서 측정했으므로 중단했다"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-012"]
+contracts = []
+code = ["crates/oms-node/src/pipeline.rs"]
+claims = ["V-PERF-1", "V-PERF-2"]
+open = "세그먼트 사전 할당은 측정으로 이득(동기 쓰기 1/3)을 확인했지만 복구 판정을 바꾸는 일이라 보류했다. 영향: 더 느린 장치에서는 지연 기준을 넘을 수 있다(980 500GB에서 넘었다). 해소: 필요해지면 프레임 형식 변경과 전원 장애 시험 수단을 갖춘 뒤 구현한다. 단계: 더 느린 장치에서 운용해야 할 때."
+
+[[item]]
+id = "D-TEST-01"
+layer = "domain"
+area = "검증"
+consideration = "시험의 기대값이 구현과 독립된 근거에서 나오고, 보호 로직을 깨면 시험이 실패하는가"
+necessity = "구현을 그대로 복제한 기대값은 아무것도 검증하지 않는다"
+sources = ["BRIEF"]
+applicability = "적용"
+reason = "지시문 §8. 구현을 베낀 기대값은 구현의 결함을 따라간다"
+handling = "업무 예제(손으로 쓴 기대값), 불변조건, 가상 거래소의 실제 장부와의 비교, 공식 SDK의 서명 벡터, 외부 도구로 계산한 CRC. 선별 변이 점검"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = []
+contracts = []
+code = ["crates/oms-sim/src/world.rs", "crates/xtask/src/mutants.rs"]
+claims = ["V-MUT-1", "V-SIM-1"]

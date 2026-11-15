@@ -1,0 +1,195 @@
+# 동작 계약의 색인. events 는 이 계약이 정의하는 상태 전이(저널 이벤트 이름)다.
+# 대시보드는 이벤트 이름으로 계약·설계 결정·코드·시험을 찾아 연결한다.
+
+[[contract]]
+id = "C-COMMIT"
+title = "기록·내구화·적용·응답·전송의 순서"
+file = "docs/contracts/commit.md"
+summary = "응답·전송·공개는 그 기록이 내구화된 뒤에만 나간다. 경계별 장애 결과 표가 있다"
+events = []
+adr = ["ADR-003", "ADR-004", "ADR-012"]
+code = ["crates/oms-node/src/pipeline.rs"]
+claims = ["V-COMMIT-1", "V-COMMIT-2", "V-COMMIT-3", "V-COMMIT-4", "V-COMMIT-5"]
+
+[[contract]]
+id = "C-NEW"
+title = "신규 주문 수용과 예약"
+file = "docs/contracts/order-lifecycle.md"
+anchor = "c-new-신규-주문-수용"
+summary = "검사와 예약이 한 입력 안에서 일어난다. 거절은 사유 코드를 모두 돌려준다"
+events = ["order_accepted", "request_rejected"]
+adr = ["ADR-008", "ADR-009"]
+code = ["crates/oms-core/src/decide.rs"]
+claims = ["V-NEW-1", "V-NEW-2"]
+
+[[contract]]
+id = "C-IDEM"
+title = "멱등성"
+file = "docs/contracts/idempotency.md"
+summary = "(전략, 키)마다 주문은 최대 하나. 삭제는 요청 만료 뒤에만"
+events = ["purged"]
+adr = ["ADR-006"]
+code = ["crates/oms-core/src/decide.rs"]
+claims = ["V-IDEM-1", "V-IDEM-2", "V-IDEM-3"]
+
+[[contract]]
+id = "C-SEND"
+title = "전송 결과"
+file = "docs/contracts/order-lifecycle.md"
+anchor = "c-send-전송-결과"
+summary = "게이트웨이의 네 가지 결과(놓임, 거부, 미전송, 불명)와 코어의 반응"
+events = ["order_acked", "venue_oid_learned", "order_in_doubt"]
+adr = ["ADR-005", "ADR-007"]
+code = ["crates/oms-core/src/decide.rs"]
+claims = ["V-DOUBT-1", "V-BOOT-1"]
+
+[[contract]]
+id = "C-DOUBT"
+title = "결과 불명의 해소"
+file = "docs/contracts/order-lifecycle.md"
+anchor = "c-doubt-결과-불명의-해소"
+summary = "불명 동안 예약 유지와 신규 주문 차단. 존재 증거, 만료 뒤 부재 확인, 운영자 종결 중 하나로 해소"
+events = ["order_in_doubt"]
+adr = ["ADR-005"]
+code = ["crates/oms-core/src/decide.rs"]
+claims = ["V-DOUBT-1", "V-DOUBT-2", "V-DOUBT-3"]
+
+[[contract]]
+id = "C-FILL"
+title = "체결 기장"
+file = "docs/contracts/order-lifecycle.md"
+anchor = "c-fill-체결-기장"
+summary = "체결 키로 한 번만 기장한다. 주인을 모르는 체결은 대기시키고, 버리지 않는다"
+events = ["fill_booked", "fill_parked", "fill_unparked", "external_fill_booked"]
+adr = ["ADR-007"]
+code = ["crates/oms-core/src/decide.rs", "crates/oms-core/src/core.rs"]
+claims = ["V-FILL-1", "V-EXT-1", "V-MIS-1", "V-FUZZ-1"]
+
+[[contract]]
+id = "C-CANCEL"
+title = "취소"
+file = "docs/contracts/order-lifecycle.md"
+anchor = "c-cancel-취소"
+summary = "취소 요청은 예약을 풀지 않는다. 취소는 재시도할 수 있고 상한이 있다"
+events = ["cancel_requested", "cancel_sent", "cancel_outcome_noted"]
+adr = ["ADR-005", "ADR-007"]
+code = ["crates/oms-core/src/decide.rs"]
+claims = ["V-CANCEL-1"]
+
+[[contract]]
+id = "C-TERM"
+title = "종결"
+file = "docs/contracts/order-lifecycle.md"
+anchor = "c-term-종결"
+summary = "거래소의 종결 통보는 Closing으로, 체결이 다 모였을 때 Closed로"
+events = ["venue_terminal", "order_closed", "missing_fills_flagged", "status_noted", "order_recheck"]
+adr = ["ADR-007"]
+code = ["crates/oms-core/src/decide.rs"]
+claims = ["V-TERM-1"]
+
+[[contract]]
+id = "C-JOURNAL"
+title = "저널에서 상태 복원"
+file = "docs/contracts/recovery.md"
+anchor = "c-journal-저널에서-상태-복원"
+summary = "스냅샷 + 이후 기록의 이벤트 적용. 외부 효과 없음. 손상은 위치에 따라 처리"
+events = []
+adr = ["ADR-003", "ADR-011", "ADR-013"]
+code = ["crates/oms-node/src/recovery.rs", "crates/oms-journal/src/segment.rs"]
+claims = ["V-JRN-1", "V-JRN-2", "V-JRN-3", "V-JRN-5", "V-REPLAY-1", "V-BOOT-2"]
+
+[[contract]]
+id = "C-SNAP"
+title = "스냅샷"
+file = "docs/contracts/recovery.md"
+anchor = "c-snap-스냅샷"
+summary = "내구화된 상태에서만 뜨고 원자적으로 나타난다. 실패해도 저널이 완전하다"
+events = []
+adr = ["ADR-011"]
+code = ["crates/oms-journal/src/snapshot.rs", "crates/oms-node/src/pipeline.rs"]
+claims = ["V-JRN-4", "V-PERF-3"]
+
+[[contract]]
+id = "C-BOOT"
+title = "재시작"
+file = "docs/contracts/recovery.md"
+anchor = "c-boot-재시작"
+summary = "결과 기록 없는 전송은 불명으로 표시한다. 신규 주문은 다시 보내지 않고 취소와 조회만 다시 한다"
+events = ["booted", "config_activated"]
+adr = ["ADR-005", "ADR-002"]
+code = ["crates/oms-core/src/decide.rs", "crates/oms-node/src/node.rs"]
+claims = ["V-BOOT-1", "V-CFG-1", "V-BOOT-2", "V-COMMIT-4"]
+
+[[contract]]
+id = "C-LINK"
+title = "링크 상태"
+file = "docs/contracts/reconciliation.md"
+anchor = "c-link-링크-상태"
+summary = "스트림 연결의 성립과 상실. 올라올 때마다 세션이 바뀌고 재확인이 필요하다"
+events = ["link_changed"]
+adr = ["ADR-014"]
+code = ["crates/oms-core/src/decide.rs"]
+claims = ["V-RECON-1", "V-LINK-1"]
+
+[[contract]]
+id = "C-RECON"
+title = "재확인과 대조"
+file = "docs/contracts/reconciliation.md"
+anchor = "c-recon-재확인과-대조"
+summary = "주문별 증거, 체결 동기화, 열린 주문 훑기, 포지션 구간 검사"
+events = ["fills_synced", "open_orders_swept", "positions_verified", "status_noted", "order_recheck"]
+adr = ["ADR-014"]
+code = ["crates/oms-core/src/decide.rs", "crates/oms-core/src/needs.rs", "crates/oms-node/src/venue/reconciler.rs"]
+claims = ["V-RECON-1", "V-RECON-2"]
+
+[[contract]]
+id = "C-MISMATCH"
+title = "불일치와 조정"
+file = "docs/contracts/reconciliation.md"
+anchor = "c-mismatch-불일치"
+summary = "차이는 기록되고 신규 주문을 막는다. 운영자가 건별로 확인하고 명시적으로 조정한다"
+events = ["mismatch_raised", "mismatch_acked", "position_adjusted"]
+adr = ["ADR-014"]
+code = ["crates/oms-core/src/decide.rs"]
+claims = ["V-RECON-1", "V-EXT-1", "V-MIS-1"]
+
+[[contract]]
+id = "C-OVERLOAD"
+title = "과부하와 저장 공간"
+file = "docs/contracts/overload.md"
+summary = "큐별 상한과 가득 찼을 때의 동작. 저장 공간 부족과 저장 실패"
+events = ["storage_low_changed"]
+adr = ["ADR-010"]
+code = ["crates/oms-node/src/queues.rs", "crates/oms-node/src/server.rs"]
+claims = ["V-OVL-1", "V-OVL-2", "V-OVL-3", "V-API-3", "V-PERF-2"]
+
+[[contract]]
+id = "C-OPS"
+title = "운영 명령"
+file = "docs/contracts/api.md"
+anchor = "운영-명령"
+summary = "중지·재개·전체 취소·주문 종결·참조 가격. 모두 사유와 함께 저널에 기록된다"
+events = ["operator_halted", "operator_resumed", "ref_price_updated"]
+adr = ["ADR-008", "ADR-015"]
+code = ["crates/oms-core/src/decide.rs"]
+claims = ["V-API-1", "V-CANCEL-1"]
+
+[[contract]]
+id = "C-API"
+title = "로컬 API"
+file = "docs/contracts/api.md"
+summary = "프로토콜, 권한, 입력 검증, 연결별 상한"
+events = []
+adr = ["ADR-015"]
+code = ["crates/oms-api/src/lib.rs", "crates/oms-node/src/server.rs"]
+claims = ["V-API-1", "V-API-2", "V-API-3", "V-DASH-1"]
+
+[[contract]]
+id = "C-GW"
+title = "게이트웨이 계약"
+file = "docs/contracts/gateway.md"
+summary = "게이트웨이가 지켜야 하는 의무 12가지와 중단 지점"
+events = []
+adr = ["ADR-005", "ADR-014", "ADR-017"]
+code = ["crates/oms-node/src/venue/mod.rs", "crates/oms-node/src/venue/simnet.rs", "crates/oms-node/src/venue/hyperliquid/mod.rs"]
+claims = ["V-HL-1", "V-HL-2", "V-HL-3", "V-SLICE-1"]

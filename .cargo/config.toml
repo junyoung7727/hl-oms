@@ -1,0 +1,4 @@
+# Machine-local: build output goes to the 2 TB NVMe next to the source tree,
+# not to the root SSD. Delete or change this on another machine.
+[build]
+target-dir = "/mnt/nvme/gitproject/.cargo-target/oms"

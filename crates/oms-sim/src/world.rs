@@ -1,0 +1,1208 @@
+//! Deterministic simulation of the whole order flow under faults.
+//!
+//! One `World` holds a real `oms_core::Core`, a model of the commit gate
+//! (records become durable in batches; outputs are released only then), a
+//! model gateway with an unreliable network, the simulated venue and a
+//! strategy that submits, repeats and cancels requests. Everything is driven
+//! by one seeded generator and one virtual clock, so a failing run is
+//! reproduced exactly by its seed.
+//!
+//! What is real here: the core's decisions and state. What is modelled: the
+//! journal (a vector with a durable prefix), the gateway, the network and the
+//! venue. The real journal, threads and sockets are exercised by the
+//! `oms-node` integration tests instead.
+
+use crate::rng::Rng;
+use crate::venue::*;
+use oms_core::*;
+use std::collections::{BTreeMap, BTreeSet};
+
+/// Probabilities are per mille of one draw.
+#[derive(Clone, Debug)]
+pub struct Profile {
+    pub name: &'static str,
+    pub steps: u32,
+    // actions per step
+    pub p_new: u32,
+    pub p_dup: u32,
+    pub p_cancel: u32,
+    pub p_fill: u32,
+    pub p_venue_cancel: u32,
+    pub p_tick: u32,
+    pub p_crash: u32,
+    pub p_link_drop: u32,
+    pub p_external_fill: u32,
+    pub p_operator: u32,
+    // network faults
+    pub p_not_sent: u32,
+    pub p_req_lost: u32,
+    pub p_req_slow: u32,
+    pub p_resp_lost: u32,
+    pub p_stream_dup: u32,
+    pub p_stream_late: u32,
+    pub p_query_lost: u32,
+    // commit gate
+    pub p_commit: u32,
+    pub max_pending: usize,
+    // venue behaviour
+    pub report_cum: bool,
+    pub fills_have_client_id: bool,
+    /// Venue clock minus local clock, microseconds.
+    pub venue_skew_us: i64,
+    pub enforce_expiry: bool,
+    // policy overrides
+    pub absence_margin_us: u64,
+    pub closed_retention_us: u64,
+    pub dedup_grace_us: u64,
+}
+
+impl Profile {
+    pub fn calm() -> Profile {
+        Profile {
+            name: "calm",
+            steps: 1500,
+            p_new: 250,
+            p_dup: 0,
+            p_cancel: 120,
+            p_fill: 300,
+            p_venue_cancel: 20,
+            p_tick: 100,
+            p_crash: 0,
+            p_link_drop: 0,
+            p_external_fill: 0,
+            p_operator: 0,
+            p_not_sent: 0,
+            p_req_lost: 0,
+            p_req_slow: 0,
+            p_resp_lost: 0,
+            p_stream_dup: 0,
+            p_stream_late: 0,
+            p_query_lost: 0,
+            p_commit: 700,
+            max_pending: 8,
+            report_cum: true,
+            fills_have_client_id: true,
+            venue_skew_us: 0,
+            enforce_expiry: true,
+            absence_margin_us: 2_000_000,
+            closed_retention_us: 3_600_000_000,
+            dedup_grace_us: 60_000_000,
+        }
+    }
+
+    /// Lossy network, duplicated and late stream messages, repeated requests.
+    pub fn lossy() -> Profile {
+        Profile {
+            name: "lossy",
+            p_dup: 80,
+            p_not_sent: 30,
+            p_req_lost: 40,
+            p_req_slow: 60,
+            p_resp_lost: 80,
+            p_stream_dup: 150,
+            p_stream_late: 200,
+            p_query_lost: 100,
+            p_link_drop: 8,
+            p_operator: 5,
+            ..Profile::calm()
+        }
+    }
+
+    /// Everything in `lossy` plus process crashes at arbitrary points.
+    pub fn crashy() -> Profile {
+        Profile {
+            name: "crashy",
+            p_crash: 12,
+            p_commit: 500,
+            ..Profile::lossy()
+        }
+    }
+
+    /// The venue states no cumulative quantity and fills carry only the
+    /// venue's order id, the weakest evidence the core must cope with.
+    pub fn weak_evidence() -> Profile {
+        Profile {
+            name: "weak_evidence",
+            report_cum: false,
+            fills_have_client_id: false,
+            ..Profile::crashy()
+        }
+    }
+
+    /// Short retention, so idempotency keys are forgotten during the run and
+    /// late duplicates must be refused as expired.
+    pub fn purge() -> Profile {
+        Profile {
+            name: "purge",
+            p_dup: 200,
+            closed_retention_us: 1_000_000,
+            dedup_grace_us: 500_000,
+            ..Profile::crashy()
+        }
+    }
+
+    /// Trades appear on the account that the OMS did not send.
+    pub fn external() -> Profile {
+        Profile {
+            name: "external",
+            p_external_fill: 6,
+            ..Profile::lossy()
+        }
+    }
+
+    /// Venue clock one second behind the local clock, inside the margin.
+    pub fn skewed() -> Profile {
+        Profile {
+            name: "skewed",
+            venue_skew_us: -1_000_000,
+            ..Profile::crashy()
+        }
+    }
+
+    pub fn all() -> Vec<Profile> {
+        vec![
+            Profile::calm(),
+            Profile::lossy(),
+            Profile::crashy(),
+            Profile::weak_evidence(),
+            Profile::purge(),
+            Profile::skewed(),
+            Profile::external(),
+        ]
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SimStats {
+    pub steps: u32,
+    pub inputs: u64,
+    pub records: u64,
+    pub commits: u64,
+    pub crashes: u32,
+    pub link_drops: u32,
+    pub requests: u64,
+    pub accepted: u64,
+    pub rejected: u64,
+    pub duplicates: u64,
+    pub conflicts: u64,
+    pub sends: u64,
+    pub venue_orders: u64,
+    pub venue_fills: u64,
+    pub external_fills: u64,
+    pub in_doubt_seen: u64,
+    pub closed_not_placed: u64,
+    pub parked_seen: u64,
+    pub purged: u64,
+    pub mismatches: u64,
+    pub final_digest: u64,
+    pub trace_hash: u64,
+    pub sim_seconds: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Violation {
+    pub property: &'static str,
+    pub detail: String,
+    pub at_step: u32,
+    pub seed: u64,
+    pub profile: &'static str,
+}
+
+impl std::fmt::Display for Violation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[{}] seed {} profile {} step {}: {}",
+            self.property, self.seed, self.profile, self.at_step, self.detail
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+enum Query {
+    Status(OrderId),
+    Fills(Ts),
+    OpenOrders,
+    Positions,
+}
+
+#[derive(Clone, Debug)]
+enum Net {
+    PlaceArrive { req: u64, epoch: u32, place: PlaceReq, order_id: OrderId, immediate: Qty },
+    CancelArrive { req: u64, epoch: u32, order_id: OrderId, attempt: u32, client: VenueClientId },
+    Resp { req: u64, epoch: u32, input: VenueInput },
+    Timeout { req: u64, epoch: u32 },
+    Stream { session: u64, epoch: u32, ev: StreamEvent },
+    LinkUp { epoch: u32 },
+    Reconcile { epoch: u32, n: u32 },
+    QueryArrive { epoch: u32, session: u64, queried_at: Ts, q: Query },
+    QueryResp { epoch: u32, inputs: Vec<VenueInput> },
+}
+
+#[derive(Clone, Debug)]
+enum Inflight {
+    Place(OrderId),
+    Cancel(OrderId, u32),
+}
+
+pub const INSTANCE: u64 = 0x51_4d_55_4c;
+const GW_TIMEOUT_US: u64 = 2_000_000;
+const RECONCILE_EVERY_US: u64 = 300_000;
+
+pub struct World {
+    pub p: Profile,
+    pub seed: u64,
+    rng: Rng,
+    pub now: Ts,
+    step: u32,
+    pub core: Core,
+    pub durable: Vec<Record>,
+    pending: Vec<(Option<Record>, Output)>,
+    pub venue: SimVenue,
+    queue: BTreeMap<(Ts, u64), Net>,
+    qseq: u64,
+    epoch: u32,
+    link_up: bool,
+    session: u64,
+    inflight: BTreeMap<u64, Inflight>,
+    next_req: u64,
+    sent: Vec<NewOrderReq>,
+    key_counter: u64,
+    calm: bool,
+    released_sends: BTreeMap<OrderId, u32>,
+    released_keys: BTreeSet<(StrategyId, ClientOrderId)>,
+    accepted_keys: BTreeMap<(StrategyId, ClientOrderId), OrderId>,
+    external_seen: bool,
+    pub stats: SimStats,
+}
+
+fn inst() -> InstrumentId {
+    InstrumentId::new("X").expect("valid id")
+}
+
+fn strat(name: &str) -> StrategyId {
+    StrategyId::new(name).expect("valid id")
+}
+
+const QTY_STEP: i64 = 1_000_000; // 0.01
+const PX_TICK: i64 = 100_000_000; // 1
+
+pub fn sim_config(p: &Profile) -> CoreConfig {
+    let mut instruments = BTreeMap::new();
+    instruments.insert(inst(), InstrumentSpec {
+        qty_step: Qty(QTY_STEP),
+        px_tick: Px(PX_TICK),
+        px_max_sig_figs: Some(5),
+        min_notional: Amount(0),
+        max_order_qty: Qty(200 * QTY_STEP),
+        max_order_notional: Amount(i64::MAX / 4),
+        price_band_bps: None,
+        account_pos_min: SQty(-500 * QTY_STEP),
+        account_pos_max: SQty(500 * QTY_STEP),
+    });
+    let mut strategies = BTreeMap::new();
+    for name in ["a", "b"] {
+        let mut limits = BTreeMap::new();
+        limits.insert(inst(), PosLimit { min: SQty(-400 * QTY_STEP), max: SQty(400 * QTY_STEP) });
+        strategies.insert(strat(name), StrategySpec { enabled: true, max_open_orders: 40, limits });
+    }
+    let policy = Policy {
+        max_open_orders: 60,
+        max_inflight_sends: 16,
+        max_expiry_horizon_us: 10_000_000,
+        absence_margin_us: p.absence_margin_us,
+        venue_enforces_expiry: true,
+        cancel_retry_backoff_us: 500_000,
+        cancel_max_attempts: 50,
+        closed_retention_us: p.closed_retention_us,
+        dedup_grace_us: p.dedup_grace_us,
+        purge_interval_us: 1_000_000,
+        unmatched_fill_wait_us: 40_000_000,
+        fill_dedup_retention_us: p.closed_retention_us,
+        ..Policy::default()
+    };
+    CoreConfig { version: 1, instruments, strategies, policy }
+}
+
+fn fnv(mut h: u64, bytes: &[u8]) -> u64 {
+    for b in bytes {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+impl World {
+    pub fn new(seed: u64, p: Profile) -> World {
+        let venue = SimVenue::new(p.enforce_expiry);
+        let mut w = World {
+            seed,
+            rng: Rng::new(seed),
+            now: 1_700_000_000_000_000,
+            step: 0,
+            core: Core::new(INSTANCE),
+            durable: Vec::new(),
+            pending: Vec::new(),
+            venue,
+            queue: BTreeMap::new(),
+            qseq: 0,
+            epoch: 0,
+            link_up: false,
+            session: 0,
+            inflight: BTreeMap::new(),
+            next_req: 1,
+            sent: Vec::new(),
+            key_counter: 0,
+            calm: false,
+            released_sends: BTreeMap::new(),
+            released_keys: BTreeSet::new(),
+            accepted_keys: BTreeMap::new(),
+            external_seen: false,
+            stats: SimStats { trace_hash: 0xcbf2_9ce4_8422_2325, ..SimStats::default() },
+            p,
+        };
+        w.stats.steps = w.p.steps;
+        w
+    }
+
+    fn violation(&self, property: &'static str, detail: String) -> Violation {
+        Violation { property, detail, at_step: self.step, seed: self.seed, profile: self.p.name }
+    }
+
+    fn venue_now(&self) -> Ts {
+        self.now.saturating_add_signed(self.p.venue_skew_us)
+    }
+
+    fn schedule(&mut self, delay_us: u64, ev: Net) {
+        self.qseq += 1;
+        self.queue.insert((self.now + delay_us, self.qseq), ev);
+    }
+
+    fn chance(&mut self, per_mille: u32) -> bool {
+        !self.calm && self.rng.chance(per_mille)
+    }
+
+    fn net_delay(&mut self) -> u64 {
+        self.rng.range(2_000, 40_000)
+    }
+
+    // ---- core, commit gate ------------------------------------------------
+
+    fn feed(&mut self, input: Input) -> Result<(), Violation> {
+        self.stats.inputs += 1;
+        let out = self
+            .core
+            .handle(self.now, &input)
+            .map_err(|e| self.violation("core-fault", format!("{e} on {input:?}")))?;
+        self.core
+            .check_invariants()
+            .map_err(|e| self.violation("structural-invariant", format!("{e} after {input:?}")))?;
+        let rec = (!out.events.is_empty()).then(|| {
+            let pending_records = self.pending.iter().filter(|(r, _)| r.is_some()).count();
+            Record {
+                seq: (self.durable.len() + pending_records) as u64 + 1,
+                at: self.now,
+                input: input.clone(),
+                events: out.events.clone(),
+            }
+        });
+        self.pending.push((rec, out));
+        if self.rng.chance(self.p.p_commit) || self.pending.len() >= self.p.max_pending {
+            self.commit()?;
+        }
+        Ok(())
+    }
+
+    /// Makes every pending record durable, then releases the outputs that
+    /// were waiting for it. This is the only place a command reaches the
+    /// gateway or a reply reaches the strategy.
+    pub fn commit(&mut self) -> Result<(), Violation> {
+        if self.pending.is_empty() {
+            return Ok(());
+        }
+        self.stats.commits += 1;
+        let batch = std::mem::take(&mut self.pending);
+        let mut outputs = Vec::with_capacity(batch.len());
+        for (rec, out) in batch {
+            if let Some(rec) = rec {
+                let bytes = serde_json::to_vec(&rec).unwrap_or_default();
+                self.stats.trace_hash = fnv(self.stats.trace_hash, &bytes);
+                self.stats.records += 1;
+                self.note_events(&rec.events);
+                self.durable.push(rec);
+            }
+            outputs.push(out);
+        }
+        for out in outputs {
+            if let Some(reply) = out.reply {
+                self.on_reply(reply)?;
+            }
+            for cmd in out.commands {
+                self.gateway_send(cmd)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn note_events(&mut self, events: &[Event]) {
+        for e in events {
+            match e {
+                Event::OrderInDoubt { .. } => self.stats.in_doubt_seen += 1,
+                Event::OrderClosed { reason: CloseReason::NotPlaced { .. }, .. } => self.stats.closed_not_placed += 1,
+                Event::FillParked { .. } => self.stats.parked_seen += 1,
+                Event::Purged { order_ids, .. } => self.stats.purged += order_ids.len() as u64,
+                Event::MismatchRaised { .. } => self.stats.mismatches += 1,
+                _ => {}
+            }
+        }
+    }
+
+    fn on_reply(&mut self, reply: Reply) -> Result<(), Violation> {
+        if let Reply::NewOrder(r) = reply {
+            match r {
+                NewOrderReply::Accepted { order_id } => {
+                    self.stats.accepted += 1;
+                    let o = self
+                        .core
+                        .order(order_id)
+                        .ok_or_else(|| self.violation("reply", format!("accepted order {order_id} is unknown")))?;
+                    let key = (o.strategy.clone(), o.client_order_id.clone());
+                    if let Some(prev) = self.accepted_keys.insert(key.clone(), order_id) {
+                        // A key may be accepted again only after the earlier
+                        // order was purged, which requires its request to have
+                        // expired; and then the request is refused as expired.
+                        return Err(self.violation(
+                            "one-order-per-key",
+                            format!("key {key:?} accepted as order {prev} and again as {order_id}"),
+                        ));
+                    }
+                }
+                NewOrderReply::Rejected { .. } => self.stats.rejected += 1,
+                NewOrderReply::Duplicate { .. } => self.stats.duplicates += 1,
+                NewOrderReply::Conflict { .. } => self.stats.conflicts += 1,
+            }
+        }
+        Ok(())
+    }
+
+    // ---- gateway ----------------------------------------------------------
+
+    fn gateway_send(&mut self, cmd: VenueCommand) -> Result<(), Violation> {
+        match cmd {
+            VenueCommand::SendOrder { order_id, instance_id, instrument, side, qty, px, tif, expires_at, .. } => {
+                self.stats.sends += 1;
+                let n = {
+                    let n = self.released_sends.entry(order_id).or_default();
+                    *n += 1;
+                    *n
+                };
+                if n > 1 {
+                    return Err(self.violation(
+                        "single-send",
+                        format!("order {order_id} released to the gateway {n} times"),
+                    ));
+                }
+                if let Some(o) = self.core.order(order_id) {
+                    let key = (o.strategy.clone(), o.client_order_id.clone());
+                    if !self.released_keys.insert(key.clone()) {
+                        return Err(self.violation("one-send-per-key", format!("key {key:?} sent twice")));
+                    }
+                }
+                let client = VenueClientId { instance_id, order_id };
+                if !self.link_up || self.chance(self.p.p_not_sent) {
+                    let d = self.net_delay();
+                    let req = self.new_req(Inflight::Place(order_id));
+                    self.schedule(d, Net::Resp {
+                        req,
+                        epoch: self.epoch,
+                        input: VenueInput::SendResult {
+                            order_id,
+                            outcome: SendOutcome::NotSent { reason: "connection could not be established".into() },
+                            timing: Default::default(),
+                        },
+                    });
+                    return Ok(());
+                }
+                let req = self.new_req(Inflight::Place(order_id));
+                self.schedule(GW_TIMEOUT_US, Net::Timeout { req, epoch: self.epoch });
+                if self.chance(self.p.p_req_lost) {
+                    return Ok(());
+                }
+                let d = if self.chance(self.p.p_req_slow) { self.rng.range(500_000, 9_000_000) } else { self.net_delay() };
+                let immediate = match tif {
+                    Tif::Ioc => Qty(self.rng.below(qty.0 as u64 / QTY_STEP as u64 + 1) as i64 * QTY_STEP),
+                    Tif::Alo => {
+                        if self.rng.chance(150) { Qty(QTY_STEP) } else { Qty::ZERO }
+                    }
+                    Tif::Gtc => {
+                        if self.rng.chance(200) {
+                            Qty(self.rng.below(qty.0 as u64 / QTY_STEP as u64 + 1) as i64 * QTY_STEP)
+                        } else {
+                            Qty::ZERO
+                        }
+                    }
+                };
+                let place = PlaceReq { client, instrument, side, qty, px, tif, expires_at };
+                self.schedule(d, Net::PlaceArrive { req, epoch: self.epoch, place, order_id, immediate });
+            }
+            VenueCommand::SendCancel { order_id, instance_id, attempt, .. } => {
+                let client = VenueClientId { instance_id, order_id };
+                let req = self.new_req(Inflight::Cancel(order_id, attempt));
+                if !self.link_up || self.chance(self.p.p_not_sent) {
+                    let d = self.net_delay();
+                    self.schedule(d, Net::Resp {
+                        req,
+                        epoch: self.epoch,
+                        input: VenueInput::CancelResult {
+                            order_id,
+                            attempt,
+                            outcome: CancelOutcome::NotSent { reason: "connection could not be established".into() },
+                            timing: Default::default(),
+                        },
+                    });
+                    return Ok(());
+                }
+                self.schedule(GW_TIMEOUT_US, Net::Timeout { req, epoch: self.epoch });
+                if self.chance(self.p.p_req_lost) {
+                    return Ok(());
+                }
+                let d = self.net_delay();
+                self.schedule(d, Net::CancelArrive { req, epoch: self.epoch, order_id, attempt, client });
+            }
+        }
+        Ok(())
+    }
+
+    fn new_req(&mut self, kind: Inflight) -> u64 {
+        let req = self.next_req;
+        self.next_req += 1;
+        self.inflight.insert(req, kind);
+        req
+    }
+
+    fn pump_stream(&mut self) {
+        let events = self.venue.take_stream();
+        if !self.link_up {
+            return; // nobody is subscribed; the messages are gone
+        }
+        for ev in events {
+            let mut d = self.net_delay();
+            if self.chance(self.p.p_stream_late) {
+                d += self.rng.range(50_000, 1_500_000);
+            }
+            self.schedule(d, Net::Stream { session: self.session, epoch: self.epoch, ev: ev.clone() });
+            if self.chance(self.p.p_stream_dup) {
+                let d2 = d + self.rng.range(1_000, 800_000);
+                self.schedule(d2, Net::Stream { session: self.session, epoch: self.epoch, ev });
+            }
+        }
+    }
+
+    fn stream_input(&self, session: u64, ev: &StreamEvent) -> VenueInput {
+        match ev {
+            StreamEvent::Order { oid, client, status, filled, ts } => VenueInput::OrderStatus(OrderStatusIn {
+                session,
+                order_id: client.filter(|c| c.instance_id == INSTANCE).map(|c| c.order_id),
+                venue_oid: Some(oid_string(*oid)),
+                status: status_in(status, *filled, *ts, self.p.report_cum),
+                source: EvidenceSource::Stream,
+            }),
+            StreamEvent::Fill(f) => VenueInput::Fill(fill_in(f, INSTANCE, self.p.fills_have_client_id)),
+        }
+    }
+
+    fn deliver(&mut self, ev: Net) -> Result<(), Violation> {
+        match ev {
+            Net::PlaceArrive { req, epoch, place, order_id, immediate } => {
+                // The request is on the wire: it reaches the venue even if the
+                // gateway that sent it has since died.
+                let resp = self.venue.place(self.venue_now(), &place, immediate);
+                if matches!(resp, PlaceResp::Placed { .. }) {
+                    self.stats.venue_orders += 1;
+                }
+                self.pump_stream();
+                if self.chance(self.p.p_resp_lost) {
+                    return Ok(());
+                }
+                let outcome = match resp {
+                    PlaceResp::Placed { oid, status, filled, ts } => SendOutcome::Placed {
+                        venue_oid: oid_string(oid),
+                        status: status_in(&status, filled, ts, self.p.report_cum),
+                    },
+                    PlaceResp::Rejected { reason } => SendOutcome::Rejected { reason },
+                };
+                let d = self.net_delay();
+                self.schedule(d, Net::Resp { req, epoch, input: VenueInput::SendResult { order_id, outcome, timing: Default::default() } });
+            }
+            Net::CancelArrive { req, epoch, order_id, attempt, client } => {
+                let r = self.venue.cancel(self.venue_now(), client);
+                self.pump_stream();
+                if self.chance(self.p.p_resp_lost) {
+                    return Ok(());
+                }
+                let outcome = match r {
+                    Ok(()) => CancelOutcome::Confirmed,
+                    Err(reason) => CancelOutcome::Rejected { reason },
+                };
+                let d = self.net_delay();
+                self.schedule(d, Net::Resp { req, epoch, input: VenueInput::CancelResult { order_id, attempt, outcome, timing: Default::default() } });
+            }
+            Net::Resp { req, epoch, input } => {
+                if epoch == self.epoch && self.inflight.remove(&req).is_some() {
+                    self.feed(Input::Venue(input))?;
+                }
+            }
+            Net::Timeout { req, epoch } => {
+                if epoch == self.epoch {
+                    if let Some(kind) = self.inflight.remove(&req) {
+                        self.feed(Input::Venue(unknown_result(kind, "no response within the gateway timeout")))?;
+                    }
+                }
+            }
+            Net::Stream { session, epoch, ev } => {
+                if epoch == self.epoch && self.link_up && session == self.session {
+                    let input = self.stream_input(session, &ev);
+                    self.feed(Input::Venue(input))?;
+                }
+            }
+            Net::LinkUp { epoch } => {
+                if epoch == self.epoch && !self.link_up {
+                    self.session += 1;
+                    self.link_up = true;
+                    let session = self.session;
+                    self.feed(Input::Venue(VenueInput::Link { up: true, session, reason: "connected".into() }))?;
+                    self.schedule(1_000, Net::Reconcile { epoch, n: 0 });
+                }
+            }
+            Net::Reconcile { epoch, n } => {
+                if epoch == self.epoch {
+                    if self.link_up {
+                        // The reconciler reads published state, which is the
+                        // durable state.
+                        self.commit()?;
+                        self.issue_queries(n);
+                    }
+                    self.schedule(RECONCILE_EVERY_US, Net::Reconcile { epoch, n: n + 1 });
+                }
+            }
+            Net::QueryArrive { epoch, session, queried_at, q } => {
+                if epoch != self.epoch || self.chance(self.p.p_query_lost) {
+                    return Ok(());
+                }
+                let inputs = self.answer(session, queried_at, q);
+                let d = self.net_delay();
+                self.schedule(d, Net::QueryResp { epoch, inputs });
+            }
+            Net::QueryResp { epoch, inputs } => {
+                if epoch == self.epoch {
+                    for i in inputs {
+                        self.feed(Input::Venue(i))?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn issue_queries(&mut self, n: u32) {
+        let mut queries: Vec<Query> = self
+            .core
+            .needs()
+            .into_iter()
+            .map(|need| match need {
+                Need::OrderStatus { order_id, .. } => Query::Status(order_id),
+                Need::Fills { since } => Query::Fills(since),
+                Need::OpenOrders => Query::OpenOrders,
+                Need::Positions => Query::Positions,
+            })
+            .collect();
+        if n % 10 == 9 {
+            queries.push(Query::OpenOrders);
+            queries.push(Query::Positions);
+            queries.push(Query::Fills(self.core.sync.fills_up_to.max(self.core.fill_floor)));
+        }
+        for q in queries {
+            let d = self.net_delay();
+            self.schedule(d, Net::QueryArrive { epoch: self.epoch, session: self.session, queried_at: self.now, q });
+        }
+    }
+
+    fn answer(&self, session: u64, queried_at: Ts, q: Query) -> Vec<VenueInput> {
+        match q {
+            Query::Status(order_id) => {
+                let client = VenueClientId { instance_id: INSTANCE, order_id };
+                match self.venue.status(client) {
+                    Some(o) => vec![VenueInput::OrderStatus(OrderStatusIn {
+                        session,
+                        order_id: Some(order_id),
+                        venue_oid: Some(o.venue_oid()),
+                        status: status_in(&o.status, o.filled, o.updated_at, self.p.report_cum),
+                        source: EvidenceSource::Query,
+                    })],
+                    None => vec![VenueInput::StatusNotFound { session, order_id, queried_at }],
+                }
+            }
+            Query::Fills(since) => {
+                let mut v: Vec<VenueInput> = self
+                    .venue
+                    .fills_since(since)
+                    .iter()
+                    .map(|f| VenueInput::Fill(fill_in(f, INSTANCE, self.p.fills_have_client_id)))
+                    .collect();
+                // A fill can still happen at this very venue time after the
+                // answer was computed, so the watermark stops just before it.
+                v.push(VenueInput::FillsSynced { session, up_to: self.venue_now().saturating_sub(1) });
+                v
+            }
+            Query::OpenOrders => vec![VenueInput::OpenOrders {
+                session,
+                queried_at,
+                orders: self
+                    .venue
+                    .open_orders()
+                    .iter()
+                    .map(|o| VenueOpenOrder {
+                        venue_oid: o.venue_oid(),
+                        order_id: o.client.filter(|c| c.instance_id == INSTANCE).map(|c| c.order_id),
+                        instrument: o.instrument.clone(),
+                        side: o.side,
+                        remaining: Some(o.remaining()),
+                    })
+                    .collect(),
+            }],
+            Query::Positions => vec![VenueInput::Positions {
+                session,
+                queried_at,
+                positions: self
+                    .venue
+                    .positions
+                    .iter()
+                    .map(|(i, q)| VenuePosition { instrument: i.clone(), qty: SQty(*q) })
+                    .collect(),
+            }],
+        }
+    }
+
+    // ---- faults -----------------------------------------------------------
+
+    /// Rebuilds a core from the durable records alone.
+    pub fn rebuild(&self) -> Result<Core, Violation> {
+        let mut c = Core::new(INSTANCE);
+        for rec in &self.durable {
+            c.replay(rec).map_err(|e| self.violation("replay", format!("{e} at record {}", rec.seq)))?;
+        }
+        Ok(c)
+    }
+
+    fn crash(&mut self) -> Result<(), Violation> {
+        self.stats.crashes += 1;
+        // Records that were not durable vanish together with the outputs that
+        // were waiting for them: nothing of them was ever released.
+        self.pending.clear();
+        self.core = self.rebuild()?;
+        self.core
+            .check_invariants()
+            .map_err(|e| self.violation("structural-invariant", format!("{e} after recovery")))?;
+        self.epoch += 1;
+        self.inflight.clear();
+        self.link_up = false;
+        self.feed(Input::Boot { binary: "sim".into() })?;
+        self.commit()?;
+        let d = self.rng.range(100_000, 3_000_000);
+        self.schedule(d, Net::LinkUp { epoch: self.epoch });
+        Ok(())
+    }
+
+    fn link_drop(&mut self) -> Result<(), Violation> {
+        if !self.link_up {
+            return Ok(());
+        }
+        self.stats.link_drops += 1;
+        self.link_up = false;
+        let inflight = std::mem::take(&mut self.inflight);
+        for (_, kind) in inflight {
+            self.feed(Input::Venue(unknown_result(kind, "connection lost before a response")))?;
+        }
+        self.feed(Input::Venue(VenueInput::Link { up: false, session: self.session, reason: "connection lost".into() }))?;
+        let d = self.rng.range(50_000, 2_000_000);
+        self.schedule(d, Net::LinkUp { epoch: self.epoch });
+        Ok(())
+    }
+
+    // ---- actors -----------------------------------------------------------
+
+    fn act_new_order(&mut self) -> Result<(), Violation> {
+        self.key_counter += 1;
+        let strategy = strat(if self.rng.chance(500) { "a" } else { "b" });
+        let side = if self.rng.chance(500) { Side::Buy } else { Side::Sell };
+        // Mostly small orders; sometimes one that cannot fit the limits.
+        let lots = if self.rng.chance(60) { self.rng.range(150, 260) } else { self.rng.range(1, 60) };
+        let tif = match self.rng.below(10) {
+            0 | 1 => Tif::Ioc,
+            2 => Tif::Alo,
+            _ => Tif::Gtc,
+        };
+        let req = NewOrderReq {
+            strategy,
+            client_order_id: ClientOrderId::new(format!("k{}", self.key_counter)).expect("valid id"),
+            instrument: inst(),
+            side,
+            qty: Qty(lots as i64 * QTY_STEP),
+            px: Px(self.rng.range(90, 110) as i64 * PX_TICK),
+            tif,
+            reduce_only: false,
+            expires_at: self.now + self.rng.range(800_000, 5_000_000),
+        };
+        self.stats.requests += 1;
+        if self.sent.len() < 400 {
+            self.sent.push(req.clone());
+        } else {
+            let i = self.rng.below(400) as usize;
+            self.sent[i] = req.clone();
+        }
+        self.feed(Input::NewOrder(req))
+    }
+
+    fn act_duplicate(&mut self) -> Result<(), Violation> {
+        if self.sent.is_empty() {
+            return Ok(());
+        }
+        let i = self.rng.below(self.sent.len() as u64) as usize;
+        let mut req = self.sent[i].clone();
+        if self.rng.chance(200) {
+            req.qty = Qty(req.qty.0 + QTY_STEP); // same key, different request
+        }
+        self.stats.requests += 1;
+        self.feed(Input::NewOrder(req))
+    }
+
+    fn act_cancel(&mut self) -> Result<(), Violation> {
+        let open: Vec<OrderId> = self.core.open.iter().copied().collect();
+        if open.is_empty() {
+            return Ok(());
+        }
+        let id = open[self.rng.below(open.len() as u64) as usize];
+        let Some(o) = self.core.order(id) else { return Ok(()) };
+        let actor = if self.rng.chance(50) { Actor::Strategy(strat("a")) } else { Actor::Strategy(o.strategy.clone()) };
+        self.feed(Input::Cancel(CancelReq { actor, target: CancelTarget::Order(id) }))
+    }
+
+    fn act_fill(&mut self) {
+        let open = self.venue.open_oids();
+        if open.is_empty() {
+            return;
+        }
+        let oid = open[self.rng.below(open.len() as u64) as usize];
+        let remaining = self.venue.orders[&oid].remaining().0 / QTY_STEP;
+        if remaining <= 0 {
+            return;
+        }
+        let lots = if self.rng.chance(350) { remaining } else { self.rng.range(1, remaining as u64 + 1) as i64 };
+        if self.venue.fill(self.venue_now(), oid, Qty(lots * QTY_STEP)).is_some() {
+            self.stats.venue_fills += 1;
+        }
+        self.pump_stream();
+    }
+
+    fn act_venue_cancel(&mut self) {
+        let open = self.venue.open_oids();
+        if open.is_empty() {
+            return;
+        }
+        let oid = open[self.rng.below(open.len() as u64) as usize];
+        self.venue.venue_cancel(self.venue_now(), oid, "cancelled by venue");
+        self.pump_stream();
+    }
+
+    fn act_external_fill(&mut self) {
+        let side = if self.rng.chance(500) { Side::Buy } else { Side::Sell };
+        let qty = Qty(self.rng.range(1, 10) as i64 * QTY_STEP);
+        self.venue.external_fill(self.venue_now(), &inst(), side, qty, Px(100 * PX_TICK));
+        self.external_seen = true;
+        self.stats.external_fills += 1;
+        self.pump_stream();
+    }
+
+    fn act_operator(&mut self) -> Result<(), Violation> {
+        // Decide from the core's own state: a halt that was not durable
+        // before a crash never happened.
+        let halt = self.core.halt_account.is_none();
+        let cmd = if halt {
+            OperatorCmd::Halt { scope: Scope::Account, note: "sim".into() }
+        } else {
+            OperatorCmd::Resume { scope: Scope::Account, note: "sim".into() }
+        };
+        self.feed(Input::Operator(cmd))
+    }
+
+    // ---- checks -----------------------------------------------------------
+
+    /// Properties that must hold at every instant, faults included.
+    fn check_always(&self) -> Result<(), Violation> {
+        if !self.venue.duplicate_placements.is_empty() {
+            return Err(self.violation(
+                "single-placement",
+                format!("venue saw repeated placement for client ids {:?}", self.venue.duplicate_placements),
+            ));
+        }
+        if let Some((c, n)) = self.venue.place_requests.iter().find(|(_, n)| **n > 1) {
+            return Err(self.violation("single-placement", format!("client id {c:#x} was requested {n} times")));
+        }
+        if self.external_seen {
+            return Ok(());
+        }
+        // Bridge: the venue's true position is always explained by booked
+        // fills plus what open reservations could still add.
+        let b = self.core.account_book(&inst());
+        let truth = self.venue.position(&inst());
+        let (lo, hi) = (b.pos.0 - b.sell_open.0, b.pos.0 + b.buy_open.0);
+        if truth < lo || truth > hi {
+            return Err(self.violation(
+                "bridge",
+                format!("venue position {} outside [{}, {}] (booked {})", SQty(truth), SQty(lo), SQty(hi), b.pos),
+            ));
+        }
+        if self.core.mismatches.is_empty() {
+            self.core.check_position_bounds().map_err(|e| self.violation("position-bounds", e))?;
+        }
+        let spec = &self.core.config.instruments[&inst()];
+        if truth < spec.account_pos_min.0 || truth > spec.account_pos_max.0 {
+            return Err(self.violation("venue-position-limit", format!("venue position {} outside the account limit", SQty(truth))));
+        }
+        Ok(())
+    }
+
+    /// Properties that must hold once faults have stopped and reconciliation
+    /// has finished.
+    fn check_final(&mut self) -> Result<(), Violation> {
+        self.commit()?;
+        let rebuilt = self.rebuild()?;
+        if rebuilt != self.core {
+            return Err(self.violation("replay-equivalence", "state rebuilt from the journal differs from the live state".into()));
+        }
+        // Re-deciding every recorded input reproduces the recorded events.
+        let mut redo = Core::new(INSTANCE);
+        for rec in &self.durable {
+            let out = redo.handle(rec.at, &rec.input).map_err(|e| self.violation("re-decide", e.to_string()))?;
+            if out.events != rec.events {
+                return Err(self.violation("re-decide", format!("record {} re-decided differently", rec.seq)));
+            }
+        }
+
+        let truth = self.venue.position(&inst());
+        let b = self.core.account_book(&inst());
+        if b.pos.0 != truth {
+            return Err(self.violation("final-position", format!("booked {} but venue has {}", b.pos, SQty(truth))));
+        }
+        let ext = self.venue.external_positions.get(&inst()).copied().unwrap_or(0);
+        let un = self.core.unattributed.get(&inst()).map(|b| b.pos.0).unwrap_or(0);
+        if un != ext {
+            return Err(self.violation("final-unattributed", format!("unattributed {} but external activity was {}", SQty(un), SQty(ext))));
+        }
+        if self.external_seen {
+            if self.stats.mismatches == 0 {
+                return Err(self.violation("external-detection", "external fills happened and no mismatch was raised".into()));
+            }
+        } else {
+            if !self.core.mismatches.is_empty() {
+                return Err(self.violation("no-false-mismatch", format!("{:?}", self.core.mismatches.values().collect::<Vec<_>>())));
+            }
+            let holds = self.core.holds(None);
+            if !holds.is_empty() {
+                return Err(self.violation("final-holds", format!("{holds:?} with needs {:?}", self.core.needs())));
+            }
+        }
+
+        // Every venue order of ours is known with the right fills and state.
+        for vo in self.venue.orders.values() {
+            let Some(c) = vo.client else { continue };
+            let known = self.core.order(c.order_id);
+            let purged = self.durable.iter().any(|r| {
+                r.events.iter().any(|e| matches!(e, Event::Purged { order_ids, .. } if order_ids.contains(&c.order_id)))
+            });
+            let Some(o) = known else {
+                if purged {
+                    continue;
+                }
+                return Err(self.violation("final-orders", format!("venue order {} unknown to the core", vo.oid)));
+            };
+            if o.cum_qty != vo.filled {
+                return Err(self.violation(
+                    "final-fills",
+                    format!("order {}: booked {} but venue filled {}", o.id, o.cum_qty, vo.filled),
+                ));
+            }
+            match (&vo.status, o.phase) {
+                (SimStatus::Open, Phase::Working) => {
+                    if o.reserved != vo.remaining() {
+                        return Err(self.violation("final-orders", format!("order {}: reserved {} != remaining {}", o.id, o.reserved, vo.remaining())));
+                    }
+                }
+                (SimStatus::Filled | SimStatus::Canceled(_), Phase::Closed) => {}
+                (s, p) => {
+                    return Err(self.violation("final-orders", format!("order {}: venue {s:?} but core {p:?}", o.id)));
+                }
+            }
+        }
+        // Every order the core still considers open exists at the venue.
+        for id in &self.core.open {
+            let client = VenueClientId { instance_id: INSTANCE, order_id: *id };
+            if self.venue.status(client).is_none_or(|o| o.status != SimStatus::Open) {
+                return Err(self.violation("final-orders", format!("core order {id} is open but not open at the venue")));
+            }
+        }
+        // Every order closed as never placed really is absent.
+        for o in self.core.orders.values() {
+            if let Some(Close { reason: CloseReason::NotSent { .. } | CloseReason::NotPlaced { .. } | CloseReason::RejectedByVenue { .. }, .. }) = &o.close {
+                let client = VenueClientId { instance_id: INSTANCE, order_id: o.id };
+                if o.cum_qty.is_zero() && self.venue.status(client).is_some() {
+                    return Err(self.violation("final-orders", format!("order {} closed as absent but exists at the venue", o.id)));
+                }
+            }
+        }
+        let fee_core: i64 = self.core.orders.values().map(|o| o.fee.0).sum();
+        let fee_venue: i64 = self.venue.fills.iter().filter(|f| f.client.is_some()).map(|f| f.fee.0).sum();
+        if self.stats.purged == 0 && fee_core != fee_venue {
+            return Err(self.violation("final-fees", format!("booked fees {} but venue charged {}", Amount(fee_core), Amount(fee_venue))));
+        }
+        self.stats.final_digest = self.core.digest();
+        Ok(())
+    }
+
+    // ---- run --------------------------------------------------------------
+
+    fn drain_due(&mut self) -> Result<(), Violation> {
+        while let Some((&(t, n), _)) = self.queue.iter().next() {
+            if t > self.now {
+                break;
+            }
+            if let Some(ev) = self.queue.remove(&(t, n)) {
+                self.deliver(ev)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn one_step(&mut self) -> Result<(), Violation> {
+        self.now += self.rng.range(1_000, 30_000);
+        self.drain_due()?;
+        let p = self.p.clone();
+        let roll = self.rng.below(1000) as u32;
+        let mut edge = 0;
+        let mut pick = |w: u32| {
+            edge += w;
+            roll < edge && roll >= edge - w
+        };
+        if pick(p.p_new) {
+            self.act_new_order()?;
+        } else if pick(p.p_dup) {
+            self.act_duplicate()?;
+        } else if pick(p.p_cancel) {
+            self.act_cancel()?;
+        } else if pick(p.p_fill) {
+            self.act_fill();
+        } else if pick(p.p_venue_cancel) {
+            self.act_venue_cancel();
+        } else if pick(p.p_tick) {
+            self.feed(Input::Tick)?;
+        } else if pick(p.p_crash) {
+            self.crash()?;
+        } else if pick(p.p_link_drop) {
+            self.link_drop()?;
+        } else if pick(p.p_external_fill) {
+            self.act_external_fill();
+        } else if pick(p.p_operator) {
+            self.act_operator()?;
+        }
+        self.check_always()
+    }
+
+    /// Stops injecting faults and lets the system settle.
+    fn quiesce(&mut self) -> Result<(), Violation> {
+        self.calm = true;
+        if self.core.halt_account.is_some() {
+            self.act_operator()?;
+        }
+        self.commit()?;
+        let deadline = self.now + 90_000_000;
+        let mut settled_for = 0u32;
+        while self.now < deadline {
+            self.now += 100_000;
+            self.drain_due()?;
+            self.feed(Input::Tick)?;
+            self.commit()?;
+            self.check_always()?;
+            if self.external_seen {
+                // Acknowledge what an operator would after inspecting it.
+                let ids: Vec<u32> = self.core.mismatches.values().filter(|m| m.acked.is_none()).map(|m| m.id).collect();
+                for id in ids {
+                    self.feed(Input::Operator(OperatorCmd::AckMismatch { id, note: "sim".into() }))?;
+                }
+                self.commit()?;
+            }
+            let quiet = self.link_up
+                && self.inflight.is_empty()
+                && self.core.needs().is_empty()
+                && !self.core.has_in_doubt()
+                && self.core.parked_fills.is_empty()
+                && self.queue.values().all(|e| matches!(e, Net::Reconcile { .. }));
+            settled_for = if quiet { settled_for + 1 } else { 0 };
+            // Several quiet reconcile rounds in a row, so periodic sweeps ran.
+            if settled_for >= 40 {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn run(mut self) -> Result<SimStats, Violation> {
+        let r = self.run_inner();
+        if let (Err(v), Ok(filter)) = (&r, std::env::var("OMS_SIM_DUMP")) {
+            // Debug aid: print the durable records that mention `filter`.
+            eprintln!("violation: {v}");
+            for rec in &self.durable {
+                let line = serde_json::to_string(rec).unwrap_or_default();
+                if filter.is_empty() || line.contains(&filter) {
+                    eprintln!("{line}");
+                }
+            }
+        }
+        r.map(|()| self.stats)
+    }
+
+    fn run_inner(&mut self) -> Result<(), Violation> {
+        self.feed(Input::Boot { binary: "sim".into() })?;
+        self.feed(Input::Config(Box::new(sim_config(&self.p))))?;
+        self.commit()?;
+        self.schedule(10_000, Net::LinkUp { epoch: self.epoch });
+        let start = self.now;
+        for step in 0..self.p.steps {
+            self.step = step;
+            self.one_step()?;
+        }
+        self.step = self.p.steps;
+        self.quiesce()?;
+        self.check_final()?;
+        self.stats.sim_seconds = (self.now - start) / 1_000_000;
+        Ok(())
+    }
+}
+
+fn unknown_result(kind: Inflight, reason: &str) -> VenueInput {
+    match kind {
+        Inflight::Place(order_id) => {
+            VenueInput::SendResult { order_id, outcome: SendOutcome::Unknown { reason: reason.to_string() }, timing: Default::default() }
+        }
+        Inflight::Cancel(order_id, attempt) => VenueInput::CancelResult {
+            order_id,
+            attempt,
+            outcome: CancelOutcome::Unknown { reason: reason.to_string() },
+            timing: Default::default(),
+        },
+    }
+}
+
+/// Runs one seed of one profile.
+pub fn run(seed: u64, profile: Profile) -> Result<SimStats, Violation> {
+    World::new(seed, profile).run()
+}

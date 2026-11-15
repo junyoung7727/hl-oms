@@ -1,0 +1,52 @@
+# Hyperliquid testnet 예제 설정.
+#
+# 주의: 이 게이트웨이의 주문 경로는 실제 거래소에서 실행된 적이 없다(사용자 결정 U-01).
+# 처음 쓸 때는 docs/operations/runbook.md의 "testnet 첫 실행" 절차를 따른다.
+#
+# 비밀 키는 이 파일에 적지 않는다. agent 지갑의 개인 키를 환경 변수로 준다:
+#   HL_AGENT_PRIVATE_KEY=0x... oms-node run --config config/hyperliquid-testnet.toml
+# 자금을 가진 마스터 지갑의 키는 이 시스템 어디에도 넣지 않는다.
+
+data_dir = "../data/hl-testnet"
+
+[http]
+listen = "127.0.0.1:8188"
+static_dir = "../dashboard"
+
+[venue]
+kind = "hyperliquid"
+network = "testnet"                     # mainnet은 mainnet_confirmed = true가 있어야 한다
+account_address = "0x0000000000000000000000000000000000000000"   # 자금을 가진 계좌의 주소로 바꾼다
+agent_key_env = "HL_AGENT_PRIVATE_KEY"
+request_timeout_ms = 5000
+fills_lag_ms = 2000                     # 체결 조회를 이만큼 과거까지만 완료로 본다 (가정 A-02)
+schedule_cancel_secs = 0                # 양수면 프로세스가 멈췄을 때 거래소가 전부 취소한다 (U-05)
+
+[core]
+version = 1
+
+# 종목 규칙은 거래소의 규칙과 같거나 더 거칠어야 한다. 시작할 때 거래소의 meta와 대조하고
+# 맞지 않으면 링크를 올리지 않는다. 아래 값은 2026-10-02 testnet BTC(szDecimals 5)에 맞춘 것이다.
+[core.instruments.BTC]
+qty_step = "0.00001"
+px_tick = "1"
+px_max_sig_figs = 5
+min_notional = "10"
+max_order_qty = "0.001"
+max_order_notional = "200"
+price_band_bps = 500                    # 참조 가격에서 5% 넘게 벗어난 지정가는 거절
+account_pos_min = "-0.003"
+account_pos_max = "0.003"
+
+[core.strategies.demo]
+enabled = true
+max_open_orders = 5
+[core.strategies.demo.limits.BTC]
+min = "-0.002"
+max = "0.002"
+
+[core.policy]
+max_open_orders = 10
+max_inflight_sends = 4
+max_expiry_horizon_us = 30000000        # 요청의 만료 시각은 최대 30초 앞
+absence_margin_us = 10000000            # 만료 + 10초 뒤의 "없음"만 부재로 인정

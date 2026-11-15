@@ -1,0 +1,46 @@
+# 가상 거래소(simvenue)에 붙는 예제 설정. 실제 주문은 어디에도 나가지 않는다.
+#
+#   저장소 루트에서:
+#   cargo build --release
+#   T=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+#   mkdir -p data/sim
+#   $T/release/simvenue data/sim/venue.sock &
+#   $T/release/oms-node run --config config/sim.toml
+#   브라우저: http://127.0.0.1:8188/
+#
+# data_dir과 static_dir의 상대 경로는 이 파일이 있는 디렉터리 기준이다.
+# [venue].socket의 상대 경로는 data_dir 기준이다.
+
+data_dir = "../data/sim"
+
+[http]
+listen = "127.0.0.1:8188"      # loopback만 허용된다. 비우면 대시보드를 띄우지 않는다
+static_dir = "../dashboard"
+
+[venue]
+kind = "sim"
+socket = "venue.sock"
+request_timeout_ms = 1000
+
+[core]
+version = 1                     # 내용을 바꾸면 올린다. 저널에 기록된다
+
+[core.instruments.BTC]
+qty_step = "0.00001"
+px_tick = "1"
+px_max_sig_figs = 5
+min_notional = "10"
+max_order_qty = "0.01"
+max_order_notional = "1000"
+account_pos_min = "-0.05"
+account_pos_max = "0.05"
+
+[core.strategies.demo]
+enabled = true
+max_open_orders = 20
+[core.strategies.demo.limits.BTC]
+min = "-0.02"
+max = "0.02"
+
+[core.policy]
+max_open_orders = 50

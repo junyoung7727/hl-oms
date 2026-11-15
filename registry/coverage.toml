@@ -1,0 +1,717 @@
+# 출처 요소별 대응표. 검토 기준의 모수.
+# status: 다룸 | 비적용 | 보류 | 미검토. 다룸이 아니면 note에 이유(비적용·미검토) 또는 영향과 재개 조건(보류)을 적는다.
+# '다룸'은 검토 항목이 있다는 뜻이고, 그 항목의 설계·구현·검증 상태는 항목에 있다.
+
+[[row]]
+source = "ISO25010"
+element = "Functional suitability: correctness, completeness"
+status = "다룸"
+items = ["G-QUAL-01", "D-RISK-01", "D-ORD-01", "D-TEST-01"]
+note = ""
+
+[[row]]
+source = "ISO25010"
+element = "Functional suitability: appropriateness (운영 명령이 비상 절차를 덮는가)"
+status = "다룸"
+items = ["G-QUAL-04", "D-RISK-07", "G-OPS-06"]
+note = "비상 절차의 훈련은 하지 않았다"
+
+[[row]]
+source = "ISO25010"
+element = "Performance efficiency: time behaviour, capacity"
+status = "다룸"
+items = ["G-QUAL-02", "P-PERF-01", "D-OVL-01"]
+note = ""
+
+[[row]]
+source = "ISO25010"
+element = "Performance efficiency: resource utilization"
+status = "다룸"
+items = ["G-RES-01", "G-RES-02"]
+note = ""
+
+[[row]]
+source = "ISO25010"
+element = "Compatibility: interoperability"
+status = "다룸"
+items = ["P-VEN-01", "G-QUAL-03"]
+note = ""
+
+[[row]]
+source = "ISO25010"
+element = "Compatibility: co-existence (같은 호스트의 전략·대시보드와 자원 공유)"
+status = "보류"
+items = []
+note = "영향: 전략 프로세스가 CPU나 디스크를 다 쓰면 OMS의 응답 지연이 늘고 디스크가 차면 신규 주문이 막힌다. 측정하지 않았다. 재개 조건: 배포 구성(같은 호스트에 무엇을 함께 돌릴지)이 정해질 때"
+
+[[row]]
+source = "ISO25010"
+element = "Interaction capability: operability, user error protection, self-descriptiveness"
+status = "다룸"
+items = ["G-QUAL-04", "G-OPS-08"]
+note = ""
+
+[[row]]
+source = "ISO25010"
+element = "Interaction capability: learnability, user engagement, inclusivity, user assistance"
+status = "비적용"
+items = []
+note = "운영자 1인의 내부 도구다"
+
+[[row]]
+source = "ISO25010"
+element = "Reliability: recoverability"
+status = "다룸"
+items = ["G-REL-01", "G-REL-02", "D-PER-01", "D-REC-01"]
+note = ""
+
+[[row]]
+source = "ISO25010"
+element = "Reliability: fault tolerance"
+status = "다룸"
+items = ["D-UNK-01", "D-DUP-02", "D-DUP-03", "G-REL-05"]
+note = ""
+
+[[row]]
+source = "ISO25010"
+element = "Reliability: faultlessness"
+status = "다룸"
+items = ["D-TEST-01", "G-QUAL-08"]
+note = ""
+
+[[row]]
+source = "ISO25010"
+element = "Reliability: availability"
+status = "다룸"
+items = ["G-REL-03", "D-AVL-01"]
+note = "단일 노드와 수동 복구로 범위를 정했다"
+
+[[row]]
+source = "ISO25010"
+element = "Security: integrity"
+status = "다룸"
+items = ["D-PER-03", "G-OPS-03", "G-SEC-05"]
+note = ""
+
+[[row]]
+source = "ISO25010"
+element = "Security: confidentiality"
+status = "다룸"
+items = ["G-SEC-03"]
+note = ""
+
+[[row]]
+source = "ISO25010"
+element = "Security: authenticity"
+status = "다룸"
+items = ["G-SEC-01"]
+note = ""
+
+[[row]]
+source = "ISO25010"
+element = "Security: accountability"
+status = "다룸"
+items = ["G-SEC-05"]
+note = ""
+
+[[row]]
+source = "ISO25010"
+element = "Security: non-repudiation"
+status = "비적용"
+items = []
+note = "운영자와 자금주가 같은 사람이다"
+
+[[row]]
+source = "ISO25010"
+element = "Security: resistance"
+status = "다룸"
+items = ["G-RES-03", "D-OVL-01", "G-SEC-13"]
+note = "노출면은 로컬 소켓과 loopback이다"
+
+[[row]]
+source = "ISO25010"
+element = "Maintainability: modularity, analysability, modifiability, testability"
+status = "다룸"
+items = ["G-QUAL-05", "D-DET-01"]
+note = ""
+
+[[row]]
+source = "ISO25010"
+element = "Maintainability: reusability"
+status = "보류"
+items = []
+note = "영향: 없음. 재개 조건: 두 번째 거래소를 붙일 때"
+
+[[row]]
+source = "ISO25010"
+element = "Flexibility: adaptability, replaceability"
+status = "다룸"
+items = ["G-QUAL-06"]
+note = ""
+
+[[row]]
+source = "ISO25010"
+element = "Flexibility: installability"
+status = "다룸"
+items = ["G-OPS-02", "P-OPS-03"]
+note = ""
+
+[[row]]
+source = "ISO25010"
+element = "Flexibility: scalability"
+status = "비적용"
+items = []
+note = "단일 계좌·단일 노드로 범위를 정했다(ADR-001)"
+
+[[row]]
+source = "ISO25010"
+element = "Safety: fail safe, operational constraint"
+status = "다룸"
+items = ["G-QUAL-07", "D-RISK-07", "G-REL-05"]
+note = "금전 손실이 25010의 Safety 정의에 드는지는 본문을 읽지 못했다"
+
+[[row]]
+source = "ISO25010"
+element = "Safety: hazard warning, risk identification"
+status = "다룸"
+items = ["G-OPS-05"]
+note = "알림은 구현하지 않았다"
+
+[[row]]
+source = "ISO25010"
+element = "Safety: safe integration"
+status = "다룸"
+items = ["D-OWN-01", "G-SEC-01", "G-QUAL-06"]
+note = ""
+
+[[row]]
+source = "ISO42010"
+element = "Stakeholders, Concerns (6.2, 6.4 제목)"
+status = "다룸"
+items = ["G-ARCH-01"]
+note = ""
+
+[[row]]
+source = "ISO42010"
+element = "Stakeholder perspectives, Aspects (6.3, 6.5 제목)"
+status = "미검토"
+items = []
+note = "2022판의 새 개념이고 본문을 읽지 못해 무엇을 요구하는지 모른다"
+
+[[row]]
+source = "ISO42010"
+element = "Viewpoints, Views (6.6, 6.7 제목)"
+status = "다룸"
+items = ["G-ARCH-01"]
+note = ""
+
+[[row]]
+source = "ISO42010"
+element = "View components, Model kinds (6.8, 8.2 제목)"
+status = "미검토"
+items = []
+note = "본문을 읽지 못했다. 표기 규약을 따로 정하지 않았다"
+
+[[row]]
+source = "ISO42010"
+element = "Correspondences (6.9 제목)"
+status = "다룸"
+items = ["G-QUAL-01"]
+note = ""
+
+[[row]]
+source = "ISO42010"
+element = "Decisions and rationale (6.10 제목)"
+status = "다룸"
+items = ["G-ARCH-01", "D-LMAX-01"]
+note = ""
+
+[[row]]
+source = "ISO42010"
+element = "Conformance (4), ADF, ADL (7)"
+status = "비적용"
+items = []
+note = "적합성을 주장하지 않는다. 자체 프레임워크나 언어를 정의하지 않는다"
+
+[[row]]
+source = "SSDF"
+element = "PO.1.1, PO.1.2 보안 요구의 문서화"
+status = "다룸"
+items = ["G-SEC-01", "G-SEC-11"]
+note = ""
+
+[[row]]
+source = "SSDF"
+element = "PO.1.3 상용 공급자에게 요구 전달"
+status = "비적용"
+items = []
+note = "상용 공급 계약이 없다"
+
+[[row]]
+source = "SSDF"
+element = "PO.2 역할, 교육, 경영진 의지"
+status = "비적용"
+items = []
+note = "1인 조직이다. 운영자·개발자·승인자가 같은 사람이라는 점은 P-OPS-01에 위험으로 적었다"
+
+[[row]]
+source = "SSDF"
+element = "PO.3 도구 체인과 그 산출물"
+status = "다룸"
+items = ["G-SEC-04", "G-QUAL-05", "G-CHG-02"]
+note = "의존성 점검 도구는 설치돼 있지 않다"
+
+[[row]]
+source = "SSDF"
+element = "PO.4 릴리스 전 보안 점검 기준"
+status = "다룸"
+items = ["G-SEC-11"]
+note = ""
+
+[[row]]
+source = "SSDF"
+element = "PO.5 개발·시험·운영 환경 분리"
+status = "다룸"
+items = ["P-VEN-09", "G-SEC-12"]
+note = ""
+
+[[row]]
+source = "SSDF"
+element = "PS.1 소스와 설정의 접근 통제"
+status = "다룸"
+items = ["G-SEC-08"]
+note = "저장소가 아직 없다(U-10)"
+
+[[row]]
+source = "SSDF"
+element = "PS.2 릴리스 무결성 검증 정보"
+status = "다룸"
+items = ["G-SEC-08"]
+note = ""
+
+[[row]]
+source = "SSDF"
+element = "PS.3 릴리스 보관, provenance, SBOM"
+status = "다룸"
+items = ["G-SEC-08", "G-OPS-02"]
+note = "SBOM은 만들지 않았다"
+
+[[row]]
+source = "SSDF"
+element = "PW.1.1, PW.1.2 위협 모델, 보안 요구·위험·결정의 추적"
+status = "다룸"
+items = ["G-SEC-11"]
+note = ""
+
+[[row]]
+source = "SSDF"
+element = "PW.1.3 표준 보안 기능의 사용"
+status = "다룸"
+items = ["G-SEC-06"]
+note = "TLS는 라이브러리, 서명은 SDK 벡터로 대조한 자체 구현"
+
+[[row]]
+source = "SSDF"
+element = "PW.2 설계 검토 (설계자가 아닌 사람 또는 자동화)"
+status = "다룸"
+items = ["G-QUAL-08"]
+note = ""
+
+[[row]]
+source = "SSDF"
+element = "PW.4.1, PW.4.4 의존성의 선택과 유지"
+status = "다룸"
+items = ["G-SEC-04"]
+note = ""
+
+[[row]]
+source = "SSDF"
+element = "PW.4.2 자체 공통 컴포넌트"
+status = "비적용"
+items = []
+note = "다른 프로젝트와 공유하는 컴포넌트가 없다"
+
+[[row]]
+source = "SSDF"
+element = "PW.5 secure coding practice"
+status = "다룸"
+items = ["G-SEC-10", "G-QUAL-05", "G-SEC-02"]
+note = ""
+
+[[row]]
+source = "SSDF"
+element = "PW.6 컴파일러와 빌드 설정"
+status = "다룸"
+items = ["G-QUAL-05", "G-REL-05"]
+note = ""
+
+[[row]]
+source = "SSDF"
+element = "PW.7 코드 리뷰와 분석"
+status = "다룸"
+items = ["G-QUAL-08", "G-QUAL-05"]
+note = ""
+
+[[row]]
+source = "SSDF"
+element = "PW.8 실행 코드 시험"
+status = "다룸"
+items = ["D-TEST-01", "G-SEC-02"]
+note = "fuzzing 도구는 쓰지 않았다"
+
+[[row]]
+source = "SSDF"
+element = "PW.9 안전한 기본 설정"
+status = "다룸"
+items = ["G-SEC-07"]
+note = ""
+
+[[row]]
+source = "SSDF"
+element = "RV.1.1, RV.1.2 취약점 정보 수집과 확인"
+status = "다룸"
+items = ["G-SEC-04"]
+note = ""
+
+[[row]]
+source = "SSDF"
+element = "RV.1.3 취약점 공개 정책"
+status = "비적용"
+items = []
+note = "비공개 1인 소프트웨어다. 공개 저장소가 되면 다시 본다"
+
+[[row]]
+source = "SSDF"
+element = "RV.2 취약점 평가와 조치"
+status = "다룸"
+items = ["G-SEC-09"]
+note = "절차를 정하지 않았다"
+
+[[row]]
+source = "SSDF"
+element = "RV.3 근본 원인 분석과 유사 결함 제거"
+status = "다룸"
+items = ["G-SEC-09", "G-QUAL-08"]
+note = "간격 검토에서 찾은 결함마다 같은 종류의 결함을 다시 찾지는 않았다"
+
+[[row]]
+source = "SSDF"
+element = "v1.2 초안의 PO.6, PS.4"
+status = "비적용"
+items = []
+note = "초안이다"
+
+[[row]]
+source = "ASVS"
+element = "목표 레벨의 선택"
+status = "보류"
+items = []
+note = "영향: 어느 요구까지 만족해야 하는지의 기준이 없다. 재개 조건: 원격 접근이나 다중 사용자가 생길 때. 지금은 로컬 소켓과 loopback뿐이다"
+
+[[row]]
+source = "ASVS"
+element = "V3, V4 브라우저 경유 접근(교차 출처, CSP, 허용 메서드)"
+status = "다룸"
+items = ["G-SEC-13"]
+note = ""
+
+[[row]]
+source = "ASVS"
+element = "V6~V9 인증, 세션, 인가 (제어 API)"
+status = "다룸"
+items = ["G-SEC-01"]
+note = "네트워크가 아니라 소켓 파일 권한과 peer uid로 판별한다. 토큰은 없다"
+
+[[row]]
+source = "ASVS"
+element = "V12 전송 구간 보호"
+status = "다룸"
+items = ["G-SEC-06"]
+note = "로컬 소켓과 loopback 구간은 암호화하지 않는다"
+
+[[row]]
+source = "ASVS"
+element = "V13 설정과 비밀 정보"
+status = "다룸"
+items = ["G-SEC-03", "G-SEC-07"]
+note = ""
+
+[[row]]
+source = "ASVS"
+element = "V15.2.3 시험·개발용 코드가 운영 빌드에 없는가"
+status = "다룸"
+items = ["G-SEC-12"]
+note = ""
+
+[[row]]
+source = "ASVS"
+element = "V15.4 동시성 (L3)"
+status = "다룸"
+items = ["D-CONC-01", "D-OWN-01"]
+note = ""
+
+[[row]]
+source = "ASVS"
+element = "V16 로그와 오류 처리 (오류 중 거래 처리 금지)"
+status = "다룸"
+items = ["G-SEC-05", "D-PER-02", "G-REL-05"]
+note = ""
+
+[[row]]
+source = "ASVS"
+element = "V5, V10, V17 파일 처리, OAuth, WebRTC"
+status = "비적용"
+items = []
+note = "그 기능을 쓰지 않는다"
+
+[[row]]
+source = "ASVS"
+element = "V2.3.5 고가치 흐름의 다자 승인"
+status = "비적용"
+items = []
+note = "운영자가 한 명이다. 위험한 명령의 확인 절차는 G-OPS-08에 미해결로 적었다"
+
+[[row]]
+source = "FIX-OSC"
+element = "2장 OrdStatus 우선순위"
+status = "다룸"
+items = ["D-ORD-01"]
+note = "순서 관계만 참고했다. 거래소의 상태 집합은 다르다"
+
+[[row]]
+source = "FIX-OSC"
+element = "Pending Cancel ≠ Canceled"
+status = "다룸"
+items = ["D-RISK-02", "D-ORD-02"]
+note = ""
+
+[[row]]
+source = "FIX-OSC"
+element = "B.1.b, B.1.c 취소 대기 중 체결, 취소가 늦은 경우"
+status = "다룸"
+items = ["D-ORD-02"]
+note = ""
+
+[[row]]
+source = "FIX-OSC"
+element = "B.1.d, B.1.e 접수 확인 전 취소"
+status = "다룸"
+items = ["D-ORD-02"]
+note = ""
+
+[[row]]
+source = "FIX-OSC"
+element = "B.1.f, G.1.a 모르는 주문에 대한 취소·조회 응답"
+status = "다룸"
+items = ["D-UNK-01"]
+note = ""
+
+[[row]]
+source = "FIX-OSC"
+element = "C, D 정정(cancel/replace)"
+status = "다룸"
+items = ["D-ORD-03"]
+note = "정정을 지원하지 않기로 했다. C.1–2, D.1은 제목만 봤다"
+
+[[row]]
+source = "FIX-OSC"
+element = "E 요청 없는 취소·축소"
+status = "다룸"
+items = ["P-VEN-07"]
+note = ""
+
+[[row]]
+source = "FIX-OSC"
+element = "F.1.a, F.1.b, Session 4.9 클라이언트 ID 중복과 재송신"
+status = "다룸"
+items = ["D-DUP-01", "D-ORD-04"]
+note = ""
+
+[[row]]
+source = "FIX-OSC"
+element = "PossDupFlag와 PossResend"
+status = "다룸"
+items = ["D-DUP-01"]
+note = "필드는 없다. 중복 판정은 응용 계층의 책임이라는 원칙만 가져왔다"
+
+[[row]]
+source = "FIX-OSC"
+element = "G.1.c 조회 응답과 사건 스트림의 관계"
+status = "다룸"
+items = ["D-REC-01"]
+note = ""
+
+[[row]]
+source = "FIX-OSC"
+element = "H 거래일 경계의 GT 주문"
+status = "비적용"
+items = ["D-ORD-05"]
+note = "24시간 시장이다. 본문은 제목만 봤다"
+
+[[row]]
+source = "FIX-OSC"
+element = "I TimeInForce별 종료 상태"
+status = "미검토"
+items = []
+note = "제목만 봤다. IOC의 종료 상태는 거래소 문서와 실주문으로 확인해야 한다(P-VEN-01)"
+
+[[row]]
+source = "FIX-OSC"
+element = "J 체결 취소·정정"
+status = "다룸"
+items = ["D-ORD-03"]
+note = "지원하지 않고 포지션 대조로 탐지한다"
+
+[[row]]
+source = "FIX-OSC"
+element = "K 거래 정지"
+status = "다룸"
+items = ["P-VEN-13"]
+note = "제목만 봤다. 거래소의 실제 동작은 확인하지 못했다"
+
+[[row]]
+source = "FIX-OSC"
+element = "A, L, 4장"
+status = "미검토"
+items = []
+note = "제목만 봤다. 주제가 메시지 축약 방식 등이라 관련이 적다고 판단했다"
+
+[[row]]
+source = "FIA24"
+element = "Best Practices for Automated Trading Risk Controls (기존 분석의 요구 R01~R15로 재사용)"
+status = "다룸"
+items = ["D-RISK-01", "D-RISK-02", "D-RISK-03", "D-RISK-04", "D-RISK-05", "D-RISK-06", "D-RISK-07", "D-OVL-03", "D-REC-01"]
+note = "이번에는 표지와 목차만 다시 확인했다. 내용은 기존 저장소의 분석 문서에 기댄다"
+
+[[row]]
+source = "FIA15"
+element = "Guide to the Development and Operation of Automated Trading Systems"
+status = "다룸"
+items = ["G-OPS-01", "G-OPS-02", "G-OPS-03", "G-OPS-04", "G-OPS-05", "G-OPS-06", "G-SEC-01", "G-SEC-05"]
+note = "이번에는 표지와 서문만 다시 확인했다"
+
+[[row]]
+source = "BRIEF"
+element = "규제 문서(RTS 6, SEC 15c3-5, 가상자산이용자보호법)의 적용 여부"
+status = "보류"
+items = ["P-OPS-04"]
+note = "영향: 의무를 놓칠 수 있다. 조문 일부만 읽었고 적용 여부는 법률 검토가 필요하다. 재개 조건: U-12"
+
+[[row]]
+source = "HL-DOCS"
+element = "A. 주문 제출"
+status = "다룸"
+items = ["P-VEN-01"]
+note = ""
+
+[[row]]
+source = "HL-DOCS"
+element = "B. 취소, 정정, 예약 취소"
+status = "다룸"
+items = ["P-VEN-11", "D-ORD-03"]
+note = ""
+
+[[row]]
+source = "HL-DOCS"
+element = "C. nonce와 API 지갑"
+status = "다룸"
+items = ["P-VEN-03", "P-VEN-12"]
+note = ""
+
+[[row]]
+source = "HL-DOCS"
+element = "D. Info 조회"
+status = "다룸"
+items = ["P-VEN-06", "D-REC-01"]
+note = ""
+
+[[row]]
+source = "HL-DOCS"
+element = "E. WebSocket"
+status = "다룸"
+items = ["D-DUP-03", "D-DUP-02"]
+note = ""
+
+[[row]]
+source = "HL-DOCS"
+element = "F. 요청 한도"
+status = "다룸"
+items = ["P-VEN-04", "P-OPS-02"]
+note = ""
+
+[[row]]
+source = "HL-DOCS"
+element = "G. 가격·수량 단위"
+status = "다룸"
+items = ["P-VEN-05"]
+note = ""
+
+[[row]]
+source = "HL-DOCS"
+element = "H. 오류 응답"
+status = "다룸"
+items = ["D-UNK-01", "P-VEN-01"]
+note = ""
+
+[[row]]
+source = "HL-DOCS"
+element = "I. 거래 의미론(청산, 자기 체결, 거래소 주도 취소, 상장 폐지)"
+status = "다룸"
+items = ["P-VEN-07", "P-VEN-08", "D-RISK-06", "P-VEN-13"]
+note = ""
+
+[[row]]
+source = "HL-DOCS"
+element = "J. 서명"
+status = "다룸"
+items = ["P-VEN-02"]
+note = ""
+
+[[row]]
+source = "HL-DOCS"
+element = "K. 엔드포인트와 testnet"
+status = "다룸"
+items = ["P-VEN-09"]
+note = ""
+
+[[row]]
+source = "HL-DOCS"
+element = "L. 전달 보장과 순서"
+status = "다룸"
+items = ["D-DUP-02", "D-DUP-03"]
+note = ""
+
+[[row]]
+source = "HL-DOCS"
+element = "spot, vault, staking, HIP-3"
+status = "비적용"
+items = []
+note = "perp 단일 계좌만 다룬다. 이 절들은 읽지 않았다. 같은 계좌의 spot 체결은 기장하지 않고 경고만 남긴다(P-VEN-13)"
+
+[[row]]
+source = "LMAX"
+element = "단일 writer, 입력 저널, 스냅샷, 복제, Disruptor"
+status = "다룸"
+items = ["D-LMAX-01", "D-OWN-01", "D-PER-01", "D-PER-04", "D-OPT-01"]
+note = ""
+
+[[row]]
+source = "LINUX"
+element = "fsync, fdatasync, rename, 디렉터리 fsync의 계약"
+status = "다룸"
+items = ["D-PER-02", "D-PER-03", "D-PER-04", "G-REL-04"]
+note = ""
+
+[[row]]
+source = "FSYNC-RESEARCH"
+element = "fsync 실패 뒤의 동작, 파일 시스템별 충돌 일관성"
+status = "다룸"
+items = ["D-PER-02", "D-PER-03", "G-REL-04"]
+note = ""
+
+[[row]]
+source = "RUST"
+element = "표준 라이브러리와 tokio의 동시성·취소 계약"
+status = "다룸"
+items = ["D-CONC-01", "D-CONC-02", "D-CONC-03"]
+note = ""

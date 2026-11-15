@@ -1,0 +1,760 @@
+# 층 1: 일반 소프트웨어 고려사항.
+# applicability: 적용 | 조건부 | 비적용
+# design: 결정 | 미결 | 해당없음     impl: 구현 | 부분 | 미구현 | 해당없음     verify: 검증 | 부분 | 미검증 | 해당없음
+# "검증"은 연결된 주장(claims)의 시험이 통과했다는 뜻이며, 그 범위는 주장에 적힌 조건 안이다.
+
+[[item]]
+id = "G-QUAL-01"
+layer = "general"
+area = "품질"
+consideration = "요구사항이 동작 계약과 시험으로 이어지는가"
+necessity = "요구와 구현이 따로 변하면 무엇이 보장되는지 아무도 모르게 된다"
+sources = ["ISO25010", "BRIEF"]
+applicability = "적용"
+reason = "기능 적합성은 모든 시스템에 해당한다"
+handling = "검토 항목 → 설계 결정 → 계약 → 코드 → 주장 → 시험을 이 registry로 연결하고, `xtask docs`가 끊어진 연결을 오류로 잡는다"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = []
+contracts = []
+code = ["crates/xtask/src/registry.rs"]
+claims = []
+open = "연결의 존재만 검사한다. 연결된 시험이 그 주장을 실제로 뒷받침하는지는 사람이 판단한다. 영향: 연결은 있는데 내용이 어긋난 주장을 생성기가 놓친다. 해소: 구현과 분리된 검토에서 주장과 시험을 대조한다(1회 수행: verification/gap-review.md). 단계: 코드를 바꿀 때마다."
+
+[[item]]
+id = "G-QUAL-02"
+layer = "general"
+area = "품질"
+consideration = "성능 목표가 측정 조건을 포함한 수용 기준으로 정해져 있는가"
+necessity = "근거 없는 수치는 과잉 최적화나 미달을 낳는다"
+sources = ["ISO25010", "BRIEF"]
+applicability = "적용"
+reason = "성능 효율은 품질 특성이다"
+handling = "수용 기준 A-LAT-1, A-LAT-2, A-CAP-1, A-REC-2를 거래소 한도에서 유도했다. 측정 도구는 `xtask perf`"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-012"]
+contracts = []
+code = ["crates/xtask/src/perf.rs", "crates/xtask/src/loadgen.rs"]
+claims = ["V-PERF-1", "V-PERF-2", "V-PERF-3"]
+open = "지연 기준은 장치에 달려 있다. 같은 빌드가 970 EVO Plus 2TB에서는 초당 200건 p99 9.1 ms로 만족했고, 거의 찬 980 500GB에서는 27~32 ms로 넘었다. 영향: 다른 장치에서는 결과가 다를 수 있다. 해소: 운용 장치에서 `xtask fsync-probe`와 `perf`를 다시 돌린다. 단계: 배포 전."
+
+[[item]]
+id = "G-QUAL-03"
+layer = "general"
+area = "품질"
+consideration = "다른 언어로 작성된 전략이 붙을 수 있는가"
+necessity = "기존 전략이 Go로 작성돼 있다. 접속 방식이 Rust에 묶이면 재작성이 필요하다"
+sources = ["ISO25010", "REQ"]
+applicability = "적용"
+reason = "전략은 별도 프로세스다"
+handling = "줄 단위 JSON over Unix 소켓. 수치는 십진 문자열"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-015"]
+contracts = ["C-API"]
+code = ["crates/oms-api/src/lib.rs"]
+claims = ["V-API-2"]
+open = "Rust 클라이언트로만 시험했다. Go·Python 클라이언트는 작성하지 않았다. 영향: 다른 언어의 클라이언트에서 형식 해석의 차이가 처음 드러날 수 있다. 해소: Go 클라이언트로 `wire_examples`의 예를 왕복한다. 단계: 기존 전략을 붙일 때(U-13)."
+
+[[item]]
+id = "G-QUAL-04"
+layer = "general"
+area = "품질"
+consideration = "운영자가 상태를 이해하고 조치할 수 있는가"
+necessity = "차단 사유를 모르면 운영자가 재시작만 반복한다"
+sources = ["ISO25010"]
+applicability = "적용"
+reason = "운영자 1인이 모든 조치를 한다"
+handling = "차단 사유·불일치·결과 불명 주문을 사유 코드와 함께 status와 대시보드에 표시. 조치는 `omsctl`"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-016"]
+contracts = ["C-API"]
+code = ["crates/oms-node/src/status.rs", "crates/oms-api/src/bin/omsctl.rs", "dashboard/app.js"]
+claims = ["V-API-1"]
+open = "운영자가 실제로 써 본 평가는 없다. 영향: 화면과 절차가 실제 장애에서 부족할 수 있다. 해소: 가상 거래소로 운영 문서 §7의 상황을 연습한다. 단계: testnet 운용 전."
+
+[[item]]
+id = "G-QUAL-05"
+layer = "general"
+area = "유지보수"
+consideration = "모듈 경계와 코드 규율이 변경 비용을 낮추는가"
+necessity = "판단 로직과 I/O가 섞이면 한도 하나를 바꾸는 데 전체를 다시 검증해야 한다"
+sources = ["ISO25010", "SSDF"]
+applicability = "적용"
+reason = "판단 로직과 I/O를 같은 사람이 계속 고친다. 경계가 흐려지면 한 곳의 변경이 전체 재검증을 부른다"
+handling = "crate 6개의 경계와 이유를 문서화. clippy 경고 0, `unsafe_code = forbid`, release에서도 overflow 검사"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-001", "ADR-012"]
+contracts = []
+code = ["Cargo.toml"]
+claims = ["V-PURE-1"]
+open = "코드 커버리지를 측정하지 않았다(cargo-llvm-cov 미설치). 영향: 시험이 지나지 않는 코드가 어디인지 모른다. 해소: cargo-llvm-cov를 설치해 측정한다. 단계: 배포 전."
+
+[[item]]
+id = "G-QUAL-06"
+layer = "general"
+area = "유지보수"
+consideration = "거래소를 바꾸거나 추가할 때 코어를 고치지 않아도 되는가"
+necessity = "거래소별 분기가 코어에 퍼지면 두 번째 거래소부터 비용이 급증한다"
+sources = ["ISO25010", "REQ"]
+applicability = "적용"
+reason = "기존 저장소에 키움 프로토타입이 있고 다중 거래소가 장기 방향이다"
+handling = "코어는 거래소 중립 타입만 안다. 게이트웨이 계약 C-GW를 구현 둘(가상 거래소, Hyperliquid)이 지킨다"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-017"]
+contracts = ["C-GW"]
+code = ["crates/oms-node/src/venue/mod.rs"]
+claims = ["V-HL-2"]
+open = "거래일 경계, 가격제한폭, 호가 단위표가 있는 시장(국내 주식)은 코어 변경이 필요하다. 다루지 않았다. 영향: 그런 시장을 추가하면 코어 변경과 전체 재검증이 필요하다. 해소: 추가할 때 설계한다. 단계: 두 번째 거래소를 정할 때."
+
+[[item]]
+id = "G-QUAL-07"
+layer = "general"
+area = "품질"
+consideration = "오동작이 금전 손실로 이어지지 않도록 막는 장치가 있는가"
+necessity = "주문 시스템의 결함은 곧 손실이다"
+sources = ["ISO25010", "FIA24"]
+applicability = "조건부"
+reason = "ISO 25010:2023의 Safety 특성이 금전 손실을 포함하는지는 본문을 읽지 못해 확인하지 못했다. 항목 자체는 FIA 권고로 적용한다"
+handling = "불확실하면 신규 주문을 막는다(차단 사유 7종). 내부 모순이나 저장 실패는 프로세스를 멈춘다"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-008", "ADR-010"]
+contracts = ["C-NEW", "C-OVERLOAD"]
+code = ["crates/oms-core/src/core.rs"]
+claims = ["V-SIM-1", "V-COMMIT-1"]
+
+[[item]]
+id = "G-REL-01"
+layer = "general"
+area = "신뢰성"
+consideration = "프로세스가 임의 시점에 죽어도 일관된 상태로 돌아오는가"
+necessity = "죽는 시점에 따라 주문이 사라지거나 두 번 나가면 안 된다"
+sources = ["ISO25010", "FIA15"]
+applicability = "적용"
+reason = "강제 종료 뒤의 재시작이 이 시스템의 유일한 복구 수단이다"
+handling = "커밋 게이트와 저널 재생. 경계별 결과는 C-COMMIT의 표"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-003", "ADR-004"]
+contracts = ["C-COMMIT", "C-JOURNAL", "C-BOOT"]
+code = ["crates/oms-node/src/pipeline.rs", "crates/oms-node/src/recovery.rs"]
+claims = ["V-COMMIT-1", "V-COMMIT-2", "V-BOOT-1", "V-REPLAY-1", "V-COMMIT-4", "V-BOOT-2"]
+
+[[item]]
+id = "G-REL-02"
+layer = "general"
+area = "신뢰성"
+consideration = "복구에 걸리는 시간이 허용 중단 시간 안인가"
+necessity = "저널이 길어지면 재생이 분 단위를 넘을 수 있다"
+sources = ["ISO25010", "BRIEF"]
+applicability = "적용"
+reason = "복구가 수동 재시작이므로 복구 시간이 곧 중단 시간이다"
+handling = "스냅샷(5만 기록마다, 종료 시). 수용 기준 A-REC-2"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-011"]
+contracts = ["C-SNAP"]
+code = ["crates/oms-node/src/pipeline.rs"]
+claims = ["V-PERF-3", "V-JRN-4"]
+
+[[item]]
+id = "G-REL-03"
+layer = "general"
+area = "신뢰성"
+consideration = "서버 장애와 재해에 대한 가용성 요구가 정해져 있는가"
+necessity = "요구를 정하지 않으면 과소 또는 과잉 설계가 된다"
+sources = ["ISO25010", "BRIEF"]
+applicability = "적용"
+reason = "사용자가 단일 노드와 수동 복구를 택했다. 그 선택의 한계를 적어야 한다"
+handling = "단일 노드 + 재시작 복구(사용자 결정). 서버 장애는 수동 복구 절차(운영 문서 §7.6): 마지막 기록까지 있는 저널이면 그것으로, 과거 사본뿐이면 새 인스턴스로 시작한다. 자동 failover와 재해 복구는 범위 밖"
+design = "결정"
+impl = "부분"
+verify = "미검증"
+adr = ["ADR-013"]
+contracts = []
+code = []
+claims = []
+open = "서버 장애 복구 절차(저널 사본에서 기동)는 문서만 있고 훈련하지 않았다. 저널을 다른 장치로 복사하는 도구가 없다. 영향: 서버를 잃으면 사본 이후의 기록과 전략별 귀속을 잃는다. 과거 사본으로 거래를 재개하면 주문 번호가 다시 쓰인다(A-12). 해소: 운영 문서 §7.6의 절차를 연습하고, 닫힌 세그먼트를 다른 장치로 복사하는 수단을 둔다. 단계: 실거래 전."
+
+[[item]]
+id = "G-REL-04"
+layer = "general"
+area = "신뢰성"
+consideration = "전원 장애와 장치 고장에서 내구성이 유지되는가"
+necessity = "fdatasync가 성공해도 장치가 캐시를 잃으면 응답한 주문의 기록이 사라진다"
+sources = ["LINUX", "FSYNC-RESEARCH"]
+applicability = "조건부"
+reason = "장치가 flush를 지킬 때만 성립한다. 개발 호스트의 SSD(Samsung 980)는 전원 손실 보호가 없다"
+handling = "가정 A-05로 남긴다. 유실되면 재시작 뒤 열린 주문 대조가 OrphanOrder로 드러낸다"
+design = "결정"
+impl = "해당없음"
+verify = "미검증"
+adr = ["ADR-004", "ADR-011"]
+contracts = ["C-COMMIT"]
+code = []
+claims = []
+open = "전원 차단 시험을 하지 않았다. 운용 장치를 정할 때 전원 손실 보호 여부를 확인해야 한다. 영향: 전원 장애 때 응답한 주문의 기록이 사라질 수 있다. 해소: 전원 손실 보호가 있는 장치를 고르고, 가능하면 전원 차단 시험을 한다. 단계: 배포 전."
+
+[[item]]
+id = "G-RES-01"
+layer = "general"
+area = "자원"
+consideration = "메모리 사용에 상한이 있는가"
+necessity = "주문·키·추적 기록이 무한히 쌓이면 며칠 뒤 프로세스가 죽는다"
+sources = ["PRACTICE", "BRIEF"]
+applicability = "적용"
+reason = "며칠씩 떠 있는 프로세스다"
+handling = "메모리의 주문 수 상한, 종결 주문 제거, 체결 키 바닥, 주문별 추적 200건, 최근 기록 2000건, 대기 체결 1024건, 모든 큐 상한"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-006", "ADR-010"]
+contracts = ["C-IDEM", "C-OVERLOAD"]
+code = ["crates/oms-core/src/config.rs", "crates/oms-node/src/published.rs"]
+claims = ["V-IDEM-2", "V-OVL-1"]
+open = "장시간 실행에서 메모리 사용량을 측정하지 않았다. 불일치는 대상(주문, 종목, 거래소 주문)마다 한 건으로 묶지만 전체 수의 상한은 없다. 영향: 며칠 운용한 뒤의 메모리 증가를 모른다. 해소: 가상 거래소로 24시간 돌리며 메모리를 기록한다. 단계: testnet 운용 중."
+
+[[item]]
+id = "G-RES-02"
+layer = "general"
+area = "자원"
+consideration = "디스크가 차기 전에 대응하는가"
+necessity = "저널을 못 쓰면 체결도 기록하지 못한다"
+sources = ["PRACTICE", "BRIEF"]
+applicability = "적용"
+reason = "저널이 로컬 디스크에 삭제 없이 쌓인다"
+handling = "여유 공간이 기준 아래면 신규 주문만 차단. 쓰기 실패는 정지"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-010"]
+contracts = ["C-OVERLOAD"]
+code = ["crates/oms-node/src/node.rs"]
+claims = ["V-OVL-3"]
+open = "실제로 디스크를 채우는 시험은 하지 않았다. 보관·삭제 정책은 U-04. 영향: 실제로 가득 찬 디스크에서의 동작은 주입 시험으로만 안다. 해소: 작은 파일 시스템(loop 장치)을 채우는 시험을 한다. 단계: 배포 전."
+
+[[item]]
+id = "G-RES-03"
+layer = "general"
+area = "자원"
+consideration = "연결 수와 진행 중 요청 수에 상한이 있는가"
+necessity = "클라이언트 하나가 태스크와 버퍼를 무한히 만들 수 있다"
+sources = ["PRACTICE", "ASVS"]
+applicability = "적용"
+reason = "전략 프로세스의 폭주와 버그를 OMS가 받아낸다"
+handling = "연결 64, 연결당 진행 요청 32, 한 줄 64 KiB, 응답 버퍼 상한"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-010", "ADR-015"]
+contracts = ["C-API", "C-OVERLOAD"]
+code = ["crates/oms-node/src/server.rs"]
+claims = ["V-OVL-2", "V-API-3"]
+open = "줄 길이 상한과 hello 시간 제한은 직접 시험하지 않았다. 연결 수 상한과 구독 수는 V-API-3이 다룬다. 영향: 상한 코드의 결함을 놓칠 수 있다. 해소: 프로세스 시험을 추가한다. 단계: 배포 전."
+
+[[item]]
+id = "G-SEC-01"
+layer = "general"
+area = "보안"
+consideration = "누가 주문하고 누가 운영 명령을 내릴 수 있는가"
+necessity = "권한 없는 주문이나 중지 해제는 직접 손실이다"
+sources = ["ASVS", "SSDF", "FIA15"]
+applicability = "적용"
+reason = "ASVS V6(인증), V8(권한)에 해당"
+handling = "Unix 소켓 파일 권한과 상대 uid. 운영 명령은 별도 소켓. 대시보드는 읽기 전용"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-015"]
+contracts = ["C-API"]
+code = ["crates/oms-node/src/server.rs", "crates/oms-node/src/http.rs"]
+claims = ["V-API-1"]
+open = "같은 OS 사용자 안에서는 전략을 구별하지 못한다. 다른 uid로의 접속 거부는 시험하지 않았다. 영향: 같은 uid로 도는 전략이 다른 전략의 이름으로 주문할 수 있다. 해소: 전략마다 uid를 나누거나 전략별 소켓을 둔다. 단계: 서로 신뢰하지 않는 전략을 함께 돌릴 때."
+
+[[item]]
+id = "G-SEC-02"
+layer = "general"
+area = "보안"
+consideration = "신뢰 경계에서 모든 입력을 검증하는가"
+necessity = "잘못된 숫자나 거대한 입력이 코어를 멈추거나 잘못된 주문을 만든다"
+sources = ["ASVS", "SSDF"]
+applicability = "적용"
+reason = "ASVS V2(검증과 업무 로직)에 해당"
+handling = "타입 수준 검증(식별자 문자 집합·길이, 십진 문자열, 소수 자릿수), 줄 길이 상한, 이후 코어의 업무 규칙. 거래소 응답도 모르는 형태는 '결과 불명'으로 처리"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-009", "ADR-015"]
+contracts = ["C-API", "C-GW"]
+code = ["crates/oms-core/src/ids.rs", "crates/oms-core/src/num.rs", "crates/oms-node/src/venue/hyperliquid/wire.rs"]
+claims = ["V-NUM-1", "V-API-2", "V-HL-2"]
+open = "fuzzing을 하지 않았다(cargo-fuzz 미설치). 저널 파일을 조작한 입력에 대한 시험은 손상 시험뿐이다. 영향: 드문 입력에서의 panic을 놓칠 수 있다. panic은 프로세스 정지로 이어진다. 해소: cargo-fuzz로 API 줄과 프레임 해석을 fuzz한다. 단계: 배포 전."
+
+[[item]]
+id = "G-SEC-03"
+layer = "general"
+area = "보안"
+consideration = "서명 키 같은 비밀정보가 새지 않는가"
+necessity = "키가 로그나 저널에 남으면 그 파일을 읽는 누구나 주문할 수 있다"
+sources = ["ASVS", "SSDF"]
+applicability = "적용"
+reason = "agent 지갑의 개인 키로 주문에 서명한다"
+handling = "키는 환경 변수로만 받고 게이트웨이 안에만 둔다. 설정 파일에는 변수 이름만. 저널·로그·입력에 싣지 않는다. Debug 출력은 주소만"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-017"]
+contracts = ["C-GW"]
+code = ["crates/oms-node/src/venue/hyperliquid/sign.rs"]
+claims = ["V-HL-1"]
+open = "환경 변수는 같은 사용자의 다른 프로세스가 /proc에서 읽을 수 있다. 키 보관 방식(파일 권한, 비밀 관리 도구)은 운영 결정이다. 마스터 지갑 키는 이 시스템에 넣지 않는다. 영향: 호스트의 같은 사용자 권한이 뚫리면 agent 키가 드러난다. agent 키로는 출금하지 못한다. 해소: 전용 사용자, 0600 키 파일, agent 키의 주기적 교체(P-VEN-12). 단계: mainnet 전."
+
+[[item]]
+id = "G-SEC-04"
+layer = "general"
+area = "보안"
+consideration = "의존성의 알려진 취약점과 유지보수 상태를 관리하는가"
+necessity = "유지보수가 끊긴 라이브러리의 결함이 그대로 남는다"
+sources = ["SSDF"]
+applicability = "적용"
+reason = "SSDF PW.4(검증된 소프트웨어 재사용), RV.1(취약점 식별)"
+handling = "`Cargo.lock`으로 버전 고정. 선택 시 유지보수 상태와 권고 조회(bincode 제외 등)"
+design = "결정"
+impl = "부분"
+verify = "미검증"
+adr = ["ADR-011"]
+contracts = []
+code = ["Cargo.lock"]
+claims = []
+open = "cargo-deny, cargo-audit이 설치돼 있지 않아 자동 점검이 없다. 영향: 새 권고를 놓친다. 해소: 도구 설치 후 `xtask verify`에 추가. 단계: 배포 전."
+
+[[item]]
+id = "G-SEC-05"
+layer = "general"
+area = "보안"
+consideration = "상태를 바꾼 행위가 누가 왜 했는지와 함께 남는가"
+necessity = "사고 뒤에 원인을 재구성할 수 없다"
+sources = ["ASVS", "FIA15"]
+applicability = "적용"
+reason = "ASVS V16(로깅)"
+handling = "저널이 감사 기록이다. 운영 명령은 사유(note)와 함께 입력으로 기록된다. 전송 시각과 와이어 식별자도 결과 입력에 남는다"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-003", "ADR-015"]
+contracts = ["C-COMMIT"]
+code = ["crates/oms-core/src/record.rs"]
+claims = ["V-SLICE-1"]
+open = "운영 명령에 운영자 식별자가 없다(운영자 1인 가정). 저널의 변조 방지(서명, 외부 보관)가 없다. 영향: 운영자가 둘 이상이 되면 누가 했는지 알 수 없다. 저널을 고친 사람을 알 수 없다. 해소: 운영자 식별 필드와 저널의 외부 사본. 단계: 운영자가 둘 이상이 될 때."
+
+[[item]]
+id = "G-SEC-06"
+layer = "general"
+area = "보안"
+consideration = "외부 통신이 암호화되고 상대가 검증되는가"
+necessity = "중간자가 주문을 보거나 바꿀 수 있다"
+sources = ["ASVS"]
+applicability = "적용"
+reason = "ASVS V12(통신 보안)"
+handling = "거래소와는 HTTPS/WSS(rustls, 내장 루트 인증서). 주문은 추가로 서명된다. 로컬 소켓은 호스트 내부라 암호화하지 않는다"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-017"]
+contracts = ["C-GW"]
+code = ["crates/oms-node/src/venue/hyperliquid/mod.rs"]
+claims = ["V-HL-3"]
+open = "인증서 검증은 라이브러리 기본 동작에 맡겼고 실패 사례를 시험하지 않았다. 영향: 인증서 검증이 꺼진 빌드를 알아채지 못한다. 해소: 잘못된 인증서의 서버에 접속이 실패하는지 시험한다. 단계: mainnet 전."
+
+[[item]]
+id = "G-SEC-07"
+layer = "general"
+area = "보안"
+consideration = "기본값이 안전한 쪽이고 위험한 설정은 명시적 확인을 요구하는가"
+necessity = "설정 실수 하나로 실계좌 주문이 나간다"
+sources = ["SSDF", "PRACTICE"]
+applicability = "적용"
+reason = "SSDF PW.9(안전한 기본 설정)"
+handling = "mainnet은 `mainnet_confirmed = true` 필요. 대시보드는 loopback만(설정 검증이 강제). 설정 파일의 모르는 필드는 오류"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-015"]
+contracts = []
+code = ["crates/oms-node/src/config.rs"]
+claims = ["V-CFG-1"]
+open = "설정 검증 자체의 시험은 버전 규칙뿐이다. 영향: 잘못된 설정이 받아들여질 수 있다. 해소: 설정 검증의 단위 시험(loopback이 아닌 주소, mainnet 미확인, 0 크기 큐). 단계: 배포 전."
+
+[[item]]
+id = "G-SEC-08"
+layer = "general"
+area = "보안"
+consideration = "배포한 바이너리가 어떤 소스에서 나왔는지 확인할 수 있는가"
+necessity = "검증한 코드와 운용하는 코드가 다를 수 있다"
+sources = ["SSDF"]
+applicability = "적용"
+reason = "SSDF PS.2(무결성 확인 수단), PS.3(릴리스 보관)"
+handling = "소스 다이제스트를 바이너리에 넣고 검증 결과에도 기록한다"
+design = "결정"
+impl = "부분"
+verify = "부분"
+adr = []
+contracts = []
+code = ["crates/oms-node/build.rs", "crates/xtask/src/digest.rs"]
+claims = []
+open = "git 저장소가 아니다. 다이제스트는 변경 탐지용이지 무결성 보호가 아니다(FNV). 릴리스 서명과 보관이 없다. 영향: 운영 바이너리가 검토한 소스와 같은지 강하게 증명하지 못한다. 해소: 저장소 초기화와 태그. 단계: U-10 결정 뒤."
+
+[[item]]
+id = "G-SEC-09"
+layer = "general"
+area = "보안"
+consideration = "취약점이 발견됐을 때의 대응 절차가 있는가"
+necessity = "절차가 없으면 대응이 늦어진다"
+sources = ["SSDF"]
+applicability = "조건부"
+reason = "SSDF RV.2, RV.3. 운영자 1인의 개인 시스템이라 공개 보고 창구는 필요 없다"
+handling = "남은 결정"
+design = "미결"
+impl = "미구현"
+verify = "해당없음"
+adr = []
+contracts = []
+code = []
+claims = []
+open = "영향: 의존성 권고가 나와도 반영 주기가 없다. 해소: G-SEC-04의 자동 점검을 주기적으로 돌리는 절차를 운영 문서에 추가. 단계: 배포 전."
+
+[[item]]
+id = "G-SEC-10"
+layer = "general"
+area = "보안"
+consideration = "메모리 안전성에 의존하는 직접 작성 코드가 있는가"
+necessity = "unsafe나 자체 lock-free 코드는 검토 범위를 크게 넓힌다"
+sources = ["SSDF", "BRIEF"]
+applicability = "적용"
+reason = "작업 공간 전체에 unsafe를 금지했다. 그것이 지켜지는지 확인해야 한다"
+handling = "작업 공간 전체에 `unsafe_code = forbid`. 자체 atomic 알고리즘 없음. atomic은 계수기, 치명 표시, nonce 증가에만 쓰고 의미는 D-CONC-01에 적었다"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-012"]
+contracts = []
+code = ["Cargo.toml"]
+claims = ["V-PURE-1"]
+
+[[item]]
+id = "G-OPS-01"
+layer = "general"
+area = "운영"
+consideration = "시작과 종료의 순서가 정해져 있고 중간에 멈춰도 안전한가"
+necessity = "대조 전에 주문을 받거나, 종료 중에 기록이 빠질 수 있다"
+sources = ["FIA15", "PRACTICE"]
+applicability = "적용"
+reason = "재시작이 복구 수단이므로 시작 순서가 곧 복구 순서다"
+handling = "시작: 복구 → 파이프라인 → Boot·설정 내구화 → 게이트웨이 → 소켓. 종료: 소켓 닫기 → 큐 닫기 → 배출 → 스냅샷"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-013"]
+contracts = ["C-BOOT"]
+code = ["crates/oms-node/src/node.rs"]
+claims = ["V-SLICE-1", "V-BOOT-1", "V-BOOT-2"]
+open = "SIGTERM을 받은 뒤에도 큐에 이미 들어 있던 신규 주문은 수용되고 거래소로 나간다. 응답은 연결이 닫혀 전략에 닿지 않을 수 있다(같은 키로 다시 물으면 duplicate). 영향: 종료 직전에 낸 주문이 거래소에 남는다. 해소: 종료 절차에서 먼저 halt한다(운영 문서 §5). 종료 중 신규 주문을 거절하게 바꿀지는 정하지 않았다. 단계: 실거래 전."
+
+[[item]]
+id = "G-OPS-02"
+layer = "general"
+area = "운영"
+consideration = "배포와 롤백 절차가 있고 형식 호환이 고려됐는가"
+necessity = "새 빌드가 쓴 저널을 옛 빌드가 못 읽으면 롤백이 불가능하다"
+sources = ["FIA15", "SSDF"]
+applicability = "적용"
+reason = "저널은 버전이 바뀌어도 읽혀야 한다"
+handling = "버전 호환 표(ADR-011 §7)와 운영 문서의 업그레이드·롤백 절차"
+design = "결정"
+impl = "부분"
+verify = "미검증"
+adr = ["ADR-011"]
+contracts = ["C-JOURNAL"]
+code = ["crates/oms-journal/src/segment.rs"]
+claims = ["V-JRN-5"]
+open = "실제 업그레이드와 롤백을 해 본 적이 없다(버전이 하나뿐이다). 기록 스키마가 바뀐 뒤에는 롤백할 수 없다는 점이 절차에 적혀 있다. 영향: 첫 버전 변경에서 절차의 빈틈이 드러날 수 있다. 해소: 가상 거래소에서 열린 주문을 둔 채 바이너리를 바꿔 본다. 단계: 첫 버전 변경 전."
+
+[[item]]
+id = "G-OPS-03"
+layer = "general"
+area = "운영"
+consideration = "설정 변경이 추적되고 이전 설정의 승인이 재사용되지 않는가"
+necessity = "한도를 바꿨는데 반영 시점이 불분명하면 사고 분석이 불가능하다"
+sources = ["FIA15", "REQ"]
+applicability = "적용"
+reason = "요구 R13"
+handling = "설정은 버전이 붙은 입력이고 저널에 전체가 기록된다. 수용 이벤트에 설정 버전이 남는다. 같은 버전의 다른 내용은 거부"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-002"]
+contracts = ["C-BOOT"]
+code = ["crates/oms-core/src/config.rs", "crates/oms-core/src/decide.rs"]
+claims = ["V-CFG-1"]
+open = "실행 중 설정 변경 명령은 없다. 재시작으로만 바꾼다. 설정 변경의 승인 절차는 운영자 1인 가정으로 두지 않았다. 영향: 한도를 바꾸려면 재시작해야 하고 그동안 거래소의 주문은 남는다. 해소: 필요해지면 운영 명령으로 설정을 제출하게 한다. 단계: 필요해질 때."
+
+[[item]]
+id = "G-OPS-04"
+layer = "general"
+area = "운영"
+consideration = "처리 지연, 큐, 저장, 대조 상태를 관측할 수 있는가"
+necessity = "문제가 생긴 뒤에야 알게 된다"
+sources = ["FIA15", "ISO25010"]
+applicability = "적용"
+reason = "운영자 1인이 화면으로 상태를 판단한다"
+handling = "status 문서, 대시보드 운영 화면, JSON 로그. 단계별 지연 히스토그램"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-016"]
+contracts = []
+code = ["crates/oms-node/src/status.rs", "crates/oms-node/src/published.rs"]
+claims = ["V-HIST-1"]
+open = "외부 지표 수집기(Prometheus 등) 연동이 없다. 로그 보관·회전은 감독자에게 맡긴다. 영향: 지연이나 디스크 사용의 추세를 사람이 화면에서만 본다. 해소: `/api/status`를 주기적으로 읽는 수집기. 단계: 무인 운용 전."
+
+[[item]]
+id = "G-OPS-05"
+layer = "general"
+area = "운영"
+consideration = "사람이 보고 있지 않을 때 문제를 알리는가"
+necessity = "차단이 걸린 채 몇 시간 방치될 수 있다"
+sources = ["FIA15"]
+applicability = "적용"
+reason = "24시간 시장이고 운영자는 한 명이다"
+handling = "남은 결정"
+design = "미결"
+impl = "미구현"
+verify = "해당없음"
+adr = []
+contracts = []
+code = []
+claims = []
+open = "영향: 불일치·결과 불명·정지가 화면을 볼 때만 보인다. 해소: status를 주기적으로 읽어 알림을 보내는 외부 스크립트 또는 내장 알림. 단계: 무인 운용 전. 사용자 결정 U-11."
+
+[[item]]
+id = "G-OPS-06"
+layer = "general"
+area = "운영"
+consideration = "장애 유형별 대응 절차가 있는가"
+necessity = "절차 없이 손으로 저널을 고치면 상황이 악화된다"
+sources = ["FIA15"]
+applicability = "적용"
+reason = "장애 때 운영자가 혼자 판단한다"
+handling = "운영 문서의 장애별 절차(시작 거부, 결과 불명, 불일치, 디스크 부족, 치명 정지)"
+design = "결정"
+impl = "구현"
+verify = "미검증"
+adr = []
+contracts = []
+code = []
+claims = []
+open = "절차를 따라 실제로 훈련하지 않았다. 영향: 절차의 오류를 실제 장애에서 처음 발견한다. 해소: 가상 거래소로 운영 문서 §7의 상황을 재현해 연습한다. 단계: testnet 운용 전."
+
+[[item]]
+id = "G-OPS-07"
+layer = "general"
+area = "운영"
+consideration = "시계 동기화에 의존하는 부분이 드러나 있는가"
+necessity = "시계가 어긋나면 만료 기반 판정이 틀린다"
+sources = ["PRACTICE", "HL-DOCS"]
+applicability = "적용"
+reason = "부재 판정과 체결 동기화가 로컬 시계와 거래소 시계의 차이에 의존한다"
+handling = "가정 A-02. 여유값(`absence_margin_us`, `fills_lag_ms`)이 설정이다"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-005"]
+contracts = ["C-DOUBT"]
+code = ["crates/oms-core/src/decide.rs"]
+claims = ["V-DOUBT-3"]
+open = "호스트의 시계 동기화 상태를 프로세스가 확인하지 않는다. 거래소 시각과의 차이를 측정하지 않는다. 영향: 시계가 여유보다 크게 어긋나면 부재 판정과 체결 동기화가 틀린다(A-02). 앞으로 간 시계도 위험하다. 해소: 시작할 때와 주기적으로 거래소 시각과 비교해 차이가 크면 신규 주문을 막는다. 단계: 실거래 전."
+
+[[item]]
+id = "G-CHG-01"
+layer = "general"
+area = "변경"
+consideration = "저장 형식이 바뀔 때의 호환 규칙이 있는가"
+necessity = "형식이 바뀐 순간 복구가 불가능해진다"
+sources = ["PRACTICE", "BRIEF"]
+applicability = "적용"
+reason = "저널을 무기한 보관하고 다음 버전이 읽는다"
+handling = "프레임 형식, 기록 스키마, 상태 스키마에 각각 버전. 읽을 수 없으면 시작 거부"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-011"]
+contracts = ["C-JOURNAL", "C-SNAP"]
+code = ["crates/oms-journal/src/segment.rs", "crates/oms-node/src/recovery.rs"]
+claims = ["V-JRN-5"]
+open = "옛 스키마의 실제 저널을 새 빌드로 읽는 회귀 시험(golden 파일)이 없다. 스키마 2가 생길 때 추가해야 한다. 영향: 스키마를 바꿀 때 옛 저널을 못 읽는 결함을 놓칠 수 있다. 해소: 현재 스키마의 저널을 보관해 회귀 시험으로 쓴다. 단계: 스키마 2를 만들 때."
+
+[[item]]
+id = "G-CHG-02"
+layer = "general"
+area = "변경"
+consideration = "문서, 검증 결과, 실행 중인 바이너리가 같은 버전을 가리키는가"
+necessity = "옛 검증 결과로 새 코드를 믿게 된다"
+sources = ["BRIEF"]
+applicability = "적용"
+reason = "지시문이 문서·구현·결과의 기준 버전 연결을 요구한다"
+handling = "소스 다이제스트를 바이너리·검증 결과·대시보드에 표시. 다이제스트가 다르면 주장의 상태를 '이전 버전 결과'로 표시"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = []
+contracts = []
+code = ["crates/xtask/src/digest.rs", "crates/xtask/src/registry.rs"]
+claims = []
+open = "두 다이제스트 계산(build.rs와 xtask)이 같은 값을 내는 것은 손으로 한 번 확인했다. 자동 시험은 없다. 문서 본문의 수치가 최신 측정과 같은지는 생성기가 확인하지 않는다. 영향: 문서 본문의 수치가 낡을 수 있다. 해소: 두 다이제스트의 일치 시험을 추가하고, 본문의 수치는 생성 문서를 가리키게 한다. 단계: 배포 전."
+
+[[item]]
+id = "G-ARCH-01"
+layer = "general"
+area = "아키텍처 기술"
+consideration = "문서가 이해관계자의 관심사별로 구조·결정·동작을 나눠 설명하는가"
+necessity = "한 문서에 모든 것을 섞으면 필요한 답을 찾을 수 없다"
+sources = ["ISO42010", "BRIEF"]
+applicability = "적용"
+reason = "42010의 개념(관심사, 뷰, 결정과 근거)을 문서 구성에만 빌린다"
+handling = "전체 구조(정적 뷰와 실행 뷰) → 설계 결정 → 시나리오 → 계약 → 검증의 순서. 상태 소유권 표"
+design = "결정"
+impl = "구현"
+verify = "해당없음"
+adr = []
+contracts = []
+code = []
+claims = []
+open = "42010 본문을 읽지 못했으므로 그 요구와의 대조는 하지 않았다. 영향: 42010의 요구 가운데 빠뜨린 것이 있는지 알 수 없다. 해소: 본문을 구해 대조한다. 단계: 준수를 주장해야 할 때."
+
+[[item]]
+id = "G-QUAL-08"
+layer = "general"
+area = "품질"
+consideration = "설계와 구현을 만든 주체가 아닌 검토가 있었는가"
+necessity = "만든 사람은 자기가 생각하지 못한 경우를 시험하지 못한다"
+sources = ["SSDF", "BRIEF"]
+applicability = "적용"
+reason = "지시문 §11이 구현과 분리된 검토 단계를 요구한다. 1인 프로젝트라 사람 검토자가 없다"
+handling = "구현 내용을 전달받지 않은 검토자 셋(코어, 실행 계층과 게이트웨이, 문서와 주장)이 반례 중심으로 검토했다. 찾은 결함은 재현 시험과 함께 고쳤고 기록은 verification/gap-review.md에 있다"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = []
+contracts = []
+code = ["crates/oms-core/tests/review_core.rs", "crates/oms-journal/tests/review_journal.rs", "crates/oms-node/tests/review_node.rs"]
+claims = ["V-FUZZ-1", "V-MIS-1", "V-API-3", "V-BOOT-2"]
+open = "검토자도 같은 종류의 모델이다. 사람 전문가의 검토와 같지 않고, 같은 맹점을 공유할 수 있다. 한 번만 했다. 영향: 세 검토자가 모두 놓친 결함이 남아 있을 수 있다. 해소: 실거래 전에 사람의 검토를 받고, 큰 변경마다 검토를 반복한다. 단계: 실거래 전."
+
+[[item]]
+id = "G-REL-05"
+layer = "general"
+area = "신뢰성"
+consideration = "스레드나 태스크가 예기치 않게 죽으면 프로세스가 안전하게 멈추는가"
+necessity = "코어 스레드만 죽고 소켓이 살아 있으면 요청은 쌓이는데 아무 응답도 없고, 예약 취소의 갱신만 계속된다"
+sources = ["PRACTICE", "ASVS"]
+applicability = "적용"
+reason = "릴리스 빌드에서도 정수 overflow 검사를 켜 두었으므로 panic이 날 수 있다"
+handling = "빌드 프로파일에서 panic을 abort로 정했다. panic이 나면 한 줄 로그를 남기고 프로세스가 끝난다. 저널에는 마지막 일관된 상태가 있고 재시작이 복구한다"
+design = "결정"
+impl = "구현"
+verify = "미검증"
+adr = ["ADR-004"]
+contracts = ["C-COMMIT"]
+code = ["Cargo.toml", "crates/oms-node/src/main.rs"]
+claims = []
+open = "panic을 일으켜 종료를 확인하는 시험이 없다. 영향: 프로파일 설정이 빠지거나 바뀌어도 알아채지 못한다. 해소: failpoints 빌드에서 panic을 주입해 종료 신호를 확인하는 시험. 단계: 배포 전."
+
+[[item]]
+id = "G-SEC-11"
+layer = "general"
+area = "보안"
+consideration = "위협 모델과, 실거래 배포 전에 통과해야 하는 기준이 적혀 있는가"
+necessity = "무엇을 막으려는지 적지 않으면 통제가 충분한지 판단할 수 없고, 배포 기준이 없으면 미검증 상태로 실거래에 들어간다"
+sources = ["SSDF"]
+applicability = "적용"
+reason = "서명 키와 주문 권한을 가진 프로세스다"
+handling = "신뢰 경계와 공격면은 ADR-015에 있다. 배포 전 관문은 verification/README.md §10에 목록으로 두었다"
+design = "결정"
+impl = "해당없음"
+verify = "해당없음"
+adr = ["ADR-015"]
+contracts = ["C-API"]
+code = []
+claims = []
+open = "위협 모델은 공격자 유형별로 체계적으로 쓴 것이 아니라 신뢰 경계의 서술이다. ASVS의 목표 레벨을 정하지 않았다. 영향: 빠진 위협이 있을 수 있다. 해소: 원격 접근이나 다중 사용자를 도입하기 전에 위협 모델을 따로 쓴다. 단계: 노출면이 넓어질 때."
+
+[[item]]
+id = "G-SEC-12"
+layer = "general"
+area = "보안"
+consideration = "시험·개발용 코드가 운영 빌드에 들어가지 않는가"
+necessity = "장애 주입 지점이 운영 바이너리에 있으면 환경 변수 하나로 프로세스를 멈출 수 있다"
+sources = ["ASVS", "SSDF"]
+applicability = "적용"
+reason = "장애 주입 지점과 가상 거래소가 같은 저장소에 있다"
+handling = "장애 주입 코드는 `failpoints` 기능으로만 컴파일되고 기본 빌드에는 없다. 가상 거래소는 별도 바이너리(`simvenue`)다. 운영 바이너리에 남는 시험용 설정은 `runtime.inline_commit` 하나이며 동작 계약은 같다. 노드에는 장애를 주입하는 API가 없다"
+design = "결정"
+impl = "구현"
+verify = "미검증"
+adr = ["ADR-016"]
+contracts = []
+code = ["crates/oms-node/Cargo.toml", "crates/oms-node/src/pipeline.rs"]
+claims = []
+open = "배포용 빌드에 `failpoints`가 꺼져 있는지 확인하는 시험이 없다. 가상 거래소에 붙는 게이트웨이(`venue.kind = \"sim\"`)는 운영 바이너리에 들어 있다. 영향: 설정을 잘못 쓰면 운영 노드가 가상 거래소에 붙는다(화면 상단에 표시된다). 해소: 빌드 기능으로 분리하고, 바이너리에 failpoint 문자열이 없는지 검사한다. 단계: 배포 전."
+
+[[item]]
+id = "G-SEC-13"
+layer = "general"
+area = "보안"
+consideration = "브라우저를 거친 접근(다른 출처의 페이지, DNS rebinding)으로 대시보드가 악용되지 않는가"
+necessity = "읽기 전용이어도 포지션과 주문이 드러나고, 상태를 바꾸는 경로가 있으면 다른 페이지가 그것을 부를 수 있다"
+sources = ["ASVS"]
+applicability = "적용"
+reason = "대시보드가 HTTP로 열려 있다"
+handling = "loopback에만 바인딩한다. GET만 받는다. Host 헤더가 loopback 이름이 아니면 거부한다. 응답에 CSP(자기 출처만, inline 금지), nosniff, frame 금지를 붙인다. 정적 파일과 문서 열람 경로는 이름과 디렉터리를 제한한다"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-015", "ADR-016"]
+contracts = ["C-API"]
+code = ["crates/oms-node/src/http.rs", "dashboard/app.js"]
+claims = ["V-DASH-1"]
+open = "경로 제한만 자동 시험이 있다. 메서드·Host·헤더는 수동으로 확인했다. 인증이 없으므로 같은 호스트의 다른 사용자가 읽을 수 있다. 영향: 다중 사용자 호스트에서는 포지션이 드러난다. 해소: HTTP 프로세스 시험을 추가하고, 다중 사용자 호스트에서는 대시보드를 끈다. 단계: 배포 전."
+
+[[item]]
+id = "G-OPS-08"
+layer = "general"
+area = "운영"
+consideration = "운영자의 실수가 손실로 이어지지 않도록 막는가"
+necessity = "비상 때의 명령은 급하게 내려지고, 운영자는 한 명이다"
+sources = ["ISO25010", "FIA15"]
+applicability = "적용"
+reason = "포지션 조정, 수동 종결, 불일치 확인은 장부를 직접 바꾸거나 차단을 푼다"
+handling = "운영 명령은 운영 소켓으로만 받고 사유와 함께 저널에 남는다. 대시보드에는 변경 경로가 없다. 틀린 수동 종결은 FillAfterClose나 OpenAfterClose로 드러난다. mainnet은 설정의 명시적 확인이 있어야 열린다"
+design = "미결"
+impl = "부분"
+verify = "부분"
+adr = ["ADR-015"]
+contracts = ["C-OPS"]
+code = ["crates/oms-node/src/server.rs", "crates/oms-api/src/bin/omsctl.rs"]
+claims = []
+open = "`adjust`는 멱등이 아니어서 두 번 실행하면 두 번 적용된다. `resolve`와 `ack`에 확인 단계가 없다. 과거 사본으로 복구한 뒤 OrphanOrder를 확인 처리하고 재개하면 주문 번호가 충돌한다(A-12). `omsctl` 자체의 시험이 없다. 영향: 급한 상황의 오조작이 장부를 틀리게 하거나 차단을 잘못 푼다. 해소: 조정에 기대값 조건(현재 포지션이 X일 때만)을 붙이고, 위험한 명령에 확인 인자를 요구한다. 단계: 실거래 전."

@@ -1,0 +1,119 @@
+# 외부 시스템·라이브러리·운영 환경에 의존하는 가정.
+# 가정이 깨졌을 때 무엇이 깨지고 무엇이 그것을 드러내는지를 함께 적는다.
+
+[[assumption]]
+id = "A-01"
+statement = "거래소는 expiresAfter가 지난 요청을 놓지 않는다"
+depends_on = "Hyperliquid"
+basis = "문서 명시: 'timestamp in milliseconds after which the action will be rejected'. 비교 기준 시계는 문서에 없다"
+if_broken = "부재로 판정해 닫은 주문이 뒤늦게 놓여 예약 없이 체결된다"
+detection = "열린 주문 대조의 OrphanOrder, 포지션 대조의 PositionOutOfRange, 체결의 FillAfterClose. 예방은 못 한다"
+checked = "시뮬레이션에서 가정을 깨면 위반이 잡힌다(V-DOUBT-3). 실제 거래소에서는 확인하지 않았다"
+
+[[assumption]]
+id = "A-02"
+statement = "로컬 시계와 거래소 기준 시계의 차이, 그리고 조회가 최신 상태보다 늦는 시간의 합이 absence_margin(기본 10초)과 fills_lag(기본 2초)보다 작다"
+depends_on = "호스트의 시계 동기화, Hyperliquid API 서버"
+basis = "문서: API 서버는 노드를 따라가며 로컬 상태를 제공한다. 지연 한도는 문서에 없다"
+if_broken = "A-01과 같다. 체결 동기화에서는 체결을 빠뜨린 채 주문을 닫는다"
+detection = "A-01과 같다"
+checked = "시뮬레이션에서 1초 차이는 통과, 6초 차이(여유 2초)는 위반으로 잡힌다. 실제 차이는 측정하지 않았다"
+
+[[assumption]]
+id = "A-03"
+statement = "게이트웨이가 체결 동기화 완료를 알릴 때 그 시각까지의 체결을 모두 전달했다"
+depends_on = "Hyperliquid의 userFillsByTime 완전성과 페이지 규칙"
+basis = "문서: 응답당 2000건, 최근 10000건, 시간 경계 포함. 페이지 크기가 다른 곳에서는 500으로 적혀 있다"
+if_broken = "최종 수량을 모르는 종결 주문이 체결을 빠뜨린 채 닫힌다"
+detection = "뒤늦은 체결의 FillAfterClose, 포지션 대조"
+checked = "가상 거래소에서만. 실제 페이지 크기는 testnet 확인이 필요하다"
+
+[[assumption]]
+id = "A-04"
+statement = "계좌에 이 OMS 인스턴스가 내지 않은 주문과 포지션 변화가 없다"
+depends_on = "운영(수동 거래 금지, 다른 프로그램 금지), 거래소(청산·ADL 없음)"
+basis = "기존 요구 문서의 환경 가정"
+if_broken = "수량 한도(I-QTY)와 I-BRIDGE가 성립하지 않는다"
+detection = "ForeignOrder, ExternalFill, PositionOutOfRange, ForeignPosition. 발견 뒤 신규 주문 차단"
+checked = "V-EXT-1"
+
+[[assumption]]
+id = "A-05"
+statement = "fdatasync가 성공하면 데이터가 장치에 내구화됐다"
+depends_on = "Linux, ext4, 저장 장치의 flush 준수"
+basis = "fdatasync(2). 장치의 준수 여부는 소프트웨어로 확인할 수 없다"
+if_broken = "응답했거나 전송한 주문의 기록이 전원 장애에서 사라진다"
+detection = "재시작 뒤 OrphanOrder(거래소에 있는데 저널에 없는 주문)"
+checked = "확인하지 않았다. 프로세스 강제 종료 시험은 이 가정을 검증하지 않는다"
+
+[[assumption]]
+id = "A-06"
+statement = "같은 저널(또는 그 사본)로 동작하는 프로세스는 어느 순간에도 하나다"
+depends_on = "운영 절차"
+basis = "디렉터리 잠금은 같은 호스트만 막는다"
+if_broken = "두 프로세스가 같은 주문 ID와 클라이언트 ID로 서로 다른 주문을 낸다"
+detection = "각 인스턴스에서 상대의 주문이 OrphanOrder로 보인다(인스턴스 ID가 같으므로 Foreign이 아니다)"
+checked = "같은 호스트의 경우만(V-JRN-3)"
+
+[[assumption]]
+id = "A-07"
+statement = "전략과 OMS는 같은 호스트의 같은 시계를 쓴다"
+depends_on = "배포 구성(사용자 결정)"
+basis = "요청의 절대 만료 시각이 멱등성 키 삭제의 근거다"
+if_broken = "만료가 지난 줄 알고 키를 지운 뒤 늦은 재전송이 새 주문이 될 수 있다"
+detection = "없음"
+checked = "구성 전제이며 시험하지 않았다"
+
+[[assumption]]
+id = "A-08"
+statement = "게이트웨이가 NotSent로 분류한 요청은 한 바이트도 호스트를 떠나지 않았다"
+depends_on = "reqwest의 오류 분류(is_connect), HTTP 클라이언트가 스스로 재시도하지 않음"
+basis = "연결 수립 단계의 오류는 요청 전송 전에 일어난다. 리디렉션은 따라가지 않게 했다. 간격 검토에서 reqwest 0.13.5의 소스를 읽고, 기본 재시도는 서버가 처리하지 않았다고 프로토콜 수준에서 알린 요청에 한한다고 판단했다"
+if_broken = "예약을 푼 주문이 실제로는 놓인다"
+detection = "OrphanOrder가 아니라 정상 클라이언트 ID를 가진 주문으로 나타나므로, 종결된 주문에 대한 OpenAfterClose 또는 FillAfterClose"
+checked = "가상 거래소 게이트웨이에서만. Hyperliquid 게이트웨이의 이 분류는 시험하지 않았다. 라이브러리의 재시도 범위는 소스를 읽은 판단이고 실험이 아니다"
+
+[[assumption]]
+id = "A-09"
+statement = "체결 통보의 (시각, 종목, tid, oid) 조합은 같은 체결에 항상 같고 다른 체결과 겹치지 않는다"
+depends_on = "Hyperliquid"
+basis = "문서: tid는 (buyer_oid, seller_oid)의 50비트 해시이며 전역 유일 키로 (block_time, coin, tid)를 쓰라고 한다"
+if_broken = "겹치면 체결 누락, 달라지면 이중 기장"
+detection = "포지션 대조"
+checked = "확인하지 않았다. 스트림과 REST가 같은 체결에 같은 time을 주는지 testnet 확인이 필요하다"
+
+[[assumption]]
+id = "A-10"
+statement = "거래소는 체결을 사후에 취소하거나 정정하지 않는다"
+depends_on = "Hyperliquid"
+basis = "문서에 체결 정정에 대한 서술이 없다(검색 0건)"
+if_broken = "기장된 체결이 실제와 달라진다"
+detection = "포지션 대조의 PositionOutOfRange"
+checked = "문서의 침묵에 근거한다"
+
+[[assumption]]
+id = "A-11"
+statement = "std와 tokio의 잠금·채널은 문서대로 동작한다(상한, 순서, 닫힘 통지)"
+depends_on = "Rust 1.96 표준 라이브러리, tokio 1.53"
+basis = "라이브러리 문서"
+if_broken = "큐 상한이나 출력 순서가 깨진다"
+detection = "시험이 일부 드러낸다(큐 시험, 그룹 커밋 시험)"
+checked = "라이브러리 자체는 검증하지 않았다"
+
+[[assumption]]
+id = "A-12"
+statement = "거래를 이어 가는 저널에는 그 인스턴스가 낸 모든 주문이 들어 있다(과거 시점의 사본으로 거래를 재개하지 않는다)"
+depends_on = "운영 절차"
+basis = "주문 번호는 저널에서 복원한 계수기에서 이어진다. 사본 이후에 쓴 번호를 저널이 모르면 다시 쓴다"
+if_broken = "새 주문의 클라이언트 주문 ID가 옛 주문과 같아진다. 조회가 옛 주문의 상태를 새 주문의 증거로 돌려줄 수 있고, 체결이 다른 주문에 기장될 수 있다"
+detection = "사본 이후의 주문이 OrphanOrder로 드러나 신규 주문을 막는다. 운영자가 그것을 확인 처리하고 재개하면 더는 탐지되지 않는다"
+checked = "확인하지 않았다. 절차(운영 문서 §7.6)로만 막는다"
+
+[[assumption]]
+id = "A-13"
+statement = "조회 응답(열린 주문, 포지션, 주문 상태)은 조회를 보낸 시각보다 오래된 상태를 돌려주지 않는다"
+depends_on = "Hyperliquid"
+basis = "문서: API 서버는 노드를 따라가며 상태를 로컬에 유지한다. 얼마나 뒤처질 수 있는지는 문서에 없다"
+if_broken = "뒤처진 응답이 이미 닫은 주문을 열린 것으로, 이미 기장한 체결 이전의 포지션을 현재 것으로 보여 준다. 거짓 불일치(OpenAfterClose, PositionOutOfRange)가 떠 신규 주문이 막힌다. 틀린 장부로 거래하는 쪽은 아니다"
+detection = "거짓 불일치 자체가 신호다. 운영자가 거래소 화면과 대조한다"
+checked = "확인하지 않았다. 체결 조회에만 2초의 여유를 두었고 다른 조회에는 여유가 없다. 간격 검토에서 나온 미증명 가설이다"

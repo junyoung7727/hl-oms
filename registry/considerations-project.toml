@@ -1,0 +1,438 @@
+# 층 3: 이 프로젝트 고유의 고려사항 (Hyperliquid, 성능 목표, 운영 인력, 비용, 의무).
+
+[[item]]
+id = "P-VEN-01"
+layer = "project"
+area = "거래소 계약"
+consideration = "거래소의 주문 유형·TIF·식별자 계약을 문서 근거로 반영했는가"
+necessity = "문서에 없는 동작에 기대면 실거래에서 처음 어긋난다"
+sources = ["HL-DOCS"]
+applicability = "적용"
+reason = "첫 대상 거래소다"
+handling = "TIF는 Gtc/Ioc/Alo. 시장가는 상한 가격의 IOC. cloid는 조회·취소 키로만 쓰고 멱등 키로 쓰지 않는다. 배치와 정정은 쓰지 않는다"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-017", "ADR-005"]
+contracts = ["C-GW"]
+code = ["crates/oms-node/src/venue/hyperliquid/wire.rs"]
+claims = ["V-HL-2"]
+open = "실주문으로 확인하지 않았다(U-01). 영향: 주문 경로의 결함은 첫 실주문에서 드러난다. 해소: U-01. 단계: testnet 실주문 때."
+
+[[item]]
+id = "P-VEN-02"
+layer = "project"
+area = "거래소 계약"
+consideration = "서명이 거래소가 받아들이는 형식과 정확히 같은가"
+necessity = "서명이 틀리면 원인 없는 거부만 돌아온다. 문서: 잘못된 서명은 이유를 알려 주지 않는다"
+sources = ["HL-SDK", "HL-DOCS"]
+applicability = "적용"
+reason = "문서는 서명 절차를 규정하지 않고 Python SDK를 보라고 한다"
+handling = "SDK의 절차를 따르고 SDK 자체 시험 벡터 5종(주문, cloid 주문, 임의 액션, 예약 취소 2종; mainnet/testnet)으로 확인"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-017"]
+contracts = ["C-GW"]
+code = ["crates/oms-node/src/venue/hyperliquid/sign.rs"]
+claims = ["V-HL-1"]
+open = "모든 주문에는 `expiresAfter`가 붙고 모든 취소는 `cancelByCloid`인데, 둘 다 SDK에 서명 벡터가 없다. 바이트 배치만 SDK 소스와 대조했다. 실제 수락 여부는 testnet 실주문으로만 확인된다. 영향: 서명이 거부되면 모든 주문이 실패한다(결과 불명이 아니라 거부로 드러난다). 해소: testnet 실주문. 단계: testnet 실주문 때."
+
+[[item]]
+id = "P-VEN-03"
+layer = "project"
+area = "거래소 계약"
+consideration = "nonce 규칙을 지키는가"
+necessity = "nonce가 겹치거나 뒤처지면 요청이 거부된다"
+sources = ["HL-DOCS"]
+applicability = "적용"
+reason = "문서: 서명자별 상위 100개 nonce 저장, (T−2일, T+1일) 창, 프로세스당 API 지갑 하나 권고"
+handling = "게이트웨이가 CAS로 단조 증가하는 ms nonce를 발급한다. nonce는 코어와 저널에 넣지 않는다. 한 데이터 디렉터리에 프로세스 하나"
+design = "결정"
+impl = "구현"
+verify = "미검증"
+adr = ["ADR-017", "ADR-013"]
+contracts = ["C-GW"]
+code = ["crates/oms-node/src/venue/hyperliquid/mod.rs"]
+claims = []
+open = "nonce 발급의 단위 시험이 없다. 재시작 직후 시계가 뒤로 갔을 때 이전 nonce보다 작아질 수 있다(100개 집합의 최솟값보다 작으면 거부된다). 거부는 결과 불명이 아니라 명시적 오류로 돌아올 것으로 보이나 문서에 없다. 영향: 재시작 직후 주문이 거부될 수 있다. 거부는 안전한 쪽이다. 해소: nonce 단위 시험을 쓰고 마지막 nonce를 파일에 둔다. 단계: testnet 실주문 때."
+
+[[item]]
+id = "P-VEN-04"
+layer = "project"
+area = "거래소 계약"
+consideration = "거래소의 요청 한도(IP, 계좌)와 열린 주문 한도 안에서 동작하는가"
+necessity = "한도를 넘으면 10초에 1건으로 줄어 취소조차 어려워진다"
+sources = ["HL-DOCS"]
+applicability = "적용"
+reason = "IP 분당 1200 weight. 계좌는 누적 거래 1 USDC당 1건 + 10000건"
+handling = "게이트웨이의 요청 예산(초당 20 보충, 취소용 100과 주문용 200을 남김). 예산이 없으면 주문은 보내지 않고 `NotSent`. 열린 주문 상한 기본 500"
+design = "결정"
+impl = "부분"
+verify = "부분"
+adr = ["ADR-017"]
+contracts = ["C-GW"]
+code = ["crates/oms-node/src/venue/hyperliquid/mod.rs"]
+claims = ["V-HL-2"]
+open = "계좌 단위 한도를 조회·표시하지 않는다(`userRateLimit`). 체결 없이 주문·취소만 반복하면 초기 10000건이 소진된다. 한도 초과 시의 응답 형태가 문서에 없어 식별하지 못한다. 영향: 계좌 한도가 소진되면 주문이 10초에 1건으로 제한된다. 해소: userRateLimit을 조회해 화면에 보인다. 단계: 실거래 전."
+
+[[item]]
+id = "P-VEN-05"
+layer = "project"
+area = "거래소 계약"
+consideration = "종목의 가격·수량 단위 규칙이 거래소와 일치하는가"
+necessity = "틀리면 모든 주문이 거부된다. 문서: 일부 tick 오류는 배치 전체 오류로 온다"
+sources = ["HL-DOCS"]
+applicability = "적용"
+reason = "유효숫자 5자리, 소수 6−szDecimals 자리, 정수 가격 예외, 최소 10 USD"
+handling = "코어의 종목 설정으로 사전 검증. 게이트웨이가 시작할 때 거래소 메타와 대조하고 맞지 않으면 링크를 올리지 않는다. 자산 인덱스는 메타에서 읽는다"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-009", "ADR-017"]
+contracts = ["C-NEW", "C-GW"]
+code = ["crates/oms-node/src/venue/hyperliquid/mod.rs", "crates/oms-core/src/decide.rs"]
+claims = ["V-NEW-2", "V-HL-3"]
+open = "최소 주문 금액이 지정가 기준인지 mark 기준인지 문서에 없다. 영향: 최소 금액 근처의 주문이 거래소에서 거부될 수 있다. 해소: testnet에서 확인한다. 단계: testnet 실주문 때."
+
+[[item]]
+id = "P-VEN-06"
+layer = "project"
+area = "거래소 계약"
+consideration = "단절 뒤 체결 이력을 빠짐없이 중복 없이 얻는가"
+necessity = "포지션 오차"
+sources = ["HL-DOCS"]
+applicability = "적용"
+reason = "REST는 응답당 2000건, 최근 10000건만. 시간 경계는 양쪽 포함. tid만으로는 전역 유일이 아니다"
+handling = "재구독 스냅샷과 REST 조회를 모두 같은 경로로. 체결 키 `시각:종목:tid:oid`. 조회 종료 시각을 과거(기본 2초)로 잡고 그 직전까지만 완료 선언. 쪽이 문서의 두 쪽 크기 중 작은 것(500)보다 짧을 때만 마지막 쪽으로 보고, 1만 건에 이르면 완료를 선언하지 않는다"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-017", "ADR-007"]
+contracts = ["C-GW", "C-RECON"]
+code = ["crates/oms-node/src/venue/hyperliquid/mod.rs"]
+claims = ["V-HL-2", "V-HL-3"]
+open = "끊긴 동안 체결이 1만 건에 이르면 API로 복원할 수 없다. 게이트웨이는 완료를 선언하지 않고 오류를 남긴다. 같은 계좌의 spot 체결은 기장하지 않고 경고만 남긴다. 영향: 체결이 1만 건을 넘게 밀리면 동기화가 끝나지 않아 신규 주문이 막힌 채로 남는다(운영자가 조치해야 한다). 해소: testnet에서 쪽 크기와 겹침을 확인한다. 단계: testnet 실주문 때."
+
+[[item]]
+id = "P-VEN-07"
+layer = "project"
+area = "거래소 계약"
+consideration = "거래소가 요청 없이 주문을 취소하는 경우를 처리하는가"
+necessity = "'내가 취소하지 않았으면 살아 있다'는 가정이 깨진다"
+sources = ["HL-DOCS"]
+applicability = "적용"
+reason = "문서의 상태 목록: marginCanceled, selfTradeCanceled, reduceOnlyCanceled, liquidatedCanceled, scheduledCancel 등"
+handling = "문서의 상태 표에 있는 종결 상태를 사유 문자열과 함께 종결 통보로 변환한다. 표에 없는 상태 이름에서는 아무 결론도 내지 않고 오류로 남긴다(주문은 열린 주문 대조와 운영자가 처리한다)"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-017"]
+contracts = ["C-TERM"]
+code = ["crates/oms-node/src/venue/hyperliquid/wire.rs"]
+claims = ["V-HL-2", "V-SIM-2"]
+open = "실제 거래소의 상태 통보로 확인하지 않았다. 영향: 상태 이름을 잘못 해석하면 주문이 닫히지 않거나 잘못 닫힌다. 표에 없는 이름은 아무 결론도 내지 않고 오류로 남긴다. 해소: testnet에서 확인한다. 단계: testnet 실주문 때."
+
+[[item]]
+id = "P-VEN-08"
+layer = "project"
+area = "거래소 계약"
+consideration = "청산, 자동 디레버리징, funding처럼 주문 없이 계좌가 변하는 사건을 다루는가"
+necessity = "포지션과 손익이 설명되지 않는다"
+sources = ["HL-DOCS", "REQ"]
+applicability = "적용"
+reason = "문서: 청산은 체결의 liquidation 필드로, ADL의 표현 방식은 문서에 없다"
+handling = "전용 처리는 없다. 청산 체결은 외부 체결로 기장되고 불일치가 제기된다. funding은 기장하지 않는다"
+design = "미결"
+impl = "미구현"
+verify = "해당없음"
+adr = []
+contracts = ["C-MISMATCH"]
+code = []
+claims = ["V-EXT-1"]
+open = "영향: 청산이 일어나면 운영자 개입 전까지 신규 주문이 차단된다(의도된 보수적 동작). funding 비용은 장부에 없다. 해소: U-07의 원장 결정과 함께. 단계: 실거래 전."
+
+[[item]]
+id = "P-VEN-09"
+layer = "project"
+area = "거래소 계약"
+consideration = "testnet과 mainnet의 차이가 설정 실수로 이어지지 않는가"
+necessity = "testnet 설정으로 mainnet에 주문하거나 그 반대"
+sources = ["HL-DOCS", "REQ"]
+applicability = "적용"
+reason = "자산 인덱스가 다르다(실측: testnet BTC는 3). 서명의 source가 다르다"
+handling = "네트워크는 설정 한 곳에서 정하고 URL·서명 source가 함께 따른다. mainnet은 명시적 확인 필요. 자산 인덱스는 하드코딩하지 않는다"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-017"]
+contracts = []
+code = ["crates/oms-node/src/config.rs", "crates/oms-node/src/venue/hyperliquid/mod.rs"]
+claims = ["V-HL-1", "V-HL-3"]
+open = "mainnet 확인 설정의 시험이 없다. mainnet에는 어떤 요청도 보낸 적이 없다. 영향: 확인 설정의 결함이 mainnet 주문으로 이어질 수 있다. 해소: 설정 검증의 단위 시험. 단계: mainnet 전."
+
+[[item]]
+id = "P-VEN-10"
+layer = "project"
+area = "거래소 검증"
+consideration = "실제 거래소에서 무엇을 확인했고 무엇을 확인하지 못했는가"
+necessity = "가상 거래소 통과를 실제 동작 검증으로 오해한다"
+sources = ["BRIEF", "FIA24"]
+applicability = "적용"
+reason = "지시문 §8이 실거래소 검증 범위의 구분을 요구한다"
+handling = "확인한 것: testnet 읽기 전용(메타, 스트림 구독, 주문 조회, 열린 주문, 포지션, 체결 조회, 참조 가격). 확인하지 않은 것: 주문·취소·체결·만료·한도. 실험 목록 35건"
+design = "결정"
+impl = "부분"
+verify = "부분"
+adr = ["ADR-017"]
+contracts = ["C-GW"]
+code = ["crates/oms-node/tests/hl_live.rs"]
+claims = ["V-HL-3"]
+open = "실주문 검증은 사용자의 허가와 testnet 키가 필요하다(U-01). 그 전까지 Hyperliquid 게이트웨이의 주문 경로는 미검증이다. 영향: 주문 경로의 결함은 첫 실주문에서 드러난다. 해소: U-01. 단계: testnet 실주문 때."
+
+[[item]]
+id = "P-VEN-11"
+layer = "project"
+area = "거래소 계약"
+consideration = "OMS가 죽어 있는 동안 거래소에 남은 주문을 어떻게 하는가"
+necessity = "눈이 가려진 채 체결이 진행된다"
+sources = ["HL-DOCS", "FIA24"]
+applicability = "적용"
+reason = "문서: scheduleCancel은 5초 이상 뒤, 하루 10회 발동"
+handling = "선택 기능(`schedule_cancel_secs`, 기본 꺼짐). 켜면 게이트웨이가 예약 취소를 계속 미룬다"
+design = "미결"
+impl = "구현"
+verify = "미검증"
+adr = ["ADR-017"]
+contracts = []
+code = ["crates/oms-node/src/venue/hyperliquid/mod.rs"]
+claims = ["V-HL-1"]
+open = "켤지 여부와 시간은 U-05. 서명 벡터만 확인했고 실제 동작은 미검증. 10회 소진 뒤의 동작은 문서에 없다. 포지션은 청산하지 않는다. 영향: OMS가 죽어 있는 동안 주문이 체결된다. 해소: U-05 결정과 testnet 확인. 단계: 실거래 전."
+
+[[item]]
+id = "P-PERF-01"
+layer = "project"
+area = "성능"
+consideration = "OMS의 지연이 전략의 시간 척도와 거래소 지연에 비해 충분히 작은가"
+necessity = "OMS가 지배적 지연이 되면 전략이 의미를 잃는다"
+sources = ["BRIEF", "HL-DOCS"]
+applicability = "적용"
+reason = "전략은 초~수백 ms 단위. 거래소 지연 중앙값 0.2초(문서)"
+handling = "수용 기준 A-LAT-1: 초당 200건에서 로컬 응답 p99 20 ms 이하"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = ["ADR-012"]
+contracts = []
+code = ["crates/xtask/src/perf.rs"]
+claims = ["V-PERF-1"]
+open = "측정은 가상 거래소 상대이고 실제 거래소 왕복은 재지 않았다. 지연 기준은 장치에 따라 달랐다(970 EVO Plus 만족, 980 500GB 미달). 영향: 실제 왕복 지연과 그 분포를 모른다. 해소: testnet에서 게이트웨이의 시각 기록으로 왕복을 잰다. 단계: testnet 실주문 때."
+
+[[item]]
+id = "P-PERF-02"
+layer = "project"
+area = "성능"
+consideration = "부하 생성기가 지연을 숨기지 않는가"
+necessity = "응답을 기다렸다 보내는 생성기는 서버가 느려질수록 부하를 줄여 지연을 과소 보고한다"
+sources = ["BRIEF"]
+applicability = "적용"
+reason = "지시문 §8: coordinated omission을 확인하라"
+handling = "open-loop. 지연은 '의도한 전송 시각'부터 잰다. 실제 전송부터의 지연과 생성기 지연을 따로 보고한다"
+design = "결정"
+impl = "구현"
+verify = "검증"
+adr = []
+contracts = []
+code = ["crates/xtask/src/loadgen.rs"]
+claims = ["V-PERF-1"]
+open = "부하 생성기 자체의 시험은 없다. 생성기 지연(의도한 시각과 실제 전송 시각의 차이)을 결과에 함께 싣는 것으로 확인한다: 측정에서 p99 0.25 ms 이하였다. 영향: 생성기에 결함이 있으면 지연이 실제보다 작게 보일 수 있다. 해소: 알려진 지연을 넣은 서버로 생성기를 검증한다. 단계: 배포 전."
+
+[[item]]
+id = "P-PERF-03"
+layer = "project"
+area = "성능"
+consideration = "저장 장치가 요구를 만족하는가"
+necessity = "flush 한 번이 지연의 대부분이다"
+sources = ["LINUX", "PRACTICE"]
+applicability = "적용"
+reason = "커밋마다 fdatasync하므로 장치가 응답 지연의 하한을 정한다"
+handling = "`xtask fsync-probe`로 대상 디렉터리를 먼저 잰다. 저널과 빌드 출력은 970 EVO Plus 2TB(`/mnt/nvme`)에 둔다. 측정(`evidence/perf/fsync-nvme.json`): fdatasync 중앙값 2.5 ms, p99 2.9 ms. 500GB SSD는 단독으로 0.9 ms였지만 부하 중 꼬리가 15~18 ms였다"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-012"]
+contracts = []
+code = ["crates/xtask/src/bench.rs"]
+claims = ["V-PERF-5"]
+open = "970 EVO Plus도 소비자용이고 전원 손실 보호가 없다. 영향: 지연 기준은 만족하지만 전원 장애에서 응답한 주문의 기록이 사라질 수 있다(A-05). 해소: 실거래에는 전원 손실 보호가 있는 장치를 쓰고 그 장치에서 다시 잰다(U-14). 단계: 실거래 전."
+
+[[item]]
+id = "P-OPS-01"
+layer = "project"
+area = "운영"
+consideration = "운영자 1인이라는 조건이 절차와 권한 설계에 반영됐는가"
+necessity = "다인 승인 절차를 흉내 내면 형식만 남는다"
+sources = ["BRIEF", "FIA15"]
+applicability = "적용"
+reason = "사용자가 혼자 개발하고 운영한다"
+handling = "승인 단계 없음. 대신 모든 운영 명령에 사유를 요구하고 저널에 남긴다. 복구는 수동"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-015", "ADR-013"]
+contracts = ["C-API"]
+code = ["crates/oms-api/src/bin/omsctl.rs"]
+claims = ["V-API-1"]
+open = "운영자가 자리에 없을 때의 대응(알림)은 G-OPS-05. 영향: 운영자가 없을 때 문제가 방치된다. 해소: U-11. 단계: 무인 운용 전."
+
+[[item]]
+id = "P-OPS-02"
+layer = "project"
+area = "비용"
+consideration = "설계 선택이 거래소 비용(요청 한도, 수수료)을 불필요하게 쓰지 않는가"
+necessity = "조회와 만료가 주문 예산을 깎는다"
+sources = ["HL-DOCS"]
+applicability = "적용"
+reason = "조회도 IP weight를 쓴다(orderStatus 2, 그 외 20). 만료된 액션은 계좌 한도를 5배 소모"
+handling = "주문별 조회는 간격을 벌린다. 계좌 단위 조회는 초당 1회 이하, 정기 훑기는 15초. 만료는 전략이 정하되 너무 짧게 잡지 않도록 문서에 적었다"
+design = "결정"
+impl = "구현"
+verify = "미검증"
+adr = ["ADR-014", "ADR-005"]
+contracts = ["C-RECON"]
+code = ["crates/oms-node/src/venue/reconciler.rs"]
+claims = []
+open = "실제 weight 소모량을 재지 않았다. 열린 주문이 많을 때 재접속 재확인이 분당 한도를 넘을 수 있다(열린 주문 목록이 증거를 갱신하므로 완화된다). 영향: 재접속이 잦으면 요청 한도에 걸려 재확인이 늦어진다. 해소: testnet에서 weight를 센다. 단계: testnet 운용 중."
+
+[[item]]
+id = "P-OPS-03"
+layer = "project"
+area = "운영"
+consideration = "배포 환경과 감독(재시작) 방식이 정해져 있는가"
+necessity = "프로세스가 죽은 채 방치된다"
+sources = ["BRIEF"]
+applicability = "적용"
+reason = "단일 호스트의 단일 프로세스로 범위를 정했다"
+handling = "단일 호스트, systemd 예시를 운영 문서에 제공. 종료 코드 0(정상), 2(치명), 3(시작 거부)의 의미를 구분"
+design = "결정"
+impl = "부분"
+verify = "미검증"
+adr = ["ADR-013"]
+contracts = []
+code = ["crates/oms-node/src/node.rs"]
+claims = []
+open = "systemd 단위 파일을 실제로 설치해 보지 않았다. 종료 코드 3(시작 거부)에서 자동 재시작하면 안 된다는 설정이 필요하다. 영향: 감독 설정이 틀리면 시작 거부 상태에서 재시작이 반복된다. 해소: 단위 파일을 설치해 본다. 단계: 배포 전."
+
+[[item]]
+id = "P-OPS-04"
+layer = "project"
+area = "의무"
+consideration = "적용되는 법규·약관상의 의무가 있는가"
+necessity = "기록 보관이나 신고 의무를 놓친다"
+sources = ["BRIEF"]
+applicability = "조건부"
+reason = "개인이 자기 자금으로 해외 가상자산 파생상품을 거래하는 경우다. 조사에서 EU RTS 6, 미국 15c3-5, 한국 가상자산이용자보호법의 조문 일부를 읽었으나 적용 여부는 판단하지 못했다"
+handling = "남은 결정. 기술적으로는 저널 무기한 보관이 기본이다"
+design = "미결"
+impl = "해당없음"
+verify = "해당없음"
+adr = []
+contracts = []
+code = []
+claims = []
+open = "법률 검토가 필요하다. 엔지니어링 판단으로 대신할 수 없다. 사용자 결정 U-12. 영향: 의무를 놓칠 수 있다. 해소: 법률 검토(U-12). 단계: 실거래 전."
+
+[[item]]
+id = "P-STRAT-01"
+layer = "project"
+area = "전략 귀속"
+consideration = "체결·비용이 전략별로 올바르게 귀속되는가"
+necessity = "전략 성과 판단이 틀린다"
+sources = ["REQ"]
+applicability = "적용"
+reason = "요구 R12"
+handling = "체결은 원천 주문의 전략에 귀속. 전략별 수량 포지션, 체결 수량·금액 합, 직접 수수료 합. 계좌 = 전략 합 + 미귀속(I-ATTR)"
+design = "미결"
+impl = "부분"
+verify = "부분"
+adr = ["ADR-008"]
+contracts = ["C-FILL"]
+code = ["crates/oms-core/src/model.rs"]
+claims = ["V-SIM-2", "V-EXT-1"]
+open = "손익, 평균 단가, funding, 공통 비용 배분이 없다(U-07). 수수료 합은 시뮬레이션에서만 거래소 값과 대조했다. 영향: 전략의 성과를 이 장부로 판단할 수 없다. 해소: U-07. 단계: 전략 성과 평가가 필요해질 때."
+
+[[item]]
+id = "P-STRAT-02"
+layer = "project"
+area = "전략 귀속"
+consideration = "긴급 시장가 매수 정책을 반영했는가"
+necessity = "기존 문서에서 사용자가 정한 정책이다"
+sources = ["REQ"]
+applicability = "적용"
+reason = "기존 결정: 추정 부담 + 버퍼 예약, 계좌당 진행 중 1건"
+handling = "별도 경로를 만들지 않았다. Hyperliquid의 시장가는 상한 가격의 IOC이므로 수량 × 상한 가격이 금액 상한이 된다. 빈도·건수 제한은 없다"
+design = "미결"
+impl = "미구현"
+verify = "해당없음"
+adr = ["ADR-008"]
+contracts = []
+code = []
+claims = []
+open = "기존 정책(긴급 사유 분류, 계좌당 1건, 빈도 제한)을 그대로 둘지, 상한 가격 IOC로 대체할지는 U-03. 영향: 긴급 주문의 빈도와 규모에 통제가 없다. 해소: U-03. 단계: 실거래 전."
+
+[[item]]
+id = "P-MIG-01"
+layer = "project"
+area = "이행"
+consideration = "기존 Go 구현과의 관계와 이행 경로가 정해져 있는가"
+necessity = "두 시스템이 같은 계좌에 동시에 주문하면 서로의 주문을 외부 주문으로 본다"
+sources = ["REQ"]
+applicability = "적용"
+reason = "`hyperliquid-trading`이 같은 계좌를 대상으로 한다"
+handling = "남은 결정. 이 OMS는 기존 코드를 건드리지 않았다"
+design = "미결"
+impl = "해당없음"
+verify = "해당없음"
+adr = []
+contracts = []
+code = []
+claims = []
+open = "기존 전략을 이 OMS의 클라이언트로 옮길지, 병행할지. 병행하면 계좌(또는 서브계정)를 나눠야 한다. 사용자 결정 U-13. 영향: 병행하면 두 프로그램이 한 계좌에 주문해 외부 체결로 차단된다. 해소: U-13. 단계: 기존 전략을 붙이기 전."
+
+[[item]]
+id = "P-VEN-12"
+layer = "project"
+area = "거래소 계약"
+consideration = "agent 지갑의 수명(만료, 등록 해제, 교체)을 다루는가"
+necessity = "agent 지갑이 만료되면 모든 주문이 거부된다. 등록이 해제된 지갑은 nonce 기록이 지워져 옛 서명이 다시 쓰일 수 있다고 문서가 경고한다"
+sources = ["HL-DOCS"]
+applicability = "적용"
+reason = "서명에 agent 지갑을 쓴다"
+handling = "다루지 않았다. 키는 환경 변수로 받고 프로세스 수명 동안 그대로 쓴다"
+design = "미결"
+impl = "미구현"
+verify = "해당없음"
+adr = ["ADR-017"]
+contracts = ["C-GW"]
+code = []
+claims = []
+open = "만료 시각을 조회하거나 알리지 않는다. 교체 절차가 없다. 영향: 지갑이 만료되면 주문이 모두 거부되고(거부로 드러난다) 취소도 나가지 않는다. 해소: 운영 문서에 교체 절차를 쓰고, 만료가 가까우면 화면에 표시한다. 해제한 지갑의 주소를 다시 쓰지 않는다. 단계: mainnet 전."
+
+[[item]]
+id = "P-VEN-13"
+layer = "project"
+area = "거래소 계약"
+consideration = "거래소가 일으키는 사건(상장 폐지, 거래 정지, 업그레이드 중의 제한, 증거금 설정, 일일 요청 상한, 같은 계좌의 spot 거래)을 다루는가"
+necessity = "주문 없이 주문과 포지션이 바뀌거나, 평소와 다른 거부가 온다"
+sources = ["HL-DOCS", "FIX-OSC"]
+applicability = "적용"
+reason = "문서에 상장 폐지 취소, post-only 기간, 요청 상한이 나온다"
+handling = "전용 처리는 없다. 거래소 주도 취소는 종결 통보로 받는다. 포지션이 주문 없이 바뀌면 포지션 대조가 불일치를 띄운다. 같은 계좌의 spot 체결은 기장하지 않고 경고 로그만 남긴다. 레버리지와 증거금 방식은 설정하지 않고 계좌의 값을 그대로 쓴다"
+design = "미결"
+impl = "부분"
+verify = "미검증"
+adr = ["ADR-017"]
+contracts = ["C-GW", "C-MISMATCH"]
+code = ["crates/oms-node/src/venue/hyperliquid/mod.rs"]
+claims = []
+open = "상장 폐지 때 포지션이 정산되는 통보의 형식, 업그레이드 중 post-only만 받는 기간의 거부 형식, 일일 요청 상한을 넘었을 때의 응답을 모른다. 영향: 이런 사건에서 불일치가 떠 거래가 막히거나, 거부가 결과 불명으로 분류돼 차단이 길어진다. 틀린 장부로 계속 거래하는 쪽은 아니다. 해소: testnet과 운용에서 관찰하고 종류별 처리를 정한다. 단계: 실거래 전."

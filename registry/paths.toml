@@ -1,0 +1,107 @@
+# 정상·오류 경로. 각 단계는 저널 이벤트 이름이다. 대시보드의 동작 탐색 화면이 읽는다.
+# 생성기가 이벤트 이름이 실제로 있는지 확인한다.
+
+[[path]]
+id = "P-NORMAL"
+title = "정상: 접수 → 거래소 접수 → 체결 → 종결"
+kind = "정상"
+steps = ["order_accepted", "order_acked", "fill_booked", "venue_terminal", "order_closed"]
+note = "응답은 order_accepted가 내구화된 뒤, 전송은 그 뒤에 나간다. 체결이 주문 수량에 도달하면 종결 통보 없이도 닫힌다."
+
+[[path]]
+id = "P-REJECT-LOCAL"
+title = "코어가 거절"
+kind = "오류"
+steps = ["request_rejected"]
+note = "주문이 만들어지지 않는다. 멱등성 키는 소모되지 않는다."
+
+[[path]]
+id = "P-REJECT-VENUE"
+title = "거래소가 거부"
+kind = "오류"
+steps = ["order_accepted", "order_closed"]
+note = "종결 사유 rejected_by_venue. 예약이 전부 풀린다."
+
+[[path]]
+id = "P-PARTIAL-CANCEL"
+title = "부분 체결 후 잔량 취소"
+kind = "정상"
+steps = ["order_accepted", "order_acked", "fill_booked", "cancel_requested", "cancel_sent", "cancel_outcome_noted", "venue_terminal", "order_closed"]
+note = "취소 요청은 예약을 풀지 않는다. 취소 도중의 체결은 기장된다."
+
+[[path]]
+id = "P-LOST-RESPONSE"
+title = "응답 유실: 결과 불명 → 조회로 발견"
+kind = "장애"
+steps = ["order_accepted", "order_in_doubt", "order_acked"]
+note = "다시 보내지 않는다. 불명인 동안 계좌 전체의 신규 주문이 막힌다. 스트림 통보가 먼저 오면 order_in_doubt 없이 order_acked가 된다."
+
+[[path]]
+id = "P-LOST-REQUEST"
+title = "요청 유실: 결과 불명 → 만료 뒤 부재 확인"
+kind = "장애"
+steps = ["order_accepted", "order_in_doubt", "order_closed"]
+note = "종결 사유 not_placed. 조회가 만료 + 여유 이후에 '없음'일 때만. 가정 A-01, A-02에 기댄다."
+
+[[path]]
+id = "P-RESTART"
+title = "전송 중 재시작"
+kind = "장애"
+steps = ["order_accepted", "booted", "order_in_doubt", "link_changed", "order_acked"]
+note = "재생은 전송 명령을 만들지 않는다. 재시작 뒤 조회로 주문을 찾는다. 못 찾으면 요청 유실 경로와 같다."
+
+[[path]]
+id = "P-FILL-BEFORE-ACK"
+title = "체결이 접수 응답보다 먼저 도착"
+kind = "순서 역전"
+steps = ["order_accepted", "fill_parked", "order_acked", "fill_unparked", "fill_booked"]
+note = "체결에 거래소 주문 ID만 있고 그 ID를 아직 모를 때. 주문을 식별할 수 있으면 fill_parked 없이 바로 order_acked, fill_booked."
+
+[[path]]
+id = "P-TERMINAL-BEFORE-FILL"
+title = "종결 통보가 체결보다 먼저 도착"
+kind = "순서 역전"
+steps = ["order_accepted", "order_acked", "venue_terminal", "fill_booked", "fills_synced", "order_closed"]
+note = "Closing 단계에서 기다린다. 최종 수량을 모르면 체결 동기화가 종결 시각을 지난 뒤에 닫는다."
+
+[[path]]
+id = "P-RECONNECT"
+title = "링크 단절과 재확인"
+kind = "장애"
+steps = ["link_changed", "link_changed", "status_noted", "fills_synced", "open_orders_swept", "positions_verified"]
+note = "네 가지가 모두 현재 세션에서 확인될 때까지 신규 주문이 막힌다(resync)."
+
+[[path]]
+id = "P-EXTERNAL"
+title = "외부 체결 탐지"
+kind = "불일치"
+steps = ["external_fill_booked", "mismatch_raised", "mismatch_acked"]
+note = "기장은 하고 신규 주문을 막는다. 운영자가 확인해야 풀린다. 포지션을 맞추려면 position_adjusted."
+
+[[path]]
+id = "P-OPERATOR"
+title = "운영자 중지와 재개"
+kind = "운영"
+steps = ["operator_halted", "cancel_requested", "operator_resumed"]
+note = "중지는 신규 주문만 막는다. 열린 주문을 없애려면 전체 취소를 따로 요청한다."
+
+[[path]]
+id = "P-REPLY-LOST"
+title = "전략에 대한 응답 유실: 주문은 접수됐는데 전략이 답을 못 받음"
+kind = "장애"
+steps = ["order_accepted", "order_acked"]
+note = "전략이 같은 키와 같은 만료 시각으로 다시 보내면 duplicate를 받는다. 중복 요청은 이벤트를 남기지 않으므로 저널에는 첫 요청의 기록만 있다(대시보드의 '이벤트 없는 입력'에 잠시 보인다). 계약 C-IDEM."
+
+[[path]]
+id = "P-FILL-AFTER-CLOSE"
+title = "닫은 주문에 체결이 도착"
+kind = "불일치"
+steps = ["order_closed", "fill_booked", "mismatch_raised", "mismatch_acked"]
+note = "버리지 않는다. 그 주문과 전략에 기장하고 FillAfterClose를 제기한다. 주문이 이미 메모리에서 지워졌으면 external_fill_booked로 계좌와 미귀속 장부에 기장한다."
+
+[[path]]
+id = "P-CANCEL-RETRY"
+title = "취소 시도가 다한 뒤 다시 요청"
+kind = "장애"
+steps = ["cancel_requested", "cancel_sent", "cancel_outcome_noted", "mismatch_raised", "cancel_requested", "cancel_sent"]
+note = "한 번의 요청에 시도 5회. 다 쓰면 CancelStuck이 한 번 뜬다. 전략이나 운영자가 다시 요청하면 새로 5회가 주어진다."

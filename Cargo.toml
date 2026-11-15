@@ -1,0 +1,42 @@
+[workspace]
+resolver = "3"
+members = ["crates/oms-core", "crates/oms-journal", "crates/oms-sim", "crates/oms-api", "crates/oms-node", "crates/xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+oms-core = { path = "crates/oms-core" }
+oms-journal = { path = "crates/oms-journal" }
+oms-sim = { path = "crates/oms-sim" }
+oms-api = { path = "crates/oms-api" }
+serde = { version = "1.0.229", features = ["derive", "rc"] }
+serde_json = "1.0.151"
+proptest = "1.11.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unwrap_used = "warn"
+# Nested `if let` + `if` reads more clearly than a let-chain in the decision code.
+collapsible_if = "allow"
+
+# A panic anywhere ends the process. A thread that died while the others keep
+# accepting requests would be worse than a stop: the journal holds the last
+# consistent state and the supervisor restarts into recovery. (Test harnesses
+# are always built with unwinding, so tests are unaffected.)
+[profile.release]
+debug = "line-tables-only"
+overflow-checks = true
+panic = "abort"
+
+[profile.dev]
+debug = "line-tables-only"
+panic = "abort"
