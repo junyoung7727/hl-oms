@@ -1,0 +1,6 @@
+# The toolchain every local build and the CI use. Clippy runs with
+# `-D warnings`, so a newer compiler may add lints; change this in its own PR.
+[toolchain]
+channel = "1.96.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"
