@@ -32,8 +32,11 @@ fn payload(seq: u64) -> Vec<u8> {
     format!("record-{seq}-{}", "x".repeat((seq % 7) as usize)).into_bytes()
 }
 
+/// The writer, the recovery report and every record visited.
+type Opened = (Writer, Recovery, Vec<(u64, Vec<u8>)>);
+
 /// Opens the journal and returns the writer and every record visited.
-fn open(dir: &Path, o: &Options, after: u64) -> Result<(Writer, Recovery, Vec<(u64, Vec<u8>)>), Error> {
+fn open(dir: &Path, o: &Options, after: u64) -> Result<Opened, Error> {
     let mut seen = Vec::new();
     let (w, r) = recover(dir, o, after, |seq, _schema, p| {
         seen.push((seq, p.to_vec()));
