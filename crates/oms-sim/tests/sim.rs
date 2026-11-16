@@ -59,6 +59,14 @@ fn run_profile(p: Profile) -> Vec<SimStats> {
             sum(|s| s.leverage_checked),
             sum(|s| s.leverage_rejects),
         );
+        println!(
+            "profile={} margin: reducing_entries={} reducing_entry_cancels={} reducing_plain_rejects={} reducing_reduce_only_accepts={}",
+            p.name,
+            sum(|s| s.reducing_entries),
+            sum(|s| s.reducing_entry_cancels),
+            sum(|s| s.reducing_plain_rejects),
+            sum(|s| s.reducing_reduce_only_accepts),
+        );
     }
     all
 }
@@ -354,5 +362,20 @@ fn profile_margin_calm() {
         // were refused by it.
         assert!(total(all, |s| s.leverage_checked) > 0, "no accepted plain order was judged");
         assert!(total(all, |s| s.leverage_rejects) > 0, "the leverage gate never refused an order");
+    }
+}
+
+/// S8 under random interleavings. The run itself fails when, while the
+/// account is REDUCING, a plain order is accepted (`reducing-accept`), or
+/// when a plain order that is open at the entry is left without a cancel
+/// request by the end of that same input (`reducing-cancel`).
+#[test]
+fn profile_margin_calm_reducing_invariant() {
+    let all = margin_calm_runs();
+    if all.len() >= 10 {
+        assert!(total(all, |s| s.reducing_entries) > 0, "REDUCING was never entered");
+        assert!(total(all, |s| s.reducing_entry_cancels) > 0, "no plain order was open at an entry");
+        assert!(total(all, |s| s.reducing_plain_rejects) > 0, "no plain order was refused while REDUCING");
+        assert!(total(all, |s| s.reducing_reduce_only_accepts) > 0, "no reduce-only order was accepted while REDUCING");
     }
 }

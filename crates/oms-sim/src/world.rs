@@ -235,6 +235,14 @@ pub struct SimStats {
     pub leverage_checked: u64,
     /// Requests refused with `AccountLeverage`.
     pub leverage_rejects: u64,
+    /// Times the account entered REDUCING.
+    pub reducing_entries: u64,
+    /// Plain orders that were open at an entry and had their cancel request.
+    pub reducing_entry_cancels: u64,
+    /// Plain requests refused with `Hold(Reducing)`.
+    pub reducing_plain_rejects: u64,
+    /// Reduce-only requests accepted while REDUCING.
+    pub reducing_reduce_only_accepts: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -307,6 +315,7 @@ enum Inflight {
 /// What the world notes before an input, to judge the core's answer to it.
 struct MarginBefore {
     exposure: Option<i128>,
+    reducing: bool,
 }
 
 pub const INSTANCE: u64 = 0x51_4d_55_4c;
@@ -930,7 +939,7 @@ impl World {
     // ---- margin rules: what the world checks after every input ------------
 
     fn margin_before(&self) -> MarginBefore {
-        MarginBefore { exposure: self.oracle_exposure() }
+        MarginBefore { exposure: self.oracle_exposure(), reducing: self.core.margin.reducing.is_some() }
     }
 
     /// Account exposure worked out by the world from the core's books: the
@@ -953,14 +962,43 @@ impl World {
     }
 
     fn check_margin_rules(&mut self, input: &Input, out: &Output, before: &MarginBefore) -> Result<(), Violation> {
+        if out.events.iter().any(|e| matches!(e, Event::ReducingEntered { .. })) {
+            // S8: every plain order that is open at the entry has a cancel
+            // request when the input that entered is done.
+            self.stats.reducing_entries += 1;
+            for o in self.core.open.iter().filter_map(|id| self.core.order(*id)) {
+                if o.reduce_only {
+                    continue;
+                }
+                if o.cancel.is_none() {
+                    return Err(self.violation(
+                        "reducing-cancel",
+                        format!("plain order {} is open at the entry into REDUCING and has no cancel request", o.id),
+                    ));
+                }
+                self.stats.reducing_entry_cancels += 1;
+            }
+        }
         let Input::NewOrder(req) = input else { return Ok(()) };
         match &out.reply {
             Some(Reply::NewOrder(NewOrderReply::Rejected { reasons })) => {
                 if reasons.contains(&RejectReason::AccountLeverage) {
                     self.stats.leverage_rejects += 1;
                 }
+                if !req.reduce_only && reasons.contains(&RejectReason::Hold(HoldReason::Reducing)) {
+                    self.stats.reducing_plain_rejects += 1;
+                }
             }
-            Some(Reply::NewOrder(NewOrderReply::Accepted { order_id })) if !req.reduce_only => {
+            Some(Reply::NewOrder(NewOrderReply::Accepted { order_id })) if before.reducing && !req.reduce_only => {
+                // S8: while REDUCING no plain order is accepted.
+                return Err(self.violation("reducing-accept", format!("plain order {order_id} accepted while REDUCING")));
+            }
+            Some(Reply::NewOrder(NewOrderReply::Accepted { .. })) if req.reduce_only => {
+                if before.reducing {
+                    self.stats.reducing_reduce_only_accepts += 1;
+                }
+            }
+            Some(Reply::NewOrder(NewOrderReply::Accepted { order_id })) => {
                 // S5: at acceptance the exposure is within twice the
                 // account value, or the order did not raise it.
                 self.stats.leverage_checked += 1;
