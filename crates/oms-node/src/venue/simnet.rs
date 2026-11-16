@@ -374,7 +374,7 @@ impl Gateway {
                         seq,
                         queried_at,
                         account_value: r.account_value,
-                        positions: Vec::new(),
+                        positions: r.positions,
                     }),
                     // An answer that cannot be read is refused as a whole.
                     Err(e) => VenueInput::MarginReportInvalid {
