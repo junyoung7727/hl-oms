@@ -1044,3 +1044,30 @@ fn a_report_of_an_earlier_day_does_not_change_the_day_base() {
     assert_eq!(out.events[1..], [daily_loss_entered("94.99", "100")]);
     assert_eq!(h.core.margin.day_base, base);
 }
+
+/// G9. The rule acts on a report, not on the loss itself. Two consecutive
+/// reports five seconds apart show 100 and then 88: REDUCING is entered on
+/// the second report, when 12 % of the base is already lost. Nothing
+/// happens between the two reports. The 5 % limit is not a cap on the loss.
+#[test]
+fn a_loss_between_two_reports_enters_reducing_on_the_next_report() {
+    let mut h = at_base_100();
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+
+    // The account loses 12 between the polls. No input tells the core.
+    h.advance(5 * SEC);
+    h.tick();
+    assert_eq!(h.core.holds(None), vec![]);
+    assert_eq!(h.order(bid).cancel, None);
+
+    let out = h.report_margin("88");
+    assert_eq!(
+        out.events[1..],
+        [
+            daily_loss_entered("88", "100"),
+            rule_cancel(bid),
+            cancel_sent(bid, 1)
+        ]
+    );
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+}

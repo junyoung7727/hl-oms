@@ -18,7 +18,7 @@
 - [x] Test `first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day` (seam A, S12): fails when a loss taken across midnight is absorbed into the new base; also for a gap of three days, which rolls once.
 - [x] Test `a_new_day_does_not_clear_reducing` (seam A, S12): fails when the latch is gone after the roll.
 - [x] Test `a_report_of_an_earlier_day_does_not_change_the_day_base` (seam A, G5): fails when a report dated a day before the base re-bases.
-- [ ] Test `a_loss_between_two_reports_enters_reducing_on_the_next_report` (seam A, G9): fails when reports at 100 and then 88 do not latch on the second report. It documents that 12 % was already lost.
+- [x] Test `a_loss_between_two_reports_enters_reducing_on_the_next_report` (seam A, G9): fails when reports at 100 and then 88 do not latch on the second report. It documents that 12 % was already lost.
 - [ ] Test `a_report_older_than_the_freshness_limit_on_arrival_is_still_judged` (seam A, S11): an accepted report whose query time is 40 s before the record time shows 94.99 on base 100. Fails when the account does not enter REDUCING with `Rule(DailyLoss)` on that report.
 - [ ] Test `an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing` (seam A, S19): fails when after an external fill and a loss report the account is not REDUCING with a mismatch open, or a reduce-only order is then refused.
 - [ ] Test `latch_and_day_base_replay_to_the_same_state` (seam A, S13): fails when replay loses the latch or re-bases the day.
