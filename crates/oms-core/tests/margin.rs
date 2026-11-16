@@ -3208,3 +3208,121 @@ fn an_old_report_on_arrival_is_still_judged_by_the_mm_rule() {
     );
     assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
 }
+
+/// Whether a first margin report with one isolated position of this
+/// maximum leverage, value and margin (raw 1e-8 integers) enters REDUCING
+/// by the MM-buffer rule, under a policy with this buffer.
+fn mm_rule_trips(max_leverage: u32, buffer_bps: u32, value: i64, margin: i64) -> bool {
+    let mut cfg = config_with_margin();
+    if let Some(policy) = cfg.policy.margin.as_mut() {
+        policy.mm_buffer_bps = buffer_bps;
+    }
+    let mut h = H::ready_with(cfg);
+    let out = report_positions(
+        &mut h,
+        vec![MarginPosition {
+            position_value: Amount(value),
+            margin_used: Amount(margin),
+            ..position("X", max_leverage)
+        }],
+    );
+    let rule = h.core.margin.reducing.as_ref().map(|r| r.rule);
+    assert!(
+        rule.is_none() || rule == Some(RuleId::MmBuffer),
+        "another rule tripped: {rule:?}"
+    );
+    assert_eq!(
+        rule.is_some(),
+        names(&out).contains(&"reducing_entered"),
+        "the latch and the event disagree"
+    );
+    rule.is_some()
+}
+
+/// G3. The rule compares exact products: no rounding flips the result next
+/// to the line, and nothing overflows at the largest amounts, leverages and
+/// buffers. Values in the first part are literals worked out by hand, as
+/// raw 1e-8 integers; the generated part takes the line from its own i128
+/// product.
+#[test]
+fn mm_comparison_is_exact_at_extreme_values() {
+    const MAX: i64 = 9_223_372_036_854_775_807;
+
+    // The largest position value at maximum leverage 40 and 25 bps: the
+    // line is 1.5 % of it, 138 350 580 552 821 637.105 raw.
+    assert!(mm_rule_trips(40, 25, MAX, 138_350_580_552_821_637));
+    assert!(!mm_rule_trips(40, 25, MAX, 138_350_580_552_821_638));
+    // The smallest position value: the line is 0.015 raw. A line rounded
+    // down to 0 would let a margin of 0 pass.
+    assert!(mm_rule_trips(40, 25, 1, 0));
+    assert!(!mm_rule_trips(40, 25, 1, 1));
+    // Maximum leverage 1 and no buffer: the line is half of the value,
+    // 4 611 686 018 427 387 903.5 raw.
+    assert!(mm_rule_trips(1, 0, MAX, 4_611_686_018_427_387_903));
+    assert!(!mm_rule_trips(1, 0, MAX, 4_611_686_018_427_387_904));
+    // The largest maximum leverage and no buffer: the line is the value
+    // divided by 8 589 934 590, which is 1 073 741 824.25 raw.
+    assert!(mm_rule_trips(u32::MAX, 0, MAX, 1_073_741_824));
+    assert!(!mm_rule_trips(u32::MAX, 0, MAX, 1_073_741_825));
+    // A buffer of 10 000 bps is the whole value on top of the maintenance
+    // margin: also a margin equal to the value is under the line.
+    assert!(mm_rule_trips(40, 10_000, MAX, MAX));
+    assert!(mm_rule_trips(40, 10_000, 1, 1));
+    // The largest buffer with the largest leverage and value: the line is
+    // more than 429 496 times the value. Its scaled product does not fit in
+    // an i128; the answer is still "under the line", for every margin.
+    assert!(mm_rule_trips(u32::MAX, u32::MAX, MAX, MAX));
+    assert!(mm_rule_trips(u32::MAX, u32::MAX, MAX, 0));
+    assert!(mm_rule_trips(1, u32::MAX, MAX, MAX));
+    // A negative margin is under every line, also the most negative one.
+    assert!(mm_rule_trips(40, 25, 1, -1));
+    assert!(mm_rule_trips(u32::MAX, u32::MAX, MAX, i64::MIN));
+    assert!(mm_rule_trips(40, 0, MAX, i64::MIN));
+    // A position value of zero or below is not judged, whatever its margin.
+    assert!(!mm_rule_trips(40, 25, 0, 0));
+    assert!(!mm_rule_trips(40, 25, 0, -1));
+    assert!(!mm_rule_trips(40, 25, -1, i64::MIN));
+    assert!(!mm_rule_trips(u32::MAX, u32::MAX, i64::MIN, i64::MIN));
+
+    // Generated. The line in raw units is value × (10 000 + 2 × leverage ×
+    // buffer) / (2 × leverage × 10 000). The largest margin under it and
+    // the smallest margin on or above it come from the test's own product;
+    // with a buffer of at most 1 000 000 bps that product fits.
+    let leverage = prop_oneof![1u32..=100, 1u32..=u32::MAX];
+    let buffer = prop_oneof![Just(0u32), Just(25u32), 0u32..=10_000, 0u32..=1_000_000];
+    let value = prop_oneof![1i64..=1_000, 1i64..=10_000_000_000_000, 1i64..=i64::MAX];
+    let mut runner = proptest::test_runner::TestRunner::default();
+    let result = runner.run(&(leverage, buffer, value), |(leverage, buffer, value)| {
+        let scale = 2 * i128::from(leverage) * 10_000;
+        let scaled_line = i128::from(value) * (10_000 + 2 * i128::from(leverage) * i128::from(buffer));
+        let (floor, on_a_unit) = (scaled_line / scale, scaled_line % scale == 0);
+        let first_not_under = if on_a_unit { floor } else { floor + 1 };
+        let last_under = first_not_under - 1;
+        match i64::try_from(last_under) {
+            Ok(margin) => prop_assert!(
+                mm_rule_trips(leverage, buffer, value, margin),
+                "margin {} did not trip: leverage {}, buffer {}, value {}",
+                margin,
+                leverage,
+                buffer,
+                value
+            ),
+            // The line is above every margin that can be written.
+            Err(_) => prop_assert!(mm_rule_trips(leverage, buffer, value, i64::MAX)),
+        }
+        if let Ok(margin) = i64::try_from(first_not_under) {
+            prop_assert!(
+                !mm_rule_trips(leverage, buffer, value, margin),
+                "margin {} tripped: leverage {}, buffer {}, value {}",
+                margin,
+                leverage,
+                buffer,
+                value
+            );
+        }
+        Ok(())
+    });
+    if let Err(e) = result {
+        panic!("{e}");
+    }
+}
