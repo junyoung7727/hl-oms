@@ -15,11 +15,11 @@
 - [x] Test `an_account_mode_off_the_allow_list_or_unknown_holds_the_account` (seam A, S18): fails when an unlisted value, or no value in this link session, passes.
 - [x] Test `reduce_only_order_passes_the_venue_setting_and_account_mode_holds` (seam A, S17, S18): fails when it is rejected by either hold.
 - [x] Test `node_reads_venue_setting_and_account_mode_and_status_shows_them` (seam C, S17, S18): fails when the queries, the simulated venue answers, the inputs or the status fields are not wired.
-- [ ] Mutants: the mode comparison, the leverage comparison, the session reset and the two never-allowed modes are each caught by a named test.
-- [ ] Stated and not proven here: which mode string means standard (T10); whether the venue enforces the leverage on resting orders (T8).
-- [ ] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
-- [ ] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
-- [ ] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
+- [x] Mutants: the mode comparison, the leverage comparison, the session reset and the two never-allowed modes are each caught by a named test.
+- [x] Stated and not proven here: which mode string means standard (T10); whether the venue enforces the leverage on resting orders (T8).
+- [x] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
+- [x] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
+- [x] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
 - [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
 
 ## Comments

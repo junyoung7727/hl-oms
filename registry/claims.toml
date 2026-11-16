@@ -856,7 +856,7 @@ criterion = "C-MARGIN의 차단 표와 설정 표. 기대값은 손으로 적었
 tests = ["core/absent_margin_policy_adds_no_bytes_to_a_journal_record", "core/empty_margin_section_takes_the_contract_defaults", "core/reduce_only_order_is_accepted_during_resync", "core/reduce_only_order_is_accepted_while_another_order_is_in_doubt", "core/reduce_only_order_is_accepted_under_an_unacknowledged_mismatch", "core/reduce_only_order_is_rejected_by_every_block_all_hold", "core/reduce_only_order_is_still_bound_by_the_strategy_position_limit", "core/without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order"]
 repro = "cargo test -p oms-core --test scenarios reduce_only && cargo test -p oms-core --test margin"
 supports = "C-MARGIN, ADR-018 §7의 8"
-not_covered = "거래소가 감소 전용 주문의 포지션 확대를 실제로 막는지(T5). `Reducing`, `VenueSetting`, `AccountMode` 차단은 뒤 티켓에서 생긴다. 정책 값을 읽는 규칙은 아직 없다"
+not_covered = "거래소가 감소 전용 주문의 포지션 확대를 실제로 막는지(T5). `Reducing` 차단은 뒤 티켓에서 생긴다(`VenueSetting`, `AccountMode` 차단의 통과는 V-MARGIN-9)"
 
 [[claim]]
 id = "V-MARGIN-2"
@@ -912,7 +912,7 @@ scope = "코어의 차단 계산과 신규 주문 검사. 정책 기본값(격�
 real = "oms-core"
 simulated = "거래소 설정 응답과 증거금 보고는 시험이 입력"
 faults = "설정을 받지 못한 링크 세션, 옛 세션의 늦은 응답, 교차 증거금, 레버리지 3과 1, 허용 목록에 잘못 적힌 통합 계좌와 포트폴리오 증거금"
-criterion = "C-MARGIN의 '거래소 설정과 계좌 모드'. 기대값은 손으로 적었다"
+criterion = "C-MARGIN의 '거래소 설정과 계좌 모드'. 기대값은 손으로 적었다. 변이 M50~M57"
 tests = ["core/instrument_with_unknown_venue_setting_holds_plain_orders", "core/a_setting_that_differs_from_config_holds_only_that_instrument", "core/a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again", "core/a_cross_position_in_a_margin_report_raises_the_hold", "core/venue_setting_hold_names_its_instrument_in_holds", "core/unified_or_portfolio_account_mode_holds_the_account", "core/an_account_mode_off_the_allow_list_or_unknown_holds_the_account", "core/reduce_only_order_passes_the_venue_setting_and_account_mode_holds"]
 repro = "cargo test -p oms-core --test margin"
 supports = "C-MARGIN"
