@@ -16,7 +16,7 @@
 - [x] Test `a_venue_rejection_of_an_accepted_order_frees_its_exposure` (seam A, S20): fails when an order the venue rejected (for example for margin) still counts, or the reject text is interpreted.
 - [x] Test `after_a_passive_breach_a_plain_reducing_order_passes_and_an_increasing_one_does_not` (seam A, S7): fails when a price move above 2x rejects a plain sell that lowers exposure, accepts one that raises it, or latches anything.
 - [x] Test `reduce_only_order_skips_the_leverage_gate` (seam A, S7): fails when a reduce-only order is rejected with `AccountLeverage`, or is left out of the sum for the next plain order.
-- [ ] Test `plain_order_is_rejected_when_an_exposed_instrument_has_no_fresh_reference_price` (seam A): fails when exposure on an instrument without a fresh reference price counts as zero.
+- [x] Test `plain_order_is_rejected_when_an_exposed_instrument_has_no_fresh_reference_price` (seam A): fails when exposure on an instrument without a fresh reference price counts as zero.
 - [ ] Test `account_value_zero_or_negative_rejects` (seam A): fails when a plain order passes with account value 0 or below.
 - [ ] Test `adding_an_order_never_lowers_exposure` (seam A, property, G3): fails when any generated accepted order lowers the published account exposure.
 - [ ] Test `mirrored_books_have_equal_exposure_and_equal_decisions` (seam A, property, G3): fails when swapping every side and the sign of every position changes the exposure or a decision.

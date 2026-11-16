@@ -316,7 +316,8 @@ fn plain_order_is_rejected_margin_unavailable_without_a_fresh_report() {
     // accepted.
     let t0 = h.now;
     h.margin_report(1, 1, t0, "1000");
-    next_input_at(&mut h, t0 + 30 * SEC);
+    next_input_at(&mut h, t0 + 30 * SEC - 1_000);
+    h.ref_price("X", "100");
     let id = h.accept("a", "k2", Side::Buy, "1", "100");
     assert_eq!(h.order(id).accepted_at, t0 + 30_000_000);
 
@@ -324,7 +325,8 @@ fn plain_order_is_rejected_margin_unavailable_without_a_fresh_report() {
     // microsecond later is rejected, and the reason is the only one.
     let t1 = h.now;
     h.margin_report(1, 2, t1, "1000");
-    next_input_at(&mut h, t1 + 30 * SEC + 1);
+    next_input_at(&mut h, t1 + 30 * SEC + 1 - 1_000);
+    h.ref_price("X", "100");
     assert_eq!(h.now + 1_000, t1 + 30_000_001);
     assert_eq!(
         h.reject("a", "k3", Side::Buy, "1", "100"),
@@ -365,7 +367,8 @@ fn margin_report_dated_after_the_record_time_is_not_fresh() {
     // exactly at its query time sees age zero and is accepted.
     let queried_at = h.now + 10 * SEC;
     h.margin_report(1, 2, queried_at, "1000");
-    next_input_at(&mut h, queried_at);
+    next_input_at(&mut h, queried_at - 1_000);
+    h.ref_price("X", "100");
     let id = h.accept("a", "k3", Side::Buy, "1", "100");
     assert_eq!(h.order(id).accepted_at, queried_at);
 }
@@ -377,6 +380,7 @@ fn margin_report_dated_after_the_record_time_is_not_fresh() {
 fn reduce_only_order_needs_no_fresh_report() {
     let mut h = H::ready_with(config_with_margin());
     h.report_margin("1000");
+    h.ref_price("X", "100");
     h.long("a", "k1", "1");
 
     // Reports stop. 31 s later the last one is not fresh.
@@ -824,6 +828,69 @@ fn reduce_only_order_skips_the_leverage_gate() {
     );
 }
 
+/// Exposure on an instrument cannot be valued without a fresh reference
+/// price (15 s, the existing limit of the price band). It is then not
+/// counted as zero: a plain order is refused with `MarginUnavailable`,
+/// whichever instrument it is for. An instrument with no position and no
+/// order needs no price.
+#[test]
+fn plain_order_is_rejected_when_an_exposed_instrument_has_no_fresh_reference_price() {
+    let mut h = H::ready_with(config_xy());
+    h.report_margin("100");
+
+    // No reference price for X was ever recorded: the order itself would
+    // be exposure on X.
+    let r = req_on(&h, "X", "k1", Side::Buy, "1", "100");
+    assert_eq!(rejected(h.new_order(r)), vec![RejectReason::MarginUnavailable]);
+
+    // With a price for X the order is accepted. Y has no price and no
+    // exposure, and is not asked about.
+    h.ref_price("X", "100");
+    let r = req_on(&h, "X", "k2", Side::Buy, "0.5", "100");
+    accepted(h.new_order(r));
+    assert_eq!(exposure(&h), "50");
+
+    // An order rests on Y, valued with a price recorded at t0.
+    h.ref_price("Y", "100");
+    let t0 = h.now;
+    let r = req_on(&h, "Y", "k3", Side::Buy, "0.5", "100");
+    accepted(h.new_order(r));
+
+    // Exactly 15 s after t0 the price of Y is still fresh: a plain order on
+    // X is accepted. (The report and the price of X are kept fresh.)
+    next_input_at(&mut h, t0 + 15 * SEC - 2_000);
+    h.report_margin("100");
+    h.ref_price("X", "100");
+    assert_eq!(h.now, t0 + 15 * SEC - 1_000);
+    let r = req_on(&h, "X", "k4", Side::Buy, "0.1", "100");
+    let id = accepted(h.new_order(r));
+    assert_eq!(h.order(id).accepted_at, t0 + 15_000_000);
+
+    // A new price of Y at t1. 15 s and one microsecond after t1 it is not
+    // fresh. The 50 resting on Y cannot be valued, so the order on X is
+    // refused although X has a fresh price.
+    h.ref_price("Y", "100");
+    let t1 = h.now;
+    next_input_at(&mut h, t1 + 15 * SEC + 1 - 2_000);
+    h.report_margin("100");
+    h.ref_price("X", "100");
+    assert_eq!(h.now + 1_000, t1 + 15_000_001);
+    let r = req_on(&h, "X", "k5", Side::Buy, "0.1", "100");
+    assert_eq!(rejected(h.new_order(r)), vec![RejectReason::MarginUnavailable]);
+    // Not a hold, and a reduce-only order is not stopped by it.
+    assert_eq!(h.core.holds(None), vec![]);
+    let r = NewOrderReq {
+        reduce_only: true,
+        ..req_on(&h, "X", "k6", Side::Sell, "0.1", "100")
+    };
+    accepted(h.new_order(r));
+
+    // A new price for Y ends it.
+    h.ref_price("Y", "100");
+    let r = req_on(&h, "X", "k7", Side::Buy, "0.1", "100");
+    accepted(h.new_order(r));
+}
+
 // ---- C-MARGIN: replay ---------------------------------------------------------
 
 /// S13. Margin state comes only from journal events. A core rebuilt from the
@@ -833,6 +900,7 @@ fn reduce_only_order_skips_the_leverage_gate() {
 fn margin_events_replay_to_the_same_state() {
     let mut h = H::ready_with(config_with_margin());
     h.margin_report(1, 1, h.now, "100");
+    h.ref_price("X", "100");
     h.accept("a", "k1", Side::Buy, "1", "100");
     h.venue(VenueInput::MarginReportInvalid {
         session: 1,

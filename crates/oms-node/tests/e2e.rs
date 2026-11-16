@@ -632,9 +632,20 @@ fn node_polls_margin_and_status_shows_value_and_age() {
     env.ctl(json!({"account_value": {"value": "249"}}));
     assert!(shown(&env, "249"), "status did not follow the venue: {}", env.status()["core"]["margin"]);
 
-    // The report is what a plain order needs: it is accepted.
+    // The report is what a plain order needs, with a fresh reference price
+    // for the leverage gate: it is accepted. The price reaches the core
+    // through the venue stream, so the order is tried until it has arrived.
+    env.ctl(json!({"ref_price": {"instrument": "X", "px": "100"}}));
     let mut c = env.client("a");
-    accept(&mut c, "k1", Side::Buy, "1", "100");
+    let accepted = (0..50).any(|n| {
+        let reply = c.new_order(order_op(&format!("k{n}"), Side::Buy, "1", "100", Tif::Gtc, 5_000)).unwrap();
+        let ok = matches!(reply, NewOrderReply::Accepted { .. });
+        if !ok {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        ok
+    });
+    assert!(accepted, "a plain order was never accepted: {}", env.status()["core"]["margin"]);
     assert_eq!(env.status()["core"]["margin"]["last_rejection"], serde_json::Value::Null);
     assert!(env.venue_dump()["margin_queries"].as_u64().unwrap() >= 4);
     drop(c);

@@ -10,10 +10,10 @@ use serde::{Serialize, Serializer};
 use std::fmt;
 use crate::core::Core;
 use crate::input::NewOrderReq;
-use crate::ids::InstrumentId;
+use crate::event::RejectReason;
+use crate::ids::{InstrumentId, Ts};
 use crate::model::Side;
 use std::collections::BTreeMap;
-use crate::num::{Px, Qty};
 
 /// Account exposure in units of 1e-16 quote (see the module text). Shown and
 /// serialised as a plain decimal of quote units.
@@ -42,10 +42,12 @@ impl Serialize for Exposure {
 
 impl Core {
     /// The account exposure now: the sum over instruments of the furthest
-    /// the position can reach, valued as the leverage gate values it. `None`
-    /// when it is not known.
+    /// the position can reach, valued as the leverage gate values it, with
+    /// the last reference price of each instrument whatever its age. `None`
+    /// when an instrument with a position or an order has no reference
+    /// price at all.
     pub fn account_exposure(&self) -> Option<Exposure> {
-        Some(Exposure(self.exposure_with(None)))
+        self.exposure_with(None, None).ok().map(Exposure)
     }
 
     /// Account exposure with `extra` counted as one more resting order.
@@ -57,52 +59,74 @@ impl Core {
     ///   N_down = max(0, -pos x ref + sum of sells x max(limit, ref))
     /// The instrument's exposure is the larger of the two, and the account
     /// exposure is the sum over instruments.
-    fn exposure_with(&self, extra: Option<&NewOrderReq>) -> i128 {
-        let reference = |i: &InstrumentId| self.ref_px.get(i).map_or(0, |p| p.px.0);
-        // An order is valued at the higher of its limit price and the
-        // reference price: the worse of where it rests and where the market
-        // is.
-        let value = |i: &InstrumentId, qty: Qty, px: Px| i128::from(qty.0) * i128::from(px.0.max(reference(i)));
-        // (buys, sells) per instrument. Every instrument with a position or
-        // an order has an account book.
-        let mut legs: BTreeMap<&InstrumentId, (i128, i128)> = self.account.keys().map(|i| (i, (0, 0))).collect();
+    ///
+    /// With `fresh_at`, every reference price used must be fresh at that
+    /// record time. Exposure that cannot be valued is never counted as zero.
+    fn exposure_with(&self, extra: Option<&NewOrderReq>, fresh_at: Option<Ts>) -> Result<i128, Unvalued> {
+        let max_age = self.config.policy.ref_price_max_age_us;
+        let reference = |i: &InstrumentId| {
+            self.ref_px
+                .get(i)
+                .filter(|p| fresh_at.is_none_or(|at| at.saturating_sub(p.at) <= max_age))
+                .map(|p| p.px.0)
+                .ok_or(Unvalued::NoReferencePrice)
+        };
+        // (buys, sells) per instrument.
+        let mut legs: BTreeMap<&InstrumentId, (i128, i128)> = BTreeMap::new();
+        for (i, book) in &self.account {
+            if book.pos.0 != 0 {
+                legs.insert(i, (0, 0));
+            }
+        }
         // A resting order counts until terminal evidence releases its
         // reservation. A cancel request alone releases nothing.
         let resting = self
             .open
             .iter()
             .filter_map(|id| self.orders.get(id))
+            .filter(|o| o.reserved.0 > 0)
             .map(|o| (&o.instrument, o.side, o.reserved, o.px));
         let extra = extra.map(|r| (&r.instrument, r.side, r.qty, r.px));
         for (i, side, qty, px) in resting.chain(extra) {
+            // An order is valued at the higher of its limit price and the
+            // reference price: the worse of where it rests and where the
+            // market is.
+            let value = i128::from(qty.0) * i128::from(px.0.max(reference(i)?));
             let leg = legs.entry(i).or_default();
             match side {
-                Side::Buy => leg.0 += value(i, qty, px),
-                Side::Sell => leg.1 += value(i, qty, px),
+                Side::Buy => leg.0 += value,
+                Side::Sell => leg.1 += value,
             }
         }
         let mut account = 0i128;
         for (i, (buys, sells)) in legs {
-            let position = i128::from(self.account_book(i).pos.0) * i128::from(reference(i));
+            let position = i128::from(self.account_book(i).pos.0) * i128::from(reference(i)?);
             let up = (position + buys).max(0);
             let down = (sells - position).max(0);
             account += up.max(down);
         }
-        account
+        Ok(account)
     }
 
-    /// Whether the leverage gate refuses this plain order. The caller has
-    /// checked that the quantity and the price are positive.
-    pub(crate) fn leverage_gate_refuses(&self, policy: &MarginPolicy, r: &NewOrderReq) -> bool {
-        let Some(report) = &self.margin.report else {
-            return false;
+    /// Judges a plain order at record time `at` against the leverage gate.
+    /// `None` means the gate does not refuse it. The caller has checked
+    /// that the quantity and the price are positive.
+    pub(crate) fn leverage_gate(&self, policy: &MarginPolicy, r: &NewOrderReq, at: Ts) -> Option<RejectReason> {
+        // Without a fresh report the order is already refused, and there is
+        // no account value to judge it with.
+        let report = self.margin.report.as_ref().filter(|_| self.margin_report_is_fresh(at))?;
+        let (Ok(before), Ok(after)) = (self.exposure_with(None, Some(at)), self.exposure_with(Some(r), Some(at))) else {
+            return Some(RejectReason::MarginUnavailable);
         };
-        let before = self.exposure_with(None);
-        let after = self.exposure_with(Some(r));
         let limit = i128::from(policy.max_account_leverage.0) * i128::from(report.account_value.0);
         // Above the limit alone does not refuse: a price move can put the
         // account there, and an order that does not raise exposure must
         // still pass so that the account can come down.
-        after > limit && after > before
+        (after > limit && after > before).then_some(RejectReason::AccountLeverage)
     }
+}
+
+/// Why an exposure has no value.
+enum Unvalued {
+    NoReferencePrice,
 }
