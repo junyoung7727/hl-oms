@@ -4,7 +4,7 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-merge
+**Status:** done
 
 - [x] Test `order_past_twice_the_account_value_is_rejected_account_leverage` (seam A, S5): fails when a buy of 2.01 at 100 is accepted.
 - [x] Test `order_exactly_at_the_limit_is_accepted` (seam A, S5): fails when a buy of 2.00 at 100 is rejected.
@@ -27,7 +27,7 @@
 - [x] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
 - [x] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
 - [x] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
-- [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
+- [x] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
 
 ## Comments
 
@@ -58,3 +58,4 @@
     - The gate walks all open orders twice per plain order (before and after). The cost with 500 resting orders is not measured here (ticket 12).
     - Daily loss, MM buffer, REDUCING, the stale cancel and the venue-setting holds are not in this ticket.
   - Local gate on the branch tip: `cargo test --workspace --locked` 217 passed, 0 failed, 0 ignored; clippy with warnings denied clean; generated documents in step; secret scan and `rustfmt_added.sh` pass.
+- Merged 2026-11-16 (merger claude-fable-5-2): merge commit 1a96627 into `margin-rules`. Workspace tests 217 passed, 0 failed, 0 ignored. Clippy clean, generated documents in step, secret scan, selftest and rustfmt-added pass. `verify --extended` without live-testnet: 236 tests in 9 suites passed; `mutants`: 36 of 36 killed (M32 to M36 included); both recorded for source `9557b57c6b2d6836` in commit d5de37d. Performance was not measured again, so V-PERF-1..5 stay "previous version result". Nothing had to be fixed during the merge. M32 to M36 are now taken on `margin-rules`; ticket 04 numbers its mutants from M37.
