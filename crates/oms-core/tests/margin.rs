@@ -1054,6 +1054,17 @@ proptest! {
             }
         }
     }
+
+    /// G3. Long and short are judged alike: the same run with every side
+    /// swapped, and so every position with the opposite sign, publishes the
+    /// same exposure after every step and decides every order the same way.
+    #[test]
+    fn mirrored_books_have_equal_exposure_and_equal_decisions(steps in steps()) {
+        let (plain, mirrored) = (play(&steps, false), play(&steps, true));
+        for (n, (a, b)) in plain.iter().zip(&mirrored).enumerate() {
+            prop_assert_eq!(a, b, "step {} ({:?}) differs in the mirrored run", n, &steps[n]);
+        }
+    }
 }
 
 // ---- C-MARGIN: replay ---------------------------------------------------------
