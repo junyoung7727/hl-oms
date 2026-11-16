@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-merge
+**Status:** done
 
 - [x] Test `margin_report_of_the_current_session_is_recorded` (seam A): fails when a report of the current link session produces no `margin_reported` event.
 - [x] Test `margin_report_of_an_old_session_or_with_the_link_down_is_ignored` (seam A): fails when such a report is stored or judged.
@@ -23,7 +23,7 @@
 - [x] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
 - [x] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
 - [x] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
-- [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
+- [x] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
 
 ## Comments
 
@@ -55,3 +55,4 @@
   - Not run here: the extended verification (the merger runs it) and the full mutant run. `evidence/mutants.json` still lists 23 mutants; `docs/verification/README.md` §4 lists 31 and says so. The evidence in `docs/generated` reads "이전 버전 결과" until the merger's run, because the source digest changed.
   - Still not guaranteed: no rule judges a report yet (daily loss, MM buffer, the leverage gate, the stale cancel and the holds `Reducing`, `VenueSetting`, `AccountMode` come with later tickets), so a recorded report only decides freshness. `MarginUnavailable` for a stale reference price is not built (it comes with the leverage gate). The query-weight budget check and `runtime.venue_setting_poll_ms` are not built (tickets 08 and 09). `account_modes_allowed` is not checked. The Hyperliquid gateway does not answer the margin query: with a margin policy on that gateway every plain order is rejected with `MarginUnavailable`. The seam C test runs with a 100 ms poll; the default of 5 s is not exercised by a test. Whether the venue's account value includes isolated equity is T2 and is not verified. Rules are not judged while no new report is accepted.
   - Local gate on the branch tip: `cargo test --workspace --locked` 201 passed, 0 failed, 0 ignored; clippy with warnings denied clean; generated documents in step; secret scan and `rustfmt_added.sh` pass.
+- Merged 2026-11-16 (merger claude-fable-5-2): merge commit 475c932 into `margin-rules`. Workspace tests 201 passed, 0 failed, 0 ignored. Clippy clean, generated documents in step, secret scan, selftest and rustfmt-added pass. `verify --extended` without live-testnet: 220 tests in 9 suites passed; `mutants`: 31 of 31 killed (M24 to M31 included); both recorded for source `0a86a80a92f2313c` in commit 2587299. Performance was not measured again, so V-PERF-1..5 stay "previous version result". Nothing had to be fixed during the merge.
