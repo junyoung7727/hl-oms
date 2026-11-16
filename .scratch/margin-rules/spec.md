@@ -288,11 +288,24 @@ Alternative considered: seam A only. Rejected because the operator commands, the
 
 Every scenario S1–S25 has at least one planned test in a ticket. The ticket files list the planned names. S4 and S20 get margin-specific tests on top of the existing ones. S19 is covered by composition (external fill plus loss report); the shape of a real liquidation fill (T6) is not verified.
 
+State after ticket 12 (2026-11-16): every test named in the scenario table of `spec-ko.md` §9 exists under that exact name (81 names, checked one by one with `grep` against the test functions). No planned name was renamed. Seven tests were added to the 102 planned ones, 109 in all:
+
+| Ticket | Added test | Seam | Scenario row |
+|---|---|---|---|
+| 01 | `absent_margin_policy_adds_no_bytes_to_a_journal_record`, `empty_margin_section_takes_the_contract_defaults` | A | S21 (not in the table; they carry "optional, absent by default") |
+| 04 | `status_shows_reducing_its_rule_and_the_day_base` | C | S8 |
+| 06 | `stale_age_starts_at_policy_activation_when_the_link_is_already_up` | A | S23 |
+| 10 | `margin_report_of_the_venue_process_carries_its_positions` | C | S17 |
+| 12 | `without_a_fresh_report_an_order_past_the_limit_is_rejected_margin_unavailable_only` | A | S11 |
+| 12 | `core_bench_margin_case_runs_the_leverage_gate_over_500_resting_orders` | xtask unit test | none (it pins the book of the benchmark case of G1) |
+
+Deviations, choices where this spec is silent, the open finding of ticket 09 and everything that is not guaranteed are collected in `docs/verification/README.md` §11 and, for the owner, in `spec-ko.md` §15.
+
 ### Test gaps G1–G11: decisions
 
 | Gap | Decision | Where |
 |---|---|---|
-| G1 Performance | Accepted. The gate runs on every new order and sums over all resting orders. The core benchmark gets a case with the margin policy on and 500 resting orders; claims V-PERF-1..5 are rerun after the gate lands. Perf evidence is not left stale | Ticket 12 |
+| G1 Performance | Accepted. The gate runs on every new order and sums over all resting orders. The core benchmark gets a case with the margin policy on and 500 resting orders; claims V-PERF-1..5 are rerun after the gate lands. Perf evidence is not left stale. Result (source `9468258ab606c562`): `handle(new_order)` at about 500 resting orders, median 62.3 µs and p99 74.1 µs with the margin policy, 27.0 µs and 33.2 µs without; V-PERF-1..5 passed. The open-loop runs behind V-PERF-1..4 use a node configuration without a margin policy, so the gate did not run in them | Ticket 12 |
 | G2 Mutation testing | Accepted. Every rule ticket adds mutants for its rule lines (leverage comparison, exposure sum, daily-loss comparison, evaluate-then-roll order, MM comparison, latch entry, hold table rows, stale limits, venue-setting comparison, sequence guard). The full mutant run before the final gate must catch all; a survivor is a finding that is fixed or written down | Tickets 01–09, run in 12 |
 | G3 Property tests | Accepted. Through seam A: adding an order never lowers exposure; mirroring long and short gives the same exposure and the same decision; account exposure is the sum over instruments; no overflow and no rounding flip at extreme price × quantity, with expected values from independent `i128` multiplication on literals | Ticket 03 (gate), 07 (MM) |
 | G4 Crash points for the latch | Accepted. The crash-point mechanism is extended to fire on a margin-report batch. Crash before the journal write of the REDUCING decision; crash after the write and before the cancels are sent; crash around a day-base set. After restart the latch, base and cancel state are consistent | Ticket 05 |
