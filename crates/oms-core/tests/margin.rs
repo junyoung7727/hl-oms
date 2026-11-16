@@ -2171,3 +2171,83 @@ fn latch_and_day_base_replay_to_the_same_state() {
     let recs: Vec<Record> = serde_json::from_str(&serde_json::to_string(&h.log).unwrap()).unwrap();
     assert_eq!(recs, h.log);
 }
+
+// ---- C-MARGIN: stale cancel ---------------------------------------------------
+
+fn stale_cancel(id: OrderId) -> Event {
+    Event::CancelRequested {
+        order_id: id,
+        by: Actor::Rule(RuleId::MarginStale),
+    }
+}
+
+/// What a tick decided, without the periodic purge record.
+fn decided(out: &Output) -> Vec<Event> {
+    out.events
+        .iter()
+        .filter(|ev| !matches!(ev, Event::Purged { .. }))
+        .cloned()
+        .collect()
+}
+
+/// S23. The link is up and the last accepted margin report was asked for
+/// more than 60 s ago: the tick asks once, as `Rule(MarginStale)`, to cancel
+/// every resting plain order, an unflagged take-profit included. At exactly
+/// 60 s nothing is cancelled. An order with the reduce-only flag is kept, an
+/// order whose cancel was already requested gets no second request, and the
+/// next tick asks for nothing more.
+#[test]
+fn report_stale_past_the_cancel_limit_cancels_each_plain_order_once() {
+    let mut h = at_base_100();
+    h.long("a", "k1", "1");
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    let take_profit = resting(&mut h, "a", "tp", Side::Sell, "0.5", "110");
+    let flagged = resting_reduce_only(&mut h, "a", "flagged", Side::Sell, "0.5", "120");
+    let asked = resting(&mut h, "b", "asked", Side::Buy, "0.2", "90");
+    assert_eq!(
+        h.cancel("b", asked),
+        CancelReply::Requested { order_id: asked }
+    );
+    // The venue confirmed that cancel; the order is still open there.
+    h.venue(VenueInput::CancelResult {
+        order_id: asked,
+        attempt: 1,
+        outcome: CancelOutcome::Confirmed,
+        timing: Default::default(),
+    });
+    let queried_at = h.now;
+    h.report_margin("100");
+    h.commands.clear();
+
+    // 60 s after the query: not past the limit.
+    next_input_at(&mut h, queried_at + 60 * SEC);
+    let out = h.tick();
+    assert_eq!(decided(&out), vec![], "a cancel at exactly 60 s");
+    assert_eq!(out.commands, vec![]);
+
+    // One microsecond later.
+    next_input_at(&mut h, queried_at + 60 * SEC + 1_000);
+    let out = h.tick();
+    assert_eq!(
+        decided(&out),
+        vec![
+            stale_cancel(bid),
+            cancel_sent(bid, 1),
+            stale_cancel(take_profit),
+            cancel_sent(take_profit, 1),
+        ]
+    );
+    assert_eq!(h.cancels(), vec![(bid, 1), (take_profit, 1)]);
+    let by = |id: OrderId| h.order(id).cancel.as_ref().map(|c| c.by.clone());
+    assert_eq!(by(flagged), None, "a reduce-only order was cancelled");
+    assert_eq!(by(asked), Some(Actor::Strategy(sid("b"))));
+    assert_eq!(h.order(flagged).phase, Phase::Working);
+
+    // The next tick asks for nothing again. Nothing latched.
+    h.advance(SEC);
+    let out = h.tick();
+    assert_eq!(decided(&out), vec![], "a second cancel on the next tick");
+    assert_eq!(out.commands, vec![]);
+    assert_eq!(h.core.holds(None), vec![]);
+    assert_eq!(h.core.margin.reducing, None);
+}

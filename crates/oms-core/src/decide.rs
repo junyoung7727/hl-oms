@@ -1432,6 +1432,33 @@ impl Tx<'_> {
 
     // ---- time -------------------------------------------------------------
 
+    /// Stale cancel (C-MARGIN): no margin report was accepted for longer
+    /// than `stale_cancel_us`. Every open plain order that has no cancel
+    /// request gets one, once. Nothing latches: the next recorded report
+    /// ends it.
+    fn stale_cancel(&mut self) -> Result<(), CoreFault> {
+        let (Some(policy), Some(report)) = (&self.core.config.policy.margin, &self.core.margin.report) else {
+            return Ok(());
+        };
+        let blind_for = self.at.saturating_sub(report.queried_at);
+        if blind_for <= policy.stale_cancel_us {
+            return Ok(());
+        }
+        for id in self.open_ids() {
+            let Some(o) = self.core.orders.get(&id) else { continue };
+            let is_plain = !o.reduce_only;
+            let not_asked_yet = o.cancel.is_none();
+            if is_plain && not_asked_yet {
+                self.emit(Event::CancelRequested {
+                    order_id: id,
+                    by: Actor::Rule(RuleId::MarginStale),
+                })?;
+                self.maybe_send_cancel(id)?;
+            }
+        }
+        Ok(())
+    }
+
     fn tick(&mut self) -> Result<(), CoreFault> {
         let policy = self.core.config.policy.clone();
         for id in self.open_ids() {
@@ -1467,6 +1494,7 @@ impl Tx<'_> {
             }
             self.maybe_send_cancel(id)?;
         }
+        self.stale_cancel()?;
 
         // A parked fill is given up as external when no order of ours could
         // still turn out to own it, or when it has waited too long.

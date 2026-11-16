@@ -6,7 +6,7 @@
 
 **Status:** claimed
 
-- [ ] Test `report_stale_past_the_cancel_limit_cancels_each_plain_order_once` (seam A, S23): fails when there is no cancel by `Rule(MarginStale)` after 60 s, a cancel at or before 60 s, a second cancel on the next tick, or a cancel of a reduce-only order.
+- [x] Test `report_stale_past_the_cancel_limit_cancels_each_plain_order_once` (seam A, S23): fails when there is no cancel by `Rule(MarginStale)` after 60 s, a cancel at or before 60 s, a second cancel on the next tick, or a cancel of a reduce-only order.
 - [ ] Test `stale_age_starts_at_link_up_when_no_report_has_arrived` (seam A, S23): fails when a node that never got a report never cancels.
 - [ ] Test `stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off` (seam A, S23): fails when cancels are requested in either case.
 - [ ] Test `stale_cancel_does_not_reissue_an_exhausted_cancel` (seam A, S23): fails when an order with a spent cancel gets a new request on a tick.

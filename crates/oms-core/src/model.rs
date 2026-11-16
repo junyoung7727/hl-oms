@@ -395,6 +395,9 @@ pub struct MarginState {
 pub enum RuleId {
     /// The account value fell more than `daily_loss_bps` below the day base.
     DailyLoss,
+    /// No margin report was accepted for longer than `stale_cancel_us`
+    /// while the link was up. It cancels and latches nothing.
+    MarginStale,
 }
 
 /// The REDUCING latch (C-MARGIN, 감소 전용 상태).
