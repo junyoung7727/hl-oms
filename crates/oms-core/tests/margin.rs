@@ -1071,3 +1071,29 @@ fn a_loss_between_two_reports_enters_reducing_on_the_next_report() {
     );
     assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
 }
+
+/// S11. Every recorded report is judged, also one that is older than the
+/// freshness limit of 30 s when it arrives. Its values were computed by the
+/// venue and are the newest the OMS has, and entering REDUCING is the safe
+/// side. Freshness only gates what releases risk.
+#[test]
+fn a_report_older_than_the_freshness_limit_on_arrival_is_still_judged() {
+    let mut h = at_base_100();
+    h.advance(60 * SEC);
+
+    // The answer was 40 s on the way: its query time is 40 s before the
+    // time it is recorded at.
+    let recorded_at = h.now + 1_000;
+    let out = h.margin_report(1, 2, recorded_at - 40 * SEC, "94.99");
+    assert_eq!(h.now, recorded_at);
+    assert!(
+        !h.core.margin_report_is_fresh(recorded_at),
+        "a report that is 40 s old counts as fresh"
+    );
+    assert_eq!(out.events[1..], [daily_loss_entered("94.99", "100")]);
+    assert_eq!(
+        h.core.margin.reducing.as_ref().map(|r| (r.rule, r.since)),
+        Some((RuleId::DailyLoss, recorded_at))
+    );
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+}
