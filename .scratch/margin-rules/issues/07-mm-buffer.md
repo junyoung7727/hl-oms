@@ -4,7 +4,7 @@
 
 **Blocked by:** 05
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Test `isolated_margin_below_mmr_plus_buffer_enters_reducing` (seam A, S16): fails when 2.99 does not latch with `Rule(MmBuffer)`, or 3.00 does. Does not prove that the venue's margin field is the isolated equity (T1).
 - [ ] Test `mmr_follows_the_max_leverage_of_each_position` (seam A, S16): fails when a position with maximum leverage 25 is judged at 1.25 % and not at 2 %.
