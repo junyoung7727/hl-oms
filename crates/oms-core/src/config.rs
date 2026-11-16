@@ -89,7 +89,18 @@ pub struct Policy {
     /// How far behind the fill-sync watermark fill keys are remembered. A
     /// fill older than that is treated as a re-delivery.
     pub fill_dedup_retention_us: u64,
+    /// Margin rules (ADR-018, C-MARGIN). Absent means the rules are off and
+    /// every hold refuses every new order, as before the rules existed. An
+    /// absent section is not serialised, so a journal of a run without the
+    /// rules keeps the bytes it had before the section existed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub margin: Option<MarginPolicy>,
 }
+
+/// Values of the margin rules. The section is optional; see `Policy::margin`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MarginPolicy {}
 
 impl Default for Policy {
     fn default() -> Self {
@@ -110,6 +121,7 @@ impl Default for Policy {
             max_parked_fills: 1024,
             purge_interval_us: 60_000_000,
             fill_dedup_retention_us: 86_400_000_000,
+            margin: None,
         }
     }
 }
