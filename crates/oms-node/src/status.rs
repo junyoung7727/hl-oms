@@ -85,6 +85,10 @@ pub fn status(ctx: &ApiCtx, strategy: Option<&StrategyId>) -> serde_json::Value 
             "seq": report.map(|r| r.seq),
             "positions": report.map(|r| &r.positions),
             "last_rejection": core.margin.last_rejection,
+            // NORMAL is `reducing: null`. Otherwise the rule that tripped
+            // first, what it saw and since when.
+            "reducing": core.margin.reducing,
+            "day_base": core.margin.day_base,
             // What the venue told in this link session, per configured
             // instrument: null while unknown. `as_configured` is false when
             // the instrument is held by its setting.

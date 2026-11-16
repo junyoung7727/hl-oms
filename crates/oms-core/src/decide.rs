@@ -693,7 +693,70 @@ impl Tx<'_> {
                 reason: format!("position {}: max_leverage is zero", p.instrument),
             });
         }
-        self.emit(Event::MarginReported { report: r.clone() })
+        self.emit(Event::MarginReported { report: r.clone() })?;
+        self.judge_daily_loss(r)?;
+        self.roll_day_base(r)
+    }
+
+    /// Daily loss (C-MARGIN): the account value of a recorded report is more
+    /// than `daily_loss_bps` below the day base.
+    fn judge_daily_loss(&mut self, r: &MarginReportIn) -> Result<(), CoreFault> {
+        let (Some(policy), Some(base)) = (&self.core.config.policy.margin, &self.core.margin.day_base) else {
+            return Ok(());
+        };
+        let (base_value, value) = (i128::from(base.value.0), i128::from(r.account_value.0));
+        let lost_too_much = (base_value - value) * 10_000 > i128::from(policy.daily_loss_bps) * base_value;
+        if !lost_too_much {
+            return Ok(());
+        }
+        let detail = format!(
+            "account value {} is more than {} bps below the day base {}",
+            r.account_value, policy.daily_loss_bps, base.value
+        );
+        self.enter_reducing(RuleId::DailyLoss, detail)
+    }
+
+    /// Latches REDUCING for the whole account and, in the same input, asks
+    /// to cancel every open plain order. An order with the venue's
+    /// reduce-only flag is kept: it can only lower the position.
+    fn enter_reducing(&mut self, rule: RuleId, detail: String) -> Result<(), CoreFault> {
+        // Entered once: a second trigger emits nothing, and the rule that
+        // tripped first stays recorded.
+        if self.core.margin.reducing.is_some() {
+            return Ok(());
+        }
+        self.emit(Event::ReducingEntered { rule, detail })?;
+        for id in self.open_ids() {
+            let Some(o) = self.core.orders.get(&id) else { continue };
+            let is_plain = !o.reduce_only;
+            if is_plain && (o.cancel.is_none() || self.cancel_exhausted(id)) {
+                self.emit(Event::CancelRequested {
+                    order_id: id,
+                    by: Actor::Rule(rule),
+                })?;
+                // Sent now if the venue has the order. An order still
+                // waiting for its send result keeps the request, and the
+                // cancel goes out when the venue acknowledges it.
+                self.maybe_send_cancel(id)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Sets the day base from a recorded report when there is none, or when
+    /// the report belongs to a later UTC day than the base. Runs after the
+    /// report was judged against the old base. A report of an earlier day
+    /// never moves the base back.
+    fn roll_day_base(&mut self, r: &MarginReportIn) -> Result<(), CoreFault> {
+        let day = r.queried_at / DAY_US;
+        if self.core.margin.day_base.as_ref().is_some_and(|base| day <= base.day) {
+            return Ok(());
+        }
+        self.emit(Event::DayBaseSet {
+            day,
+            value: r.account_value,
+            set_by: BaseSetBy::Report,
+        })
     }
 
     fn on_link(&mut self, up: bool, session: u64, reason: &str) -> Result<(), CoreFault> {

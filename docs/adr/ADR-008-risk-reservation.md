@@ -88,7 +88,7 @@ C. 구현은 `check_new_order`(`crates/oms-core/src/decide.rs`)와 `Book`(`model
 
 감소 전용 주문의 기준은 거래소의 reduce-only 표시다. OMS가 계산한 '줄이는 방향'이 아니다. 거래소가 계좌 포지션으로 판정하므로 기존 결정 O08의 우려(전략에서 축소인 주문이 계좌에서는 아닐 수 있다)가 이 표시에는 해당하지 않는다. 감소 전용 주문도 §7의 다른 검사는 모두 받는다.
 
-`VenueSetting(종목)`, `AccountMode`는 티켓 08이 추가했다. `Reducing`은 아직 코드에 없는 사유다. 증거금 규칙의 뒤 티켓(`.scratch/margin-rules/issues/` 04)이 추가하고, 그때 위 표의 오른쪽 열에 들어간다. 표는 `HoldReason::refuses_only_plain_orders`(`model.rs`)에 있다.
+`Reducing`은 증거금 규칙의 티켓 04가, `VenueSetting(종목)`, `AccountMode`는 티켓 08이 추가했고 모두 위 표의 오른쪽 열에 있다. 표는 `HoldReason::refuses_only_plain_orders`(`model.rs`)에 있다.
 
 한도를 현재 노출 아래로 낮추는 설정 변경은 허용한다. 기존 노출은 남고 새 주문만 새 한도로 검사된다. 그 동안 I-QTY는 성립하지 않는다.
 

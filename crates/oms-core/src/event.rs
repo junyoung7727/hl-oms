@@ -200,6 +200,18 @@ pub enum Event {
         queried_at: Ts,
         reason: String,
     },
+    /// The day base of the daily-loss rule was set (C-MARGIN).
+    DayBaseSet {
+        day: u64,
+        value: Amount,
+        set_by: BaseSetBy,
+    },
+    /// The account entered REDUCING (C-MARGIN). In the same input every
+    /// resting plain order gets a `CancelRequested` by this rule.
+    ReducingEntered {
+        rule: RuleId,
+        detail: String,
+    },
     /// The venue told the margin mode and the leverage of one instrument in
     /// the current link session (C-MARGIN).
     VenueSettingNoted {
@@ -381,6 +393,8 @@ impl Event {
             Event::Purged { .. } => "purged",
             Event::MarginReported { .. } => "margin_reported",
             Event::MarginReportRejected { .. } => "margin_report_rejected",
+            Event::DayBaseSet { .. } => "day_base_set",
+            Event::ReducingEntered { .. } => "reducing_entered",
             Event::VenueSettingNoted { .. } => "venue_setting_noted",
             Event::AccountModeNoted { .. } => "account_mode_noted",
         }
