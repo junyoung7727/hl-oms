@@ -2421,6 +2421,34 @@ fn a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again() {
     h.accept("a", "k2", Side::Buy, "1", "100");
 }
 
+/// A report can list positions on instruments that are not configured
+/// here. They stay in the recorded report and the MM rule judges them, but
+/// they leave no venue setting: only a configured instrument can be held
+/// by its setting, and the map of settings is bounded by the configuration.
+/// The `VenueSetting` input is filtered the same way.
+#[test]
+fn a_report_position_on_an_unconfigured_instrument_leaves_no_venue_setting() {
+    let mut h = H::ready_with(config_with_margin());
+    link_down(&mut h);
+    h.link_up_and_sync_only();
+    assert_eq!(h.core.margin.venue_settings.len(), 0);
+
+    h.margin_seq += 1;
+    h.venue(VenueInput::MarginReport(MarginReportIn {
+        session: h.session,
+        seq: h.margin_seq,
+        queried_at: h.now,
+        account_value: amt("1000"),
+        positions: vec![position("X", 40), position("NOT-CONFIGURED", 20)],
+    }));
+    let known: Vec<&InstrumentId> = h.core.margin.venue_settings.keys().collect();
+    assert_eq!(known, vec![&iid("X")]);
+    // The report itself is kept whole.
+    let reported = h.core.margin.report.as_ref().map(|r| r.positions.len());
+    assert_eq!(reported, Some(2));
+    assert_eq!(h.rebuilt().margin, h.core.margin);
+}
+
 /// The next margin report of the current link session: account value 1000
 /// and one position on X with this margin mode and leverage.
 fn report_with_position_on_x(

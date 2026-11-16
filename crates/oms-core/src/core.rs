@@ -832,7 +832,11 @@ impl Core {
                 self.margin.last_rejection = None;
                 // Every position states the margin mode and the leverage of
                 // its instrument: a report is a source of venue settings.
-                for p in &report.positions {
+                // Only for configured instruments, as with the
+                // `VenueSetting` input: nothing reads another setting, and
+                // the venue decides how many positions a report lists.
+                let configured = &self.config.instruments;
+                for p in report.positions.iter().filter(|p| configured.contains_key(&p.instrument)) {
                     self.margin.venue_settings.insert(
                         p.instrument.clone(),
                         VenueSettingSeen {
