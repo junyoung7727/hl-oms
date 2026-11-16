@@ -12,7 +12,7 @@
 - [x] Test `a_withdrawal_without_rebase_reads_as_a_loss` (seam A, S15): fails when a drop in account value caused by a withdrawal stops latching. The unsafe side (a deposit hides a loss) is a stated non-guarantee.
 - [x] Test `strategy_socket_cannot_clear_reducing_or_rebase` (seam C, S14): fails when either command works from the strategy socket.
 - [x] Test `omsctl_clear_reduce_and_rebase_day_work_end_to_end` (seam C, S14): fails when the commands, their replies or the status fields (state, rule, day base) are not wired.
-- [ ] Test `reducing_and_day_base_survive_a_node_kill` (seam C, S13): fails when after a kill and restart the status shows no latch or a new base.
+- [x] Test `reducing_and_day_base_survive_a_node_kill` (seam C, S13): fails when after a kill and restart the status shows no latch or a new base.
 - [ ] Test `reducing_cancels_every_resting_plain_order_through_the_node` (seam C, S8, G7): fails when with many resting plain orders at the simulated venue one of them is still open after entry, or a reduce-only one is cancelled.
 - [ ] Test `stopped_before_the_write_of_a_reducing_decision_the_next_report_decides_again` (seam C, crash point, G4): fails when after restart the latch or its cancels exist without a journal record, or the next breaching report does not latch.
 - [ ] Test `stopped_after_the_reducing_decision_is_durable_the_cancels_are_sent_after_restart` (seam C, crash point, G4): fails when after restart the latch is missing, or a recorded rule cancel is never sent.

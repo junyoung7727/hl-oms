@@ -892,3 +892,60 @@ fn omsctl_clear_reduce_and_rebase_day_work_end_to_end() {
     let err = omsctl(&env.sock(), &["--strategy", "a", "clear-reduce", "--note", "x"]).unwrap_err();
     assert_eq!(err, "Forbidden: operator operations need the admin socket");
 }
+
+/// S13. REDUCING and the day base are journal state. The node process is
+/// killed (SIGKILL) while REDUCING and started again: `status` shows the
+/// same latch (rule, detail, time of entry) and the same day base, although
+/// the venue's account value is what a fresh start would take as a new
+/// base. Plain orders stay refused. A clear survives a kill in the same
+/// way: after the next restart the account is NORMAL with the operator's
+/// base.
+#[test]
+fn reducing_and_day_base_survive_a_node_kill() {
+    let mut env = margin_node("margin-kill", "100");
+    lose_to(&mut env, "94");
+    let before = env.status()["core"]["margin"].clone();
+    assert_eq!(before["reducing"]["rule"], "daily_loss");
+    assert_eq!(before["day_base"]["value"], "100");
+
+    env.kill_node();
+    env.start_node();
+    // The restarted node is in session again and has taken new reports.
+    let seq_seen = |m: &serde_json::Value| m["seq"].as_u64().is_some_and(|n| n >= 3);
+    assert!(
+        env.wait(Duration::from_secs(20), || {
+            env.try_status().is_some_and(|st| {
+                st["core"]["boot"] == 2 && st["core"]["holds"] == json!(["reducing"]) && seq_seen(&st["core"]["margin"])
+            })
+        }),
+        "the restarted node did not come back REDUCING: {:?}\n{}",
+        env.try_status().map(|st| st["core"].to_string()),
+        env.log_tail(20)
+    );
+    let after = env.status()["core"]["margin"].clone();
+    assert_eq!(after["reducing"], before["reducing"], "the latch changed across the kill");
+    assert_eq!(after["day_base"], before["day_base"], "the day base changed across the kill");
+    assert_eq!(after["account_value"], "94");
+    let mut c = env.client("a");
+    match c.new_order(order_op("k1", Side::Buy, "0.1", "100", Tif::Gtc, 5_000)).unwrap() {
+        NewOrderReply::Rejected { reasons } => {
+            assert!(reasons.contains(&RejectReason::Hold(HoldReason::Reducing)), "{reasons:?}")
+        }
+        other => panic!("a plain order was not refused after the restart: {other:?}"),
+    }
+    drop(c);
+
+    // The operator clears, and the node is killed again.
+    assert_eq!(env.admin().call(Op::ClearReduce { note: "after the restart".into() }).unwrap(), json!("cleared"));
+    let cleared = env.status()["core"]["margin"].clone();
+    assert_eq!(cleared["day_base"]["value"], "94");
+    env.kill_node();
+    env.start_node();
+    env.wait_ready();
+    wait_margin(&env, "reports after the second restart", seq_seen);
+    let st = env.status();
+    assert_eq!(st["core"]["boot"], 3);
+    assert_eq!(st["core"]["margin"]["reducing"], serde_json::Value::Null);
+    assert_eq!(st["core"]["margin"]["day_base"], cleared["day_base"]);
+    assert_eq!(st["core"]["margin"]["day_base"]["set_by"], "operator");
+}
