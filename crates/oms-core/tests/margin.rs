@@ -669,6 +669,47 @@ fn exposure_is_the_sum_over_instruments() {
     assert_eq!(rejected(h.new_order(r)), vec![RejectReason::AccountLeverage]);
 }
 
+/// S2. A cancel request frees nothing, and neither does the venue's
+/// confirmation of the request. Exposure falls when terminal evidence
+/// releases the reservation. Buy 2 at 100, 0.5 filled: position 50 plus the
+/// resting 1.5 is still 200.
+#[test]
+fn partial_fill_then_cancel_frees_exposure_only_on_terminal_evidence() {
+    let mut h = gate();
+    let id = h.accept("a", "k1", Side::Buy, "2", "100");
+    h.placed_open(id, "v1");
+    h.fill(id, "t1", "0.5", "100");
+    assert_eq!(exposure(&h), "200");
+
+    assert_eq!(h.cancel("a", id), CancelReply::Requested { order_id: id });
+    assert_eq!(exposure(&h), "200");
+    assert_eq!(
+        h.reject("a", "k2", Side::Buy, "0.1", "100"),
+        vec![RejectReason::AccountLeverage]
+    );
+
+    // The venue confirms the cancel request. That is not terminal evidence.
+    h.venue(VenueInput::CancelResult {
+        order_id: id,
+        attempt: 1,
+        outcome: CancelOutcome::Confirmed,
+        timing: Default::default(),
+    });
+    assert_eq!(exposure(&h), "200");
+    assert_eq!(
+        h.reject("a", "k3", Side::Buy, "0.1", "100"),
+        vec![RejectReason::AccountLeverage]
+    );
+
+    // Terminal evidence: cancelled with 0.5 filled. The position of 0.5
+    // stays, the resting 1.5 is gone.
+    h.status(id, VenueStatus::Canceled { reason: "user".into() }, Some("0.5"));
+    assert_eq!(h.order(id).phase, Phase::Closed);
+    assert_eq!(exposure(&h), "50");
+    h.accept("a", "k4", Side::Buy, "1.5", "100");
+    assert_eq!(exposure(&h), "200");
+}
+
 // ---- C-MARGIN: replay ---------------------------------------------------------
 
 /// S13. Margin state comes only from journal events. A core rebuilt from the
