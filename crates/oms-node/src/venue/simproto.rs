@@ -180,8 +180,8 @@ pub struct WirePosition {
 pub struct MarginResult {
     pub account_value: Amount,
     /// Every position of the account, with its value, margin, margin mode,
-    /// leverage and maximum leverage.
-    #[serde(default)]
+    /// leverage and maximum leverage. The list is part of the answer: an
+    /// answer without it is unreadable, not an account without positions.
     pub positions: Vec<MarginPosition>,
 }
 
@@ -214,4 +214,24 @@ pub enum StreamMsg {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StreamLine {
     pub stream: StreamMsg,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A margin answer is one fact (C-MARGIN): an answer without its list
+    /// of positions is not read as "no positions". The gateway turns the
+    /// error into a rejected report.
+    #[test]
+    fn a_margin_answer_without_its_position_list_is_not_read() {
+        let whole = json!({"account_value": "100", "positions": []});
+        let read = serde_json::from_value::<MarginResult>(whole).map(|r| (r.account_value, r.positions.len()));
+        assert_eq!(read.ok(), Some((Amount(10_000_000_000), 0)));
+
+        let without_list = json!({"account_value": "100"});
+        let error = serde_json::from_value::<MarginResult>(without_list).map(|r| r.positions.len());
+        assert_eq!(error.map_err(|e| e.to_string()), Err("missing field `positions`".to_string()));
+    }
 }
