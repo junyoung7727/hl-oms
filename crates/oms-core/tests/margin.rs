@@ -2987,3 +2987,53 @@ fn mmr_follows_the_max_leverage_of_each_position() {
     );
     assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
 }
+
+/// S16. The latch is one for the whole account. The position on X is under
+/// its line; the plain order resting on Y is cancelled in the name of the
+/// rule, and a new plain order is refused on Y as on X. A reduce-only order
+/// on Y is still accepted.
+#[test]
+fn a_trigger_on_one_instrument_blocks_plain_orders_on_all() {
+    let mut h = H::ready_with(config_xy());
+    h.ref_price("X", "100");
+    h.ref_price("Y", "100");
+    h.report_margin("100");
+    let bid_on_y = accepted({
+        let r = req_on(&h, "Y", "bid-y", Side::Buy, "0.2", "90");
+        h.new_order(r)
+    });
+    h.placed_open(bid_on_y, "bid-y");
+
+    h.advance(5 * SEC);
+    let out = report_positions(&mut h, vec![position_with("X", 40, "200", "2.99")]);
+    let by_the_rule = Actor::Rule(RuleId::MmBuffer);
+    assert_eq!(
+        out.events[1..],
+        [
+            mm_buffer_entered(
+                "position X: isolated margin 2.99 is below the maintenance margin \
+                 at maximum leverage 40 plus 25 bps of the position value 200"
+            ),
+            Event::CancelRequested {
+                order_id: bid_on_y,
+                by: by_the_rule.clone(),
+            },
+            cancel_sent(bid_on_y, 1),
+        ]
+    );
+    assert_eq!(
+        h.order(bid_on_y).cancel.as_ref().map(|c| c.by.clone()),
+        Some(by_the_rule)
+    );
+
+    let held = vec![RejectReason::Hold(HoldReason::Reducing)];
+    for (n, instrument) in ["Y", "X"].into_iter().enumerate() {
+        let r = req_on(&h, instrument, &format!("plain-{n}"), Side::Buy, "0.1", "100");
+        assert_eq!(rejected(h.new_order(r)), held, "plain order on {instrument}");
+    }
+    let r = NewOrderReq {
+        reduce_only: true,
+        ..req_on(&h, "Y", "flagged-y", Side::Sell, "0.1", "100")
+    };
+    accepted(h.new_order(r));
+}

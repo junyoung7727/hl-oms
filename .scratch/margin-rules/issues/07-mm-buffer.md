@@ -8,7 +8,7 @@
 
 - [x] Test `isolated_margin_below_mmr_plus_buffer_enters_reducing` (seam A, S16): fails when 2.99 does not latch with `Rule(MmBuffer)`, or 3.00 does. Does not prove that the venue's margin field is the isolated equity (T1).
 - [x] Test `mmr_follows_the_max_leverage_of_each_position` (seam A, S16): fails when a position with maximum leverage 25 is judged at 1.25 % and not at 2 %.
-- [ ] Test `a_trigger_on_one_instrument_blocks_plain_orders_on_all` (seam A, S16): fails when a plain order on another instrument is accepted.
+- [x] Test `a_trigger_on_one_instrument_blocks_plain_orders_on_all` (seam A, S16): fails when a plain order on another instrument is accepted.
 - [ ] Test `a_cross_position_is_not_judged_by_the_mm_rule` (seam A): fails when a cross-margin position trips the rule (it is the venue-setting hold's case).
 - [ ] Test `clear_reduce_is_refused_while_the_mm_condition_holds` (seam A, S14): fails when the clear succeeds, or the refusal reason is not `MmBufferActive`. There is no way out of a false latch; that is a stated non-guarantee.
 - [ ] Test `reducing_records_the_rule_that_tripped_first` (seam A, S16): fails when a later MM trigger overwrites `DailyLoss` in the latch, or the reverse.
