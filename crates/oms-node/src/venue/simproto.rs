@@ -80,6 +80,9 @@ pub enum Ctl {
     RefPrice { instrument: InstrumentId, px: Px },
     /// Sets the account value the venue states in its margin reports.
     AccountValue { value: Amount },
+    /// Sets the margin the venue states for the position on one instrument,
+    /// in place of its model's figure (position value / leverage).
+    MarginUsed { instrument: InstrumentId, value: Amount },
     /// Sets the margin mode and the leverage the venue states for one
     /// instrument. Stands for the operator changing it at the venue.
     VenueSetting { instrument: InstrumentId, isolated: bool, leverage: u32 },
@@ -177,8 +180,8 @@ pub struct WirePosition {
 pub struct MarginResult {
     pub account_value: Amount,
     /// Every position of the account, with its value, margin, margin mode,
-    /// leverage and maximum leverage.
-    #[serde(default)]
+    /// leverage and maximum leverage. The list is part of the answer: an
+    /// answer without it is unreadable, not an account without positions.
     pub positions: Vec<MarginPosition>,
 }
 
@@ -195,10 +198,6 @@ pub struct AccountModeResult {
     pub mode: String,
 }
 
-/// What the simulated venue calls its ordinary account mode. This is the
-/// simulated venue's own name, not a Hyperliquid value (T10).
-pub const SIM_STANDARD_MODE: &str = "standard";
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamMsg {
@@ -211,4 +210,24 @@ pub enum StreamMsg {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StreamLine {
     pub stream: StreamMsg,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A margin answer is one fact (C-MARGIN): an answer without its list
+    /// of positions is not read as "no positions". The gateway turns the
+    /// error into a rejected report.
+    #[test]
+    fn a_margin_answer_without_its_position_list_is_not_read() {
+        let whole = json!({"account_value": "100", "positions": []});
+        let read = serde_json::from_value::<MarginResult>(whole).map(|r| (r.account_value, r.positions.len()));
+        assert_eq!(read.ok(), Some((Amount(10_000_000_000), 0)));
+
+        let without_list = json!({"account_value": "100"});
+        let error = serde_json::from_value::<MarginResult>(without_list).map(|r| r.positions.len());
+        assert_eq!(error.map_err(|e| e.to_string()), Err("missing field `positions`".to_string()));
+    }
 }

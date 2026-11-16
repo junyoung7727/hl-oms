@@ -19,6 +19,25 @@ fn run_profile(p: Profile) -> Vec<SimStats> {
     run_profile_seeds(p, seeds())
 }
 
+/// Whether `all` holds enough runs to judge what a profile reached
+/// (`needed` runs: some of the things counted happen a few times in that
+/// many). With fewer runs the invariants were still checked in every run,
+/// but nothing says the profile reached the rule. That case is not silent:
+/// the line below goes to standard error past the test harness's capture,
+/// so it shows in every `cargo test` and in the log of `xtask verify`.
+/// Fewer runs come from `OMS_SIM_SEEDS` below the number, from
+/// `OMS_SIM_SEED`, from `OMS_SIM_PROFILE` naming another profile, and for
+/// `margin_days` (a tenth of the seeds) from the default 40 seeds.
+fn reach_is_judged(check: &str, all: &[SimStats], needed: usize) -> bool {
+    use std::io::Write;
+    if all.len() >= needed {
+        return true;
+    }
+    let line = format!("sim: REACH NOT CHECKED: {check}: {} runs, {needed} needed\n", all.len());
+    let _ = std::io::stderr().write_all(line.as_bytes());
+    false
+}
+
 fn run_profile_seeds(p: Profile, seeds: Vec<u64>) -> Vec<SimStats> {
     if let Ok(only) = std::env::var("OMS_SIM_PROFILE") {
         if only != p.name {
@@ -115,7 +134,7 @@ fn profile_calm() {
 #[test]
 fn profile_lossy() {
     let all = run_profile(Profile::lossy());
-    if all.len() >= 10 {
+    if reach_is_judged("profile_lossy", &all, 10) {
         // The profile must actually reach the paths it is meant to cover.
         assert!(all.iter().map(|s| s.in_doubt_seen).sum::<u64>() > 0, "no send outcome was ever unknown");
         assert!(all.iter().map(|s| s.closed_not_placed).sum::<u64>() > 0, "absence rule never used");
@@ -127,7 +146,7 @@ fn profile_lossy() {
 #[test]
 fn profile_crashy() {
     let all = run_profile(Profile::crashy());
-    if all.len() >= 10 {
+    if reach_is_judged("profile_crashy", &all, 10) {
         assert!(all.iter().map(|s| u64::from(s.crashes)).sum::<u64>() > 0, "no crash was injected");
     }
 }
@@ -135,7 +154,7 @@ fn profile_crashy() {
 #[test]
 fn profile_weak_evidence() {
     let all = run_profile(Profile::weak_evidence());
-    if all.len() >= 10 {
+    if reach_is_judged("profile_weak_evidence", &all, 10) {
         assert!(all.iter().map(|s| s.parked_seen).sum::<u64>() > 0, "no fill ever waited for its order");
     }
 }
@@ -143,7 +162,7 @@ fn profile_weak_evidence() {
 #[test]
 fn profile_purge() {
     let all = run_profile(Profile::purge());
-    if all.len() >= 10 {
+    if reach_is_judged("profile_purge", &all, 10) {
         assert!(all.iter().map(|s| s.purged).sum::<u64>() > 0, "nothing was purged");
     }
 }
@@ -156,7 +175,7 @@ fn profile_skewed() {
 #[test]
 fn profile_external() {
     let all = run_profile(Profile::external());
-    if all.len() >= 10 {
+    if reach_is_judged("profile_external", &all, 10) {
         assert!(all.iter().map(|s| s.external_fills).sum::<u64>() > 0, "no external fill was injected");
     }
 }
@@ -382,7 +401,8 @@ fn margin_calm_runs() -> &'static [SimStats] {
 
 // The assertions on what a margin profile reached are made from 40 seeds on:
 // some of the things counted (a midnight while REDUCING, a stale cancel that
-// finds an order) happen a few times in 40 runs.
+// finds an order) happen a few times in 40 runs. With fewer runs
+// `reach_is_judged` says on standard error that the reach was not checked.
 
 fn total(all: &[SimStats], f: fn(&SimStats) -> u64) -> u64 {
     all.iter().map(f).sum()
@@ -395,7 +415,7 @@ fn total(all: &[SimStats], f: fn(&SimStats) -> u64) -> u64 {
 #[test]
 fn profile_margin_calm() {
     let all = margin_calm_runs();
-    if all.len() >= 40 {
+    if reach_is_judged("profile_margin_calm", all, 40) {
         // The profile must reach the rule: orders were judged, and some
         // were refused by it.
         assert!(total(all, |s| s.leverage_checked) > 0, "no accepted plain order was judged");
@@ -410,7 +430,7 @@ fn profile_margin_calm() {
 #[test]
 fn profile_margin_calm_reducing_invariant() {
     let all = margin_calm_runs();
-    if all.len() >= 40 {
+    if reach_is_judged("profile_margin_calm_reducing_invariant", all, 40) {
         assert!(total(all, |s| s.reducing_entries) > 0, "REDUCING was never entered");
         assert!(total(all, |s| s.reducing_entry_cancels) > 0, "no plain order was open at an entry");
         assert!(total(all, |s| s.reducing_plain_rejects) > 0, "no plain order was refused while REDUCING");
@@ -452,7 +472,7 @@ fn profile_margin_calm_release_invariant() {
     assert!(!is_reducing(&w));
 
     let all = margin_calm_runs();
-    if all.len() >= 40 {
+    if reach_is_judged("profile_margin_calm_release_invariant", all, 40) {
         assert!(total(all, |s| s.reducing_clears) > 0, "REDUCING was never cleared by the operator");
         assert!(total(all, |s| s.reducing_day_rolls) > 0, "no run crossed midnight while REDUCING");
         assert!(total(all, |s| s.reducing_recoveries) > 0, "the account value never recovered while REDUCING");
@@ -469,7 +489,7 @@ fn profile_margin_calm_release_invariant() {
 #[test]
 fn profile_margin_lossy() {
     let all = run_profile(Profile::margin_lossy());
-    if all.len() >= 40 {
+    if reach_is_judged("profile_margin_lossy", &all, 40) {
         // The faults happened ...
         assert!(total(&all, |s| u64::from(s.crashes)) > 0, "no restart was injected");
         assert!(total(&all, |s| u64::from(s.link_drops)) > 0, "the link never dropped");
@@ -608,11 +628,11 @@ fn profile_margin_days_crosses_three_utc_days_with_restarts() {
         assert_eq!(s.day_rolls, 3, "run {i}: the day base crossed {} UTC midnights, the run has 3", s.day_rolls);
         assert!(s.crashes > 0, "run {i} had no restart");
     }
-    if all.len() >= 4 {
+    if reach_is_judged("profile_margin_days_crosses_three_utc_days_with_restarts", all, 4) {
         assert!(total(all, |s| s.reducing_restarts) > 0, "no restart happened while REDUCING");
         assert!(total(all, |s| s.reducing_clears) > 0, "REDUCING was never cleared by the operator");
     }
-    if all.len() >= 40 {
+    if reach_is_judged("profile_margin_days_crosses_three_utc_days_with_restarts (rare events)", all, 40) {
         assert!(total(all, |s| s.reducing_day_rolls) > 0, "no run crossed midnight while REDUCING");
         assert!(total(all, |s| s.roll_losses) > 0, "no loss was first seen by the report that rolled the day");
     }
@@ -633,7 +653,7 @@ fn margin_journal_records_stay_within_one_per_poll() {
     assert_eq!(margin_records(&w) - records, 17_280);
 
     let all = margin_days_runs();
-    if all.len() >= 4 {
+    if reach_is_judged("margin_journal_records_stay_within_one_per_poll", all, 4) {
         assert!(total(all, |s| s.report_dups) > 0, "no margin answer was delivered twice");
         assert!(total(all, |s| s.reports_dropped) > 0, "no margin report was dropped");
     }

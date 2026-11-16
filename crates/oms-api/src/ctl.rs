@@ -133,8 +133,10 @@ fn build(cmd: &str, args: &[String]) -> Result<Op, String> {
 
 /// Runs one `omsctl` invocation: `args` are the command-line arguments
 /// without the program name. Returns the text to print (the JSON answer).
-/// `watch` prints each event as it arrives and returns only on an error.
-pub fn run(args: &[String]) -> Result<String, String> {
+/// `watch` writes each event to `events` as it arrives, one JSON object
+/// per line, and returns only on an error (also when `events` cannot be
+/// written to). No other command writes to `events`.
+pub fn run(args: &[String], events: &mut dyn std::io::Write) -> Result<String, String> {
     let socket = PathBuf::from(need(args, "--socket")?);
     let strategy = opt(args, "--strategy");
     let flags_with_value = [
@@ -173,10 +175,9 @@ pub fn run(args: &[String]) -> Result<String, String> {
             .set_timeout(std::time::Duration::from_secs(3600))
             .map_err(|e| e.to_string())?;
         loop {
-            match client.next_event() {
-                Ok(ev) => println!("{}", serde_json::to_string(&ev).unwrap_or_default()),
-                Err(e) => return Err(e.to_string()),
-            }
+            let ev = client.next_event().map_err(|e| e.to_string())?;
+            let line = serde_json::to_string(&ev).unwrap_or_default();
+            writeln!(events, "{line}").map_err(|e| e.to_string())?;
         }
     }
     let op = build(&cmd, args)?;

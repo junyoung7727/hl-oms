@@ -76,7 +76,7 @@ fn names(out: &Output) -> Vec<&'static str> {
 fn position(instrument: &str, max_leverage: u32) -> MarginPosition {
     MarginPosition {
         instrument: iid(instrument),
-        szi: sq("2"),
+        qty: sq("2"),
         position_value: amt("200"),
         margin_used: amt("100"),
         leverage_type: LeverageType::Isolated,
@@ -92,7 +92,7 @@ fn position(instrument: &str, max_leverage: u32) -> MarginPosition {
 fn margin_report_of_the_current_session_is_recorded() {
     let mut h = H::ready_with(config_with_margin());
     let queried_at = h.now;
-    let report = MarginReportIn {
+    let report = MarginReport {
         session: h.session,
         seq: 1,
         queried_at,
@@ -243,7 +243,7 @@ fn invalid_margin_report_is_journaled_and_never_becomes_fresh() {
     // maintenance margin rate.
     h.advance(5 * SEC);
     let zero_at = h.now;
-    let out = h.venue(VenueInput::MarginReport(MarginReportIn {
+    let out = h.venue(VenueInput::MarginReport(MarginReport {
         session: 1,
         seq: 3,
         queried_at: zero_at,
@@ -292,6 +292,34 @@ fn invalid_margin_report_is_journaled_and_never_becomes_fresh() {
     let out = h.margin_report(1, 4, h.now, "99");
     assert_eq!(names(&out), vec!["margin_reported"]);
     assert_eq!(recorded(&h), Some((1, 4, amt("99"))));
+}
+
+/// The last rejection is what the operator sees as "why the last margin
+/// report was rejected". A report recorded after it ends it: the venue
+/// answers readably again, and an old reason must not read as a current
+/// problem. Replay gives the same.
+#[test]
+fn a_recorded_report_ends_the_last_rejection() {
+    let mut h = H::ready_with(config_with_margin());
+    h.margin_report(1, 1, h.now, "100");
+    h.advance(5 * SEC);
+    let queried_at = h.now;
+    h.venue(VenueInput::MarginReportInvalid {
+        session: 1,
+        seq: 2,
+        queried_at,
+        reason: "marginSummary.accountValue: not a number".into(),
+    });
+    assert_eq!(
+        h.core.margin.last_rejection.as_ref().map(|r| r.seq),
+        Some(2)
+    );
+
+    h.advance(5 * SEC);
+    let out = h.margin_report(1, 3, h.now, "99");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.last_rejection, None);
+    assert_eq!(h.rebuilt().margin, h.core.margin);
 }
 
 // ---- C-MARGIN: freshness ----------------------------------------------------
@@ -424,7 +452,7 @@ fn without_a_margin_policy_no_margin_check_runs() {
         reason: "unreadable".into(),
     });
     assert_eq!(names(&out), Vec::<&str>::new());
-    let out = h.venue(VenueInput::MarginReport(MarginReportIn {
+    let out = h.venue(VenueInput::MarginReport(MarginReport {
         session: 1,
         seq: 3,
         queried_at: h.now,
@@ -1397,13 +1425,21 @@ fn margin_events_replay_to_the_same_state() {
     link_down(&mut h);
     h.link_up_and_sync();
     let last_at = h.now;
-    h.venue(VenueInput::MarginReport(MarginReportIn {
+    h.venue(VenueInput::MarginReport(MarginReport {
         session: 2,
         seq: 1,
         queried_at: last_at,
         account_value: amt("96"),
         positions: vec![position("X", 40)],
     }));
+    // A rejection lasts until the next recorded report: the one before the
+    // reports above is gone, this one stays.
+    h.venue(VenueInput::MarginReportInvalid {
+        session: 2,
+        seq: 2,
+        queried_at: h.now,
+        reason: "unreadable again".into(),
+    });
     h.advance(31 * SEC);
     h.reject("a", "k2", Side::Buy, "1", "100");
 
@@ -1430,7 +1466,7 @@ fn margin_events_replay_to_the_same_state() {
             .last_rejection
             .as_ref()
             .map(|r| (r.seq, r.reason.as_str())),
-        Some((2, "unreadable"))
+        Some((2, "unreadable again"))
     );
     // The rebuilt core judges freshness as the live one does.
     assert!(rebuilt.margin_report_is_fresh(last_at + 30 * SEC));
@@ -1713,6 +1749,56 @@ fn under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted() 
     assert_eq!(h.sends().last(), Some(&order_id));
     // The accepted order is not cancelled by the latch that is already set.
     assert_eq!(h.order(order_id).cancel, None);
+}
+
+/// Without a margin policy no order is refused for a reason of C-MARGIN
+/// (contract, 설정): a configuration without the policy, activated while the
+/// account is REDUCING, takes the hold `Reducing` away with every other
+/// margin hold, and plain orders are accepted as before these rules. The
+/// latch itself is journal state and is not cleared by a configuration:
+/// the policy that comes back finds the account REDUCING, and only the
+/// operator's clear ends it.
+#[test]
+fn without_a_margin_policy_the_reducing_latch_refuses_no_order_and_returns_with_the_policy() {
+    let mut h = at_base_100();
+    h.long("a", "k1", "1");
+    h.report_margin("94.99");
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+    let latch = h.core.margin.reducing.clone();
+    assert_eq!(latch.as_ref().map(|r| r.rule), Some(RuleId::DailyLoss));
+
+    // The policy is taken out of the configuration.
+    let out = h.inp(Input::Config(Box::new(CoreConfig {
+        version: 2,
+        ..config()
+    })));
+    assert!(matches!(out.reply, Some(Reply::Config(Ok(2)))));
+    assert_eq!(h.core.holds(None), vec![]);
+    assert_eq!(h.core.holds(Some(&sid("a"))), vec![]);
+    // A plain order and a reduce-only order are both accepted.
+    h.accept("a", "k2", Side::Buy, "0.1", "100");
+    let r = h.reduce_only_req("a", "k3", Side::Sell, "0.5", "100");
+    assert!(matches!(h.new_order(r), NewOrderReply::Accepted { .. }));
+
+    // The policy comes back: the account is REDUCING as it was, by the
+    // same rule and since the same time.
+    let out = h.inp(Input::Config(Box::new(CoreConfig {
+        version: 3,
+        ..config_with_margin()
+    })));
+    assert!(matches!(out.reply, Some(Reply::Config(Ok(3)))));
+    assert_eq!(h.core.margin.reducing, latch);
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+    assert_eq!(
+        h.reject("a", "k4", Side::Buy, "0.1", "100"),
+        vec![RejectReason::Hold(HoldReason::Reducing)]
+    );
+    assert_eq!(h.rebuilt().margin, h.core.margin);
+
+    // And the operator can clear it on the fresh report.
+    let out = clear_reduce(&mut h, "policy restored, account checked");
+    assert!(matches!(out.reply, Some(Reply::Operator(Ok(_)))), "{:?}", out.reply);
+    assert_eq!(h.core.holds(None), vec![]);
 }
 
 /// S9. An order that is still waiting for its send result when the account
@@ -2335,6 +2421,34 @@ fn a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again() {
     h.accept("a", "k2", Side::Buy, "1", "100");
 }
 
+/// A report can list positions on instruments that are not configured
+/// here. They stay in the recorded report and the MM rule judges them, but
+/// they leave no venue setting: only a configured instrument can be held
+/// by its setting, and the map of settings is bounded by the configuration.
+/// The `VenueSetting` input is filtered the same way.
+#[test]
+fn a_report_position_on_an_unconfigured_instrument_leaves_no_venue_setting() {
+    let mut h = H::ready_with(config_with_margin());
+    link_down(&mut h);
+    h.link_up_and_sync_only();
+    assert_eq!(h.core.margin.venue_settings.len(), 0);
+
+    h.margin_seq += 1;
+    h.venue(VenueInput::MarginReport(MarginReport {
+        session: h.session,
+        seq: h.margin_seq,
+        queried_at: h.now,
+        account_value: amt("1000"),
+        positions: vec![position("X", 40), position("NOT-CONFIGURED", 20)],
+    }));
+    let known: Vec<&InstrumentId> = h.core.margin.venue_settings.keys().collect();
+    assert_eq!(known, vec![&iid("X")]);
+    // The report itself is kept whole.
+    let reported = h.core.margin.report.as_ref().map(|r| r.positions.len());
+    assert_eq!(reported, Some(2));
+    assert_eq!(h.rebuilt().margin, h.core.margin);
+}
+
 /// The next margin report of the current link session: account value 1000
 /// and one position on X with this margin mode and leverage.
 fn report_with_position_on_x(
@@ -2343,7 +2457,7 @@ fn report_with_position_on_x(
     leverage_value: u32,
 ) -> Output {
     h.margin_seq += 1;
-    h.venue(VenueInput::MarginReport(MarginReportIn {
+    h.venue(VenueInput::MarginReport(MarginReport {
         session: h.session,
         seq: h.margin_seq,
         queried_at: h.now,
@@ -3192,7 +3306,7 @@ fn report_positions(h: &mut H, positions: Vec<MarginPosition>) -> Output {
 
 fn report_positions_asked_at(h: &mut H, queried_at: Ts, positions: Vec<MarginPosition>) -> Output {
     h.margin_seq += 1;
-    h.venue(VenueInput::MarginReport(MarginReportIn {
+    h.venue(VenueInput::MarginReport(MarginReport {
         session: h.session,
         seq: h.margin_seq,
         queried_at,
@@ -3476,7 +3590,7 @@ fn reducing_records_the_rule_that_tripped_first() {
     let mut h = at_base_100();
     h.advance(5 * SEC);
     h.margin_seq += 1;
-    let out = h.venue(VenueInput::MarginReport(MarginReportIn {
+    let out = h.venue(VenueInput::MarginReport(MarginReport {
         session: h.session,
         seq: h.margin_seq,
         queried_at: h.now,

@@ -350,7 +350,7 @@ pub fn fill_input(f: &HlFill, instance_id: u64) -> Option<FillIn> {
 /// a whole margin report, or a refusal with its reason. Never a part of one.
 pub fn margin_input(body: &serde_json::Value, session: u64, seq: u64, queried_at: Ts) -> VenueInput {
     match margin_report(body) {
-        Ok((account_value, positions)) => VenueInput::MarginReport(MarginReportIn {
+        Ok((account_value, positions)) => VenueInput::MarginReport(MarginReport {
             session,
             seq,
             queried_at,
@@ -385,17 +385,10 @@ fn margin_report(body: &serde_json::Value) -> Result<(Amount, Vec<MarginPosition
             return Err(format!("assetPositions[{i}]: coin is missing or unusable"));
         };
         let at = |e: String| format!("assetPositions[{i}] ({coin}): {e}");
-        let szi = decimal(pos.get("szi"), "szi", SQty::parse).map_err(at)?;
+        let qty = decimal(pos.get("szi"), "szi", SQty::parse).map_err(at)?;
         let position_value = decimal(pos.get("positionValue"), "positionValue", Amount::parse).map_err(at)?;
         let margin_used = decimal(pos.get("marginUsed"), "marginUsed", Amount::parse).map_err(at)?;
-        let leverage_type = match pos.pointer("/leverage/type") {
-            None => return Err(at("leverage.type is missing".into())),
-            Some(v) => match v.as_str() {
-                Some("isolated") => LeverageType::Isolated,
-                Some("cross") => LeverageType::Cross,
-                _ => return Err(at(format!("leverage.type is neither isolated nor cross: {v}"))),
-            },
-        };
+        let leverage_type = leverage_type(pos.pointer("/leverage/type")).map_err(at)?;
         let leverage_value = whole(pos.pointer("/leverage/value"), "leverage.value").map_err(at)?;
         // The maintenance margin rate is 1 / (2 x maxLeverage): a report
         // without it cannot be judged, and zero would divide by nothing.
@@ -405,7 +398,7 @@ fn margin_report(body: &serde_json::Value) -> Result<(Amount, Vec<MarginPosition
         }
         positions.push(MarginPosition {
             instrument,
-            szi,
+            qty,
             position_value,
             margin_used,
             leverage_type,
@@ -414,6 +407,17 @@ fn margin_report(body: &serde_json::Value) -> Result<(Amount, Vec<MarginPosition
         });
     }
     Ok((account_value, positions))
+}
+
+/// The margin mode in a `leverage` object of the venue: the string
+/// `isolated` or `cross`, exactly. Anything else is not read as either.
+fn leverage_type(v: Option<&serde_json::Value>) -> Result<LeverageType, String> {
+    let v = v.ok_or("leverage.type is missing")?;
+    match v.as_str() {
+        Some("isolated") => Ok(LeverageType::Isolated),
+        Some("cross") => Ok(LeverageType::Cross),
+        _ => Err(format!("leverage.type is neither isolated nor cross: {v}")),
+    }
 }
 
 /// A decimal the venue sends as a string. A JSON number is not accepted in
@@ -442,11 +446,7 @@ pub fn venue_setting_input(body: &serde_json::Value, session: u64, instrument: &
     if body.get("coin").and_then(|c| c.as_str()) != Some(instrument.as_str()) {
         return None;
     }
-    let isolated = match body.pointer("/leverage/type").and_then(|t| t.as_str()) {
-        Some("isolated") => true,
-        Some("cross") => false,
-        _ => return None,
-    };
+    let isolated = leverage_type(body.pointer("/leverage/type")).ok()? == LeverageType::Isolated;
     let leverage = whole(body.pointer("/leverage/value"), "leverage.value").ok()?;
     Some(VenueInput::VenueSetting {
         session,
@@ -479,27 +479,35 @@ pub fn account_mode_input(body: &serde_json::Value, session: u64) -> Option<Venu
 }
 
 /// Weight of a `clearinghouseState` query against the venue's limit of
-/// 1200 per minute and IP (documented: weight 2).
+/// 1200 per minute and IP (documented: weight 2). The margin query and the
+/// position query of the sweep are this request.
 pub const WEIGHT_MARGIN_QUERY: u32 = 2;
-/// Weight of an `activeAssetData` or `userAbstraction` query. Neither is
-/// in the documented list of weight-2 queries, so the documented default
-/// for every other info request applies.
+/// Weight of an `orderStatus` query (documented: weight 2).
+pub const WEIGHT_ORDER_STATUS_QUERY: u32 = 2;
+/// Weight of an `activeAssetData`, `userAbstraction`, `frontendOpenOrders`
+/// or `userFillsByTime` query. None is in the documented list of weight-2
+/// queries, so the documented default for every other info request
+/// applies.
 pub const WEIGHT_OTHER_INFO_QUERY: u32 = 20;
 
 /// Body of the margin query (`/info`). The optional `dex` field is left
 /// out: the first perp dex.
-pub fn margin_request(user: &str) -> serde_json::Value {
-    serde_json::json!({"type": "clearinghouseState", "user": user})
+pub fn margin_request(account: &str) -> serde_json::Value {
+    serde_json::json!({"type": "clearinghouseState", "user": account})
 }
 
-/// Body of the venue-setting query for one coin (`/info`).
-pub fn venue_setting_request(user: &str, coin: &str) -> serde_json::Value {
-    serde_json::json!({"type": "activeAssetData", "user": user, "coin": coin})
+/// Body of the venue-setting query for one instrument (`/info`). The venue
+/// calls the instrument a coin. Its name there is the instrument id: the
+/// gateway does not start a link unless every configured instrument id is,
+/// letter for letter, a name of the venue's universe (`load_meta`), and
+/// orders find their asset by the same id.
+pub fn venue_setting_request(account: &str, instrument: &InstrumentId) -> serde_json::Value {
+    serde_json::json!({"type": "activeAssetData", "user": account, "coin": instrument.as_str()})
 }
 
 /// Body of the account-mode query (`/info`).
-pub fn account_mode_request(user: &str) -> serde_json::Value {
-    serde_json::json!({"type": "userAbstraction", "user": user})
+pub fn account_mode_request(account: &str) -> serde_json::Value {
+    serde_json::json!({"type": "userAbstraction", "user": account})
 }
 
 #[cfg(test)]
@@ -558,14 +566,14 @@ mod tests {
     fn documented_clearinghouse_state_parses_to_a_margin_report() {
         assert_eq!(
             margin_input(&doc_state(), 7, 3, 1_700_000_000_000_000),
-            VenueInput::MarginReport(MarginReportIn {
+            VenueInput::MarginReport(MarginReport {
                 session: 7,
                 seq: 3,
                 queried_at: 1_700_000_000_000_000,
                 account_value: Amount(1_310_948_232_800),
                 positions: vec![MarginPosition {
                     instrument: InstrumentId::new("ETH").unwrap(),
-                    szi: SQty(3_350_000),
+                    qty: SQty(3_350_000),
                     position_value: Amount(10_002_765_000),
                     margin_used: Amount(496_782_600),
                     leverage_type: LeverageType::Isolated,
@@ -707,7 +715,7 @@ mod tests {
         flat["assetPositions"] = json!([]);
         assert_eq!(
             margin_input(&flat, 7, 3, 9),
-            VenueInput::MarginReport(MarginReportIn {
+            VenueInput::MarginReport(MarginReport {
                 session: 7,
                 seq: 3,
                 queried_at: 9,
@@ -724,7 +732,7 @@ mod tests {
             panic!("refused");
         };
         assert_eq!(
-            (r.positions[1].leverage_type, r.positions[1].leverage_value, r.positions[1].szi),
+            (r.positions[1].leverage_type, r.positions[1].leverage_value, r.positions[1].qty),
             (LeverageType::Cross, 3, SQty(-3_350_000))
         );
     }
@@ -854,7 +862,7 @@ mod tests {
             documented(r#"{"type": "clearinghouseState", "user": "0xUSER"}"#)
         );
         assert_eq!(
-            venue_setting_request("0xUSER", "APT"),
+            venue_setting_request("0xUSER", &InstrumentId::new("APT").unwrap()),
             documented(r#"{"type": "activeAssetData", "user": "0xUSER", "coin": "APT"}"#)
         );
         assert_eq!(

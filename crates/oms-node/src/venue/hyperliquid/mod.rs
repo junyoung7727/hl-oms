@@ -438,7 +438,7 @@ impl Gateway {
                 }
                 .to_hex();
                 let body = serde_json::json!({"type": "orderStatus", "user": self.account, "oid": cloid});
-                let Some(resp) = self.info(body, 2.0).await else { return };
+                let Some(resp) = self.info(body, f64::from(WEIGHT_ORDER_STATUS_QUERY)).await else { return };
                 match resp.get("status").and_then(|s| s.as_str()) {
                     Some("order") => {
                         let Some(u) = resp
@@ -480,7 +480,7 @@ impl Gateway {
             QueryReq::Fills { since } => self.sync_fills(session, since).await,
             QueryReq::OpenOrders => {
                 let body = serde_json::json!({"type": "frontendOpenOrders", "user": self.account});
-                let Some(resp) = self.info(body, 20.0).await else { return };
+                let Some(resp) = self.info(body, f64::from(WEIGHT_OTHER_INFO_QUERY)).await else { return };
                 let Ok(list) = serde_json::from_value::<Vec<HlOpenOrder>>(resp) else { return };
                 let orders = list
                     .iter()
@@ -519,7 +519,7 @@ impl Gateway {
                 self.input.send(input).await;
             }
             QueryReq::VenueSetting { instrument } => {
-                let body = venue_setting_request(&self.account, instrument.as_str());
+                let body = venue_setting_request(&self.account, &instrument);
                 let Some(resp) = self.info(body, f64::from(WEIGHT_OTHER_INFO_QUERY)).await else { return };
                 match venue_setting_input(&resp, session, &instrument) {
                     Some(input) => {
@@ -540,7 +540,7 @@ impl Gateway {
             }
             QueryReq::Positions => {
                 let body = serde_json::json!({"type": "clearinghouseState", "user": self.account});
-                let Some(resp) = self.info(body, 2.0).await else { return };
+                let Some(resp) = self.info(body, f64::from(WEIGHT_MARGIN_QUERY)).await else { return };
                 let Some(list) = resp.get("assetPositions").and_then(|a| a.as_array()) else {
                     return;
                 };
@@ -589,7 +589,7 @@ impl Gateway {
                 "type": "userFillsByTime", "user": self.account,
                 "startTime": start, "endTime": end, "aggregateByTime": false,
             });
-            let Some(resp) = self.info(body, 20.0).await else { return };
+            let Some(resp) = self.info(body, f64::from(WEIGHT_OTHER_INFO_QUERY)).await else { return };
             let Ok(fills) = serde_json::from_value::<Vec<HlFill>>(resp) else {
                 error!("the fills answer did not parse; fills are not declared complete");
                 return;
@@ -1017,7 +1017,7 @@ mod tests {
             b
         };
         // What the gateway does for the margin query, `ms` after the burst.
-        let margin_query_goes = |b: &Budget, ms: u64| b.clone().for_query(t0 + Duration::from_millis(ms), 2.0);
+        let margin_query_goes = |b: &Budget, ms: u64| b.clone().for_query(t0 + Duration::from_millis(ms), f64::from(WEIGHT_MARGIN_QUERY));
         // Exactly `left` units are in the budget: all of them can be taken
         // and one more cannot.
         let holds = |b: &Budget, left: f64| b.clone().take_at(t0, left, 0.0) && !b.clone().take_at(t0, left + 1.0, 0.0);

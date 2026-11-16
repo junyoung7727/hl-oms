@@ -71,48 +71,7 @@ pub fn status(ctx: &ApiCtx, strategy: Option<&StrategyId>) -> serde_json::Value 
         .collect();
     // Margin rules (C-MARGIN): null without a margin policy. The age is
     // this process's clock now minus the query time of the last report.
-    let margin = core.config.policy.margin.as_ref().map(|_| {
-        let report = core.margin.report.as_ref();
-        serde_json::json!({
-            "account_value": report.map(|r| r.account_value),
-            "queried_at": report.map(|r| r.queried_at),
-            "age_us": report.map(|r| now.saturating_sub(r.queried_at)),
-            "fresh": core.margin_report_is_fresh(now),
-            // What the leverage gate judges with, at the last reference
-            // prices whatever their age. Null when it has no value.
-            "account_exposure": core.account_exposure(),
-            "session": report.map(|r| r.session),
-            "seq": report.map(|r| r.seq),
-            "positions": report.map(|r| &r.positions),
-            "last_rejection": core.margin.last_rejection,
-            // NORMAL is `reducing: null`. Otherwise the rule that tripped
-            // first, what it saw and since when.
-            "reducing": core.margin.reducing,
-            "day_base": core.margin.day_base,
-            // What the venue told in this link session, per configured
-            // instrument: null while unknown. `as_configured` is false when
-            // the instrument is held by its setting.
-            "venue_settings": core
-                .config
-                .instruments
-                .keys()
-                .map(|i| {
-                    let seen = core.margin.venue_settings.get(i).map(|s| {
-                        serde_json::json!({
-                            "isolated": s.isolated,
-                            "leverage": s.leverage,
-                            "as_configured": core.venue_setting_is_as_configured(i),
-                        })
-                    });
-                    (i.to_string(), serde_json::json!(seen))
-                })
-                .collect::<serde_json::Map<String, serde_json::Value>>(),
-            // Null while the venue has not told it in this link session.
-            "account_mode": core.margin.account_mode.as_ref().map(|mode| {
-                serde_json::json!({ "mode": mode, "allowed": core.account_mode_is_allowed() })
-            }),
-        })
-    });
+    let margin = core.margin_view(now);
     serde_json::json!({
         "as_of": now,
         "source": "published state (durable records only) and process counters",

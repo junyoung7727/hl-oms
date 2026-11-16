@@ -1034,8 +1034,71 @@
       "note": "",
       "test": "cargo test -p oms-core --test margin without_a_fresh_report_an_order_past_the_limit_is_rejected_margin_unavailable_only",
       "what": "the leverage gate judges an order with the account value of a report that is no longer fresh"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / policy section",
+      "id": "M116-reducing-holds-without-a-margin-policy",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin without_a_margin_policy_the_reducing_latch_refuses_no_order_and_returns_with_the_policy",
+      "what": "the REDUCING latch refuses orders although no margin policy is set"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / report intake",
+      "id": "M117-rejection-outlives-a-recorded-report",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin a_recorded_report_ends_the_last_rejection",
+      "what": "the last rejection of a margin report stays after a later report was recorded"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / venue setting",
+      "id": "M118-report-sets-a-setting-for-any-instrument",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin a_report_position_on_an_unconfigured_instrument_leaves_no_venue_setting",
+      "what": "a report position on an instrument that is not configured is stored as a venue setting"
+    },
+    {
+      "file": "crates/oms-node/src/venue/simproto.rs",
+      "guards": "C-MARGIN / report intake",
+      "id": "M119-margin-answer-without-positions-reads-as-empty",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib a_margin_answer_without_its_position_list_is_not_read",
+      "what": "a margin answer of the venue process without its position list is read as an account without positions"
+    },
+    {
+      "file": "crates/oms-node/src/venue/reconciler.rs",
+      "guards": "C-MARGIN / margin poll",
+      "id": "M120-margin-timer-moves-without-a-query",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --test reconciler a_margin_query_the_gateway_had_no_room_for_goes_out_on_the_next_round",
+      "what": "the margin timer moves although the gateway had no room for the query"
+    },
+    {
+      "file": "crates/oms-node/src/venue/reconciler.rs",
+      "guards": "C-MARGIN / query weight budget",
+      "id": "M121-unknown-setting-asked-every-second",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --test reconciler an_unanswered_setting_or_mode_query_is_repeated_at_the_setting_period_only",
+      "what": "a venue setting that stays unanswered is asked for again every second"
+    },
+    {
+      "file": "crates/oms-node/src/venue/reconciler.rs",
+      "guards": "C-MARGIN / query weight budget",
+      "id": "M122-unknown-mode-asked-every-second",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --test reconciler an_unanswered_setting_or_mode_query_is_repeated_at_the_setting_period_only",
+      "what": "an account mode that stays unanswered is asked for again every second"
     }
   ],
-  "source_digest": "9468258ab606c562",
-  "taken_at_us": 1794832252414786
+  "source_digest": "4792170a151450cf",
+  "taken_at_us": 1794837107067801
 }

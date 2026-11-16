@@ -299,13 +299,29 @@ State after ticket 12 (2026-11-16): every test named in the scenario table of `s
 | 12 | `without_a_fresh_report_an_order_past_the_limit_is_rejected_margin_unavailable_only` | A | S11 |
 | 12 | `core_bench_margin_case_runs_the_leverage_gate_over_500_resting_orders` | xtask unit test | none (it pins the book of the benchmark case of G1) |
 
-Deviations, choices where this spec is silent, the open finding of ticket 09 and everything that is not guaranteed are collected in `docs/verification/README.md` §11 and, for the owner, in `spec-ko.md` §15.
+State after the code review (2026-11-16, reviewers claude-fable-5-2, head 228373e): seven more tests, 116 in all. No earlier test was renamed.
+
+| Finding | Added test | Seam | Scenario row |
+|---|---|---|---|
+| B1 | `without_a_margin_policy_the_reducing_latch_refuses_no_order_and_returns_with_the_policy` | A | S21 |
+| B4 | `a_recorded_report_ends_the_last_rejection` | A | S25 |
+| B8 | `a_report_position_on_an_unconfigured_instrument_leaves_no_venue_setting` | A | S17 |
+| B2 | `venue_process_states_the_margin_a_control_sets_and_the_mm_rule_latches_on_it` | C | S16 |
+| B6 | `a_margin_answer_without_its_position_list_is_not_read` | unit test of the wire type of the simulated venue process | S25 |
+| B5 | `a_margin_query_the_gateway_had_no_room_for_goes_out_on_the_next_round` | the two ports of the reconciler task (see below) | S11 |
+| B3 | `an_unanswered_setting_or_mode_query_is_repeated_at_the_setting_period_only` | the two ports of the reconciler task | S17, S18 |
+
+The two reconciler tests are outside the four seams. The process seam cannot make the venue stay silent on one query kind or fill the gateway's query queue, so they drive the reconciler task directly: the published state goes in, the query channel comes out, with real and short timers. They run in the suite `node-unit`.
+
+The spec was silent on one case, decided in the review (B1): a configuration without a margin policy, activated while the account is REDUCING, keeps the latch in the state and applies no margin hold; activating a policy again restores REDUCING. The reconciler finding of ticket 09 is closed (B3): a venue setting or an account mode that stays unanswered is asked for again once per `venue_setting_poll_ms`, as the request budget counts.
+
+Deviations, choices where this spec is silent and everything that is not guaranteed are collected in `docs/verification/README.md` §11 and, for the owner, in `spec-ko.md` §15.
 
 ### Test gaps G1–G11: decisions
 
 | Gap | Decision | Where |
 |---|---|---|
-| G1 Performance | Accepted. The gate runs on every new order and sums over all resting orders. The core benchmark gets a case with the margin policy on and 500 resting orders; claims V-PERF-1..5 are rerun after the gate lands. Perf evidence is not left stale. Result (source `9468258ab606c562`): `handle(new_order)` at about 500 resting orders, median 62.3 µs and p99 74.1 µs with the margin policy, 27.0 µs and 33.2 µs without; V-PERF-1..5 passed. The open-loop runs behind V-PERF-1..4 use a node configuration without a margin policy, so the gate did not run in them | Ticket 12 |
+| G1 Performance | Accepted. The gate runs on every new order and sums over all resting orders. The core benchmark gets a case with the margin policy on and 500 resting orders; claims V-PERF-1..5 are rerun after the gate lands. Perf evidence is not left stale. Result (source `4792170a151450cf`, after the code-review fixes): `handle(new_order)` at about 500 resting orders, median 64.0 µs and p99 74.3 µs with the margin policy, 26.8 µs and 33.6 µs without; V-PERF-1..5 passed. (The run of ticket 12 on source `9468258ab606c562`: 62.3 and 74.1 µs, 27.0 and 33.2 µs.) The open-loop runs behind V-PERF-1..4 use a node configuration without a margin policy, so the gate did not run in them | Ticket 12 |
 | G2 Mutation testing | Accepted. Every rule ticket adds mutants for its rule lines (leverage comparison, exposure sum, daily-loss comparison, evaluate-then-roll order, MM comparison, latch entry, hold table rows, stale limits, venue-setting comparison, sequence guard). The full mutant run before the final gate must catch all; a survivor is a finding that is fixed or written down | Tickets 01–09, run in 12 |
 | G3 Property tests | Accepted. Through seam A: adding an order never lowers exposure; mirroring long and short gives the same exposure and the same decision; account exposure is the sum over instruments; no overflow and no rounding flip at extreme price × quantity, with expected values from independent `i128` multiplication on literals | Ticket 03 (gate), 07 (MM) |
 | G4 Crash points for the latch | Accepted. The crash-point mechanism is extended to fire on a margin-report batch. Crash before the journal write of the REDUCING decision; crash after the write and before the cancels are sent; crash around a day-base set. After restart the latch, base and cancel state are consistent | Ticket 05 |

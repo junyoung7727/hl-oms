@@ -281,7 +281,7 @@ impl H {
     /// A margin report of link session `session` with number `seq`, asked
     /// for at `queried_at`, with no positions.
     pub fn margin_report(&mut self, session: u64, seq: u64, queried_at: Ts, account_value: &str) -> Output {
-        self.venue(VenueInput::MarginReport(MarginReportIn {
+        self.venue(VenueInput::MarginReport(MarginReport {
             session,
             seq,
             queried_at,

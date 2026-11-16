@@ -188,10 +188,14 @@ impl Core {
         if self.storage_low {
             v.push(HoldReason::StorageLow);
         }
-        if self.margin.reducing.is_some() {
+        // The holds of C-MARGIN exist only with a margin policy. The
+        // REDUCING latch itself stays in the state without one, and holds
+        // again when a policy is activated.
+        let margin_rules_on = self.config.policy.margin.is_some();
+        if margin_rules_on && self.margin.reducing.is_some() {
             v.push(HoldReason::Reducing);
         }
-        if self.config.policy.margin.is_some() {
+        if margin_rules_on {
             for instrument in self.config.instruments.keys() {
                 if !self.venue_setting_is_as_configured(instrument) {
                     v.push(HoldReason::VenueSetting(instrument.clone()));
@@ -824,9 +828,16 @@ impl Core {
             }
             Event::MarginReported { report } => {
                 self.margin.report = Some(report.clone());
+                // The venue answers readably again: the reason an earlier
+                // answer was refused is no longer the state of things.
+                self.margin.last_rejection = None;
                 // Every position states the margin mode and the leverage of
                 // its instrument: a report is a source of venue settings.
-                for p in &report.positions {
+                // Only for configured instruments, as with the
+                // `VenueSetting` input: nothing reads another setting, and
+                // the venue decides how many positions a report lists.
+                let configured = &self.config.instruments;
+                for p in report.positions.iter().filter(|p| configured.contains_key(&p.instrument)) {
                     self.margin.venue_settings.insert(
                         p.instrument.clone(),
                         VenueSettingSeen {

@@ -380,14 +380,16 @@ pub struct SyncState {
     pub positions_session: u64,
 }
 
-/// What the core knows from margin reports (C-MARGIN). Empty until the first
-/// report is recorded, and always empty without a margin policy.
+/// What the core knows from margin reports (C-MARGIN). Empty in a run that
+/// never had a margin policy. A configuration that takes the policy away
+/// leaves what is here in place: no rule and no hold reads it until a
+/// policy is activated again.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MarginState {
     /// The newest report recorded. It stays, and ages, across link changes.
-    pub report: Option<crate::input::MarginReportIn>,
-    /// Why the most recent refused report was refused. Shown to the operator;
-    /// no rule reads it.
+    pub report: Option<crate::input::MarginReport>,
+    /// Why the most recent refused report was refused, until a later report
+    /// is recorded. Shown to the operator; no rule reads it.
     pub last_rejection: Option<MarginRejection>,
     /// The account value the daily loss is measured against. Changed only by
     /// `day_base_set`; a restart and a link change keep it.

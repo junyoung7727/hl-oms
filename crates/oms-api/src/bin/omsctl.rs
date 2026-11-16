@@ -29,7 +29,7 @@
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    match oms_api::ctl::run(&args) {
+    match oms_api::ctl::run(&args, &mut std::io::stdout()) {
         Ok(text) => println!("{text}"),
         Err(e) => {
             eprintln!("omsctl: {e}");
