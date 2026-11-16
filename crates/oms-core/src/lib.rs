@@ -27,6 +27,7 @@ pub mod record;
 pub use crate::core::{Core, CoreFault};
 pub use config::*;
 pub use event::*;
+pub use exposure::Exposure;
 pub use ids::*;
 pub use input::*;
 pub use model::*;

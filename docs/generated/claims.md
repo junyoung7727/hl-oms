@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `e4c5a5e287fef9d4`, 검증 결과의 다이제스트 `0a86a80a92f2313c`.
+> 소스 다이제스트 `3e1150c18b447d3c`, 검증 결과의 다이제스트 `0a86a80a92f2313c`.
 
 주장 60건: 통과 0, 실패 0, 미실행 2, 이전 버전 결과 58.
 
@@ -1325,6 +1325,7 @@
 | `core/an_unfilled_resting_order_keeps_its_exposure_and_is_never_repriced_or_expired_by_the_oms` | 미실행 |  |
 | `core/resting_order_counts_at_the_higher_of_limit_and_reference` | 미실행 |  |
 | `core/reduce_only_and_plain_buy_on_a_short_count_at_full_reach` | 미실행 |  |
+| `core/exposure_is_the_sum_over_instruments` | 미실행 |  |
 
 ## V-MARGIN-11 — 증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이를 보여 준다. 정책이 없으면 묻지 않는다
 

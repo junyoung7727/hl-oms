@@ -596,6 +596,79 @@ fn reduce_only_and_plain_buy_on_a_short_count_at_full_reach() {
     );
 }
 
+/// `config_with_margin()` with a second instrument Y that has the limits of
+/// X.
+fn config_xy() -> CoreConfig {
+    let mut cfg = config_with_margin();
+    let spec = cfg.instruments[&iid("X")].clone();
+    cfg.instruments.insert(iid("Y"), spec);
+    for strategy in cfg.strategies.values_mut() {
+        let limit = strategy.limits[&iid("X")].clone();
+        strategy.limits.insert(iid("Y"), limit);
+    }
+    cfg
+}
+
+/// A plain request of strategy `a` on `instrument`.
+fn req_on(h: &H, instrument: &str, key: &str, side: Side, qty: &str, price: &str) -> NewOrderReq {
+    NewOrderReq {
+        instrument: iid(instrument),
+        ..h.req("a", key, side, qty, price)
+    }
+}
+
+fn accepted(reply: NewOrderReply) -> OrderId {
+    match reply {
+        NewOrderReply::Accepted { order_id } => order_id,
+        other => panic!("expected acceptance, got {other:?}"),
+    }
+}
+
+fn rejected(reply: NewOrderReply) -> Vec<RejectReason> {
+    match reply {
+        NewOrderReply::Rejected { reasons } => reasons,
+        other => panic!("expected rejection, got {other:?}"),
+    }
+}
+
+/// The account exposure the core publishes, as a decimal of quote units.
+fn exposure(h: &H) -> String {
+    h.core.account_exposure().expect("exposure is known").to_string()
+}
+
+/// S5. Account exposure is the sum over instruments: two instruments cannot
+/// each use the whole limit. With account value 100, 1.5x on X and 1.5x on Y
+/// is 3x.
+#[test]
+fn exposure_is_the_sum_over_instruments() {
+    let mut h = H::ready_with(config_xy());
+    h.report_margin("100");
+    h.ref_price("X", "100");
+    h.ref_price("Y", "100");
+    assert_eq!(exposure(&h), "0");
+
+    let r = req_on(&h, "X", "k1", Side::Buy, "1.5", "100");
+    accepted(h.new_order(r));
+    assert_eq!(exposure(&h), "150");
+    // 150 on X and 150 on Y is 300.
+    let r = req_on(&h, "Y", "k2", Side::Buy, "1.5", "100");
+    assert_eq!(rejected(h.new_order(r)), vec![RejectReason::AccountLeverage]);
+    // A short on Y does not offset the long on X either.
+    let r = req_on(&h, "Y", "k3", Side::Sell, "1.5", "100");
+    assert_eq!(rejected(h.new_order(r)), vec![RejectReason::AccountLeverage]);
+    assert_eq!(exposure(&h), "150");
+
+    // 150 + 50 is at the limit.
+    let r = req_on(&h, "Y", "k4", Side::Sell, "0.5", "100");
+    accepted(h.new_order(r));
+    assert_eq!(exposure(&h), "200");
+    // Now neither instrument has room.
+    let r = req_on(&h, "X", "k5", Side::Buy, "0.1", "100");
+    assert_eq!(rejected(h.new_order(r)), vec![RejectReason::AccountLeverage]);
+    let r = req_on(&h, "Y", "k6", Side::Sell, "0.1", "100");
+    assert_eq!(rejected(h.new_order(r)), vec![RejectReason::AccountLeverage]);
+}
+
 // ---- C-MARGIN: replay ---------------------------------------------------------
 
 /// S13. Margin state comes only from journal events. A core rebuilt from the
