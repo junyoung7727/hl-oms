@@ -1797,7 +1797,11 @@ fn without_a_margin_policy_the_reducing_latch_refuses_no_order_and_returns_with_
 
     // And the operator can clear it on the fresh report.
     let out = clear_reduce(&mut h, "policy restored, account checked");
-    assert!(matches!(out.reply, Some(Reply::Operator(Ok(_)))), "{:?}", out.reply);
+    assert!(
+        matches!(out.reply, Some(Reply::Operator(Ok(_)))),
+        "{:?}",
+        out.reply
+    );
     assert_eq!(h.core.holds(None), vec![]);
 }
 
