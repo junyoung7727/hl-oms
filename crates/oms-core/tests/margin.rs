@@ -2387,3 +2387,56 @@ fn rebase_day_sets_the_base_and_leaves_the_latch_alone() {
     let out = rebase_day(&mut h, "rebase on the report of the earlier day");
     assert_eq!(out.events, vec![operator_base_set(20_000, "101")]);
 }
+
+/// S15. The OMS does not see transfers. A withdrawal lowers the account
+/// value, and the daily-loss rule reads the drop as a loss: this is the
+/// safe side. A withdrawal of 6 from 100 alone enters REDUCING. A
+/// withdrawal of 4 does not, but then a trading loss of 2 does, at 94.
+/// After `rebase-day` at 96 the same 94 is a loss of 2 against 96 and does
+/// not trip. The other side is a stated non-guarantee and is shown here as
+/// it is: a deposit of 10 hides a loss of 14 until a rebase or the next UTC
+/// day.
+#[test]
+fn a_withdrawal_without_rebase_reads_as_a_loss() {
+    // 100, then 6 withdrawn and nothing lost in trading.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    let out = h.report_margin("94");
+    assert_eq!(
+        out.events.get(1),
+        Some(&Event::ReducingEntered {
+            rule: RuleId::DailyLoss,
+            detail: "account value 94 is more than 500 bps below the day base 100".into(),
+        })
+    );
+
+    // 100, then 4 withdrawn (96), then 2 lost (94), and no rebase.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    h.report_margin("96");
+    assert_eq!(h.core.margin.reducing, None);
+    h.advance(5 * SEC);
+    h.report_margin("94");
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+
+    // The same with a rebase after the withdrawal: the loss of 2 is
+    // measured against 96.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    h.report_margin("96");
+    let out = rebase_day(&mut h, "withdrawal of 4");
+    assert_eq!(out.events, vec![operator_base_set(20_000, "96")]);
+    h.advance(5 * SEC);
+    h.report_margin("94");
+    assert_eq!(h.core.margin.reducing, None);
+    assert_eq!(h.core.holds(None), vec![]);
+
+    // Not guaranteed: 100, then 10 deposited (110), then 14 lost (96). The
+    // loss is 14 % of the day's start and the rule does not see it.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    h.report_margin("110");
+    h.advance(5 * SEC);
+    h.report_margin("96");
+    assert_eq!(h.core.margin.reducing, None);
+}

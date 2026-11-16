@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `c50ef0644efb9eb5`, 검증 결과의 다이제스트 `44860df661c2396d`.
+> 소스 다이제스트 `a83a8e5e8806ee25`, 검증 결과의 다이제스트 `44860df661c2396d`.
 
 주장 63건: 통과 0, 실패 0, 미실행 2, 이전 버전 결과 61.
 
@@ -69,7 +69,7 @@
 | V-MARGIN-11 | 증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이, 계좌 노출을 보여 준다. 정책이 없으면 묻지 않는다. 조회한 계좌 가치가 기준 금액보다 5 %를 넘게 낮아지면 status가 감소 전용 상태와 그 규칙, 기준 금액을 보여 주고 일반 주문이 Hold(Reducing)으로 거절된다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e node_polls_margin && cargo test -p oms-node --test e2e status_shows_account_exposure && cargo test -p oms-node --test e2e status_shows_reducing` |
 | V-MARGIN-5 | 증거금 정책이 있으면 첫 증거금 보고가 그 계좌 가치를 조회 시각의 UTC 날짜와 함께 기준 금액으로 정한다. 같은 날의 뒤 보고는 기준을 바꾸지 않는다. 받은 보고의 계좌 가치가 기준 금액보다 5 %를 넘게 낮으면 계좌가 감소 전용 상태로 들어간다(기준 100에서 95.00은 아니고 94.99는 들어간다). 뒤 UTC 날짜의 첫 보고는 옛 기준으로 먼저 판정된 뒤에 새 기준이 되고, 여러 날의 공백 뒤에도 기준은 한 번만 넘어간다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test margin` |
 | V-MARGIN-4 | 감소 전용 상태로 들어가는 입력 안에서, 감소 전용 표시가 없고 취소 요청이 없거나 취소 시도가 다 된 모든 열린 주문에 규칙 이름으로 취소 요청이 나간다. 표시 없는 익절 주문도 취소된다. 감소 전용 표시가 있는 주문은 그대로 둔다. 감소 전용 상태에서 일반 주문은 포지션을 줄이는 방향이어도 Hold(Reducing)으로 거절되고, 감소 전용 주문은 받는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test margin` |
-| V-MARGIN-6 | 운영자의 해제(clear-reduce)는 계좌가 감소 전용 상태가 아니면 NotReducing으로, 증거금 보고가 30초보다 오래됐으면 MarginUnavailable로, 사유가 비었으면 NoteRequired로 거절되고, 거절은 아무것도 기록하지 않는다. 받아들인 해제는 한 입력 안에서 마지막 보고의 계좌 가치를 새 기준 금액으로 정하고(day_base_set, set_by: operator) 감소 전용 상태를 끝낸다(reducing_cleared). 정확히 30초 된 보고는 신선하다. 그 뒤 새 기준 94에서 94와 89.30은 걸리지 않고 89.29는 다시 걸린다. 두 번째 해제는 NotReducing이다. 기준 재설정(rebase-day)은 신선한 보고와 사유가 있을 때 마지막 보고의 계좌 가치와 그 날짜(기준보다 앞선 날짜라도)를 기준 금액으로 정하고, 감소 전용 상태는 건드리지 않는다 | 단위 | 미실행 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-6 | 운영자의 해제(clear-reduce)는 계좌가 감소 전용 상태가 아니면 NotReducing으로, 증거금 보고가 30초보다 오래됐으면 MarginUnavailable로, 사유가 비었으면 NoteRequired로 거절되고, 거절은 아무것도 기록하지 않는다. 받아들인 해제는 한 입력 안에서 마지막 보고의 계좌 가치를 새 기준 금액으로 정하고(day_base_set, set_by: operator) 감소 전용 상태를 끝낸다(reducing_cleared). 정확히 30초 된 보고는 신선하다. 그 뒤 새 기준 94에서 94와 89.30은 걸리지 않고 89.29는 다시 걸린다. 두 번째 해제는 NotReducing이다. 기준 재설정(rebase-day)은 신선한 보고와 사유가 있을 때 마지막 보고의 계좌 가치와 그 날짜(기준보다 앞선 날짜라도)를 기준 금액으로 정하고, 감소 전용 상태는 건드리지 않는다. 기준 재설정 없이 출금하면 그만큼이 손실로 읽힌다(100에서 6을 출금하면 걸린다) | 단위 | 미실행 | `cargo test -p oms-core --test margin` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -1410,7 +1410,7 @@
 | `core/an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing` | 이전 버전 결과 | last result: passed |
 | `core/latch_and_day_base_replay_to_the_same_state` | 이전 버전 결과 | last result: passed |
 
-## V-MARGIN-6 — 운영자의 해제(clear-reduce)는 계좌가 감소 전용 상태가 아니면 NotReducing으로, 증거금 보고가 30초보다 오래됐으면 MarginUnavailable로, 사유가 비었으면 NoteRequired로 거절되고, 거절은 아무것도 기록하지 않는다. 받아들인 해제는 한 입력 안에서 마지막 보고의 계좌 가치를 새 기준 금액으로 정하고(day_base_set, set_by: operator) 감소 전용 상태를 끝낸다(reducing_cleared). 정확히 30초 된 보고는 신선하다. 그 뒤 새 기준 94에서 94와 89.30은 걸리지 않고 89.29는 다시 걸린다. 두 번째 해제는 NotReducing이다. 기준 재설정(rebase-day)은 신선한 보고와 사유가 있을 때 마지막 보고의 계좌 가치와 그 날짜(기준보다 앞선 날짜라도)를 기준 금액으로 정하고, 감소 전용 상태는 건드리지 않는다
+## V-MARGIN-6 — 운영자의 해제(clear-reduce)는 계좌가 감소 전용 상태가 아니면 NotReducing으로, 증거금 보고가 30초보다 오래됐으면 MarginUnavailable로, 사유가 비었으면 NoteRequired로 거절되고, 거절은 아무것도 기록하지 않는다. 받아들인 해제는 한 입력 안에서 마지막 보고의 계좌 가치를 새 기준 금액으로 정하고(day_base_set, set_by: operator) 감소 전용 상태를 끝낸다(reducing_cleared). 정확히 30초 된 보고는 신선하다. 그 뒤 새 기준 94에서 94와 89.30은 걸리지 않고 89.29는 다시 걸린다. 두 번째 해제는 NotReducing이다. 기준 재설정(rebase-day)은 신선한 보고와 사유가 있을 때 마지막 보고의 계좌 가치와 그 날짜(기준보다 앞선 날짜라도)를 기준 금액으로 정하고, 감소 전용 상태는 건드리지 않는다. 기준 재설정 없이 출금하면 그만큼이 손실로 읽힌다(100에서 6을 출금하면 걸린다)
 
 - 상태: **미실행**
 - 왜 중요한가: 해제는 위험을 다시 여는 유일한 길이다. 오래된 숫자로, 또는 사유 없이 풀리면 손실 한도가 뜻을 잃는다
@@ -1422,11 +1422,12 @@
 - 판정 기준과 근거: C-MARGIN의 '해제와 기준 재설정'. 기대값은 손으로 적었다
 - 재현: `cargo test -p oms-core --test margin`
 - 뒷받침하는 것: C-MARGIN
-- 확인하지 않은 범위: 운영자의 판단이 옳은 것. 유지증거금 여유 조건이 참일 때의 거절(MmBufferActive, 티켓 07)
+- 확인하지 않은 범위: 운영자의 판단이 옳은 것. 입금이 가린 손실(100, 입금 10, 손실 14는 걸리지 않는다: 시험이 그대로 보여 준다). 유지증거금 여유 조건이 참일 때의 거절(MmBufferActive, 티켓 07)
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
 | `core/clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing` | 미실행 |  |
 | `core/clear_reduce_rebases_the_day_and_a_further_loss_latches_again` | 미실행 |  |
 | `core/rebase_day_sets_the_base_and_leaves_the_latch_alone` | 미실행 |  |
+| `core/a_withdrawal_without_rebase_reads_as_a_loss` | 미실행 |  |
 
