@@ -449,8 +449,89 @@
       "note": "",
       "test": "cargo test -p oms-core --test margin reduce_only_order_passes_the_venue_setting_and_account_mode_holds",
       "what": "the venue-setting and account-mode holds also refuse a reduce-only order"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / clear and rebase",
+      "id": "M51-clear-reduce-when-not-reducing",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing",
+      "what": "clear-reduce is accepted, and re-bases the day, when the account is not REDUCING"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / clear and rebase",
+      "id": "M52-clear-reduce-on-a-stale-report",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing",
+      "what": "clear-reduce is accepted on a margin report that is not fresh"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / clear and rebase",
+      "id": "M53-clear-reduce-without-a-note",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing",
+      "what": "clear-reduce is accepted with an empty note"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / clear and rebase",
+      "id": "M54-clear-reduce-keeps-the-old-day-base",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin clear_reduce_rebases_the_day_and_a_further_loss_latches_again",
+      "what": "clear-reduce ends REDUCING without taking the current account value as the day base"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / clear and rebase",
+      "id": "M55-rebase-day-on-a-stale-report",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin rebase_day_sets_the_base_and_leaves_the_latch_alone",
+      "what": "rebase-day is accepted on a margin report that is not fresh"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / clear and rebase",
+      "id": "M56-rebase-day-without-a-note",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin rebase_day_sets_the_base_and_leaves_the_latch_alone",
+      "what": "rebase-day is accepted with an empty note"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / clear and rebase",
+      "id": "M57-rebase-day-clears-reducing",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin rebase_day_sets_the_base_and_leaves_the_latch_alone",
+      "what": "rebase-day also ends REDUCING"
+    },
+    {
+      "file": "crates/oms-node/src/server.rs",
+      "guards": "C-MARGIN / clear and rebase (operator socket only)",
+      "id": "M58-clear-reduce-from-the-strategy-socket",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --test e2e strategy_socket_cannot_clear_reducing_or_rebase",
+      "what": "clear-reduce is taken from a strategy connection"
+    },
+    {
+      "file": "crates/oms-node/src/server.rs",
+      "guards": "C-MARGIN / clear and rebase (operator socket only)",
+      "id": "M59-rebase-day-from-the-strategy-socket",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --test e2e strategy_socket_cannot_clear_reducing_or_rebase",
+      "what": "rebase-day is taken from a strategy connection"
     }
   ],
-  "source_digest": "444207d7cf4d7911",
-  "taken_at_us": 1794818035893616
+  "source_digest": "ea6d6a6eba72fa74",
+  "taken_at_us": 1794819254494130
 }
