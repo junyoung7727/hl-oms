@@ -791,8 +791,80 @@
       "note": "",
       "test": "cargo test -p oms-core --test margin reducing_records_the_rule_that_tripped_first",
       "what": "a report that trips both rules records the daily loss, not the MM buffer"
+    },
+    {
+      "file": "crates/oms-sim/src/venue.rs",
+      "guards": "C-MARGIN / simulation model",
+      "id": "M89-sim-venue-fee-not-charged",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim world_account_value_follows_fills_price_fees_and_funding",
+      "what": "the simulated venue's margin model does not take the fee of a fill from the cash"
+    },
+    {
+      "file": "crates/oms-sim/src/venue.rs",
+      "guards": "C-MARGIN / simulation model",
+      "id": "M90-sim-venue-funding-not-charged",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim a_loss_made_only_of_fees_and_funding_enters_reducing",
+      "what": "the simulated venue's margin model does not take funding from the cash"
+    },
+    {
+      "file": "crates/oms-sim/src/venue.rs",
+      "guards": "C-MARGIN / simulation model",
+      "id": "M91-sim-venue-places-growing-reduce-only",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim world_refuses_a_reduce_only_order_that_would_grow_the_position",
+      "what": "the simulated venue places a reduce-only order that would grow the position"
+    },
+    {
+      "file": "crates/oms-sim/src/venue.rs",
+      "guards": "C-MARGIN / simulation model",
+      "id": "M92-sim-venue-fills-reduce-only-through-zero",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim world_refuses_a_reduce_only_order_that_would_grow_the_position",
+      "what": "a resting reduce-only order at the simulated venue trades more than the position that is left"
+    },
+    {
+      "file": "crates/oms-sim/src/world.rs",
+      "guards": "C-MARGIN / no policy, same run",
+      "id": "M93-sim-world-draws-without-margin",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim existing_profiles_give_the_same_run_with_margin_off",
+      "what": "a simulation run without a margin policy draws one more random number per query answer"
+    },
+    {
+      "file": "crates/oms-core/src/exposure.rs",
+      "guards": "C-MARGIN / leverage gate, simulation",
+      "id": "M94-sim-leverage-gate-loose",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim profile_margin_calm",
+      "what": "the leverage gate lets exposure reach 1.25 times the limit (seen by the simulation check)"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / stale cancel, simulation",
+      "id": "M95-sim-stale-cancel-late",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim profile_margin_lossy",
+      "what": "the stale cancel waits for 100 times its limit (seen by the simulation check)"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / REDUCING release, simulation",
+      "id": "M96-sim-day-roll-ends-reducing",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim profile_margin_calm_release_invariant",
+      "what": "a day base set by a report ends REDUCING without an event (seen by the simulation check)"
     }
   ],
-  "source_digest": "2cf32bd373ac7282",
-  "taken_at_us": 1794823048805999
+  "source_digest": "1fa039295d1b184b",
+  "taken_at_us": 1794827768756092
 }
