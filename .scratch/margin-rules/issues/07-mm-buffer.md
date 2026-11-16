@@ -14,10 +14,10 @@
 - [x] Test `reducing_records_the_rule_that_tripped_first` (seam A, S16): fails when a later MM trigger overwrites `DailyLoss` in the latch, or the reverse.
 - [x] Test `an_old_report_on_arrival_is_still_judged_by_the_mm_rule` (seam A, S11): an accepted report whose query time is 40 s before the record time carries isolated margin 2.99 on position value 200 at maximum leverage 40. Fails when the account does not enter REDUCING with `Rule(MmBuffer)` on that report.
 - [x] Test `mm_comparison_is_exact_at_extreme_values` (seam A, property, G3): fails when an overflow or a rounding flips the result near the boundary; expected values come from independent `i128` multiplication on literals.
-- [ ] Mutants: an MM judgement that runs only on a fresh report, the MM comparison direction, the buffer term and the factor 2 × maximum leverage are each caught by a named test.
-- [ ] Stated and not proven here: margin tiers (T9); the rule fires 0.13–0.37 % of price before liquidation and a 5 s poll can step over it.
+- [x] Mutants: an MM judgement that runs only on a fresh report, the MM comparison direction, the buffer term and the factor 2 × maximum leverage are each caught by a named test.
+- [x] Stated and not proven here: margin tiers (T9); the rule fires 0.13–0.37 % of price before liquidation and a 5 s poll can step over it.
 - [ ] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
-- [ ] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
+- [x] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
 - [ ] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
 - [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
 
