@@ -47,7 +47,7 @@ pub fn suites(quick: bool, live: bool, extended: Option<&str>) -> Vec<Suite> {
         },
         Suite {
             name: "sim",
-            what: "deterministic simulation, 7 fault profiles and 2 broken-assumption runs",
+            what: "deterministic simulation, 10 profiles (7 without a margin policy, 3 with one) and 2 broken-assumption runs; margin_days runs a tenth of the seeds",
             args: &["test", "--release", "-p", "oms-sim", "--", "--nocapture"],
             env: env(&[("OMS_SIM_SEEDS", if quick { "40" } else { "400" })]),
         },
@@ -85,7 +85,7 @@ pub fn suites(quick: bool, live: bool, extended: Option<&str>) -> Vec<Suite> {
         // figure quoted in a document can be traced to a stored run.
         v.push(Suite {
             name: "sim-extended",
-            what: "deterministic simulation with 3000 seeds per profile",
+            what: "deterministic simulation with 3000 seeds per profile (300 of margin_days)",
             args: &["test", "--release", "-p", "oms-sim", "--", "--nocapture"],
             env: env(&[("OMS_SIM_SEEDS", "3000")]),
         });

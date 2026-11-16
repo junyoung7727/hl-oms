@@ -16,13 +16,17 @@ fn seeds() -> Vec<u64> {
 }
 
 fn run_profile(p: Profile) -> Vec<SimStats> {
+    run_profile_seeds(p, seeds())
+}
+
+fn run_profile_seeds(p: Profile, seeds: Vec<u64>) -> Vec<SimStats> {
     if let Ok(only) = std::env::var("OMS_SIM_PROFILE") {
         if only != p.name {
             return Vec::new();
         }
     }
     let mut all = Vec::new();
-    for seed in seeds() {
+    for seed in seeds {
         match run(seed, p.clone()) {
             Ok(s) => all.push(s),
             Err(v) => panic!("{v}\nrerun: OMS_SIM_PROFILE={} OMS_SIM_SEED={} cargo test -p oms-sim --test sim", p.name, seed),
@@ -84,6 +88,18 @@ fn run_profile(p: Profile) -> Vec<SimStats> {
             sum(|s| s.stale_cancel_ticks),
             sum(|s| s.stale_rule_cancels),
             sum(|s| s.mm_entries),
+        );
+        println!(
+            "profile={} margin: day_rolls={} roll_losses={}",
+            p.name,
+            sum(|s| s.day_rolls),
+            sum(|s| s.roll_losses),
+        );
+        println!(
+            "profile={} margin: margin_polls={} margin_records={}",
+            p.name,
+            sum(|s| s.margin_polls),
+            sum(|s| s.margin_records),
         );
     }
     all
@@ -468,6 +484,172 @@ fn profile_margin_lossy() {
         assert!(total(&all, |s| s.reducing_restarts) > 0, "no restart happened while REDUCING");
         assert!(total(&all, |s| s.clear_refusals) > 0, "no clear was refused");
         assert!(total(&all, |s| s.reducing_clears) > 0, "REDUCING was never cleared by the operator");
+    }
+}
+
+/// The seeds of `margin_days`: one for every ten of the standard run, and
+/// at least two. One run of it is about a hundred times the inputs of a run
+/// of another profile.
+fn soak_seeds() -> Vec<u64> {
+    let standard = seeds();
+    let n = if standard.len() == 1 { 1 } else { (standard.len() / 10).max(2) };
+    standard.into_iter().take(n).collect()
+}
+
+/// Every seed of `margin_days`, run once for the tests that read it.
+fn margin_days_runs() -> &'static [SimStats] {
+    static RUNS: std::sync::OnceLock<Vec<SimStats>> = std::sync::OnceLock::new();
+    RUNS.get_or_init(|| run_profile_seeds(Profile::margin_days(), soak_seeds()))
+}
+
+const SECOND: u64 = 1_000_000;
+const HOUR: u64 = 3_600 * SECOND;
+
+/// A world with the margin clock and the start time of `margin_days` and
+/// no random action, driven by the test. Ten seconds have passed.
+fn scripted_days_world() -> World {
+    let days = Profile::margin_days();
+    let mut w = World::new(1, Profile {
+        name: "margin_days_scripted",
+        margin: true,
+        start_at: days.start_at,
+        margin_poll_us: days.margin_poll_us,
+        margin_max_age_us: days.margin_max_age_us,
+        stale_cancel_us: days.stale_cancel_us,
+        reconcile_every_us: days.reconcile_every_us,
+        ..Profile::calm()
+    });
+    w.start().unwrap();
+    w.advance(10 * SECOND).unwrap();
+    w
+}
+
+fn margin_records(w: &World) -> usize {
+    w.durable.iter().filter(|r| matches!(r.input, oms_core::Input::Venue(oms_core::VenueInput::MarginReport(_)))).count()
+}
+
+fn day_base(w: &World) -> Option<(u64, oms_core::Amount)> {
+    w.core.margin.day_base.as_ref().map(|b| (b.day, b.value))
+}
+
+/// S12, S13, G8: the margin rules over several UTC days, on the contract's
+/// own clock (poll 5 s). First one exact sequence, then the random runs of
+/// `margin_days`: a run starts one hour before a UTC midnight and lasts 50
+/// hours of virtual time, with restarts, link drops, losses, withdrawals
+/// and deposits, clears and rebases in between. Every check of
+/// `margin_lossy` runs after every input, and a run fails (`daily-loss`)
+/// when a recorded report is more than 5 % below the day base that stood
+/// before it and the account is not REDUCING after it.
+#[test]
+fn profile_margin_days_crosses_three_utc_days_with_restarts() {
+    // The exact sequence. Day numbers are UTC days since 1970; the run
+    // starts on day 19675, one hour before day 19676.
+    let mut w = scripted_days_world();
+    assert_eq!(day_base(&w), Some((19_675, amount("100"))), "the first report sets the base");
+    // Ten seconds before midnight the venue stops answering margin queries
+    // for twenty seconds, and 6 leave the account meanwhile.
+    w.sleep(HOUR - 20 * SECOND).unwrap();
+    assert_eq!(w.now, 19_676 * oms_core::DAY_US - 10 * SECOND);
+    w.margin_outage(20 * SECOND);
+    w.venue.deposit(amount("-6"));
+    w.sleep(40 * SECOND).unwrap();
+    // The first report of day 19676 says 94. It is judged against the 100
+    // of the day before, and only then becomes the base of the new day.
+    assert_eq!(reported_value(&w), Some(amount("94")));
+    assert_eq!(reducing_rules(&w), vec![oms_core::RuleId::DailyLoss], "a loss across midnight is not absorbed by the new base");
+    assert_eq!(day_base(&w), Some((19_676, amount("94"))));
+    assert_eq!(w.stats.roll_losses, 1);
+
+    // S13: a restart in the middle of the day keeps the latch and the base.
+    w.restart().unwrap();
+    w.sleep(60 * SECOND).unwrap();
+    assert_eq!(reported_value(&w), Some(amount("94")), "reports arrive again after the restart");
+    assert!(is_reducing(&w), "a restart does not end REDUCING");
+    assert_eq!(day_base(&w), Some((19_676, amount("94"))), "a restart does not move the base");
+    // The 6 come back. The second midnight: the base becomes the 100 of
+    // the first report of day 19677, and the latch stays.
+    w.venue.deposit(amount("6"));
+    w.sleep(24 * HOUR).unwrap();
+    assert_eq!(day_base(&w), Some((19_677, amount("100"))));
+    assert!(is_reducing(&w), "a new day does not end REDUCING");
+    // A withdrawal of 1 during day 19677 does not move the base: it is set
+    // once per day. Then a restart and the third midnight.
+    w.venue.deposit(amount("-1"));
+    w.sleep(HOUR).unwrap();
+    assert_eq!(reported_value(&w), Some(amount("99")));
+    assert_eq!(day_base(&w), Some((19_677, amount("100"))), "the base is set once per day");
+    w.restart().unwrap();
+    w.sleep(24 * HOUR).unwrap();
+    assert_eq!(day_base(&w), Some((19_678, amount("99"))));
+    assert!(is_reducing(&w), "neither restart nor new day ended REDUCING");
+    assert_eq!(w.stats.crashes, 2);
+    // The journal: one base per UTC day by a report, none by anything else.
+    let bases: Vec<(u64, oms_core::Amount)> = w
+        .durable
+        .iter()
+        .flat_map(|r| &r.events)
+        .filter_map(|e| match e {
+            oms_core::Event::DayBaseSet { day, value, set_by: oms_core::BaseSetBy::Report } => Some((*day, *value)),
+            oms_core::Event::DayBaseSet { .. } => panic!("no operator set a base here: {e:?}"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(bases, vec![(19_675, amount("100")), (19_676, amount("94")), (19_677, amount("100")), (19_678, amount("99"))]);
+    assert_eq!(w.stats.day_rolls, 3);
+    // The operator's clear ends it, on the newest report.
+    w.operator(oms_core::OperatorCmd::ClearReduce { note: "checked by hand".into() }).unwrap();
+    assert!(!is_reducing(&w));
+    assert_eq!(reducing_rules(&w), vec![oms_core::RuleId::DailyLoss], "REDUCING was entered once in three days");
+
+    let all = margin_days_runs();
+    for (i, s) in all.iter().enumerate() {
+        assert!(s.sim_seconds >= 50 * 3600, "run {i} lasted {} s", s.sim_seconds);
+        // Three midnights, and the journal's day base went over each once.
+        assert_eq!(s.day_rolls, 3, "run {i}: the day base crossed {} UTC midnights, the run has 3", s.day_rolls);
+        assert!(s.crashes > 0, "run {i} had no restart");
+    }
+    if all.len() >= 4 {
+        assert!(total(all, |s| s.reducing_restarts) > 0, "no restart happened while REDUCING");
+        assert!(total(all, |s| s.reducing_clears) > 0, "REDUCING was never cleared by the operator");
+    }
+    if all.len() >= 40 {
+        assert!(total(all, |s| s.reducing_day_rolls) > 0, "no run crossed midnight while REDUCING");
+        assert!(total(all, |s| s.roll_losses) > 0, "no loss was first seen by the report that rolled the day");
+    }
+}
+
+/// G8: the journal gains at most one margin record per poll, over days. A
+/// margin record is a journal record whose input is a margin report. The
+/// poll is every 5 s: 17 280 per day and link session. Journal bytes are
+/// not measured, and the journal is not pruned (U-04).
+#[test]
+fn margin_journal_records_stay_within_one_per_poll() {
+    // One quiet day of one link session: 86 400 s / 5 s = 17 280 polls,
+    // and as many margin records.
+    let mut w = scripted_days_world();
+    let (polls, records) = (w.stats.margin_polls, margin_records(&w));
+    w.sleep(24 * HOUR).unwrap();
+    assert_eq!(w.stats.margin_polls - polls, 17_280);
+    assert_eq!(margin_records(&w) - records, 17_280);
+
+    let all = margin_days_runs();
+    if all.len() >= 4 {
+        assert!(total(all, |s| s.report_dups) > 0, "no margin answer was delivered twice");
+        assert!(total(all, |s| s.reports_dropped) > 0, "no margin report was dropped");
+    }
+    for (i, s) in all.iter().enumerate() {
+        assert!(s.margin_records > 0, "run {i} journalled no margin record");
+        assert_eq!(s.margin_records, s.margin_polls_recorded, "run {i} journalled a poll's answer more than once");
+        assert!(
+            s.margin_records <= s.margin_polls,
+            "run {i} journalled {} margin records for {} polls",
+            s.margin_records,
+            s.margin_polls
+        );
+        // Each link session polls every 5 s from its start.
+        let sessions = u64::from(s.crashes) + u64::from(s.link_drops) + 1;
+        let most = s.sim_seconds / 5 + 1 + sessions;
+        assert!(s.margin_polls <= most, "run {i} polled {} times in {} s and {sessions} link sessions", s.margin_polls, s.sim_seconds);
     }
 }
 

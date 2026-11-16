@@ -12,7 +12,7 @@
 - "거래소 설정과 계좌 모드" 전체: 입력 `VenueSetting`, `AccountMode`와 이벤트 `VenueSettingNoted`, `AccountModeNoted`, 차단 `VenueSetting(종목)`, `AccountMode`, 노드의 두 조회와 `runtime.venue_setting_poll_ms`, 가상 거래소의 응답과 제어 명령(`venue_setting`, `account_mode`), `status`의 종목별 거래소 설정과 계좌 모드(티켓 08, V-MARGIN-9, V-MARGIN-11).
 - "유지증거금 여유" 전체: 받은 보고마다의 판정, `Rule(MmBuffer)`로 들어가는 감소 전용 상태와 그 이름의 규칙 취소, 조건이 참일 때의 해제 거절 `MmBufferActive`. `status`의 `core.margin.reducing.rule`은 `mm_buffer`가 된다(티켓 07, V-MARGIN-8, V-MARGIN-4, V-MARGIN-6).
 - "Hyperliquid 조회" 전체: Hyperliquid 게이트웨이의 증거금 조회, 거래소 설정 조회, 계좌 모드 조회와 그 응답의 번역, 조회 weight 예산 검사, 증거금 정책을 담은 Hyperliquid 예제 설정(티켓 09, V-MARGIN-10, V-CFG-1). 실제 거래소에는 한 번도 묻지 않았다.
-- 시뮬레이션의 증거금 모형과 검사: 가상 거래소(`oms-sim`의 `SimVenue`. simvenue 프로세스도 같은 것을 쓴다)가 계좌 가치를 자기 모형으로 계산하고(현금 + 포지션 × 기준 가격. 체결 대금과 수수료, 펀딩이 현금에서 나간다), 보고에 포지션(가치, 증거금, 증거금 방식, 레버리지, 최대 레버리지)을 담고, 감소 전용 주문이 포지션을 키우지 못하게 한다. 시뮬레이션 세계는 증거금 프로파일 `margin_calm`, `margin_lossy`에서 증거금 정책을 켜고 매 입력 뒤에 증거금 불변식을 검사한다(티켓 10, V-MARGIN-12, V-SIM-1, V-MARGIN-11). 프로파일과 검사의 목록은 [simulation.md](../verification/simulation.md)에 있다.
+- 시뮬레이션의 증거금 모형과 검사: 가상 거래소(`oms-sim`의 `SimVenue`. simvenue 프로세스도 같은 것을 쓴다)가 계좌 가치를 자기 모형으로 계산하고(현금 + 포지션 × 기준 가격. 체결 대금과 수수료, 펀딩이 현금에서 나간다), 보고에 포지션(가치, 증거금, 증거금 방식, 레버리지, 최대 레버리지)을 담고, 감소 전용 주문이 포지션을 키우지 못하게 한다. 시뮬레이션 세계는 증거금 프로파일 `margin_calm`, `margin_lossy`에서 증거금 정책을 켜고 매 입력 뒤에 증거금 불변식을 검사한다(티켓 10, V-MARGIN-12, V-SIM-1, V-MARGIN-11). 프로파일 `margin_days`는 같은 검사를 계약 기본값의 증거금 시계로 가상 시간 50시간(UTC 자정 세 번) 동안 돌린다(티켓 11, V-MARGIN-12). 프로파일과 검사의 목록은 [simulation.md](../verification/simulation.md)에 있다.
 
 가상 거래소에 대해 알아 둘 것: 계좌 가치와 포지션의 증거금은 우리가 만든 모형이고 거래소의 산술이 아니다. 포지션의 증거금은 가치 ÷ 레버리지이고 손실이 나도 줄지 않는다(모형은 진입 가격을 기억하지 않는다). 그래서 유지증거금 여유 규칙은 시뮬레이션이 증거금을 일부러 0으로 말하게 할 때만 걸린다. simvenue 프로세스는 참조 가격을 스스로 내지 않고 제어 명령(`ref_price`)을 받았을 때만 낸다(그 가격이 모형의 기준 가격도 된다). 그래서 simvenue에서 `policy.margin`을 켜면 그 명령으로 가격을 준 뒤 15초 동안만 일반 주문을 받는다. simvenue 프로세스의 접수 요청에는 감소 전용 표시가 없어서 프로세스는 모든 주문을 일반 주문으로 다룬다(감소 전용 주문의 거절은 시뮬레이션 세계에서만 일어난다). 가상 거래소는 모든 종목을 격리·레버리지 2로(제어 명령 `venue_setting`으로 바꿀 수 있다), 계좌 모드를 `standard`(가상 거래소가 붙인 이름이고 Hyperliquid의 값이 아니다)로 답한다. 기본 허용 목록은 비어 있으므로 simvenue에서 일반 주문을 내려면 `account_modes_allowed = ["standard"]`를 적어야 한다.
 
@@ -247,7 +247,7 @@ Hyperliquid 게이트웨이는 세 조회를 `/info`로 보내고 응답을 코�
 
 누가 언제 보는가: 이벤트가 내구화된 뒤 `status`에 나타난다. `status`는 감소 전용 상태(규칙, 시각), 기준 금액, 마지막 보고의 계좌 가치와 나이, 계좌 노출, 종목별 거래소 설정, 계좌 모드, 마지막 보고 거부 사유를 보여 준다.
 
-자원 상한: 보고는 5초에 하나이므로 저널에 하루 최대 17 280건을 더한다. 노출 계산은 열린 주문 수(상한 500)에 비례한다. 감소 전용 상태 진입이 내는 취소는 열린 주문 상한 이하이고 명령 채널 용량 안에 있다.
+자원 상한: 보고는 5초에 하나이므로 저널에 하루 최대 17 280건을 더한다(링크 세션이 새로 시작하면 그 세션의 첫 조회가 바로 나가므로 세션마다 한 건이 더 있을 수 있다). 시뮬레이션이 건수로 확인한다(`sim::margin_journal_records_stay_within_one_per_poll`). 디스크 바이트는 재지 않았고 저널은 지워지지 않는다(U-04). 노출 계산은 열린 주문 수(상한 500)에 비례한다. 감소 전용 상태 진입이 내는 취소는 열린 주문 상한 이하이고 명령 채널 용량 안에 있다.
 
 ### 전략이 지켜야 하는 것
 
@@ -297,6 +297,7 @@ Hyperliquid 게이트웨이는 세 조회를 `/info`로 보내고 응답을 코�
 | 중단과 재실행(중단 지점) | V-MARGIN-11 | `crash_points::stopped_before_the_write_of_a_reducing_decision_the_next_report_decides_again`, `stopped_after_the_reducing_decision_is_durable_the_cancels_are_sent_after_restart`, `stopped_around_a_day_base_set_the_base_is_set_exactly_once` (`--features failpoints`) |
 | 시뮬레이션(가상 거래소의 증거금 모형) | V-MARGIN-12 | `sim::world_account_value_follows_fills_price_fees_and_funding`, `a_loss_made_only_of_fees_and_funding_enters_reducing`, `world_refuses_a_reduce_only_order_that_would_grow_the_position`. 변이 M89~M92 |
 | 시뮬레이션(임의 순서의 실행에서 증거금 불변식) | V-MARGIN-12, V-SIM-1 | `sim::profile_margin_calm`, `profile_margin_calm_reducing_invariant`, `profile_margin_calm_release_invariant`, `profile_margin_lossy`. 변이 M94~M96 |
+| 시뮬레이션(여러 UTC 날: 자정 세 번, 재시작, 손실, 해제, 기준 재설정. 증거금 기록 수) | V-MARGIN-12, V-SIM-1 | `sim::profile_margin_days_crosses_three_utc_days_with_restarts`, `margin_journal_records_stay_within_one_per_poll`. 변이 M97~M100 |
 | 설정(정책이 없을 때: 기존 프로파일의 저널이 main의 것과 같다) | V-MARGIN-12 | `sim::existing_profiles_give_the_same_run_with_margin_off`. 변이 M93 |
 | 조회와 `status`(가상 거래소 프로세스의 포지션) | V-MARGIN-11 | `e2e::margin_report_of_the_venue_process_carries_its_positions` |
 
@@ -312,7 +313,7 @@ Hyperliquid 게이트웨이는 세 조회를 `/info`로 보내고 응답을 코�
 
 보고 끊김 취소의 시험이 보이지 않는 것: 포지션은 그대로 남는다(OMS는 닫지 않는다). 감소 전용 주문은 남는다. 링크가 내려가 있는 동안에는 아무것도 취소하지 않는다(취소를 보낼 수 없다. 링크가 돌아오면 그 세션이 올라온 시각부터 다시 60초를 잰다). 취소가 체결보다 먼저 닿는다는 것(취소는 체결에 질 수 있고, 그때는 체결을 기장한다). 취소 시도가 다 된 주문은 다시 요청하지 않는다(운영자가 `CancelStuck` 불일치로 본다). 틱이 오는 간격만큼 늦을 수 있다. 노드 프로세스를 거친 동작(이 규칙의 프로세스 시험은 없다. 무작위로 섞인 실행은 `sim::profile_margin_lossy`가 본다).
 
-시뮬레이션의 시험이 보이지 않는 것: 실제 거래소에 관한 것은 아무것도 없다. 계좌 가치와 증거금은 우리 모형이다(T1, T2, T3). 감소 전용 주문의 거절과 잘림은 문서를 읽고 가정으로 적은 것이다(T5). 취소가 체결보다 먼저 닿는다는 것(검사는 취소 요청이 있는지만 본다. 체결이 이기면 체결을 기장한다). 주문을 받은 뒤 가격이 움직여 노출이 한도를 넘는 것(검사는 받는 순간만 본다). 청산은 모형에 없다(계좌 가치가 0 아래로 가도 포지션은 남는다). 종목은 하나다. 증거금 시계는 계약 기본값의 50분의 1이다(조회 100 ms, 신선도 600 ms, 끊김 취소 1.2초). 여러 UTC 날에 걸친 실행은 티켓 11이다(여기서는 자정을 한 번 넘는다).
+시뮬레이션의 시험이 보이지 않는 것: 실제 거래소에 관한 것은 아무것도 없다. 계좌 가치와 증거금은 우리 모형이다(T1, T2, T3). 감소 전용 주문의 거절과 잘림은 문서를 읽고 가정으로 적은 것이다(T5). 취소가 체결보다 먼저 닿는다는 것(검사는 취소 요청이 있는지만 본다. 체결이 이기면 체결을 기장한다). 주문을 받은 뒤 가격이 움직여 노출이 한도를 넘는 것(검사는 받는 순간만 본다). 청산은 모형에 없다(계좌 가치가 0 아래로 가도 포지션은 남는다). 종목은 하나다. `margin_calm`과 `margin_lossy`의 증거금 시계는 계약 기본값의 50분의 1이고(조회 100 ms, 신선도 600 ms, 끊김 취소 1.2초) 자정을 한 번 넘는다. `margin_days`는 계약 기본값의 시계로 자정을 세 번 넘지만 가상 시간이다: 노드 프로세스를 실제로 며칠 돌리지 않았다. 저널이 느는 것은 증거금 기록의 건수로만 확인했다(디스크 바이트는 재지 않았고, 저널은 지워지지 않는다, U-04). 증거금 기록이 아닌 기록(참조 가격, 틱의 정리 기록 등)의 수는 묶지 않았다. `margin_days`는 seed를 표준 실행의 10분의 1만 돌린다.
 
 차단 표의 시험이 보이지 않는 것: 귀속되지 않은 포지션을 OMS로 줄이는 길(없다), 거래소가 감소 전용 주문의 포지션 확대를 막는지(T5).
 
