@@ -38,7 +38,9 @@ cp "$src/secret_scan.sh" "$src/rustfmt_added.sh" tools/ci/
 printf '# empty\n' > tools/ci/secret_scan_allow.txt
 # An existing, unformatted file that the format check must leave alone.
 printf 'pub fn  helper( ){}\n' > tests/common/mod.rs
-printf 'fn main() {}\n' > main.rs
+# Long enough that git still sees a rename after one line is appended.
+printf 'fn main() {\n    one();\n    two();\n}\n\nfn one() {}\n\nfn two() {}\n' > main.rs
+printf '# This is a synthetic lock file.\nchecksum = "%s"\n' "$(hex 7e 32)" > Cargo.lock
 g add -A
 g commit -q -m base
 base="$(git rev-parse HEAD)"
@@ -70,8 +72,29 @@ reset
 printf 'probe.toml %s\n' "$(hex 1b 32)" >> tools/ci/secret_scan_allow.txt
 expect fail "stale allow-list entry" scan
 reset
-printf 'token gh%s_%s\n' p "$(hex Ab 18)" >> tools/ci/secret_scan_allow.txt
+# The value is in the file, so only the line-format check can catch this.
+printf 'k = "%s"\n' "$(hex 2f 32)" > probe.toml
+printf 'probe.toml %s trailing-word\n' "$(hex 2f 32)" >> tools/ci/secret_scan_allow.txt
+expect fail "malformed allow-list line" scan
+reset
+# On a comment line, so that only the credential check can catch it.
+printf '# token gh%s_%s\n' p "$(hex Ab 18)" >> tools/ci/secret_scan_allow.txt
 expect fail "credential inside the allow-list file" scan
+reset
+printf 'token = "gh%s_%s"\n' p "$(hex Ab 18)" > probe.toml
+expect fail "GitHub token in an ordinary file" scan
+reset
+printf -- '-----BEGIN %s KEY-----\n' "RSA PRIVATE" > probe.txt
+expect fail "PEM private key header" scan
+reset
+printf 'checksum = "%s"\n' "$(hex 3d 32)" >> Cargo.lock
+expect ok "64-digit checksum in Cargo.lock" scan
+reset
+printf 'rev = "%s"\n' "$(hex 3d 20)" >> Cargo.lock
+expect fail "40-digit hex in Cargo.lock" scan
+reset
+printf '\n\n' > blank.txt
+expect ok "text file that holds only empty lines" scan
 reset
 printf 'a\0b\nkey %s\n' "$(hex 5c 32)" > probe.toml
 expect fail "key in a file with a NUL byte" scan
@@ -106,7 +129,10 @@ expect fail "unformatted new file" fmt
 undo
 git mv main.rs moved.rs
 printf 'fn  added( ){}\n' >> moved.rs
-expect fail "unformatted code in a renamed file" fmt
+g add -A && g commit -q -m probe
+# The case is only worth something if git really reports a rename.
+expect ok "git reports the move as a rename" bash -c 'git diff --name-status "$1"...HEAD | grep -qE "^R[0-9]+[[:space:]]main.rs[[:space:]]moved.rs$"' _ "$base"
+expect fail "unformatted code in a renamed file" tools/ci/rustfmt_added.sh "$base"
 undo
 printf 'pub fn  more( ){}\n' >> tests/common/mod.rs
 expect ok "unformatted code added to an existing file (exempt by design)" fmt
