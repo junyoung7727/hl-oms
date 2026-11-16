@@ -1266,6 +1266,65 @@ fn reduce_only_order_is_accepted_under_an_unacknowledged_mismatch() {
     assert_eq!(h.core.holds(None), vec![HoldReason::Mismatch]);
 }
 
+/// The left column of the table: these holds refuse every new order, the
+/// flagged ones too. Each case starts from a fresh, ready core.
+#[test]
+fn reduce_only_order_is_rejected_by_every_block_all_hold() {
+    fn refused(h: &mut H, hold: HoldReason) {
+        let r = h.reduce_only_req("a", "k9", Side::Sell, "1", "100");
+        assert_eq!(
+            h.new_order(r),
+            NewOrderReply::Rejected { reasons: vec![RejectReason::Hold(hold.clone())] },
+            "{hold:?} let a reduce-only order through"
+        );
+    }
+    fn long_one() -> H {
+        let mut h = H::ready_with(config_with_margin());
+        h.long("a", "k1", "1");
+        h
+    }
+
+    let mut h = long_one();
+    h.venue(VenueInput::Link {
+        up: false,
+        session: h.session,
+        reason: "ws closed".into(),
+    });
+    refused(&mut h, HoldReason::LinkDown);
+
+    let mut h = long_one();
+    h.op(OperatorCmd::Halt {
+        scope: Scope::Account,
+        note: "t".into(),
+    })
+    .unwrap();
+    refused(&mut h, HoldReason::OperatorAccount);
+
+    let mut h = long_one();
+    h.op(OperatorCmd::Halt {
+        scope: Scope::Strategy(sid("a")),
+        note: "t".into(),
+    })
+    .unwrap();
+    refused(&mut h, HoldReason::OperatorStrategy);
+
+    let mut h = long_one();
+    h.inp(Input::Storage { low: true, free_bytes: 0 });
+    refused(&mut h, HoldReason::StorageLow);
+
+    // No configuration: there is no strategy and no margin policy either, so
+    // the order is refused for more than one reason. The hold is among them.
+    let mut h = H::new();
+    h.inp(Input::Boot { binary: "test".into() });
+    let r = h.reduce_only_req("a", "k9", Side::Sell, "1", "100");
+    match h.new_order(r) {
+        NewOrderReply::Rejected { reasons } => {
+            assert!(reasons.contains(&RejectReason::Hold(HoldReason::NoConfig)), "{reasons:?}")
+        }
+        other => panic!("accepted without a configuration: {other:?}"),
+    }
+}
+
 #[test]
 fn acknowledging_one_mismatch_does_not_clear_another() {
     let mut h = H::ready();
