@@ -359,3 +359,41 @@ fn reduce_only_order_needs_no_fresh_report() {
     assert!(h.order(order_id).reduce_only);
     assert_eq!(h.sends().last(), Some(&order_id));
 }
+
+/// S21. Without a margin policy the rules are off: no order is refused for
+/// margin, and a margin input of any kind changes nothing and is not
+/// journaled.
+#[test]
+fn without_a_margin_policy_no_margin_check_runs() {
+    let mut h = H::ready();
+    assert_eq!(h.core.config.policy.margin, None);
+    let digest = h.core.digest();
+    let journaled = h.log.len();
+
+    let out = h.margin_report(1, 1, h.now, "100");
+    assert_eq!(names(&out), Vec::<&str>::new());
+    let out = h.venue(VenueInput::MarginReportInvalid {
+        session: 1,
+        seq: 2,
+        queried_at: h.now,
+        reason: "unreadable".into(),
+    });
+    assert_eq!(names(&out), Vec::<&str>::new());
+    let out = h.venue(VenueInput::MarginReport(MarginReportIn {
+        session: 1,
+        seq: 3,
+        queried_at: h.now,
+        account_value: amt("100"),
+        positions: vec![position("X", 0)],
+    }));
+    assert_eq!(names(&out), Vec::<&str>::new());
+
+    assert!(h.core.margin.is_empty());
+    assert_eq!(h.core.digest(), digest, "a margin input changed the state");
+    assert_eq!(h.log.len(), journaled, "a margin input was journaled");
+
+    // A plain order is accepted with no report at all, also a long time
+    // after the inputs above.
+    h.advance(120 * SEC);
+    h.accept("a", "k1", Side::Buy, "1", "100");
+}

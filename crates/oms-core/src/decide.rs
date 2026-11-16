@@ -611,7 +611,7 @@ impl Tx<'_> {
                 queried_at,
                 reason,
             } => {
-                if !self.margin_session_is_current(*session) {
+                if !self.takes_margin_input(*session) {
                     return Ok(());
                 }
                 self.emit(Event::MarginReportRejected {
@@ -626,14 +626,19 @@ impl Tx<'_> {
 
     // ---- margin reports (C-MARGIN) ----------------------------------------
 
-    /// An answer to a query of another link session, or one that arrives
-    /// while the link is down, is dropped: not stored and not judged.
-    fn margin_session_is_current(&self, session: u64) -> bool {
+    /// Whether a margin input of link session `session` is looked at at all.
+    /// Without a margin policy none is. An answer to a query of another link
+    /// session, or one that arrives while the link is down, is dropped: not
+    /// stored and not judged.
+    fn takes_margin_input(&self, session: u64) -> bool {
+        if self.core.config.policy.margin.is_none() {
+            return false;
+        }
         self.core.link.up && session == self.core.link.session
     }
 
     fn on_margin_report(&mut self, r: &MarginReportIn) -> Result<(), CoreFault> {
-        if !self.margin_session_is_current(r.session) {
+        if !self.takes_margin_input(r.session) {
             return Ok(());
         }
         // Answers can overtake each other. The query number decides which is
