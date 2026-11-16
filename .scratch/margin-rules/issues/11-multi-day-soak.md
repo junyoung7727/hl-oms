@@ -4,7 +4,7 @@
 
 **Blocked by:** 10
 
-**Status:** ready-for-merge
+**Status:** done
 
 - [x] Test `profile_margin_days_crosses_three_utc_days_with_restarts` (seam D, S12, S13, G8): fails when over the seeds of the standard run an invariant breaks, a day roll absorbs a loss, the base rolls more than once per day, or a restart or a day roll clears REDUCING.
 - [x] Test `margin_journal_records_stay_within_one_per_poll` (seam D, G8): fails when the run journals more margin records than polls made (17 280 per virtual day at 5 s).
@@ -13,7 +13,7 @@
 - [x] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
 - [x] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
 - [x] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
-- [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
+- [x] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
 
 ## Comments
 
@@ -37,3 +37,6 @@
   - For the merger: `evidence/mutants.json` lists 96 mutants, the code has 100; "96건" in `README.md` and in the kept-run rows of `docs/verification/README.md` (also "프로파일 9개", "19건") describe the kept run and were left.
   - Still not guaranteed: a wall-clock soak of the node process over real days (not done; the 50 hours are virtual). Disk bytes of the journal (not measured; the journal is not pruned, U-04). The number of records that are not margin records is not bounded here: in `margin_days` about one journal record in five is a margin record; the rest are mostly reference prices (one per poll), the `purged` record of a tick (one per purge interval of 1 s in the simulation's policy) and `fills_synced` records. That behaviour is older than the margin rules and was not changed. Memory use over days (not measured). More than three midnights in one run. A loss first seen across a midnight happens in about one random run of seven. Everything ticket 10 lists about the real venue.
   - Local gate on the branch tip (`git merge margin-rules`: already up to date at 28af154): `cargo test --workspace --locked` 286 passed, 0 failed, 0 ignored; clippy with warnings denied clean; generated documents in step; secret scan and `rustfmt_added.sh` pass. Not run here: the extended verification and the full mutant run (the merger's; the last checklist line is open).
+- Merge (merger claude-fable-5-2), 2026-11-16: merge commit 7a38e2f on `margin-rules`. `cargo test --workspace --locked`: 286 passed, 0 failed, 0 ignored. Clippy with warnings denied clean; generated documents in step; secret scan, `selftest.sh` and `rustfmt_added.sh` pass.
+  - Fixed during the merge (92d02a1): the full `xtask mutants` run stopped with "M93-sim-world-draws-without-margin: the text to mutate occurs 0 times in crates/oms-sim/src/world.rs; the list is out of date". This ticket rewrote the line M93 changes (the margin test is now the local `is_margin`); the ticket ran only M97 to M100 with `--only`. M93's text was updated to the new line, the same change as before (the random draw before the margin test). No rule code and no test was changed.
+  - Evidence (29d3962, source `b653c198772545d8`): `verify --extended` without `--live-testnet`, 318 tests in 9 suites, all passed (`sim` 21, 66 s; `sim-extended` 21, 501 s, `margin_days` with 300 seeds: 54 million inputs, 38 million records, 4407 restarts; `kills-extended` 114 s). The run was made twice: the first (source `f924a17e216f28c6`, also 318 passed) was before the M93 fix changed the digest and is not kept. Mutants: 100 of 100 killed. Performance was not measured again.
