@@ -465,6 +465,7 @@ pub enum BaseSetBy {
 pub enum MarginRefusal {
     NotReducing,
     MarginUnavailable,
+    MmBufferActive,
     NoteRequired,
 }
 
@@ -474,6 +475,7 @@ impl MarginRefusal {
         match self {
             MarginRefusal::NotReducing => "not_reducing: the account is not REDUCING",
             MarginRefusal::MarginUnavailable => "margin_unavailable: no fresh margin report",
+            MarginRefusal::MmBufferActive => "mm_buffer_active: a position is below its maintenance margin plus the buffer on the last margin report",
             MarginRefusal::NoteRequired => "note_required: the command needs a note",
         }
     }

@@ -10,7 +10,7 @@
 - [x] Test `mmr_follows_the_max_leverage_of_each_position` (seam A, S16): fails when a position with maximum leverage 25 is judged at 1.25 % and not at 2 %.
 - [x] Test `a_trigger_on_one_instrument_blocks_plain_orders_on_all` (seam A, S16): fails when a plain order on another instrument is accepted.
 - [x] Test `a_cross_position_is_not_judged_by_the_mm_rule` (seam A): fails when a cross-margin position trips the rule (it is the venue-setting hold's case).
-- [ ] Test `clear_reduce_is_refused_while_the_mm_condition_holds` (seam A, S14): fails when the clear succeeds, or the refusal reason is not `MmBufferActive`. There is no way out of a false latch; that is a stated non-guarantee.
+- [x] Test `clear_reduce_is_refused_while_the_mm_condition_holds` (seam A, S14): fails when the clear succeeds, or the refusal reason is not `MmBufferActive`. There is no way out of a false latch; that is a stated non-guarantee.
 - [ ] Test `reducing_records_the_rule_that_tripped_first` (seam A, S16): fails when a later MM trigger overwrites `DailyLoss` in the latch, or the reverse.
 - [ ] Test `an_old_report_on_arrival_is_still_judged_by_the_mm_rule` (seam A, S11): an accepted report whose query time is 40 s before the record time carries isolated margin 2.99 on position value 200 at maximum leverage 40. Fails when the account does not enter REDUCING with `Rule(MmBuffer)` on that report.
 - [ ] Test `mm_comparison_is_exact_at_extreme_values` (seam A, property, G3): fails when an overflow or a rounding flips the result near the boundary; expected values come from independent `i128` multiplication on literals.

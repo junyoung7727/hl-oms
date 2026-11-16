@@ -3058,3 +3058,68 @@ fn a_cross_position_is_not_judged_by_the_mm_rule() {
     assert_eq!(h.core.margin.reducing, None);
     assert_eq!(h.core.holds(None), vec![HoldReason::VenueSetting(iid("X"))]);
 }
+
+/// S14. While the newest margin report shows a position under its line, the
+/// operator cannot clear REDUCING: the refusal is `MmBufferActive`, nothing
+/// is recorded and the latch stays. It does not matter which rule set the
+/// latch. The condition is asked before the note. A report that shows the
+/// position back on its line lets the clear through.
+///
+/// Not guaranteed: a way out of a false latch. If the venue's margin field
+/// does not mean what the rule assumes (T1), the condition can read true
+/// for as long as the position exists; there is no force option.
+#[test]
+fn clear_reduce_is_refused_while_the_mm_condition_holds() {
+    let active = "mm_buffer_active: a position is below its maintenance margin \
+                  plus the buffer on the last margin report";
+
+    // The MM-buffer rule set the latch, and the condition is still true.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    report_positions(&mut h, vec![position_with("X", 40, "200", "2.99")]);
+    let latch = h.core.margin.reducing.clone();
+    assert_eq!(latch.as_ref().map(|r| r.rule), Some(RuleId::MmBuffer));
+    for note in ["position looked at", ""] {
+        let out = clear_reduce(&mut h, note);
+        assert_eq!(refused(&out), active, "note {note:?}");
+        assert_eq!(h.core.margin.reducing, latch);
+    }
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+
+    // A newer report still shows it: refused again.
+    h.advance(5 * SEC);
+    report_positions(&mut h, vec![position_with("X", 40, "200", "2.5")]);
+    let out = clear_reduce(&mut h, "position looked at");
+    assert_eq!(refused(&out), active);
+
+    // Margin was added at the venue: exactly on the line is not under it.
+    h.advance(5 * SEC);
+    report_positions(&mut h, vec![position_with("X", 40, "200", "3")]);
+    let out = clear_reduce(&mut h, "margin added at the venue");
+    assert_eq!(out.reply, Some(Reply::Operator(Ok("cleared".into()))));
+    assert_eq!(
+        out.events,
+        vec![
+            operator_base_set(20_000, "100"),
+            Event::ReducingCleared {
+                note: "margin added at the venue".into(),
+                old_base: Some(amt("100")),
+                new_base: amt("100"),
+            },
+        ]
+    );
+    assert_eq!(h.core.holds(None), vec![]);
+
+    // The daily-loss rule set the latch; a later report shows a position
+    // under its line. The clear is refused for that position.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    h.report_margin("94");
+    let latch = h.core.margin.reducing.clone();
+    assert_eq!(latch.as_ref().map(|r| r.rule), Some(RuleId::DailyLoss));
+    h.advance(5 * SEC);
+    report_positions(&mut h, vec![position_with("X", 40, "200", "2.99")]);
+    let out = clear_reduce(&mut h, "loss understood");
+    assert_eq!(refused(&out), active);
+    assert_eq!(h.core.margin.reducing, latch);
+}
