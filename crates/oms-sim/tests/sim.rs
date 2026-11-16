@@ -16,13 +16,17 @@ fn seeds() -> Vec<u64> {
 }
 
 fn run_profile(p: Profile) -> Vec<SimStats> {
+    run_profile_seeds(p, seeds())
+}
+
+fn run_profile_seeds(p: Profile, seeds: Vec<u64>) -> Vec<SimStats> {
     if let Ok(only) = std::env::var("OMS_SIM_PROFILE") {
         if only != p.name {
             return Vec::new();
         }
     }
     let mut all = Vec::new();
-    for seed in seeds() {
+    for seed in seeds {
         match run(seed, p.clone()) {
             Ok(s) => all.push(s),
             Err(v) => panic!("{v}\nrerun: OMS_SIM_PROFILE={} OMS_SIM_SEED={} cargo test -p oms-sim --test sim", p.name, seed),
@@ -468,6 +472,44 @@ fn profile_margin_lossy() {
         assert!(total(&all, |s| s.reducing_restarts) > 0, "no restart happened while REDUCING");
         assert!(total(&all, |s| s.clear_refusals) > 0, "no clear was refused");
         assert!(total(&all, |s| s.reducing_clears) > 0, "REDUCING was never cleared by the operator");
+    }
+}
+
+/// The seeds of `margin_days`: one for every ten of the standard run, and
+/// at least two. One run of it is about a hundred times the inputs of a run
+/// of another profile.
+fn soak_seeds() -> Vec<u64> {
+    let standard = seeds();
+    let n = if standard.len() == 1 { 1 } else { (standard.len() / 10).max(2) };
+    standard.into_iter().take(n).collect()
+}
+
+/// Every seed of `margin_days`, run once for the tests that read it.
+fn margin_days_runs() -> &'static [SimStats] {
+    static RUNS: std::sync::OnceLock<Vec<SimStats>> = std::sync::OnceLock::new();
+    RUNS.get_or_init(|| run_profile_seeds(Profile::margin_days(), soak_seeds()))
+}
+
+/// S12, S13, G8: the margin rules over several UTC days, on the contract's
+/// own clock (poll 5 s). A run starts one hour before a UTC midnight and
+/// lasts 50 hours of virtual time, with restarts, link drops, losses,
+/// withdrawals and deposits, clears and rebases in between. Every check of
+/// `margin_lossy` runs after every input.
+#[test]
+fn profile_margin_days_crosses_three_utc_days_with_restarts() {
+    let all = margin_days_runs();
+    for (i, s) in all.iter().enumerate() {
+        assert!(s.sim_seconds >= 50 * 3600, "run {i} lasted {} s", s.sim_seconds);
+        // Three midnights, and the journal's day base went over each once.
+        assert_eq!(s.day_rolls, 3, "run {i}: the day base crossed {} UTC midnights, the run has 3", s.day_rolls);
+        assert!(s.crashes > 0, "run {i} had no restart");
+    }
+    if all.len() >= 4 {
+        assert!(total(all, |s| s.reducing_restarts) > 0, "no restart happened while REDUCING");
+        assert!(total(all, |s| s.reducing_clears) > 0, "REDUCING was never cleared by the operator");
+    }
+    if all.len() >= 40 {
+        assert!(total(all, |s| s.reducing_day_rolls) > 0, "no run crossed midnight while REDUCING");
     }
 }
 
