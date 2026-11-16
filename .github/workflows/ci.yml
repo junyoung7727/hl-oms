@@ -59,6 +59,13 @@ jobs:
         run: |
           cargo run --locked -p xtask -- docs
           git diff --exit-code -- docs/generated
+          # git diff does not see a new, uncommitted generated file.
+          untracked="$(git status --porcelain -- docs/generated)"
+          if [ -n "$untracked" ]; then
+            echo "docs/generated is not committed in full:"
+            echo "$untracked"
+            exit 1
+          fi
 
       - name: Format of added Rust files
         if: github.event_name == 'pull_request'
