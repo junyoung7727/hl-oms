@@ -863,8 +863,44 @@
       "note": "",
       "test": "cargo test -p oms-sim --test sim profile_margin_calm_release_invariant",
       "what": "a day base set by a report ends REDUCING without an event (seen by the simulation check)"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / day base, simulation over days",
+      "id": "M97-sim-day-roll-absorbs-loss",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim profile_margin_days_crosses_three_utc_days_with_restarts",
+      "what": "a report sets the new day's base before it is judged against the old one (seen by the simulation over days)"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / day base, simulation over days",
+      "id": "M98-sim-base-reset-within-day",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim profile_margin_days_crosses_three_utc_days_with_restarts",
+      "what": "every report of the same UTC day sets the day base again (seen by the simulation over days)"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / day base across a restart, simulation over days",
+      "id": "M99-sim-boot-forgets-day-base",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim profile_margin_days_crosses_three_utc_days_with_restarts",
+      "what": "a restart forgets the day base, so the next report sets it again (seen by the simulation over days)"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / journal growth, simulation over days",
+      "id": "M100-sim-repeated-poll-recorded",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim margin_journal_records_stay_within_one_per_poll",
+      "what": "a margin answer that arrives twice is journalled twice (seen by the record count of the simulation over days)"
     }
   ],
-  "source_digest": "1fa039295d1b184b",
-  "taken_at_us": 1794827768756092
+  "source_digest": "b653c198772545d8",
+  "taken_at_us": 1794831471367030
 }
