@@ -271,10 +271,10 @@ Hyperliquid 게이트웨이는 세 조회를 `/info`로 보내고 응답을 코�
 | 중단과 재실행(재생: 감소 전용 상태와 기준 금액) | V-MARGIN-4, V-MARGIN-5, V-REPLAY-1 | `margin::latch_and_day_base_replay_to_the_same_state` |
 | 거래소 설정과 계좌 모드(종목 설정) | V-MARGIN-9 | `margin::instrument_with_unknown_venue_setting_holds_plain_orders`, `a_setting_that_differs_from_config_holds_only_that_instrument`, `a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again`, `a_cross_position_in_a_margin_report_raises_the_hold`, `venue_setting_hold_names_its_instrument_in_holds`. 변이 M43~M45 |
 | 거래소 설정과 계좌 모드(계좌 모드) | V-MARGIN-9 | `margin::unified_or_portfolio_account_mode_holds_the_account`, `an_account_mode_off_the_allow_list_or_unknown_holds_the_account`. 변이 M46~M49 |
-| Hyperliquid 조회(증거금 보고의 번역) | V-MARGIN-10 | `wire::tests::documented_clearinghouse_state_parses_to_a_margin_report`, `missing_zero_or_unparseable_max_leverage_rejects_the_whole_report`, `any_unparseable_number_rejects_the_whole_report`, `a_position_on_an_unconfigured_coin_is_kept` (oms-node 단위) |
-| Hyperliquid 조회(거래소 설정, 계좌 모드, 요청 본문) | V-MARGIN-10 | `wire::tests::documented_active_asset_data_parses_leverage_and_mode`, `user_abstraction_values_parse_and_an_unknown_value_stays_unknown`, `margin_and_setting_request_json` (oms-node 단위) |
-| Hyperliquid 조회(조회 weight 예산, 예제 설정) | V-CFG-1 | `config::tests::steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused`, `example_config_with_a_margin_policy_loads` (oms-node 단위) |
-| Hyperliquid 조회(취소 폭주 뒤의 요청 예산) | V-MARGIN-10 | `venue::hyperliquid::tests::a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time` (oms-node 단위) |
+| Hyperliquid 조회(증거금 보고의 번역) | V-MARGIN-10 | `wire::tests::documented_clearinghouse_state_parses_to_a_margin_report`, `missing_zero_or_unparseable_max_leverage_rejects_the_whole_report`, `any_unparseable_number_rejects_the_whole_report`, `a_position_on_an_unconfigured_coin_is_kept` (oms-node 단위). 변이 M80~M86 |
+| Hyperliquid 조회(거래소 설정, 계좌 모드, 요청 본문) | V-MARGIN-10 | `wire::tests::documented_active_asset_data_parses_leverage_and_mode`, `user_abstraction_values_parse_and_an_unknown_value_stays_unknown`, `margin_and_setting_request_json` (oms-node 단위). 변이 M87~M89 |
+| Hyperliquid 조회(조회 weight 예산, 예제 설정) | V-CFG-1 | `config::tests::steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused`, `example_config_with_a_margin_policy_loads` (oms-node 단위). 변이 M90, M91 |
+| Hyperliquid 조회(취소 폭주 뒤의 요청 예산) | V-MARGIN-10 | `venue::hyperliquid::tests::a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time` (oms-node 단위). 변이 M92 |
 | 차단 표(거래소 설정, 계좌 모드) | V-MARGIN-9 | `margin::reduce_only_order_passes_the_venue_setting_and_account_mode_holds`. 변이 M50 |
 | 설정(`runtime.venue_setting_poll_ms`) | V-CFG-1 | `config::tests::mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused` (oms-node 단위) |
 

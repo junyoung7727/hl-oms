@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `6a7cfbed2dfc3feb`, 검증 결과의 다이제스트 `444207d7cf4d7911`.
+> 소스 다이제스트 `9db9ccf7e00f5ad3`, 검증 결과의 다이제스트 `444207d7cf4d7911`.
 
 주장 64건: 통과 0, 실패 0, 미실행 3, 이전 버전 결과 61.
 
@@ -1448,7 +1448,7 @@
 - 실제 구성요소: oms-node(venue/hyperliquid/wire.rs, venue/hyperliquid/mod.rs의 Budget)
 - 모의·시뮬레이션: 응답은 시험이 입력. 거래소에 묻지 않는다
 - 주입한 장애: maxLeverage 없음, 0, 문자열, null, 음수, 소수, u32 초과, 배열. 소수 필드 없음, 숫자가 아닌 문자열, 빈 문자열, JSON 숫자, null, 지수 표기, NaN, 소수 9자리. 모르는 증거금 방식. 종목 이름 없음. 포지션 목록 없음
-- 판정 기준과 근거: C-MARGIN의 'Hyperliquid 조회'. 기대값은 문서 예의 소수를 손으로 1e-8 단위 정수로 적었다
+- 판정 기준과 근거: C-MARGIN의 'Hyperliquid 조회'. 기대값은 문서 예의 소수를 손으로 1e-8 단위 정수로 적었다. 변이 M80~M89, M92
 - 재현: `cargo test -p oms-node --lib venue::hyperliquid`
 - 뒷받침하는 것: C-MARGIN
 - 확인하지 않은 범위: 실제 응답이 문서의 예와 같은지, 필드의 뜻이 유도한 것과 같은지(T1, T2). 어느 userAbstraction 값이 표준 모드인지(T10), 포지션이 없을 때 activeAssetData가 레버리지를 주는지(T11). activeAssetData의 응답 예는 저장소의 조사 문서에 없고 문서와 다시 대조하지 않았다. 게이트웨이가 조회를 실제로 보내는 경로(HTTP)는 시험하지 않는다. HTTP 429일 때의 동작. 거래소가 실제로 세는 weight. 요청 예산을 여러 조회가 다투는 순서와 조회 간격만큼 더 길어지는 대기

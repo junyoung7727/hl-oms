@@ -477,6 +477,123 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "oms-core", "--test", "margin", "reduce_only_order_passes_the_venue_setting_and_account_mode_holds"],
         guards: "C-MARGIN / hold table",
     },
+    Mutant {
+        id: "M80-zero-max-leverage-reported",
+        what: "a position with maxLeverage 0 is reported instead of refusing the whole answer",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "if max_leverage == 0 {",
+        replace: "if false {",
+        test: &["-p", "oms-node", "--lib", "missing_zero_or_unparseable_max_leverage_rejects_the_whole_report"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M81-missing-max-leverage-defaulted",
+        what: "a missing or unreadable maxLeverage is read as 1",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "let max_leverage = whole(pos.get(\"maxLeverage\"), \"maxLeverage\").map_err(at)?;",
+        replace: "let max_leverage = whole(pos.get(\"maxLeverage\"), \"maxLeverage\").unwrap_or(1);",
+        test: &["-p", "oms-node", "--lib", "missing_zero_or_unparseable_max_leverage_rejects_the_whole_report"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M82-unreadable-position-skipped",
+        what: "a position whose size cannot be read is left out and the rest is reported",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "let szi = decimal(pos.get(\"szi\"), \"szi\", SQty::parse).map_err(at)?;",
+        replace: "let Ok(szi) = decimal(pos.get(\"szi\"), \"szi\", SQty::parse) else { continue };",
+        test: &["-p", "oms-node", "--lib", "any_unparseable_number_rejects_the_whole_report"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M83-unreadable-margin-read-as-zero",
+        what: "an unreadable marginUsed is reported as zero",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "let margin_used = decimal(pos.get(\"marginUsed\"), \"marginUsed\", Amount::parse).map_err(at)?;",
+        replace: "let margin_used = decimal(pos.get(\"marginUsed\"), \"marginUsed\", Amount::parse).unwrap_or(Amount::ZERO);",
+        test: &["-p", "oms-node", "--lib", "any_unparseable_number_rejects_the_whole_report"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M84-unreadable-account-value-read-as-zero",
+        what: "an unreadable account value is reported as zero",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "let account_value = decimal(body.pointer(\"/marginSummary/accountValue\"), \"marginSummary.accountValue\", Amount::parse)?;",
+        replace: "let account_value = decimal(body.pointer(\"/marginSummary/accountValue\"), \"marginSummary.accountValue\", Amount::parse).unwrap_or(Amount::ZERO);",
+        test: &["-p", "oms-node", "--lib", "any_unparseable_number_rejects_the_whole_report"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M85-cross-only-account-value",
+        what: "the account value is taken from crossMarginSummary, which leaves isolated margin out",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "body.pointer(\"/marginSummary/accountValue\")",
+        replace: "body.pointer(\"/crossMarginSummary/accountValue\")",
+        test: &["-p", "oms-node", "--lib", "documented_clearinghouse_state_parses_to_a_margin_report"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M86-unknown-position-mode-read-as-cross",
+        what: "a position whose margin mode is not documented is reported as cross",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "_ => return Err(at(format!(\"leverage.type is neither isolated nor cross: {v}\"))),",
+        replace: "_ => LeverageType::Cross,",
+        test: &["-p", "oms-node", "--lib", "any_unparseable_number_rejects_the_whole_report"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M87-unknown-setting-mode-read-as-isolated",
+        what: "a venue setting whose margin mode is not documented is read as isolated",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "Some(\"cross\") => false,\n        _ => return None,",
+        replace: "Some(\"cross\") => false,\n        _ => true,",
+        test: &["-p", "oms-node", "--lib", "documented_active_asset_data_parses_leverage_and_mode"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M88-setting-of-another-coin-accepted",
+        what: "the venue setting of another coin is taken as the setting of the instrument asked about",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "if body.get(\"coin\").and_then(|c| c.as_str()) != Some(instrument.as_str()) {",
+        replace: "if false {",
+        test: &["-p", "oms-node", "--lib", "documented_active_asset_data_parses_leverage_and_mode"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M89-unknown-account-mode-read-as-default",
+        what: "an account mode that is not unifiedAccount or portfolioMargin is passed on as default",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "let mode = body.as_str()?;",
+        replace: "let mode = match body.as_str()? {\n        m @ (\"unifiedAccount\" | \"portfolioMargin\") => m,\n        _ => \"default\",\n    };",
+        test: &["-p", "oms-node", "--lib", "user_abstraction_values_parse_and_an_unknown_value_stays_unknown"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M90-query-weight-above-budget-loads",
+        what: "a configuration whose query weight is above 600 per minute loads",
+        file: "crates/oms-node/src/config.rs",
+        find: "if weight > QUERY_WEIGHT_BUDGET {",
+        replace: "if false {",
+        test: &["-p", "oms-node", "--lib", "steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused"],
+        guards: "C-MARGIN / query weight budget",
+    },
+    Mutant {
+        id: "M91-venue-setting-queries-not-counted",
+        what: "the venue-setting queries are left out of the query weight",
+        file: "crates/oms-node/src/config.rs",
+        find: "weight += per_minute(u64::from(WEIGHT_OTHER_INFO_QUERY) * instruments, r.venue_setting_poll_ms);",
+        replace: "",
+        test: &["-p", "oms-node", "--lib", "steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused"],
+        guards: "C-MARGIN / query weight budget",
+    },
+    Mutant {
+        id: "M92-queries-use-the-reserve",
+        what: "an info query may use the budget reserved for orders and cancels",
+        file: "crates/oms-node/src/venue/hyperliquid/mod.rs",
+        find: "self.take_at(now, weight, RESERVE_FOR_CANCELS + RESERVE_FOR_ORDERS)",
+        replace: "self.take_at(now, weight, 0.0)",
+        test: &["-p", "oms-node", "--lib", "a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time"],
+        guards: "C-MARGIN / query weight budget",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -508,7 +625,9 @@ pub fn run(root: &Path, only: Option<&str>) -> i32 {
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target"));
     let work = target.join("mutants-work");
     let _ = std::fs::remove_dir_all(work.join("crates"));
-    for item in ["crates", "Cargo.toml", "Cargo.lock"] {
+    // `config` holds the shipped example configurations, which unit tests
+    // of the node load.
+    for item in ["crates", "config", "Cargo.toml", "Cargo.lock"] {
         let (src, dst) = (root.join(item), work.join(item));
         let r = if src.is_dir() { copy_tree(&src, &dst) } else { std::fs::create_dir_all(&work).and_then(|()| std::fs::copy(&src, &dst).map(|_| ())) };
         if let Err(e) = r {
