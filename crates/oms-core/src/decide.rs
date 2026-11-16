@@ -760,7 +760,7 @@ impl Tx<'_> {
         self.core.link.up && session == self.core.link.session
     }
 
-    fn on_margin_report(&mut self, r: &MarginReportIn) -> Result<(), CoreFault> {
+    fn on_margin_report(&mut self, r: &MarginReport) -> Result<(), CoreFault> {
         if !self.takes_margin_input(r.session) {
             return Ok(());
         }
@@ -790,7 +790,7 @@ impl Tx<'_> {
     /// recorded report is close to liquidation. A cross position is not
     /// judged: its margin is the account's (the venue-setting hold names
     /// it).
-    fn judge_mm_buffer(&mut self, r: &MarginReportIn) -> Result<(), CoreFault> {
+    fn judge_mm_buffer(&mut self, r: &MarginReport) -> Result<(), CoreFault> {
         let Some(policy) = &self.core.config.policy.margin else {
             return Ok(());
         };
@@ -807,7 +807,7 @@ impl Tx<'_> {
 
     /// Daily loss (C-MARGIN): the account value of a recorded report is more
     /// than `daily_loss_bps` below the day base.
-    fn judge_daily_loss(&mut self, r: &MarginReportIn) -> Result<(), CoreFault> {
+    fn judge_daily_loss(&mut self, r: &MarginReport) -> Result<(), CoreFault> {
         let (Some(policy), Some(base)) = (&self.core.config.policy.margin, &self.core.margin.day_base) else {
             return Ok(());
         };
@@ -866,7 +866,7 @@ impl Tx<'_> {
     /// the report belongs to a later UTC day than the base. Runs after the
     /// report was judged against the old base. A report of an earlier day
     /// never moves the base back.
-    fn roll_day_base(&mut self, r: &MarginReportIn) -> Result<(), CoreFault> {
+    fn roll_day_base(&mut self, r: &MarginReport) -> Result<(), CoreFault> {
         let day = r.queried_at / DAY_US;
         if self.core.margin.day_base.as_ref().is_some_and(|base| day <= base.day) {
             return Ok(());
@@ -1734,7 +1734,7 @@ fn reach_after(b: &Book, side: Side, qty: Qty) -> Option<i64> {
 /// The first position of the report that the MM-buffer rule judges and
 /// finds under its line. Judged: isolated, with a position value above
 /// zero.
-fn position_under_the_mm_line(r: &MarginReportIn, buffer_bps: u32) -> Option<&MarginPosition> {
+fn position_under_the_mm_line(r: &MarginReport, buffer_bps: u32) -> Option<&MarginPosition> {
     let judged = |p: &&MarginPosition| p.leverage_type == LeverageType::Isolated && p.position_value.0 > 0;
     r.positions.iter().filter(judged).find(|p| mm_buffer_is_used_up(p, buffer_bps))
 }

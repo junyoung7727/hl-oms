@@ -198,7 +198,7 @@ pub fn core_bench_case(orders: u64, margin: bool) -> Result<CoreBenchCase, Strin
     let mut poll = |core: &mut Core, at: &mut Ts| {
         margin_seq += 1;
         let queried_at = *at;
-        go(core, at, Input::Venue(VenueInput::MarginReport(MarginReportIn {
+        go(core, at, Input::Venue(VenueInput::MarginReport(MarginReport {
             session,
             seq: margin_seq,
             queried_at,

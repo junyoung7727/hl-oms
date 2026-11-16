@@ -92,7 +92,7 @@ fn position(instrument: &str, max_leverage: u32) -> MarginPosition {
 fn margin_report_of_the_current_session_is_recorded() {
     let mut h = H::ready_with(config_with_margin());
     let queried_at = h.now;
-    let report = MarginReportIn {
+    let report = MarginReport {
         session: h.session,
         seq: 1,
         queried_at,
@@ -243,7 +243,7 @@ fn invalid_margin_report_is_journaled_and_never_becomes_fresh() {
     // maintenance margin rate.
     h.advance(5 * SEC);
     let zero_at = h.now;
-    let out = h.venue(VenueInput::MarginReport(MarginReportIn {
+    let out = h.venue(VenueInput::MarginReport(MarginReport {
         session: 1,
         seq: 3,
         queried_at: zero_at,
@@ -452,7 +452,7 @@ fn without_a_margin_policy_no_margin_check_runs() {
         reason: "unreadable".into(),
     });
     assert_eq!(names(&out), Vec::<&str>::new());
-    let out = h.venue(VenueInput::MarginReport(MarginReportIn {
+    let out = h.venue(VenueInput::MarginReport(MarginReport {
         session: 1,
         seq: 3,
         queried_at: h.now,
@@ -1425,7 +1425,7 @@ fn margin_events_replay_to_the_same_state() {
     link_down(&mut h);
     h.link_up_and_sync();
     let last_at = h.now;
-    h.venue(VenueInput::MarginReport(MarginReportIn {
+    h.venue(VenueInput::MarginReport(MarginReport {
         session: 2,
         seq: 1,
         queried_at: last_at,
@@ -2434,7 +2434,7 @@ fn a_report_position_on_an_unconfigured_instrument_leaves_no_venue_setting() {
     assert_eq!(h.core.margin.venue_settings.len(), 0);
 
     h.margin_seq += 1;
-    h.venue(VenueInput::MarginReport(MarginReportIn {
+    h.venue(VenueInput::MarginReport(MarginReport {
         session: h.session,
         seq: h.margin_seq,
         queried_at: h.now,
@@ -2457,7 +2457,7 @@ fn report_with_position_on_x(
     leverage_value: u32,
 ) -> Output {
     h.margin_seq += 1;
-    h.venue(VenueInput::MarginReport(MarginReportIn {
+    h.venue(VenueInput::MarginReport(MarginReport {
         session: h.session,
         seq: h.margin_seq,
         queried_at: h.now,
@@ -3306,7 +3306,7 @@ fn report_positions(h: &mut H, positions: Vec<MarginPosition>) -> Output {
 
 fn report_positions_asked_at(h: &mut H, queried_at: Ts, positions: Vec<MarginPosition>) -> Output {
     h.margin_seq += 1;
-    h.venue(VenueInput::MarginReport(MarginReportIn {
+    h.venue(VenueInput::MarginReport(MarginReport {
         session: h.session,
         seq: h.margin_seq,
         queried_at,
@@ -3590,7 +3590,7 @@ fn reducing_records_the_rule_that_tripped_first() {
     let mut h = at_base_100();
     h.advance(5 * SEC);
     h.margin_seq += 1;
-    let out = h.venue(VenueInput::MarginReport(MarginReportIn {
+    let out = h.venue(VenueInput::MarginReport(MarginReport {
         session: h.session,
         seq: h.margin_seq,
         queried_at: h.now,

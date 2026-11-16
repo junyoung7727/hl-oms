@@ -1061,7 +1061,7 @@ impl World {
         match q {
             Query::Margin { .. } if self.now < self.margin_out_until => Vec::new(),
             Query::Margin { .. } if self.night_out.0 <= self.now && self.now < self.night_out.1 => Vec::new(),
-            Query::Margin { seq } => vec![VenueInput::MarginReport(MarginReportIn {
+            Query::Margin { seq } => vec![VenueInput::MarginReport(MarginReport {
                 session,
                 seq,
                 queried_at,
@@ -1243,7 +1243,7 @@ impl World {
     /// base that stood before it. A report more than 5 % below that base
     /// leaves the account REDUCING, also when the same report starts a new
     /// UTC day.
-    fn check_day_base(&mut self, report: &MarginReportIn, out: &Output, before: &MarginBefore) -> Result<(), Violation> {
+    fn check_day_base(&mut self, report: &MarginReport, out: &Output, before: &MarginBefore) -> Result<(), Violation> {
         let value = i128::from(report.account_value.0);
         let rolled = out.events.iter().any(|e| matches!(e, Event::DayBaseSet { set_by: BaseSetBy::Report, .. }));
         let Some(base) = before.day_base.map(|b| i128::from(b.0)) else { return Ok(()) };

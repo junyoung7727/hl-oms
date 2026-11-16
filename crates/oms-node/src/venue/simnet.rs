@@ -369,7 +369,7 @@ impl Gateway {
                     return;
                 };
                 let input = match serde_json::from_value::<MarginResult>(resp.result) {
-                    Ok(r) => VenueInput::MarginReport(MarginReportIn {
+                    Ok(r) => VenueInput::MarginReport(MarginReport {
                         session,
                         seq,
                         queried_at,

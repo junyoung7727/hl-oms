@@ -134,7 +134,7 @@ pub enum VenueInput {
         venue_ts: Ts,
     },
     /// The venue's answer to one margin query (C-MARGIN).
-    MarginReport(MarginReportIn),
+    MarginReport(MarginReport),
     /// The venue answered a margin query and the gateway could not read the
     /// answer as a whole report. No part of it is used.
     MarginReportInvalid {
@@ -159,7 +159,7 @@ pub enum VenueInput {
 /// What the venue said about the account's margin at one moment. The whole
 /// report is one fact: it is recorded as it came or not at all.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MarginReportIn {
+pub struct MarginReport {
     /// Link session in which the query was sent.
     pub session: u64,
     /// Number of the query. It rises within a link session, so a late answer

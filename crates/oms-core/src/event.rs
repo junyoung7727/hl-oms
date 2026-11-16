@@ -190,7 +190,7 @@ pub enum Event {
     /// A margin report of the current link session was taken as the newest
     /// one (C-MARGIN).
     MarginReported {
-        report: MarginReportIn,
+        report: MarginReport,
     },
     /// A margin report was refused as a whole. The last recorded report
     /// stays and keeps ageing.

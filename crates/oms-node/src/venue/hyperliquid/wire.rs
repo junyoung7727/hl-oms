@@ -350,7 +350,7 @@ pub fn fill_input(f: &HlFill, instance_id: u64) -> Option<FillIn> {
 /// a whole margin report, or a refusal with its reason. Never a part of one.
 pub fn margin_input(body: &serde_json::Value, session: u64, seq: u64, queried_at: Ts) -> VenueInput {
     match margin_report(body) {
-        Ok((account_value, positions)) => VenueInput::MarginReport(MarginReportIn {
+        Ok((account_value, positions)) => VenueInput::MarginReport(MarginReport {
             session,
             seq,
             queried_at,
@@ -566,7 +566,7 @@ mod tests {
     fn documented_clearinghouse_state_parses_to_a_margin_report() {
         assert_eq!(
             margin_input(&doc_state(), 7, 3, 1_700_000_000_000_000),
-            VenueInput::MarginReport(MarginReportIn {
+            VenueInput::MarginReport(MarginReport {
                 session: 7,
                 seq: 3,
                 queried_at: 1_700_000_000_000_000,
@@ -715,7 +715,7 @@ mod tests {
         flat["assetPositions"] = json!([]);
         assert_eq!(
             margin_input(&flat, 7, 3, 9),
-            VenueInput::MarginReport(MarginReportIn {
+            VenueInput::MarginReport(MarginReport {
                 session: 7,
                 seq: 3,
                 queried_at: 9,
