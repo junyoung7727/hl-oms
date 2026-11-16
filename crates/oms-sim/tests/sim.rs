@@ -470,3 +470,41 @@ fn profile_margin_lossy() {
         assert!(total(&all, |s| s.reducing_clears) > 0, "REDUCING was never cleared by the operator");
     }
 }
+
+/// S21: without a margin policy the run is the one it was before the margin
+/// rules existed. `trace_hash` is a hash of the bytes of every journal
+/// record of a run. The literals were recorded by running the same seeds on
+/// `main` at commit 84db0f9, the last commit without the margin rules. This
+/// never compares two runs of the same build. The state digest is not
+/// compared: the state gained fields in this work.
+#[test]
+fn existing_profiles_give_the_same_run_with_margin_off() {
+    const SEEDS: [u64; 5] = [1, 2, 3, 17, 99];
+    #[rustfmt::skip]
+    const ON_MAIN: [(&str, [u64; 5]); 7] = [
+        ("calm", [0x78ea96a841127a00, 0x92f0d68707600a30, 0xa87915c80fcdbcd3, 0x5ee1e73fd2acf460, 0xf4a3b14b7805cd83]),
+        ("lossy", [0x1af94f30f321f791, 0x993eed60d1c00056, 0xa1cf4640ec4a4d57, 0x0bd1f5aa1cc2a36c, 0x122e38edd5bcf74e]),
+        ("crashy", [0xc334a3ed9e8eb6bd, 0xfbe67ba08168cdd2, 0x0a3151c117f08f96, 0x2adb6e13a9493068, 0x462b79a20d00aa9e]),
+        ("weak_evidence", [0x1ca783100ce07926, 0x212723d84aed965f, 0xa664451ca2efc5af, 0x8ee02956c3d1cc5c, 0x1c65e63c460ab56b]),
+        ("purge", [0x34e48abedd743f00, 0x3fe98eccfc6abb06, 0x8e5ee1fa329498b6, 0x64007ec0c07c2687, 0xbed2cb70e8fa3690]),
+        ("skewed", [0x3e82591d3201083a, 0x6a60979da1038880, 0xa125571a90eecb1d, 0x08f6e8ab065e0037, 0xa0e93a3de07c5902]),
+        ("external", [0x430b153812515e1b, 0x39dda192dceeeb72, 0x064d9dbd1c8e562f, 0x3dda428cab0e2d5a, 0xa09e0d117525bbc9]),
+    ];
+    let profiles = Profile::all();
+    assert_eq!(
+        profiles.iter().map(|p| p.name).collect::<Vec<_>>(),
+        ON_MAIN.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
+        "the profiles that existed on main, each with its literals"
+    );
+    for (p, (name, on_main)) in profiles.into_iter().zip(ON_MAIN) {
+        assert!(!p.margin && world::sim_config(&p).policy.margin.is_none(), "{name} must run without a margin policy");
+        for (seed, expected) in SEEDS.into_iter().zip(on_main) {
+            let stats = run(seed, p.clone()).unwrap();
+            assert_eq!(
+                stats.trace_hash, expected,
+                "profile {name} seed {seed}: journal hash {:#018x}, on main {expected:#018x}",
+                stats.trace_hash
+            );
+        }
+    }
+}
