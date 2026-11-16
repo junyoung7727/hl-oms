@@ -684,6 +684,11 @@ impl Tx<'_> {
     /// to cancel every open plain order. An order with the venue's
     /// reduce-only flag is kept: it can only lower the position.
     fn enter_reducing(&mut self, rule: RuleId, detail: String) -> Result<(), CoreFault> {
+        // Entered once: a second trigger emits nothing, and the rule that
+        // tripped first stays recorded.
+        if self.core.margin.reducing.is_some() {
+            return Ok(());
+        }
         self.emit(Event::ReducingEntered { rule, detail })?;
         for id in self.open_ids() {
             let Some(o) = self.core.orders.get(&id) else { continue };

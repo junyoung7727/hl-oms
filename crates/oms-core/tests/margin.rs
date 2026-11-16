@@ -910,3 +910,30 @@ fn a_stuck_rule_cancel_does_not_block_reduce_only_orders() {
     };
     assert_eq!(h.sends().last(), Some(&order_id));
 }
+
+/// S8. REDUCING is entered once. A later report that breaches the limit
+/// again emits no second entry event and no new cancel, also not for an
+/// order whose rule cancel has used up its attempts. The first entry stays
+/// recorded as it was.
+#[test]
+fn reducing_is_entered_once() {
+    let mut h = at_base_100();
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    h.report_margin("94.99");
+    let first_entry = h.core.margin.reducing.clone();
+    assert!(first_entry.is_some());
+    exhaust_cancel(&mut h, bid);
+    assert_eq!(h.cancels().len(), 5);
+
+    h.advance(5 * SEC);
+    let out = h.report_margin("90");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(out.commands, vec![]);
+    assert_eq!(h.cancels().len(), 5);
+    assert_eq!(h.core.margin.reducing, first_entry);
+    assert_eq!(
+        h.order(bid).cancel.as_ref().map(|c| c.used()),
+        Some(5),
+        "the stuck cancel got a new budget"
+    );
+}
