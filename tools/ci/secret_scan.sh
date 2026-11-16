@@ -4,19 +4,15 @@
 #
 # It reads tracked files only (`git ls-files`). It is a pattern check: it
 # does not prove that no secret exists, only that none has a known shape.
+# A key split over lines, encoded in base64 or written as a mnemonic passes.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-# Files that hold public SDK test vectors or documentation examples. A new
-# entry needs a reason in the PR that adds it.
-ALLOW_HEX=(
-  "crates/oms-node/src/venue/hyperliquid/sign.rs"
-  "crates/oms-node/tests/hl_live.rs"
-  "config/hyperliquid-testnet.example.toml"
-  "docs/research/hyperliquid-protocol.md"
-)
-# Cargo.lock holds 64-digit package checksums and nothing else of that shape.
-ALLOW_BARE64=("Cargo.lock")
+# Every run of exactly 40 or 64 hex digits (an address or a 32-byte key,
+# with or without a 0x prefix) must be listed here as "<path> <value>".
+ALLOW_FILE="tools/ci/secret_scan_allow.txt"
+# Cargo.lock holds 64-digit package checksums. Only that length is exempt.
+LOCK_FILE="Cargo.lock"
 
 fail=0
 report() {
@@ -24,15 +20,11 @@ report() {
   fail=1
 }
 
-allowed() {
-  local file="$1"
-  shift
-  local a
-  for a in "$@"; do
-    [[ "$file" == "$a" ]] && return 0
-  done
-  return 1
-}
+declare -A allowed=()
+while read -r path value _; do
+  [[ -z "$path" || "$path" == \#* ]] && continue
+  allowed["$path $value"]=1
+done < "$ALLOW_FILE"
 
 mapfile -t files < <(git ls-files)
 
@@ -43,22 +35,26 @@ for f in "${files[@]}"; do
   fi
 done
 
-# 2. A 20-byte address or a 32-byte key in hex.
-ADDRESS='0x[0-9a-fA-F]{40}([^0-9a-fA-F]|$)'
-KEY64='(^|[^0-9a-fA-F])[0-9a-fA-F]{64}([^0-9a-fA-F]|$)'
-# 3. Credentials with a fixed shape.
+# 2. Credentials with a fixed shape.
 TOKENS='-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{40,}|xox[baprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}'
 
 for f in "${files[@]}"; do
-  [[ -f "$f" ]] || continue
-  if ! allowed "$f" "${ALLOW_HEX[@]}"; then
-    if grep -IqE "$ADDRESS" -- "$f"; then
-      report "address-shaped value in $f: $(grep -InE "$ADDRESS" -- "$f" | cut -d: -f1 | head -3 | tr '\n' ' ')(line numbers)"
+  [[ -f "$f" && "$f" != "$ALLOW_FILE" ]] || continue
+  # Skip binary files.
+  grep -Iq . -- "$f" || continue
+
+  # 3. Hex runs of exactly 40 or 64 digits, each one checked by value.
+  while read -r value; do
+    [[ -z "$value" ]] && continue
+    if [[ "$f" == "$LOCK_FILE" && ${#value} -eq 64 ]]; then
+      continue
     fi
-    if ! allowed "$f" "${ALLOW_BARE64[@]}" && grep -IqE "$KEY64" -- "$f"; then
-      report "64-digit hex value in $f: $(grep -InE "$KEY64" -- "$f" | cut -d: -f1 | head -3 | tr '\n' ' ')(line numbers)"
+    if [[ -z "${allowed["$f $value"]:-}" ]]; then
+      line=$(grep -inF -- "$value" "$f" | head -1 | cut -d: -f1)
+      report "${#value}-digit hex value not on the allow-list: $f:${line:-?}"
     fi
-  fi
+  done < <(tr -c '0-9a-fA-F' '\n' < "$f" | grep -xE '[0-9a-fA-F]{40}|[0-9a-fA-F]{64}' | tr 'A-F' 'a-f' | sort -u || true)
+
   if grep -IqE -e "$TOKENS" -- "$f"; then
     report "credential-shaped value in $f"
   fi
@@ -68,4 +64,4 @@ if [[ $fail -ne 0 ]]; then
   echo "secret-scan: FAILED"
   exit 1
 fi
-echo "secret-scan: ok (${#files[@]} tracked files)"
+echo "secret-scan: ok (${#files[@]} tracked files, ${#allowed[@]} allow-listed values)"
