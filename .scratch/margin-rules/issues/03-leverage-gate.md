@@ -13,7 +13,7 @@
 - [x] Test `reduce_only_and_plain_buy_on_a_short_count_at_full_reach` (seam A, S6): fails when short 5 with a reduce-only buy 5 and a plain buy 8 counts as 5 and not 8.
 - [x] Test `exposure_is_the_sum_over_instruments` (seam A, S5): fails when two instruments at 1.5x each pass a 2x limit.
 - [x] Test `partial_fill_then_cancel_frees_exposure_only_on_terminal_evidence` (seam A, S2): fails when a cancel request alone frees room for the next order.
-- [ ] Test `a_venue_rejection_of_an_accepted_order_frees_its_exposure` (seam A, S20): fails when an order the venue rejected (for example for margin) still counts, or the reject text is interpreted.
+- [x] Test `a_venue_rejection_of_an_accepted_order_frees_its_exposure` (seam A, S20): fails when an order the venue rejected (for example for margin) still counts, or the reject text is interpreted.
 - [ ] Test `after_a_passive_breach_a_plain_reducing_order_passes_and_an_increasing_one_does_not` (seam A, S7): fails when a price move above 2x rejects a plain sell that lowers exposure, accepts one that raises it, or latches anything.
 - [ ] Test `reduce_only_order_skips_the_leverage_gate` (seam A, S7): fails when a reduce-only order is rejected with `AccountLeverage`, or is left out of the sum for the next plain order.
 - [ ] Test `plain_order_is_rejected_when_an_exposed_instrument_has_no_fresh_reference_price` (seam A): fails when exposure on an instrument without a fresh reference price counts as zero.

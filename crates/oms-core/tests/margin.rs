@@ -710,6 +710,47 @@ fn partial_fill_then_cancel_frees_exposure_only_on_terminal_evidence() {
     assert_eq!(exposure(&h), "200");
 }
 
+/// S20. An order the gate accepted and the venue then refuses stops
+/// counting: a venue refusal does not use up the limit. The venue's reason
+/// is kept as text and never read: whatever it says, the result is the
+/// same, and nothing is held.
+#[test]
+fn a_venue_rejection_of_an_accepted_order_frees_its_exposure() {
+    for reason in ["Insufficient margin to place order", "reduceOnlyCanceled", ""] {
+        // Refused in the answer to the send.
+        let mut h = gate();
+        let id = h.accept("a", "k1", Side::Buy, "2", "100");
+        assert_eq!(exposure(&h), "200");
+        assert_eq!(
+            h.reject("a", "k2", Side::Buy, "0.1", "100"),
+            vec![RejectReason::AccountLeverage]
+        );
+        h.venue(VenueInput::SendResult {
+            order_id: id,
+            outcome: SendOutcome::Rejected { reason: reason.into() },
+            timing: Default::default(),
+        });
+        assert_eq!(
+            h.order(id).close.as_ref().map(|c| &c.reason),
+            Some(&CloseReason::RejectedByVenue { reason: reason.into() })
+        );
+        assert_eq!(exposure(&h), "0", "venue reason {reason:?}");
+        assert_eq!(h.core.holds(None), vec![], "venue reason {reason:?}");
+        h.accept("a", "k3", Side::Buy, "2", "100");
+
+        // Refused by a status after the order was acknowledged.
+        let mut h = gate();
+        let id = h.accept("a", "k1", Side::Sell, "2", "100");
+        h.placed_open(id, "v1");
+        assert_eq!(exposure(&h), "200");
+        h.status(id, VenueStatus::Rejected { reason: reason.into() }, None);
+        assert_eq!(h.order(id).phase, Phase::Closed);
+        assert_eq!(exposure(&h), "0", "venue reason {reason:?}");
+        assert_eq!(h.core.holds(None), vec![], "venue reason {reason:?}");
+        h.accept("a", "k2", Side::Sell, "2", "100");
+    }
+}
+
 // ---- C-MARGIN: replay ---------------------------------------------------------
 
 /// S13. Margin state comes only from journal events. A core rebuilt from the
