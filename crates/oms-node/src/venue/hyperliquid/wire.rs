@@ -344,10 +344,123 @@ pub fn fill_input(f: &HlFill, instance_id: u64) -> Option<FillIn> {
     })
 }
 
+// ---- margin queries (C-MARGIN) ----------------------------------------------
+
+/// Turns the answer to a `clearinghouseState` query into the core's input:
+/// a whole margin report, or a refusal with its reason. Never a part of one.
+pub fn margin_input(body: &serde_json::Value, session: u64, seq: u64, queried_at: Ts) -> VenueInput {
+    let amount = |v: Option<&serde_json::Value>| {
+        v.and_then(|v| v.as_str())
+            .and_then(|s| Amount::parse(s).ok())
+            .unwrap_or(Amount::ZERO)
+    };
+    let whole = |v: Option<&serde_json::Value>| {
+        v.and_then(|v| v.as_u64())
+            .and_then(|n| u32::try_from(n).ok())
+            .unwrap_or(0)
+    };
+    let list = body.get("assetPositions").and_then(|a| a.as_array());
+    let positions = list
+        .into_iter()
+        .flatten()
+        .filter_map(|p| {
+            let pos = p.get("position")?;
+            Some(MarginPosition {
+                instrument: instrument_id(pos.get("coin")?.as_str()?)?,
+                szi: SQty::parse(pos.get("szi")?.as_str()?).ok()?,
+                position_value: amount(pos.get("positionValue")),
+                margin_used: amount(pos.get("marginUsed")),
+                leverage_type: match pos.pointer("/leverage/type").and_then(|t| t.as_str()) {
+                    Some("isolated") => LeverageType::Isolated,
+                    _ => LeverageType::Cross,
+                },
+                leverage_value: whole(pos.pointer("/leverage/value")),
+                max_leverage: whole(pos.get("maxLeverage")),
+            })
+        })
+        .collect();
+    VenueInput::MarginReport(MarginReportIn {
+        session,
+        seq,
+        queried_at,
+        account_value: amount(body.pointer("/marginSummary/accountValue")),
+        positions,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The example answer of the Info endpoint documentation (Perpetuals,
+    /// `clearinghouseState`), as recorded in the research note of
+    /// 2026-11-15. It names no account.
+    const DOC_CLEARINGHOUSE_STATE: &str = r#"{
+      "assetPositions": [
+        {
+          "position": {
+            "coin": "ETH",
+            "cumFunding": {"allTime": "514.085417", "sinceChange": "0.0", "sinceOpen": "0.0"},
+            "entryPx": "2986.3",
+            "leverage": {"rawUsd": "-95.059824", "type": "isolated", "value": 20},
+            "liquidationPx": "2866.26936529",
+            "marginUsed": "4.967826",
+            "maxLeverage": 50,
+            "positionValue": "100.02765",
+            "returnOnEquity": "-0.0026789",
+            "szi": "0.0335",
+            "unrealizedPnl": "-0.0134"
+          },
+          "type": "oneWay"
+        }
+      ],
+      "crossMaintenanceMarginUsed": "0.0",
+      "crossMarginSummary": {
+        "accountValue": "13104.514502",
+        "totalMarginUsed": "0.0",
+        "totalNtlPos": "0.0",
+        "totalRawUsd": "13104.514502"
+      },
+      "marginSummary": {
+        "accountValue": "13109.482328",
+        "totalMarginUsed": "4.967826",
+        "totalNtlPos": "100.02765",
+        "totalRawUsd": "13009.454678"
+      },
+      "time": 1708622398623,
+      "withdrawable": "13104.514502"
+    }"#;
+
+    fn doc_state() -> serde_json::Value {
+        serde_json::from_str(DOC_CLEARINGHOUSE_STATE).unwrap()
+    }
+
+    /// S25. Every field of the documented example lands in its place. The
+    /// expected numbers are the documented decimals written by hand as
+    /// integers of 1e-8: the account value is the one of `marginSummary`
+    /// (cross and isolated together), not the cross-only one.
+    #[test]
+    fn documented_clearinghouse_state_parses_to_a_margin_report() {
+        assert_eq!(
+            margin_input(&doc_state(), 7, 3, 1_700_000_000_000_000),
+            VenueInput::MarginReport(MarginReportIn {
+                session: 7,
+                seq: 3,
+                queried_at: 1_700_000_000_000_000,
+                account_value: Amount(1_310_948_232_800),
+                positions: vec![MarginPosition {
+                    instrument: InstrumentId::new("ETH").unwrap(),
+                    szi: SQty(3_350_000),
+                    position_value: Amount(10_002_765_000),
+                    margin_used: Amount(496_782_600),
+                    leverage_type: LeverageType::Isolated,
+                    leverage_value: 20,
+                    max_leverage: 50,
+                }],
+            })
+        );
+    }
 
     /// Response examples from the Exchange endpoint documentation.
     #[test]
