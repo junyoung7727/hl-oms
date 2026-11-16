@@ -65,8 +65,9 @@ TOKENS='-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9
 for f in "${files[@]}"; do
   [[ -f "$f" && -s "$f" ]] || continue
 
-  # 2. Binary files are not skipped: they fail.
-  if ! grep -Iq . -- "$f"; then
+  # 2. Binary files are not skipped: they fail. Binary means: holds a NUL
+  #    byte. (`grep -I` would also call a file of empty lines binary.)
+  if ! LC_ALL=C tr -d '\000' < "$f" | cmp -s - "$f"; then
     listed=0
     for a in "${ALLOW_BINARY[@]}"; do [[ "$f" == "$a" ]] && listed=1; done
     [[ $listed -eq 1 ]] || report "binary file is tracked: $f"
@@ -87,7 +88,7 @@ for f in "${files[@]}"; do
   fi
 
   # 4. Credentials with a fixed shape. The allow-list file is not exempt.
-  if grep -IqE -e "$TOKENS" -- "$f"; then
+  if grep -qE -e "$TOKENS" -- "$f"; then
     report "credential-shaped value in $f"
   fi
 done
