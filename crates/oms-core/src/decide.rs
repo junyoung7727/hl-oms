@@ -564,9 +564,29 @@ impl Tx<'_> {
                     Ok("adjusted".into())
                 }
             }
+            OperatorCmd::ClearReduce { note } => match self.clear_reduce_refusal(note) {
+                Some(refusal) => Err(refusal.text().into()),
+                None => Err("not implemented".into()),
+            },
         };
         self.out.reply = Some(Reply::Operator(reply));
         Ok(())
+    }
+
+    /// Why `clear-reduce` cannot be taken now, if it cannot (C-MARGIN, 해제).
+    /// The release is decided on numbers the venue gave within the last
+    /// `margin_max_age_us`, and every release carries a reason.
+    fn clear_reduce_refusal(&self, note: &str) -> Option<MarginRefusal> {
+        if self.core.margin.reducing.is_none() {
+            return Some(MarginRefusal::NotReducing);
+        }
+        if !self.core.margin_report_is_fresh(self.at) {
+            return Some(MarginRefusal::MarginUnavailable);
+        }
+        if note.trim().is_empty() {
+            return Some(MarginRefusal::NoteRequired);
+        }
+        None
     }
 
     // ---- venue ------------------------------------------------------------

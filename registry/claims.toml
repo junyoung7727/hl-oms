@@ -932,3 +932,18 @@ tests = ["core/entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones
 repro = "cargo test -p oms-core --test margin"
 supports = "C-MARGIN"
 not_covered = "취소가 체결보다 먼저 닿는다는 것. 포지션이 닫힌다는 것(OMS는 닫지 않는다). 링크가 내려가 있는 동안의 동작"
+
+[[claim]]
+id = "V-MARGIN-6"
+statement = "운영자의 해제(clear-reduce)는 계좌가 감소 전용 상태가 아니면 NotReducing으로, 증거금 보고가 30초보다 오래됐으면 MarginUnavailable로, 사유가 비었으면 NoteRequired로 거절되고, 거절은 아무것도 기록하지 않는다"
+why = "해제는 위험을 다시 여는 유일한 길이다. 오래된 숫자로, 또는 사유 없이 풀리면 손실 한도가 뜻을 잃는다"
+level = "단위"
+scope = "운영자 입력 ClearReduce와 그 거절 사유"
+real = "oms-core"
+simulated = "보고는 시험이 입력"
+faults = "없음"
+criterion = "C-MARGIN의 '해제와 기준 재설정'. 기대값은 손으로 적었다"
+tests = ["core/clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing"]
+repro = "cargo test -p oms-core --test margin"
+supports = "C-MARGIN"
+not_covered = "운영자의 판단이 옳은 것. 유지증거금 여유 조건이 참일 때의 거절(MmBufferActive, 티켓 07)"

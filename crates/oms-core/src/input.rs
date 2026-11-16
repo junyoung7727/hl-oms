@@ -70,6 +70,9 @@ pub enum OperatorCmd {
         delta: SQty,
         note: String,
     },
+    /// Ends REDUCING and takes the current account value as the new day
+    /// base (C-MARGIN, 해제). Needs a fresh margin report and a note.
+    ClearReduce { note: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

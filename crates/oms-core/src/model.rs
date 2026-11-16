@@ -424,6 +424,26 @@ pub enum BaseSetBy {
     Report,
 }
 
+/// Why an operator's `clear-reduce` or `rebase-day` was refused (C-MARGIN,
+/// 해제와 기준 재설정). The reply text starts with the code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MarginRefusal {
+    NotReducing,
+    MarginUnavailable,
+    NoteRequired,
+}
+
+impl MarginRefusal {
+    /// The stable code and one sentence for the operator.
+    pub fn text(self) -> &'static str {
+        match self {
+            MarginRefusal::NotReducing => "not_reducing: the account is not REDUCING",
+            MarginRefusal::MarginUnavailable => "margin_unavailable: no fresh margin report",
+            MarginRefusal::NoteRequired => "note_required: the command needs a note",
+        }
+    }
+}
+
 /// Microseconds in one UTC day.
 pub const DAY_US: u64 = 86_400_000_000;
 

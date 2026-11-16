@@ -2171,3 +2171,59 @@ fn latch_and_day_base_replay_to_the_same_state() {
     let recs: Vec<Record> = serde_json::from_str(&serde_json::to_string(&h.log).unwrap()).unwrap();
     assert_eq!(recs, h.log);
 }
+
+// ---- C-MARGIN: clear and rebase ------------------------------------------------
+
+fn clear_reduce(h: &mut H, note: &str) -> Output {
+    h.inp(Input::Operator(OperatorCmd::ClearReduce {
+        note: note.into(),
+    }))
+}
+
+fn refused(out: &Output) -> &str {
+    assert_eq!(out.events, vec![], "a refused command changed the state");
+    assert_eq!(out.commands, vec![]);
+    match &out.reply {
+        Some(Reply::Operator(Err(text))) => text,
+        other => panic!("the command was not refused: {other:?}"),
+    }
+}
+
+/// S14. `clear-reduce` is refused when the account is not REDUCING
+/// (`NotReducing`), when the note is empty or blank (`NoteRequired`), and
+/// when the newest margin report is older than 30 s (`MarginUnavailable`).
+/// A refusal records nothing and the latch stays.
+#[test]
+fn clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing() {
+    let mut h = at_base_100();
+
+    // Not REDUCING: a fresh report and a note are not enough.
+    let out = clear_reduce(&mut h, "nothing to clear");
+    assert_eq!(refused(&out), "not_reducing: the account is not REDUCING");
+
+    h.advance(5 * SEC);
+    h.report_margin("94");
+    let latch = h.core.margin.reducing.clone();
+    assert_eq!(latch.as_ref().map(|r| r.rule), Some(RuleId::DailyLoss));
+    let queried_at = h.core.margin.report.as_ref().map(|r| r.queried_at).unwrap();
+
+    // REDUCING and a fresh report, but no reason given.
+    for note in ["", "  \t"] {
+        let out = clear_reduce(&mut h, note);
+        assert_eq!(refused(&out), "note_required: the command needs a note");
+        assert_eq!(h.core.margin.reducing, latch);
+    }
+
+    // REDUCING and a note, but the report is 30 s and one microsecond old
+    // when the command is recorded.
+    next_input_at(&mut h, queried_at + 30 * SEC + 1);
+    let out = clear_reduce(&mut h, "looked at the account");
+    assert_eq!(h.now, queried_at + 30_000_001);
+    assert_eq!(refused(&out), "margin_unavailable: no fresh margin report");
+    assert_eq!(h.core.margin.reducing, latch);
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+    assert_eq!(
+        h.core.margin.day_base.as_ref().map(|b| b.value),
+        Some(amt("100"))
+    );
+}
