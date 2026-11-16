@@ -220,8 +220,8 @@ N_down = max(0, −pos × ref + Σ_매도 예약 × max(지정가, ref))
 | 거래소 설정과 계좌 모드(계좌 모드) | V-MARGIN-9 | `margin::unified_or_portfolio_account_mode_holds_the_account`, `an_account_mode_off_the_allow_list_or_unknown_holds_the_account`. 변이 M46~M49 |
 | 차단 표(거래소 설정, 계좌 모드) | V-MARGIN-9 | `margin::reduce_only_order_passes_the_venue_setting_and_account_mode_holds`. 변이 M50 |
 | 설정(`runtime.venue_setting_poll_ms`) | V-CFG-1 | `config::tests::mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused` (oms-node 단위) |
-| 해제와 기준 재설정 | V-MARGIN-6 | `margin::clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing`, `clear_reduce_rebases_the_day_and_a_further_loss_latches_again`, `rebase_day_sets_the_base_and_leaves_the_latch_alone`, `a_withdrawal_without_rebase_reads_as_a_loss`. 변이 M60~M66 |
-| 해제와 기준 재설정(운영 소켓, 운영자 도구) | V-MARGIN-11 | `e2e::strategy_socket_cannot_clear_reducing_or_rebase`, `e2e::omsctl_clear_reduce_and_rebase_day_work_end_to_end`. 변이 M67, M68 |
+| 해제와 기준 재설정 | V-MARGIN-6 | `margin::clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing`, `clear_reduce_rebases_the_day_and_a_further_loss_latches_again`, `rebase_day_sets_the_base_and_leaves_the_latch_alone`, `a_withdrawal_without_rebase_reads_as_a_loss`. 변이 M51~M57 |
+| 해제와 기준 재설정(운영 소켓, 운영자 도구) | V-MARGIN-11 | `e2e::strategy_socket_cannot_clear_reducing_or_rebase`, `e2e::omsctl_clear_reduce_and_rebase_day_work_end_to_end`. 변이 M58, M59 |
 | 감소 전용 상태(프로세스: 재시작, 많은 주문의 취소) | V-MARGIN-11 | `e2e::reducing_and_day_base_survive_a_node_kill`, `e2e::reducing_cancels_every_resting_plain_order_through_the_node` |
 | 중단과 재실행(중단 지점) | V-MARGIN-11 | `crash_points::stopped_before_the_write_of_a_reducing_decision_the_next_report_decides_again`, `stopped_after_the_reducing_decision_is_durable_the_cancels_are_sent_after_restart`, `stopped_around_a_day_base_set_the_base_is_set_exactly_once` (`--features failpoints`) |
 

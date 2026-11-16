@@ -478,7 +478,7 @@ const MUTANTS: &[Mutant] = &[
         guards: "C-MARGIN / hold table",
     },
     Mutant {
-        id: "M60-clear-reduce-when-not-reducing",
+        id: "M51-clear-reduce-when-not-reducing",
         what: "clear-reduce is accepted, and re-bases the day, when the account is not REDUCING",
         file: "crates/oms-core/src/decide.rs",
         find: "if nothing_to_clear {",
@@ -487,7 +487,7 @@ const MUTANTS: &[Mutant] = &[
         guards: "C-MARGIN / clear and rebase",
     },
     Mutant {
-        id: "M61-clear-reduce-on-a-stale-report",
+        id: "M52-clear-reduce-on-a-stale-report",
         what: "clear-reduce is accepted on a margin report that is not fresh",
         file: "crates/oms-core/src/decide.rs",
         find: "if !clear_on_a_fresh_report {",
@@ -496,7 +496,7 @@ const MUTANTS: &[Mutant] = &[
         guards: "C-MARGIN / clear and rebase",
     },
     Mutant {
-        id: "M62-clear-reduce-without-a-note",
+        id: "M53-clear-reduce-without-a-note",
         what: "clear-reduce is accepted with an empty note",
         file: "crates/oms-core/src/decide.rs",
         find: "if !clear_has_a_note {",
@@ -505,7 +505,7 @@ const MUTANTS: &[Mutant] = &[
         guards: "C-MARGIN / clear and rebase",
     },
     Mutant {
-        id: "M63-clear-reduce-keeps-the-old-day-base",
+        id: "M54-clear-reduce-keeps-the-old-day-base",
         what: "clear-reduce ends REDUCING without taking the current account value as the day base",
         file: "crates/oms-core/src/decide.rs",
         find: "let Some(new_base) = self.rebase_on_the_report()? else {",
@@ -514,7 +514,7 @@ const MUTANTS: &[Mutant] = &[
         guards: "C-MARGIN / clear and rebase",
     },
     Mutant {
-        id: "M64-rebase-day-on-a-stale-report",
+        id: "M55-rebase-day-on-a-stale-report",
         what: "rebase-day is accepted on a margin report that is not fresh",
         file: "crates/oms-core/src/decide.rs",
         find: "if !rebase_on_a_fresh_report {",
@@ -523,7 +523,7 @@ const MUTANTS: &[Mutant] = &[
         guards: "C-MARGIN / clear and rebase",
     },
     Mutant {
-        id: "M65-rebase-day-without-a-note",
+        id: "M56-rebase-day-without-a-note",
         what: "rebase-day is accepted with an empty note",
         file: "crates/oms-core/src/decide.rs",
         find: "if !rebase_has_a_note {",
@@ -532,7 +532,7 @@ const MUTANTS: &[Mutant] = &[
         guards: "C-MARGIN / clear and rebase",
     },
     Mutant {
-        id: "M66-rebase-day-clears-reducing",
+        id: "M57-rebase-day-clears-reducing",
         what: "rebase-day also ends REDUCING",
         file: "crates/oms-core/src/decide.rs",
         find: "                    self.rebase_on_the_report()?;\n                    Ok(\"rebased\".into())",
@@ -541,7 +541,7 @@ const MUTANTS: &[Mutant] = &[
         guards: "C-MARGIN / clear and rebase",
     },
     Mutant {
-        id: "M67-clear-reduce-from-the-strategy-socket",
+        id: "M58-clear-reduce-from-the-strategy-socket",
         what: "clear-reduce is taken from a strategy connection",
         file: "crates/oms-node/src/server.rs",
         find: "Op::ClearReduce { note } => operator_only(s).or_else(|| {",
@@ -550,7 +550,7 @@ const MUTANTS: &[Mutant] = &[
         guards: "C-MARGIN / clear and rebase (operator socket only)",
     },
     Mutant {
-        id: "M68-rebase-day-from-the-strategy-socket",
+        id: "M59-rebase-day-from-the-strategy-socket",
         what: "rebase-day is taken from a strategy connection",
         file: "crates/oms-node/src/server.rs",
         find: "Op::RebaseDay { note } => operator_only(s).or_else(|| {",
