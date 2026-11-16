@@ -131,10 +131,18 @@ pub async fn run(
             wanted.push(QueryReq::OpenOrders);
             wanted.push(QueryReq::Positions);
         }
+        // The margin query is issued here and not with the rest: its timer
+        // and its number move only when the gateway took it. A query that
+        // found no room is offered again on the next round.
         if margin_rules && last_margin.is_none_or(|t| now.duration_since(t) >= margin_poll) {
-            last_margin = Some(now);
-            margin_seq += 1;
-            wanted.push(QueryReq::Margin { seq: margin_seq });
+            match queries.try_send(QueryReq::Margin { seq: margin_seq + 1 }) {
+                Ok(()) => {
+                    last_margin = Some(now);
+                    margin_seq += 1;
+                }
+                Err(_) if queries.is_closed() => return,
+                Err(_) => {}
+            }
         }
         // A venue setting that is not known yet is asked for at once and
         // then once per second until the answer is recorded.
