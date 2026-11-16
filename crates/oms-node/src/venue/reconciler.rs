@@ -8,6 +8,10 @@
 //!
 //! Besides the needs it also sweeps open orders, positions and fills on a
 //! timer, which is how activity the core does not expect is noticed.
+//!
+//! With a margin policy it also asks for a margin report on its own timer
+//! (C-MARGIN). Each such query gets a number that only rises while this
+//! process lives, so it rises within every link session.
 
 use super::QueryReq;
 use crate::published::Published;
@@ -28,7 +32,9 @@ fn backoff(attempts: u32) -> Duration {
     }
 }
 
-pub async fn run(published: Arc<Published>, queries: mpsc::Sender<QueryReq>, every: Duration, sweep: Duration) {
+pub async fn run(published: Arc<Published>, queries: mpsc::Sender<QueryReq>, every: Duration, sweep: Duration, margin_poll: Duration) {
+    let mut margin_seq: u64 = 0;
+    let mut last_margin: Option<Instant> = None;
     let mut asked: HashMap<OrderId, (u32, Instant)> = HashMap::new();
     let mut last_sweep = Instant::now();
     let mut last_account: HashMap<&'static str, Instant> = HashMap::new();
@@ -36,12 +42,13 @@ pub async fn run(published: Arc<Published>, queries: mpsc::Sender<QueryReq>, eve
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tick.tick().await;
-        let (needs, link_up, fills_since) = {
+        let (needs, link_up, fills_since, margin_rules) = {
             let p = published.read();
             (
                 p.core.needs(),
                 p.core.link.up,
                 p.core.sync.fills_up_to.max(p.core.fill_floor),
+                p.core.config.policy.margin.is_some(),
             )
         };
         if !link_up {
@@ -85,6 +92,11 @@ pub async fn run(published: Arc<Published>, queries: mpsc::Sender<QueryReq>, eve
             wanted.push(QueryReq::Fills { since: fills_since });
             wanted.push(QueryReq::OpenOrders);
             wanted.push(QueryReq::Positions);
+        }
+        if margin_rules && last_margin.is_none_or(|t| now.duration_since(t) >= margin_poll) {
+            last_margin = Some(now);
+            margin_seq += 1;
+            wanted.push(QueryReq::Margin { seq: margin_seq });
         }
         for q in wanted {
             // If the gateway is busy the query is simply not issued this

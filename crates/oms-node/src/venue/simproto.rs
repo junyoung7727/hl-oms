@@ -40,6 +40,8 @@ pub enum SimOp {
     },
     OpenOrders,
     Positions,
+    /// The account's margin report. Answered with a `MarginResult`.
+    Margin,
     /// Turns this connection into an event stream.
     Subscribe,
     Ctl {
@@ -69,6 +71,8 @@ pub enum Ctl {
     /// Refuse new stream subscriptions while set.
     RefuseStreams { on: bool },
     RefPrice { instrument: InstrumentId, px: Px },
+    /// Sets the account value the venue states in its margin reports.
+    AccountValue { value: Amount },
     /// Counters and the venue's own view, for test assertions.
     Dump,
 }
@@ -154,6 +158,12 @@ pub struct FillsResult {
 pub struct WirePosition {
     pub instrument: InstrumentId,
     pub qty: SQty,
+}
+
+/// Answer to `SimOp::Margin`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MarginResult {
+    pub account_value: Amount,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

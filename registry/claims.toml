@@ -872,3 +872,18 @@ tests = ["core/margin_report_of_the_current_session_is_recorded", "core/margin_r
 repro = "cargo test -p oms-core --test margin"
 supports = "C-MARGIN"
 not_covered = "실제 거래소 응답의 모양과 값의 뜻(T1, T2). 새 보고를 받지 못하는 동안에는 규칙을 판정하지 않는다"
+
+[[claim]]
+id = "V-MARGIN-11"
+statement = "증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이를 보여 준다. 정책이 없으면 묻지 않는다"
+why = "코어의 규칙이 옳아도 조회가 연결되지 않으면 보고가 없어 모든 일반 주문이 거절되거나, 운영자가 왜 거절되는지 볼 수 없다"
+level = "프로세스"
+scope = "실제 oms-node와 simvenue 프로세스. 조회 간격 100 ms로 줄인 설정 1회, 정책 없는 설정 1회"
+real = "oms-node(재조정 태스크의 타이머, 게이트웨이, 입력 큐, 저널, status), 소켓"
+simulated = "거래소(simvenue). 계좌 가치는 시험이 정한다"
+faults = "없음"
+criterion = "status의 core.margin(account_value, age_us, seq, fresh)과 simvenue가 센 조회 수"
+tests = ["e2e/node_polls_margin_and_status_shows_value_and_age"]
+repro = "cargo test -p oms-node --test e2e node_polls_margin"
+supports = "C-MARGIN"
+not_covered = "기본 간격 5초 그대로의 실행. Hyperliquid 게이트웨이(아직 이 조회에 답하지 않는다: 티켓 09). 운영자 명령과 재시작(뒤 티켓). 정확한 시간"

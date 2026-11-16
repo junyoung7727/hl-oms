@@ -40,6 +40,13 @@ pub enum QueryReq {
     },
     OpenOrders,
     Positions,
+    /// The account's margin report (C-MARGIN). `seq` numbers the query; the
+    /// answer carries it back so that the core can tell a late answer from
+    /// a new one. Answered with `MarginReport`, with `MarginReportInvalid`
+    /// if the answer cannot be read as a whole, or not at all.
+    Margin {
+        seq: u64,
+    },
 }
 
 /// The gateway's side of the channels.

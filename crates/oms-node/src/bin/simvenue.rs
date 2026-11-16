@@ -26,6 +26,7 @@ struct State {
     auto_fill: AutoFill,
     refuse_streams: bool,
     requests: u64,
+    margin_queries: u64,
 }
 
 fn now_us() -> Ts {
@@ -162,6 +163,12 @@ impl State {
                     .collect();
                 Ok(json(&v))
             }
+            SimOp::Margin => {
+                self.margin_queries += 1;
+                Ok(json(&MarginResult {
+                    account_value: self.venue.account_value,
+                }))
+            }
             SimOp::Subscribe => Err("subscribe is handled by the connection".into()),
             SimOp::Ctl { action } => self.ctl(action, now),
         }
@@ -225,6 +232,10 @@ impl State {
                 });
                 Ok(serde_json::Value::Null)
             }
+            Ctl::AccountValue { value } => {
+                self.venue.account_value = value;
+                Ok(serde_json::Value::Null)
+            }
             Ctl::Dump => Ok(serde_json::json!({
                 "orders": self.venue.orders.values().map(wire_order).collect::<Vec<_>>(),
                 "positions": self.venue.positions.iter().map(|(i, q)| (i.to_string(), SQty(*q).to_string())).collect::<std::collections::BTreeMap<_, _>>(),
@@ -233,6 +244,7 @@ impl State {
                 "repeated_place_requests": self.venue.place_requests.values().filter(|n| **n > 1).count(),
                 "duplicate_placements": self.venue.duplicate_placements.len(),
                 "requests": self.requests,
+                "margin_queries": self.margin_queries,
                 "streams": self.streams.len(),
             })),
         }
@@ -364,6 +376,7 @@ async fn main() {
         auto_fill: AutoFill::None,
         refuse_streams: false,
         requests: 0,
+        margin_queries: 0,
     }));
     eprintln!("simvenue listening on {path}");
     loop {
