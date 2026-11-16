@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `23a162f1b3ef5ad8`, 검증 결과의 다이제스트 `4f6788394bb348d6`.
+> 소스 다이제스트 `4ba2cb2744d3dae4`, 검증 결과의 다이제스트 `4f6788394bb348d6`.
 
-주장 56건: 통과 0, 실패 0, 미실행 1, 이전 버전 결과 55.
+주장 57건: 통과 0, 실패 0, 미실행 2, 이전 버전 결과 55.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -63,6 +63,7 @@
 | V-SIM-4 | 프로파일마다 seed 3000개로 V-SIM-1, V-SIM-2, V-EXT-1의 성질이 유지된다 | 시뮬레이션 | 이전 버전 결과 | `cargo run --release -p xtask -- verify --extended <실제 디스크의 디렉터리>` |
 | V-FUZZ-1 | 가정을 지키지 않는 임의의 거래소 입력(순서 역전, 중복, 낡은 상태, 식별자 없는 체결, 부재 응답, 링크 변동, 재시작)에서도 코어는 결함으로 멈추지 않고, 불변조건과 재생 일치가 유지되고, 주문당 전송은 한 번이며, 차단 중 수용이 없고, 새 체결은 반드시 기장되거나 대기하고, 정직하게 정리된 뒤에는 차단이 남지 않는다 | 속성 | 이전 버전 결과 | `cargo test --release -p oms-core --test review_core examined_fuzz` |
 | V-MIS-1 | 불일치 14종 각각을 일으키는 시험이 있고, 같은 대상의 반복은 확인되기 전까지 한 건으로 남는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core` |
+| V-MARGIN-1 | 증거금 정책이 있으면 감소 전용 주문은 재확인, 결과 불명, 불일치 차단을 통과하고, 일반 주문은 모든 차단에서 거절된다. 정책 구역은 선택이고, 없으면 저널 기록에 바이트를 더하지 않는다 | 단위 | 미실행 | `cargo test -p oms-core --test scenarios reduce_only && cargo test -p oms-core --test margin` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -1246,4 +1247,24 @@
 | `core/cancel_is_retried_with_backoff_and_then_flagged` | 이전 버전 결과 | last result: passed |
 | `core/too_many_unidentified_fills_are_booked_as_external_instead_of_waiting` | 이전 버전 결과 | last result: passed |
 | `core/f7_external_fills_do_not_grow_the_mismatch_list_without_bound` | 이전 버전 결과 | last result: passed |
+
+## V-MARGIN-1 — 증거금 정책이 있으면 감소 전용 주문은 재확인, 결과 불명, 불일치 차단을 통과하고, 일반 주문은 모든 차단에서 거절된다. 정책 구역은 선택이고, 없으면 저널 기록에 바이트를 더하지 않는다
+
+- 상태: **미실행**
+- 왜 중요한가: 모든 차단이 줄이는 주문까지 막으면 '줄이기만 허용'하는 상태를 만들 수 없다. 정책이 없는 실행의 저널은 바뀌면 안 된다
+- 수준: 단위
+- 전제와 범위: 차단 표(ADR-008 §7 개정)의 사유별 시험, 정책 구역의 직렬화와 기본값
+- 실제 구성요소: oms-core
+- 모의·시뮬레이션: 통보는 시험이 입력
+- 주입한 장애: 링크 단절 뒤 재접속
+- 판정 기준과 근거: C-MARGIN의 차단 표와 설정 표. 기대값은 손으로 적었다
+- 재현: `cargo test -p oms-core --test scenarios reduce_only && cargo test -p oms-core --test margin`
+- 뒷받침하는 것: C-MARGIN, ADR-018 §7의 8
+- 확인하지 않은 범위: 거래소가 감소 전용 주문의 포지션 확대를 실제로 막는지(T5). `Reducing`, `VenueSetting`, `AccountMode` 차단은 뒤 티켓에서 생긴다. 정책 값을 읽는 규칙은 아직 없다
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/absent_margin_policy_adds_no_bytes_to_a_journal_record` | 미실행 |  |
+| `core/empty_margin_section_takes_the_contract_defaults` | 미실행 |  |
+| `core/reduce_only_order_is_accepted_during_resync` | 미실행 |  |
 

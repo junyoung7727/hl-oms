@@ -1159,6 +1159,47 @@ fn holds_are_independent() {
     );
 }
 
+// ---- C-MARGIN: hold table (ADR-008 §7 as amended by ADR-018) -----------------
+//
+// With a margin policy set, the holds for resync, in-doubt orders and
+// mismatches refuse only plain orders. "Reduce-only" is the venue flag on the
+// order, not a direction the OMS works out.
+
+#[test]
+fn reduce_only_order_is_accepted_during_resync() {
+    let mut h = H::ready_with(config_with_margin());
+    h.long("a", "k1", "1");
+    h.venue(VenueInput::Link {
+        up: false,
+        session: h.session,
+        reason: "ws closed".into(),
+    });
+    h.session += 1;
+    let session = h.session;
+    h.venue(VenueInput::Link {
+        up: true,
+        session,
+        reason: "reconnected".into(),
+    });
+    assert_eq!(h.core.holds(None), vec![HoldReason::Resync]);
+
+    // A plain order is refused, also one that would reduce the position.
+    assert_eq!(
+        h.reject("a", "k2", Side::Sell, "1", "100"),
+        vec![RejectReason::Hold(HoldReason::Resync)]
+    );
+    // The same order with the flag is accepted and sent.
+    let r = h.reduce_only_req("a", "k3", Side::Sell, "1", "100");
+    let order_id = match h.new_order(r) {
+        NewOrderReply::Accepted { order_id } => order_id,
+        other => panic!("the resync hold refused a reduce-only order: {other:?}"),
+    };
+    assert!(h.order(order_id).reduce_only);
+    assert_eq!(h.sends().last(), Some(&order_id));
+    // The hold itself is still there.
+    assert_eq!(h.core.holds(None), vec![HoldReason::Resync]);
+}
+
 #[test]
 fn acknowledging_one_mismatch_does_not_clear_another() {
     let mut h = H::ready();

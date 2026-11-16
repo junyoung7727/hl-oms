@@ -85,6 +85,13 @@ pub fn config() -> CoreConfig {
     }
 }
 
+/// `config()` with a margin policy at its default values.
+pub fn config_with_margin() -> CoreConfig {
+    let mut cfg = config();
+    cfg.policy.margin = Some(MarginPolicy::default());
+    cfg
+}
+
 pub struct H {
     pub core: Core,
     pub shadow: Core,
@@ -202,6 +209,20 @@ impl H {
             reduce_only: false,
             expires_at: self.now + 5 * SEC,
         }
+    }
+
+    /// `req` with the venue's reduce-only flag set.
+    pub fn reduce_only_req(&self, strategy: &str, key: &str, side: Side, qty: &str, price: &str) -> NewOrderReq {
+        NewOrderReq { reduce_only: true, ..self.req(strategy, key, side, qty, price) }
+    }
+
+    /// Strategy `strategy` buys `qty` and the venue reports it filled.
+    pub fn long(&mut self, strategy: &str, key: &str, qty: &str) {
+        let id = self.accept(strategy, key, Side::Buy, qty, "100");
+        self.placed_open(id, key);
+        self.fill(id, key, qty, "100");
+        self.status(id, VenueStatus::Filled, Some(qty));
+        assert_eq!(self.order(id).phase, Phase::Closed);
     }
 
     pub fn new_order(&mut self, r: NewOrderReq) -> NewOrderReply {

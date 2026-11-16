@@ -222,6 +222,9 @@ impl Tx<'_> {
         let mut why = Vec::new();
 
         for h in core.holds(Some(&r.strategy)) {
+            if r.reduce_only && h == HoldReason::Resync {
+                continue;
+            }
             why.push(R::Hold(h));
         }
         let Some(strategy) = cfg.strategies.get(&r.strategy) else {

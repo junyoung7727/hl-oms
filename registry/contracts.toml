@@ -202,5 +202,5 @@ file = "docs/contracts/margin.md"
 summary = "계좌 레버리지 검사, 일 손실과 유지증거금 여유로 들어가는 감소 전용 상태, 보고 끊김 취소, 거래소 설정 확인. 미구현(ADR-018)"
 events = []
 adr = ["ADR-008", "ADR-018"]
-code = []
-claims = []
+code = ["crates/oms-core/src/config.rs", "crates/oms-core/src/decide.rs"]
+claims = ["V-MARGIN-1"]

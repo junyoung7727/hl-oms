@@ -6,7 +6,7 @@
 
 **Status:** claimed
 
-- [ ] Test `reduce_only_order_is_accepted_during_resync` (seam A, S3): fails when the resync hold still rejects a reduce-only order.
+- [x] Test `reduce_only_order_is_accepted_during_resync` (seam A, S3): fails when the resync hold still rejects a reduce-only order.
 - [ ] Test `reduce_only_order_is_accepted_while_another_order_is_in_doubt` (seam A, S3): fails when the in-doubt hold still rejects it.
 - [ ] Test `reduce_only_order_is_accepted_under_an_unacknowledged_mismatch` (seam A, S10): fails when a mismatch (for example a stuck cancel) still rejects it.
 - [ ] Test `reduce_only_order_is_rejected_by_every_block_all_hold` (seam A): fails when any of no-config, link-down, operator account halt, operator strategy halt or storage-low lets a reduce-only order through.
