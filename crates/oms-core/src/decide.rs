@@ -610,6 +610,12 @@ impl Tx<'_> {
         if !of_this_session {
             return Ok(());
         }
+        // Answers can overtake each other. The query number decides which is
+        // newer, not the query time: the wall clock can step backwards.
+        let last_seq = self.core.margin.report.as_ref().filter(|last| last.session == r.session).map(|last| last.seq);
+        if last_seq.is_some_and(|last| r.seq <= last) {
+            return Ok(());
+        }
         self.emit(Event::MarginReported { report: r.clone() })
     }
 

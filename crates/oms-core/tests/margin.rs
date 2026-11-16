@@ -156,3 +156,38 @@ fn margin_report_of_an_old_session_or_with_the_link_down_is_ignored() {
         .count();
     assert_eq!(journaled, 1);
 }
+
+/// Answers can overtake each other. A report whose number is not greater
+/// than that of the last report recorded in this session is dropped: not
+/// stored, not judged. The numbers start again with a new link session.
+#[test]
+fn late_margin_report_with_a_lower_sequence_is_ignored() {
+    let mut h = H::ready_with(config_with_margin());
+    h.margin_report(1, 5, h.now, "100");
+    assert_eq!(recorded(&h), Some((1, 5, amt("100"))));
+
+    // Query 4 was sent before query 5 and is answered after it. Its query
+    // time is the older one, but the number alone decides.
+    let out = h.margin_report(1, 4, h.now - SEC, "50");
+    assert_eq!(names(&out), Vec::<&str>::new());
+    assert_eq!(recorded(&h), Some((1, 5, amt("100"))));
+
+    // The same number again (a duplicated answer) is not greater either,
+    // also when it claims a later query time.
+    let out = h.margin_report(1, 5, h.now + SEC, "60");
+    assert_eq!(names(&out), Vec::<&str>::new());
+    assert_eq!(recorded(&h), Some((1, 5, amt("100"))));
+
+    // The next number is recorded.
+    let out = h.margin_report(1, 6, h.now, "99");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(recorded(&h), Some((1, 6, amt("99"))));
+
+    // A new link session starts its own numbering: number 1 of session 2 is
+    // newer than number 6 of session 1.
+    link_down(&mut h);
+    h.link_up_and_sync();
+    let out = h.margin_report(2, 1, h.now, "98");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(recorded(&h), Some((2, 1, amt("98"))));
+}
