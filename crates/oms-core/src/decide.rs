@@ -568,9 +568,87 @@ impl Tx<'_> {
                     Ok("adjusted".into())
                 }
             }
+            OperatorCmd::ClearReduce { note } => match self.clear_reduce_refusal(note) {
+                Some(refusal) => Err(refusal.text().into()),
+                None => {
+                    self.clear_reduce(note)?;
+                    Ok("cleared".into())
+                }
+            },
+            OperatorCmd::RebaseDay { note } => match self.rebase_day_refusal(note) {
+                Some(refusal) => Err(refusal.text().into()),
+                None => {
+                    self.rebase_on_the_report()?;
+                    Ok("rebased".into())
+                }
+            },
         };
         self.out.reply = Some(Reply::Operator(reply));
         Ok(())
+    }
+
+    /// Why `clear-reduce` cannot be taken now, if it cannot (C-MARGIN, 해제).
+    /// The release is decided on numbers the venue gave within the last
+    /// `margin_max_age_us`, and every release carries a reason.
+    fn clear_reduce_refusal(&self, note: &str) -> Option<MarginRefusal> {
+        let nothing_to_clear = self.core.margin.reducing.is_none();
+        if nothing_to_clear {
+            return Some(MarginRefusal::NotReducing);
+        }
+        let clear_on_a_fresh_report = self.core.margin_report_is_fresh(self.at);
+        if !clear_on_a_fresh_report {
+            return Some(MarginRefusal::MarginUnavailable);
+        }
+        let clear_has_a_note = !note.trim().is_empty();
+        if !clear_has_a_note {
+            return Some(MarginRefusal::NoteRequired);
+        }
+        None
+    }
+
+    /// Why `rebase-day` cannot be taken now, if it cannot (C-MARGIN, 기준
+    /// 재설정). It does not look at REDUCING.
+    fn rebase_day_refusal(&self, note: &str) -> Option<MarginRefusal> {
+        let rebase_on_a_fresh_report = self.core.margin_report_is_fresh(self.at);
+        if !rebase_on_a_fresh_report {
+            return Some(MarginRefusal::MarginUnavailable);
+        }
+        let rebase_has_a_note = !note.trim().is_empty();
+        if !rebase_has_a_note {
+            return Some(MarginRefusal::NoteRequired);
+        }
+        None
+    }
+
+    /// Ends REDUCING on the newest report: its account value becomes the day
+    /// base first, so that the loss that tripped the rule does not trip it
+    /// again on the next report, and a further loss is measured from here.
+    fn clear_reduce(&mut self, note: &str) -> Result<(), CoreFault> {
+        let old_base = self.core.margin.day_base.as_ref().map(|base| base.value);
+        let Some(new_base) = self.rebase_on_the_report()? else {
+            return Ok(());
+        };
+        self.emit(Event::ReducingCleared {
+            note: note.to_string(),
+            old_base,
+            new_base,
+        })
+    }
+
+    /// Sets the day base to the account value and the UTC day of the newest
+    /// report, by the operator. The day is the report's, also when it is
+    /// earlier than the base's. Returns the new base value.
+    fn rebase_on_the_report(&mut self) -> Result<Option<Amount>, CoreFault> {
+        let Some(report) = &self.core.margin.report else {
+            return Ok(None);
+        };
+        let (day, value) = (report.queried_at / DAY_US, report.account_value);
+        self.emit(Event::DayBaseSet {
+            day,
+            value,
+            set_by: BaseSetBy::Operator,
+        })?;
+        Ok(Some(value))
     }
 
     // ---- venue ------------------------------------------------------------

@@ -27,6 +27,7 @@
 | `ack_mismatch` | 운영 | `mismatch_id`, `note` | 문자열 |
 | `resolve_order` | 운영 | `order_id`, `note` | 문자열 |
 | `adjust_position` | 운영 | `instrument`, `strategy`(없으면 미귀속), `delta`, `note` | 문자열 |
+| `clear_reduce`, `rebase_day` | 운영 | `note` | 문자열. 거절이면 `bad_request`와 사유 코드로 시작하는 문장([C-MARGIN](margin.md)) |
 | `snapshot` | 운영 | — | 문자열 |
 
 예:
@@ -89,6 +90,8 @@
 | `ack_mismatch` | `mismatch_acked` | 그 불일치 하나를 확인 처리 | 원인이 남아 있으면 다시 제기된다 |
 | `resolve_order` | `order_closed(manual)` | 주문을 종결하고 예약을 푼다 | 그 주문에 더 체결이 없다고 운영자가 단언하는 것이다. 틀리면 `FillAfterClose` |
 | `adjust_position` | `position_adjusted` | 계좌와 지정 장부의 포지션을 증감 | 멱등이 아니다. 두 번 보내면 두 번 적용된다 |
+| `clear_reduce` | `day_base_set(operator)`, `reducing_cleared` | 감소 전용 상태를 끝내고 현재 계좌 가치를 기준 금액으로 삼는다 | 신선한 증거금 보고와 사유가 필요하다. 그 뒤 5 %를 더 잃으면 다시 걸린다([C-MARGIN](margin.md)) |
+| `rebase_day` | `day_base_set(operator)` | 현재 계좌 가치를 기준 금액으로 삼는다 | 감소 전용 상태는 그대로다. 입금 뒤에 하지 않으면 그만큼의 손실이 가려진다 |
 | `snapshot` | 없음 | 다음 커밋에서 스냅샷 요청 | 기록되지 않는다 |
 
 참조 가격(`ref_price_updated`)은 운영 명령이 아니라 게이트웨이의 입력이다.
@@ -111,7 +114,7 @@
 `api::tests::wire_examples`, `e2e::a_strategy_sees_and_cancels_only_its_own_orders`, `e2e::external_activity_is_detected_and_needs_an_operator`,
 `e2e::vertical_slice_new_partial_fill_cancel_restart`(구독 순서), `e2e::overload_is_refused_at_the_door_and_cancels_still_work`.
 연결과 구독의 상한: `review_node::idle_trading_connections_do_not_lock_the_operator_out`, `a_departed_subscriber_gives_its_connection_slot_back`, `one_connection_cannot_register_thousands_of_subscriptions`.
-프로세스 수준에서 실행되는 운영 명령은 `ack_mismatch`, `cancel_all`, `halt`, `status`다. 나머지(`resume`, `resolve_order`, `adjust_position`, `snapshot`)는 코어 시험으로만 확인했다. `omsctl` 자체의 시험은 없다.
+프로세스 수준에서 실행되는 운영 명령은 `ack_mismatch`, `cancel_all`, `halt`, `status`, `clear_reduce`, `rebase_day`다. 나머지(`resume`, `resolve_order`, `adjust_position`, `snapshot`)는 코어 시험으로만 확인했다. `omsctl`은 `status`, `clear-reduce`, `rebase-day`만 시험한다(`e2e::omsctl_clear_reduce_and_rebase_day_work_end_to_end`. 실행 파일이 부르는 함수 `oms_api::ctl::run`을 부른다).
 
 ## C-OPS 운영 명령의 질문들
 
