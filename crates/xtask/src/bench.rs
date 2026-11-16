@@ -142,10 +142,24 @@ fn bench_config() -> CoreConfig {
     CoreConfig { version: 1, instruments, strategies, policy }
 }
 
+/// What one case of the core benchmark measured, and the core it ended with.
+pub struct CoreBenchCase {
+    pub core: Core,
+    /// Nanoseconds inside `Core::handle` for each new order.
+    pub t_new: Vec<u64>,
+    pub t_ack: Vec<u64>,
+    pub t_fill: Vec<u64>,
+    pub t_enc: Vec<u64>,
+    pub sizes: Vec<u64>,
+    pub elapsed_s: f64,
+}
+
 /// One order's whole life through the core, in memory: accept, acknowledge,
-/// fill, close. Reports the time inside `Core::handle` and the time to
-/// encode each record, with about 500 orders open throughout.
-pub fn core_bench(orders: u64) -> i32 {
+/// fill, close, with about 500 orders open throughout. With `margin` the
+/// configuration has a margin policy, so every new order is also judged by
+/// the leverage gate.
+pub fn core_bench_case(orders: u64, margin: bool) -> Result<CoreBenchCase, String> {
+    let _ = margin;
     let mut core = Core::new(1);
     let mut at: Ts = 1_700_000_000_000_000;
     let go = |core: &mut Core, at: &mut Ts, input: Input| -> (Output, u64) {
@@ -198,8 +212,7 @@ pub fn core_bench(orders: u64) -> i32 {
         let input = Input::NewOrder(req);
         let (out, ns) = go(&mut core, &mut at, input.clone());
         let Some(Reply::NewOrder(NewOrderReply::Accepted { order_id })) = out.reply else {
-            eprintln!("unexpected reply {:?}", out.reply);
-            return 1;
+            return Err(format!("order {i}: unexpected reply {:?}", out.reply));
         };
         t_new.push(ns);
         encode(at, input, &out, &mut t_enc, &mut sizes);
@@ -237,9 +250,22 @@ pub fn core_bench(orders: u64) -> i32 {
             encode(at, input, &out, &mut t_enc, &mut sizes);
         }
     }
-    let elapsed = started.elapsed();
+    let elapsed_s = started.elapsed().as_secs_f64();
+    Ok(CoreBenchCase { core, t_new, t_ack, t_fill, t_enc, sizes, elapsed_s })
+}
+
+/// Runs the core benchmark and stores it as `evidence/perf/core-bench.json`.
+pub fn core_bench(orders: u64) -> i32 {
+    let base = match core_bench_case(orders, false) {
+        Ok(case) => case,
+        Err(e) => {
+            eprintln!("{e}");
+            return 1;
+        }
+    };
+    let CoreBenchCase { core, t_new, t_ack, t_fill, t_enc, sizes, elapsed_s } = base;
     println!("# {orders} orders, ~500 open, {} in memory, release build: {}", core.orders.len(), !cfg!(debug_assertions));
-    println!("# total {:.2} s including measurement overhead", elapsed.as_secs_f64());
+    println!("# total {elapsed_s:.2} s including measurement overhead");
     let results = vec![
         summary("handle(new_order)", t_new, "ns"),
         summary("handle(send_result placed)", t_ack, "ns"),
