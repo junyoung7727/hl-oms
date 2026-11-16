@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Test `clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing` (seam A, S14): fails when any of the three is accepted, or the refusal reason is not `MarginUnavailable`, `NoteRequired`, `NotReducing`.
 - [ ] Test `clear_reduce_rebases_the_day_and_a_further_loss_latches_again` (seam A, S14): fails when after a clear at 94 a report at 94 or at 89.30 re-latches, or one at 89.29 does not.
