@@ -99,7 +99,8 @@ fn margin_report_of_the_current_session_is_recorded() {
         positions: vec![position("X", 40), position("NOT-CONFIGURED", 20)],
     };
     let out = h.venue(VenueInput::MarginReport(report.clone()));
-    assert_eq!(names(&out), vec!["margin_reported"]);
+    // The first report of a run also sets the day base.
+    assert_eq!(names(&out), vec!["margin_reported", "day_base_set"]);
     assert_eq!(h.core.margin.report, Some(report));
     // Nothing is sent to the venue because of a report.
     assert_eq!(out.commands, vec![]);
@@ -139,7 +140,8 @@ fn margin_report_of_an_old_session_or_with_the_link_down_is_ignored() {
 
     // A report of session 2 is recorded.
     let out = h.margin_report(2, 1, h.now, "100");
-    assert_eq!(names(&out), vec!["margin_reported"]);
+    // The first report of a run also sets the day base.
+    assert_eq!(names(&out), vec!["margin_reported", "day_base_set"]);
     assert_eq!(recorded(&h), Some((2, 1, amt("100"))));
 
     // The link goes down. The answer to a query of session 2 arrives late.
@@ -347,7 +349,8 @@ fn margin_report_dated_after_the_record_time_is_not_fresh() {
     let queried_at = h.now + 10 * SEC;
     let out = h.margin_report(1, 1, queried_at, "1000");
     // The report is recorded: the number decides the order, not the time.
-    assert_eq!(names(&out), vec!["margin_reported"]);
+    // The first report of a run also sets the day base.
+    assert_eq!(names(&out), vec!["margin_reported", "day_base_set"]);
 
     // Ten seconds before its query time.
     assert_eq!(
@@ -509,4 +512,49 @@ fn margin_events_replay_to_the_same_state() {
     assert_eq!(back, h.core);
     let recs: Vec<Record> = serde_json::from_str(&serde_json::to_string(&h.log).unwrap()).unwrap();
     assert_eq!(recs, h.log);
+}
+
+// ---- C-MARGIN: daily loss and the day base ------------------------------------
+
+/// Microseconds in one UTC day, written out: 24 × 3600 × 1 000 000.
+const DAY: u64 = 86_400_000_000;
+
+/// A margin policy at its defaults, and the node clock at 10:00:00 UTC of
+/// day 20 000. No margin report has arrived yet.
+fn on_day_20_000() -> H {
+    let mut h = H::ready_with(config_with_margin());
+    next_input_at(&mut h, 20_000 * DAY + 36_000 * SEC);
+    h
+}
+
+/// S12. The first margin report sets the day base to its account value, on
+/// the UTC day of its query time. A later report of the same day leaves the
+/// base alone.
+#[test]
+fn first_report_sets_the_day_base() {
+    let mut h = on_day_20_000();
+    assert_eq!(h.core.margin.day_base, None);
+
+    let out = h.report_margin("100");
+    assert_eq!(
+        out.events.last(),
+        Some(&Event::DayBaseSet {
+            day: 20_000,
+            value: amt("100"),
+            set_by: BaseSetBy::Report,
+        })
+    );
+    assert_eq!(names(&out), vec!["margin_reported", "day_base_set"]);
+    let base = DayBase {
+        day: 20_000,
+        value: amt("100"),
+        set_by: BaseSetBy::Report,
+    };
+    assert_eq!(h.core.margin.day_base, Some(base.clone()));
+
+    // Later the same day, with another value: the base stays.
+    h.advance(3_600 * SEC);
+    let out = h.report_margin("103");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.day_base, Some(base));
 }

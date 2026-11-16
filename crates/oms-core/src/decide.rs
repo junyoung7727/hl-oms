@@ -657,7 +657,20 @@ impl Tx<'_> {
                 reason: format!("position {}: max_leverage is zero", p.instrument),
             });
         }
-        self.emit(Event::MarginReported { report: r.clone() })
+        self.emit(Event::MarginReported { report: r.clone() })?;
+        self.roll_day_base(r)
+    }
+
+    /// Sets the day base from a recorded report when there is none.
+    fn roll_day_base(&mut self, r: &MarginReportIn) -> Result<(), CoreFault> {
+        if self.core.margin.day_base.is_some() {
+            return Ok(());
+        }
+        self.emit(Event::DayBaseSet {
+            day: r.queried_at / DAY_US,
+            value: r.account_value,
+            set_by: BaseSetBy::Report,
+        })
     }
 
     fn on_link(&mut self, up: bool, session: u64, reason: &str) -> Result<(), CoreFault> {

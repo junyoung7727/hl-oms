@@ -200,6 +200,12 @@ pub enum Event {
         queried_at: Ts,
         reason: String,
     },
+    /// The day base of the daily-loss rule was set (C-MARGIN).
+    DayBaseSet {
+        day: u64,
+        value: Amount,
+        set_by: BaseSetBy,
+    },
 }
 
 /// Stable reason codes for a refused new-order request.
@@ -367,6 +373,7 @@ impl Event {
             Event::Purged { .. } => "purged",
             Event::MarginReported { .. } => "margin_reported",
             Event::MarginReportRejected { .. } => "margin_report_rejected",
+            Event::DayBaseSet { .. } => "day_base_set",
         }
     }
 }

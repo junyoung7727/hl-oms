@@ -372,7 +372,31 @@ pub struct MarginState {
     /// Why the most recent refused report was refused. Shown to the operator;
     /// no rule reads it.
     pub last_rejection: Option<MarginRejection>,
+    /// The account value the daily loss is measured against. Changed only by
+    /// `day_base_set`; a restart and a link change keep it.
+    #[serde(default)]
+    pub day_base: Option<DayBase>,
 }
+
+/// The day base of the daily-loss rule (C-MARGIN, 일 손실과 기준 금액).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DayBase {
+    /// UTC day number (days since 1970-01-01) of the query time of the
+    /// report the value was taken from.
+    pub day: u64,
+    pub value: Amount,
+    pub set_by: BaseSetBy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BaseSetBy {
+    /// The first report, or the first report of a later UTC day.
+    Report,
+}
+
+/// Microseconds in one UTC day.
+pub const DAY_US: u64 = 86_400_000_000;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MarginRejection {

@@ -772,6 +772,13 @@ impl Core {
                     at,
                 });
             }
+            Event::DayBaseSet { day, value, set_by } => {
+                self.margin.day_base = Some(DayBase {
+                    day: *day,
+                    value: *value,
+                    set_by: *set_by,
+                });
+            }
         }
         Ok(())
     }
