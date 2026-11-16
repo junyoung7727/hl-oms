@@ -996,3 +996,30 @@ fn first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day
     let out = h.report_margin("92.14");
     assert_eq!(out.events[1..], [daily_loss_entered("92.14", "97")]);
 }
+
+/// S12. A new UTC day rolls the day base and leaves REDUCING in place: the
+/// entry stays as it was recorded, and a plain order is still refused,
+/// although the account lost nothing against the new base.
+#[test]
+fn a_new_day_does_not_clear_reducing() {
+    let mut h = at_base_100();
+    h.report_margin("94.99");
+    let entry = h.core.margin.reducing.clone();
+    assert_eq!(entry.as_ref().map(|r| r.rule), Some(RuleId::DailyLoss));
+
+    next_input_at(&mut h, 20_001 * DAY + 5 * SEC);
+    let venue_ts = h.now;
+    h.venue(VenueInput::RefPrice {
+        instrument: iid("X"),
+        px: px("100"),
+        venue_ts,
+    });
+    let out = h.report_margin("94.99");
+    assert_eq!(out.events[1..], [base_set(20_001, "94.99")]);
+    assert_eq!(h.core.margin.reducing, entry);
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+    assert_eq!(
+        h.reject("a", "k1", Side::Buy, "0.1", "100"),
+        vec![RejectReason::Hold(HoldReason::Reducing)]
+    );
+}
