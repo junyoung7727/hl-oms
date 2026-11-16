@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-merge
+**Status:** done
 
 - [x] Test `reduce_only_order_is_accepted_during_resync` (seam A, S3): fails when the resync hold still rejects a reduce-only order.
 - [x] Test `reduce_only_order_is_accepted_while_another_order_is_in_doubt` (seam A, S3): fails when the in-doubt hold still rejects it.
@@ -21,7 +21,7 @@
 - [x] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
 - [x] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
 - [x] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
-- [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
+- [x] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
 
 ## Comments
 
@@ -39,3 +39,4 @@
   - Not run here: the extended verification (the merger runs it), the full mutant run (`evidence/mutants.json` is still the older result; ticket 12). The evidence in `docs/generated` reads "이전 버전 결과" until the merger's run, because the source digest changed.
   - Still not guaranteed: no rule reads a policy value yet, and the node does not check the section (ticket 02), so a section with bad values is accepted by the core. The holds `Reducing`, `VenueSetting`, `AccountMode` do not exist yet. Journal bytes without a policy are checked by "no `margin` key in the configuration record", not against literals recorded on main (ticket 10). A strategy that has room in its own position limit can still send a reduce-only order against a position it does not own; whether the venue then refuses or shrinks it is T5.
   - Local gate on the branch tip: `cargo test --workspace --locked` 190 passed, 0 failed, 0 ignored; clippy with warnings denied clean; generated documents in step; secret scan and `rustfmt_added.sh` pass.
+- Merged 2026-11-16 (merger claude-fable-5-2): merge commit 6c86bab into `margin-rules`. Workspace tests 190 passed, 0 failed, 0 ignored. Clippy clean, generated documents in step, secret scan, selftest and rustfmt-added pass. `verify --extended` without live-testnet: 209 tests in 9 suites passed; `mutants`: 23 of 23 killed (M21 to M23 included); both recorded for source `84bbfc41882f370d` in commit 1a553b8. Performance was not measured again, so V-PERF-1..5 stay "previous version result". Nothing had to be fixed during the merge.
