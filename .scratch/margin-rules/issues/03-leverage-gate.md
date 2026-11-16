@@ -10,7 +10,7 @@
 - [x] Test `order_exactly_at_the_limit_is_accepted` (seam A, S5): fails when a buy of 2.00 at 100 is rejected.
 - [x] Test `an_unfilled_resting_order_keeps_its_exposure_and_is_never_repriced_or_expired_by_the_oms` (seam A, S1): the test feeds a fresh margin report and a fresh reference price at every poll interval over hours of ticks (so the stale cancel of ticket 06 does not apply), and fails when the order then has a cancel, a new price, or no longer counts in the gate.
 - [x] Test `resting_order_counts_at_the_higher_of_limit_and_reference` (seam A, S1): fails when a sell at 150 counts at 100, or a buy at 50 counts at 50.
-- [ ] Test `reduce_only_and_plain_buy_on_a_short_count_at_full_reach` (seam A, S6): fails when short 5 with a reduce-only buy 5 and a plain buy 8 counts as 5 and not 8.
+- [x] Test `reduce_only_and_plain_buy_on_a_short_count_at_full_reach` (seam A, S6): fails when short 5 with a reduce-only buy 5 and a plain buy 8 counts as 5 and not 8.
 - [ ] Test `exposure_is_the_sum_over_instruments` (seam A, S5): fails when two instruments at 1.5x each pass a 2x limit.
 - [ ] Test `partial_fill_then_cancel_frees_exposure_only_on_terminal_evidence` (seam A, S2): fails when a cancel request alone frees room for the next order.
 - [ ] Test `a_venue_rejection_of_an_accepted_order_frees_its_exposure` (seam A, S20): fails when an order the venue rejected (for example for margin) still counts, or the reject text is interpreted.

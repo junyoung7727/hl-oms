@@ -554,6 +554,48 @@ fn resting_order_counts_at_the_higher_of_limit_and_reference() {
     );
 }
 
+/// Strategy `a` sells `qty` at 100 and the venue reports it filled.
+fn short(h: &mut H, key: &str, qty: &str) {
+    let id = h.accept("a", key, Side::Sell, qty, "100");
+    h.placed_open(id, key);
+    h.fill(id, key, qty, "100");
+    h.status(id, VenueStatus::Filled, Some(qty));
+    assert_eq!(h.order(id).phase, Phase::Closed);
+}
+
+/// S6. Exposure is the furthest the position can reach. Short 5 with a
+/// reduce-only buy of 5 and a plain buy of 8 can end long 8 (-5 + 13): the
+/// exposure is 800, not 500 (the short alone) and not 1300 (the buys
+/// alone). Account value 400, so the limit is 800.
+#[test]
+fn reduce_only_and_plain_buy_on_a_short_count_at_full_reach() {
+    let mut h = H::ready_with(config_with_margin());
+    h.report_margin("400");
+    h.ref_price("X", "100");
+    short(&mut h, "k1", "5");
+    assert_eq!(h.acct().pos, sq("-5"));
+
+    let r = h.reduce_only_req("a", "k2", Side::Buy, "5", "100");
+    assert!(matches!(h.new_order(r), NewOrderReply::Accepted { .. }));
+    // Counted as 13 x 100 the plain buy would be refused; it reaches 800,
+    // which is at the limit.
+    h.accept("a", "k3", Side::Buy, "8", "100");
+    assert_eq!((h.acct().pos, h.acct().buy_open), (sq("-5"), q("13")));
+
+    // The reach is 8, so the limit is used up: 0.1 more would make 810.
+    // Counted as 5 (the short alone) this buy would pass.
+    assert_eq!(
+        h.reject("a", "k4", Side::Buy, "0.1", "100"),
+        vec![RejectReason::AccountLeverage]
+    );
+    // The short side still reaches only 5: a sell of 3 makes 800.
+    h.accept("a", "k5", Side::Sell, "3", "100");
+    assert_eq!(
+        h.reject("a", "k6", Side::Sell, "0.1", "100"),
+        vec![RejectReason::AccountLeverage]
+    );
+}
+
 // ---- C-MARGIN: replay ---------------------------------------------------------
 
 /// S13. Margin state comes only from journal events. A core rebuilt from the

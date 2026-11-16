@@ -8,6 +8,7 @@
 use crate::config::MarginPolicy;
 use crate::core::Core;
 use crate::input::NewOrderReq;
+use crate::model::Side;
 use crate::num::{Px, Qty};
 
 impl Core {
@@ -22,16 +23,28 @@ impl Core {
         // is.
         let reference = self.ref_px.get(&r.instrument).map_or(0, |p| p.px.0);
         let value = |qty: Qty, px: Px| i128::from(qty.0) * i128::from(px.0.max(reference));
-        // Every resting order of the instrument counts at its remaining
-        // reserved quantity until terminal evidence releases it.
-        let resting: i128 = self
-            .open
-            .iter()
-            .filter_map(|id| self.orders.get(id))
-            .filter(|o| o.instrument == r.instrument)
-            .map(|o| value(o.reserved, o.px))
-            .sum();
-        let after = resting + value(r.qty, r.px);
+        // Every resting order of the instrument, reduce-only included,
+        // counts at its remaining reserved quantity until terminal evidence
+        // releases it.
+        let (mut buys, mut sells) = (0i128, 0i128);
+        for o in self.open.iter().filter_map(|id| self.orders.get(id)) {
+            if o.instrument == r.instrument {
+                match o.side {
+                    Side::Buy => buys += value(o.reserved, o.px),
+                    Side::Sell => sells += value(o.reserved, o.px),
+                }
+            }
+        }
+        match r.side {
+            Side::Buy => buys += value(r.qty, r.px),
+            Side::Sell => sells += value(r.qty, r.px),
+        }
+        // The furthest the position can reach on each side, at the
+        // reference price; the larger side is the exposure.
+        let position = i128::from(self.account_book(&r.instrument).pos.0) * i128::from(reference);
+        let up = (position + buys).max(0);
+        let down = (sells - position).max(0);
+        let after = up.max(down);
         let limit = i128::from(policy.max_account_leverage.0) * i128::from(report.account_value.0);
         after > limit
     }
