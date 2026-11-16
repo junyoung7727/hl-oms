@@ -9,6 +9,7 @@
 mod common;
 use common::*;
 use oms_core::*;
+use proptest::prelude::*;
 
 // ---- C-MARGIN: the policy section ------------------------------------------
 
@@ -926,6 +927,133 @@ fn account_value_zero_or_negative_rejects() {
     h.long("a", "k1", "2");
     h.report_margin("0.00000001");
     h.accept("a", "k2", Side::Sell, "1", "100");
+}
+
+// ---- C-MARGIN: leverage gate, properties (G3) ---------------------------------
+
+/// One generated step of an account's life on the instruments X and Y.
+#[derive(Clone, Debug)]
+enum Step {
+    /// A new order of strategy `a`. `qty` is in tenths, `px` an index into
+    /// `PRICES`.
+    Order {
+        on_y: bool,
+        buy: bool,
+        qty: u8,
+        px: usize,
+        reduce_only: bool,
+    },
+    /// The venue fills up to `qty` tenths of the `nth` open order.
+    Fill { nth: usize, qty: u8 },
+    /// A new reference price.
+    Price { on_y: bool, px: usize },
+    /// A new margin report with this account value.
+    Value(u16),
+}
+
+const PRICES: [&str; 5] = ["50", "99.5", "100", "100.5", "150"];
+
+fn tenths(n: u8) -> String {
+    format!("{}.{}", n / 10, n % 10)
+}
+
+fn steps() -> impl Strategy<Value = Vec<Step>> {
+    let order = (any::<bool>(), any::<bool>(), 1u8..=40, 0..PRICES.len(), any::<bool>()).prop_map(
+        |(on_y, buy, qty, px, flag)| Step::Order {
+            on_y,
+            buy,
+            qty,
+            px,
+            // One order in four carries the reduce-only flag.
+            reduce_only: flag && qty % 2 == 0,
+        },
+    );
+    let fill = (0usize..8, 1u8..=40).prop_map(|(nth, qty)| Step::Fill { nth, qty });
+    let price = (any::<bool>(), 0..PRICES.len()).prop_map(|(on_y, px)| Step::Price { on_y, px });
+    let value = (0u16..=1500).prop_map(Step::Value);
+    prop::collection::vec(prop_oneof![6 => order, 3 => fill, 1 => price, 1 => value], 1..40)
+}
+
+/// What one step did: the published exposure before and after it, and the
+/// decision if the step was an order (`None` for an accepted order).
+#[derive(Debug, PartialEq)]
+struct Trace {
+    before: Exposure,
+    after: Exposure,
+    order: Option<Option<Vec<RejectReason>>>,
+}
+
+/// Plays the steps on a fresh account (account value 500, both reference
+/// prices 100). With `mirrored`, every buy is a sell and every sell a buy,
+/// so every position has the opposite sign.
+fn play(steps: &[Step], mirrored: bool) -> Vec<Trace> {
+    let mut h = H::ready_with(config_xy());
+    h.report_margin("500");
+    h.ref_price("X", "100");
+    h.ref_price("Y", "100");
+    let name = |on_y: bool| if on_y { "Y" } else { "X" };
+    let mut out = Vec::new();
+    for (n, step) in steps.iter().enumerate() {
+        let before = h.core.account_exposure().expect("exposure is known");
+        let mut order = None;
+        match step {
+            Step::Order {
+                on_y,
+                buy,
+                qty,
+                px,
+                reduce_only,
+            } => {
+                let side = if *buy != mirrored { Side::Buy } else { Side::Sell };
+                let key = format!("k{n}");
+                let r = NewOrderReq {
+                    reduce_only: *reduce_only,
+                    ..req_on(&h, name(*on_y), &key, side, &tenths(*qty), PRICES[*px])
+                };
+                order = Some(match h.new_order(r) {
+                    NewOrderReply::Accepted { order_id } => {
+                        h.placed_open(order_id, &key);
+                        None
+                    }
+                    NewOrderReply::Rejected { reasons } => Some(reasons),
+                    other => panic!("unexpected reply {other:?}"),
+                });
+            }
+            Step::Fill { nth, qty } => {
+                let open: Vec<OrderId> = h.core.open.iter().copied().collect();
+                if !open.is_empty() {
+                    let o = h.order(open[nth % open.len()]).clone();
+                    let part = q(&tenths(*qty)).min(o.remaining());
+                    h.fill(o.id, &format!("t{n}"), &part.to_string(), &o.px.to_string());
+                }
+            }
+            Step::Price { on_y, px } => {
+                h.ref_price(name(*on_y), PRICES[*px]);
+            }
+            Step::Value(v) => {
+                h.report_margin(&v.to_string());
+            }
+        }
+        let after = h.core.account_exposure().expect("exposure is known");
+        out.push(Trace { before, after, order });
+    }
+    out
+}
+
+proptest! {
+    /// G3. Whatever the account looks like, an order that is accepted (plain
+    /// or reduce-only) never lowers the published account exposure.
+    #[test]
+    fn adding_an_order_never_lowers_exposure(steps in steps()) {
+        for (n, t) in play(&steps, false).iter().enumerate() {
+            if t.order == Some(None) {
+                prop_assert!(t.after >= t.before, "step {} ({:?}) lowered exposure from {} to {}", n, steps[n], t.before, t.after);
+            } else if t.order.is_some() {
+                // A refused order changes nothing.
+                prop_assert_eq!(t.after, t.before);
+            }
+        }
+    }
 }
 
 // ---- C-MARGIN: replay ---------------------------------------------------------
