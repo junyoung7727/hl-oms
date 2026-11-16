@@ -263,7 +263,7 @@ id = "V-SIM-1"
 statement = "네트워크 장애, 통보 중복·지연, 링크 단절, 프로세스 재시작, 키 삭제가 임의로 섞인 실행의 매 단계에서: 구조 불변조건이 성립하고, 거래소의 실제 포지션이 OMS가 설명하는 범위 안에 있고, 한도를 넘지 않고, 같은 주문이 두 번 전송되지 않는다"
 why = "예제 시험이 생각하지 못한 순서를 찾는다. 실제로 결함 넷을 찾아 고쳤다"
 level = "시뮬레이션"
-scope = "프로파일 6개(calm, lossy, crashy, weak_evidence, purge, skewed). 실행당 1500단계. seed 수는 결과의 notes에 있다. 한 종목, 두 전략, 가상 시계"
+scope = "프로파일 6개(calm, lossy, crashy, weak_evidence, purge, skewed)와 증거금 정책을 켠 2개(margin_calm, margin_lossy: 증거금 검사는 V-MARGIN-12). 실행당 1500단계. seed 수는 결과의 notes에 있다. 한 종목, 두 전략, 가상 시계"
 real = "oms-core의 판단과 상태"
 simulated = "저널과 커밋 게이트(내구 접두부 모델), 게이트웨이, 네트워크, 거래소, 전략, 시계"
 faults = "요청 유실 4%, 요청 지연 6%(만료를 넘기기도), 응답 유실 8%, 미전송 3%, 스트림 중복 15%·지연 20%, 조회 유실 10%, 링크 단절, 재시작 1.2%/단계, 거래소 시계 1초 지연"
@@ -890,7 +890,7 @@ not_covered = "주문 사이에 가격이 움직인 뒤의 노출은 지켜보�
 
 [[claim]]
 id = "V-MARGIN-11"
-statement = "증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이, 계좌 노출을 보여 준다. 링크가 올라오면 종목마다 거래소 설정을, 그리고 계좌 모드를 묻고, 포지션이 없는 종목의 설정은 정해진 간격으로 다시 묻는다. status는 종목별 거래소 설정과 계좌 모드, 그것이 정책과 맞는지를 보여 준다. 정책이 없으면 묻지 않는다. 조회한 계좌 가치가 기준 금액보다 5 %를 넘게 낮아지면 status가 감소 전용 상태와 그 규칙, 기준 금액을 보여 주고 일반 주문이 Hold(Reducing)으로 거절된다. 해제(clear-reduce)와 기준 재설정(rebase-day)은 전략 소켓에서 forbidden으로 거절되고 코어에 닿지 않는다. 운영자 도구(omsctl)의 clear-reduce --note와 rebase-day --note는 운영자 소켓으로 실행 중인 노드의 코어에 닿고, 응답과 status(상태, 규칙, 기준 금액)가 그 결과를 보여 준다. 감소 전용 상태에서 노드 프로세스를 강제 종료(SIGKILL)하고 다시 띄우면 status가 같은 상태(규칙, 내용, 진입 시각)와 같은 기준 금액을 보여 주고, 해제한 뒤의 강제 종료도 해제와 운영자의 기준을 그대로 남긴다. 가상 거래소에 일반 주문 300건과 감소 전용 주문 3건이 걸린 채로 감소 전용 상태에 들어가면 일반 주문은 모두 거래소에서 취소되고 감소 전용 주문 3건은 열린 채로 남으며, 그 뒤에도 증거금 조회가 이어진다. 감소 전용 상태를 결정한 기록이 쓰이기 전에 노드가 멈추면 재시작 뒤에 상태도 취소 요청도 그 기록도 없고 기준 금액은 그대로이며, 다음에 한도를 넘는 보고가 한 번 다시 결정한다. 그 기록이 파일에 닿은 뒤(쓰기 뒤, 내구화 뒤, 읽기 모델 반영 뒤)에 취소가 나가기 전에 멈추면 재시작 뒤에 상태와 취소 요청이 저널에서 복원되고, 보내지 못한 취소가 거래소로 나가며, 감소 전용 주문은 남는다. 기준 금액을 정하는 기록의 각 경계에서 멈춰도 저널의 day_base_set은 정확히 하나이고, 그 날짜와 값은 같은 기록의 보고의 것이다(쓰기 전에 멈추면 다음 보고가 정한다)"
+statement = "증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이, 계좌 노출을 보여 준다. 링크가 올라오면 종목마다 거래소 설정을, 그리고 계좌 모드를 묻고, 포지션이 없는 종목의 설정은 정해진 간격으로 다시 묻는다. status는 종목별 거래소 설정과 계좌 모드, 그것이 정책과 맞는지를 보여 준다. 정책이 없으면 묻지 않는다. 조회한 계좌 가치가 기준 금액보다 5 %를 넘게 낮아지면 status가 감소 전용 상태와 그 규칙, 기준 금액을 보여 주고 일반 주문이 Hold(Reducing)으로 거절된다. 해제(clear-reduce)와 기준 재설정(rebase-day)은 전략 소켓에서 forbidden으로 거절되고 코어에 닿지 않는다. 운영자 도구(omsctl)의 clear-reduce --note와 rebase-day --note는 운영자 소켓으로 실행 중인 노드의 코어에 닿고, 응답과 status(상태, 규칙, 기준 금액)가 그 결과를 보여 준다. 감소 전용 상태에서 노드 프로세스를 강제 종료(SIGKILL)하고 다시 띄우면 status가 같은 상태(규칙, 내용, 진입 시각)와 같은 기준 금액을 보여 주고, 해제한 뒤의 강제 종료도 해제와 운영자의 기준을 그대로 남긴다. 가상 거래소에 일반 주문 300건과 감소 전용 주문 3건이 걸린 채로 감소 전용 상태에 들어가면 일반 주문은 모두 거래소에서 취소되고 감소 전용 주문 3건은 열린 채로 남으며, 그 뒤에도 증거금 조회가 이어진다. 감소 전용 상태를 결정한 기록이 쓰이기 전에 노드가 멈추면 재시작 뒤에 상태도 취소 요청도 그 기록도 없고 기준 금액은 그대로이며, 다음에 한도를 넘는 보고가 한 번 다시 결정한다. 그 기록이 파일에 닿은 뒤(쓰기 뒤, 내구화 뒤, 읽기 모델 반영 뒤)에 취소가 나가기 전에 멈추면 재시작 뒤에 상태와 취소 요청이 저널에서 복원되고, 보내지 못한 취소가 거래소로 나가며, 감소 전용 주문은 남는다. 기준 금액을 정하는 기록의 각 경계에서 멈춰도 저널의 day_base_set은 정확히 하나이고, 그 날짜와 값은 같은 기록의 보고의 것이다(쓰기 전에 멈추면 다음 보고가 정한다). 가상 거래소 프로세스의 증거금 보고는 포지션(수량, 가치, 증거금, 증거금 방식, 레버리지, 최대 레버리지)을 담고 status가 그대로 보여 주며, 포지션이 있는 종목의 거래소 설정이 바뀌면 보고로 코어에 닿아 그 종목이 막힌다"
 why = "코어의 규칙이 옳아도 조회가 연결되지 않으면 보고가 없어 모든 일반 주문이 거절되거나, 운영자가 왜 거절되는지 볼 수 없다"
 level = "프로세스"
 scope = "실제 oms-node와 simvenue 프로세스. 조회 간격 100 ms(거래소 설정은 200 ms)로 줄인 설정 3회(계좌 가치 따라가기, 일 손실 진입, 거래소 설정과 계좌 모드), 정책 없는 설정 2회. 티켓 05: 운영자 명령, 강제 종료 2회, 주문 303건의 감소 전용 상태 진입. 중단 지점 시험은 failpoints 기능으로 빌드한 노드"
@@ -899,9 +899,9 @@ simulated = "거래소(simvenue). 계좌 가치, 종목의 거래소 설정, 계
 faults = "거래소에서 바뀐 종목 설정(교차, 레버리지 3), 바뀐 계좌 모드(unifiedAccount), 스트림 끊김으로 생긴 새 링크 세션. SIGKILL. 감소 전용 상태 진입 기록과 기준 금액 기록의 커밋 경계(before_write, after_write, after_sync, after_reply)에서 abort"
 criterion = "status의 core.margin(account_value, age_us, seq, fresh, account_exposure, reducing, day_base, venue_settings, account_mode), core.holds, simvenue가 센 조회 수와 simvenue의 열린 주문 목록, 운영 명령의 응답, 저널의 이벤트 수"
 tests = ["e2e/node_polls_margin_and_status_shows_value_and_age", "e2e/status_shows_account_exposure", "e2e/status_shows_reducing_its_rule_and_the_day_base", "e2e/node_reads_venue_setting_and_account_mode_and_status_shows_them", "e2e/strategy_socket_cannot_clear_reducing_or_rebase", "e2e/omsctl_clear_reduce_and_rebase_day_work_end_to_end", "e2e/reducing_and_day_base_survive_a_node_kill", "e2e/reducing_cancels_every_resting_plain_order_through_the_node", "pipeline/stopped_before_the_write_of_a_reducing_decision_the_next_report_decides_again", "pipeline/stopped_after_the_reducing_decision_is_durable_the_cancels_are_sent_after_restart", "pipeline/stopped_around_a_day_base_set_the_base_is_set_exactly_once", "e2e/margin_report_of_the_venue_process_carries_its_positions"]
-repro = "cargo test -p oms-node --test e2e node_polls_margin && cargo test -p oms-node --test e2e status_shows_account_exposure && cargo test -p oms-node --test e2e status_shows_reducing && cargo test -p oms-node --test e2e node_reads_venue_setting && cargo test -p oms-node --test e2e -- strategy_socket_cannot omsctl_clear reducing_ && cargo test -p oms-node --features failpoints --test crash_points -- reducing day_base"
+repro = "cargo test -p oms-node --test e2e node_polls_margin && cargo test -p oms-node --test e2e status_shows_account_exposure && cargo test -p oms-node --test e2e status_shows_reducing && cargo test -p oms-node --test e2e node_reads_venue_setting && cargo test -p oms-node --test e2e -- strategy_socket_cannot omsctl_clear reducing_ && cargo test -p oms-node --test e2e margin_report_of_the_venue && cargo test -p oms-node --features failpoints --test crash_points -- reducing day_base"
 supports = "C-MARGIN"
-not_covered = "기본 간격 5초(거래소 설정은 60초) 그대로의 실행. Hyperliquid 게이트웨이가 조회를 보내는 경로(응답의 번역만 V-MARGIN-10이 본다). 포지션이 있는 종목의 설정이 보고로 갱신되는 것(simvenue의 보고에는 포지션이 없다: 티켓 10). Hyperliquid 게이트웨이의 요청 예산이 실제 거래소 한도와 맞는지(예산의 산술은 V-MARGIN-10). 디스크 유실과 전원 장애(중단은 프로세스 abort와 SIGKILL이다). omsctl 실행 파일의 main. 정확한 시간"
+not_covered = "기본 간격 5초(거래소 설정은 60초) 그대로의 실행. Hyperliquid 게이트웨이가 조회를 보내는 경로(응답의 번역만 V-MARGIN-10이 본다). Hyperliquid 게이트웨이의 요청 예산이 실제 거래소 한도와 맞는지(예산의 산술은 V-MARGIN-10). 디스크 유실과 전원 장애(중단은 프로세스 abort와 SIGKILL이다). omsctl 실행 파일의 main. 정확한 시간"
 
 [[claim]]
 id = "V-MARGIN-5"
@@ -995,18 +995,18 @@ not_covered = "거래소의 격리 포지션 marginUsed가 그 포지션의 자�
 
 [[claim]]
 id = "V-MARGIN-12"
-statement = "시뮬레이션의 가상 거래소는 계좌 가치를 자기 모형으로 계산한다: 현금 + 포지션 × 기준 가격. 체결은 낸 값과 수수료만큼, 펀딩은 그 금액만큼 현금을 줄이고, 가격 변화는 포지션 가치를 바꾼다. 손으로 푼 예(입금 100, 100에 0.5 매수와 수수료 0.01, 가격 104, 펀딩 0.1 %)에서 계좌 가치는 99.99, 101.99, 101.938이다"
-why = "일 손실 규칙은 거래소가 말한 계좌 가치만 읽는다. 시뮬레이션이 그 값을 체결·가격·수수료·펀딩에서 스스로 만들어야 규칙을 임의 순서의 실행에서 볼 수 있다"
+statement = "시뮬레이션의 가상 거래소는 계좌 가치를 자기 모형으로 계산한다: 현금 + 포지션 × 기준 가격. 체결은 낸 값과 수수료만큼, 펀딩은 그 금액만큼 현금을 줄이고, 가격 변화는 포지션 가치를 바꾼다. 손으로 푼 예(입금 100, 100에 0.5 매수와 수수료 0.01, 가격 104, 펀딩 0.1 %)에서 계좌 가치는 99.99, 101.99, 101.938이다. 가격이 움직이지 않아도 수수료와 펀딩만으로 계좌가 기준 금액보다 5 %를 넘게 내려가면 감소 전용 상태로 들어간다(100에서 95.00은 아니고 94.99는 들어간다). 가상 거래소는 포지션을 키우거나 반대쪽으로 넘기는 감소 전용 주문을 거절하고, 걸려 있는 감소 전용 주문은 남은 포지션만큼만 체결한 뒤 나머지를 취소한다. 증거금 정책을 켠 임의 순서의 실행(체결, 가격 변화, 펀딩, 운영자 해제, 그리고 margin_lossy에서는 보고 유실·지연·무응답, 링크 단절, 재시작)의 매 입력 뒤에: 받아들인 일반 주문은 신선한 보고가 있었고 노출이 계좌 가치의 2배 이내이거나 노출을 올리지 않았다. 감소 전용 상태에 들어가면 열려 있는 일반 주문마다 취소 요청이 있고, 그 상태인 동안 일반 주문은 받아들여지지 않는다. 감소 전용 상태는 증거금 보고로만 들어가고 운영자의 해제로만 끝난다(재시작, 새 UTC 날, 회복된 계좌 가치는 끝내지 않는다). 보고가 한도보다 오래 끊긴 뒤의 틱이 끝나면 열려 있는 일반 주문마다 취소 요청이 있다. 증거금 정책이 없는 기존 프로파일 일곱 개는 seed 다섯 개씩 main(84db0f9)에서 기록한 것과 같은 저널을 쓴다"
+why = "일 손실 규칙은 거래소가 말한 계좌 가치만 읽는다. 시뮬레이션이 그 값을 체결·가격·수수료·펀딩에서 스스로 만들어야 규칙을 임의 순서의 실행에서 볼 수 있다. 예제 시험이 생각하지 못한 순서(취소 중의 진입, 재시작 직후의 보고, 앞지른 늦은 보고)는 여기서만 나온다"
 level = "시뮬레이션"
-scope = "가상 거래소의 증거금 모형(한 종목)"
-real = "없음(모형 자체의 산술)"
-simulated = "거래소의 계좌 가치 계산. 우리 모형이고 거래소의 문서화된 산술이 아니다"
-faults = "없음"
-criterion = "손으로 푼 예의 값과 같다"
+scope = "가상 거래소의 증거금 모형(단위 3건). 프로파일 margin_calm, margin_lossy: 실행당 1500단계, 한 종목, 두 전략, 계좌 100, 증거금 시계는 계약 기본값의 50분의 1(조회 100 ms, 신선도 600 ms, 끊김 취소 1.2초), UTC 자정을 한 번 넘는다. 기존 프로파일 7개 × seed 5개의 저널 해시"
+real = "oms-core의 판단과 상태"
+simulated = "거래소와 그 증거금 모형(우리 모형이고 거래소의 문서화된 산술이 아니다), 저널과 커밋 게이트, 게이트웨이, 네트워크, 전략, 운영자, 시계"
+faults = "margin_calm: 없음. margin_lossy: lossy의 네트워크 장애, 링크 단절 0.3 %/단계, 재시작 0.2 %/단계, 증거금 조회 무응답 0.5~2.5초, 늦은 응답, 포지션 증거금을 0으로 말하는 거래소"
+criterion = "모형은 손으로 푼 예의 값. 실행은 검사 leverage-gate, margin-fresh, reducing-cancel, reducing-accept, reducing-entry, reducing-release, stale-cancel(노출은 세계가 코어의 장부에서 따로 계산한다)과 V-SIM-1, V-SIM-2의 검사. 프로파일이 각 규칙에 닿았는지는 seed 40개부터 확인한다. 저널 해시는 main에서 기록한 상수와 비교한다"
 tests = ["sim/world_account_value_follows_fills_price_fees_and_funding", "sim/a_loss_made_only_of_fees_and_funding_enters_reducing", "sim/world_refuses_a_reduce_only_order_that_would_grow_the_position", "sim/profile_margin_calm", "sim/profile_margin_calm_reducing_invariant", "sim/profile_margin_calm_release_invariant", "sim/profile_margin_lossy", "sim/existing_profiles_give_the_same_run_with_margin_off"]
-repro = "cargo test -p oms-sim --test sim world_"
+repro = "cargo test -p oms-sim --test sim -- world_ a_loss_made profile_margin existing_profiles --nocapture   (실패 시: OMS_SIM_PROFILE=<이름> OMS_SIM_SEED=<n>)"
 supports = "C-MARGIN"
-not_covered = "실제 거래소가 계좌 가치를 이렇게 계산하는지(T2, T3: 수수료와 펀딩이 어느 잔고에서 나가는지). 청산. 증거금 구간"
+not_covered = "실제 거래소에 관한 것 전부: 계좌 가치와 증거금의 계산(T1, T2), 수수료와 펀딩이 어느 잔고에서 나가는지(T3), 감소 전용 주문의 처리(T5, 문서 인용을 가정으로 적었다). 취소가 체결보다 먼저 닿는 것. 주문을 받은 뒤 가격이 움직여 넘은 노출. 청산(모형에 없다). 증거금 구간. 여러 종목. 여러 UTC 날(티켓 11)"
 
 [[claim]]
 id = "V-MARGIN-10"

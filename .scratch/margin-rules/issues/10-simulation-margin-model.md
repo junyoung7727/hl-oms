@@ -15,10 +15,10 @@
 - [x] Test `profile_margin_lossy` (seam D, S11, S23): fails when an invariant breaks when reports are dropped or delayed or the node restarts.
 - [x] Test `existing_profiles_give_the_same_run_with_margin_off` (seam D, S21): for a fixed list of seeds of each existing profile, the journal hash of the run (the `trace_hash` of the run statistics, a hash of every journal record's bytes) is compared with a literal recorded by running the same seed on main at 84db0f9. Fails when any hash differs with no margin policy. It never compares two runs of the same build. The state digest is not compared, because the state gains fields in this work.
 - [x] Test `margin_report_of_the_venue_process_carries_its_positions` (seam C, added by the implementer; the contract named "the simulated venue states positions in its report" as this ticket's): fails when the margin report of the simvenue process does not carry the position with its value, margin, margin mode, leverage and maximum leverage from the venue's margin model, or when a changed setting of an instrument with a position does not reach the core through the report.
-- [ ] Stated and not proven here: anything about the real venue; fills that beat a cancel; exposure after price moves.
-- [ ] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
-- [ ] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
-- [ ] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
+- [x] Stated and not proven here: anything about the real venue; fills that beat a cancel; exposure after price moves.
+- [x] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
+- [x] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
+- [x] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
 - [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
 
 ## Comments
