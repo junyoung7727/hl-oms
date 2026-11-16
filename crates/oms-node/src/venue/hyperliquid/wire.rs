@@ -478,6 +478,30 @@ pub fn account_mode_input(body: &serde_json::Value, session: u64) -> Option<Venu
     })
 }
 
+/// Weight of a `clearinghouseState` query against the venue's limit of
+/// 1200 per minute and IP (documented: weight 2).
+pub const WEIGHT_MARGIN_QUERY: u32 = 2;
+/// Weight of an `activeAssetData` or `userAbstraction` query. Neither is
+/// in the documented list of weight-2 queries, so the documented default
+/// for every other info request applies.
+pub const WEIGHT_OTHER_INFO_QUERY: u32 = 20;
+
+/// Body of the margin query (`/info`). The optional `dex` field is left
+/// out: the first perp dex.
+pub fn margin_request(user: &str) -> serde_json::Value {
+    serde_json::json!({"type": "clearinghouseState", "user": user})
+}
+
+/// Body of the venue-setting query for one coin (`/info`).
+pub fn venue_setting_request(user: &str, coin: &str) -> serde_json::Value {
+    serde_json::json!({"type": "activeAssetData", "user": user, "coin": coin})
+}
+
+/// Body of the account-mode query (`/info`).
+pub fn account_mode_request(user: &str) -> serde_json::Value {
+    serde_json::json!({"type": "userAbstraction", "user": user})
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -818,6 +842,25 @@ mod tests {
         // The value is journaled, so its length is bounded.
         assert_eq!(mode(json!("x".repeat(64))), Some("x".repeat(64)));
         assert_eq!(mode(json!("x".repeat(65))), None);
+    }
+
+    /// The three request bodies as the Info endpoint documentation gives
+    /// them. The optional `dex` field is left out: the first perp dex.
+    #[test]
+    fn margin_and_setting_request_json() {
+        let documented = |text: &str| serde_json::from_str::<serde_json::Value>(text).unwrap();
+        assert_eq!(
+            margin_request("0xUSER"),
+            documented(r#"{"type": "clearinghouseState", "user": "0xUSER"}"#)
+        );
+        assert_eq!(
+            venue_setting_request("0xUSER", "APT"),
+            documented(r#"{"type": "activeAssetData", "user": "0xUSER", "coin": "APT"}"#)
+        );
+        assert_eq!(
+            account_mode_request("0xUSER"),
+            documented(r#"{"type": "userAbstraction", "user": "0xUSER"}"#)
+        );
     }
 
     /// Response examples from the Exchange endpoint documentation.

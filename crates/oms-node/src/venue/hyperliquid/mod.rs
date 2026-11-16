@@ -489,11 +489,40 @@ impl Gateway {
                     })
                     .await;
             }
-            // The margin query of this gateway comes with a later ticket
-            // (C-MARGIN, ticket 09). Until then it is not answered: with a
-            // margin policy the core sees no report and refuses plain
-            // orders, which is the safe side.
-            QueryReq::Margin { .. } | QueryReq::VenueSetting { .. } | QueryReq::AccountMode => {}
+            // The three queries of the margin rules (C-MARGIN). They only
+            // read. No answer gives no input: the last report keeps ageing,
+            // a setting or a mode stays unknown, and the core refuses plain
+            // orders on that ground, which is the safe side.
+            QueryReq::Margin { seq } => {
+                let body = margin_request(&self.account);
+                let Some(resp) = self.info(body, f64::from(WEIGHT_MARGIN_QUERY)).await else { return };
+                // The whole report, or the reason it is refused as a whole.
+                let input = margin_input(&resp, session, seq, queried_at);
+                if let VenueInput::MarginReportInvalid { reason, .. } = &input {
+                    warn!("the margin answer was refused as a whole", "seq": seq, "reason": reason.clone());
+                }
+                self.input.send(input).await;
+            }
+            QueryReq::VenueSetting { instrument } => {
+                let body = venue_setting_request(&self.account, instrument.as_str());
+                let Some(resp) = self.info(body, f64::from(WEIGHT_OTHER_INFO_QUERY)).await else { return };
+                match venue_setting_input(&resp, session, &instrument) {
+                    Some(input) => {
+                        self.input.send(input).await;
+                    }
+                    None => warn!("the venue-setting answer could not be read; the setting stays unknown", "instrument": instrument.to_string()),
+                }
+            }
+            QueryReq::AccountMode => {
+                let body = account_mode_request(&self.account);
+                let Some(resp) = self.info(body, f64::from(WEIGHT_OTHER_INFO_QUERY)).await else { return };
+                match account_mode_input(&resp, session) {
+                    Some(input) => {
+                        self.input.send(input).await;
+                    }
+                    None => warn!("the account-mode answer could not be read; the mode stays unknown"),
+                }
+            }
             QueryReq::Positions => {
                 let body = serde_json::json!({"type": "clearinghouseState", "user": self.account});
                 let Some(resp) = self.info(body, 2.0).await else { return };
