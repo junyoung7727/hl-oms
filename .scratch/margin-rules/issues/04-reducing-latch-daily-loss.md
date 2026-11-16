@@ -15,7 +15,7 @@
 - [x] The existing test `cancel_race_final_status_decides` (S4) stays green: for a strategy cancel that races a fill, the final status still decides.
 - [x] Test `a_stuck_rule_cancel_does_not_block_reduce_only_orders` (seam A, S10): fails when a stuck cancel after a rule cancel rejects a reduce-only order.
 - [x] Test `reducing_is_entered_once` (seam A, S8): fails when a second breaching report emits a second entry event or new cancels.
-- [ ] Test `first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day` (seam A, S12): fails when a loss taken across midnight is absorbed into the new base; also for a gap of three days, which rolls once.
+- [x] Test `first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day` (seam A, S12): fails when a loss taken across midnight is absorbed into the new base; also for a gap of three days, which rolls once.
 - [ ] Test `a_new_day_does_not_clear_reducing` (seam A, S12): fails when the latch is gone after the roll.
 - [ ] Test `a_report_of_an_earlier_day_does_not_change_the_day_base` (seam A, G5): fails when a report dated a day before the base re-bases.
 - [ ] Test `a_loss_between_two_reports_enters_reducing_on_the_next_report` (seam A, G9): fails when reports at 100 and then 88 do not latch on the second report. It documents that 12 % was already lost.

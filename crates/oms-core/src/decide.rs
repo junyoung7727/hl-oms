@@ -707,13 +707,17 @@ impl Tx<'_> {
         Ok(())
     }
 
-    /// Sets the day base from a recorded report when there is none.
+    /// Sets the day base from a recorded report when there is none, or when
+    /// the report belongs to a later UTC day than the base. Runs after the
+    /// report was judged against the old base. A report of an earlier day
+    /// never moves the base back.
     fn roll_day_base(&mut self, r: &MarginReportIn) -> Result<(), CoreFault> {
-        if self.core.margin.day_base.is_some() {
+        let day = r.queried_at / DAY_US;
+        if self.core.margin.day_base.as_ref().is_some_and(|base| day <= base.day) {
             return Ok(());
         }
         self.emit(Event::DayBaseSet {
-            day: r.queried_at / DAY_US,
+            day,
             value: r.account_value,
             set_by: BaseSetBy::Report,
         })

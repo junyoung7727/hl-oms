@@ -937,3 +937,62 @@ fn reducing_is_entered_once() {
         "the stuck cancel got a new budget"
     );
 }
+
+fn daily_loss_entered(value: &str, base: &str) -> Event {
+    Event::ReducingEntered {
+        rule: RuleId::DailyLoss,
+        detail: format!("account value {value} is more than 500 bps below the day base {base}"),
+    }
+}
+
+fn base_set(day: u64, value: &str) -> Event {
+    Event::DayBaseSet {
+        day,
+        value: amt(value),
+        set_by: BaseSetBy::Report,
+    }
+}
+
+/// S12. The first report of a later UTC day is judged against the old base
+/// first, and only then becomes the new base. So a loss taken across
+/// midnight is not absorbed into the new day. After a gap of several days
+/// the base rolls once, to the day of the report.
+#[test]
+fn first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day() {
+    // Base 100 on day 20 000. Five seconds into day 20 001 the account is
+    // worth 94: a loss of 6 % of the old base.
+    let mut h = at_base_100();
+    next_input_at(&mut h, 20_001 * DAY + 5 * SEC);
+    let out = h.report_margin("94");
+    assert_eq!(
+        out.events[1..],
+        [daily_loss_entered("94", "100"), base_set(20_001, "94")]
+    );
+
+    // No report for three days. The first one after the gap is judged
+    // against the base of day 20 000, and the base rolls once.
+    let mut h = at_base_100();
+    next_input_at(&mut h, 20_003 * DAY + 5 * SEC);
+    let out = h.report_margin("94.99");
+    assert_eq!(
+        out.events[1..],
+        [daily_loss_entered("94.99", "100"), base_set(20_003, "94.99")]
+    );
+    h.advance(5 * SEC);
+    let out = h.report_margin("94.99");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+
+    // A roll without a breach: 97 on the next day is 3 % below 100. From
+    // then on the base is 97, and 5 % of 97 is 4.85: 92.15 does not trip,
+    // 92.14 does.
+    let mut h = at_base_100();
+    next_input_at(&mut h, 20_001 * DAY + 5 * SEC);
+    let out = h.report_margin("97");
+    assert_eq!(out.events[1..], [base_set(20_001, "97")]);
+    h.advance(5 * SEC);
+    let out = h.report_margin("92.15");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    h.advance(5 * SEC);
+    let out = h.report_margin("92.14");
+    assert_eq!(out.events[1..], [daily_loss_entered("92.14", "97")]);
+}
