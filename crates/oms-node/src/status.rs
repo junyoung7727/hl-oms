@@ -78,6 +78,9 @@ pub fn status(ctx: &ApiCtx, strategy: Option<&StrategyId>) -> serde_json::Value 
             "queried_at": report.map(|r| r.queried_at),
             "age_us": report.map(|r| now.saturating_sub(r.queried_at)),
             "fresh": core.margin_report_is_fresh(now),
+            // What the leverage gate judges with, at the last reference
+            // prices whatever their age. Null when it has no value.
+            "account_exposure": core.account_exposure(),
             "session": report.map(|r| r.session),
             "seq": report.map(|r| r.seq),
             "positions": report.map(|r| &r.positions),

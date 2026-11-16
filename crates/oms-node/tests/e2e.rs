@@ -632,9 +632,20 @@ fn node_polls_margin_and_status_shows_value_and_age() {
     env.ctl(json!({"account_value": {"value": "249"}}));
     assert!(shown(&env, "249"), "status did not follow the venue: {}", env.status()["core"]["margin"]);
 
-    // The report is what a plain order needs: it is accepted.
+    // The report is what a plain order needs, with a fresh reference price
+    // for the leverage gate: it is accepted. The price reaches the core
+    // through the venue stream, so the order is tried until it has arrived.
+    env.ctl(json!({"ref_price": {"instrument": "X", "px": "100"}}));
     let mut c = env.client("a");
-    accept(&mut c, "k1", Side::Buy, "1", "100");
+    let accepted = (0..50).any(|n| {
+        let reply = c.new_order(order_op(&format!("k{n}"), Side::Buy, "1", "100", Tif::Gtc, 5_000)).unwrap();
+        let ok = matches!(reply, NewOrderReply::Accepted { .. });
+        if !ok {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        ok
+    });
+    assert!(accepted, "a plain order was never accepted: {}", env.status()["core"]["margin"]);
     assert_eq!(env.status()["core"]["margin"]["last_rejection"], serde_json::Value::Null);
     assert!(env.venue_dump()["margin_queries"].as_u64().unwrap() >= 4);
     drop(c);
@@ -648,4 +659,48 @@ fn node_polls_margin_and_status_shows_value_and_age() {
     std::thread::sleep(Duration::from_millis(600));
     assert_eq!(env.venue_dump()["margin_queries"], 0);
     assert_eq!(env.status()["core"]["margin"], serde_json::Value::Null);
+}
+
+/// The operator sees the account exposure the leverage gate judges with:
+/// `status` shows it under `core.margin`, it follows an accepted order, and
+/// an order the gate refuses leaves it as it was.
+#[test]
+fn status_shows_account_exposure() {
+    let mut env = Env::new("margin-exposure");
+    env.extra_runtime = "margin_poll_ms = 100".into();
+    env.extra_policy = "\n[core.policy.margin]\n".into();
+    env.ctl(json!({"account_value": {"value": "100"}}));
+    env.start_node();
+    env.wait_ready();
+    let shown = |env: &Env, value: &str| {
+        env.wait(Duration::from_secs(5), || {
+            env.try_status().is_some_and(|st| st["core"]["margin"]["account_exposure"] == value)
+        })
+    };
+    // No position and no order: the exposure is zero, not absent.
+    assert!(shown(&env, "0"), "status never showed the exposure: {}", env.status()["core"]["margin"]);
+
+    // Account value 100, limit 2.0, reference price 100: a buy of 1.5 is an
+    // exposure of 150. The price reaches the core through the venue stream,
+    // so the order is tried until it has arrived.
+    env.ctl(json!({"ref_price": {"instrument": "X", "px": "100"}}));
+    let mut c = env.client("a");
+    let accepted = (0..50).any(|n| {
+        let reply = c.new_order(order_op(&format!("k{n}"), Side::Buy, "1.5", "100", Tif::Gtc, 5_000)).unwrap();
+        let ok = matches!(reply, NewOrderReply::Accepted { .. });
+        if !ok {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        ok
+    });
+    assert!(accepted, "a plain order was never accepted: {}", env.status()["core"]["margin"]);
+    assert!(shown(&env, "150"), "status did not follow the order: {}", env.status()["core"]["margin"]);
+
+    // One more would make 250 against a limit of 200: refused by the gate,
+    // and the exposure shown stays 150.
+    match c.new_order(order_op("over", Side::Buy, "1", "100", Tif::Gtc, 5_000)).unwrap() {
+        NewOrderReply::Rejected { reasons } => assert_eq!(reasons, vec![RejectReason::AccountLeverage]),
+        other => panic!("expected rejection, got {other:?}"),
+    }
+    assert_eq!(env.status()["core"]["margin"]["account_exposure"], "150");
 }
