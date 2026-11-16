@@ -194,7 +194,7 @@ adr = ["ADR-005", "ADR-014", "ADR-017"]
 code = ["crates/oms-node/src/venue/mod.rs", "crates/oms-node/src/venue/simnet.rs", "crates/oms-node/src/venue/hyperliquid/mod.rs"]
 claims = ["V-HL-1", "V-HL-2", "V-HL-3", "V-SLICE-1"]
 
-# 일부 구현(차단 표: 티켓 01, 증거금 보고 수신과 신선도: 티켓 02, 계좌 레버리지 검사: 티켓 03). 이벤트와 주장은 그것을 추가하는 티켓이 함께 채운다(.scratch/margin-rules/issues/).
+# 구현됨(티켓 01~12, .scratch/margin-rules/issues/). 실제 거래소에서는 확인하지 않았다.
 [[contract]]
 id = "C-MARGIN"
 title = "증거금 규칙"
