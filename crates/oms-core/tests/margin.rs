@@ -2859,3 +2859,290 @@ fn a_withdrawal_without_rebase_reads_as_a_loss() {
     h.report_margin("96");
     assert_eq!(h.core.margin.reducing, None);
 }
+
+// ---- C-MARGIN: stale cancel ---------------------------------------------------
+
+fn stale_cancel(id: OrderId) -> Event {
+    Event::CancelRequested {
+        order_id: id,
+        by: Actor::Rule(RuleId::MarginStale),
+    }
+}
+
+/// What a tick decided, without the periodic purge record.
+fn decided(out: &Output) -> Vec<Event> {
+    out.events
+        .iter()
+        .filter(|ev| !matches!(ev, Event::Purged { .. }))
+        .cloned()
+        .collect()
+}
+
+/// S23. The link is up and the last accepted margin report was asked for
+/// more than 60 s ago: the tick asks once, as `Rule(MarginStale)`, to cancel
+/// every resting plain order, an unflagged take-profit included. At exactly
+/// 60 s nothing is cancelled. An order with the reduce-only flag is kept, an
+/// order whose cancel was already requested gets no second request, and the
+/// next tick asks for nothing more.
+#[test]
+fn report_stale_past_the_cancel_limit_cancels_each_plain_order_once() {
+    let mut h = at_base_100();
+    h.long("a", "k1", "1");
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    let take_profit = resting(&mut h, "a", "tp", Side::Sell, "0.5", "110");
+    let flagged = resting_reduce_only(&mut h, "a", "flagged", Side::Sell, "0.5", "120");
+    let asked = resting(&mut h, "b", "asked", Side::Buy, "0.2", "90");
+    assert_eq!(
+        h.cancel("b", asked),
+        CancelReply::Requested { order_id: asked }
+    );
+    // The venue confirmed that cancel; the order is still open there.
+    h.venue(VenueInput::CancelResult {
+        order_id: asked,
+        attempt: 1,
+        outcome: CancelOutcome::Confirmed,
+        timing: Default::default(),
+    });
+    let queried_at = h.now;
+    h.report_margin("100");
+    h.commands.clear();
+
+    // 60 s after the query: not past the limit.
+    next_input_at(&mut h, queried_at + 60 * SEC);
+    let out = h.tick();
+    assert_eq!(decided(&out), vec![], "a cancel at exactly 60 s");
+    assert_eq!(out.commands, vec![]);
+
+    // One microsecond later.
+    next_input_at(&mut h, queried_at + 60 * SEC + 1_000);
+    let out = h.tick();
+    assert_eq!(
+        decided(&out),
+        vec![
+            stale_cancel(bid),
+            cancel_sent(bid, 1),
+            stale_cancel(take_profit),
+            cancel_sent(take_profit, 1),
+        ]
+    );
+    assert_eq!(h.cancels(), vec![(bid, 1), (take_profit, 1)]);
+    let by = |id: OrderId| h.order(id).cancel.as_ref().map(|c| c.by.clone());
+    assert_eq!(by(flagged), None, "a reduce-only order was cancelled");
+    assert_eq!(by(asked), Some(Actor::Strategy(sid("b"))));
+    assert_eq!(h.order(flagged).phase, Phase::Working);
+
+    // The next tick asks for nothing again. Nothing latched.
+    h.advance(SEC);
+    let out = h.tick();
+    assert_eq!(decided(&out), vec![], "a second cancel on the next tick");
+    assert_eq!(out.commands, vec![]);
+    assert_eq!(h.core.holds(None), vec![]);
+    assert_eq!(h.core.margin.reducing, None);
+}
+
+/// S23. Without a report in the current link session the age is measured
+/// from the moment that session came up. Scene 1: a node that never got a
+/// report at all still cancels, 60 s after link-up. Scene 2: a report of an
+/// earlier session is older than 60 s when the link comes back; the orders
+/// are not cancelled at once, the new session gets its own 60 s.
+#[test]
+fn stale_age_starts_at_link_up_when_no_report_has_arrived() {
+    // Scene 1. The order rests from before the margin policy was set, so
+    // that it exists although no report ever arrived.
+    let mut h = H::ready();
+    let bid = h.accept("a", "bid", Side::Buy, "0.2", "90");
+    h.placed_open(bid, "bid");
+    let out = h.inp(Input::Config(Box::new(CoreConfig {
+        version: 2,
+        ..config_with_margin()
+    })));
+    assert!(matches!(out.reply, Some(Reply::Config(Ok(2)))));
+    link_down(&mut h);
+    let up_at = h.now + 1_000;
+    h.link_up_and_sync();
+    assert_eq!(h.core.margin.report, None);
+    h.commands.clear();
+
+    next_input_at(&mut h, up_at + 60 * SEC);
+    assert_eq!(decided(&h.tick()), vec![], "a cancel at exactly 60 s");
+    next_input_at(&mut h, up_at + 60 * SEC + 1_000);
+    assert_eq!(
+        decided(&h.tick()),
+        vec![stale_cancel(bid), cancel_sent(bid, 1)],
+        "a node that never got a report never cancels"
+    );
+
+    // Scene 2.
+    let mut h = at_base_100();
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    link_down(&mut h);
+    h.advance(300 * SEC);
+    let up_at = h.now + 1_000;
+    h.link_up_and_sync();
+    h.commands.clear();
+
+    assert_eq!(decided(&h.tick()), vec![], "cancelled on the old report");
+    next_input_at(&mut h, up_at + 60 * SEC);
+    assert_eq!(decided(&h.tick()), vec![]);
+    next_input_at(&mut h, up_at + 60 * SEC + 1_000);
+    assert_eq!(
+        decided(&h.tick()),
+        vec![stale_cancel(bid), cancel_sent(bid, 1)]
+    );
+}
+
+/// S23. Nothing is cancelled while the link is down, however old the report
+/// is: a cancel could not be sent. And nothing is cancelled without a
+/// margin policy, also when a report of an earlier configuration is still
+/// in the state.
+#[test]
+fn stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off() {
+    // The link is down.
+    let mut h = at_base_100();
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    link_down(&mut h);
+    h.commands.clear();
+    h.advance(61 * SEC);
+    assert_eq!(decided(&h.tick()), vec![], "a cancel with the link down");
+    h.advance(3_600 * SEC);
+    assert_eq!(decided(&h.tick()), vec![], "a cancel with the link down");
+    assert_eq!(h.order(bid).cancel, None);
+    assert_eq!(h.commands, vec![]);
+
+    // The policy was taken out of the configuration.
+    let mut h = at_base_100();
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    let out = h.inp(Input::Config(Box::new(CoreConfig {
+        version: 2,
+        ..config()
+    })));
+    assert!(matches!(out.reply, Some(Reply::Config(Ok(2)))));
+    h.commands.clear();
+    h.advance(61 * SEC);
+    assert_eq!(decided(&h.tick()), vec![], "a cancel without a policy");
+    assert_eq!(h.order(bid).cancel, None);
+    assert_eq!(h.commands, vec![]);
+
+    // It never was in the configuration.
+    let mut h = H::ready();
+    let bid = h.accept("a", "bid", Side::Buy, "0.2", "90");
+    h.placed_open(bid, "bid");
+    h.advance(61 * SEC);
+    assert_eq!(decided(&h.tick()), vec![], "a cancel without a policy");
+    assert_eq!(h.order(bid).cancel, None);
+    // And the link-up left nothing in the margin state: the state of a run
+    // without a policy keeps the bytes it had before these rules.
+    assert!(h.core.margin.is_empty(), "{:?}", h.core.margin);
+}
+
+/// S23. The stale cancel asks only for orders that have no cancel request.
+/// An order whose cancel used up its attempts gets no new request and no
+/// new budget on a tick, unlike at the entry into REDUCING: a tick comes
+/// every second, and the stuck cancel is already with the operator.
+#[test]
+fn stale_cancel_does_not_reissue_an_exhausted_cancel() {
+    let mut h = at_base_100();
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    h.cancel("a", bid);
+    exhaust_cancel(&mut h, bid);
+    let queried_at = h.now;
+    h.report_margin("100");
+    assert_eq!(h.cancels().len(), 5);
+
+    next_input_at(&mut h, queried_at + 60 * SEC + 1_000);
+    let out = h.tick();
+    assert_eq!(decided(&out), vec![], "a spent cancel was asked for again");
+    h.advance(SEC);
+    let out = h.tick();
+    assert_eq!(decided(&out), vec![], "a spent cancel was asked for again");
+    assert_eq!(h.cancels().len(), 5);
+    let c = h.order(bid).cancel.as_ref().unwrap();
+    assert_eq!((c.by.clone(), c.used()), (Actor::Strategy(sid("a")), 5));
+}
+
+/// S23. A stale episode latches nothing. While it lasts a plain order is
+/// refused with `MarginUnavailable` only; the first report recorded after
+/// it restores acceptance, the account is not REDUCING and has no hold, and
+/// the tick cancels nothing more.
+#[test]
+fn a_fresh_report_after_a_stale_episode_restores_acceptance_without_a_latch() {
+    let mut h = at_base_100();
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    h.advance(61 * SEC);
+    assert_eq!(
+        decided(&h.tick()),
+        vec![stale_cancel(bid), cancel_sent(bid, 1)]
+    );
+    h.ref_price("X", "100");
+    assert_eq!(
+        h.reject("a", "k2", Side::Buy, "0.2", "90"),
+        vec![RejectReason::MarginUnavailable]
+    );
+
+    h.report_margin("100");
+    assert_eq!(h.core.margin.reducing, None, "REDUCING appeared");
+    assert_eq!(h.core.holds(None), vec![]);
+    let again = h.accept("a", "k3", Side::Buy, "0.2", "90");
+    h.placed_open(again, "k3");
+    h.advance(SEC);
+    assert_eq!(decided(&h.tick()), vec![]);
+    assert_eq!(h.order(again).cancel, None);
+}
+
+/// G5. The wall clock steps forward by an hour between two inputs. The
+/// stored report then reads as an hour old: a plain order is not accepted
+/// on it, and the next tick asks to cancel the resting plain orders. The
+/// reduce-only order stays.
+#[test]
+fn a_forward_clock_jump_reads_the_report_as_stale_and_cancels() {
+    let mut h = at_base_100();
+    h.long("a", "k1", "1");
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    let flagged = resting_reduce_only(&mut h, "a", "flagged", Side::Sell, "0.5", "120");
+    h.report_margin("100");
+    h.commands.clear();
+
+    h.advance(3_600 * SEC);
+    h.ref_price("X", "100");
+    assert_eq!(
+        h.reject("a", "k2", Side::Buy, "0.2", "90"),
+        vec![RejectReason::MarginUnavailable],
+        "a plain order was accepted on the old report"
+    );
+    assert_eq!(
+        decided(&h.tick()),
+        vec![stale_cancel(bid), cancel_sent(bid, 1)]
+    );
+    assert_eq!(h.cancels(), vec![(bid, 1)]);
+    assert_eq!(h.order(flagged).cancel, None);
+    assert_eq!(h.core.margin.reducing, None);
+}
+
+/// S23, added by the implementer. A margin policy that is activated while
+/// the link is already up has no link-up moment of its own. The age is then
+/// measured from the activation: orders that rest from before the policy
+/// are cancelled when no report follows within 60 s, and not at once.
+#[test]
+fn stale_age_starts_at_policy_activation_when_the_link_is_already_up() {
+    let mut h = H::ready();
+    let bid = h.accept("a", "bid", Side::Buy, "0.2", "90");
+    h.placed_open(bid, "bid");
+    h.advance(300 * SEC);
+    let activated_at = h.now + 1_000;
+    let out = h.inp(Input::Config(Box::new(CoreConfig {
+        version: 2,
+        ..config_with_margin()
+    })));
+    assert!(matches!(out.reply, Some(Reply::Config(Ok(2)))));
+    h.commands.clear();
+
+    assert_eq!(decided(&h.tick()), vec![], "cancelled at once");
+    next_input_at(&mut h, activated_at + 60 * SEC);
+    assert_eq!(decided(&h.tick()), vec![], "a cancel at exactly 60 s");
+    next_input_at(&mut h, activated_at + 60 * SEC + 1_000);
+    assert_eq!(
+        decided(&h.tick()),
+        vec![stale_cancel(bid), cancel_sent(bid, 1)],
+        "orders from before the policy are never cancelled"
+    );
+}

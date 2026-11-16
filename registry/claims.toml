@@ -962,3 +962,18 @@ tests = ["core/clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_
 repro = "cargo test -p oms-core --test margin"
 supports = "C-MARGIN"
 not_covered = "운영자의 판단이 옳은 것. 입금이 가린 손실(100, 입금 10, 손실 14는 걸리지 않는다: 시험이 그대로 보여 준다). 유지증거금 여유 조건이 참일 때의 거절(MmBufferActive, 티켓 07)"
+
+[[claim]]
+id = "V-MARGIN-7"
+statement = "증거금 정책이 있고 링크가 올라와 있을 때, 마지막으로 받은 증거금 보고의 조회 시각에서 60초가 넘게 지나면 틱이 감소 전용 표시가 없고 취소 요청이 없는 모든 열린 주문에 Rule(MarginStale) 이름으로 취소 요청을 한 번 낸다. 정확히 60초에는 내지 않는다. 감소 전용 표시가 있는 주문은 그대로 둔다. 아무 상태도 걸리지 않는다"
+why = "증거금 보고를 못 받는 동안에는 일 손실도 유지증거금 여유도 판정하지 못한다. 그동안 걸려 있는 일반 주문이 체결되면 보지 못하는 채로 위험이 는다"
+level = "단위"
+scope = "틱 안의 cancel_requested(by: Rule(MarginStale)), cancel_sent"
+real = "oms-core"
+simulated = "보고와 거래소 통보, 시각은 시험이 입력"
+faults = "보고가 끊긴 링크"
+criterion = "C-MARGIN의 '보고 끊김 취소'. 기대값은 손으로 적었다"
+tests = ["core/report_stale_past_the_cancel_limit_cancels_each_plain_order_once", "core/stale_age_starts_at_link_up_when_no_report_has_arrived", "core/stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off", "core/stale_cancel_does_not_reissue_an_exhausted_cancel", "core/a_fresh_report_after_a_stale_episode_restores_acceptance_without_a_latch", "core/a_forward_clock_jump_reads_the_report_as_stale_and_cancels", "core/stale_age_starts_at_policy_activation_when_the_link_is_already_up"]
+repro = "cargo test -p oms-core --test margin"
+supports = "C-MARGIN"
+not_covered = "포지션(그대로 남는다). 감소 전용 주문. 링크가 내려가 있는 동안(아무것도 취소하지 않는다). 취소가 체결보다 먼저 닿는다는 것"

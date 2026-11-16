@@ -358,7 +358,14 @@ impl Core {
     pub fn apply(&mut self, at: Ts, ev: &Event) -> Result<(), CoreFault> {
         match ev {
             Event::ConfigActivated { config } => {
+                let policy_comes_on = self.config.policy.margin.is_none() && config.policy.margin.is_some();
                 self.config = (**config).clone();
+                // A policy that comes on while the link is up has no
+                // link-up moment of its own: the stale cancel measures
+                // from here.
+                if policy_comes_on && self.link.up {
+                    self.margin.link_up_at = Some(at);
+                }
             }
             Event::Booted { boot, fill_floor, .. } => {
                 self.boot = *boot;
@@ -368,6 +375,9 @@ impl Core {
             Event::LinkChanged { up, session, .. } => {
                 self.link.up = *up;
                 self.link.session = *session;
+                if *up && self.config.policy.margin.is_some() {
+                    self.margin.link_up_at = Some(at);
+                }
                 // What the venue told in one link session says nothing
                 // about the next (C-MARGIN): the venue settings and the
                 // account mode are unknown again. The last margin report

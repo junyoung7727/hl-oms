@@ -1539,6 +1539,45 @@ impl Tx<'_> {
 
     // ---- time -------------------------------------------------------------
 
+    /// Stale cancel (C-MARGIN): no margin report was accepted for longer
+    /// than `stale_cancel_us`. Every open plain order that has no cancel
+    /// request gets one, once. Nothing latches: the next recorded report
+    /// ends it.
+    fn stale_cancel(&mut self) -> Result<(), CoreFault> {
+        let Some(policy) = &self.core.config.policy.margin else {
+            return Ok(());
+        };
+        // With the link down a cancel cannot be sent, and no report can
+        // arrive: nothing is asked for.
+        if !self.core.link.up {
+            return Ok(());
+        }
+        // Measured from the query time of the last recorded report, or from
+        // the moment the current link session came up when that is later.
+        let margin = &self.core.margin;
+        let last_report_at = margin.report.as_ref().map(|r| r.queried_at);
+        let Some(blind_since) = last_report_at.max(margin.link_up_at) else {
+            return Ok(());
+        };
+        let blind_for = self.at.saturating_sub(blind_since);
+        if blind_for <= policy.stale_cancel_us {
+            return Ok(());
+        }
+        for id in self.open_ids() {
+            let Some(o) = self.core.orders.get(&id) else { continue };
+            let plain_order = !o.reduce_only;
+            let not_asked_yet = o.cancel.is_none();
+            if plain_order && not_asked_yet {
+                self.emit(Event::CancelRequested {
+                    order_id: id,
+                    by: Actor::Rule(RuleId::MarginStale),
+                })?;
+                self.maybe_send_cancel(id)?;
+            }
+        }
+        Ok(())
+    }
+
     fn tick(&mut self) -> Result<(), CoreFault> {
         let policy = self.core.config.policy.clone();
         for id in self.open_ids() {
@@ -1574,6 +1613,7 @@ impl Tx<'_> {
             }
             self.maybe_send_cancel(id)?;
         }
+        self.stale_cancel()?;
 
         // A parked fill is given up as external when no order of ours could
         // still turn out to own it, or when it has waited too long.
