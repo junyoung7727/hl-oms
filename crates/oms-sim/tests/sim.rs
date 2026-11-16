@@ -205,3 +205,78 @@ fn world_account_value_follows_fills_price_fees_and_funding() {
     assert_eq!(charged, amount("0.052"));
     assert_eq!(v.account_value(), amount("101.938"), "after funding");
 }
+
+// ---- the margin rules in the world (C-MARGIN) --------------------------------
+
+/// A world with a margin policy and no random faults, driven by the test.
+fn scripted_margin_world() -> World {
+    let mut w = World::new(1, Profile { name: "margin_scripted", margin: true, ..Profile::calm() });
+    w.start().unwrap();
+    w.advance(2_000_000).unwrap();
+    w
+}
+
+fn reducing_rules(w: &World) -> Vec<oms_core::RuleId> {
+    w.durable
+        .iter()
+        .flat_map(|r| &r.events)
+        .filter_map(|e| match e {
+            oms_core::Event::ReducingEntered { rule, .. } => Some(*rule),
+            _ => None,
+        })
+        .collect()
+}
+
+fn reported_value(w: &World) -> Option<oms_core::Amount> {
+    w.core.margin.report.as_ref().map(|r| r.account_value)
+}
+
+/// Fees and funding count as loss (G10). The price never moves here, so the
+/// loss is made of nothing else. Hand-worked, with the world's start capital
+/// of 100 and the venue fee of 2 bps:
+///   buy 0.5 at 100: fee 0.01                 ->  99.99
+///   funding 9.98 % of the position value 50  ->  95.00   5.00 % below: no latch
+///   funding 0.02 % of the position value 50  ->  94.99   more than 5 %: REDUCING
+/// Which balance the venue pays fees and funding from is not verified (T3).
+#[test]
+fn a_loss_made_only_of_fees_and_funding_enters_reducing() {
+    let mut w = scripted_margin_world();
+    assert_eq!(reported_value(&w), Some(amount("100")), "the first reports state the start capital");
+
+    w.submit(oms_core::NewOrderReq {
+        strategy: oms_core::StrategyId::new("a").unwrap(),
+        client_order_id: oms_core::ClientOrderId::new("k1").unwrap(),
+        instrument: x(),
+        side: oms_core::Side::Buy,
+        qty: oms_core::Qty::parse("0.5").unwrap(),
+        px: oms_core::Px::parse("100").unwrap(),
+        tif: oms_core::Tif::Gtc,
+        reduce_only: false,
+        expires_at: w.now + 5_000_000,
+    })
+    .unwrap();
+    assert_eq!(w.stats.accepted, 1, "the plain order is accepted");
+    w.advance(500_000).unwrap();
+    // The venue fills whatever is still open, at the limit price of 100.
+    for oid in w.venue.open_oids() {
+        let rest = w.venue.orders[&oid].remaining();
+        w.venue.fill(w.now, oid, rest);
+    }
+    assert_eq!(w.venue.position(&x()), 50_000_000, "long 0.5");
+    w.advance(1_000_000).unwrap();
+    assert_eq!(reported_value(&w), Some(amount("99.99")));
+    assert_eq!(reducing_rules(&w), vec![]);
+
+    assert_eq!(w.venue.charge_funding(&x(), 99_800), amount("4.99"));
+    w.advance(1_000_000).unwrap();
+    assert_eq!(reported_value(&w), Some(amount("95")));
+    assert_eq!(reducing_rules(&w), vec![], "exactly 5 % below the base does not latch");
+    assert!(!w.core.holds(None).contains(&oms_core::HoldReason::Reducing));
+
+    assert_eq!(w.venue.charge_funding(&x(), 200), amount("0.01"));
+    w.advance(1_000_000).unwrap();
+    assert_eq!(reported_value(&w), Some(amount("94.99")));
+    assert_eq!(reducing_rules(&w), vec![oms_core::RuleId::DailyLoss]);
+    assert!(w.core.holds(None).contains(&oms_core::HoldReason::Reducing));
+    assert_eq!(w.venue.mark(&x()), oms_core::Px::parse("100").unwrap(), "the price never moved");
+}

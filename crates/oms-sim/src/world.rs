@@ -54,6 +54,11 @@ pub struct Profile {
     pub absence_margin_us: u64,
     pub closed_retention_us: u64,
     pub dedup_grace_us: u64,
+    /// Runs the core with a margin policy (C-MARGIN) and the venue with its
+    /// margin model. Off in every profile that existed before the margin
+    /// rules: such a run draws the same random numbers and writes the same
+    /// journal as before.
+    pub margin: bool,
 }
 
 impl Profile {
@@ -87,6 +92,7 @@ impl Profile {
             absence_margin_us: 2_000_000,
             closed_retention_us: 3_600_000_000,
             dedup_grace_us: 60_000_000,
+            margin: false,
         }
     }
 
@@ -224,6 +230,9 @@ enum Query {
     Fills(Ts),
     OpenOrders,
     Positions,
+    Margin { seq: u64 },
+    VenueSetting,
+    AccountMode,
 }
 
 #[derive(Clone, Debug)]
@@ -237,6 +246,10 @@ enum Net {
     Reconcile { epoch: u32, n: u32 },
     QueryArrive { epoch: u32, session: u64, queried_at: Ts, q: Query },
     QueryResp { epoch: u32, inputs: Vec<VenueInput> },
+    /// The margin poll of one link session (margin profiles only).
+    MarginPoll { epoch: u32, session: u64 },
+    /// A reference price on the stream (margin profiles only).
+    RefPrice { epoch: u32, session: u64, px: Px, ts: Ts },
 }
 
 #[derive(Clone, Debug)]
@@ -248,6 +261,15 @@ enum Inflight {
 pub const INSTANCE: u64 = 0x51_4d_55_4c;
 const GW_TIMEOUT_US: u64 = 2_000_000;
 const RECONCILE_EVERY_US: u64 = 300_000;
+
+// The margin rules run on a clock that is fifty times faster than the
+// contract's defaults (poll 5 s, fresh 30 s, stale cancel 60 s), because one
+// run lasts about 25 virtual seconds. The proportions are kept.
+const MARGIN_POLL_US: u64 = 100_000;
+const MARGIN_MAX_AGE_US: u64 = 600_000;
+const STALE_CANCEL_US: u64 = 1_200_000;
+/// What the account holds at the start of a margin run: the owner's 100.
+const START_CAPITAL: i64 = 100 * oms_core::num::SCALE;
 
 pub struct World {
     pub p: Profile,
@@ -273,6 +295,9 @@ pub struct World {
     released_keys: BTreeSet<(StrategyId, ClientOrderId)>,
     accepted_keys: BTreeMap<(StrategyId, ClientOrderId), OrderId>,
     external_seen: bool,
+    /// Number of the last margin query. It rises for the life of the
+    /// process, as the node's does.
+    margin_seq: u64,
     pub stats: SimStats,
 }
 
@@ -321,6 +346,16 @@ pub fn sim_config(p: &Profile) -> CoreConfig {
         fill_dedup_retention_us: p.closed_retention_us,
         ..Policy::default()
     };
+    let mut policy = policy;
+    if p.margin {
+        policy.ref_price_max_age_us = MARGIN_MAX_AGE_US;
+        policy.margin = Some(MarginPolicy {
+            margin_max_age_us: MARGIN_MAX_AGE_US,
+            stale_cancel_us: STALE_CANCEL_US,
+            account_modes_allowed: vec!["standard".into()],
+            ..MarginPolicy::default()
+        });
+    }
     CoreConfig { version: 1, instruments, strategies, policy }
 }
 
@@ -358,10 +393,15 @@ impl World {
             released_keys: BTreeSet::new(),
             accepted_keys: BTreeMap::new(),
             external_seen: false,
+            margin_seq: 0,
             stats: SimStats { trace_hash: 0xcbf2_9ce4_8422_2325, ..SimStats::default() },
             p,
         };
         w.stats.steps = w.p.steps;
+        if w.p.margin {
+            w.venue.deposit(Amount(START_CAPITAL));
+            w.venue.set_mark(&inst(), Px(100 * PX_TICK));
+        }
         w
     }
 
@@ -672,6 +712,21 @@ impl World {
                     let session = self.session;
                     self.feed(Input::Venue(VenueInput::Link { up: true, session, reason: "connected".into() }))?;
                     self.schedule(1_000, Net::Reconcile { epoch, n: 0 });
+                    if self.p.margin {
+                        self.schedule(1_000, Net::MarginPoll { epoch, session });
+                    }
+                }
+            }
+            Net::MarginPoll { epoch, session } => {
+                // One poll chain per link session; it ends with the session.
+                if epoch == self.epoch && self.link_up && session == self.session {
+                    self.issue_margin_queries();
+                    self.schedule(MARGIN_POLL_US, Net::MarginPoll { epoch, session });
+                }
+            }
+            Net::RefPrice { epoch, session, px, ts } => {
+                if epoch == self.epoch && self.link_up && session == self.session {
+                    self.feed(Input::Venue(VenueInput::RefPrice { instrument: inst(), px, venue_ts: ts }))?;
                 }
             }
             Net::Reconcile { epoch, n } => {
@@ -727,8 +782,42 @@ impl World {
         }
     }
 
+    /// What the node's reconciler does for the margin rules: the margin
+    /// query on its timer, and the venue setting and the account mode while
+    /// the core does not know them in this link session. The venue also
+    /// publishes its mark as the reference price.
+    fn issue_margin_queries(&mut self) {
+        self.margin_seq += 1;
+        let mut queries = vec![Query::Margin { seq: self.margin_seq }];
+        if !self.core.margin.venue_settings.contains_key(&inst()) {
+            queries.push(Query::VenueSetting);
+        }
+        if self.core.margin.account_mode.is_none() {
+            queries.push(Query::AccountMode);
+        }
+        for q in queries {
+            let d = self.net_delay();
+            self.schedule(d, Net::QueryArrive { epoch: self.epoch, session: self.session, queried_at: self.now, q });
+        }
+        let d = self.net_delay();
+        let (px, ts) = (self.venue.mark(&inst()), self.venue_now());
+        self.schedule(d, Net::RefPrice { epoch: self.epoch, session: self.session, px, ts });
+    }
+
     fn answer(&self, session: u64, queried_at: Ts, q: Query) -> Vec<VenueInput> {
         match q {
+            Query::Margin { seq } => vec![VenueInput::MarginReport(MarginReportIn {
+                session,
+                seq,
+                queried_at,
+                account_value: self.venue.account_value(),
+                positions: self.venue.margin_positions(),
+            })],
+            Query::VenueSetting => {
+                let (mode, leverage) = self.venue.setting(&inst());
+                vec![VenueInput::VenueSetting { session, instrument: inst(), isolated: mode == LeverageType::Isolated, leverage }]
+            }
+            Query::AccountMode => vec![VenueInput::AccountMode { session, mode: self.venue.account_mode.clone() }],
             Query::Status(order_id) => {
                 let client = VenueClientId { instance_id: INSTANCE, order_id };
                 match self.venue.status(client) {
@@ -1153,6 +1242,42 @@ impl World {
             }
         }
         Ok(())
+    }
+
+    // ---- scripted runs ----------------------------------------------------
+    //
+    // A test that needs one exact sequence drives the world itself with the
+    // three calls below and with `venue`, and reads `core`, `durable` and
+    // `stats`. Random actions are those of `run` only.
+
+    /// Boots the core, activates the configuration and lets the link come up.
+    pub fn start(&mut self) -> Result<(), Violation> {
+        self.feed(Input::Boot { binary: "sim".into() })?;
+        self.feed(Input::Config(Box::new(sim_config(&self.p))))?;
+        self.commit()?;
+        self.schedule(10_000, Net::LinkUp { epoch: self.epoch });
+        Ok(())
+    }
+
+    /// Lets `us` of virtual time pass in steps of 10 ms: messages that are
+    /// due are delivered, what the venue did is put on the stream, and the
+    /// always-properties are checked. Everything is durable at the end.
+    pub fn advance(&mut self, us: u64) -> Result<(), Violation> {
+        let end = self.now + us;
+        while self.now < end {
+            self.now += 10_000;
+            self.pump_stream();
+            self.drain_due()?;
+            self.check_always()?;
+        }
+        self.commit()
+    }
+
+    /// One new-order request of a strategy.
+    pub fn submit(&mut self, req: NewOrderReq) -> Result<(), Violation> {
+        self.stats.requests += 1;
+        self.feed(Input::NewOrder(req))?;
+        self.commit()
     }
 
     pub fn run(mut self) -> Result<SimStats, Violation> {

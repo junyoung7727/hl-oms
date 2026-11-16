@@ -110,6 +110,17 @@ pub struct SimVenue {
     /// Mark price of each instrument. Until the driver sets one, the price
     /// of the instrument's first fill stands in.
     pub marks: BTreeMap<InstrumentId, Px>,
+    /// Margin mode and leverage the venue states for an instrument that is
+    /// not listed here: isolated, 2.
+    pub settings: BTreeMap<InstrumentId, (LeverageType, u32)>,
+    /// Maximum leverage the venue states for every instrument.
+    pub max_leverage: u32,
+    /// Control knob: the margin the venue states for a position, in place
+    /// of the model's value (see `margin_positions`).
+    pub margin_used_override: BTreeMap<InstrumentId, Amount>,
+    /// The account mode the venue states. `standard` is this model's own
+    /// name for the ordinary mode, not a Hyperliquid value (T10).
+    pub account_mode: String,
 }
 
 impl SimVenue {
@@ -119,6 +130,8 @@ impl SimVenue {
             next_tid: 1,
             enforce_expiry,
             fee_bps: 2,
+            max_leverage: 40,
+            account_mode: "standard".into(),
             ..SimVenue::default()
         }
     }
@@ -176,6 +189,40 @@ impl SimVenue {
         };
         self.cash = Amount(self.cash.0 - paid - fee.0);
         self.marks.entry(instrument.clone()).or_insert(px);
+    }
+
+    /// Margin mode and leverage of one instrument, as the venue states them.
+    pub fn setting(&self, instrument: &InstrumentId) -> (LeverageType, u32) {
+        self.settings.get(instrument).copied().unwrap_or((LeverageType::Isolated, 2))
+    }
+
+    /// The positions of a margin report. Position value is size x mark. The
+    /// margin of a position is its value divided by the instrument's
+    /// leverage, unless the driver set another number: the model keeps no
+    /// entry price, so a loss does not eat into the stated margin by itself.
+    pub fn margin_positions(&self) -> Vec<MarginPosition> {
+        self.positions
+            .iter()
+            .filter(|(_, q)| **q != 0)
+            .map(|(i, q)| {
+                let (leverage_type, leverage_value) = self.setting(i);
+                let position_value = Amount(self.signed_value(i).abs());
+                let margin_used = self
+                    .margin_used_override
+                    .get(i)
+                    .copied()
+                    .unwrap_or(Amount(position_value.0 / i64::from(leverage_value.max(1))));
+                MarginPosition {
+                    instrument: i.clone(),
+                    szi: SQty(*q),
+                    position_value,
+                    margin_used,
+                    leverage_type,
+                    leverage_value,
+                    max_leverage: self.max_leverage,
+                }
+            })
+            .collect()
     }
 
     /// Control knob: moves the cash so that the account is worth `value`
