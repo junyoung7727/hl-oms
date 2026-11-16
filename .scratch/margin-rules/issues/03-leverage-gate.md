@@ -4,7 +4,7 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Test `order_past_twice_the_account_value_is_rejected_account_leverage` (seam A, S5): fails when a buy of 2.01 at 100 is accepted.
 - [ ] Test `order_exactly_at_the_limit_is_accepted` (seam A, S5): fails when a buy of 2.00 at 100 is rejected.
