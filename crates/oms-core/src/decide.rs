@@ -367,9 +367,10 @@ impl Tx<'_> {
                 }
             }
         }
-        // Leverage gate (C-MARGIN).
+        // Leverage gate (C-MARGIN). A reduce-only order is not judged; it
+        // still counts in the exposure of the orders that follow.
         if let Some(margin) = &cfg.policy.margin {
-            if r.qty.0 > 0 && r.px.0 > 0 && core.leverage_gate_refuses(margin, r) {
+            if !r.reduce_only && r.qty.0 > 0 && r.px.0 > 0 && core.leverage_gate_refuses(margin, r) {
                 why.push(R::AccountLeverage);
             }
         }

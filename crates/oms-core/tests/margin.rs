@@ -795,6 +795,35 @@ fn after_a_passive_breach_a_plain_reducing_order_passes_and_an_increasing_one_do
     assert_eq!(exposure(&h), "200");
 }
 
+/// S7. An order with the venue's reduce-only flag is not judged by the
+/// gate, also when its size would count as more exposure (long 2 at a price
+/// of 150 is 300; a reduce-only sell of 5 reaches 5 x 150 - 300 = 450). It
+/// still counts for the plain orders that follow.
+#[test]
+fn reduce_only_order_skips_the_leverage_gate() {
+    let mut h = gate();
+    h.long("a", "k1", "2");
+    h.ref_price("X", "150");
+    assert_eq!(exposure(&h), "300");
+
+    // The same order without the flag is refused.
+    assert_eq!(
+        h.reject("a", "k2", Side::Sell, "5", "150"),
+        vec![RejectReason::AccountLeverage]
+    );
+    let r = h.reduce_only_req("a", "k3", Side::Sell, "5", "150");
+    let id = accepted(h.new_order(r));
+    assert!(h.order(id).reduce_only);
+    assert_eq!(exposure(&h), "450");
+
+    // It is in the sum: a plain sell of 0.1 would raise 450 to 465. Left
+    // out of the sum, that sell would read as 300 before and after.
+    assert_eq!(
+        h.reject("a", "k4", Side::Sell, "0.1", "150"),
+        vec![RejectReason::AccountLeverage]
+    );
+}
+
 // ---- C-MARGIN: replay ---------------------------------------------------------
 
 /// S13. Margin state comes only from journal events. A core rebuilt from the
