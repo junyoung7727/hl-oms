@@ -71,7 +71,9 @@ fn test_names(root: &Path, dirs: &[&str]) -> BTreeSet<String> {
             } else if p.extension().is_some_and(|x| x == "rs") {
                 let text = std::fs::read_to_string(&p).unwrap_or_default();
                 for line in text.lines() {
-                    if let Some(rest) = line.trim_start().strip_prefix("fn ") {
+                    // `async fn` too: a test under `#[tokio::test]`.
+                    let declaration = line.trim_start().trim_start_matches("async ");
+                    if let Some(rest) = declaration.strip_prefix("fn ") {
                         if let Some(name) = rest.split(['(', '<']).next() {
                             out.insert(name.trim().to_string());
                         }
