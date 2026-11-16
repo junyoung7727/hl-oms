@@ -440,18 +440,18 @@ not_covered = "내구화와 전송 사이의 각 경계는 V-COMMIT-4가 따로 
 
 [[claim]]
 id = "V-CFG-1"
-statement = "설정은 버전이 커야 활성화되고, 같은 버전에 다른 내용이면 시작을 거부한다. 노출이 남은 종목·전략은 제거할 수 없다. mainnet은 증거금 정책(policy.margin) 없이는 시작하지 않고, 정책의 값이 C-MARGIN 설정 표의 범위를 벗어나면 어느 거래소 설정에서도 시작하지 않는다"
+statement = "설정은 버전이 커야 활성화되고, 같은 버전에 다른 내용이면 시작을 거부한다. 노출이 남은 종목·전략은 제거할 수 없다. mainnet은 증거금 정책(policy.margin) 없이는 시작하지 않고, 정책의 값이 C-MARGIN 설정 표의 범위를 벗어나면 어느 거래소 설정에서도 시작하지 않는다. 저장소의 Hyperliquid 예제 설정은 증거금 정책(소유자가 정한 값)을 담고 검사를 통과한다. Hyperliquid 설정에 증거금 정책이 있으면 설정에서 계산한 분당 조회 weight(216 + 종목마다 20, 기본 간격)가 600을 넘을 때 시작하지 않는다"
 why = "설정 변경이 추적되지 않으면 사고 분석이 불가능하다"
 level = "프로세스"
 scope = "코어 예제, 실제 노드 1회, 노드 설정 검사의 단위 시험(증거금 정책)"
 real = "oms-core, oms-node"
 simulated = "없음"
-faults = "버전을 올리지 않은 변경. 정책 없는 mainnet 설정, 0인 한도, 신선도 한도보다 크지 않은 보고 끊김 취소 한도"
+faults = "버전을 올리지 않은 변경. 정책 없는 mainnet 설정, 0인 한도, 신선도 한도보다 크지 않은 보고 끊김 취소 한도, 종목 20개, 짧은 조회 간격"
 criterion = "종료 코드 3과 오류 문구"
-tests = ["core/configuration_changes_are_validated_against_existing_exposure", "e2e/configuration_changes_need_a_new_version", "core/f10_config_validation_enforces_the_parked_fill_wait_rule", "node-unit/config::tests::mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused"]
+tests = ["core/configuration_changes_are_validated_against_existing_exposure", "e2e/configuration_changes_need_a_new_version", "core/f10_config_validation_enforces_the_parked_fill_wait_rule", "node-unit/config::tests::mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused", "node-unit/config::tests::example_config_with_a_margin_policy_loads", "node-unit/config::tests::steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused"]
 repro = "cargo test -p oms-node --test e2e configuration_changes && cargo test -p oms-node --lib config::tests"
 supports = "요구 R13, C-BOOT"
-not_covered = "설정 파일의 그 밖의 검증 규칙. 조회 weight 예산 검사(뒤 티켓). account_modes_allowed의 내용(목록에 무엇을 적든 설정은 읽힌다. 허용 여부는 코어가 판정한다: V-MARGIN-9)"
+not_covered = "설정 파일의 그 밖의 검증 규칙. 조회 weight는 문서의 weight 표로 계산한 값이고 거래소가 실제로 세는 값과 대조하지 않았다. 정상 상태가 아닌 조회(응답이 없을 때 1초마다 되묻는 거래소 설정·계좌 모드 조회, 주문 상태 조회)와 주문·취소는 예산 계산에 없다. 증거금 정책이 없는 설정에는 예산 검사를 하지 않는다. account_modes_allowed의 내용(목록에 무엇을 적든 설정은 읽힌다. 허용 여부는 코어가 판정한다: V-MARGIN-9)"
 
 [[claim]]
 id = "V-OVL-1"
@@ -901,7 +901,7 @@ criterion = "status의 core.margin(account_value, age_us, seq, fresh, account_ex
 tests = ["e2e/node_polls_margin_and_status_shows_value_and_age", "e2e/status_shows_account_exposure", "e2e/status_shows_reducing_its_rule_and_the_day_base", "e2e/node_reads_venue_setting_and_account_mode_and_status_shows_them", "e2e/strategy_socket_cannot_clear_reducing_or_rebase", "e2e/omsctl_clear_reduce_and_rebase_day_work_end_to_end", "e2e/reducing_and_day_base_survive_a_node_kill", "e2e/reducing_cancels_every_resting_plain_order_through_the_node", "pipeline/stopped_before_the_write_of_a_reducing_decision_the_next_report_decides_again", "pipeline/stopped_after_the_reducing_decision_is_durable_the_cancels_are_sent_after_restart", "pipeline/stopped_around_a_day_base_set_the_base_is_set_exactly_once"]
 repro = "cargo test -p oms-node --test e2e node_polls_margin && cargo test -p oms-node --test e2e status_shows_account_exposure && cargo test -p oms-node --test e2e status_shows_reducing && cargo test -p oms-node --test e2e node_reads_venue_setting && cargo test -p oms-node --test e2e -- strategy_socket_cannot omsctl_clear reducing_ && cargo test -p oms-node --features failpoints --test crash_points -- reducing day_base"
 supports = "C-MARGIN"
-not_covered = "기본 간격 5초(거래소 설정은 60초) 그대로의 실행. Hyperliquid 게이트웨이(아직 이 조회들에 답하지 않는다: 티켓 09). 포지션이 있는 종목의 설정이 보고로 갱신되는 것(simvenue의 보고에는 포지션이 없다: 티켓 10). Hyperliquid 게이트웨이의 요청 예산. 디스크 유실과 전원 장애(중단은 프로세스 abort와 SIGKILL이다). omsctl 실행 파일의 main. 정확한 시간"
+not_covered = "기본 간격 5초(거래소 설정은 60초) 그대로의 실행. Hyperliquid 게이트웨이가 조회를 보내는 경로(응답의 번역만 V-MARGIN-10이 본다). 포지션이 있는 종목의 설정이 보고로 갱신되는 것(simvenue의 보고에는 포지션이 없다: 티켓 10). Hyperliquid 게이트웨이의 요청 예산이 실제 거래소 한도와 맞는지(예산의 산술은 V-MARGIN-10). 디스크 유실과 전원 장애(중단은 프로세스 abort와 SIGKILL이다). omsctl 실행 파일의 main. 정확한 시간"
 
 [[claim]]
 id = "V-MARGIN-5"
@@ -977,3 +977,18 @@ tests = ["core/report_stale_past_the_cancel_limit_cancels_each_plain_order_once"
 repro = "cargo test -p oms-core --test margin"
 supports = "C-MARGIN"
 not_covered = "포지션(그대로 남는다). 감소 전용 주문. 링크가 내려가 있는 동안(아무것도 취소하지 않는다). 취소가 체결보다 먼저 닿는다는 것"
+
+[[claim]]
+id = "V-MARGIN-10"
+statement = "Hyperliquid 게이트웨이는 문서의 clearinghouseState 응답 예를 증거금 보고 입력으로 옮긴다: 계좌 가치는 marginSummary.accountValue, 포지션마다 종목, 부호 있는 수량, 포지션 가치, 사용 증거금, 증거금 방식, 레버리지, 최대 레버리지. 어느 포지션이든 maxLeverage가 없거나 0이거나 정수가 아니면 보고 전체를 사유와 함께 거부 입력(MarginReportInvalid)으로 바꾸고, 멀쩡한 다른 포지션도 보고하지 않는다. 계좌 가치, 수량, 포지션 가치, 사용 증거금, 레버리지 가운데 하나라도 없거나 읽을 수 없을 때, 증거금 방식이 isolated도 cross도 아닐 때, 포지션 목록이 없을 때도 같다. 어떤 값도 0이나 기본값으로 채우지 않고 어떤 포지션도 건너뛰지 않는다. 설정에 없는 종목의 포지션도 보고에 남는다(번역 함수는 설정된 종목을 받지 않는다). activeAssetData 응답 예는 그 종목의 거래소 설정 입력(증거금 방식, 레버리지)이 된다. 방식이 isolated도 cross도 아니거나, 레버리지가 정수가 아니거나, 응답이 다른 종목의 것이면 입력을 만들지 않는다(설정은 모름으로 남아 그 종목이 막힌다). userAbstraction 응답(문자열 하나)은 글자 그대로 계좌 모드 입력이 된다. 문서에 없는 문자열을 문서에 있는 값으로 바꾸지 않고, 문자열이 아니거나 64자를 넘으면 입력을 만들지 않는다. 세 조회의 요청 본문은 문서의 것과 같다(clearinghouseState, activeAssetData, userAbstraction). 게이트웨이의 요청 예산은 취소를 막지 않으므로 취소 500건 뒤에는 조회가 기다린다: 가득 찬 예산(1200)에서는 700이 남아 증거금 조회가 바로 나가고, 시작 직후(600)에는 100이 남아 10.1초, 빈 예산에서는 15.1초를 기다린다"
+why = "증거금 규칙이 읽는 숫자는 모두 이 번역을 거친다. 필드를 하나 잘못 옮기면 규칙이 틀린 값으로 판정한다"
+level = "단위"
+scope = "게이트웨이의 순수 번역 함수(JSON 응답 → 코어 입력)와 요청 본문 함수. 문서의 응답 예가 입력. 요청 예산은 시각을 시험이 주는 단위 시험"
+real = "oms-node(venue/hyperliquid/wire.rs, venue/hyperliquid/mod.rs의 Budget)"
+simulated = "응답은 시험이 입력. 거래소에 묻지 않는다"
+faults = "maxLeverage 없음, 0, 문자열, null, 음수, 소수, u32 초과, 배열. 소수 필드 없음, 숫자가 아닌 문자열, 빈 문자열, JSON 숫자, null, 지수 표기, NaN, 소수 9자리. 모르는 증거금 방식. 종목 이름 없음. 포지션 목록 없음"
+criterion = "C-MARGIN의 'Hyperliquid 조회'. 기대값은 문서 예의 소수를 손으로 1e-8 단위 정수로 적었다. 변이 M67~M76, M79"
+tests = ["node-unit/venue::hyperliquid::wire::tests::documented_clearinghouse_state_parses_to_a_margin_report", "node-unit/venue::hyperliquid::wire::tests::missing_zero_or_unparseable_max_leverage_rejects_the_whole_report", "node-unit/venue::hyperliquid::wire::tests::any_unparseable_number_rejects_the_whole_report", "node-unit/venue::hyperliquid::wire::tests::a_position_on_an_unconfigured_coin_is_kept", "node-unit/venue::hyperliquid::wire::tests::documented_active_asset_data_parses_leverage_and_mode", "node-unit/venue::hyperliquid::wire::tests::user_abstraction_values_parse_and_an_unknown_value_stays_unknown", "node-unit/venue::hyperliquid::wire::tests::margin_and_setting_request_json", "node-unit/venue::hyperliquid::tests::a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time"]
+repro = "cargo test -p oms-node --lib venue::hyperliquid"
+supports = "C-MARGIN"
+not_covered = "실제 응답이 문서의 예와 같은지, 필드의 뜻이 유도한 것과 같은지(T1, T2). 어느 userAbstraction 값이 표준 모드인지(T10), 포지션이 없을 때 activeAssetData가 레버리지를 주는지(T11). activeAssetData의 응답 예는 저장소의 조사 문서에 없고 문서와 다시 대조하지 않았다. 게이트웨이가 조회를 실제로 보내는 경로(HTTP)는 시험하지 않는다. HTTP 429일 때의 동작. 거래소가 실제로 세는 weight. 요청 예산을 여러 조회가 다투는 순서와 조회 간격만큼 더 길어지는 대기"

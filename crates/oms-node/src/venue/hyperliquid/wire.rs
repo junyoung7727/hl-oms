@@ -344,10 +344,524 @@ pub fn fill_input(f: &HlFill, instance_id: u64) -> Option<FillIn> {
     })
 }
 
+// ---- margin queries (C-MARGIN) ----------------------------------------------
+
+/// Turns the answer to a `clearinghouseState` query into the core's input:
+/// a whole margin report, or a refusal with its reason. Never a part of one.
+pub fn margin_input(body: &serde_json::Value, session: u64, seq: u64, queried_at: Ts) -> VenueInput {
+    match margin_report(body) {
+        Ok((account_value, positions)) => VenueInput::MarginReport(MarginReportIn {
+            session,
+            seq,
+            queried_at,
+            account_value,
+            positions,
+        }),
+        Err(reason) => VenueInput::MarginReportInvalid {
+            session,
+            seq,
+            queried_at,
+            reason,
+        },
+    }
+}
+
+/// The account value and every position of a `clearinghouseState` answer,
+/// or the first thing in it that cannot be read. Nothing is defaulted and
+/// no position is skipped: a rule must never judge half an answer.
+fn margin_report(body: &serde_json::Value) -> Result<(Amount, Vec<MarginPosition>), String> {
+    // `marginSummary` covers cross and isolated margin together.
+    let account_value = decimal(body.pointer("/marginSummary/accountValue"), "marginSummary.accountValue", Amount::parse)?;
+    let list = body
+        .get("assetPositions")
+        .and_then(|a| a.as_array())
+        .ok_or("assetPositions is missing or not a list")?;
+    let mut positions = Vec::with_capacity(list.len());
+    for (i, p) in list.iter().enumerate() {
+        let pos = p.get("position").ok_or(format!("assetPositions[{i}]: position is missing"))?;
+        // A coin that is not configured here is reported like any other.
+        let coin = pos.get("coin").and_then(|c| c.as_str());
+        let (Some(coin), Some(instrument)) = (coin, coin.and_then(instrument_id)) else {
+            return Err(format!("assetPositions[{i}]: coin is missing or unusable"));
+        };
+        let at = |e: String| format!("assetPositions[{i}] ({coin}): {e}");
+        let szi = decimal(pos.get("szi"), "szi", SQty::parse).map_err(at)?;
+        let position_value = decimal(pos.get("positionValue"), "positionValue", Amount::parse).map_err(at)?;
+        let margin_used = decimal(pos.get("marginUsed"), "marginUsed", Amount::parse).map_err(at)?;
+        let leverage_type = match pos.pointer("/leverage/type") {
+            None => return Err(at("leverage.type is missing".into())),
+            Some(v) => match v.as_str() {
+                Some("isolated") => LeverageType::Isolated,
+                Some("cross") => LeverageType::Cross,
+                _ => return Err(at(format!("leverage.type is neither isolated nor cross: {v}"))),
+            },
+        };
+        let leverage_value = whole(pos.pointer("/leverage/value"), "leverage.value").map_err(at)?;
+        // The maintenance margin rate is 1 / (2 x maxLeverage): a report
+        // without it cannot be judged, and zero would divide by nothing.
+        let max_leverage = whole(pos.get("maxLeverage"), "maxLeverage").map_err(at)?;
+        if max_leverage == 0 {
+            return Err(at("maxLeverage is zero".into()));
+        }
+        positions.push(MarginPosition {
+            instrument,
+            szi,
+            position_value,
+            margin_used,
+            leverage_type,
+            leverage_value,
+            max_leverage,
+        });
+    }
+    Ok((account_value, positions))
+}
+
+/// A decimal the venue sends as a string. A JSON number is not accepted in
+/// its place: it may already have lost digits.
+fn decimal<T, E>(v: Option<&serde_json::Value>, name: &str, parse: fn(&str) -> Result<T, E>) -> Result<T, String> {
+    let v = v.ok_or(format!("{name} is missing"))?;
+    v.as_str()
+        .and_then(|s| parse(s).ok())
+        .ok_or(format!("{name} is not a decimal string: {v}"))
+}
+
+/// A whole number the venue sends as a JSON integer.
+fn whole(v: Option<&serde_json::Value>, name: &str) -> Result<u32, String> {
+    let v = v.ok_or(format!("{name} is missing"))?;
+    v.as_u64()
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or(format!("{name} is not a whole number: {v}"))
+}
+
+/// Turns the answer to an `activeAssetData` query about `instrument` into
+/// the core's input, or into nothing: a setting that cannot be read stays
+/// unknown, and an unknown setting holds the instrument.
+pub fn venue_setting_input(body: &serde_json::Value, session: u64, instrument: &InstrumentId) -> Option<VenueInput> {
+    // The answer names the coin it is about. One that names another coin,
+    // or none, is not taken as this instrument's setting.
+    if body.get("coin").and_then(|c| c.as_str()) != Some(instrument.as_str()) {
+        return None;
+    }
+    let isolated = match body.pointer("/leverage/type").and_then(|t| t.as_str()) {
+        Some("isolated") => true,
+        Some("cross") => false,
+        _ => return None,
+    };
+    let leverage = whole(body.pointer("/leverage/value"), "leverage.value").ok()?;
+    Some(VenueInput::VenueSetting {
+        session,
+        instrument: instrument.clone(),
+        isolated,
+        leverage,
+    })
+}
+
+/// Longest account mode passed on. The documented values have at most 15
+/// letters; the value is journaled, so it is bounded.
+const ACCOUNT_MODE_MAX_LEN: usize = 64;
+
+/// Turns the answer to a `userAbstraction` query into the core's input.
+///
+/// The answer is one JSON string. It is passed on exactly as it came: this
+/// gateway does not decide which mode is acceptable and never rewrites a
+/// value it does not know into one it knows. The core accepts a mode only
+/// if the allow-list spells it the same way, so an unknown value holds the
+/// account. An answer that is not a string gives no input.
+pub fn account_mode_input(body: &serde_json::Value, session: u64) -> Option<VenueInput> {
+    let mode = body.as_str()?;
+    if mode.len() > ACCOUNT_MODE_MAX_LEN {
+        return None;
+    }
+    Some(VenueInput::AccountMode {
+        session,
+        mode: mode.to_string(),
+    })
+}
+
+/// Weight of a `clearinghouseState` query against the venue's limit of
+/// 1200 per minute and IP (documented: weight 2).
+pub const WEIGHT_MARGIN_QUERY: u32 = 2;
+/// Weight of an `activeAssetData` or `userAbstraction` query. Neither is
+/// in the documented list of weight-2 queries, so the documented default
+/// for every other info request applies.
+pub const WEIGHT_OTHER_INFO_QUERY: u32 = 20;
+
+/// Body of the margin query (`/info`). The optional `dex` field is left
+/// out: the first perp dex.
+pub fn margin_request(user: &str) -> serde_json::Value {
+    serde_json::json!({"type": "clearinghouseState", "user": user})
+}
+
+/// Body of the venue-setting query for one coin (`/info`).
+pub fn venue_setting_request(user: &str, coin: &str) -> serde_json::Value {
+    serde_json::json!({"type": "activeAssetData", "user": user, "coin": coin})
+}
+
+/// Body of the account-mode query (`/info`).
+pub fn account_mode_request(user: &str) -> serde_json::Value {
+    serde_json::json!({"type": "userAbstraction", "user": user})
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The example answer of the Info endpoint documentation (Perpetuals,
+    /// `clearinghouseState`), as recorded in the research note of
+    /// 2026-11-15. It names no account.
+    const DOC_CLEARINGHOUSE_STATE: &str = r#"{
+      "assetPositions": [
+        {
+          "position": {
+            "coin": "ETH",
+            "cumFunding": {"allTime": "514.085417", "sinceChange": "0.0", "sinceOpen": "0.0"},
+            "entryPx": "2986.3",
+            "leverage": {"rawUsd": "-95.059824", "type": "isolated", "value": 20},
+            "liquidationPx": "2866.26936529",
+            "marginUsed": "4.967826",
+            "maxLeverage": 50,
+            "positionValue": "100.02765",
+            "returnOnEquity": "-0.0026789",
+            "szi": "0.0335",
+            "unrealizedPnl": "-0.0134"
+          },
+          "type": "oneWay"
+        }
+      ],
+      "crossMaintenanceMarginUsed": "0.0",
+      "crossMarginSummary": {
+        "accountValue": "13104.514502",
+        "totalMarginUsed": "0.0",
+        "totalNtlPos": "0.0",
+        "totalRawUsd": "13104.514502"
+      },
+      "marginSummary": {
+        "accountValue": "13109.482328",
+        "totalMarginUsed": "4.967826",
+        "totalNtlPos": "100.02765",
+        "totalRawUsd": "13009.454678"
+      },
+      "time": 1708622398623,
+      "withdrawable": "13104.514502"
+    }"#;
+
+    fn doc_state() -> serde_json::Value {
+        serde_json::from_str(DOC_CLEARINGHOUSE_STATE).unwrap()
+    }
+
+    /// S25. Every field of the documented example lands in its place. The
+    /// expected numbers are the documented decimals written by hand as
+    /// integers of 1e-8: the account value is the one of `marginSummary`
+    /// (cross and isolated together), not the cross-only one.
+    #[test]
+    fn documented_clearinghouse_state_parses_to_a_margin_report() {
+        assert_eq!(
+            margin_input(&doc_state(), 7, 3, 1_700_000_000_000_000),
+            VenueInput::MarginReport(MarginReportIn {
+                session: 7,
+                seq: 3,
+                queried_at: 1_700_000_000_000_000,
+                account_value: Amount(1_310_948_232_800),
+                positions: vec![MarginPosition {
+                    instrument: InstrumentId::new("ETH").unwrap(),
+                    szi: SQty(3_350_000),
+                    position_value: Amount(10_002_765_000),
+                    margin_used: Amount(496_782_600),
+                    leverage_type: LeverageType::Isolated,
+                    leverage_value: 20,
+                    max_leverage: 50,
+                }],
+            })
+        );
+    }
+
+    /// The documented example with one more position (BTC, sound) in front
+    /// and `change` applied to the documented ETH position.
+    fn state_with(change: impl FnOnce(&mut serde_json::Value)) -> serde_json::Value {
+        let mut body = doc_state();
+        let mut btc = body["assetPositions"][0].clone();
+        btc["position"]["coin"] = json!("BTC");
+        body["assetPositions"].as_array_mut().unwrap().insert(0, btc);
+        change(&mut body["assetPositions"][1]["position"]);
+        body
+    }
+
+    /// The refusal reason of an answer that must be refused as a whole.
+    /// Panics if any report came out of it.
+    fn refusal(body: &serde_json::Value) -> String {
+        match margin_input(body, 7, 3, 1_700_000_000_000_000) {
+            VenueInput::MarginReportInvalid {
+                session: 7,
+                seq: 3,
+                queried_at: 1_700_000_000_000_000,
+                reason,
+            } => reason,
+            other => panic!("not refused as a whole: {other:?}\nanswer: {body}"),
+        }
+    }
+
+    /// S25. The maintenance margin rate comes from `maxLeverage`. Without a
+    /// usable one on any position there is no report at all: the sound
+    /// position next to it is not reported either.
+    #[test]
+    fn missing_zero_or_unparseable_max_leverage_rejects_the_whole_report() {
+        let missing = state_with(|p| {
+            p.as_object_mut().unwrap().remove("maxLeverage");
+        });
+        assert_eq!(refusal(&missing), "assetPositions[1] (ETH): maxLeverage is missing");
+        let zero = state_with(|p| p["maxLeverage"] = json!(0));
+        assert_eq!(refusal(&zero), "assetPositions[1] (ETH): maxLeverage is zero");
+        for bad in [json!("50"), json!(null), json!(-1), json!(50.5), json!(4294967296u64), json!([50])] {
+            let body = state_with(|p| p["maxLeverage"] = bad.clone());
+            assert_eq!(
+                refusal(&body),
+                format!("assetPositions[1] (ETH): maxLeverage is not a whole number: {bad}")
+            );
+        }
+        // The two-position answer is sound when nothing is changed.
+        assert!(matches!(
+            margin_input(&state_with(|_| {}), 7, 3, 1),
+            VenueInput::MarginReport(r) if r.positions.len() == 2
+        ));
+    }
+
+    /// S25. No number of the answer is ever replaced by a default: a bad
+    /// account value, size, position value, margin or leverage, a margin
+    /// mode that is not one of the two documented ones, or a list that
+    /// cannot be walked, refuses the whole report and names what was wrong.
+    #[test]
+    fn any_unparseable_number_rejects_the_whole_report() {
+        // Decimal fields of a position. The venue sends decimals as strings;
+        // a JSON number, an exponent or more than 8 decimals is not read.
+        for field in ["szi", "positionValue", "marginUsed"] {
+            let gone = state_with(|p| {
+                p.as_object_mut().unwrap().remove(field);
+            });
+            assert_eq!(refusal(&gone), format!("assetPositions[1] (ETH): {field} is missing"));
+            for bad in [json!("abc"), json!(""), json!(4.967826), json!(null), json!("1e3"), json!("NaN"), json!("0.123456789")] {
+                let body = state_with(|p| p[field] = bad.clone());
+                assert_eq!(
+                    refusal(&body),
+                    format!("assetPositions[1] (ETH): {field} is not a decimal string: {bad}")
+                );
+            }
+        }
+        // The account value.
+        let mut body = doc_state();
+        body["marginSummary"].as_object_mut().unwrap().remove("accountValue");
+        assert_eq!(refusal(&body), "marginSummary.accountValue is missing");
+        let mut body = doc_state();
+        body.as_object_mut().unwrap().remove("marginSummary");
+        assert_eq!(refusal(&body), "marginSummary.accountValue is missing");
+        for bad in [json!("abc"), json!(13109.482328), json!(null)] {
+            let mut body = doc_state();
+            body["marginSummary"]["accountValue"] = bad.clone();
+            assert_eq!(refusal(&body), format!("marginSummary.accountValue is not a decimal string: {bad}"));
+        }
+        // The leverage of a position and its margin mode.
+        let gone = state_with(|p| {
+            p["leverage"].as_object_mut().unwrap().remove("value");
+        });
+        assert_eq!(refusal(&gone), "assetPositions[1] (ETH): leverage.value is missing");
+        for bad in [json!("20"), json!(2.5), json!(-2), json!(null)] {
+            let body = state_with(|p| p["leverage"]["value"] = bad.clone());
+            assert_eq!(
+                refusal(&body),
+                format!("assetPositions[1] (ETH): leverage.value is not a whole number: {bad}")
+            );
+        }
+        let gone = state_with(|p| {
+            p.as_object_mut().unwrap().remove("leverage");
+        });
+        assert_eq!(refusal(&gone), "assetPositions[1] (ETH): leverage.type is missing");
+        for bad in [json!("hedged"), json!("Isolated"), json!(""), json!(1)] {
+            let body = state_with(|p| p["leverage"]["type"] = bad.clone());
+            assert_eq!(
+                refusal(&body),
+                format!("assetPositions[1] (ETH): leverage.type is neither isolated nor cross: {bad}")
+            );
+        }
+        // A position that cannot be identified is not skipped.
+        let no_coin = state_with(|p| {
+            p.as_object_mut().unwrap().remove("coin");
+        });
+        assert_eq!(refusal(&no_coin), "assetPositions[1]: coin is missing or unusable");
+        let empty_coin = state_with(|p| p["coin"] = json!(""));
+        assert_eq!(refusal(&empty_coin), "assetPositions[1]: coin is missing or unusable");
+        let mut no_position = state_with(|_| {});
+        no_position["assetPositions"][1] = json!({"type": "oneWay"});
+        assert_eq!(refusal(&no_position), "assetPositions[1]: position is missing");
+        // No list of positions is not the same as an empty list.
+        let mut body = doc_state();
+        body.as_object_mut().unwrap().remove("assetPositions");
+        assert_eq!(refusal(&body), "assetPositions is missing or not a list");
+        let mut body = doc_state();
+        body["assetPositions"] = json!({});
+        assert_eq!(refusal(&body), "assetPositions is missing or not a list");
+        for not_an_answer in [json!(null), json!([]), json!("error"), json!({})] {
+            refusal(&not_an_answer);
+        }
+        // An account without a position is a whole report.
+        let mut flat = doc_state();
+        flat["assetPositions"] = json!([]);
+        assert_eq!(
+            margin_input(&flat, 7, 3, 9),
+            VenueInput::MarginReport(MarginReportIn {
+                session: 7,
+                seq: 3,
+                queried_at: 9,
+                account_value: Amount(1_310_948_232_800),
+                positions: vec![],
+            })
+        );
+        // A cross position and a short one are read as they are.
+        let cross_short = state_with(|p| {
+            p["leverage"] = json!({"type": "cross", "value": 3});
+            p["szi"] = json!("-0.0335");
+        });
+        let VenueInput::MarginReport(r) = margin_input(&cross_short, 7, 3, 9) else {
+            panic!("refused");
+        };
+        assert_eq!(
+            (r.positions[1].leverage_type, r.positions[1].leverage_value, r.positions[1].szi),
+            (LeverageType::Cross, 3, SQty(-3_350_000))
+        );
+    }
+
+    /// S22. The parser is not given the configured instruments and has no
+    /// way to leave a position out: a position on a coin this OMS does not
+    /// trade (a manual trade, another dex, a name that needs mapping) is in
+    /// the report, so the MM-buffer rule sees it.
+    #[test]
+    fn a_position_on_an_unconfigured_coin_is_kept() {
+        let mut body = state_with(|p| p["coin"] = json!("kPEPE"));
+        let mut other_dex = body["assetPositions"][0].clone();
+        other_dex["position"]["coin"] = json!("xyz:XYZ100");
+        other_dex["position"]["marginUsed"] = json!("1.5");
+        let mut odd_name = body["assetPositions"][0].clone();
+        odd_name["position"]["coin"] = json!("PURR/USDC");
+        let list = body["assetPositions"].as_array_mut().unwrap();
+        list.push(other_dex);
+        list.push(odd_name);
+        let VenueInput::MarginReport(r) = margin_input(&body, 7, 3, 9) else {
+            panic!("refused");
+        };
+        let coins: Vec<&str> = r.positions.iter().map(|p| p.instrument.as_str()).collect();
+        assert_eq!(coins, ["BTC", "kPEPE", "xyz:XYZ100", "PURR_USDC"]);
+        assert_eq!(r.positions[2].margin_used, Amount(150_000_000));
+    }
+
+    /// The example answer of the Info endpoint documentation (Perpetuals,
+    /// `activeAssetData`). The account of the example is replaced by a
+    /// placeholder.
+    const DOC_ACTIVE_ASSET_DATA: &str = r#"{
+      "user": "0xUSER",
+      "coin": "APT",
+      "leverage": {"type": "cross", "value": 3},
+      "maxTradeSzs": ["24836370.4400000013", "24836370.4400000013"],
+      "availableToTrade": ["37019438.0284740031", "37019438.0284740031"],
+      "markPx": "4.4716"
+    }"#;
+
+    /// S17. The margin mode and the leverage of the documented example,
+    /// and of the same answer for an isolated instrument (the `leverage`
+    /// object has the shape it has in `clearinghouseState`). An answer
+    /// that does not state both, or that is about another coin, is no
+    /// setting at all.
+    #[test]
+    fn documented_active_asset_data_parses_leverage_and_mode() {
+        let apt = InstrumentId::new("APT").unwrap();
+        let doc: serde_json::Value = serde_json::from_str(DOC_ACTIVE_ASSET_DATA).unwrap();
+        assert_eq!(
+            venue_setting_input(&doc, 7, &apt),
+            Some(VenueInput::VenueSetting {
+                session: 7,
+                instrument: apt.clone(),
+                isolated: false,
+                leverage: 3,
+            })
+        );
+        let mut isolated = doc.clone();
+        isolated["leverage"] = json!({"type": "isolated", "value": 2, "rawUsd": "0.0"});
+        assert_eq!(
+            venue_setting_input(&isolated, 8, &apt),
+            Some(VenueInput::VenueSetting {
+                session: 8,
+                instrument: apt.clone(),
+                isolated: true,
+                leverage: 2,
+            })
+        );
+
+        let with = |change: &dyn Fn(&mut serde_json::Value)| {
+            let mut body = isolated.clone();
+            change(&mut body);
+            venue_setting_input(&body, 8, &apt)
+        };
+        // A mode that is not one of the two documented ones is not read as
+        // either.
+        for mode in [json!("hedged"), json!("Isolated"), json!(""), json!(null), json!(true)] {
+            assert_eq!(with(&|b| b["leverage"]["type"] = mode.clone()), None, "{mode}");
+        }
+        assert_eq!(with(&|b| { b["leverage"].as_object_mut().unwrap().remove("type"); }), None);
+        // The leverage is a whole number or nothing.
+        for value in [json!("2"), json!(2.5), json!(-2), json!(null), json!(4294967296u64)] {
+            assert_eq!(with(&|b| b["leverage"]["value"] = value.clone()), None, "{value}");
+        }
+        assert_eq!(with(&|b| { b["leverage"].as_object_mut().unwrap().remove("value"); }), None);
+        assert_eq!(with(&|b| { b.as_object_mut().unwrap().remove("leverage"); }), None);
+        // An answer about another coin, or one that names none, says
+        // nothing about this instrument.
+        assert_eq!(with(&|b| b["coin"] = json!("BTC")), None);
+        assert_eq!(with(&|b| { b.as_object_mut().unwrap().remove("coin"); }), None);
+        assert_eq!(venue_setting_input(&json!(null), 8, &apt), None);
+    }
+
+    /// S18. The answer to `userAbstraction` is one JSON string. The five
+    /// documented values reach the core letter for letter. A string that
+    /// is not documented is not turned into one that is: it reaches the
+    /// core as it came, where only an allow-list entry spelled the same
+    /// way could pass it. Anything that is not a string is no mode.
+    #[test]
+    fn user_abstraction_values_parse_and_an_unknown_value_stays_unknown() {
+        let mode = |body: serde_json::Value| match account_mode_input(&body, 7) {
+            Some(VenueInput::AccountMode { session: 7, mode }) => Some(mode),
+            None => None,
+            other => panic!("{other:?}"),
+        };
+        for documented in ["unifiedAccount", "portfolioMargin", "disabled", "default", "dexAbstraction"] {
+            assert_eq!(mode(json!(documented)).as_deref(), Some(documented));
+        }
+        for unknown in ["somethingNew", "Default", "DISABLED", " default", "default ", "standard", ""] {
+            assert_eq!(mode(json!(unknown)).as_deref(), Some(unknown));
+        }
+        for not_a_mode in [json!(null), json!({"mode": "default"}), json!(["default"]), json!(1), json!(true)] {
+            assert_eq!(mode(not_a_mode.clone()), None, "{not_a_mode}");
+        }
+        // The value is journaled, so its length is bounded.
+        assert_eq!(mode(json!("x".repeat(64))), Some("x".repeat(64)));
+        assert_eq!(mode(json!("x".repeat(65))), None);
+    }
+
+    /// The three request bodies as the Info endpoint documentation gives
+    /// them. The optional `dex` field is left out: the first perp dex.
+    #[test]
+    fn margin_and_setting_request_json() {
+        let documented = |text: &str| serde_json::from_str::<serde_json::Value>(text).unwrap();
+        assert_eq!(
+            margin_request("0xUSER"),
+            documented(r#"{"type": "clearinghouseState", "user": "0xUSER"}"#)
+        );
+        assert_eq!(
+            venue_setting_request("0xUSER", "APT"),
+            documented(r#"{"type": "activeAssetData", "user": "0xUSER", "coin": "APT"}"#)
+        );
+        assert_eq!(
+            account_mode_request("0xUSER"),
+            documented(r#"{"type": "userAbstraction", "user": "0xUSER"}"#)
+        );
+    }
 
     /// Response examples from the Exchange endpoint documentation.
     #[test]
