@@ -14,8 +14,8 @@ use std::path::{Path, PathBuf};
 pub const QUERY_WEIGHT_BUDGET: u64 = 600;
 /// One reference-price query (`allMids`, documented weight 2).
 const WEIGHT_REF_PRICE: u64 = 2;
-/// One sweep: fills (20), open orders (20) and positions (2).
-const WEIGHT_SWEEP: u64 = 42;
+/// One sweep: fills (20), open orders (20) and positions (2), 42 in all.
+const WEIGHT_SWEEP: u64 = 2 * WEIGHT_OTHER_INFO_QUERY as u64 + WEIGHT_MARGIN_QUERY as u64;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

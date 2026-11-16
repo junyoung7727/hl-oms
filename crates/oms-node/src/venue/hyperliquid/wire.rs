@@ -479,11 +479,15 @@ pub fn account_mode_input(body: &serde_json::Value, session: u64) -> Option<Venu
 }
 
 /// Weight of a `clearinghouseState` query against the venue's limit of
-/// 1200 per minute and IP (documented: weight 2).
+/// 1200 per minute and IP (documented: weight 2). The margin query and the
+/// position query of the sweep are this request.
 pub const WEIGHT_MARGIN_QUERY: u32 = 2;
-/// Weight of an `activeAssetData` or `userAbstraction` query. Neither is
-/// in the documented list of weight-2 queries, so the documented default
-/// for every other info request applies.
+/// Weight of an `orderStatus` query (documented: weight 2).
+pub const WEIGHT_ORDER_STATUS_QUERY: u32 = 2;
+/// Weight of an `activeAssetData`, `userAbstraction`, `frontendOpenOrders`
+/// or `userFillsByTime` query. None is in the documented list of weight-2
+/// queries, so the documented default for every other info request
+/// applies.
 pub const WEIGHT_OTHER_INFO_QUERY: u32 = 20;
 
 /// Body of the margin query (`/info`). The optional `dex` field is left
