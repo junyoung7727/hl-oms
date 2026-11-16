@@ -97,8 +97,12 @@ impl Core {
         let Some(report) = &self.margin.report else {
             return false;
         };
+        let before = self.exposure_with(None);
         let after = self.exposure_with(Some(r));
         let limit = i128::from(policy.max_account_leverage.0) * i128::from(report.account_value.0);
-        after > limit
+        // Above the limit alone does not refuse: a price move can put the
+        // account there, and an order that does not raise exposure must
+        // still pass so that the account can come down.
+        after > limit && after > before
     }
 }

@@ -751,6 +751,50 @@ fn a_venue_rejection_of_an_accepted_order_frees_its_exposure() {
     }
 }
 
+/// S7. The gate looks only at new orders. A price move that takes the
+/// account above the limit (long 2, price 100 to 150: exposure 300 against
+/// a limit of 200) latches nothing and cancels nothing. A plain order that
+/// does not raise exposure passes; one that raises it is refused.
+#[test]
+fn after_a_passive_breach_a_plain_reducing_order_passes_and_an_increasing_one_does_not() {
+    let mut h = gate();
+    h.long("a", "k1", "2");
+    assert_eq!(exposure(&h), "200");
+
+    let commands_before = h.commands.len();
+    let out = h.ref_price("X", "150");
+    assert_eq!(names(&out), vec!["ref_price_updated"]);
+    assert_eq!(exposure(&h), "300");
+    assert_eq!(h.core.holds(None), vec![]);
+    assert_eq!(h.commands.len(), commands_before);
+
+    // A plain sell of 1 can only lower the position: exposure stays 300.
+    let sell = h.accept("a", "k2", Side::Sell, "1", "150");
+    assert!(!h.order(sell).reduce_only);
+    assert_eq!(exposure(&h), "300");
+    // A plain buy raises it to 315.
+    assert_eq!(
+        h.reject("a", "k3", Side::Buy, "0.1", "150"),
+        vec![RejectReason::AccountLeverage]
+    );
+    // A plain sell large enough to turn the position raises it too: with
+    // the resting sell of 1 the short side would reach 6 x 150 - 300 = 600.
+    assert_eq!(
+        h.reject("a", "k4", Side::Sell, "5", "150"),
+        vec![RejectReason::AccountLeverage]
+    );
+
+    // The sell fills and the price comes back: long 1 at 100. Nothing was
+    // latched, so a buy up to the limit is accepted again.
+    h.placed_open(sell, "v2");
+    h.fill(sell, "t2", "1", "150");
+    h.ref_price("X", "100");
+    assert_eq!(exposure(&h), "100");
+    assert_eq!(h.core.holds(None), vec![]);
+    h.accept("a", "k5", Side::Buy, "1", "100");
+    assert_eq!(exposure(&h), "200");
+}
+
 // ---- C-MARGIN: replay ---------------------------------------------------------
 
 /// S13. Margin state comes only from journal events. A core rebuilt from the
