@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `55e9ff1c10feb9ff`, 검증 결과의 다이제스트 `0a86a80a92f2313c`.
+> 소스 다이제스트 `0a7f0bf2e6d9c7f7`, 검증 결과의 다이제스트 `0a86a80a92f2313c`.
 
-주장 61건: 통과 0, 실패 0, 미실행 3, 이전 버전 결과 58.
+주장 61건: 통과 0, 실패 0, 미실행 4, 이전 버전 결과 57.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -23,7 +23,7 @@
 | V-RECON-1 | 링크가 돌아오면 미종결 주문의 증거, 체결, 열린 주문, 포지션을 현재 세션에서 다시 확인할 때까지 신규 주문을 막는다. 포지션은 예약으로 설명되는 범위로 검사하고, 오래된 스냅샷은 판정하지 않는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios` |
 | V-RECON-2 | 노드가 죽어 있는 동안 거래소에서 일어난 체결, 거래소 주도 취소, 부분 체결을 재시작 뒤 거래소 조회로 모두 반영한다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e events_missed` |
 | V-EXT-1 | OMS가 내지 않은 체결은 기장되고 불일치로 표시되어 신규 주문을 막으며, 운영자가 확인해야 풀린다 | 시뮬레이션 | 이전 버전 결과 | `cargo test --release -p oms-sim --test sim profile_external` |
-| V-REPLAY-1 | 기록된 이벤트만 적용해 만든 상태는 살아 있는 상태와 같고, 기록된 입력을 다시 판단하면 기록된 이벤트가 나온다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios && oms-node verify --data-dir <dir> --re-decide` |
+| V-REPLAY-1 | 기록된 이벤트만 적용해 만든 상태는 살아 있는 상태와 같고, 기록된 입력을 다시 판단하면 기록된 이벤트가 나온다 | 단위 | 미실행 | `cargo test -p oms-core --test scenarios && oms-node verify --data-dir <dir> --re-decide` |
 | V-SIM-1 | 네트워크 장애, 통보 중복·지연, 링크 단절, 프로세스 재시작, 키 삭제가 임의로 섞인 실행의 매 단계에서: 구조 불변조건이 성립하고, 거래소의 실제 포지션이 OMS가 설명하는 범위 안에 있고, 한도를 넘지 않고, 같은 주문이 두 번 전송되지 않는다 | 시뮬레이션 | 이전 버전 결과 | `OMS_SIM_SEEDS=400 cargo test --release -p oms-sim --test sim -- --nocapture   (실패 시: OMS_SIM_PROFILE=<이름> OMS_SIM_SEED=<n>)` |
 | V-SIM-2 | 장애가 멈추면 장부가 가상 거래소와 일치한다: 주문별 체결량과 상태, 포지션, 수수료 합. 차단 사유와 거짓 불일치가 남지 않는다 | 시뮬레이션 | 이전 버전 결과 | `V-SIM-1과 같다` |
 | V-SIM-3 | 같은 seed는 바이트 단위로 같은 저널을 만든다 | 시뮬레이션 | 이전 버전 결과 | `cargo test --release -p oms-sim` |
@@ -434,7 +434,7 @@
 
 ## V-REPLAY-1 — 기록된 이벤트만 적용해 만든 상태는 살아 있는 상태와 같고, 기록된 입력을 다시 판단하면 기록된 이벤트가 나온다
 
-- 상태: **이전 버전 결과**
+- 상태: **미실행**
 - 왜 중요한가: 복구의 정확성과 판단의 재현성
 - 수준: 단위
 - 전제와 범위: 시나리오 시험 전부(매 입력 뒤 그림자 상태 비교), 시뮬레이션의 최종 검사, 실제 저널에 대한 verify --re-decide
@@ -454,6 +454,7 @@
 | `e2e/vertical_slice_new_partial_fill_cancel_restart` | 이전 버전 결과 | last result: passed |
 | `e2e/random_kills_under_load_keep_books_consistent` | 이전 버전 결과 | last result: passed |
 | `core/margin_events_replay_to_the_same_state` | 이전 버전 결과 | last result: passed |
+| `core/latch_and_day_base_replay_to_the_same_state` | 미실행 |  |
 
 ## V-SIM-1 — 네트워크 장애, 통보 중복·지연, 링크 단절, 프로세스 재시작, 키 삭제가 임의로 섞인 실행의 매 단계에서: 구조 불변조건이 성립하고, 거래소의 실제 포지션이 OMS가 설명하는 범위 안에 있고, 한도를 넘지 않고, 같은 주문이 두 번 전송되지 않는다
 
@@ -1345,6 +1346,7 @@
 | `core/a_report_of_an_earlier_day_does_not_change_the_day_base` | 미실행 |  |
 | `core/a_loss_between_two_reports_enters_reducing_on_the_next_report` | 미실행 |  |
 | `core/a_report_older_than_the_freshness_limit_on_arrival_is_still_judged` | 미실행 |  |
+| `core/latch_and_day_base_replay_to_the_same_state` | 미실행 |  |
 
 ## V-MARGIN-4 — 감소 전용 상태로 들어가는 입력 안에서, 감소 전용 표시가 없고 취소 요청이 없거나 취소 시도가 다 된 모든 열린 주문에 규칙 이름으로 취소 요청이 나간다. 표시 없는 익절 주문도 취소된다. 감소 전용 표시가 있는 주문은 그대로 둔다. 감소 전용 상태에서 일반 주문은 포지션을 줄이는 방향이어도 Hold(Reducing)으로 거절되고, 감소 전용 주문은 받는다
 
@@ -1370,4 +1372,5 @@
 | `core/reducing_is_entered_once` | 미실행 |  |
 | `core/a_new_day_does_not_clear_reducing` | 미실행 |  |
 | `core/an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing` | 미실행 |  |
+| `core/latch_and_day_base_replay_to_the_same_state` | 미실행 |  |
 

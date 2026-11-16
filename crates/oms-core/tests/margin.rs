@@ -1148,3 +1148,89 @@ fn an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing() {
         ]
     );
 }
+
+// ---- C-MARGIN: replay of the latch and the day base ----------------------------
+
+/// S13. The latch and the day base are journal state. After a day roll, an
+/// entry into REDUCING with a rule cancel, and a restart, a core rebuilt
+/// from the journal equals the live one: still REDUCING for the first rule,
+/// with the base of the day it was last set on. A restart does not re-base.
+/// Re-deciding the recorded inputs gives the recorded events.
+#[test]
+fn latch_and_day_base_replay_to_the_same_state() {
+    let mut h = at_base_100();
+    h.long("a", "k1", "1");
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    let flagged = resting_reduce_only(&mut h, "a", "flagged", Side::Sell, "0.5", "120");
+
+    // Day 20 001: the base rolls to 97. Later that day 92.14 trips the rule.
+    next_input_at(&mut h, 20_001 * DAY + 5 * SEC);
+    h.report_margin("97");
+    h.advance(5 * SEC);
+    h.report_margin("92.14");
+    let entered_at = h.now;
+    let base = DayBase {
+        day: 20_001,
+        value: amt("97"),
+        set_by: BaseSetBy::Report,
+    };
+    let latch = Reducing {
+        rule: RuleId::DailyLoss,
+        detail: "account value 92.14 is more than 500 bps below the day base 97".into(),
+        since: entered_at,
+    };
+    assert_eq!(h.core.margin.day_base, Some(base.clone()));
+    assert_eq!(h.core.margin.reducing, Some(latch.clone()));
+
+    // The process restarts and the link comes back as session 2.
+    h.inp(Input::Boot {
+        binary: "test".into(),
+    });
+    assert_eq!(
+        h.core.margin.day_base,
+        Some(base.clone()),
+        "the restart re-based the day"
+    );
+    assert_eq!(h.core.margin.reducing, Some(latch.clone()));
+    h.link_up_and_sync();
+    h.margin_report(2, 1, h.now, "80");
+    assert_eq!(h.core.margin.day_base, Some(base.clone()));
+    assert_eq!(h.core.margin.reducing, Some(latch.clone()));
+
+    // Rebuilt from the events alone, as recovery does.
+    let rebuilt = h.rebuilt();
+    assert_eq!(rebuilt.digest(), h.core.digest());
+    assert_eq!(rebuilt, h.core);
+    assert_eq!(rebuilt.margin.day_base, Some(base));
+    assert_eq!(rebuilt.margin.reducing, Some(latch));
+    assert!(rebuilt.holds(None).contains(&HoldReason::Reducing));
+    assert_eq!(
+        rebuilt
+            .order(bid)
+            .and_then(|o| o.cancel.as_ref())
+            .map(|c| c.by.clone()),
+        Some(Actor::Rule(RuleId::DailyLoss))
+    );
+    assert_eq!(
+        rebuilt.order(flagged).map(|o| o.cancel.is_none()),
+        Some(true)
+    );
+
+    // Re-deciding every recorded input gives the recorded events.
+    let mut c = Core::new(7);
+    for rec in &h.log {
+        let out = c.handle(rec.at, &rec.input).unwrap();
+        assert_eq!(
+            out.events, rec.events,
+            "record {} re-decided differently",
+            rec.seq
+        );
+    }
+    assert_eq!(c.digest(), h.core.digest());
+
+    // The serialised forms (snapshot, journal) read back unchanged.
+    let back: Core = serde_json::from_str(&serde_json::to_string(&h.core).unwrap()).unwrap();
+    assert_eq!(back, h.core);
+    let recs: Vec<Record> = serde_json::from_str(&serde_json::to_string(&h.log).unwrap()).unwrap();
+    assert_eq!(recs, h.log);
+}
