@@ -17,12 +17,12 @@
 - [x] Test `margin_events_replay_to_the_same_state` (seam A, S13): fails when the state rebuilt from the journal differs in digest.
 - [x] Test `mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused` (seam node unit, S21): fails when mainnet loads with no margin policy, or a zero limit, or a stale-cancel limit not greater than the freshness limit, loads.
 - [x] Test `node_polls_margin_and_status_shows_value_and_age` (seam C, S11): fails when the 5 s timer, the simulated venue answer, the sequence number, the core input or the status fields are not wired.
-- [ ] An absent margin policy still adds no bytes to a journal record after this ticket (criterion of ticket 01; ticket 10 checks it against literals recorded on main).
-- [ ] Mutants: the session guard, the sequence guard and the freshness comparison (both ends) are each caught by a named test.
-- [ ] Stated in the contract and not proven here: rules are not judged while no new report is accepted; whether the venue's account value includes isolated equity (T2).
-- [ ] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
-- [ ] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
-- [ ] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
+- [x] An absent margin policy still adds no bytes to a journal record after this ticket (criterion of ticket 01; ticket 10 checks it against literals recorded on main).
+- [x] Mutants: the session guard, the sequence guard and the freshness comparison (both ends) are each caught by a named test.
+- [x] Stated in the contract and not proven here: rules are not judged while no new report is accepted; whether the venue's account value includes isolated equity (T2).
+- [x] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
+- [x] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
+- [x] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
 - [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
 
 ## Comments
