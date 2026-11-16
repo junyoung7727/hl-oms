@@ -25,3 +25,4 @@
 | [ADR-015](ADR-015-api-trust.md) | Unix 소켓 둘, 읽기 전용 대시보드 | 보안 |
 | [ADR-016](ADR-016-observability.md) | 읽기 모델 기반 관측, 판정 종류 표시 | 운영 |
 | [ADR-017](ADR-017-hyperliquid-gateway.md) | Hyperliquid 게이트웨이를 직접 구현, 공백은 보수적으로 | 거래소 |
+| [ADR-018](ADR-018-margin-rules.md) | 증거금 규칙: 계좌 레버리지 검사, 감소 전용 상태, 거래소 설정 확인(미구현) | 리스크 |

@@ -23,5 +23,6 @@
 | [C-OPS](../../docs/contracts/api.md) | 운영 명령 | `operator_halted` `operator_resumed` `ref_price_updated` | ADR-008, ADR-015 | `crates/oms-core/src/decide.rs` | V-API-1(통과), V-CANCEL-1(통과) |
 | [C-API](../../docs/contracts/api.md) | 로컬 API |  | ADR-015 | `crates/oms-api/src/lib.rs`<br>`crates/oms-node/src/server.rs` | V-API-1(통과), V-API-2(통과), V-API-3(통과), V-DASH-1(통과) |
 | [C-GW](../../docs/contracts/gateway.md) | 게이트웨이 계약 |  | ADR-005, ADR-014, ADR-017 | `crates/oms-node/src/venue/mod.rs`<br>`crates/oms-node/src/venue/simnet.rs`<br>`crates/oms-node/src/venue/hyperliquid/mod.rs` | V-HL-1(통과), V-HL-2(통과), V-HL-3(미실행), V-SLICE-1(통과) |
+| [C-MARGIN](../../docs/contracts/margin.md) | 증거금 규칙 |  | ADR-008, ADR-018 |  |  |
 
 모든 저널 이벤트는 위 표의 어느 계약에 속한다(생성기가 확인한다).
