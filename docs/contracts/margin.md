@@ -132,6 +132,7 @@ N_down = max(0, −pos × ref + Σ_매도 예약 × max(지정가, ref))
 - 동작: `Tick`이 `reduce_only`가 아니고 취소 요청이 없는 모든 열린 주문에 `CancelRequested { by: Rule(MarginStale) }`를 낸다. 주문마다 한 번이다. 취소 시도가 다 된 주문에 다시 내지 않는다.
 - 래치도 차단도 없다. 새 보고를 받으면 끝나고, 일반 주문을 다시 받는다.
 - 링크가 내려가 있으면 아무것도 취소하지 않는다.
+- "현재 링크 세션이 올라온 시각"은 상태 `margin.link_up_at`이고, `policy.margin`이 있을 때 링크가 올라오는 이벤트(`LinkChanged { up: true }`)가 그 기록 시각으로 정한다. 링크가 이미 올라와 있는 동안 `policy.margin`이 없던 설정에서 있는 설정으로 바뀌면 그 설정 이벤트의 기록 시각으로 정한다(정책이 켜지기 전부터 걸려 있던 주문이 곧바로 취소되지도, 영영 남지도 않게).
 
 ### 차단 표
 
@@ -206,7 +207,7 @@ N_down = max(0, −pos × ref + Σ_매도 예약 × max(지정가, ref))
 | 조회와 `status` | V-MARGIN-11 | `e2e::node_polls_margin_and_status_shows_value_and_age`, `e2e::status_shows_account_exposure`, `e2e::status_shows_reducing_its_rule_and_the_day_base` |
 | 일 손실과 기준 금액 | V-MARGIN-5 | `margin::first_report_sets_the_day_base`, `loss_greater_than_five_percent_of_the_base_enters_reducing`, `first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day`, `a_report_of_an_earlier_day_does_not_change_the_day_base`, `a_loss_between_two_reports_enters_reducing_on_the_next_report`, `a_report_older_than_the_freshness_limit_on_arrival_is_still_judged`. 변이 M37~M39 |
 | 감소 전용 상태(진입, 규칙 취소, 주문 받기) | V-MARGIN-4 | `margin::entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones`, `under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted`, `an_order_pending_send_at_entry_is_cancelled_once_acknowledged`, `a_rule_cancel_that_races_a_fill_books_the_fill`, `a_stuck_rule_cancel_does_not_block_reduce_only_orders`, `reducing_is_entered_once`, `a_new_day_does_not_clear_reducing`, `an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing`. 변이 M40~M42. 기존 시험 `scenarios::cancel_race_final_status_decides`는 그대로 통과한다 |
-| 보고 끊김 취소 | V-MARGIN-7 | `margin::report_stale_past_the_cancel_limit_cancels_each_plain_order_once`, `stale_age_starts_at_link_up_when_no_report_has_arrived`, `stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off`, `stale_cancel_does_not_reissue_an_exhausted_cancel`, `a_fresh_report_after_a_stale_episode_restores_acceptance_without_a_latch`, `a_forward_clock_jump_reads_the_report_as_stale_and_cancels` |
+| 보고 끊김 취소 | V-MARGIN-7 | `margin::report_stale_past_the_cancel_limit_cancels_each_plain_order_once`, `stale_age_starts_at_link_up_when_no_report_has_arrived`, `stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off`, `stale_cancel_does_not_reissue_an_exhausted_cancel`, `a_fresh_report_after_a_stale_episode_restores_acceptance_without_a_latch`, `a_forward_clock_jump_reads_the_report_as_stale_and_cancels`, `stale_age_starts_at_policy_activation_when_the_link_is_already_up` |
 | 중단과 재실행(재생: 감소 전용 상태와 기준 금액) | V-MARGIN-4, V-MARGIN-5, V-REPLAY-1 | `margin::latch_and_day_base_replay_to_the_same_state` |
 
 보고 수신과 신선도의 시험이 보이지 않는 것: 새 보고를 받지 못하는 동안에는 어떤 규칙도 판정하지 않는다(판정은 받은 보고마다 한 번이다. 판정하는 규칙 자체가 뒤 티켓에서 온다). 거래소의 계좌 가치가 격리 포지션의 자산을 포함하는지(T2). 기본 간격 5초 그대로의 실행(프로세스 시험은 100 ms로 줄였다).

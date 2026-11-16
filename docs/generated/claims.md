@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `24aab14ab02955cc`, 검증 결과의 다이제스트 `44860df661c2396d`.
+> 소스 다이제스트 `7da587639dc45b19`, 검증 결과의 다이제스트 `44860df661c2396d`.
 
 주장 63건: 통과 0, 실패 0, 미실행 2, 이전 버전 결과 61.
 
@@ -1432,4 +1432,5 @@
 | `core/stale_cancel_does_not_reissue_an_exhausted_cancel` | 미실행 |  |
 | `core/a_fresh_report_after_a_stale_episode_restores_acceptance_without_a_latch` | 미실행 |  |
 | `core/a_forward_clock_jump_reads_the_report_as_stale_and_cancels` | 미실행 |  |
+| `core/stale_age_starts_at_policy_activation_when_the_link_is_already_up` | 미실행 |  |
 

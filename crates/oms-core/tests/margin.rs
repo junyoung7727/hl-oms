@@ -2426,3 +2426,32 @@ fn a_forward_clock_jump_reads_the_report_as_stale_and_cancels() {
     assert_eq!(h.order(flagged).cancel, None);
     assert_eq!(h.core.margin.reducing, None);
 }
+
+/// S23, added by the implementer. A margin policy that is activated while
+/// the link is already up has no link-up moment of its own. The age is then
+/// measured from the activation: orders that rest from before the policy
+/// are cancelled when no report follows within 60 s, and not at once.
+#[test]
+fn stale_age_starts_at_policy_activation_when_the_link_is_already_up() {
+    let mut h = H::ready();
+    let bid = h.accept("a", "bid", Side::Buy, "0.2", "90");
+    h.placed_open(bid, "bid");
+    h.advance(300 * SEC);
+    let activated_at = h.now + 1_000;
+    let out = h.inp(Input::Config(Box::new(CoreConfig {
+        version: 2,
+        ..config_with_margin()
+    })));
+    assert!(matches!(out.reply, Some(Reply::Config(Ok(2)))));
+    h.commands.clear();
+
+    assert_eq!(decided(&h.tick()), vec![], "cancelled at once");
+    next_input_at(&mut h, activated_at + 60 * SEC);
+    assert_eq!(decided(&h.tick()), vec![], "a cancel at exactly 60 s");
+    next_input_at(&mut h, activated_at + 60 * SEC + 1_000);
+    assert_eq!(
+        decided(&h.tick()),
+        vec![stale_cancel(bid), cancel_sent(bid, 1)],
+        "orders from before the policy are never cancelled"
+    );
+}

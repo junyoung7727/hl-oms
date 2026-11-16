@@ -388,7 +388,8 @@ pub struct MarginState {
     pub reducing: Option<Reducing>,
     /// Record time at which the current link session came up. The stale
     /// cancel measures from it while the session has no report. Set by the
-    /// link-up event, and only with a margin policy.
+    /// link-up event, and only with a margin policy; a policy that is
+    /// activated while the link is up sets it to the activation time.
     #[serde(default)]
     pub link_up_at: Option<Ts>,
 }

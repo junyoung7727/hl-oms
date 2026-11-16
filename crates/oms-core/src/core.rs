@@ -316,7 +316,14 @@ impl Core {
     pub fn apply(&mut self, at: Ts, ev: &Event) -> Result<(), CoreFault> {
         match ev {
             Event::ConfigActivated { config } => {
+                let policy_comes_on = self.config.policy.margin.is_none() && config.policy.margin.is_some();
                 self.config = (**config).clone();
+                // A policy that comes on while the link is up has no
+                // link-up moment of its own: the stale cancel measures
+                // from here.
+                if policy_comes_on && self.link.up {
+                    self.margin.link_up_at = Some(at);
+                }
             }
             Event::Booted { boot, fill_floor, .. } => {
                 self.boot = *boot;
