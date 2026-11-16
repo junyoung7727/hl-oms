@@ -312,7 +312,7 @@ adr = ["ADR-008", "ADR-018"]
 contracts = ["C-MARGIN"]
 code = ["crates/oms-core/src/exposure.rs", "crates/oms-core/src/decide.rs", "crates/oms-core/src/core.rs", "crates/oms-core/src/model.rs", "crates/oms-core/src/config.rs", "crates/oms-node/src/venue/reconciler.rs", "crates/oms-node/src/venue/hyperliquid/wire.rs", "crates/oms-node/src/config.rs"]
 claims = ["V-MARGIN-1", "V-MARGIN-2", "V-MARGIN-3", "V-MARGIN-4", "V-MARGIN-5", "V-MARGIN-6", "V-MARGIN-7", "V-MARGIN-8", "V-MARGIN-9", "V-MARGIN-10", "V-MARGIN-11", "V-MARGIN-12"]
-open = "검증은 가상 거래소와 시뮬레이션까지다. 실제 거래소에서는 아무것도 확인하지 않았다: 규칙이 읽는 숫자의 뜻은 가정 T1~T11이고(ADR-018 §8), 증거금 조회는 testnet에도 보낸 적이 없다. 규칙은 손실을 5 %에서 멈춘다고 보장하지 않는다(두 보고 사이의 손실, 체결에 지는 취소). 대조기가 모르는 거래소 설정을 1초마다 되묻는 문제가 남아 있다(검증 문서 §11.5). U-02는 결정됨. U-03(긴급 시장가 수치)은 미결이다. 영향: 실제 거래소의 숫자가 가정과 다르면 규칙이 틀리게 걸리거나 걸리지 않는다. 해소: testnet 예행과 T1~T11 확인(U-01, 사용자 승인 필요). 단계: 실거래 전."
+open = "검증은 가상 거래소와 시뮬레이션까지다. 실제 거래소에서는 아무것도 확인하지 않았다: 규칙이 읽는 숫자의 뜻은 가정 T1~T11이고(ADR-018 §8), 증거금 조회는 testnet에도 보낸 적이 없다. 규칙은 손실을 5 %에서 멈춘다고 보장하지 않는다(두 보고 사이의 손실, 체결에 지는 취소). 대조기가 모르는 거래소 설정을 1초마다 되묻던 문제는 고쳤다(검증 문서 §11.5). U-02는 결정됨. U-03(긴급 시장가 수치)은 미결이다. 영향: 실제 거래소의 숫자가 가정과 다르면 규칙이 틀리게 걸리거나 걸리지 않는다. 해소: testnet 예행과 T1~T11 확인(U-01, 사용자 승인 필요). 단계: 실거래 전."
 
 [[item]]
 id = "D-RISK-05"
