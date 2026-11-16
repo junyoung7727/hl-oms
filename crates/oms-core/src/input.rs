@@ -73,6 +73,10 @@ pub enum OperatorCmd {
     /// Ends REDUCING and takes the current account value as the new day
     /// base (C-MARGIN, 해제). Needs a fresh margin report and a note.
     ClearReduce { note: String },
+    /// Takes the current account value as the day base and leaves REDUCING
+    /// as it is (C-MARGIN, 기준 재설정). For use after a deposit or a
+    /// withdrawal. Needs a fresh margin report and a note.
+    RebaseDay { note: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -2309,3 +2309,81 @@ fn clear_reduce_rebases_the_day_and_a_further_loss_latches_again() {
         Some(amt("89.29"))
     );
 }
+
+fn rebase_day(h: &mut H, note: &str) -> Output {
+    h.inp(Input::Operator(OperatorCmd::RebaseDay {
+        note: note.into(),
+    }))
+}
+
+/// S15. `rebase-day` sets the day base to the account value of the newest
+/// report and does nothing else: it does not enter REDUCING, and under
+/// REDUCING it leaves the latch as it is. It needs a fresh report and a
+/// note. The day is the report's day, also when that is earlier than the
+/// day of the base.
+#[test]
+fn rebase_day_sets_the_base_and_leaves_the_latch_alone() {
+    // A deposit of 10 while the account is NORMAL.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    h.report_margin("110");
+    let out = rebase_day(&mut h, "deposit of 10");
+    assert_eq!(out.reply, Some(Reply::Operator(Ok("rebased".into()))));
+    assert_eq!(out.events, vec![operator_base_set(20_000, "110")]);
+    assert_eq!(out.commands, vec![]);
+    assert_eq!(h.core.margin.reducing, None);
+    assert_eq!(
+        h.core.margin.day_base,
+        Some(DayBase {
+            day: 20_000,
+            value: amt("110"),
+            set_by: BaseSetBy::Operator,
+        })
+    );
+
+    // Against 110 a value of 104.5 is a loss of exactly 5 %; 104 trips.
+    h.advance(5 * SEC);
+    h.report_margin("104");
+    let latch = h.core.margin.reducing.clone();
+    assert_eq!(
+        latch.as_ref().map(|r| r.detail.as_str()),
+        Some("account value 104 is more than 500 bps below the day base 110")
+    );
+    let queried_at = h.core.margin.report.as_ref().map(|r| r.queried_at).unwrap();
+
+    // No reason given: refused, nothing recorded.
+    let out = rebase_day(&mut h, " ");
+    assert_eq!(refused(&out), "note_required: the command needs a note");
+
+    // Under REDUCING the base moves and the latch does not.
+    let out = rebase_day(&mut h, "base to the value after the loss");
+    assert_eq!(out.events, vec![operator_base_set(20_000, "104")]);
+    assert_eq!(h.core.margin.reducing, latch, "a rebase changed the latch");
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+    assert_eq!(
+        h.core.margin.day_base.as_ref().map(|b| b.value),
+        Some(amt("104"))
+    );
+
+    // A report 30 s and one microsecond old is not fresh: refused.
+    next_input_at(&mut h, queried_at + 30 * SEC + 1);
+    let out = rebase_day(&mut h, "too late");
+    assert_eq!(refused(&out), "margin_unavailable: no fresh margin report");
+    assert_eq!(
+        h.core.margin.day_base.as_ref().map(|b| b.value),
+        Some(amt("104"))
+    );
+
+    // The base is of day 20 001. The wall clock stepped back, so the next
+    // query is dated 5 s before midnight, on day 20 000. That report does
+    // not move the base; the operator's rebase takes its value and its day.
+    let mut h = on_day_20_000();
+    next_input_at(&mut h, 20_001 * DAY + 2 * SEC);
+    h.report_margin("100");
+    assert_eq!(h.core.margin.day_base.as_ref().map(|b| b.day), Some(20_001));
+    h.margin_seq += 1;
+    let out = h.margin_report(h.session, h.margin_seq, 20_001 * DAY - 5 * SEC, "101");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    let out = rebase_day(&mut h, "rebase on the report of the earlier day");
+    assert_eq!(out.events, vec![operator_base_set(20_000, "101")]);
+}

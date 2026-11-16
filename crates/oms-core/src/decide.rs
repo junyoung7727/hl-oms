@@ -571,6 +571,16 @@ impl Tx<'_> {
                     Ok("cleared".into())
                 }
             },
+            OperatorCmd::RebaseDay { note } => {
+                if !self.core.margin_report_is_fresh(self.at) {
+                    Err(MarginRefusal::MarginUnavailable.text().into())
+                } else if note.trim().is_empty() {
+                    Err(MarginRefusal::NoteRequired.text().into())
+                } else {
+                    self.rebase_on_the_report()?;
+                    Ok("rebased".into())
+                }
+            }
         };
         self.out.reply = Some(Reply::Operator(reply));
         Ok(())
