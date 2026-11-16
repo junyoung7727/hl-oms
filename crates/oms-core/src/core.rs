@@ -191,10 +191,11 @@ impl Core {
         // The holds of C-MARGIN exist only with a margin policy. The
         // REDUCING latch itself stays in the state without one, and holds
         // again when a policy is activated.
-        if self.config.policy.margin.is_some() {
-            if self.margin.reducing.is_some() {
-                v.push(HoldReason::Reducing);
-            }
+        let margin_rules_on = self.config.policy.margin.is_some();
+        if margin_rules_on && self.margin.reducing.is_some() {
+            v.push(HoldReason::Reducing);
+        }
+        if margin_rules_on {
             for instrument in self.config.instruments.keys() {
                 if !self.venue_setting_is_as_configured(instrument) {
                     v.push(HoldReason::VenueSetting(instrument.clone()));
