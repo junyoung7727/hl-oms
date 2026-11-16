@@ -4,9 +4,18 @@
 //! input and is journaled; the rest configures the execution layer of this
 //! process and is not part of the domain state.
 
+use crate::venue::hyperliquid::wire::{WEIGHT_MARGIN_QUERY, WEIGHT_OTHER_INFO_QUERY};
 use oms_core::CoreConfig;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
+
+/// Most weight per minute the steady-state queries may use against
+/// Hyperliquid: half of the documented 1200 per minute and IP.
+pub const QUERY_WEIGHT_BUDGET: u64 = 600;
+/// One reference-price query (`allMids`, documented weight 2).
+const WEIGHT_REF_PRICE: u64 = 2;
+/// One sweep: fills (20), open orders (20) and positions (2).
+const WEIGHT_SWEEP: u64 = 42;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -266,8 +275,47 @@ impl NodeConfig {
             if h.schedule_cancel_secs != 0 && h.schedule_cancel_secs < 15 {
                 return Err("[venue] schedule_cancel_secs must be 0 or at least 15".into());
             }
+            // With the margin rules the queries must leave half of the
+            // venue's limit to orders, cancels and everything that is not
+            // steady. Without them nothing is refused that loaded before.
+            if let (Some(weight), true) = (self.steady_state_query_weight(), self.core.policy.margin.is_some()) {
+                if weight > QUERY_WEIGHT_BUDGET {
+                    return Err(format!(
+                        "[runtime] steady-state query weight {weight} per minute is above {QUERY_WEIGHT_BUDGET}, half of the venue's limit of 1200: use fewer instruments or longer intervals (margin_poll_ms, venue_setting_poll_ms, sweep_ms, ref_price_interval_ms)"
+                    ));
+                }
+            }
         }
         Ok(())
+    }
+
+    /// Weight per minute of the queries this configuration sends to the
+    /// venue in a steady state, against the venue's request limit. `None`
+    /// for a venue without such a limit.
+    ///
+    /// The terms (C-MARGIN, 조회 weight 예산): the margin report and, per
+    /// instrument, the venue setting, both only with a margin policy; the
+    /// reference prices; the sweep. The venue setting is counted for every
+    /// instrument, the worst case of no position anywhere. The reference
+    /// prices are counted as one weight-2 query per interval although this
+    /// gateway reads them from the stream, which leaves that much room.
+    /// Not counted, because they are not steady: the account-mode query
+    /// (20 once per link session), order-status queries, the queries
+    /// repeated each second while an answer is missing, orders and cancels.
+    pub fn steady_state_query_weight(&self) -> Option<u64> {
+        let VenueConfig::Hyperliquid(h) = &self.venue else {
+            return None;
+        };
+        // A part of a unit counts as a whole one.
+        let per_minute = |weight: u64, every_ms: u64| (weight * 60_000).div_ceil(every_ms.max(1));
+        let r = &self.runtime;
+        let mut weight = per_minute(WEIGHT_REF_PRICE, h.ref_price_interval_ms) + per_minute(WEIGHT_SWEEP, r.sweep_ms);
+        if self.core.policy.margin.is_some() {
+            let instruments = self.core.instruments.len() as u64;
+            weight += per_minute(u64::from(WEIGHT_MARGIN_QUERY), r.margin_poll_ms);
+            weight += per_minute(u64::from(WEIGHT_OTHER_INFO_QUERY) * instruments, r.venue_setting_poll_ms);
+        }
+        Some(weight)
     }
 
     pub fn socket_path(&self) -> PathBuf {
@@ -293,7 +341,20 @@ mod tests {
     /// `[runtime]` lines and, if `margin` is given, a `[core.policy.margin]`
     /// table with those lines.
     fn check(venue: &str, runtime: &str, margin: Option<&str>) -> Result<(), String> {
+        parse(venue, runtime, margin, 1)?.validate()
+    }
+
+    /// The same configuration, not yet validated, with `instruments`
+    /// instruments (X, X2, X3, ...).
+    fn parse(venue: &str, runtime: &str, margin: Option<&str>, instruments: usize) -> Result<NodeConfig, String> {
         let margin = margin.map(|m| format!("[core.policy.margin]\n{m}")).unwrap_or_default();
+        let more: String = (2..=instruments)
+            .map(|i| {
+                format!(
+                    "[core.instruments.X{i}]\nqty_step = \"0.001\"\npx_tick = \"0.1\"\nmin_notional = \"10\"\nmax_order_qty = \"100\"\nmax_order_notional = \"1000000\"\naccount_pos_min = \"-10\"\naccount_pos_max = \"10\"\n\n"
+                )
+            })
+            .collect();
         let text = format!(
             r#"
 data_dir = "d"
@@ -316,6 +377,7 @@ max_order_notional = "1000000"
 account_pos_min = "-10"
 account_pos_max = "10"
 
+{more}
 [core.strategies.a]
 enabled = true
 max_open_orders = 50
@@ -328,8 +390,7 @@ max = "10"
 {margin}
 "#
         );
-        let cfg: NodeConfig = toml::from_str(&text).map_err(|e| format!("parse: {e}"))?;
-        cfg.validate()
+        toml::from_str(&text).map_err(|e| format!("parse: {e}"))
     }
 
     fn refused(venue: &str, runtime: &str, margin: Option<&str>, because: &str) {
@@ -369,6 +430,69 @@ max = "10"
 
         let sim = shipped("sim.toml").expect("the shipped simulated-venue example must load");
         assert_eq!(sim.core.policy.margin, None);
+    }
+
+    /// G7. The query weight per minute is worked out from the
+    /// configuration, and a configuration with a margin policy whose weight
+    /// is above 600 (half of the venue's 1200 per minute and IP) does not
+    /// load. Every expected number is worked by hand:
+    ///
+    /// - margin report: weight 2 every 5 s = 2 x 12 = 24
+    /// - reference prices: weight 2 every 5 s = 24
+    /// - sweep: fills 20 + open orders 20 + positions 2 = 42 every 15 s = 42 x 4 = 168
+    /// - venue setting: weight 20 per instrument every 60 s = 20 per instrument
+    ///
+    /// 24 + 24 + 168 = 216, plus 20 per instrument.
+    #[test]
+    fn steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused() {
+        let testnet = hyperliquid("testnet");
+        let weight = |runtime: &str, margin: Option<&str>, instruments: usize| {
+            parse(&testnet, runtime, margin, instruments).unwrap().steady_state_query_weight()
+        };
+        // The shipped example: one instrument.
+        assert_eq!(shipped("hyperliquid-testnet.example.toml").unwrap().steady_state_query_weight(), Some(236));
+        assert_eq!(weight("", Some(""), 1), Some(236));
+        assert_eq!(weight("", Some(""), 2), Some(256));
+        // 216 + 19 x 20 = 596 loads; 216 + 20 x 20 = 616 does not.
+        assert_eq!(weight("", Some(""), 19), Some(596));
+        assert_eq!(parse(&testnet, "", Some(""), 19).unwrap().validate(), Ok(()));
+        assert_eq!(weight("", Some(""), 20), Some(616));
+        let refused = parse(&testnet, "", Some(""), 20).unwrap().validate().unwrap_err();
+        assert!(refused.contains("query weight 616 per minute is above 600"), "{refused}");
+
+        // Each interval moves its own term.
+        // Margin every 1 s: 2 x 60 = 120; 120 + 24 + 168 + 20 = 332.
+        assert_eq!(weight("margin_poll_ms = 1000", Some(""), 1), Some(332));
+        // Sweep every 5 s: 42 x 12 = 504; 24 + 24 + 504 + 20 = 572.
+        assert_eq!(weight("sweep_ms = 5000", Some(""), 1), Some(572));
+        // Reference prices every 1 s: 2 x 60 = 120; 24 + 120 + 168 + 20 = 332.
+        let fast_ref = format!("{testnet}\nref_price_interval_ms = 1000");
+        assert_eq!(parse(&fast_ref, "", Some(""), 1).unwrap().steady_state_query_weight(), Some(332));
+        // Venue setting every 20 s: 20 x 3 = 60; 216 + 60 = 276.
+        assert_eq!(weight("venue_setting_poll_ms = 20000", Some(""), 1), Some(276));
+
+        // Exactly 600 loads. Venue setting every 3.125 s is 20 x 19.2 = 384
+        // and 216 + 384 = 600. One millisecond faster is 384.1..., counted
+        // as 385 (a part of a unit is a whole one): 601 does not load.
+        assert_eq!(weight("venue_setting_poll_ms = 3125", Some(""), 1), Some(600));
+        assert_eq!(check(&testnet, "venue_setting_poll_ms = 3125", Some("")), Ok(()));
+        assert_eq!(weight("venue_setting_poll_ms = 3124", Some(""), 1), Some(601));
+        self::refused(&testnet, "venue_setting_poll_ms = 3124", Some(""), "query weight 601 per minute is above 600");
+        // Sweep every 4 s: 42 x 15 = 630; 24 + 24 + 630 + 20 = 698.
+        self::refused(&testnet, "sweep_ms = 4000", Some(""), "query weight 698 per minute is above 600");
+        // Mainnet is held to the same budget.
+        self::refused(&hyperliquid("mainnet"), "sweep_ms = 4000", Some(""), "query weight 698 per minute is above 600");
+
+        // Without a margin policy the margin and venue-setting queries are
+        // not sent (24 + 168 = 192 for any number of instruments), and the
+        // budget is not enforced: such a configuration loads as it did
+        // before the margin rules.
+        assert_eq!(weight("", None, 1), Some(192));
+        assert_eq!(weight("", None, 20), Some(192));
+        assert_eq!(check(&testnet, "sweep_ms = 4000", None), Ok(()));
+        // The simulated venue has no request limit.
+        assert_eq!(parse(SIM, "sweep_ms = 4000", Some(""), 20).unwrap().steady_state_query_weight(), None);
+        assert_eq!(check(SIM, "sweep_ms = 4000", Some("")), Ok(()));
     }
 
     /// S21. Mainnet does not start without a margin policy, and a margin
