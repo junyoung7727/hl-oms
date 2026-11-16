@@ -833,10 +833,22 @@ impl Tx<'_> {
             return Ok(());
         }
         self.emit(Event::ReducingEntered { rule, detail })?;
+        // The latch is new, so a cancel that ran out of attempts earlier is
+        // asked for again with a new budget.
+        self.rule_cancel_plain_orders(rule, ExhaustedCancel::AskAgain)
+    }
+
+    /// Rule cancel: `rule` asks to cancel every open plain order that has
+    /// no cancel request and, if `exhausted` says so, every one whose
+    /// request used up its attempts. A reduce-only order is never asked
+    /// for: it can only lower the position.
+    fn rule_cancel_plain_orders(&mut self, rule: RuleId, exhausted: ExhaustedCancel) -> Result<(), CoreFault> {
         for id in self.open_ids() {
             let Some(o) = self.core.orders.get(&id) else { continue };
             let is_plain = !o.reduce_only;
-            if is_plain && (o.cancel.is_none() || self.cancel_exhausted(id)) {
+            let not_asked_yet = o.cancel.is_none();
+            let asked_in_vain = exhausted == ExhaustedCancel::AskAgain && self.cancel_exhausted(id);
+            if is_plain && (not_asked_yet || asked_in_vain) {
                 self.emit(Event::CancelRequested {
                     order_id: id,
                     by: Actor::Rule(rule),
@@ -1592,19 +1604,9 @@ impl Tx<'_> {
         if blind_for <= policy.stale_cancel_us {
             return Ok(());
         }
-        for id in self.open_ids() {
-            let Some(o) = self.core.orders.get(&id) else { continue };
-            let plain_order = !o.reduce_only;
-            let not_asked_yet = o.cancel.is_none();
-            if plain_order && not_asked_yet {
-                self.emit(Event::CancelRequested {
-                    order_id: id,
-                    by: Actor::Rule(RuleId::MarginStale),
-                })?;
-                self.maybe_send_cancel(id)?;
-            }
-        }
-        Ok(())
+        // One request per order: this runs on every tick, and a cancel
+        // that ran out of attempts is already with the operator.
+        self.rule_cancel_plain_orders(RuleId::MarginStale, ExhaustedCancel::Leave)
     }
 
     fn tick(&mut self) -> Result<(), CoreFault> {
@@ -1703,6 +1705,16 @@ impl Tx<'_> {
         }
         Ok(())
     }
+}
+
+/// What a rule cancel does with an order whose earlier cancel request used
+/// up its attempts.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ExhaustedCancel {
+    /// A new request, with a new budget of attempts.
+    AskAgain,
+    /// Nothing: the stuck cancel stays as it is.
+    Leave,
 }
 
 /// The furthest position the book can reach on `side` if `qty` more is
