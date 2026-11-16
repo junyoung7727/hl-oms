@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-merge
+**Status:** done
 
 - [x] Test `clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing` (seam A, S14): fails when any of the three is accepted, or the refusal reason is not `MarginUnavailable`, `NoteRequired`, `NotReducing`.
 - [x] Test `clear_reduce_rebases_the_day_and_a_further_loss_latches_again` (seam A, S14): fails when after a clear at 94 a report at 94 or at 89.30 re-latches, or one at 89.29 does not.
@@ -23,7 +23,7 @@
 - [x] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
 - [x] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
 - [x] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
-- [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
+- [x] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
 
 ## Comments
 
@@ -50,3 +50,4 @@
   - Merge with `margin-rules`: twice (9b90feb with ticket 08, then 41f5005 with its evidence). Both tickets' behaviour is kept. Conflicts were additions at the same places (event list and apply arms, test files, mutant list, registry, contract, verification notes); V-MARGIN-11 was merged by hand. The margin nodes of this ticket's process tests now set `account_modes_allowed = ["standard"]`, as ticket 08's do. After the merge: `cargo test --workspace --locked` 250 passed, 0 failed, 0 ignored; `cargo test -p oms-node --features failpoints --test pipeline --test crash_points` 11 passed (pipeline 3, crash_points 8); clippy clean (also with `failpoints`); generated documents in step; secret scan and rustfmt-added pass.
   - Not run here: the extended verification and the full mutant run (the merger runs them). `evidence/mutants.json` lists 50 mutants; the list in the code has 59. The counts "50" in `docs/verification/README.md` and `README.md` describe the kept run and were left for the merger.
   - Still not guaranteed: that the operator judged well. A deposit hides a loss of its size until a rebase or the next UTC day (the test shows 100, +10, −14 not latching). The clear is not refused while the MM-buffer condition holds (ticket 07). Disk loss and power failure: the stops are a process abort and SIGKILL, the operating system lives. The cancel burst was run with 300 orders against simvenue, which has no request budget; what the Hyperliquid gateway's budget does after a burst is ticket 09. While a configuration without `policy.margin` is active, REDUCING cannot be cleared (`margin_unavailable`); the policy has to be set again first. The process tests run with a 100 ms margin poll. The `omsctl` executable's `main` is not run by a test.
+- Merged into `margin-rules` (merger claude-fable-5-2), 2026-11-16: merge commit 9b9d4df (ticket branch tip 0f1ca45), evidence commit b2797f1 for source `ea6d6a6eba72fa74`. Before the merge the mutants were renumbered M60-M68 to M51-M59 (xtask, the contract, the verification document, this file; the registry names none of them), because M50 is the highest number on `margin-rules`; each was run with `xtask mutants --only M5` and is killed. Gate: workspace tests 250 passed, 0 failed, 0 ignored; clippy clean (also with `failpoints`); generated documents in step; `verify --extended` without live-testnet 272 tests in 9 suites, all passed (the `pipeline` suite runs the failpoint tests: pipeline 3, crash_points 8); full mutant run 59 of 59 killed; secret scan, selftest and rustfmt-added pass. Nothing had to be fixed in the code.
