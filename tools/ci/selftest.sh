@@ -84,6 +84,19 @@ reset
 printf 'token = "gh%s_%s"\n' p "$(hex Ab 18)" > probe.toml
 expect fail "GitHub token in an ordinary file" scan
 reset
+# The allow-list file is free text outside its entries. A value on a comment
+# line is not an entry, so it must fail like a value in any other file.
+printf '# %s\n' "$(hex 4c 32)" >> tools/ci/secret_scan_allow.txt
+expect fail "64-digit hex on a comment line of the allow-list" scan
+reset
+printf '  # note %s\n' "$(hex 4c 32)" >> tools/ci/secret_scan_allow.txt
+expect fail "64-digit hex on an indented comment line of the allow-list" scan
+reset
+# A comment may repeat a value that a valid entry of the file allows.
+printf 'k = "%s"\n' "$(hex 1b 32)" > probe.toml
+printf 'probe.toml %s\n# see %s\n' "$(hex 1b 32)" "$(hex 1b 32)" >> tools/ci/secret_scan_allow.txt
+expect ok "comment that repeats the value of a valid allow-list entry" scan
+reset
 printf -- '-----BEGIN %s KEY-----\n' "RSA PRIVATE" > probe.txt
 expect fail "PEM private key header" scan
 reset
@@ -123,6 +136,32 @@ for name in notes.pem id.key trades.jsonl "journal-$(printf '%020d' 2).oj" tail.
   expect fail "forbidden name: $name" tools/ci/secret_scan.sh
   reset
 done
+# The name rule does not depend on letter case.
+for name in probe.PEM run.LOG .ENV Id.Key Data/readme.txt; do
+  mkdir -p "$(dirname "$name")"
+  printf 'text\n' > "$name"
+  git add -f "$name"
+  expect fail "forbidden name in another letter case: $name" tools/ci/secret_scan.sh
+  reset
+done
+# A path is text that the public can read, like file content.
+printf 'text\n' > "k_$(hex 4c 32).txt"
+expect fail "64-digit hex in a file name" scan
+reset
+mkdir -p "$(hex 4c 20)"
+printf 'text\n' > "$(hex 4c 20)/readme.txt"
+expect fail "40-digit hex in a directory name" scan
+reset
+printf 'text\n' > "$(printf 'gh%s_%s.txt' p "$(hex Ab 18)")"
+expect fail "credential shape in a file name" scan
+reset
+# A symlink's target is stored in the repository but is not file content.
+ln -s "$(hex 4c 32)" probe_link
+expect fail "symlink whose target is a 64-digit hex value" scan
+reset
+ln -s main.rs probe_link
+expect fail "symlink to an existing file (no symlink may be tracked)" scan
+reset
 # No hex and no forbidden name, so that only the binary check can catch it.
 printf 'a\0b\n' > probe.dat
 expect fail "binary file with no key and an ordinary name" scan
