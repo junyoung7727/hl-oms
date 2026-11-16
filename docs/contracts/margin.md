@@ -11,8 +11,9 @@
 - "보고 끊김 취소" 전부와 규칙 이름 `Rule(MarginStale)`(티켓 06, V-MARGIN-7).
 - "거래소 설정과 계좌 모드" 전체: 입력 `VenueSetting`, `AccountMode`와 이벤트 `VenueSettingNoted`, `AccountModeNoted`, 차단 `VenueSetting(종목)`, `AccountMode`, 노드의 두 조회와 `runtime.venue_setting_poll_ms`, 가상 거래소의 응답과 제어 명령(`venue_setting`, `account_mode`), `status`의 종목별 거래소 설정과 계좌 모드(티켓 08, V-MARGIN-9, V-MARGIN-11).
 - "유지증거금 여유" 전체: 받은 보고마다의 판정, `Rule(MmBuffer)`로 들어가는 감소 전용 상태와 그 이름의 규칙 취소, 조건이 참일 때의 해제 거절 `MmBufferActive`. `status`의 `core.margin.reducing.rule`은 `mm_buffer`가 된다(티켓 07, V-MARGIN-8, V-MARGIN-4, V-MARGIN-6).
+- "Hyperliquid 조회" 전체: Hyperliquid 게이트웨이의 증거금 조회, 거래소 설정 조회, 계좌 모드 조회와 그 응답의 번역, 조회 weight 예산 검사, 증거금 정책을 담은 Hyperliquid 예제 설정(티켓 09, V-MARGIN-10, V-CFG-1). 실제 거래소에는 한 번도 묻지 않았다.
 
-아직 코드에 없는 것: 조회 weight 예산 검사. 가상 거래소(simvenue)의 보고는 계좌 가치만 담고 포지션은 비어 있다(그래서 simvenue에서는 유지증거금 여유 규칙이 걸릴 일이 없다: 티켓 10). simvenue는 참조 가격을 스스로 내지 않고 제어 명령(`ref_price`)을 받았을 때만 낸다. 그래서 simvenue에서 `policy.margin`을 켜면 그 명령으로 가격을 준 뒤 15초 동안만 일반 주문을 받는다. 가상 거래소는 모든 종목을 격리·레버리지 2로, 계좌 모드를 `standard`(가상 거래소가 붙인 이름이고 Hyperliquid의 값이 아니다)로 답한다. 기본 허용 목록은 비어 있으므로 simvenue에서 일반 주문을 내려면 `account_modes_allowed = ["standard"]`를 적어야 한다. Hyperliquid 게이트웨이는 아직 증거금 조회, 거래소 설정 조회, 계좌 모드 조회에 답하지 않는다(티켓 09). 그래서 그 게이트웨이에서 `policy.margin`을 켜면 보고가 없고 설정과 모드를 모르므로 일반 주문이 모두 `MarginUnavailable`, `VenueSetting(종목)`, `AccountMode`로 거절된다(안전한 쪽).
+아직 코드에 없는 것: 가상 거래소(simvenue)가 보고에 포지션을 담는 것(티켓 10). simvenue의 보고는 계좌 가치만 담고 포지션은 비어 있다(그래서 simvenue에서는 유지증거금 여유 규칙이 걸릴 일이 없다). simvenue는 참조 가격을 스스로 내지 않고 제어 명령(`ref_price`)을 받았을 때만 낸다. 그래서 simvenue에서 `policy.margin`을 켜면 그 명령으로 가격을 준 뒤 15초 동안만 일반 주문을 받는다. 가상 거래소는 모든 종목을 격리·레버리지 2로, 계좌 모드를 `standard`(가상 거래소가 붙인 이름이고 Hyperliquid의 값이 아니다)로 답한다. 기본 허용 목록은 비어 있으므로 simvenue에서 일반 주문을 내려면 `account_modes_allowed = ["standard"]`를 적어야 한다.
 
 설계 근거: [ADR-018](../adr/ADR-018-margin-rules.md). 용어: [GLOSSARY.md](../../GLOSSARY.md). 스펙과 티켓: `.scratch/margin-rules/`.
 실제 거래소에서는 아무것도 확인하지 않는다(U-01). 가정 T1~T11은 ADR-018 §8에 있다.
@@ -37,7 +38,7 @@
 | `runtime.margin_poll_ms` | 5 000 | 증거금 보고 조회 간격 | 0보다 크다 |
 | `runtime.venue_setting_poll_ms` | 60 000 | 포지션이 없는 종목의 거래소 설정 조회 간격 | 0보다 크다 |
 
-조회 weight 예산: 설정에서 계산한 분당 조회 weight(증거금 보고, 참조 가격, 15초 훑기, 종목별 거래소 설정)가 거래소 한도 1200의 절반인 600을 넘으면 설정 검사가 시작을 거부한다.
+조회 weight 예산: 설정에서 계산한 분당 조회 weight(증거금 보고, 참조 가격, 15초 훑기, 종목별 거래소 설정)가 거래소 한도 1200의 절반인 600을 넘으면 설정 검사가 시작을 거부한다. 계산과 범위는 아래 "Hyperliquid 조회"에 있다.
 
 ### 입력, 상태, 이벤트
 
@@ -164,6 +165,62 @@ N_down = max(0, −pos × ref + Σ_매도 예약 × max(지정가, ref))
 - 노드는 코어가 이번 링크 세션에서 모르는 설정과 모드를 1초에 한 번씩 묻고(링크가 올라온 직후가 여기에 든다), 포지션이 없는 종목의 설정은 `runtime.venue_setting_poll_ms`마다 다시 묻는다. 계좌 모드는 링크 세션마다 한 번 읽는다. 거래소에서 모드를 바꾸면 다음 링크 세션에서 보인다.
 - `status`의 `core.margin.venue_settings`는 설정에 있는 종목마다 `{isolated, leverage, as_configured}`(모르면 null), `core.margin.account_mode`는 `{mode, allowed}`(모르면 null)이다.
 
+### Hyperliquid 조회
+
+Hyperliquid 게이트웨이는 세 조회를 `/info`로 보내고 응답을 코어 입력으로 옮긴다. 읽기만 한다. 응답이 없으면(시간 초과, HTTP 오류, 요청 예산 부족) 입력이 없다.
+
+| 조회 | 요청 본문 | weight | 응답 → 입력 |
+|---|---|---|---|
+| 증거금 보고 | `{"type":"clearinghouseState","user":계좌}` | 2 | `MarginReport` 또는 `MarginReportInvalid { reason }` |
+| 거래소 설정 | `{"type":"activeAssetData","user":계좌,"coin":종목}` | 20 | `VenueSetting` 또는 없음 |
+| 계좌 모드 | `{"type":"userAbstraction","user":계좌}` | 20 | `AccountMode` 또는 없음 |
+
+증거금 보고의 번역:
+
+| 입력의 값 | 응답의 필드 | 형식 |
+|---|---|---|
+| `account_value` | `marginSummary.accountValue` (교차와 격리를 합친 값. `crossMarginSummary`가 아니다) | 소수 문자열 |
+| `instrument` | `assetPositions[].position.coin` | 문자열. 식별자 규칙에 맞지 않는 글자는 `_`로 바꾼다 |
+| `szi` | `position.szi` | 부호 있는 소수 문자열 |
+| `position_value` | `position.positionValue` | 소수 문자열 |
+| `margin_used` | `position.marginUsed` | 소수 문자열 |
+| `leverage_type` | `position.leverage.type` | `"isolated"` 또는 `"cross"` |
+| `leverage_value` | `position.leverage.value` | JSON 정수 |
+| `max_leverage` | `position.maxLeverage` | JSON 정수, 0이 아니다 |
+
+- 위 값 가운데 하나라도 없거나, 형식이 다르거나(문자열이어야 할 소수가 JSON 숫자인 것, 지수 표기, 소수 9자리 이상을 포함한다), `maxLeverage`가 0이거나, `assetPositions`가 목록이 아니거나, 포지션에 종목 이름이 없으면 응답 전체가 `MarginReportInvalid`가 되고 사유에 그 필드 이름이 들어간다. 어떤 값도 0이나 기본값으로 채우지 않고, 어떤 포지션도 건너뛰지 않는다.
+- 번역은 설정된 종목 목록을 받지 않는다. 설정에 없는 종목의 포지션도 보고에 들어간다.
+- 거래소 설정: 응답의 `coin`이 물은 종목과 같고 `leverage.type`이 `"isolated"`나 `"cross"`이고 `leverage.value`가 JSON 정수일 때만 `VenueSetting`이 된다. 아니면 입력이 없고 설정은 "모름"으로 남는다.
+- 계좌 모드: 응답은 JSON 문자열 하나다. 글자 그대로 `AccountMode`가 된다. 게이트웨이는 문서에 없는 문자열을 문서에 있는 값(`unifiedAccount`, `portfolioMargin`, `disabled`, `default`, `dexAbstraction`)으로 바꾸지 않는다(공백을 떼지 않고 대소문자를 고치지 않는다). 그래서 모르는 값은 허용 목록에 같은 글자로 적혀 있지 않은 한 계좌를 막는다. 문자열이 아니거나 64바이트를 넘으면 입력이 없고 모드는 "모름"으로 남는다.
+
+조회 weight 예산(분당, 설정에서 계산):
+
+| 항 | 계산 | 기본 설정의 값 |
+|---|---|---|
+| 증거금 보고 | 2 × (60 000 / `runtime.margin_poll_ms`) | 24 |
+| 참조 가격 | 2 × (60 000 / `venue.ref_price_interval_ms`) | 24 |
+| 훑기(체결 20 + 열린 주문 20 + 포지션 2) | 42 × (60 000 / `runtime.sweep_ms`) | 168 |
+| 거래소 설정 | 20 × 종목 수 × (60 000 / `runtime.venue_setting_poll_ms`) | 종목마다 20 |
+
+- 합은 216 + 종목 수 × 20이다. 예제 설정(종목 1개)은 236. 나누어떨어지지 않으면 항마다 올림한다.
+- Hyperliquid 설정에 `policy.margin`이 있고 합이 600을 넘으면 시작을 거부한다. 600은 받는다. 기본 간격에서 종목 19개(596)까지 받고 20개(616)는 거부한다.
+- `policy.margin`이 없으면 증거금 보고와 거래소 설정 항이 없고(192) 검사를 하지 않는다. 이 계약 이전에 읽히던 설정은 그대로 읽힌다. 가상 거래소 설정에는 예산이 없다.
+- 거래소 설정 항은 모든 종목에 포지션이 없는 최악의 경우다. 참조 가격은 이 게이트웨이가 스트림으로 받으므로 실제로는 쓰지 않는 여유다.
+- 계산에 없는 것: 계좌 모드 조회(링크 세션마다 20 한 번), 주문 상태 조회, 주문과 취소, 그리고 응답을 받지 못한 동안 1초마다 되묻는 거래소 설정·계좌 모드 조회(종목마다 분당 최대 1200). 마지막 것은 거래소가 포지션 없는 종목의 설정을 답하지 않거나(T11) 응답을 읽지 못할 때 생기고, 그러면 아래의 게이트웨이 요청 예산이 조회를 줄인다.
+
+게이트웨이의 요청 예산과 취소 폭주: 게이트웨이는 자기 쪽에서 요청을 센다. 예산은 최대 1200, 시작할 때 600, 초당 20씩 찬다. 조회는 300(주문 몫 200 + 취소 몫 100)을 남길 수 있을 때만 나간다. 취소는 예산이 얼마든 나간다(위험을 줄이는 요청이다). 감소 전용 상태 진입이 열린 주문 상한 500건의 취소를 한꺼번에 내면:
+
+| 폭주 직전의 예산 | 500건 뒤 | 다음 증거금 조회(weight 2, 302가 필요)가 나갈 때까지 |
+|---|---|---|
+| 1200(가득) | 700 | 0초 |
+| 600(시작 직후) | 100 | 10.1초 |
+| 0 | 0 | 15.1초(가장 긴 경우) |
+
+- 가장 긴 15.1초도 신선도 한도 30초보다 짧다. 다만 증거금 조회는 `runtime.margin_poll_ms`마다만 시도되므로 실제 대기는 그 간격만큼 더 길 수 있고(기본 5초), 같은 예산을 훑기와 거래소 설정 조회가 함께 쓴다.
+- 이 숫자는 게이트웨이가 스스로 세는 예산이다. 거래소가 500건의 취소를 실제로 어떻게 세는지, 한도를 넘었을 때(HTTP 429) 무엇을 하는지는 확인하지 않았다.
+
+확인하지 않은 것: 실제 응답이 문서의 예와 같은지, `marginUsed`가 격리 자산인지(T1), 계좌 가치가 격리 자산을 포함하는지(T2), 어느 `userAbstraction` 값이 표준 모드인지(T10), 포지션이 없을 때 `activeAssetData`가 레버리지를 주는지(T11).
+
 ### 변형 입력
 
 | 상황 | 동작 |
@@ -224,12 +281,16 @@ N_down = max(0, −pos × ref + Σ_매도 예약 × max(지정가, ref))
 | 중단과 재실행(재생: 감소 전용 상태와 기준 금액) | V-MARGIN-4, V-MARGIN-5, V-REPLAY-1 | `margin::latch_and_day_base_replay_to_the_same_state` |
 | 거래소 설정과 계좌 모드(종목 설정) | V-MARGIN-9 | `margin::instrument_with_unknown_venue_setting_holds_plain_orders`, `a_setting_that_differs_from_config_holds_only_that_instrument`, `a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again`, `a_cross_position_in_a_margin_report_raises_the_hold`, `venue_setting_hold_names_its_instrument_in_holds`. 변이 M43~M45 |
 | 거래소 설정과 계좌 모드(계좌 모드) | V-MARGIN-9 | `margin::unified_or_portfolio_account_mode_holds_the_account`, `an_account_mode_off_the_allow_list_or_unknown_holds_the_account`. 변이 M46~M49 |
+| Hyperliquid 조회(증거금 보고의 번역) | V-MARGIN-10 | `wire::tests::documented_clearinghouse_state_parses_to_a_margin_report`, `missing_zero_or_unparseable_max_leverage_rejects_the_whole_report`, `any_unparseable_number_rejects_the_whole_report`, `a_position_on_an_unconfigured_coin_is_kept` (oms-node 단위). 변이 M67~M73 |
+| Hyperliquid 조회(거래소 설정, 계좌 모드, 요청 본문) | V-MARGIN-10 | `wire::tests::documented_active_asset_data_parses_leverage_and_mode`, `user_abstraction_values_parse_and_an_unknown_value_stays_unknown`, `margin_and_setting_request_json` (oms-node 단위). 변이 M74~M76 |
+| Hyperliquid 조회(조회 weight 예산, 예제 설정) | V-CFG-1 | `config::tests::steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused`, `example_config_with_a_margin_policy_loads` (oms-node 단위). 변이 M77, M78 |
+| Hyperliquid 조회(취소 폭주 뒤의 요청 예산) | V-MARGIN-10 | `venue::hyperliquid::tests::a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time` (oms-node 단위). 변이 M79 |
 | 차단 표(거래소 설정, 계좌 모드) | V-MARGIN-9 | `margin::reduce_only_order_passes_the_venue_setting_and_account_mode_holds`. 변이 M50 |
 | 설정(`runtime.venue_setting_poll_ms`) | V-CFG-1 | `config::tests::mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused` (oms-node 단위) |
 | 해제와 기준 재설정 | V-MARGIN-6 | `margin::clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing`, `clear_reduce_rebases_the_day_and_a_further_loss_latches_again`, `rebase_day_sets_the_base_and_leaves_the_latch_alone`, `a_withdrawal_without_rebase_reads_as_a_loss`. 변이 M51~M57 |
-| 유지증거금 여유 | V-MARGIN-8 | `margin::isolated_margin_below_mmr_plus_buffer_enters_reducing`, `mmr_follows_the_max_leverage_of_each_position`, `a_cross_position_is_not_judged_by_the_mm_rule`, `an_old_report_on_arrival_is_still_judged_by_the_mm_rule`, `mm_comparison_is_exact_at_extreme_values` (proptest). 변이 M100~M106 |
-| 유지증거금 여유(계좌 전체, 먼저 건 규칙) | V-MARGIN-8, V-MARGIN-4 | `margin::a_trigger_on_one_instrument_blocks_plain_orders_on_all`, `reducing_records_the_rule_that_tripped_first`. 변이 M108 |
-| 해제와 기준 재설정(유지증거금 여유 조건) | V-MARGIN-6 | `margin::clear_reduce_is_refused_while_the_mm_condition_holds`. 변이 M107 |
+| 유지증거금 여유 | V-MARGIN-8 | `margin::isolated_margin_below_mmr_plus_buffer_enters_reducing`, `mmr_follows_the_max_leverage_of_each_position`, `a_cross_position_is_not_judged_by_the_mm_rule`, `an_old_report_on_arrival_is_still_judged_by_the_mm_rule`, `mm_comparison_is_exact_at_extreme_values` (proptest). 변이 M80~M86 |
+| 유지증거금 여유(계좌 전체, 먼저 건 규칙) | V-MARGIN-8, V-MARGIN-4 | `margin::a_trigger_on_one_instrument_blocks_plain_orders_on_all`, `reducing_records_the_rule_that_tripped_first`. 변이 M88 |
+| 해제와 기준 재설정(유지증거금 여유 조건) | V-MARGIN-6 | `margin::clear_reduce_is_refused_while_the_mm_condition_holds`. 변이 M87 |
 | 해제와 기준 재설정(운영 소켓, 운영자 도구) | V-MARGIN-11 | `e2e::strategy_socket_cannot_clear_reducing_or_rebase`, `e2e::omsctl_clear_reduce_and_rebase_day_work_end_to_end`. 변이 M58, M59 |
 | 감소 전용 상태(프로세스: 재시작, 많은 주문의 취소) | V-MARGIN-11 | `e2e::reducing_and_day_base_survive_a_node_kill`, `e2e::reducing_cancels_every_resting_plain_order_through_the_node` |
 | 중단과 재실행(중단 지점) | V-MARGIN-11 | `crash_points::stopped_before_the_write_of_a_reducing_decision_the_next_report_decides_again`, `stopped_after_the_reducing_decision_is_durable_the_cancels_are_sent_after_restart`, `stopped_around_a_day_base_set_the_base_is_set_exactly_once` (`--features failpoints`) |
@@ -249,5 +310,7 @@ N_down = max(0, −pos × ref + Σ_매도 예약 × max(지정가, ref))
 차단 표의 시험이 보이지 않는 것: 귀속되지 않은 포지션을 OMS로 줄이는 길(없다), 거래소가 감소 전용 주문의 포지션 확대를 막는지(T5).
 
 거래소 설정과 계좌 모드의 시험이 보이지 않는 것: 거래소가 표준 모드를 어떤 문자열로 부르는지(T10. 시험의 `standard`는 임의의 이름이다). 거래소가 걸려 있는 주문에 그 레버리지를 실제로 적용하는지(T8). 포지션이 없는 종목의 설정을 거래소가 알려 주는지(T11). 포지션이 있는 종목의 설정이 조회 사이에 바뀐 것(그 종목은 보고의 포지션으로만 갱신되는데 simvenue의 보고에는 포지션이 없다: 티켓 10). 계좌 모드가 링크 세션 도중에 바뀐 것(다음 링크 세션에서 읽는다). 기본 간격 60초 그대로의 실행(프로세스 시험은 200 ms로 줄였다).
+
+Hyperliquid 조회의 시험이 보이지 않는 것: 시험은 문서의 응답 예를 번역 함수에 넣는다. 거래소에 묻지 않으므로 실제 응답이 그 예와 같은지는 모른다. `activeAssetData`의 예는 저장소의 조사 문서에 없어 구현자가 아는 문서의 예를 적었고(계좌는 자리 표시로 바꿨다) 문서와 다시 대조하지 않았다. 게이트웨이가 조회를 보내고 응답을 번역 함수에 넘기는 부분(세 `match` 갈래)과 HTTP 오류·429의 처리는 시험이 없다. 요청 예산 시험은 예산의 산술만 본다: 거래소가 실제로 세는 weight, 여러 조회가 같은 예산을 다투는 순서, 조회 간격 때문에 더 길어지는 대기는 보지 않는다.
 
 확인하지 않는 것: 실제 거래소의 응답 모양과 값의 뜻(T1, T2), 수수료와 펀딩이 빠지는 잔고(T3), 감소 전용 주문의 세부 처리(T5), 청산 체결의 모양(T6), 그 밖의 T4, T7~T11. testnet 실주문 예행은 이 작업 밖이고 mainnet 전에 필요하다(U-01, U-09).

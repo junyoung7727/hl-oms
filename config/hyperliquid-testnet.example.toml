@@ -50,3 +50,22 @@ max_open_orders = 10
 max_inflight_sends = 4
 max_expiry_horizon_us = 30000000        # 요청의 만료 시각은 최대 30초 앞
 absence_margin_us = 10000000            # 만료 + 10초 뒤의 "없음"만 부재로 인정
+
+# 증거금 규칙 (docs/contracts/margin.md, ADR-018). 이 구역이 없으면 규칙이 꺼지고, mainnet은 이 구역 없이는
+# 시작하지 않는다. 아래 값은 기본값과 같다. OMS는 거래소의 레버리지와 증거금 방식을 읽기만 하고 바꾸지 않는다:
+# 거래소에서 종목마다 격리(isolated)·레버리지 2로 직접 맞춰 둔다. 다르면 그 종목의 일반 주문이 막힌다.
+[core.policy.margin]
+max_account_leverage = "2.0"            # 계좌 노출이 계좌 가치의 2배를 넘게 되는 일반 주문은 거절
+daily_loss_bps = 500                    # 기준 금액보다 5 % 넘게 낮아지면 감소 전용 상태
+mm_buffer_bps = 25                      # 격리 증거금이 유지증거금률 + 0.25 %p 아래로 내려가면 감소 전용 상태
+margin_max_age_us = 30000000            # 30초보다 오래된 증거금 보고로는 일반 주문을 받지 않는다
+stale_cancel_us = 60000000              # 60초 넘게 보고가 없으면 걸려 있는 일반 주문을 취소한다
+venue_leverage = 2                      # 거래소에 있어야 하는 종목 레버리지
+isolated = true                         # 거래소에 있어야 하는 증거금 방식
+# 허용하는 계좌 모드. 거래소가 표준 모드를 어떤 문자열로 답하는지는 확인하지 않았다(가정 T10).
+# 비워 두면 모든 일반 주문이 AccountMode로 막힌다. testnet에서 status의 core.margin.account_mode에 보이는 값을
+# 확인한 뒤에 적는다. unifiedAccount와 portfolioMargin은 적어도 허용되지 않는다.
+account_modes_allowed = []
+
+# 조회 간격의 기본값: [runtime] margin_poll_ms = 5000, venue_setting_poll_ms = 60000.
+# 이 설정의 분당 조회 weight는 216 + 종목 수 × 20 = 236이고, 600을 넘으면 시작하지 않는다.

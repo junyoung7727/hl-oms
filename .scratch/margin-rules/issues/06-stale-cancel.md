@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-merge
+**Status:** done
 
 - [x] Test `report_stale_past_the_cancel_limit_cancels_each_plain_order_once` (seam A, S23): fails when there is no cancel by `Rule(MarginStale)` after 60 s, a cancel at or before 60 s, a second cancel on the next tick, or a cancel of a reduce-only order.
 - [x] Test `stale_age_starts_at_link_up_when_no_report_has_arrived` (seam A, S23): fails when a node that never got a report never cancels.
@@ -18,7 +18,7 @@
 - [x] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
 - [x] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
 - [x] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
-- [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
+- [x] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
 
 ## Comments
 
@@ -43,3 +43,4 @@
   - `docs/verification/README.md` §4: the count the implementer flagged is now 66 (the list has 66 rows; it said 59 on `margin-rules` and 42 on this branch). The sentence on the kept run says that M60 to M66 are not in it yet.
   - Tests whose setup had to change: none. No test of ticket 05, 06 or 08 was edited; no assertion changed.
   - After the merge: `cargo test --workspace --locked` 257 passed, 0 failed, 0 ignored; clippy clean; generated documents in step.
+- Merged into `margin-rules` (merger claude-fable-5-2), 2026-11-16: merge commit 640a2aa (ticket branch tip 8f86dfa), evidence commit 7a74f77 for source `95ca03971f3a393c`. Gate: workspace tests 257 passed, 0 failed, 0 ignored; clippy clean (also with `failpoints`); generated documents in step; `verify --extended` without live-testnet 279 tests in 9 suites, all passed (the `pipeline` suite runs the failpoint tests: pipeline 3, crash_points 8); full mutant run 66 of 66 killed; secret scan, selftest and rustfmt-added pass. Nothing had to be fixed in the code.

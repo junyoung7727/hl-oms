@@ -622,7 +622,124 @@ const MUTANTS: &[Mutant] = &[
         guards: "C-MARGIN / stale cancel",
     },
     Mutant {
-        id: "M100-mm-buffer-judged-only-on-a-fresh-report",
+        id: "M67-zero-max-leverage-reported",
+        what: "a position with maxLeverage 0 is reported instead of refusing the whole answer",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "if max_leverage == 0 {",
+        replace: "if false {",
+        test: &["-p", "oms-node", "--lib", "missing_zero_or_unparseable_max_leverage_rejects_the_whole_report"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M68-missing-max-leverage-defaulted",
+        what: "a missing or unreadable maxLeverage is read as 1",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "let max_leverage = whole(pos.get(\"maxLeverage\"), \"maxLeverage\").map_err(at)?;",
+        replace: "let max_leverage = whole(pos.get(\"maxLeverage\"), \"maxLeverage\").unwrap_or(1);",
+        test: &["-p", "oms-node", "--lib", "missing_zero_or_unparseable_max_leverage_rejects_the_whole_report"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M69-unreadable-position-skipped",
+        what: "a position whose size cannot be read is left out and the rest is reported",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "let szi = decimal(pos.get(\"szi\"), \"szi\", SQty::parse).map_err(at)?;",
+        replace: "let Ok(szi) = decimal(pos.get(\"szi\"), \"szi\", SQty::parse) else { continue };",
+        test: &["-p", "oms-node", "--lib", "any_unparseable_number_rejects_the_whole_report"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M70-unreadable-margin-read-as-zero",
+        what: "an unreadable marginUsed is reported as zero",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "let margin_used = decimal(pos.get(\"marginUsed\"), \"marginUsed\", Amount::parse).map_err(at)?;",
+        replace: "let margin_used = decimal(pos.get(\"marginUsed\"), \"marginUsed\", Amount::parse).unwrap_or(Amount::ZERO);",
+        test: &["-p", "oms-node", "--lib", "any_unparseable_number_rejects_the_whole_report"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M71-unreadable-account-value-read-as-zero",
+        what: "an unreadable account value is reported as zero",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "let account_value = decimal(body.pointer(\"/marginSummary/accountValue\"), \"marginSummary.accountValue\", Amount::parse)?;",
+        replace: "let account_value = decimal(body.pointer(\"/marginSummary/accountValue\"), \"marginSummary.accountValue\", Amount::parse).unwrap_or(Amount::ZERO);",
+        test: &["-p", "oms-node", "--lib", "any_unparseable_number_rejects_the_whole_report"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M72-cross-only-account-value",
+        what: "the account value is taken from crossMarginSummary, which leaves isolated margin out",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "body.pointer(\"/marginSummary/accountValue\")",
+        replace: "body.pointer(\"/crossMarginSummary/accountValue\")",
+        test: &["-p", "oms-node", "--lib", "documented_clearinghouse_state_parses_to_a_margin_report"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M73-unknown-position-mode-read-as-cross",
+        what: "a position whose margin mode is not documented is reported as cross",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "_ => return Err(at(format!(\"leverage.type is neither isolated nor cross: {v}\"))),",
+        replace: "_ => LeverageType::Cross,",
+        test: &["-p", "oms-node", "--lib", "any_unparseable_number_rejects_the_whole_report"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M74-unknown-setting-mode-read-as-isolated",
+        what: "a venue setting whose margin mode is not documented is read as isolated",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "Some(\"cross\") => false,\n        _ => return None,",
+        replace: "Some(\"cross\") => false,\n        _ => true,",
+        test: &["-p", "oms-node", "--lib", "documented_active_asset_data_parses_leverage_and_mode"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M75-setting-of-another-coin-accepted",
+        what: "the venue setting of another coin is taken as the setting of the instrument asked about",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "if body.get(\"coin\").and_then(|c| c.as_str()) != Some(instrument.as_str()) {",
+        replace: "if false {",
+        test: &["-p", "oms-node", "--lib", "documented_active_asset_data_parses_leverage_and_mode"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M76-unknown-account-mode-read-as-default",
+        what: "an account mode that is not unifiedAccount or portfolioMargin is passed on as default",
+        file: "crates/oms-node/src/venue/hyperliquid/wire.rs",
+        find: "let mode = body.as_str()?;",
+        replace: "let mode = match body.as_str()? {\n        m @ (\"unifiedAccount\" | \"portfolioMargin\") => m,\n        _ => \"default\",\n    };",
+        test: &["-p", "oms-node", "--lib", "user_abstraction_values_parse_and_an_unknown_value_stays_unknown"],
+        guards: "C-MARGIN / Hyperliquid queries",
+    },
+    Mutant {
+        id: "M77-query-weight-above-budget-loads",
+        what: "a configuration whose query weight is above 600 per minute loads",
+        file: "crates/oms-node/src/config.rs",
+        find: "if weight > QUERY_WEIGHT_BUDGET {",
+        replace: "if false {",
+        test: &["-p", "oms-node", "--lib", "steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused"],
+        guards: "C-MARGIN / query weight budget",
+    },
+    Mutant {
+        id: "M78-venue-setting-queries-not-counted",
+        what: "the venue-setting queries are left out of the query weight",
+        file: "crates/oms-node/src/config.rs",
+        find: "weight += per_minute(u64::from(WEIGHT_OTHER_INFO_QUERY) * instruments, r.venue_setting_poll_ms);",
+        replace: "",
+        test: &["-p", "oms-node", "--lib", "steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused"],
+        guards: "C-MARGIN / query weight budget",
+    },
+    Mutant {
+        id: "M79-queries-use-the-reserve",
+        what: "an info query may use the budget reserved for orders and cancels",
+        file: "crates/oms-node/src/venue/hyperliquid/mod.rs",
+        find: "self.take_at(now, weight, RESERVE_FOR_CANCELS + RESERVE_FOR_ORDERS)",
+        replace: "self.take_at(now, weight, 0.0)",
+        test: &["-p", "oms-node", "--lib", "a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time"],
+        guards: "C-MARGIN / query weight budget",
+    },
+    Mutant {
+        id: "M80-mm-buffer-judged-only-on-a-fresh-report",
         what: "the MM-buffer rule judges a recorded report only while it is fresh",
         file: "crates/oms-core/src/decide.rs",
         find: "let Some(p) = position_under_the_mm_line(r, buffer_bps) else {",
@@ -631,7 +748,7 @@ const MUTANTS: &[Mutant] = &[
         guards: "C-MARGIN / MM buffer",
     },
     Mutant {
-        id: "M101-mm-comparison-direction",
+        id: "M81-mm-comparison-direction",
         what: "the MM-buffer rule trips when the margin is above the line, not below it",
         file: "crates/oms-core/src/decide.rs",
         find: "Some(scaled_line) => scaled_margin < scaled_line,",
@@ -640,7 +757,7 @@ const MUTANTS: &[Mutant] = &[
         guards: "C-MARGIN / MM buffer",
     },
     Mutant {
-        id: "M102-mm-comparison-includes-the-line",
+        id: "M82-mm-comparison-includes-the-line",
         what: "a margin exactly on the line trips the MM-buffer rule",
         file: "crates/oms-core/src/decide.rs",
         find: "Some(scaled_line) => scaled_margin < scaled_line,",
@@ -649,7 +766,7 @@ const MUTANTS: &[Mutant] = &[
         guards: "C-MARGIN / MM buffer",
     },
     Mutant {
-        id: "M103-mm-buffer-term-dropped",
+        id: "M83-mm-buffer-term-dropped",
         what: "the line is the maintenance margin alone, without the buffer",
         file: "crates/oms-core/src/decide.rs",
         find: "match value.checked_mul(10_000 + twice_max_leverage * i128::from(buffer_bps)) {",
@@ -658,7 +775,7 @@ const MUTANTS: &[Mutant] = &[
         guards: "C-MARGIN / MM buffer",
     },
     Mutant {
-        id: "M104-mmr-without-the-factor-two",
+        id: "M84-mmr-without-the-factor-two",
         what: "the maintenance margin rate is 1 / maximum leverage, not 1 / (2 x maximum leverage)",
         file: "crates/oms-core/src/decide.rs",
         find: "let twice_max_leverage = 2 * i128::from(p.max_leverage);",
@@ -667,7 +784,7 @@ const MUTANTS: &[Mutant] = &[
         guards: "C-MARGIN / MM buffer",
     },
     Mutant {
-        id: "M105-mm-rule-judges-a-cross-position",
+        id: "M85-mm-rule-judges-a-cross-position",
         what: "a cross-margin position is judged by the MM-buffer rule",
         file: "crates/oms-core/src/decide.rs",
         find: "let judged = |p: &&MarginPosition| p.leverage_type == LeverageType::Isolated && p.position_value.0 > 0;",
@@ -676,7 +793,7 @@ const MUTANTS: &[Mutant] = &[
         guards: "C-MARGIN / MM buffer",
     },
     Mutant {
-        id: "M106-mm-line-overflow-reads-as-above",
+        id: "M86-mm-line-overflow-reads-as-above",
         what: "a line whose scaled product does not fit reads as 'margin is enough'",
         file: "crates/oms-core/src/decide.rs",
         find: "        None => true,\n    }\n}",
@@ -685,7 +802,7 @@ const MUTANTS: &[Mutant] = &[
         guards: "C-MARGIN / MM buffer",
     },
     Mutant {
-        id: "M107-clear-reduce-while-the-mm-condition-holds",
+        id: "M87-clear-reduce-while-the-mm-condition-holds",
         what: "clear-reduce is accepted while a position is under its MM-buffer line",
         file: "crates/oms-core/src/decide.rs",
         find: "if mm_condition_holds {",
@@ -694,7 +811,7 @@ const MUTANTS: &[Mutant] = &[
         guards: "C-MARGIN / clear and rebase",
     },
     Mutant {
-        id: "M108-daily-loss-judged-before-the-mm-buffer",
+        id: "M88-daily-loss-judged-before-the-mm-buffer",
         what: "a report that trips both rules records the daily loss, not the MM buffer",
         file: "crates/oms-core/src/decide.rs",
         find: "        self.judge_mm_buffer(r)?;\n        self.judge_daily_loss(r)?;",
@@ -733,7 +850,9 @@ pub fn run(root: &Path, only: Option<&str>) -> i32 {
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target"));
     let work = target.join("mutants-work");
     let _ = std::fs::remove_dir_all(work.join("crates"));
-    for item in ["crates", "Cargo.toml", "Cargo.lock"] {
+    // `config` holds the shipped example configurations, which unit tests
+    // of the node load.
+    for item in ["crates", "config", "Cargo.toml", "Cargo.lock"] {
         let (src, dst) = (root.join(item), work.join(item));
         let r = if src.is_dir() { copy_tree(&src, &dst) } else { std::fs::create_dir_all(&work).and_then(|()| std::fs::copy(&src, &dst).map(|_| ())) };
         if let Err(e) = r {
