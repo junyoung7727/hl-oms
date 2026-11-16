@@ -4,7 +4,7 @@
 
 **Blocked by:** 02, 08
 
-**Status:** ready-for-merge
+**Status:** done
 
 - [x] Test `documented_clearinghouse_state_parses_to_a_margin_report` (seam B, S25): fails when any field of the documented example maps to a wrong value. Does not prove the live answer equals the documented one.
 - [x] Test `missing_zero_or_unparseable_max_leverage_rejects_the_whole_report` (seam B, S25): fails when a partial report is returned.
@@ -21,7 +21,7 @@
 - [x] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
 - [x] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
 - [x] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
-- [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
+- [x] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
 
 ## Comments
 
@@ -49,3 +49,4 @@
   - Mutants renumbered M80–M92 → M67–M79 (ticket 06 took M60–M66) in `crates/xtask/src/mutants.rs` (list in numeric order), `docs/contracts/margin.md`, `docs/verification/README.md`, claim V-MARGIN-10 and this file. The totals in `docs/verification/README.md` are 79. Each of M67–M79 was killed again with `xtask mutants --only` on the merged branch.
   - Conflicts: `mutants.rs`, `registry/claims.toml` (V-MARGIN-7 and V-MARGIN-10 both kept), `registry/contracts.toml` (C-MARGIN lists both claims and the two gateway files), `docs/verification/README.md`, `docs/contracts/margin.md`. In the contract's "not yet in the code" paragraph the stale cancel (ticket 06) and the Hyperliquid queries and the weight check (this ticket) are both gone; only the MM-buffer rule (ticket 07) is left there. `docs/generated` was regenerated.
   - No test needed a changed setup: no test of ticket 09 or of ticket 06 was edited. Workspace tests on the merged branch: 267 passed, 0 failed, 0 ignored. Clippy with warnings denied is clean.
+- Merged into `margin-rules` as a3c5083 (merger claude-fable-5-2, 2026-11-16). Gate: workspace tests 267 passed, 0 failed, 0 ignored; clippy with warnings denied clean; generated documents in step; `verify --extended` without `--live-testnet` 289 tests in 9 suites, all passed (source 0b8724e65a18fdc6, evidence in 645462c); full `xtask mutants` 79 of 79 killed; secret scan, selftest and `rustfmt_added` pass. Nothing was sent to the venue.
