@@ -18,7 +18,7 @@
 - [x] Test `stopped_after_the_reducing_decision_is_durable_the_cancels_are_sent_after_restart` (seam C, crash point, G4): fails when after restart the latch is missing, or a recorded rule cancel is never sent.
 - [x] Test `stopped_around_a_day_base_set_the_base_is_set_exactly_once` (seam C, crash point, G4): fails when after restart the base is missing, doubled, or differs from the report that set it.
 - [x] The crash-point mechanism fires on a margin-report batch; this is test-only code behind the existing feature.
-- [ ] Mutants: each clear precondition and the rebase inside the clear are each caught by a named test.
+- [x] Mutants: each clear precondition and the rebase inside the clear are each caught by a named test.
 - [ ] Stated and not proven here: that the operator judged well; disk loss and power failure.
 - [ ] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
 - [ ] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.

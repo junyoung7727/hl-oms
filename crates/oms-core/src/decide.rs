@@ -571,16 +571,13 @@ impl Tx<'_> {
                     Ok("cleared".into())
                 }
             },
-            OperatorCmd::RebaseDay { note } => {
-                if !self.core.margin_report_is_fresh(self.at) {
-                    Err(MarginRefusal::MarginUnavailable.text().into())
-                } else if note.trim().is_empty() {
-                    Err(MarginRefusal::NoteRequired.text().into())
-                } else {
+            OperatorCmd::RebaseDay { note } => match self.rebase_day_refusal(note) {
+                Some(refusal) => Err(refusal.text().into()),
+                None => {
                     self.rebase_on_the_report()?;
                     Ok("rebased".into())
                 }
-            }
+            },
         };
         self.out.reply = Some(Reply::Operator(reply));
         Ok(())
@@ -590,13 +587,30 @@ impl Tx<'_> {
     /// The release is decided on numbers the venue gave within the last
     /// `margin_max_age_us`, and every release carries a reason.
     fn clear_reduce_refusal(&self, note: &str) -> Option<MarginRefusal> {
-        if self.core.margin.reducing.is_none() {
+        let nothing_to_clear = self.core.margin.reducing.is_none();
+        if nothing_to_clear {
             return Some(MarginRefusal::NotReducing);
         }
-        if !self.core.margin_report_is_fresh(self.at) {
+        let clear_on_a_fresh_report = self.core.margin_report_is_fresh(self.at);
+        if !clear_on_a_fresh_report {
             return Some(MarginRefusal::MarginUnavailable);
         }
-        if note.trim().is_empty() {
+        let clear_has_a_note = !note.trim().is_empty();
+        if !clear_has_a_note {
+            return Some(MarginRefusal::NoteRequired);
+        }
+        None
+    }
+
+    /// Why `rebase-day` cannot be taken now, if it cannot (C-MARGIN, 기준
+    /// 재설정). It does not look at REDUCING.
+    fn rebase_day_refusal(&self, note: &str) -> Option<MarginRefusal> {
+        let rebase_on_a_fresh_report = self.core.margin_report_is_fresh(self.at);
+        if !rebase_on_a_fresh_report {
+            return Some(MarginRefusal::MarginUnavailable);
+        }
+        let rebase_has_a_note = !note.trim().is_empty();
+        if !rebase_has_a_note {
             return Some(MarginRefusal::NoteRequired);
         }
         None
