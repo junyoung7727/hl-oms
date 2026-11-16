@@ -529,7 +529,7 @@ impl World {
 
     fn gateway_send(&mut self, cmd: VenueCommand) -> Result<(), Violation> {
         match cmd {
-            VenueCommand::SendOrder { order_id, instance_id, instrument, side, qty, px, tif, expires_at, .. } => {
+            VenueCommand::SendOrder { order_id, instance_id, instrument, side, qty, px, tif, reduce_only, expires_at } => {
                 self.stats.sends += 1;
                 let n = {
                     let n = self.released_sends.entry(order_id).or_default();
@@ -582,7 +582,7 @@ impl World {
                         }
                     }
                 };
-                let place = PlaceReq { client, instrument, side, qty, px, tif, expires_at };
+                let place = PlaceReq { client, instrument, side, qty, px, tif, expires_at, reduce_only };
                 self.schedule(d, Net::PlaceArrive { req, epoch: self.epoch, place, order_id, immediate });
             }
             VenueCommand::SendCancel { order_id, instance_id, attempt, .. } => {

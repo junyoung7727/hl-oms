@@ -127,6 +127,9 @@ impl State {
                     px,
                     tif,
                     expires_at,
+                    // The wire of this process does not carry the flag: the
+                    // venue process treats every order as a plain one.
+                    reduce_only: false,
                 };
                 let result = match self.venue.place(now, &req, immediate) {
                     PlaceResp::Placed { oid, .. } => PlaceResult::Placed(wire_order(&self.venue.orders[&oid])),

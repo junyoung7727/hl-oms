@@ -177,7 +177,12 @@ fn place_req(order: u64, side: oms_core::Side, qty: &str, px: &str) -> venue::Pl
         px: oms_core::Px::parse(px).unwrap(),
         tif: oms_core::Tif::Gtc,
         expires_at: u64::MAX,
+        reduce_only: false,
     }
+}
+
+fn qty(s: &str) -> oms_core::Qty {
+    oms_core::Qty::parse(s).unwrap()
 }
 
 /// The model's account value against a hand-worked example. The numbers are
@@ -204,6 +209,44 @@ fn world_account_value_follows_fills_price_fees_and_funding() {
     let charged = v.charge_funding(&x(), 1_000);
     assert_eq!(charged, amount("0.052"));
     assert_eq!(v.account_value(), amount("101.938"), "after funding");
+}
+
+/// The venue contract the hold table leans on: a reduce-only order never
+/// makes the position larger and never opens one on the other side. This is
+/// an assumption written into the model from the venue's documentation, not
+/// something observed at the venue (T5).
+#[test]
+fn world_refuses_a_reduce_only_order_that_would_grow_the_position() {
+    use oms_core::Side::{Buy, Sell};
+    let reduce_only = |order, side, q: &str| venue::PlaceReq { reduce_only: true, ..place_req(order, side, q, "100") };
+    let refused = |r: venue::PlaceResp| matches!(r, venue::PlaceResp::Rejected { .. });
+    let mut v = venue::SimVenue::new(true);
+
+    // No position: nothing to reduce, on either side.
+    assert!(refused(v.place(1, &reduce_only(1, Buy, "0.1"), qty("0"))), "flat, buy");
+    assert!(refused(v.place(1, &reduce_only(2, Sell, "0.1"), qty("0"))), "flat, sell");
+
+    // Long 0.5.
+    v.place(2, &place_req(3, Buy, "0.5", "100"), qty("0.5"));
+    assert_eq!(v.position(&x()), 50_000_000);
+    assert!(refused(v.place(3, &reduce_only(4, Buy, "0.1"), qty("0"))), "long, a buy adds to it");
+    assert!(refused(v.place(3, &reduce_only(5, Sell, "0.51"), qty("0"))), "long 0.5, a sell of 0.51 would end short");
+    assert_eq!(v.position(&x()), 50_000_000, "a refused order changes nothing");
+
+    // A reduce-only sell of the whole position rests.
+    let venue::PlaceResp::Placed { oid, .. } = v.place(4, &reduce_only(6, Sell, "0.5"), qty("0")) else {
+        panic!("a reduce-only sell of the whole long position must be placed");
+    };
+    // The position shrinks to 0.2 by another order while it rests.
+    v.place(5, &place_req(7, Sell, "0.3", "100"), qty("0.3"));
+    assert_eq!(v.position(&x()), 20_000_000);
+    // Filling the resting order in full trades only the 0.2 that is left,
+    // and the venue cancels the rest of it.
+    let fill = v.fill(6, oid, qty("0.5")).expect("the order trades what reduces");
+    assert_eq!(fill.qty, qty("0.2"));
+    assert_eq!(v.position(&x()), 0, "never through zero");
+    assert!(matches!(v.orders[&oid].status, venue::SimStatus::Canceled(_)), "{:?}", v.orders[&oid].status);
+    assert!(v.fill(7, oid, qty("0.1")).is_none());
 }
 
 // ---- the margin rules in the world (C-MARGIN) --------------------------------

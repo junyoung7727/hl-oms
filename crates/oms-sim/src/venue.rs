@@ -34,6 +34,7 @@ pub struct SimOrder {
     pub filled: Qty,
     pub status: SimStatus,
     pub updated_at: Ts,
+    pub reduce_only: bool,
 }
 
 impl SimOrder {
@@ -77,6 +78,8 @@ pub struct PlaceReq {
     pub px: Px,
     pub tif: Tif,
     pub expires_at: Ts,
+    /// The venue's reduce-only flag: the order may only shrink the position.
+    pub reduce_only: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -258,6 +261,9 @@ impl SimVenue {
             // and records it.
             self.duplicate_placements.push(key);
         }
+        if req.reduce_only && req.qty > self.reducible(&req.instrument, req.side) {
+            return PlaceResp::Rejected { reason: "reduce only order would increase position".into() };
+        }
         let immediate = immediate.min(req.qty);
         match req.tif {
             Tif::Ioc if immediate.is_zero() => {
@@ -280,6 +286,7 @@ impl SimVenue {
             filled: Qty::ZERO,
             status: SimStatus::Open,
             updated_at: now,
+            reduce_only: req.reduce_only,
         });
         self.by_client.insert(key, oid);
         self.emit_order(oid, now);
@@ -296,12 +303,25 @@ impl SimVenue {
     /// Trades `qty` of an open order at its limit price. Returns the fill, or
     /// `None` if the order is not open.
     pub fn fill(&mut self, now: Ts, oid: u64, qty: Qty) -> Option<SimFill> {
+        let (reduce_only, instrument, side) = {
+            let o = self.orders.get(&oid)?;
+            (o.reduce_only, o.instrument.clone(), o.side)
+        };
+        // A resting reduce-only order trades only what still shrinks the
+        // position; the venue cancels what is left of it once nothing does.
+        let reducible = reduce_only.then(|| self.reducible(&instrument, side));
         let o = self.orders.get_mut(&oid)?;
         if o.status != SimStatus::Open || qty.0 <= 0 {
             return None;
         }
-        let qty = qty.min(o.remaining());
+        let mut qty = qty.min(o.remaining());
+        if let Some(reducible) = reducible {
+            qty = qty.min(reducible);
+        }
         if qty.is_zero() {
+            if reduce_only {
+                self.cancel_oid(now, oid, "reduce only order would increase position");
+            }
             return None;
         }
         o.filled = Qty(o.filled.0 + qty.0);
@@ -327,7 +347,20 @@ impl SimVenue {
         self.fills.push(fill.clone());
         self.stream.push(StreamEvent::Fill(fill.clone()));
         self.emit_order(oid, now);
+        if reducible == Some(qty) {
+            self.cancel_oid(now, oid, "reduce only order would increase position");
+        }
         Some(fill)
+    }
+
+    /// How much an order on `side` can trade before it stops shrinking the
+    /// position: the size of the opposite position, zero when there is none.
+    fn reducible(&self, instrument: &InstrumentId, side: Side) -> Qty {
+        let pos = self.position(instrument);
+        match side {
+            Side::Sell => Qty(pos.max(0)),
+            Side::Buy => Qty((-pos).max(0)),
+        }
     }
 
     fn cancel_oid(&mut self, now: Ts, oid: u64, reason: &str) -> bool {

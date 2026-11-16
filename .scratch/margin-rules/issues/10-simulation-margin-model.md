@@ -8,7 +8,7 @@
 
 - [x] Test `world_account_value_follows_fills_price_fees_and_funding` (seam D, model unit, G10): fails when the model's account value differs from a hand-worked example with one fill, one price move, one fee and one funding charge. Does not prove the venue computes it this way.
 - [x] Test `a_loss_made_only_of_fees_and_funding_enters_reducing` (seam D, G10): fails when fees and funding that take the account more than 5 % below the base do not latch.
-- [ ] Test `world_refuses_a_reduce_only_order_that_would_grow_the_position` (seam D, S3): fails when the model accepts it. This encodes the documented venue contract as an assumption (T5).
+- [x] Test `world_refuses_a_reduce_only_order_that_would_grow_the_position` (seam D, S3): fails when the model accepts it. This encodes the documented venue contract as an assumption (T5).
 - [ ] Test `profile_margin_calm` (seam D, S5): fails when on some interleaving a plain order was accepted with account exposure above the limit at acceptance.
 - [ ] Test `profile_margin_calm_reducing_invariant` (seam D, S8): fails when while REDUCING a plain order is accepted, or a plain order open at entry has no cancel request.
 - [ ] Test `profile_margin_calm_release_invariant` (seam D, S14): fails when REDUCING ends by a restart, a new day or a recovery and not by an operator input.
