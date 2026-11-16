@@ -61,7 +61,7 @@
       "killed": true,
       "note": "",
       "test": "cargo test -p oms-core --test scenarios unknown_send_outcome",
-      "what": "hold reasons no longer cause a rejection"
+      "what": "hold reasons no longer cause a rejection, in either column of the hold table"
     },
     {
       "file": "crates/oms-core/src/decide.rs",
@@ -179,8 +179,35 @@
       "note": "",
       "test": "cargo test -p oms-node --test review_node idle_trading_connections",
       "what": "the admin socket shares its connection pool with the trading socket"
+    },
+    {
+      "file": "crates/oms-core/src/model.rs",
+      "guards": "C-MARGIN / hold table",
+      "id": "M21-partial-hold-refuses-reduce-only",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test scenarios reduce_only_order_is_accepted",
+      "what": "a hold that refuses only plain orders also refuses a reduce-only order"
+    },
+    {
+      "file": "crates/oms-core/src/model.rs",
+      "guards": "C-MARGIN / hold table",
+      "id": "M22-block-all-hold-passes-reduce-only",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test scenarios reduce_only_order_is_rejected_by_every_block_all_hold",
+      "what": "a hold that refuses every new order lets a reduce-only order pass"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / hold table",
+      "id": "M23-hold-table-without-margin-policy",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test scenarios without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order",
+      "what": "the hold table applies although no margin policy is set"
     }
   ],
-  "source_digest": "c2addecd59bc4a5a",
-  "taken_at_us": 1791165791773894
+  "source_digest": "84bbfc41882f370d",
+  "taken_at_us": 1794806474695048
 }

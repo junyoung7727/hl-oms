@@ -35,27 +35,27 @@ cargo run --release -p xtask -- docs              # 결과를 주장과 묶어 �
 | `sim-extended`, `kills-extended` | `--extended`일 때만. 시뮬레이션 seed 3000개, 실제 디스크에서 강제 종료 60회 | 위와 같다 | 위와 같다 |
 | `hl-live` | 실제 testnet에 읽기 전용 조회와 스트림 구독 | 실제 네트워크와 거래소 | 주문은 보내지 않는다 |
 
-### 보관된 실행 (소스 `4f6788394bb348d6`, 2026-11-16 00:27 ~ 00:35 KST, 저장소는 500GB SSD, 빌드 출력과 시험 자료는 970 EVO Plus 2TB)
+### 보관된 실행 (소스 `84bbfc41882f370d`, 2026-11-16 14:11 ~ 14:21 KST, 저장소는 500GB SSD, 빌드 출력과 시험 자료는 970 EVO Plus 2TB)
 
-결과 파일: `evidence/latest/results.json`. `--extended`로 실행했고 `--live-testnet`은 주지 않았다. 실제 거래소에는 접속하지 않았다.
+결과 파일: `evidence/latest/results.json`, `evidence/mutants.json`. `--extended`로 실행했고 `--live-testnet`은 주지 않았다. 실제 거래소에는 접속하지 않았다.
 
 | 묶음 | 결과 | 실행한 양 |
 |---|---|---|
-| `core` | 94건 통과 | |
+| `core` | 102건 통과 | |
 | `journal` | 29건 통과 | |
 | `api` | 1건 통과 | |
 | `sim` | 11건 통과 | 프로파일 7개 × seed 400개. 깨진 가정 둘은 `bridge` 위반으로 잡힘 |
 | `node-unit` | 24건 통과 | |
 | `pipeline` | 8건 통과 | |
-| `e2e` | 22건 통과 | 강제 종료 20회(수용 1,101건, 가상 거래소의 주문 1,101건), `verify --re-decide` 기록 6,361건 |
+| `e2e` | 22건 통과 | 강제 종료 20회(수용 1,166건, 가상 거래소의 주문 1,166건), `verify --re-decide` 기록 6,465건 |
 | `hl-live` | **실행하지 않음** | 이 묶음에만 기대는 주장 V-HL-3은 "미실행"이다 |
 | `sim-extended` | 11건 통과 | 프로파일 7개 × seed 3000개. 입력 약 5,700만 건, 기록 약 2,300만 건 |
-| `kills-extended` | 1건 통과 | 강제 종료 60회. 수용 3,200건, 가상 거래소의 주문 3,199건, `verify --re-decide` 기록 18,124건 |
-| 변이 점검 | **다시 실행하지 않음** | `evidence/mutants.json`은 소스 `c2addecd59bc4a5a`의 결과다. V-MUT-1은 "이전 버전 결과"다 |
+| `kills-extended` | 1건 통과 | 강제 종료 60회. 수용 3,188건, 가상 거래소의 주문 3,188건, `verify --re-decide` 기록 17,835건 |
+| 변이 점검 | 23건 중 23건을 시험이 잡음 | M21~M23은 차단 표(V-MARGIN-1)의 변이다 |
 | 성능 | **다시 측정하지 않음** | `evidence/perf/`는 소스 `c2addecd59bc4a5a`의 측정이다. V-PERF-1~5는 "이전 버전 결과"다 |
 
-주장 56건: 통과 49, 미실행 1(V-HL-3), 이전 버전 결과 6(V-PERF-1~5, V-MUT-1). 실패는 없다. 주장별 상태는 [generated/claims.md](../generated/claims.md)에 있다.
-이 소스와 `c2addecd59bc4a5a`의 차이는 clippy 경고 9건의 수정이고 동작은 바꾸지 않았다. 그래도 다이제스트가 달라졌으므로 다시 실행하지 않은 결과는 통과로 세지 않는다.
+주장 57건: 통과 51, 미실행 1(V-HL-3), 이전 버전 결과 5(V-PERF-1~5). 실패는 없다. 주장별 상태는 [generated/claims.md](../generated/claims.md)에 있다.
+이 소스와 `c2addecd59bc4a5a`의 차이는 clippy 경고 9건의 수정과 차단 표(증거금 정책이 있을 때 감소 전용 주문이 일부 차단을 통과한다, ADR-018)다. 다이제스트가 달라졌으므로 다시 측정하지 않은 성능 결과는 통과로 세지 않는다.
 
 ### 이전 실행 (소스 `c2addecd59bc4a5a`, 2026-10-05 10:53 ~ 11:09, 저장소와 빌드 출력이 모두 970 EVO Plus 2TB에 있음)
 
