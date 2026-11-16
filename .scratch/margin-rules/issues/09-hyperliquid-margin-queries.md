@@ -11,7 +11,7 @@
 - [x] Test `any_unparseable_number_rejects_the_whole_report` (seam B, S25): fails when a bad account value, size, position value or margin is defaulted to zero.
 - [x] Test `a_position_on_an_unconfigured_coin_is_kept` (seam B, S22): fails when it is dropped, so the MM-buffer rule cannot see a manual position.
 - [x] Test `documented_active_asset_data_parses_leverage_and_mode` (seam B, S17): fails when the mapping is wrong. Does not prove it answers with no position (T11).
-- [ ] Test `user_abstraction_values_parse_and_an_unknown_value_stays_unknown` (seam B, S18): fails when an unknown string maps to an allowed mode.
+- [x] Test `user_abstraction_values_parse_and_an_unknown_value_stays_unknown` (seam B, S18): fails when an unknown string maps to an allowed mode.
 - [ ] Test `margin_and_setting_request_json` (seam B): fails when a request body differs from the documented one.
 - [ ] Test `example_config_with_a_margin_policy_loads` (seam node unit, S21): fails when the shipped example configuration fails validation.
 - [ ] Test `steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused` (seam node unit, G7): fails when the weight for the shipped configuration is not the hand-worked literal (216 + 20 per instrument), or a configuration above 600 loads.

@@ -456,6 +456,28 @@ pub fn venue_setting_input(body: &serde_json::Value, session: u64, instrument: &
     })
 }
 
+/// Longest account mode passed on. The documented values have at most 15
+/// letters; the value is journaled, so it is bounded.
+const ACCOUNT_MODE_MAX_LEN: usize = 64;
+
+/// Turns the answer to a `userAbstraction` query into the core's input.
+///
+/// The answer is one JSON string. It is passed on exactly as it came: this
+/// gateway does not decide which mode is acceptable and never rewrites a
+/// value it does not know into one it knows. The core accepts a mode only
+/// if the allow-list spells it the same way, so an unknown value holds the
+/// account. An answer that is not a string gives no input.
+pub fn account_mode_input(body: &serde_json::Value, session: u64) -> Option<VenueInput> {
+    let mode = body.as_str()?;
+    if mode.len() > ACCOUNT_MODE_MAX_LEN {
+        return None;
+    }
+    Some(VenueInput::AccountMode {
+        session,
+        mode: mode.to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -770,6 +792,32 @@ mod tests {
         assert_eq!(with(&|b| b["coin"] = json!("BTC")), None);
         assert_eq!(with(&|b| { b.as_object_mut().unwrap().remove("coin"); }), None);
         assert_eq!(venue_setting_input(&json!(null), 8, &apt), None);
+    }
+
+    /// S18. The answer to `userAbstraction` is one JSON string. The five
+    /// documented values reach the core letter for letter. A string that
+    /// is not documented is not turned into one that is: it reaches the
+    /// core as it came, where only an allow-list entry spelled the same
+    /// way could pass it. Anything that is not a string is no mode.
+    #[test]
+    fn user_abstraction_values_parse_and_an_unknown_value_stays_unknown() {
+        let mode = |body: serde_json::Value| match account_mode_input(&body, 7) {
+            Some(VenueInput::AccountMode { session: 7, mode }) => Some(mode),
+            None => None,
+            other => panic!("{other:?}"),
+        };
+        for documented in ["unifiedAccount", "portfolioMargin", "disabled", "default", "dexAbstraction"] {
+            assert_eq!(mode(json!(documented)).as_deref(), Some(documented));
+        }
+        for unknown in ["somethingNew", "Default", "DISABLED", " default", "default ", "standard", ""] {
+            assert_eq!(mode(json!(unknown)).as_deref(), Some(unknown));
+        }
+        for not_a_mode in [json!(null), json!({"mode": "default"}), json!(["default"]), json!(1), json!(true)] {
+            assert_eq!(mode(not_a_mode.clone()), None, "{not_a_mode}");
+        }
+        // The value is journaled, so its length is bounded.
+        assert_eq!(mode(json!("x".repeat(64))), Some("x".repeat(64)));
+        assert_eq!(mode(json!("x".repeat(65))), None);
     }
 
     /// Response examples from the Exchange endpoint documentation.
