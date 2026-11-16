@@ -1430,6 +1430,7 @@ fn margin_events_replay_to_the_same_state() {
 fn instrument_with_unknown_venue_setting_holds_plain_orders() {
     let mut h = H::configured(config_with_margin());
     h.link_up_and_sync_only();
+    h.tell_account_mode();
     h.report_margin("1000");
     h.ref_price("X", "100");
 
@@ -1536,6 +1537,7 @@ fn a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again() {
     link_down(&mut h);
     h.link_up_and_sync_only();
     assert_eq!(h.session, 2);
+    h.tell_account_mode();
     h.report_margin("1000");
     h.ref_price("X", "100");
     assert_eq!(h.reject("a", "k2", Side::Buy, "1", "100"), venue_setting_hold("X"));
@@ -1600,6 +1602,7 @@ fn a_cross_position_in_a_margin_report_raises_the_hold() {
 fn venue_setting_hold_names_its_instrument_in_holds() {
     let mut h = H::configured(config_xy());
     h.link_up_and_sync_only();
+    h.tell_account_mode();
     let hold = |i: &str| HoldReason::VenueSetting(iid(i));
     assert_eq!(h.core.holds(None), vec![hold("X"), hold("Y")]);
 
@@ -1670,4 +1673,62 @@ fn unified_or_portfolio_account_mode_holds_the_account() {
     h.account_mode("standard");
     assert_eq!(h.core.holds(None), vec![]);
     h.accept("a", "k1", Side::Buy, "1", "100");
+}
+
+/// S18. Only a mode the configuration lists lets plain orders through. A
+/// mode that is not listed, an empty answer, and no answer at all in this
+/// link session each hold the account. "standard" stands here for whatever
+/// the venue calls its ordinary mode; which string that is on the real
+/// venue is not known (T10), so the operator has to list it.
+#[test]
+fn an_account_mode_off_the_allow_list_or_unknown_holds_the_account() {
+    let mut h = H::configured(config_allowing(&["standard"]));
+    h.link_up_and_sync_only();
+    h.venue_setting("X", true, 2);
+    h.venue_setting("Y", true, 2);
+    h.report_margin("1000");
+    h.ref_price("X", "100");
+
+    // The venue has not told the mode in this link session.
+    assert_eq!(h.core.holds(None), vec![HoldReason::AccountMode]);
+    assert_eq!(h.reject("a", "k1", Side::Buy, "1", "100"), account_mode_hold());
+
+    // The listed mode releases the account.
+    h.account_mode("standard");
+    assert_eq!(h.core.holds(None), vec![]);
+    h.accept("a", "k1", Side::Buy, "1", "100");
+
+    // A mode that is not listed, and an empty answer.
+    for mode in ["dexAbstraction", "Standard", ""] {
+        h.account_mode(mode);
+        assert_eq!(h.reject("a", "k2", Side::Buy, "1", "100"), account_mode_hold(), "mode {mode:?}");
+    }
+    h.account_mode("standard");
+    h.accept("a", "k2", Side::Buy, "1", "100");
+
+    // A new link session: the mode told in session 1 does not count, and a
+    // late answer to a query of session 1 is dropped.
+    link_down(&mut h);
+    h.link_up_and_sync_only();
+    h.venue_setting("X", true, 2);
+    h.venue_setting("Y", true, 2);
+    h.report_margin("1000");
+    h.ref_price("X", "100");
+    let out = h.venue(VenueInput::AccountMode {
+        session: 1,
+        mode: "standard".into(),
+    });
+    assert_eq!(names(&out), Vec::<&str>::new());
+    assert_eq!(h.core.holds(None), vec![HoldReason::AccountMode]);
+    assert_eq!(h.reject("a", "k3", Side::Buy, "1", "100"), account_mode_hold());
+    h.account_mode("standard");
+    h.accept("a", "k3", Side::Buy, "1", "100");
+
+    // The default allow-list is empty: no mode passes until one is listed.
+    let mut h = H::configured(config_allowing(&[]));
+    h.link_up_and_sync_only();
+    h.venue_setting("X", true, 2);
+    h.venue_setting("Y", true, 2);
+    h.account_mode("standard");
+    assert_eq!(h.core.holds(None), vec![HoldReason::AccountMode]);
 }

@@ -42,7 +42,7 @@ pub async fn run(published: Arc<Published>, queries: mpsc::Sender<QueryReq>, eve
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tick.tick().await;
-        let (needs, link_up, fills_since, margin_rules, settings_unknown) = {
+        let (needs, link_up, fills_since, margin_rules, settings_unknown, mode_unknown) = {
             let p = published.read();
             let margin_rules = p.core.config.policy.margin.is_some();
             // Instruments whose venue setting the core has not been told in
@@ -64,6 +64,7 @@ pub async fn run(published: Arc<Published>, queries: mpsc::Sender<QueryReq>, eve
                 p.core.sync.fills_up_to.max(p.core.fill_floor),
                 margin_rules,
                 settings_unknown,
+                margin_rules && p.core.margin.account_mode.is_none(),
             )
         };
         if !link_up {
@@ -119,6 +120,11 @@ pub async fn run(published: Arc<Published>, queries: mpsc::Sender<QueryReq>, eve
             for instrument in settings_unknown {
                 wanted.push(QueryReq::VenueSetting { instrument });
             }
+        }
+        // The account mode is asked for once per link session: at link-up,
+        // and again each second until the answer is recorded.
+        if mode_unknown && due(&mut last_account, "account_mode", now) {
+            wanted.push(QueryReq::AccountMode);
         }
         for q in wanted {
             // If the gateway is busy the query is simply not issued this

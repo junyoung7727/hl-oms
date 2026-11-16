@@ -175,6 +175,9 @@ impl State {
                 isolated: true,
                 leverage: 2,
             })),
+            SimOp::AccountMode => Ok(json(&AccountModeResult {
+                mode: SIM_STANDARD_MODE.into(),
+            })),
             SimOp::Subscribe => Err("subscribe is handled by the connection".into()),
             SimOp::Ctl { action } => self.ctl(action, now),
         }

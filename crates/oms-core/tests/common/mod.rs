@@ -85,13 +85,23 @@ pub fn config() -> CoreConfig {
     }
 }
 
-/// `config()` with a margin policy at its default values. A plain order then
-/// needs a fresh margin report: see `H::report_margin`.
+/// `config()` with a margin policy at its default values, and the account
+/// mode `STANDARD_MODE` on the allow-list (the default list is empty and
+/// lets no plain order through). A plain order then needs a fresh margin
+/// report: see `H::report_margin`.
 pub fn config_with_margin() -> CoreConfig {
     let mut cfg = config();
-    cfg.policy.margin = Some(MarginPolicy::default());
+    cfg.policy.margin = Some(MarginPolicy {
+        account_modes_allowed: vec![STANDARD_MODE.into()],
+        ..MarginPolicy::default()
+    });
     cfg
 }
+
+/// What the venue of these tests calls its ordinary account mode. The
+/// string the real venue uses is not known (T10); the default allow-list is
+/// empty and the operator lists it.
+pub const STANDARD_MODE: &str = "standard";
 
 pub struct H {
     pub core: Core,
@@ -125,7 +135,17 @@ impl H {
     pub fn ready_with(cfg: CoreConfig) -> H {
         let mut h = H::configured(cfg);
         h.link_up_and_sync();
-        assert_eq!(h.core.holds(None), vec![]);
+        // A margin policy that does not list the mode of this venue holds
+        // the account.
+        let lists_the_mode = h
+            .core
+            .config
+            .policy
+            .margin
+            .as_ref()
+            .is_none_or(|m| m.account_modes_allowed.iter().any(|mode| mode == STANDARD_MODE));
+        let expected = if lists_the_mode { vec![] } else { vec![HoldReason::AccountMode] };
+        assert_eq!(h.core.holds(None), expected);
         h
     }
 
@@ -146,7 +166,7 @@ impl H {
     }
 
     /// A new link session with the three account-level sweeps and nothing
-    /// else: the venue has not told any venue setting in it.
+    /// else: the venue has told no venue setting and no account mode in it.
     pub fn link_up_and_sync_only(&mut self) {
         self.session += 1;
         let session = self.session;
@@ -159,8 +179,9 @@ impl H {
     }
 
     /// With a margin policy: the venue tells, for every configured
-    /// instrument, the margin mode and the leverage the policy asks for.
-    /// Without a margin policy: nothing.
+    /// instrument, the margin mode and the leverage the policy asks for,
+    /// and an account mode the policy lists. Without a margin policy:
+    /// nothing.
     pub fn venue_matches_policy(&mut self) {
         let Some(policy) = self.core.config.policy.margin.clone() else {
             return;
@@ -173,6 +194,22 @@ impl H {
                 isolated: policy.isolated,
                 leverage: policy.venue_leverage,
             });
+        }
+        self.tell_account_mode();
+    }
+
+    /// With a margin policy that lists `STANDARD_MODE`: the venue tells that
+    /// mode. Otherwise nothing.
+    pub fn tell_account_mode(&mut self) {
+        let listed = self
+            .core
+            .config
+            .policy
+            .margin
+            .as_ref()
+            .and_then(|m| m.account_modes_allowed.iter().find(|mode| *mode == STANDARD_MODE).cloned());
+        if let Some(mode) = listed {
+            self.account_mode(&mode);
         }
     }
 

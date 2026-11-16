@@ -493,7 +493,7 @@ impl Gateway {
             // (C-MARGIN, ticket 09). Until then it is not answered: with a
             // margin policy the core sees no report and refuses plain
             // orders, which is the safe side.
-            QueryReq::Margin { .. } | QueryReq::VenueSetting { .. } => {}
+            QueryReq::Margin { .. } | QueryReq::VenueSetting { .. } | QueryReq::AccountMode => {}
             QueryReq::Positions => {
                 let body = serde_json::json!({"type": "clearinghouseState", "user": self.account});
                 let Some(resp) = self.info(body, 2.0).await else { return };

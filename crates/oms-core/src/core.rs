@@ -217,14 +217,20 @@ impl Core {
         mode_matches && leverage_matches
     }
 
-    /// Whether the account mode lets the margin rules run (C-MARGIN, 거래소
-    /// 설정과 계좌 모드).
+    /// Whether the venue told, in the current link session, an account mode
+    /// that lets the margin rules run (C-MARGIN, 거래소 설정과 계좌 모드).
+    /// False without a margin policy.
     pub fn account_mode_is_allowed(&self) -> bool {
+        let Some(policy) = &self.config.policy.margin else {
+            return false;
+        };
+        // Not told in this link session: unknown.
         let Some(mode) = &self.margin.account_mode else {
-            return true;
+            return false;
         };
         let never_allowed = ACCOUNT_MODES_NEVER_ALLOWED.contains(&mode.as_str());
-        !never_allowed
+        let listed = policy.account_modes_allowed.iter().any(|allowed| allowed == mode);
+        listed && !never_allowed
     }
 
     /// Whether a margin report exists that is fresh at record time `at`
@@ -360,9 +366,11 @@ impl Core {
                 self.link.up = *up;
                 self.link.session = *session;
                 // What the venue told in one link session says nothing
-                // about the next (C-MARGIN): the venue settings are unknown
-                // again. The last margin report stays.
+                // about the next (C-MARGIN): the venue settings and the
+                // account mode are unknown again. The last margin report
+                // stays.
                 self.margin.venue_settings.clear();
+                self.margin.account_mode = None;
             }
             Event::RequestRejected { .. } => {
                 self.stats.rejected += 1;

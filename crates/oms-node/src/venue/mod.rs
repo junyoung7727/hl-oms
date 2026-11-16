@@ -53,6 +53,9 @@ pub enum QueryReq {
     VenueSetting {
         instrument: InstrumentId,
     },
+    /// The account-wide margin scheme at the venue (C-MARGIN). Answered
+    /// with `AccountMode`, or not at all.
+    AccountMode,
 }
 
 /// The gateway's side of the channels.

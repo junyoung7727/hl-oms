@@ -47,6 +47,8 @@ pub enum SimOp {
     VenueSetting {
         instrument: InstrumentId,
     },
+    /// The account mode. Answered with an `AccountModeResult`.
+    AccountMode,
     /// Turns this connection into an event stream.
     Subscribe,
     Ctl {
@@ -177,6 +179,16 @@ pub struct VenueSettingResult {
     pub isolated: bool,
     pub leverage: u32,
 }
+
+/// Answer to `SimOp::AccountMode`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AccountModeResult {
+    pub mode: String,
+}
+
+/// What the simulated venue calls its ordinary account mode. This is the
+/// simulated venue's own name, not a Hyperliquid value (T10).
+pub const SIM_STANDARD_MODE: &str = "standard";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

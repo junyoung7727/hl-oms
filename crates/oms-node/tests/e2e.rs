@@ -594,7 +594,7 @@ fn random_kills_under_load_keep_books_consistent() {
 fn node_polls_margin_and_status_shows_value_and_age() {
     let mut env = Env::new("margin-poll");
     env.extra_runtime = "margin_poll_ms = 100".into();
-    env.extra_policy = "\n[core.policy.margin]\n".into();
+    env.extra_policy = "\n[core.policy.margin]\naccount_modes_allowed = [\"standard\"]\n".into();
     env.ctl(json!({"account_value": {"value": "250.5"}}));
     env.start_node();
     env.wait_ready();
@@ -668,7 +668,7 @@ fn node_polls_margin_and_status_shows_value_and_age() {
 fn status_shows_account_exposure() {
     let mut env = Env::new("margin-exposure");
     env.extra_runtime = "margin_poll_ms = 100".into();
-    env.extra_policy = "\n[core.policy.margin]\n".into();
+    env.extra_policy = "\n[core.policy.margin]\naccount_modes_allowed = [\"standard\"]\n".into();
     env.ctl(json!({"account_value": {"value": "100"}}));
     env.start_node();
     env.wait_ready();

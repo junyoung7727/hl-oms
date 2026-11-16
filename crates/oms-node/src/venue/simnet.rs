@@ -386,6 +386,17 @@ impl Gateway {
                 };
                 self.input.send(input).await;
             }
+            QueryReq::AccountMode => {
+                // No answer, or one that cannot be read: no input. The mode
+                // stays unknown and the account stays held.
+                let Ok(resp) = self.requests.call(SimOp::AccountMode).await else {
+                    return;
+                };
+                let Ok(r) = serde_json::from_value::<AccountModeResult>(resp.result) else {
+                    return;
+                };
+                self.input.send(VenueInput::AccountMode { session, mode: r.mode }).await;
+            }
             QueryReq::VenueSetting { instrument } => {
                 // No answer, or one that cannot be read: no input. The
                 // setting stays unknown and the instrument stays held.
