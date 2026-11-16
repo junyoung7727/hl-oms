@@ -710,8 +710,89 @@
       "note": "",
       "test": "cargo test -p oms-node --lib a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time",
       "what": "an info query may use the budget reserved for orders and cancels"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / MM buffer",
+      "id": "M80-mm-buffer-judged-only-on-a-fresh-report",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin an_old_report_on_arrival_is_still_judged_by_the_mm_rule",
+      "what": "the MM-buffer rule judges a recorded report only while it is fresh"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / MM buffer",
+      "id": "M81-mm-comparison-direction",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin isolated_margin_below_mmr_plus_buffer_enters_reducing",
+      "what": "the MM-buffer rule trips when the margin is above the line, not below it"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / MM buffer",
+      "id": "M82-mm-comparison-includes-the-line",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin isolated_margin_below_mmr_plus_buffer_enters_reducing",
+      "what": "a margin exactly on the line trips the MM-buffer rule"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / MM buffer",
+      "id": "M83-mm-buffer-term-dropped",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin isolated_margin_below_mmr_plus_buffer_enters_reducing",
+      "what": "the line is the maintenance margin alone, without the buffer"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / MM buffer",
+      "id": "M84-mmr-without-the-factor-two",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin mmr_follows_the_max_leverage_of_each_position",
+      "what": "the maintenance margin rate is 1 / maximum leverage, not 1 / (2 x maximum leverage)"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / MM buffer",
+      "id": "M85-mm-rule-judges-a-cross-position",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin a_cross_position_is_not_judged_by_the_mm_rule",
+      "what": "a cross-margin position is judged by the MM-buffer rule"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / MM buffer",
+      "id": "M86-mm-line-overflow-reads-as-above",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin mm_comparison_is_exact_at_extreme_values",
+      "what": "a line whose scaled product does not fit reads as 'margin is enough'"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / clear and rebase",
+      "id": "M87-clear-reduce-while-the-mm-condition-holds",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin clear_reduce_is_refused_while_the_mm_condition_holds",
+      "what": "clear-reduce is accepted while a position is under its MM-buffer line"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / REDUCING",
+      "id": "M88-daily-loss-judged-before-the-mm-buffer",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin reducing_records_the_rule_that_tripped_first",
+      "what": "a report that trips both rules records the daily loss, not the MM buffer"
     }
   ],
-  "source_digest": "0b8724e65a18fdc6",
-  "taken_at_us": 1794822036816928
+  "source_digest": "2cf32bd373ac7282",
+  "taken_at_us": 1794823048805999
 }
