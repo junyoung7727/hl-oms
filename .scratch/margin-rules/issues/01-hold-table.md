@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Test `reduce_only_order_is_accepted_during_resync` (seam A, S3): fails when the resync hold still rejects a reduce-only order.
 - [ ] Test `reduce_only_order_is_accepted_while_another_order_is_in_doubt` (seam A, S3): fails when the in-doubt hold still rejects it.
