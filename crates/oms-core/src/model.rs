@@ -425,6 +425,9 @@ pub struct VenueSettingSeen {
 pub enum RuleId {
     /// The account value fell more than `daily_loss_bps` below the day base.
     DailyLoss,
+    /// The isolated margin of a position is below its maintenance margin
+    /// plus `mm_buffer_bps` of the position value.
+    MmBuffer,
 }
 
 /// The REDUCING latch (C-MARGIN, 감소 전용 상태).

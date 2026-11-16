@@ -2859,3 +2859,84 @@ fn a_withdrawal_without_rebase_reads_as_a_loss() {
     h.report_margin("96");
     assert_eq!(h.core.margin.reducing, None);
 }
+
+// ---- C-MARGIN: MM buffer --------------------------------------------------------
+
+/// A position as the venue reports it, at the venue setting the policy asks
+/// for (isolated, 2x), with this maximum leverage, value and margin.
+fn position_with(
+    instrument: &str,
+    max_leverage: u32,
+    position_value: &str,
+    margin_used: &str,
+) -> MarginPosition {
+    MarginPosition {
+        position_value: amt(position_value),
+        margin_used: amt(margin_used),
+        ..position(instrument, max_leverage)
+    }
+}
+
+/// The next margin report of the current link session, asked now: account
+/// value 100 (the day base of `at_base_100`, so the daily-loss rule is
+/// silent) and these positions.
+fn report_positions(h: &mut H, positions: Vec<MarginPosition>) -> Output {
+    report_positions_asked_at(h, h.now, positions)
+}
+
+fn report_positions_asked_at(h: &mut H, queried_at: Ts, positions: Vec<MarginPosition>) -> Output {
+    h.margin_seq += 1;
+    h.venue(VenueInput::MarginReport(MarginReportIn {
+        session: h.session,
+        seq: h.margin_seq,
+        queried_at,
+        account_value: amt("100"),
+        positions,
+    }))
+}
+
+fn mm_buffer_entered(detail: &str) -> Event {
+    Event::ReducingEntered {
+        rule: RuleId::MmBuffer,
+        detail: detail.into(),
+    }
+}
+
+/// S16. Maximum leverage 40 gives a maintenance margin rate of 1/80 =
+/// 1.25 %. With the buffer of 0.25 percentage points the line is 1.5 % of
+/// the position value: 3.00 on a value of 200. An isolated margin of
+/// exactly 3.00 does not trip the rule; 2.99 does, and the account is then
+/// REDUCING with the rule `MmBuffer`.
+///
+/// Not proven: that the venue's margin field of an isolated position is its
+/// equity (T1).
+#[test]
+fn isolated_margin_below_mmr_plus_buffer_enters_reducing() {
+    let mut h = at_base_100();
+
+    h.advance(5 * SEC);
+    let out = report_positions(&mut h, vec![position_with("X", 40, "200", "3")]);
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.reducing, None);
+    assert_eq!(h.core.holds(None), vec![]);
+
+    h.advance(5 * SEC);
+    let out = report_positions(&mut h, vec![position_with("X", 40, "200", "2.99")]);
+    let entered_at = h.now;
+    let detail = "position X: isolated margin 2.99 is below the maintenance margin \
+                  at maximum leverage 40 plus 25 bps of the position value 200";
+    assert_eq!(names(&out), vec!["margin_reported", "reducing_entered"]);
+    assert_eq!(out.events[1], mm_buffer_entered(detail));
+    assert_eq!(
+        h.core.margin.reducing,
+        Some(Reducing {
+            rule: RuleId::MmBuffer,
+            detail: detail.into(),
+            since: entered_at,
+        })
+    );
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+    // Nothing is sent to the venue: there is no order to cancel, and the
+    // OMS never closes a position.
+    assert_eq!(out.commands, vec![]);
+}

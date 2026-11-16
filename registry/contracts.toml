@@ -203,4 +203,4 @@ summary = "계좌 레버리지 검사, 일 손실과 유지증거금 여유로 �
 events = ["margin_reported", "margin_report_rejected", "day_base_set", "reducing_entered", "reducing_cleared", "venue_setting_noted", "account_mode_noted"]
 adr = ["ADR-008", "ADR-018"]
 code = ["crates/oms-core/src/config.rs", "crates/oms-core/src/decide.rs", "crates/oms-core/src/core.rs", "crates/oms-core/src/exposure.rs", "crates/oms-core/src/model.rs", "crates/oms-node/src/config.rs", "crates/oms-node/src/venue/reconciler.rs", "crates/oms-node/src/venue/simnet.rs", "crates/oms-node/src/status.rs", "crates/oms-node/src/server.rs", "crates/oms-api/src/lib.rs", "crates/oms-api/src/ctl.rs"]
-claims = ["V-MARGIN-1", "V-MARGIN-2", "V-MARGIN-3", "V-MARGIN-4", "V-MARGIN-5", "V-MARGIN-6", "V-MARGIN-9", "V-MARGIN-11"]
+claims = ["V-MARGIN-1", "V-MARGIN-2", "V-MARGIN-3", "V-MARGIN-4", "V-MARGIN-5", "V-MARGIN-6", "V-MARGIN-8", "V-MARGIN-9", "V-MARGIN-11"]

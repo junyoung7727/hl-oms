@@ -772,8 +772,26 @@ impl Tx<'_> {
             });
         }
         self.emit(Event::MarginReported { report: r.clone() })?;
+        self.judge_mm_buffer(r)?;
         self.judge_daily_loss(r)?;
         self.roll_day_base(r)
+    }
+
+    /// MM buffer (C-MARGIN, 유지증거금 여유): a position of a recorded
+    /// report is close to liquidation.
+    fn judge_mm_buffer(&mut self, r: &MarginReportIn) -> Result<(), CoreFault> {
+        let Some(policy) = &self.core.config.policy.margin else {
+            return Ok(());
+        };
+        let buffer_bps = policy.mm_buffer_bps;
+        let Some(p) = r.positions.iter().find(|p| p.position_value.0 > 0 && mm_buffer_is_used_up(p, buffer_bps)) else {
+            return Ok(());
+        };
+        let detail = format!(
+            "position {}: isolated margin {} is below the maintenance margin at maximum leverage {} plus {} bps of the position value {}",
+            p.instrument, p.margin_used, p.max_leverage, buffer_bps, p.position_value
+        );
+        self.enter_reducing(RuleId::MmBuffer, detail)
     }
 
     /// Daily loss (C-MARGIN): the account value of a recorded report is more
@@ -1644,4 +1662,11 @@ fn reach_after(b: &Book, side: Side, qty: Qty) -> Option<i64> {
         Side::Buy => b.upper()?.checked_add(qty.0),
         Side::Sell => b.lower()?.checked_sub(qty.0),
     }
+}
+
+/// Whether the margin of a position is below (maintenance margin rate +
+/// `buffer_bps`) of its value.
+fn mm_buffer_is_used_up(p: &MarginPosition, buffer_bps: u32) -> bool {
+    let (margin, value) = (i128::from(p.margin_used.0), i128::from(p.position_value.0));
+    margin * 80 * 10_000 < value * (10_000 + 80 * i128::from(buffer_bps))
 }
