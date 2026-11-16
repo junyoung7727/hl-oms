@@ -22,6 +22,7 @@
 - [x] Test `a_report_older_than_the_freshness_limit_on_arrival_is_still_judged` (seam A, S11): an accepted report whose query time is 40 s before the record time shows 94.99 on base 100. Fails when the account does not enter REDUCING with `Rule(DailyLoss)` on that report.
 - [x] Test `an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing` (seam A, S19): fails when after an external fill and a loss report the account is not REDUCING with a mismatch open, or a reduce-only order is then refused.
 - [x] Test `latch_and_day_base_replay_to_the_same_state` (seam A, S13): fails when replay loses the latch or re-bases the day.
+- [x] Test `status_shows_reducing_its_rule_and_the_day_base` (seam C, S8; added by the implementer): fails when the status of a running node does not show REDUCING with the rule `daily_loss`, the hold and the unchanged day base after the venue's account value fell from 100 to 94.99, or a plain order is then accepted.
 - [x] Mutants: a daily-loss judgement that runs only on a fresh report, the loss comparison, the order "judge, then roll", the entry cancel filter (reduce-only kept), the single-entry guard and the `Reducing` row of the hold table are each caught by a named test.
 - [ ] Stated and not proven here: a rule cancel can lose the race to a fill; losses between two reports and losses while no new report is accepted are not stopped; the shape of a real liquidation fill (T6).
 - [ ] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.

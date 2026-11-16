@@ -5,7 +5,7 @@
 
 - 선택 구역 `policy.margin`과 그 기본값, "차단 표"의 `Resync`, `InDoubt`, `Mismatch`(티켓 01, V-MARGIN-1).
 - 입력 `MarginReport`, `MarginReportInvalid`와 이벤트 `MarginReported`, `MarginReportRejected`, "신선도"의 보고 조건(일반 주문의 `MarginUnavailable`, 감소 전용 주문의 면제), 노드의 설정 검사 가운데 mainnet 조건과 값의 범위, `runtime.margin_poll_ms` 간격의 조회, `status`의 계좌 가치와 나이(티켓 02, V-MARGIN-2, V-MARGIN-11).
-- "일 손실과 기준 금액" 전부(운영자가 기준을 정하는 `set_by: Operator`는 빼고), "감소 전용 상태"의 진입과 그 안의 규칙 취소(`Rule(DailyLoss)`), 차단 사유 `Reducing`과 "차단 표"의 그 행, 이벤트 `DayBaseSet`, `ReducingEntered`(티켓 04, V-MARGIN-4, V-MARGIN-5).
+- "일 손실과 기준 금액" 전부(운영자가 기준을 정하는 `set_by: Operator`는 빼고), "감소 전용 상태"의 진입과 그 안의 규칙 취소(`Rule(DailyLoss)`), 차단 사유 `Reducing`과 "차단 표"의 그 행, 이벤트 `DayBaseSet`, `ReducingEntered`, `status`의 감소 전용 상태(`core.margin.reducing`: 규칙, 내용, 시각. 정상이면 null)와 기준 금액(`core.margin.day_base`)(티켓 04, V-MARGIN-4, V-MARGIN-5, V-MARGIN-11).
 
 아직 코드에 없는 것: 유지증거금 여유 판정(`Rule(MmBuffer)`), 감소 전용 상태의 해제(`ReducingCleared`. 그래서 지금은 한번 걸리면 풀 방법이 없다), 레버리지 검사, "신선도"의 참조 가격 조건, 보고 끊김 취소, 거래소 설정과 계좌 모드, 해제와 기준 재설정, 조회 weight 예산 검사, `runtime.venue_setting_poll_ms`. 가상 거래소(simvenue)의 보고는 계좌 가치만 담고 포지션은 비어 있다. Hyperliquid 게이트웨이는 아직 증거금 조회에 답하지 않는다. 그래서 그 게이트웨이에서 `policy.margin`을 켜면 보고가 없어 일반 주문이 모두 `MarginUnavailable`로 거절된다(안전한 쪽).
 
@@ -189,7 +189,7 @@ N_down = max(0, −pos × ref + Σ_매도 예약 × max(지정가, ref))
 | 설정(정책이 없을 때) | V-MARGIN-2 | `margin::without_a_margin_policy_no_margin_check_runs` |
 | 중단과 재실행(재생) | V-MARGIN-2, V-REPLAY-1 | `margin::margin_events_replay_to_the_same_state` |
 | 설정(노드의 설정 검사) | V-CFG-1 | `config::tests::mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused` (oms-node 단위) |
-| 조회와 `status` | V-MARGIN-11 | `e2e::node_polls_margin_and_status_shows_value_and_age` |
+| 조회와 `status` | V-MARGIN-11 | `e2e::node_polls_margin_and_status_shows_value_and_age`, `e2e::status_shows_reducing_its_rule_and_the_day_base` |
 | 일 손실과 기준 금액 | V-MARGIN-5 | `margin::first_report_sets_the_day_base`, `loss_greater_than_five_percent_of_the_base_enters_reducing`, `first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day`, `a_report_of_an_earlier_day_does_not_change_the_day_base`, `a_loss_between_two_reports_enters_reducing_on_the_next_report`, `a_report_older_than_the_freshness_limit_on_arrival_is_still_judged`. 변이 M32~M34 |
 | 감소 전용 상태(진입, 규칙 취소, 주문 받기) | V-MARGIN-4 | `margin::entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones`, `under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted`, `an_order_pending_send_at_entry_is_cancelled_once_acknowledged`, `a_rule_cancel_that_races_a_fill_books_the_fill`, `a_stuck_rule_cancel_does_not_block_reduce_only_orders`, `reducing_is_entered_once`, `a_new_day_does_not_clear_reducing`, `an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing`. 변이 M35~M37. 기존 시험 `scenarios::cancel_race_final_status_decides`는 그대로 통과한다 |
 | 중단과 재실행(재생: 감소 전용 상태와 기준 금액) | V-MARGIN-4, V-MARGIN-5, V-REPLAY-1 | `margin::latch_and_day_base_replay_to_the_same_state` |

@@ -649,3 +649,51 @@ fn node_polls_margin_and_status_shows_value_and_age() {
     assert_eq!(env.venue_dump()["margin_queries"], 0);
     assert_eq!(env.status()["core"]["margin"], serde_json::Value::Null);
 }
+
+/// C-MARGIN: the operator sees the daily-loss rule in `status`. The first
+/// report the node polls becomes the day base. When the venue's account
+/// value falls more than 5 % below it, status shows REDUCING with the rule,
+/// the hold, and the unchanged day base, and a plain order is refused.
+#[test]
+fn status_shows_reducing_its_rule_and_the_day_base() {
+    let mut env = Env::new("margin-reducing-status");
+    env.extra_runtime = "margin_poll_ms = 100".into();
+    env.extra_policy = "\n[core.policy.margin]\n".into();
+    env.ctl(json!({"account_value": {"value": "100"}}));
+    env.start_node();
+    env.wait_ready();
+    assert!(
+        env.wait(Duration::from_secs(5), || {
+            env.try_status().is_some_and(|st| st["core"]["margin"]["account_value"] == "100")
+        }),
+        "status never showed the account value: {}",
+        env.status()["core"]["margin"]
+    );
+    let before = env.status()["core"]["margin"].clone();
+    assert_eq!(before["day_base"]["value"], "100", "no day base in status: {before}");
+    assert_eq!(before["day_base"]["set_by"], "report");
+    // The base's day is the UTC day of the first report's query time: today,
+    // or yesterday if this test runs across midnight.
+    let today = oms_api::client::now_us() / 86_400_000_000;
+    let day = before["day_base"]["day"].as_u64().expect("day is a number");
+    assert!(day == today || day + 1 == today, "day base of day {day}, today is {today}");
+    assert_eq!(before["reducing"], serde_json::Value::Null);
+
+    // The account loses 5.01 % of the base.
+    env.ctl(json!({"account_value": {"value": "94.99"}}));
+    assert!(
+        env.wait(Duration::from_secs(5), || env.status()["core"]["margin"]["reducing"]["rule"] == "daily_loss"),
+        "status never showed REDUCING: {}",
+        env.status()["core"]["margin"]
+    );
+    let st = env.status();
+    let after = &st["core"]["margin"];
+    assert_eq!(after["reducing"]["detail"], "account value 94.99 is more than 500 bps below the day base 100");
+    assert!(after["reducing"]["since"].as_u64().is_some_and(|t| t > 0));
+    assert_eq!(after["day_base"], before["day_base"], "entering REDUCING changed the day base");
+    assert_eq!(st["core"]["holds"], json!(["reducing"]));
+
+    let mut c = env.client("a");
+    let r = c.new_order(order_op("k1", Side::Buy, "1", "100", Tif::Gtc, 5_000)).unwrap();
+    assert_eq!(r, NewOrderReply::Rejected { reasons: vec![RejectReason::Hold(HoldReason::Reducing)] });
+}
