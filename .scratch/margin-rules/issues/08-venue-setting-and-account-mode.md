@@ -25,3 +25,4 @@
 ## Comments
 
 - Spec review r1 (reviewer claude-opus-5-5, head 37c6330), 2026-11-16. Finding 5 (nit, correct): ADR-018 §7 item 9 left out the case "account mode not received in this link session". Resolution: copied from the contract. This ticket's tests already cover the unknown mode.
+- Spec review r2 (reviewer claude-opus-5-5, head 1a78dfb), 2026-11-16. Finding 3 (nit, correct): two tests of this ticket tagged S17 and S18 were missing from those rows of spec-ko.md. Resolution: `reduce_only_order_passes_the_venue_setting_and_account_mode_holds` is now in rows S17 and S18, and `node_reads_venue_setting_and_account_mode_and_status_shows_them` is now also in row S18. No change to this ticket's criteria.

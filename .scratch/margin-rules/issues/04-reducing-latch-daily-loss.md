@@ -12,6 +12,7 @@
 - [ ] Test `under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted` (seam A, S8): fails when either half is wrong, also for a plain order that would reduce the position.
 - [ ] Test `an_order_pending_send_at_entry_is_cancelled_once_acknowledged` (seam A, S9): fails when the cancel is lost, or is sent before the acknowledgement.
 - [ ] Test `a_rule_cancel_that_races_a_fill_books_the_fill` (seam A, S4): fails when a fill that arrives after the rule cancel is not booked, or the final status does not decide.
+- [ ] The existing test `cancel_race_final_status_decides` (S4) stays green: for a strategy cancel that races a fill, the final status still decides.
 - [ ] Test `a_stuck_rule_cancel_does_not_block_reduce_only_orders` (seam A, S10): fails when a stuck cancel after a rule cancel rejects a reduce-only order.
 - [ ] Test `reducing_is_entered_once` (seam A, S8): fails when a second breaching report emits a second entry event or new cancels.
 - [ ] Test `first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day` (seam A, S12): fails when a loss taken across midnight is absorbed into the new base; also for a gap of three days, which rolls once.
@@ -32,3 +33,4 @@
 
 - Spec review r1 (reviewer claude-opus-5-5, head 37c6330), 2026-11-16. Finding 2 (blocking, correct): the documents disagreed on whether a report that is already older than 30 s on arrival is judged. Resolution: it is judged (contract rule kept). The non-guarantee is reworded to "while no new report is accepted" in ADR-018 §8, spec.md, spec-ko.md (S11, §10) and tickets 02 and 04. spec.md Further Notes records this as a change to agreement nodes D1.5 and D1.7. This ticket gains the test `a_report_older_than_the_freshness_limit_on_arrival_is_still_judged`, one mutant and scenario row S11.
 - Spec review r1 (reviewer claude-opus-5-5, head 37c6330), 2026-11-16. Finding 5 (nit, correct): spec-ko.md left out the entry filter "cancel absent or exhausted". Resolution: copied.
+- Spec review r2 (reviewer claude-opus-5-5, head 1a78dfb), 2026-11-16. Finding 2 (nit, correct): the S4 row of spec-ko.md names the existing test `cancel_race_final_status_decides` for this ticket, but this ticket did not list it. Resolution: it is now an acceptance criterion here as an existing guard that stays green, and the intro of the scenario table says that names marked 기존 exist today.
