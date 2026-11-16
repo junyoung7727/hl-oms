@@ -827,6 +827,9 @@ impl Core {
             }
             Event::MarginReported { report } => {
                 self.margin.report = Some(report.clone());
+                // The venue answers readably again: the reason an earlier
+                // answer was refused is no longer the state of things.
+                self.margin.last_rejection = None;
                 // Every position states the margin mode and the leverage of
                 // its instrument: a report is a source of venue settings.
                 for p in &report.positions {

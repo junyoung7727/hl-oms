@@ -388,8 +388,8 @@ pub struct SyncState {
 pub struct MarginState {
     /// The newest report recorded. It stays, and ages, across link changes.
     pub report: Option<crate::input::MarginReportIn>,
-    /// Why the most recent refused report was refused. Shown to the operator;
-    /// no rule reads it.
+    /// Why the most recent refused report was refused, until a later report
+    /// is recorded. Shown to the operator; no rule reads it.
     pub last_rejection: Option<MarginRejection>,
     /// The account value the daily loss is measured against. Changed only by
     /// `day_base_set`; a restart and a link change keep it.

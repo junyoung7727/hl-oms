@@ -294,6 +294,34 @@ fn invalid_margin_report_is_journaled_and_never_becomes_fresh() {
     assert_eq!(recorded(&h), Some((1, 4, amt("99"))));
 }
 
+/// The last rejection is what the operator sees as "why the last margin
+/// report was rejected". A report recorded after it ends it: the venue
+/// answers readably again, and an old reason must not read as a current
+/// problem. Replay gives the same.
+#[test]
+fn a_recorded_report_ends_the_last_rejection() {
+    let mut h = H::ready_with(config_with_margin());
+    h.margin_report(1, 1, h.now, "100");
+    h.advance(5 * SEC);
+    let queried_at = h.now;
+    h.venue(VenueInput::MarginReportInvalid {
+        session: 1,
+        seq: 2,
+        queried_at,
+        reason: "marginSummary.accountValue: not a number".into(),
+    });
+    assert_eq!(
+        h.core.margin.last_rejection.as_ref().map(|r| r.seq),
+        Some(2)
+    );
+
+    h.advance(5 * SEC);
+    let out = h.margin_report(1, 3, h.now, "99");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.last_rejection, None);
+    assert_eq!(h.rebuilt().margin, h.core.margin);
+}
+
 // ---- C-MARGIN: freshness ----------------------------------------------------
 
 /// Moves the harness clock so that the next input is recorded at `at`.
@@ -1404,6 +1432,14 @@ fn margin_events_replay_to_the_same_state() {
         account_value: amt("96"),
         positions: vec![position("X", 40)],
     }));
+    // A rejection lasts until the next recorded report: the one before the
+    // reports above is gone, this one stays.
+    h.venue(VenueInput::MarginReportInvalid {
+        session: 2,
+        seq: 2,
+        queried_at: h.now,
+        reason: "unreadable again".into(),
+    });
     h.advance(31 * SEC);
     h.reject("a", "k2", Side::Buy, "1", "100");
 
@@ -1430,7 +1466,7 @@ fn margin_events_replay_to_the_same_state() {
             .last_rejection
             .as_ref()
             .map(|r| (r.seq, r.reason.as_str())),
-        Some((2, "unreadable"))
+        Some((2, "unreadable again"))
     );
     // The rebuilt core judges freshness as the live one does.
     assert!(rebuilt.margin_report_is_fresh(last_at + 30 * SEC));
