@@ -292,7 +292,7 @@ impl HoldReason {
     pub fn refuses_only_plain_orders(&self) -> bool {
         match self {
             HoldReason::NoConfig | HoldReason::LinkDown | HoldReason::OperatorAccount | HoldReason::OperatorStrategy | HoldReason::StorageLow => false,
-            HoldReason::Reducing => false,
+            HoldReason::Reducing => true,
             HoldReason::Resync | HoldReason::InDoubt | HoldReason::Mismatch => true,
         }
     }

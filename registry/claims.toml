@@ -905,7 +905,7 @@ not_covered = "실제 거래소의 계좌 가치가 뜻하는 것(T2). 입금과
 
 [[claim]]
 id = "V-MARGIN-4"
-statement = "감소 전용 상태로 들어가는 입력 안에서, 감소 전용 표시가 없고 취소 요청이 없거나 취소 시도가 다 된 모든 열린 주문에 규칙 이름으로 취소 요청이 나간다. 표시 없는 익절 주문도 취소된다. 감소 전용 표시가 있는 주문은 그대로 둔다"
+statement = "감소 전용 상태로 들어가는 입력 안에서, 감소 전용 표시가 없고 취소 요청이 없거나 취소 시도가 다 된 모든 열린 주문에 규칙 이름으로 취소 요청이 나간다. 표시 없는 익절 주문도 취소된다. 감소 전용 표시가 있는 주문은 그대로 둔다. 감소 전용 상태에서 일반 주문은 포지션을 줄이는 방향이어도 Hold(Reducing)으로 거절되고, 감소 전용 주문은 받는다"
 why = "손실 한도를 넘은 계좌에 걸려 있는 일반 주문이 체결되면 위험이 더 는다. 줄이는 주문까지 취소하면 포지션을 줄일 길이 없다"
 level = "단위"
 scope = "이벤트 reducing_entered와 그 입력 안의 cancel_requested(by: Rule(DailyLoss)), cancel_sent"
@@ -913,7 +913,7 @@ real = "oms-core"
 simulated = "보고와 거래소 통보는 시험이 입력"
 faults = "취소 시도가 다 된 주문"
 criterion = "C-MARGIN의 '감소 전용 상태'. 기대값은 손으로 적었다"
-tests = ["core/entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones"]
+tests = ["core/entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones", "core/under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted"]
 repro = "cargo test -p oms-core --test margin"
 supports = "C-MARGIN"
 not_covered = "취소가 체결보다 먼저 닿는다는 것. 포지션이 닫힌다는 것(OMS는 닫지 않는다). 링크가 내려가 있는 동안의 동작"

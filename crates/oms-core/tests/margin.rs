@@ -732,3 +732,34 @@ fn entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones() {
     assert_eq!(h.acct().buy_open, q("0.6"));
     assert_eq!(h.acct().sell_open, q("1"));
 }
+
+/// S8. While the account is REDUCING a plain order is refused with
+/// `Hold(Reducing)`, also a plain sell that would only reduce the long
+/// position: "reduce-only" is the venue flag on the order, not a direction
+/// the OMS works out. The same sell with the flag is accepted and sent.
+#[test]
+fn under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted() {
+    let mut h = at_base_100();
+    h.long("a", "k1", "1");
+    h.report_margin("94.99");
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+
+    assert_eq!(
+        h.reject("a", "k2", Side::Buy, "0.1", "100"),
+        vec![RejectReason::Hold(HoldReason::Reducing)]
+    );
+    assert_eq!(
+        h.reject("a", "k3", Side::Sell, "0.5", "100"),
+        vec![RejectReason::Hold(HoldReason::Reducing)]
+    );
+
+    let r = h.reduce_only_req("a", "k4", Side::Sell, "0.5", "100");
+    let order_id = match h.new_order(r) {
+        NewOrderReply::Accepted { order_id } => order_id,
+        other => panic!("a reduce-only order was refused under REDUCING: {other:?}"),
+    };
+    assert!(h.order(order_id).reduce_only);
+    assert_eq!(h.sends().last(), Some(&order_id));
+    // The accepted order is not cancelled by the latch that is already set.
+    assert_eq!(h.order(order_id).cancel, None);
+}
