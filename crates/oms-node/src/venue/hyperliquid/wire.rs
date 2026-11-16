@@ -660,6 +660,29 @@ mod tests {
         );
     }
 
+    /// S22. The parser is not given the configured instruments and has no
+    /// way to leave a position out: a position on a coin this OMS does not
+    /// trade (a manual trade, another dex, a name that needs mapping) is in
+    /// the report, so the MM-buffer rule sees it.
+    #[test]
+    fn a_position_on_an_unconfigured_coin_is_kept() {
+        let mut body = state_with(|p| p["coin"] = json!("kPEPE"));
+        let mut other_dex = body["assetPositions"][0].clone();
+        other_dex["position"]["coin"] = json!("xyz:XYZ100");
+        other_dex["position"]["marginUsed"] = json!("1.5");
+        let mut odd_name = body["assetPositions"][0].clone();
+        odd_name["position"]["coin"] = json!("PURR/USDC");
+        let list = body["assetPositions"].as_array_mut().unwrap();
+        list.push(other_dex);
+        list.push(odd_name);
+        let VenueInput::MarginReport(r) = margin_input(&body, 7, 3, 9) else {
+            panic!("refused");
+        };
+        let coins: Vec<&str> = r.positions.iter().map(|p| p.instrument.as_str()).collect();
+        assert_eq!(coins, ["BTC", "kPEPE", "xyz:XYZ100", "PURR_USDC"]);
+        assert_eq!(r.positions[2].margin_used, Amount(150_000_000));
+    }
+
     /// Response examples from the Exchange endpoint documentation.
     #[test]
     fn documented_place_answers() {
