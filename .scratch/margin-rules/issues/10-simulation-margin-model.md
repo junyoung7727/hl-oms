@@ -4,7 +4,7 @@
 
 **Blocked by:** 03, 05, 06, 07, 08
 
-**Status:** ready-for-merge
+**Status:** done
 
 - [x] Test `world_account_value_follows_fills_price_fees_and_funding` (seam D, model unit, G10): fails when the model's account value differs from a hand-worked example with one fill, one price move, one fee and one funding charge. Does not prove the venue computes it this way.
 - [x] Test `a_loss_made_only_of_fees_and_funding_enters_reducing` (seam D, G10): fails when fees and funding that take the account more than 5 % below the base do not latch.
@@ -19,7 +19,7 @@
 - [x] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
 - [x] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
 - [x] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
-- [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
+- [x] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
 
 ## Comments
 
@@ -45,3 +45,4 @@
   - Not run here: the extended verification and the full mutant run (the merger's; the last checklist line is open). `evidence/mutants.json` lists 88 mutants, the list in the code has 96; "88건" in `README.md` and in the summary row of `docs/verification/README.md` describe the kept run and were left for the merger. Cost for the merger: at 3000 seeds (`sim-extended`) `margin_calm` took 525 s and `margin_lossy` 94 s on this machine, in a release build.
   - Still not guaranteed: everything about the real venue (T1, T2, T3, T5): the account value, the margin and the reduce-only handling are our model. A cancel that loses to a fill (the checks look only for the cancel request). Exposure after a price move (the check is at acceptance). Liquidation (not in the model; the account value can go below zero and the position stays). More than one instrument. More than one UTC midnight (ticket 11). The stale cancel finds few orders even in `margin_lossy` (5 rule cancels in 40 seeds, 1250 in 3000). In `margin_lossy` most plain requests are refused (holds, `MarginUnavailable`, `Reducing`); about 13 % are accepted. The seam C test runs with a 100 ms poll.
   - Local gate on the branch tip (`git merge margin-rules`: already up to date at 69e3d93): `cargo test --workspace --locked` 284 passed, 0 failed, 0 ignored; `cargo test -p oms-node --features failpoints --test pipeline --test crash_points` 11 passed; clippy with warnings denied clean; generated documents in step; secret scan and `rustfmt_added.sh` pass.
+- Merged into `margin-rules` as c3af0a2 (merger claude-fable-5-2, 2026-11-16). Gate: workspace tests 284 passed, 0 failed, 0 ignored; clippy with warnings denied clean; generated documents in step; `verify --extended` without `--live-testnet` 314 tests in 9 suites, all passed (source 1fa039295d1b184b; `sim-extended` 19 tests in 525 s, `kills-extended` 1 test in 113 s); `xtask mutants` 96 of 96 killed; secret scan, selftest and rustfmt-added pass. Nothing had to be fixed during the merge. Left as is: the `sim` suite's description string in `crates/xtask/src/verify.rs` (and so in `evidence/latest/results.json`) still says "7 fault profiles"; the run has 9.
