@@ -222,9 +222,16 @@ fn invalid_margin_report_is_journaled_and_never_becomes_fresh() {
             reason: "marginSummary.accountValue: not a number".into(),
         }]
     );
-    assert_eq!(h.core.margin.report, good, "an unreadable report replaced the last good one");
     assert_eq!(
-        h.core.margin.last_rejection.as_ref().map(|r| (r.seq, r.reason.as_str())),
+        h.core.margin.report, good,
+        "an unreadable report replaced the last good one"
+    );
+    assert_eq!(
+        h.core
+            .margin
+            .last_rejection
+            .as_ref()
+            .map(|r| (r.seq, r.reason.as_str())),
         Some((2, "marginSummary.accountValue: not a number"))
     );
 
@@ -249,8 +256,14 @@ fn invalid_margin_report_is_journaled_and_never_becomes_fresh() {
             reason: "position Y: max_leverage is zero".into(),
         }]
     );
-    assert_eq!(h.core.margin.report, good, "a report with a zero maximum leverage was recorded");
-    assert_eq!(h.core.margin.last_rejection.as_ref().map(|r| r.seq), Some(3));
+    assert_eq!(
+        h.core.margin.report, good,
+        "a report with a zero maximum leverage was recorded"
+    );
+    assert_eq!(
+        h.core.margin.last_rejection.as_ref().map(|r| r.seq),
+        Some(3)
+    );
 
     // Both refusals are in the journal with their reasons, and the rebuilt
     // state shows the same last reason.
@@ -263,7 +276,13 @@ fn invalid_margin_report_is_journaled_and_never_becomes_fresh() {
             _ => None,
         })
         .collect();
-    assert_eq!(reasons, vec!["marginSummary.accountValue: not a number", "position Y: max_leverage is zero"]);
+    assert_eq!(
+        reasons,
+        vec![
+            "marginSummary.accountValue: not a number",
+            "position Y: max_leverage is zero"
+        ]
+    );
     assert_eq!(h.rebuilt().margin, h.core.margin);
 
     // A refused report does not block the next good one.
@@ -288,7 +307,10 @@ fn plain_order_is_rejected_margin_unavailable_without_a_fresh_report() {
     let mut h = H::ready_with(config_with_margin());
 
     // No report was ever recorded.
-    assert_eq!(h.reject("a", "k1", Side::Buy, "1", "100"), vec![RejectReason::MarginUnavailable]);
+    assert_eq!(
+        h.reject("a", "k1", Side::Buy, "1", "100"),
+        vec![RejectReason::MarginUnavailable]
+    );
 
     // A report asked for at t0. An order recorded exactly 30 s later is
     // accepted.
@@ -304,7 +326,10 @@ fn plain_order_is_rejected_margin_unavailable_without_a_fresh_report() {
     h.margin_report(1, 2, t1, "1000");
     next_input_at(&mut h, t1 + 30 * SEC + 1);
     assert_eq!(h.now + 1_000, t1 + 30_000_001);
-    assert_eq!(h.reject("a", "k3", Side::Buy, "1", "100"), vec![RejectReason::MarginUnavailable]);
+    assert_eq!(
+        h.reject("a", "k3", Side::Buy, "1", "100"),
+        vec![RejectReason::MarginUnavailable]
+    );
     // The refusal is not a hold: it latches nothing.
     assert_eq!(h.core.holds(None), vec![]);
 
@@ -325,10 +350,16 @@ fn margin_report_dated_after_the_record_time_is_not_fresh() {
     assert_eq!(names(&out), vec!["margin_reported"]);
 
     // Ten seconds before its query time.
-    assert_eq!(h.reject("a", "k1", Side::Buy, "1", "100"), vec![RejectReason::MarginUnavailable]);
+    assert_eq!(
+        h.reject("a", "k1", Side::Buy, "1", "100"),
+        vec![RejectReason::MarginUnavailable]
+    );
     // One microsecond before its query time.
     next_input_at(&mut h, queried_at - 1);
-    assert_eq!(h.reject("a", "k2", Side::Buy, "1", "100"), vec![RejectReason::MarginUnavailable]);
+    assert_eq!(
+        h.reject("a", "k2", Side::Buy, "1", "100"),
+        vec![RejectReason::MarginUnavailable]
+    );
 
     // A second report, again dated ten seconds ahead. An order recorded
     // exactly at its query time sees age zero and is accepted.
@@ -350,7 +381,10 @@ fn reduce_only_order_needs_no_fresh_report() {
 
     // Reports stop. 31 s later the last one is not fresh.
     h.advance(31 * SEC);
-    assert_eq!(h.reject("a", "k2", Side::Sell, "1", "100"), vec![RejectReason::MarginUnavailable]);
+    assert_eq!(
+        h.reject("a", "k2", Side::Sell, "1", "100"),
+        vec![RejectReason::MarginUnavailable]
+    );
     let r = h.reduce_only_req("a", "k3", Side::Sell, "1", "100");
     let order_id = match h.new_order(r) {
         NewOrderReply::Accepted { order_id } => order_id,
@@ -436,9 +470,24 @@ fn margin_events_replay_to_the_same_state() {
     // The comparison is about something: the rebuilt state holds the last
     // report and the last refusal.
     let report = rebuilt.margin.report.as_ref().unwrap();
-    assert_eq!((report.session, report.seq, report.queried_at, report.account_value), (2, 1, last_at, amt("96")));
+    assert_eq!(
+        (
+            report.session,
+            report.seq,
+            report.queried_at,
+            report.account_value
+        ),
+        (2, 1, last_at, amt("96"))
+    );
     assert_eq!(report.positions, vec![position("X", 40)]);
-    assert_eq!(rebuilt.margin.last_rejection.as_ref().map(|r| (r.seq, r.reason.as_str())), Some((2, "unreadable")));
+    assert_eq!(
+        rebuilt
+            .margin
+            .last_rejection
+            .as_ref()
+            .map(|r| (r.seq, r.reason.as_str())),
+        Some((2, "unreadable"))
+    );
     // The rebuilt core judges freshness as the live one does.
     assert!(rebuilt.margin_report_is_fresh(last_at + 30 * SEC));
     assert!(!rebuilt.margin_report_is_fresh(last_at + 30 * SEC + 1));
@@ -447,7 +496,11 @@ fn margin_events_replay_to_the_same_state() {
     let mut c = Core::new(7);
     for rec in &h.log {
         let out = c.handle(rec.at, &rec.input).unwrap();
-        assert_eq!(out.events, rec.events, "record {} re-decided differently", rec.seq);
+        assert_eq!(
+            out.events, rec.events,
+            "record {} re-decided differently",
+            rec.seq
+        );
     }
     assert_eq!(c.digest(), h.core.digest());
 
