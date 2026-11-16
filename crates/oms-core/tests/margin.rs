@@ -1468,3 +1468,50 @@ fn instrument_with_unknown_venue_setting_holds_plain_orders() {
     h.accept("a", "k1", Side::Buy, "1", "100");
     assert_eq!(h.commands.len(), 1, "only the order itself went to the venue");
 }
+
+fn venue_setting_hold(instrument: &str) -> Vec<RejectReason> {
+    vec![RejectReason::Hold(HoldReason::VenueSetting(iid(instrument)))]
+}
+
+fn submit(h: &mut H, r: NewOrderReq) -> Result<OrderId, Vec<RejectReason>> {
+    match h.new_order(r) {
+        NewOrderReply::Accepted { order_id } => Ok(order_id),
+        NewOrderReply::Rejected { reasons } => Err(reasons),
+        other => panic!("unexpected reply {other:?}"),
+    }
+}
+
+/// S17. The policy asks for isolated margin at leverage 2. An instrument the
+/// venue has on cross margin, or at another leverage, refuses plain orders.
+/// The hold is about that instrument alone: the other instrument trades.
+#[test]
+fn a_setting_that_differs_from_config_holds_only_that_instrument() {
+    let mut h = H::ready_with(config_xy());
+    h.report_margin("1000");
+    h.ref_price("X", "100");
+    h.ref_price("Y", "100");
+
+    // Cross margin at the right leverage.
+    h.venue_setting("X", false, 2);
+    let r = req_on(&h, "X", "x1", Side::Buy, "1", "100");
+    assert_eq!(submit(&mut h, r), Err(venue_setting_hold("X")));
+    let r = req_on(&h, "Y", "y1", Side::Buy, "1", "100");
+    assert!(submit(&mut h, r).is_ok(), "the hold on X also held Y");
+
+    // Isolated margin at leverage 3, and at leverage 1: both differ from 2.
+    for leverage in [3, 1] {
+        h.venue_setting("X", true, leverage);
+        let r = req_on(&h, "X", "x1", Side::Buy, "1", "100");
+        assert_eq!(submit(&mut h, r), Err(venue_setting_hold("X")), "leverage {leverage}");
+    }
+    let r = req_on(&h, "Y", "y2", Side::Buy, "1", "100");
+    assert!(submit(&mut h, r).is_ok(), "the hold on X also held Y");
+
+    // Now Y differs and X is as configured: the hold moves with the fact.
+    h.venue_setting("X", true, 2);
+    h.venue_setting("Y", false, 3);
+    let r = req_on(&h, "X", "x1", Side::Buy, "1", "100");
+    assert!(submit(&mut h, r).is_ok());
+    let r = req_on(&h, "Y", "y3", Side::Buy, "1", "100");
+    assert_eq!(submit(&mut h, r), Err(venue_setting_hold("Y")));
+}

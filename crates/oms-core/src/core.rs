@@ -203,10 +203,15 @@ impl Core {
     /// asks for (C-MARGIN, 거래소 설정과 계좌 모드). False without a margin
     /// policy.
     pub fn venue_setting_is_as_configured(&self, instrument: &InstrumentId) -> bool {
-        if self.config.policy.margin.is_none() {
+        let Some(policy) = &self.config.policy.margin else {
             return false;
-        }
-        self.margin.venue_settings.contains_key(instrument)
+        };
+        let Some(seen) = self.margin.venue_settings.get(instrument) else {
+            return false;
+        };
+        let mode_matches = seen.isolated == policy.isolated;
+        let leverage_matches = seen.leverage == policy.venue_leverage;
+        mode_matches && leverage_matches
     }
 
     /// Whether a margin report exists that is fresh at record time `at`
