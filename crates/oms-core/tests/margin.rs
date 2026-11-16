@@ -3123,3 +3123,52 @@ fn clear_reduce_is_refused_while_the_mm_condition_holds() {
     assert_eq!(refused(&out), active);
     assert_eq!(h.core.margin.reducing, latch);
 }
+
+/// S16. The latch records the rule that tripped first, with what it saw. A
+/// later trigger of the other rule changes nothing and emits nothing,
+/// whichever of the two came first. When one report trips both, the MM
+/// buffer is judged before the daily loss and is the one recorded.
+#[test]
+fn reducing_records_the_rule_that_tripped_first() {
+    let under_the_line = || vec![position_with("X", 40, "200", "2.99")];
+
+    // Daily loss first, then a position under its line.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    h.report_margin("94");
+    let first = h.core.margin.reducing.clone();
+    assert_eq!(first.as_ref().map(|r| r.rule), Some(RuleId::DailyLoss));
+    h.advance(5 * SEC);
+    let out = report_positions(&mut h, under_the_line());
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.reducing, first);
+
+    // A position under its line first, then a loss of 6 %.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    report_positions(&mut h, under_the_line());
+    let first = h.core.margin.reducing.clone();
+    assert_eq!(first.as_ref().map(|r| r.rule), Some(RuleId::MmBuffer));
+    h.advance(5 * SEC);
+    let out = h.report_margin("94");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.reducing, first);
+
+    // Both in one report: account value 94 against the base of 100, and
+    // the position under its line.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    h.margin_seq += 1;
+    let out = h.venue(VenueInput::MarginReport(MarginReportIn {
+        session: h.session,
+        seq: h.margin_seq,
+        queried_at: h.now,
+        account_value: amt("94"),
+        positions: under_the_line(),
+    }));
+    assert_eq!(names(&out), vec!["margin_reported", "reducing_entered"]);
+    assert_eq!(
+        h.core.margin.reducing.as_ref().map(|r| r.rule),
+        Some(RuleId::MmBuffer)
+    );
+}
