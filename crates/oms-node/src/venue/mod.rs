@@ -47,6 +47,15 @@ pub enum QueryReq {
     Margin {
         seq: u64,
     },
+    /// The margin mode and the leverage of one instrument at the venue
+    /// (C-MARGIN). Answered with `VenueSetting`, or not at all. A gateway
+    /// only reads the setting; it never changes it.
+    VenueSetting {
+        instrument: InstrumentId,
+    },
+    /// The account-wide margin scheme at the venue (C-MARGIN). Answered
+    /// with `AccountMode`, or not at all.
+    AccountMode,
 }
 
 /// The gateway's side of the channels.

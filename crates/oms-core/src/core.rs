@@ -191,7 +191,49 @@ impl Core {
         if self.margin.reducing.is_some() {
             v.push(HoldReason::Reducing);
         }
+        if self.config.policy.margin.is_some() {
+            for instrument in self.config.instruments.keys() {
+                if !self.venue_setting_is_as_configured(instrument) {
+                    v.push(HoldReason::VenueSetting(instrument.clone()));
+                }
+            }
+            if !self.account_mode_is_allowed() {
+                v.push(HoldReason::AccountMode);
+            }
+        }
         v
+    }
+
+    /// Whether the venue told, in the current link session, that
+    /// `instrument` has the margin mode and the leverage the margin policy
+    /// asks for (C-MARGIN, 거래소 설정과 계좌 모드). False without a margin
+    /// policy.
+    pub fn venue_setting_is_as_configured(&self, instrument: &InstrumentId) -> bool {
+        let Some(policy) = &self.config.policy.margin else {
+            return false;
+        };
+        let Some(seen) = self.margin.venue_settings.get(instrument) else {
+            return false;
+        };
+        let mode_matches = seen.isolated == policy.isolated;
+        let leverage_matches = seen.leverage == policy.venue_leverage;
+        mode_matches && leverage_matches
+    }
+
+    /// Whether the venue told, in the current link session, an account mode
+    /// that lets the margin rules run (C-MARGIN, 거래소 설정과 계좌 모드).
+    /// False without a margin policy.
+    pub fn account_mode_is_allowed(&self) -> bool {
+        let Some(policy) = &self.config.policy.margin else {
+            return false;
+        };
+        // Not told in this link session: unknown.
+        let Some(mode) = &self.margin.account_mode else {
+            return false;
+        };
+        let never_allowed = ACCOUNT_MODES_NEVER_ALLOWED.contains(&mode.as_str());
+        let listed = policy.account_modes_allowed.iter().any(|allowed| allowed == mode);
+        listed && !never_allowed
     }
 
     /// Whether a margin report exists that is fresh at record time `at`
@@ -326,6 +368,12 @@ impl Core {
             Event::LinkChanged { up, session, .. } => {
                 self.link.up = *up;
                 self.link.session = *session;
+                // What the venue told in one link session says nothing
+                // about the next (C-MARGIN): the venue settings and the
+                // account mode are unknown again. The last margin report
+                // stays.
+                self.margin.venue_settings.clear();
+                self.margin.account_mode = None;
             }
             Event::RequestRejected { .. } => {
                 self.stats.rejected += 1;
@@ -766,6 +814,17 @@ impl Core {
             }
             Event::MarginReported { report } => {
                 self.margin.report = Some(report.clone());
+                // Every position states the margin mode and the leverage of
+                // its instrument: a report is a source of venue settings.
+                for p in &report.positions {
+                    self.margin.venue_settings.insert(
+                        p.instrument.clone(),
+                        VenueSettingSeen {
+                            isolated: p.leverage_type == crate::input::LeverageType::Isolated,
+                            leverage: p.leverage_value,
+                        },
+                    );
+                }
             }
             Event::MarginReportRejected { seq, queried_at, reason, .. } => {
                 self.margin.last_rejection = Some(MarginRejection {
@@ -788,6 +847,23 @@ impl Core {
                     detail: detail.clone(),
                     since: at,
                 });
+            }
+            Event::VenueSettingNoted {
+                instrument,
+                isolated,
+                leverage,
+                ..
+            } => {
+                self.margin.venue_settings.insert(
+                    instrument.clone(),
+                    VenueSettingSeen {
+                        isolated: *isolated,
+                        leverage: *leverage,
+                    },
+                );
+            }
+            Event::AccountModeNoted { mode, .. } => {
+                self.margin.account_mode = Some(mode.clone());
             }
         }
         Ok(())

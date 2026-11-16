@@ -226,6 +226,10 @@ impl Tx<'_> {
         // plain orders. Without one every hold refuses every new order.
         let table_applies = cfg.policy.margin.is_some();
         for h in core.holds(Some(&r.strategy)) {
+            // A venue-setting hold is about one instrument only.
+            if matches!(&h, HoldReason::VenueSetting(i) if *i != r.instrument) {
+                continue;
+            }
             if table_applies && r.reduce_only && h.refuses_only_plain_orders() {
                 continue;
             }
@@ -626,6 +630,31 @@ impl Tx<'_> {
                     seq: *seq,
                     queried_at: *queried_at,
                     reason: reason.clone(),
+                })
+            }
+            VenueInput::VenueSetting {
+                session,
+                instrument,
+                isolated,
+                leverage,
+            } => {
+                if !self.takes_margin_input(*session) || !self.core.config.instruments.contains_key(instrument) {
+                    return Ok(());
+                }
+                self.emit(Event::VenueSettingNoted {
+                    session: *session,
+                    instrument: instrument.clone(),
+                    isolated: *isolated,
+                    leverage: *leverage,
+                })
+            }
+            VenueInput::AccountMode { session, mode } => {
+                if !self.takes_margin_input(*session) {
+                    return Ok(());
+                }
+                self.emit(Event::AccountModeNoted {
+                    session: *session,
+                    mode: mode.clone(),
                 })
             }
         }

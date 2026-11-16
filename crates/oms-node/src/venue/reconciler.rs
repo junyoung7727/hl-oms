@@ -11,7 +11,11 @@
 //!
 //! With a margin policy it also asks for a margin report on its own timer
 //! (C-MARGIN). Each such query gets a number that only rises while this
-//! process lives, so it rises within every link session.
+//! process lives, so it rises within every link session. It asks for the
+//! venue setting of an instrument and for the account mode while the core
+//! does not know them in the current link session, and again for the
+//! setting of every instrument without a position on a second timer. It
+//! never asks the venue to change either.
 
 use super::QueryReq;
 use crate::published::Published;
@@ -32,7 +36,15 @@ fn backoff(attempts: u32) -> Duration {
     }
 }
 
-pub async fn run(published: Arc<Published>, queries: mpsc::Sender<QueryReq>, every: Duration, sweep: Duration, margin_poll: Duration) {
+pub async fn run(
+    published: Arc<Published>,
+    queries: mpsc::Sender<QueryReq>,
+    every: Duration,
+    sweep: Duration,
+    margin_poll: Duration,
+    venue_setting_poll: Duration,
+) {
+    let mut last_setting_poll = Instant::now();
     let mut margin_seq: u64 = 0;
     let mut last_margin: Option<Instant> = None;
     let mut asked: HashMap<OrderId, (u32, Instant)> = HashMap::new();
@@ -42,13 +54,39 @@ pub async fn run(published: Arc<Published>, queries: mpsc::Sender<QueryReq>, eve
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tick.tick().await;
-        let (needs, link_up, fills_since, margin_rules) = {
+        let (needs, link_up, fills_since, margin_rules, settings_unknown, mode_unknown, flat) = {
             let p = published.read();
+            let margin_rules = p.core.config.policy.margin.is_some();
+            // Instruments whose venue setting the core has not been told in
+            // this link session.
+            let settings_unknown: Vec<InstrumentId> = if margin_rules {
+                p.core
+                    .config
+                    .instruments
+                    .keys()
+                    .filter(|i| !p.core.margin.venue_settings.contains_key(*i))
+                    .cloned()
+                    .collect()
+            } else {
+                Vec::new()
+            };
             (
                 p.core.needs(),
                 p.core.link.up,
                 p.core.sync.fills_up_to.max(p.core.fill_floor),
-                p.core.config.policy.margin.is_some(),
+                margin_rules,
+                settings_unknown,
+                margin_rules && p.core.margin.account_mode.is_none(),
+                // Configured instruments without a position. A position
+                // states its setting in every margin report; an instrument
+                // without one has to be asked about.
+                p.core
+                    .config
+                    .instruments
+                    .keys()
+                    .filter(|i| p.core.account.get(*i).is_none_or(|b| b.pos.0 == 0))
+                    .cloned()
+                    .collect::<Vec<InstrumentId>>(),
             )
         };
         if !link_up {
@@ -97,6 +135,30 @@ pub async fn run(published: Arc<Published>, queries: mpsc::Sender<QueryReq>, eve
             last_margin = Some(now);
             margin_seq += 1;
             wanted.push(QueryReq::Margin { seq: margin_seq });
+        }
+        // A venue setting that is not known yet is asked for at once and
+        // then once per second until the answer is recorded.
+        let mut settings_wanted: Vec<InstrumentId> = Vec::new();
+        if !settings_unknown.is_empty() && due(&mut last_account, "venue_settings", now) {
+            settings_wanted = settings_unknown;
+        }
+        // A setting that is known can be changed at the venue at any time:
+        // it is asked for again on a timer.
+        if margin_rules && now.duration_since(last_setting_poll) >= venue_setting_poll {
+            last_setting_poll = now;
+            for instrument in flat {
+                if !settings_wanted.contains(&instrument) {
+                    settings_wanted.push(instrument);
+                }
+            }
+        }
+        for instrument in settings_wanted {
+            wanted.push(QueryReq::VenueSetting { instrument });
+        }
+        // The account mode is asked for once per link session: at link-up,
+        // and again each second until the answer is recorded.
+        if mode_unknown && due(&mut last_account, "account_mode", now) {
+            wanted.push(QueryReq::AccountMode);
         }
         for q in wanted {
             // If the gateway is busy the query is simply not issued this

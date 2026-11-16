@@ -42,6 +42,13 @@ pub enum SimOp {
     Positions,
     /// The account's margin report. Answered with a `MarginResult`.
     Margin,
+    /// Margin mode and leverage of one instrument. Answered with a
+    /// `VenueSettingResult`.
+    VenueSetting {
+        instrument: InstrumentId,
+    },
+    /// The account mode. Answered with an `AccountModeResult`.
+    AccountMode,
     /// Turns this connection into an event stream.
     Subscribe,
     Ctl {
@@ -73,6 +80,11 @@ pub enum Ctl {
     RefPrice { instrument: InstrumentId, px: Px },
     /// Sets the account value the venue states in its margin reports.
     AccountValue { value: Amount },
+    /// Sets the margin mode and the leverage the venue states for one
+    /// instrument. Stands for the operator changing it at the venue.
+    VenueSetting { instrument: InstrumentId, isolated: bool, leverage: u32 },
+    /// Sets the account mode the venue states.
+    AccountMode { mode: String },
     /// Counters and the venue's own view, for test assertions.
     Dump,
 }
@@ -165,6 +177,23 @@ pub struct WirePosition {
 pub struct MarginResult {
     pub account_value: Amount,
 }
+
+/// Answer to `SimOp::VenueSetting`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VenueSettingResult {
+    pub isolated: bool,
+    pub leverage: u32,
+}
+
+/// Answer to `SimOp::AccountMode`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AccountModeResult {
+    pub mode: String,
+}
+
+/// What the simulated venue calls its ordinary account mode. This is the
+/// simulated venue's own name, not a Hyperliquid value (T10).
+pub const SIM_STANDARD_MODE: &str = "standard";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
