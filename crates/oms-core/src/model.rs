@@ -111,6 +111,9 @@ pub struct Close {
 pub enum Actor {
     Strategy(StrategyId),
     Operator,
+    /// A margin rule of the core itself (C-MARGIN). The API builds only the
+    /// two actors above; a request from outside cannot carry this one.
+    Rule(RuleId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -601,3 +601,134 @@ fn loss_greater_than_five_percent_of_the_base_enters_reducing() {
         Some((20_000, amt("100")))
     );
 }
+
+// ---- C-MARGIN: REDUCING -------------------------------------------------------
+
+/// Day 20 000, a reference price of 100 for X, and a first margin report of
+/// 100 that became the day base.
+fn at_base_100() -> H {
+    let mut h = on_day_20_000();
+    let venue_ts = h.now;
+    h.venue(VenueInput::RefPrice {
+        instrument: iid("X"),
+        px: px("100"),
+        venue_ts,
+    });
+    h.report_margin("100");
+    assert_eq!(
+        h.core.margin.day_base.as_ref().map(|b| b.value),
+        Some(amt("100"))
+    );
+    h
+}
+
+/// A resting order the venue acknowledged.
+fn resting(h: &mut H, strategy: &str, key: &str, side: Side, qty: &str, price: &str) -> OrderId {
+    let id = h.accept(strategy, key, side, qty, price);
+    h.placed_open(id, key);
+    assert_eq!(h.order(id).phase, Phase::Working);
+    id
+}
+
+/// A resting order with the venue's reduce-only flag.
+fn resting_reduce_only(h: &mut H, strategy: &str, key: &str, side: Side, qty: &str, price: &str) -> OrderId {
+    let r = h.reduce_only_req(strategy, key, side, qty, price);
+    let id = match h.new_order(r) {
+        NewOrderReply::Accepted { order_id } => order_id,
+        other => panic!("the reduce-only order was refused: {other:?}"),
+    };
+    h.placed_open(id, key);
+    id
+}
+
+fn rule_cancel(id: OrderId) -> Event {
+    Event::CancelRequested {
+        order_id: id,
+        by: Actor::Rule(RuleId::DailyLoss),
+    }
+}
+
+fn cancel_sent(id: OrderId, attempt: u32) -> Event {
+    Event::CancelSent {
+        order_id: id,
+        attempt,
+    }
+}
+
+/// Every attempt of the order's current cancel request ends without an
+/// answer from the venue, until the five attempts of the default policy are
+/// used up. The core then raises `CancelStuck` and sends no further attempt.
+fn exhaust_cancel(h: &mut H, id: OrderId) {
+    let first = h.order(id).cancel.as_ref().unwrap().attempts;
+    for attempt in first..first + 5 {
+        h.venue(VenueInput::CancelResult {
+            order_id: id,
+            attempt,
+            outcome: CancelOutcome::Unknown {
+                reason: "timeout".into(),
+            },
+            timing: Default::default(),
+        });
+        h.advance(SEC);
+        h.tick();
+    }
+    let c = h.order(id).cancel.as_ref().unwrap();
+    assert_eq!((c.used(), c.inflight, c.confirmed), (5, false, false));
+    assert_eq!(h.unacked_mismatches(), vec![MismatchKind::CancelStuck]);
+}
+
+/// S8, S24. In the input that enters REDUCING every resting plain order gets
+/// a cancel by `Rule(DailyLoss)`, and the cancel goes to the venue. A sell
+/// that would take profit but carries no reduce-only flag is a plain order
+/// and is cancelled. An order with the flag is kept. An order whose cancel
+/// the strategy already asked for gets no second request, unless every
+/// attempt of that request is used up: then the rule asks again.
+#[test]
+fn entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones() {
+    let mut h = at_base_100();
+    h.long("a", "k1", "1");
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    let take_profit = resting(&mut h, "a", "tp", Side::Sell, "0.5", "110");
+    let flagged = resting_reduce_only(&mut h, "a", "flagged", Side::Sell, "0.5", "120");
+    let asked = resting(&mut h, "b", "asked", Side::Buy, "0.2", "90");
+    assert_eq!(h.cancel("b", asked), CancelReply::Requested { order_id: asked });
+    assert_eq!(h.cancels(), vec![(asked, 1)]);
+    let given_up = resting(&mut h, "b", "given-up", Side::Buy, "0.2", "90");
+    h.cancel("b", given_up);
+    exhaust_cancel(&mut h, given_up);
+
+    let out = h.report_margin("94.99");
+    assert_eq!(names(&out)[..2], ["margin_reported", "reducing_entered"]);
+    assert_eq!(
+        out.events[2..],
+        [
+            rule_cancel(bid),
+            cancel_sent(bid, 1),
+            rule_cancel(take_profit),
+            cancel_sent(take_profit, 1),
+            rule_cancel(given_up),
+            cancel_sent(given_up, 6),
+        ]
+    );
+    let sent: Vec<OrderId> = out
+        .commands
+        .iter()
+        .map(|c| match c {
+            VenueCommand::SendCancel { order_id, .. } => *order_id,
+            other => panic!("entering REDUCING sent something that is not a cancel: {other:?}"),
+        })
+        .collect();
+    assert_eq!(sent, vec![bid, take_profit, given_up]);
+
+    let by = |id: OrderId| h.order(id).cancel.as_ref().map(|c| c.by.clone());
+    assert_eq!(by(bid), Some(Actor::Rule(RuleId::DailyLoss)));
+    assert_eq!(by(take_profit), Some(Actor::Rule(RuleId::DailyLoss)));
+    assert_eq!(by(flagged), None, "a reduce-only order was cancelled");
+    assert_eq!(by(asked), Some(Actor::Strategy(sid("b"))));
+    assert_eq!(by(given_up), Some(Actor::Rule(RuleId::DailyLoss)));
+    assert_eq!(h.order(flagged).phase, Phase::Working);
+    // A cancel request frees nothing: the plain orders keep their
+    // reservation until the venue reports them closed.
+    assert_eq!(h.acct().buy_open, q("0.6"));
+    assert_eq!(h.acct().sell_open, q("1"));
+}

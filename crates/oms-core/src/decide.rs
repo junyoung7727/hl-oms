@@ -680,9 +680,26 @@ impl Tx<'_> {
         self.enter_reducing(RuleId::DailyLoss, detail)
     }
 
-    /// Latches REDUCING for the whole account.
+    /// Latches REDUCING for the whole account and, in the same input, asks
+    /// to cancel every open plain order. An order with the venue's
+    /// reduce-only flag is kept: it can only lower the position.
     fn enter_reducing(&mut self, rule: RuleId, detail: String) -> Result<(), CoreFault> {
-        self.emit(Event::ReducingEntered { rule, detail })
+        self.emit(Event::ReducingEntered { rule, detail })?;
+        for id in self.open_ids() {
+            let Some(o) = self.core.orders.get(&id) else { continue };
+            let is_plain = !o.reduce_only;
+            if is_plain && (o.cancel.is_none() || self.cancel_exhausted(id)) {
+                self.emit(Event::CancelRequested {
+                    order_id: id,
+                    by: Actor::Rule(rule),
+                })?;
+                // Sent now if the venue has the order. An order still
+                // waiting for its send result keeps the request, and the
+                // cancel goes out when the venue acknowledges it.
+                self.maybe_send_cancel(id)?;
+            }
+        }
+        Ok(())
     }
 
     /// Sets the day base from a recorded report when there is none.

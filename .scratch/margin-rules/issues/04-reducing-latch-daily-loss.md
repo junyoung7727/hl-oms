@@ -8,7 +8,7 @@
 
 - [x] Test `first_report_sets_the_day_base` (seam A): fails when the first report emits no `day_base_set`.
 - [x] Test `loss_greater_than_five_percent_of_the_base_enters_reducing` (seam A, S8): fails when 94.99 does not latch, or 95.00 does.
-- [ ] Test `entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones` (seam A, S8, S24): fails when a resting plain order (an unflagged take-profit included) gets no cancel by `Rule(DailyLoss)`, or a reduce-only order gets one.
+- [x] Test `entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones` (seam A, S8, S24): fails when a resting plain order (an unflagged take-profit included) gets no cancel by `Rule(DailyLoss)`, or a reduce-only order gets one.
 - [ ] Test `under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted` (seam A, S8): fails when either half is wrong, also for a plain order that would reduce the position.
 - [ ] Test `an_order_pending_send_at_entry_is_cancelled_once_acknowledged` (seam A, S9): fails when the cancel is lost, or is sent before the acknowledgement.
 - [ ] Test `a_rule_cancel_that_races_a_fill_books_the_fill` (seam A, S4): fails when a fill that arrives after the rule cancel is not booked, or the final status does not decide.
