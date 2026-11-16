@@ -641,7 +641,10 @@ fn rejected(reply: NewOrderReply) -> Vec<RejectReason> {
 
 /// The account exposure the core publishes, as a decimal of quote units.
 fn exposure(h: &H) -> String {
-    h.core.account_exposure().expect("exposure is known").to_string()
+    h.core
+        .account_exposure()
+        .expect("exposure is known")
+        .to_string()
 }
 
 /// S5. Account exposure is the sum over instruments: two instruments cannot
@@ -660,10 +663,16 @@ fn exposure_is_the_sum_over_instruments() {
     assert_eq!(exposure(&h), "150");
     // 150 on X and 150 on Y is 300.
     let r = req_on(&h, "Y", "k2", Side::Buy, "1.5", "100");
-    assert_eq!(rejected(h.new_order(r)), vec![RejectReason::AccountLeverage]);
+    assert_eq!(
+        rejected(h.new_order(r)),
+        vec![RejectReason::AccountLeverage]
+    );
     // A short on Y does not offset the long on X either.
     let r = req_on(&h, "Y", "k3", Side::Sell, "1.5", "100");
-    assert_eq!(rejected(h.new_order(r)), vec![RejectReason::AccountLeverage]);
+    assert_eq!(
+        rejected(h.new_order(r)),
+        vec![RejectReason::AccountLeverage]
+    );
     assert_eq!(exposure(&h), "150");
 
     // 150 + 50 is at the limit.
@@ -672,9 +681,15 @@ fn exposure_is_the_sum_over_instruments() {
     assert_eq!(exposure(&h), "200");
     // Now neither instrument has room.
     let r = req_on(&h, "X", "k5", Side::Buy, "0.1", "100");
-    assert_eq!(rejected(h.new_order(r)), vec![RejectReason::AccountLeverage]);
+    assert_eq!(
+        rejected(h.new_order(r)),
+        vec![RejectReason::AccountLeverage]
+    );
     let r = req_on(&h, "Y", "k6", Side::Sell, "0.1", "100");
-    assert_eq!(rejected(h.new_order(r)), vec![RejectReason::AccountLeverage]);
+    assert_eq!(
+        rejected(h.new_order(r)),
+        vec![RejectReason::AccountLeverage]
+    );
 }
 
 /// S2. A cancel request frees nothing, and neither does the venue's
@@ -711,7 +726,13 @@ fn partial_fill_then_cancel_frees_exposure_only_on_terminal_evidence() {
 
     // Terminal evidence: cancelled with 0.5 filled. The position of 0.5
     // stays, the resting 1.5 is gone.
-    h.status(id, VenueStatus::Canceled { reason: "user".into() }, Some("0.5"));
+    h.status(
+        id,
+        VenueStatus::Canceled {
+            reason: "user".into(),
+        },
+        Some("0.5"),
+    );
     assert_eq!(h.order(id).phase, Phase::Closed);
     assert_eq!(exposure(&h), "50");
     h.accept("a", "k4", Side::Buy, "1.5", "100");
@@ -724,7 +745,11 @@ fn partial_fill_then_cancel_frees_exposure_only_on_terminal_evidence() {
 /// same, and nothing is held.
 #[test]
 fn a_venue_rejection_of_an_accepted_order_frees_its_exposure() {
-    for reason in ["Insufficient margin to place order", "reduceOnlyCanceled", ""] {
+    for reason in [
+        "Insufficient margin to place order",
+        "reduceOnlyCanceled",
+        "",
+    ] {
         // Refused in the answer to the send.
         let mut h = gate();
         let id = h.accept("a", "k1", Side::Buy, "2", "100");
@@ -735,12 +760,16 @@ fn a_venue_rejection_of_an_accepted_order_frees_its_exposure() {
         );
         h.venue(VenueInput::SendResult {
             order_id: id,
-            outcome: SendOutcome::Rejected { reason: reason.into() },
+            outcome: SendOutcome::Rejected {
+                reason: reason.into(),
+            },
             timing: Default::default(),
         });
         assert_eq!(
             h.order(id).close.as_ref().map(|c| &c.reason),
-            Some(&CloseReason::RejectedByVenue { reason: reason.into() })
+            Some(&CloseReason::RejectedByVenue {
+                reason: reason.into()
+            })
         );
         assert_eq!(exposure(&h), "0", "venue reason {reason:?}");
         assert_eq!(h.core.holds(None), vec![], "venue reason {reason:?}");
@@ -751,7 +780,13 @@ fn a_venue_rejection_of_an_accepted_order_frees_its_exposure() {
         let id = h.accept("a", "k1", Side::Sell, "2", "100");
         h.placed_open(id, "v1");
         assert_eq!(exposure(&h), "200");
-        h.status(id, VenueStatus::Rejected { reason: reason.into() }, None);
+        h.status(
+            id,
+            VenueStatus::Rejected {
+                reason: reason.into(),
+            },
+            None,
+        );
         assert_eq!(h.order(id).phase, Phase::Closed);
         assert_eq!(exposure(&h), "0", "venue reason {reason:?}");
         assert_eq!(h.core.holds(None), vec![], "venue reason {reason:?}");
@@ -845,7 +880,10 @@ fn plain_order_is_rejected_when_an_exposed_instrument_has_no_fresh_reference_pri
     // No reference price for X was ever recorded: the order itself would
     // be exposure on X.
     let r = req_on(&h, "X", "k1", Side::Buy, "1", "100");
-    assert_eq!(rejected(h.new_order(r)), vec![RejectReason::MarginUnavailable]);
+    assert_eq!(
+        rejected(h.new_order(r)),
+        vec![RejectReason::MarginUnavailable]
+    );
 
     // With a price for X the order is accepted. Y has no price and no
     // exposure, and is not asked about.
@@ -880,7 +918,10 @@ fn plain_order_is_rejected_when_an_exposed_instrument_has_no_fresh_reference_pri
     h.ref_price("X", "100");
     assert_eq!(h.now + 1_000, t1 + 15_000_001);
     let r = req_on(&h, "X", "k5", Side::Buy, "0.1", "100");
-    assert_eq!(rejected(h.new_order(r)), vec![RejectReason::MarginUnavailable]);
+    assert_eq!(
+        rejected(h.new_order(r)),
+        vec![RejectReason::MarginUnavailable]
+    );
     // Not a hold, and a reduce-only order is not stopped by it.
     assert_eq!(h.core.holds(None), vec![]);
     let r = NewOrderReq {
@@ -961,20 +1002,28 @@ fn tenths(n: u8) -> String {
 }
 
 fn steps() -> impl Strategy<Value = Vec<Step>> {
-    let order = (any::<bool>(), any::<bool>(), 1u8..=40, 0..PRICES.len(), any::<bool>()).prop_map(
-        |(on_y, buy, qty, px, flag)| Step::Order {
+    let order = (
+        any::<bool>(),
+        any::<bool>(),
+        1u8..=40,
+        0..PRICES.len(),
+        any::<bool>(),
+    )
+        .prop_map(|(on_y, buy, qty, px, flag)| Step::Order {
             on_y,
             buy,
             qty,
             px,
             // One order in four carries the reduce-only flag.
             reduce_only: flag && qty % 2 == 0,
-        },
-    );
+        });
     let fill = (0usize..8, 1u8..=40).prop_map(|(nth, qty)| Step::Fill { nth, qty });
     let price = (any::<bool>(), 0..PRICES.len()).prop_map(|(on_y, px)| Step::Price { on_y, px });
     let value = (0u16..=1500).prop_map(Step::Value);
-    prop::collection::vec(prop_oneof![6 => order, 3 => fill, 1 => price, 1 => value], 1..40)
+    prop::collection::vec(
+        prop_oneof![6 => order, 3 => fill, 1 => price, 1 => value],
+        1..40,
+    )
 }
 
 /// What one step did: the published exposure before and after it, and the
@@ -1007,7 +1056,11 @@ fn play(steps: &[Step], mirrored: bool) -> Vec<Trace> {
                 px,
                 reduce_only,
             } => {
-                let side = if *buy != mirrored { Side::Buy } else { Side::Sell };
+                let side = if *buy != mirrored {
+                    Side::Buy
+                } else {
+                    Side::Sell
+                };
                 let key = format!("k{n}");
                 let r = NewOrderReq {
                     reduce_only: *reduce_only,
@@ -1038,7 +1091,11 @@ fn play(steps: &[Step], mirrored: bool) -> Vec<Trace> {
             }
         }
         let after = h.core.account_exposure().expect("exposure is known");
-        out.push(Trace { before, after, order });
+        out.push(Trace {
+            before,
+            after,
+            order,
+        });
     }
     out
 }
@@ -1100,7 +1157,12 @@ fn config_extreme() -> CoreConfig {
 
 /// The decision on one order in a fresh account with this account value,
 /// with the reference price at the order's price. `None` is an acceptance.
-fn decide_alone(side: Side, qty: &str, price: &str, account_value: &str) -> Option<Vec<RejectReason>> {
+fn decide_alone(
+    side: Side,
+    qty: &str,
+    price: &str,
+    account_value: &str,
+) -> Option<Vec<RejectReason>> {
     let mut h = H::ready_with(config_extreme());
     h.report_margin(account_value);
     h.ref_price("X", price);
@@ -1125,23 +1187,71 @@ fn exposure_is_exact_at_extreme_price_and_quantity() {
     let leverage = Some(vec![RejectReason::AccountLeverage]);
 
     // 90 000 000 000 x 1 = 2 x 45 000 000 000.
-    assert_eq!(decide_alone(Side::Buy, "1", "90000000000", "45000000000"), None);
-    assert_eq!(decide_alone(Side::Buy, "1", "90000000000", "44999999999.99999999"), leverage);
-    assert_eq!(decide_alone(Side::Sell, "1", "90000000000", "45000000000"), None);
-    assert_eq!(decide_alone(Side::Sell, "1", "90000000000", "44999999999.99999999"), leverage);
+    assert_eq!(
+        decide_alone(Side::Buy, "1", "90000000000", "45000000000"),
+        None
+    );
+    assert_eq!(
+        decide_alone(Side::Buy, "1", "90000000000", "44999999999.99999999"),
+        leverage
+    );
+    assert_eq!(
+        decide_alone(Side::Sell, "1", "90000000000", "45000000000"),
+        None
+    );
+    assert_eq!(
+        decide_alone(Side::Sell, "1", "90000000000", "44999999999.99999999"),
+        leverage
+    );
     // One quantity step more is 900 more: 2 x 45 000 000 450.
-    assert_eq!(decide_alone(Side::Buy, "1.00000001", "90000000000", "45000000450"), None);
-    assert_eq!(decide_alone(Side::Buy, "1.00000001", "90000000000", "45000000449.99999999"), leverage);
+    assert_eq!(
+        decide_alone(Side::Buy, "1.00000001", "90000000000", "45000000450"),
+        None
+    );
+    assert_eq!(
+        decide_alone(
+            Side::Buy,
+            "1.00000001",
+            "90000000000",
+            "45000000449.99999999"
+        ),
+        leverage
+    );
     // The largest quantity at price 1: 92 233 720 368.54775807. Half of it
     // is 46 116 860 184.273879035, which is not a multiple of 1e-8: the
     // value just below refuses, the value just above accepts.
-    assert_eq!(decide_alone(Side::Buy, "92233720368.54775807", "1", "46116860184.27387904"), None);
-    assert_eq!(decide_alone(Side::Buy, "92233720368.54775807", "1", "46116860184.27387903"), leverage);
+    assert_eq!(
+        decide_alone(
+            Side::Buy,
+            "92233720368.54775807",
+            "1",
+            "46116860184.27387904"
+        ),
+        None
+    );
+    assert_eq!(
+        decide_alone(
+            Side::Buy,
+            "92233720368.54775807",
+            "1",
+            "46116860184.27387903"
+        ),
+        leverage
+    );
     // Products below 1e-8 quote: 0.00000001 x 4.00000003 = 4.00000003e-8,
     // just above 2 x 0.00000002. Rounded to 1e-8 it would equal the limit.
-    assert_eq!(decide_alone(Side::Buy, "4.00000003", "0.00000001", "0.00000002"), leverage);
-    assert_eq!(decide_alone(Side::Buy, "4.00000003", "0.00000001", "0.00000003"), None);
-    assert_eq!(decide_alone(Side::Buy, "4", "0.00000001", "0.00000002"), None);
+    assert_eq!(
+        decide_alone(Side::Buy, "4.00000003", "0.00000001", "0.00000002"),
+        leverage
+    );
+    assert_eq!(
+        decide_alone(Side::Buy, "4.00000003", "0.00000001", "0.00000003"),
+        None
+    );
+    assert_eq!(
+        decide_alone(Side::Buy, "4", "0.00000001", "0.00000002"),
+        None
+    );
 
     // The largest quantity rests on X and on Y at 0.5, and 10 000 on Z,
     // with the largest account value: 2 x 46 116 860 184.273879035 + 5 000
@@ -1149,7 +1259,10 @@ fn exposure_is_exact_at_extreme_price_and_quantity() {
     let max = "92233720368.54775807";
     let mut h = H::ready_with(config_extreme());
     h.report_margin(max);
-    for (n, (name, qty)) in [("X", max), ("Y", max), ("Z", "10000")].into_iter().enumerate() {
+    for (n, (name, qty)) in [("X", max), ("Y", max), ("Z", "10000")]
+        .into_iter()
+        .enumerate()
+    {
         h.ref_price(name, "0.5");
         let r = req_on(&h, name, &format!("k{n}"), Side::Buy, qty, "0.5");
         accepted(h.new_order(r));
@@ -1163,7 +1276,10 @@ fn exposure_is_exact_at_extreme_price_and_quantity() {
     // Far above the limit: the smallest plain order is refused for
     // leverage, not accepted by a wrapped number.
     let r = req_on(&h, "Z", "k3", Side::Buy, "0.00000001", "0.5");
-    assert_eq!(rejected(h.new_order(r)), vec![RejectReason::AccountLeverage]);
+    assert_eq!(
+        rejected(h.new_order(r)),
+        vec![RejectReason::AccountLeverage]
+    );
     // The price of Y goes there too. The sum no longer fits in an i128: the
     // exposure is unknown and a plain order is refused with `Overflow`.
     h.ref_price("Y", max);
@@ -1185,25 +1301,36 @@ fn exposure_is_exact_at_extreme_price_and_quantity() {
         let max_qty = i64::try_from(notional_cap / i128::from(px)).unwrap_or(i64::MAX);
         // Half of the cases land exactly on a multiple of the limit factor
         // when the range allows it.
-        let on_grid = (1..=(max_qty / 200_000_000).max(1)).prop_map(move |k| k.saturating_mul(200_000_000).min(max_qty));
+        let on_grid = (1..=(max_qty / 200_000_000).max(1))
+            .prop_map(move |k| k.saturating_mul(200_000_000).min(max_qty));
         (Just(px), prop_oneof![1..=max_qty, on_grid])
     });
     let mut runner = proptest::test_runner::TestRunner::default();
     let result = runner.run(&cases, |(px, qty)| {
         let product = i128::from(px) * i128::from(qty);
         let (floor, exact) = (product / 200_000_000, product % 200_000_000 == 0);
-        let (refused_at, accepted_at) = if exact { (floor - 1, floor) } else { (floor, floor + 1) };
+        let (refused_at, accepted_at) = if exact {
+            (floor - 1, floor)
+        } else {
+            (floor, floor + 1)
+        };
         let amount = |raw: i128| Amount(i64::try_from(raw).expect("fits")).to_string();
         let (qty, px) = (Qty(qty).to_string(), Px(px).to_string());
         prop_assert_eq!(
             decide_alone(Side::Buy, &qty, &px, &amount(refused_at)),
             Some(vec![RejectReason::AccountLeverage]),
-            "{} at {} with account value {}", &qty, &px, amount(refused_at)
+            "{} at {} with account value {}",
+            &qty,
+            &px,
+            amount(refused_at)
         );
         prop_assert_eq!(
             decide_alone(Side::Sell, &qty, &px, &amount(accepted_at)),
             None,
-            "{} at {} with account value {}", &qty, &px, amount(accepted_at)
+            "{} at {} with account value {}",
+            &qty,
+            &px,
+            amount(accepted_at)
         );
         Ok(())
     });

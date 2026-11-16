@@ -6,14 +6,14 @@
 //! 1e-8 units times an account value in 1e-8 quote units.
 
 use crate::config::MarginPolicy;
-use serde::{Serialize, Serializer};
-use std::fmt;
 use crate::core::Core;
-use crate::input::NewOrderReq;
 use crate::event::RejectReason;
 use crate::ids::{InstrumentId, Ts};
+use crate::input::NewOrderReq;
 use crate::model::Side;
+use serde::{Serialize, Serializer};
 use std::collections::BTreeMap;
+use std::fmt;
 
 /// Account exposure in units of 1e-16 quote (see the module text). Shown and
 /// serialised as a plain decimal of quote units.
@@ -26,7 +26,7 @@ impl fmt::Display for Exposure {
         let abs = self.0.unsigned_abs();
         let sign = if self.0 < 0 { "-" } else { "" };
         write!(f, "{sign}{}", abs / UNIT)?;
-        if abs % UNIT != 0 {
+        if !abs.is_multiple_of(UNIT) {
             let digits = format!("{:016}", abs % UNIT);
             write!(f, ".{}", digits.trim_end_matches('0'))?;
         }
@@ -62,7 +62,11 @@ impl Core {
     ///
     /// With `fresh_at`, every reference price used must be fresh at that
     /// record time. Exposure that cannot be valued is never counted as zero.
-    fn exposure_with(&self, extra: Option<&NewOrderReq>, fresh_at: Option<Ts>) -> Result<i128, Unvalued> {
+    fn exposure_with(
+        &self,
+        extra: Option<&NewOrderReq>,
+        fresh_at: Option<Ts>,
+    ) -> Result<i128, Unvalued> {
         let max_age = self.config.policy.ref_price_max_age_us;
         let reference = |i: &InstrumentId| {
             self.ref_px
@@ -105,8 +109,13 @@ impl Core {
         for (i, (buys, sells)) in legs {
             let position = i128::from(self.account_book(i).pos.0) * i128::from(reference(i)?);
             let up = position.checked_add(buys).ok_or(Unvalued::Overflow)?.max(0);
-            let down = sells.checked_sub(position).ok_or(Unvalued::Overflow)?.max(0);
-            account = account.checked_add(up.max(down)).ok_or(Unvalued::Overflow)?;
+            let down = sells
+                .checked_sub(position)
+                .ok_or(Unvalued::Overflow)?
+                .max(0);
+            account = account
+                .checked_add(up.max(down))
+                .ok_or(Unvalued::Overflow)?;
         }
         Ok(account)
     }
@@ -114,20 +123,34 @@ impl Core {
     /// Judges a plain order at record time `at` against the leverage gate.
     /// `None` means the gate does not refuse it. The caller has checked
     /// that the quantity and the price are positive.
-    pub(crate) fn leverage_gate(&self, policy: &MarginPolicy, r: &NewOrderReq, at: Ts) -> Option<RejectReason> {
+    pub(crate) fn leverage_gate(
+        &self,
+        policy: &MarginPolicy,
+        r: &NewOrderReq,
+        at: Ts,
+    ) -> Option<RejectReason> {
         // Without a fresh report the order is already refused, and there is
         // no account value to judge it with.
-        let report = self.margin.report.as_ref().filter(|_| self.margin_report_is_fresh(at))?;
+        let report = self
+            .margin
+            .report
+            .as_ref()
+            .filter(|_| self.margin_report_is_fresh(at))?;
         // An account worth nothing carries nothing, whatever the order.
         if report.account_value.0 <= 0 {
             return Some(RejectReason::AccountLeverage);
         }
-        let (before, after) = match (self.exposure_with(None, Some(at)), self.exposure_with(Some(r), Some(at))) {
+        let (before, after) = match (
+            self.exposure_with(None, Some(at)),
+            self.exposure_with(Some(r), Some(at)),
+        ) {
             (Ok(before), Ok(after)) => (before, after),
             (Err(Unvalued::NoReferencePrice), _) | (_, Err(Unvalued::NoReferencePrice)) => {
                 return Some(RejectReason::MarginUnavailable);
             }
-            (Err(Unvalued::Overflow), _) | (_, Err(Unvalued::Overflow)) => return Some(RejectReason::Overflow),
+            (Err(Unvalued::Overflow), _) | (_, Err(Unvalued::Overflow)) => {
+                return Some(RejectReason::Overflow);
+            }
         };
         let limit = i128::from(policy.max_account_leverage.0) * i128::from(report.account_value.0);
         // Above the limit alone does not refuse: a price move can put the
