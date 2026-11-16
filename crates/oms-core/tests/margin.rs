@@ -558,3 +558,46 @@ fn first_report_sets_the_day_base() {
     assert_eq!(names(&out), vec!["margin_reported"]);
     assert_eq!(h.core.margin.day_base, Some(base));
 }
+
+/// S8. Base 100 and a limit of 5 %: an account value of 95.00 is a loss of
+/// exactly 5 % and does not trip the rule; 94.99 is more and does. The
+/// account is then REDUCING with the rule `DailyLoss`. The day base stays.
+#[test]
+fn loss_greater_than_five_percent_of_the_base_enters_reducing() {
+    let mut h = on_day_20_000();
+    h.report_margin("100");
+
+    h.advance(5 * SEC);
+    let out = h.report_margin("95");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.reducing, None);
+    assert_eq!(h.core.holds(None), vec![]);
+
+    h.advance(5 * SEC);
+    let out = h.report_margin("94.99");
+    let entered_at = h.now;
+    assert_eq!(names(&out), vec!["margin_reported", "reducing_entered"]);
+    assert_eq!(
+        out.events[1],
+        Event::ReducingEntered {
+            rule: RuleId::DailyLoss,
+            detail: "account value 94.99 is more than 500 bps below the day base 100".into(),
+        }
+    );
+    assert_eq!(
+        h.core.margin.reducing,
+        Some(Reducing {
+            rule: RuleId::DailyLoss,
+            detail: "account value 94.99 is more than 500 bps below the day base 100".into(),
+            since: entered_at,
+        })
+    );
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+    // Nothing is sent to the venue: there is no order to cancel, and the
+    // OMS never closes a position.
+    assert_eq!(out.commands, vec![]);
+    assert_eq!(
+        h.core.margin.day_base.as_ref().map(|b| (b.day, b.value)),
+        Some((20_000, amt("100")))
+    );
+}

@@ -658,7 +658,31 @@ impl Tx<'_> {
             });
         }
         self.emit(Event::MarginReported { report: r.clone() })?;
+        self.judge_daily_loss(r)?;
         self.roll_day_base(r)
+    }
+
+    /// Daily loss (C-MARGIN): the account value of a recorded report is more
+    /// than `daily_loss_bps` below the day base.
+    fn judge_daily_loss(&mut self, r: &MarginReportIn) -> Result<(), CoreFault> {
+        let (Some(policy), Some(base)) = (&self.core.config.policy.margin, &self.core.margin.day_base) else {
+            return Ok(());
+        };
+        let (base_value, value) = (i128::from(base.value.0), i128::from(r.account_value.0));
+        let lost_too_much = (base_value - value) * 10_000 > i128::from(policy.daily_loss_bps) * base_value;
+        if !lost_too_much {
+            return Ok(());
+        }
+        let detail = format!(
+            "account value {} is more than {} bps below the day base {}",
+            r.account_value, policy.daily_loss_bps, base.value
+        );
+        self.enter_reducing(RuleId::DailyLoss, detail)
+    }
+
+    /// Latches REDUCING for the whole account.
+    fn enter_reducing(&mut self, rule: RuleId, detail: String) -> Result<(), CoreFault> {
+        self.emit(Event::ReducingEntered { rule, detail })
     }
 
     /// Sets the day base from a recorded report when there is none.

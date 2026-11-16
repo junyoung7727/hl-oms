@@ -206,6 +206,12 @@ pub enum Event {
         value: Amount,
         set_by: BaseSetBy,
     },
+    /// The account entered REDUCING (C-MARGIN). In the same input every
+    /// resting plain order gets a `CancelRequested` by this rule.
+    ReducingEntered {
+        rule: RuleId,
+        detail: String,
+    },
 }
 
 /// Stable reason codes for a refused new-order request.
@@ -374,6 +380,7 @@ impl Event {
             Event::MarginReported { .. } => "margin_reported",
             Event::MarginReportRejected { .. } => "margin_report_rejected",
             Event::DayBaseSet { .. } => "day_base_set",
+            Event::ReducingEntered { .. } => "reducing_entered",
         }
     }
 }

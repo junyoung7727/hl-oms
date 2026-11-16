@@ -276,6 +276,9 @@ pub enum HoldReason {
     OperatorStrategy,
     /// Journal storage is running low.
     StorageLow,
+    /// The account is REDUCING: a margin rule tripped and only the operator
+    /// clears it (C-MARGIN).
+    Reducing,
 }
 
 impl HoldReason {
@@ -286,6 +289,7 @@ impl HoldReason {
     pub fn refuses_only_plain_orders(&self) -> bool {
         match self {
             HoldReason::NoConfig | HoldReason::LinkDown | HoldReason::OperatorAccount | HoldReason::OperatorStrategy | HoldReason::StorageLow => false,
+            HoldReason::Reducing => false,
             HoldReason::Resync | HoldReason::InDoubt | HoldReason::Mismatch => true,
         }
     }
@@ -376,6 +380,28 @@ pub struct MarginState {
     /// `day_base_set`; a restart and a link change keep it.
     #[serde(default)]
     pub day_base: Option<DayBase>,
+    /// Set while the account is REDUCING. One latch for the whole account.
+    #[serde(default)]
+    pub reducing: Option<Reducing>,
+}
+
+/// A margin rule that acts on its own: it latches REDUCING or cancels
+/// orders.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleId {
+    /// The account value fell more than `daily_loss_bps` below the day base.
+    DailyLoss,
+}
+
+/// The REDUCING latch (C-MARGIN, 감소 전용 상태).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Reducing {
+    /// The rule that tripped first. A later trigger does not replace it.
+    pub rule: RuleId,
+    /// The numbers the rule saw, for the operator.
+    pub detail: String,
+    pub since: Ts,
 }
 
 /// The day base of the daily-loss rule (C-MARGIN, 일 손실과 기준 금액).
