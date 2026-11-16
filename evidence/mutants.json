@@ -899,8 +899,143 @@
       "note": "",
       "test": "cargo test -p oms-sim --test sim margin_journal_records_stay_within_one_per_poll",
       "what": "a margin answer that arrives twice is journalled twice (seen by the record count of the simulation over days)"
+    },
+    {
+      "file": "crates/oms-core/src/exposure.rs",
+      "guards": "C-MARGIN / leverage gate",
+      "id": "M101-leverage-gate-accepts-with-no-account-value",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin account_value_zero_or_negative_rejects",
+      "what": "the leverage gate judges an account value of zero or below like any other, so a plain order that does not raise exposure passes"
+    },
+    {
+      "file": "crates/oms-core/src/exposure.rs",
+      "guards": "C-MARGIN / leverage gate",
+      "id": "M102-leverage-gate-reads-a-stale-reference-price",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin plain_order_is_rejected_when_an_exposed_instrument_has_no_fresh_reference_price",
+      "what": "the leverage gate values exposure with a reference price of any age"
+    },
+    {
+      "file": "crates/oms-core/src/exposure.rs",
+      "guards": "C-MARGIN / leverage gate",
+      "id": "M103-exposure-leaves-the-position-out",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin after_a_passive_breach_a_plain_reducing_order_passes_and_an_increasing_one_does_not",
+      "what": "account exposure counts the resting orders only, not the position"
+    },
+    {
+      "file": "crates/oms-core/src/exposure.rs",
+      "guards": "C-MARGIN / leverage gate",
+      "id": "M104-cancel-request-frees-exposure",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin partial_fill_then_cancel_frees_exposure_only_on_terminal_evidence",
+      "what": "an order with a cancel request no longer counts in account exposure, before terminal evidence"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / freshness",
+      "id": "M105-reduce-only-order-needs-a-fresh-report",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin reduce_only_order_needs_no_fresh_report",
+      "what": "a reduce-only order is refused with MarginUnavailable when no margin report is fresh"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / leverage gate",
+      "id": "M106-reduce-only-order-judged-by-the-gate",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin reduce_only_order_skips_the_leverage_gate",
+      "what": "a reduce-only order is judged by the leverage gate"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / REDUCING entry",
+      "id": "M107-entry-skips-an-exhausted-cancel",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones",
+      "what": "entering REDUCING does not ask again for a plain order whose earlier cancel is exhausted"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / day base",
+      "id": "M108-earlier-day-report-moves-the-base",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin a_report_of_an_earlier_day_does_not_change_the_day_base",
+      "what": "a report of an earlier UTC day than the day base sets the base"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / MM buffer",
+      "id": "M109-mm-rule-judges-a-position-of-no-value",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin mm_comparison_is_exact_at_extreme_values",
+      "what": "the MM-buffer rule judges a position whose value is zero"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / report intake",
+      "id": "M110-core-records-a-zero-max-leverage",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin invalid_margin_report_is_journaled_and_never_becomes_fresh",
+      "what": "the core records a margin report that has a position with a maximum leverage of zero"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / policy off",
+      "id": "M111-margin-input-taken-without-a-policy",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin without_a_margin_policy_no_margin_check_runs",
+      "what": "margin inputs are recorded although no margin policy is set"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / venue setting",
+      "id": "M112-unknown-venue-setting-passes",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin instrument_with_unknown_venue_setting_holds_plain_orders",
+      "what": "an instrument whose venue setting was not told in this link session is not held"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / account mode",
+      "id": "M113-unknown-account-mode-passes",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin an_account_mode_off_the_allow_list_or_unknown_holds_the_account",
+      "what": "an account whose mode was not told in this link session is not held"
+    },
+    {
+      "file": "crates/oms-core/src/exposure.rs",
+      "guards": "C-MARGIN / leverage gate",
+      "id": "M114-exposure-overflow-accepts",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin exposure_is_exact_at_extreme_price_and_quantity",
+      "what": "a plain order whose exposure sum does not fit in an i128 is not refused by the gate"
+    },
+    {
+      "file": "crates/oms-core/src/exposure.rs",
+      "guards": "C-MARGIN / leverage gate",
+      "id": "M115-leverage-gate-judges-a-stale-report",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin without_a_fresh_report_an_order_past_the_limit_is_rejected_margin_unavailable_only",
+      "what": "the leverage gate judges an order with the account value of a report that is no longer fresh"
     }
   ],
-  "source_digest": "b653c198772545d8",
-  "taken_at_us": 1794831471367030
+  "source_digest": "9468258ab606c562",
+  "taken_at_us": 1794832252414786
 }

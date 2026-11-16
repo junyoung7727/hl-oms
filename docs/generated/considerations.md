@@ -18,10 +18,9 @@
 
 | 항목 | 통과하지 않은 주장 |
 |---|---|
-| G-QUAL-02 | V-PERF-1, V-PERF-2, V-PERF-3 |
 | G-QUAL-07 | V-SIM-1, V-COMMIT-1 |
 | G-REL-01 | V-COMMIT-1, V-COMMIT-2, V-BOOT-1, V-REPLAY-1, V-COMMIT-4, V-BOOT-2 |
-| G-REL-02 | V-PERF-3, V-JRN-4 |
+| G-REL-02 | V-JRN-4 |
 | G-SEC-10 | V-PURE-1 |
 | G-OPS-03 | V-CFG-1 |
 | D-OWN-01 | V-NEW-1, V-SIM-1 |
@@ -46,11 +45,8 @@
 | D-PER-05 | V-BOOT-1, V-COMMIT-2, V-SIM-1 |
 | D-REC-01 | V-RECON-1, V-LINK-1 |
 | D-REC-02 | V-RECON-1, V-EXT-1, V-MIS-1 |
-| D-OVL-01 | V-OVL-1, V-OVL-2, V-PERF-2 |
-| D-OPT-01 | V-PERF-1, V-PERF-2 |
-| D-TEST-01 | V-MUT-1, V-SIM-1 |
-| P-PERF-01 | V-PERF-1 |
-| P-PERF-02 | V-PERF-1 |
+| D-OVL-01 | V-OVL-1, V-OVL-2 |
+| D-TEST-01 | V-SIM-1 |
 
 ## 1. 일반 소프트웨어
 
