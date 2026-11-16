@@ -297,3 +297,61 @@ fn stopped_after_the_reducing_decision_is_durable_the_cancels_are_sent_after_res
         assert_eq!(env.status()["core"]["mismatches_unacked"], json!([]), "{point}");
     }
 }
+
+/// G4, "중단과 재실행" row 3. The first margin report of a new node sets the
+/// day base, and the node stops at each commit boundary of that record.
+/// Stopped before the write, the base does not exist after the restart and
+/// the next report sets it, to its own value (the venue states 105 by
+/// then). Stopped at any later boundary, the base of 100 is in the journal
+/// and the restarted node keeps it. In every case the journal holds exactly
+/// one `day_base_set`, also after further reports, and its day and value
+/// are those of the report in the same record.
+#[test]
+fn stopped_around_a_day_base_set_the_base_is_set_exactly_once() {
+    for (point, written, expected) in [
+        ("before_write", 0, "105"),
+        ("after_write", 1, "100"),
+        ("after_sync", 1, "100"),
+        ("after_reply", 1, "100"),
+    ] {
+        let mut env = Env::new(&format!("crash-day-base-{point}"));
+        env.extra_runtime = "margin_poll_ms = 100".into();
+        env.extra_policy = "\n[core.policy.margin]\n".into();
+        env.node_env = crash_on(point, "day_base_set");
+        env.ctl(json!({"account_value": {"value": "100"}}));
+        env.start_node();
+        wait_abort(&mut env, point);
+        assert_eq!(env.journal_count("day_base_set"), written, "{point}");
+
+        env.ctl(json!({"account_value": {"value": "105"}}));
+        env.node_env.clear();
+        env.start_node();
+        wait_restarted(&env, 2, json!([]));
+        let shown = env.status()["core"]["margin"]["day_base"].clone();
+        assert_eq!(shown["value"], expected, "{point}: {shown}");
+        assert_eq!(shown["set_by"], "report", "{point}");
+
+        // Further reports do not set it again.
+        let seq = env.status()["core"]["margin"]["seq"].as_u64().expect("seq");
+        wait_margin(&env, "three more reports", |m| m["seq"].as_u64().is_some_and(|n| n >= seq + 3));
+        assert_eq!(env.status()["core"]["margin"]["day_base"], shown, "{point}");
+        let sets: Vec<(Input, Event)> = env
+            .journal_records()
+            .into_iter()
+            .flat_map(|r| {
+                let input = r.input.clone();
+                r.events.into_iter().filter(|e| e.name() == "day_base_set").map(move |e| (input.clone(), e))
+            })
+            .collect();
+        assert_eq!(sets.len(), 1, "{point}: the day base was set {} times", sets.len());
+        // The one event carries the day and the value of its own report.
+        let (Input::Venue(VenueInput::MarginReport(report)), Event::DayBaseSet { day, value, set_by }) = &sets[0] else {
+            panic!("{point}: {:?}", sets[0])
+        };
+        assert_eq!(*value, report.account_value, "{point}");
+        assert_eq!(value.to_string(), expected, "{point}");
+        assert_eq!(*day, report.queried_at / 86_400_000_000, "{point}");
+        assert_eq!(*set_by, BaseSetBy::Report, "{point}");
+        assert_eq!(shown["day"], *day, "{point}");
+    }
+}
