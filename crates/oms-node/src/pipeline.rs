@@ -76,22 +76,38 @@ pub struct Shared {
     pub fail_next_sync: AtomicBool,
 }
 
+/// Test-only: whether this item of a batch is the one the failpoint waits
+/// for. `OMS_CRASH_ON` names it: unset or `new_order` is a newly accepted
+/// order whose send is released; `reducing_entered` and `day_base_set` are a
+/// margin report whose record holds that event (C-MARGIN, 중단과 재실행).
+#[cfg(feature = "failpoints")]
+fn crash_trigger(record: Option<&Record>, has_commands: bool) -> bool {
+    let Some(rec) = record else { return false };
+    match std::env::var("OMS_CRASH_ON").as_deref() {
+        Ok("new_order") | Err(_) => has_commands && matches!(rec.input, Input::NewOrder(_)),
+        Ok(event) => matches!(rec.input, Input::Venue(VenueInput::MarginReport(_))) && rec.events.iter().any(|e| e.name() == event),
+    }
+}
+
 /// Test-only: the commit boundary named in `OMS_CRASH_AT`, if this batch
-/// holds a newly accepted order. Exists only with the `failpoints` feature,
-/// which the shipped binary does not enable.
+/// holds the item `crash_trigger` waits for. Exists only with the
+/// `failpoints` feature, which the shipped binary does not enable.
 #[cfg(feature = "failpoints")]
 fn crash_point(batch: &Batch) -> Option<String> {
     let point = std::env::var("OMS_CRASH_AT").ok()?;
     batch
         .items
         .iter()
-        .any(|i| !i.commands.is_empty() && i.record.as_ref().is_some_and(|(r, _)| matches!(r.input, Input::NewOrder(_))))
+        .any(|i| crash_trigger(i.record.as_ref().map(|(r, _)| r), !i.commands.is_empty()))
         .then_some(point)
 }
 
 #[cfg(feature = "failpoints")]
 fn crash_now(point: &str) -> ! {
     eprintln!("{}", serde_json::json!({"level": "warn", "msg": "failpoint: aborting", "fields": {"at": point}}));
+    // No core dump: the host's dump handler takes seconds per process, and
+    // the tests wait for the exit. The stop is still an abort.
+    let _ = rustix::process::set_dumpable_behavior(rustix::process::DumpableBehavior::NotDumpable);
     std::process::abort()
 }
 
@@ -228,7 +244,7 @@ impl Committer {
                 replies += 1;
             }
             #[cfg(feature = "failpoints")]
-            if crash.as_deref() == Some("after_reply") && !cmds.is_empty() {
+            if crash.as_deref() == Some("after_reply") && crash_trigger(record.as_ref(), !cmds.is_empty()) {
                 // Long enough for the reply to reach the client's socket.
                 std::thread::sleep(std::time::Duration::from_millis(300));
                 crash_now("after_reply");

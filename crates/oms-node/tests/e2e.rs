@@ -771,32 +771,6 @@ fn status_shows_reducing_its_rule_and_the_day_base() {
 
 // ---- C-MARGIN: operator commands, restart (ticket 05) ---------------------------
 
-/// A node with a margin policy at its defaults and a 100 ms margin poll,
-/// ready, with the venue's account value already shown in `status`: the
-/// first report became the day base.
-fn margin_node(name: &str, account_value: &str) -> Env {
-    let mut env = Env::new(name);
-    env.extra_runtime = "margin_poll_ms = 100".into();
-    env.extra_policy = "\n[core.policy.margin]\n".into();
-    env.ctl(json!({"account_value": {"value": account_value}}));
-    env.start_node();
-    env.wait_ready();
-    wait_margin(&env, "the account value", |m| m["account_value"] == account_value);
-    env
-}
-
-/// Waits until `core.margin` of `status` satisfies `cond`.
-fn wait_margin(env: &Env, what: &str, cond: impl Fn(&serde_json::Value) -> bool) {
-    let ok = env.wait(Duration::from_secs(5), || env.try_status().is_some_and(|st| cond(&st["core"]["margin"])));
-    assert!(ok, "status never showed {what}: {}", env.status()["core"]["margin"]);
-}
-
-/// The venue's account value changes and the node enters REDUCING on it.
-fn lose_to(env: &mut Env, account_value: &str) {
-    env.ctl(json!({"account_value": {"value": account_value}}));
-    wait_margin(env, "REDUCING", |m| m["reducing"]["rule"] == "daily_loss" && m["account_value"] == account_value);
-}
-
 /// S14. `clear-reduce` and `rebase-day` exist only on the admin socket. From
 /// a strategy connection both are refused with `forbidden`, nothing reaches
 /// the core, and the latch and the day base stay as they were: a strategy
@@ -948,43 +922,6 @@ fn reducing_and_day_base_survive_a_node_kill() {
     assert_eq!(st["core"]["margin"]["reducing"], serde_json::Value::Null);
     assert_eq!(st["core"]["margin"]["day_base"], cleared["day_base"]);
     assert_eq!(st["core"]["margin"]["day_base"]["set_by"], "operator");
-}
-
-/// Places one resting order and returns its id. A refusal that is only a
-/// matter of pace (too many sends outstanding, the reference price not yet
-/// arrived) is tried again.
-fn rest(env: &mut Env, c: &mut oms_api::client::Client, key: &str, side: Side, px: &str, reduce_only: bool) -> OrderId {
-    for attempt in 0..100 {
-        let Op::NewOrder { client_order_id, instrument, side, qty, px, tif, expires_at, .. } =
-            order_op(&format!("{key}-{attempt}"), side, "1", px, Tif::Gtc, 60_000)
-        else {
-            unreachable!()
-        };
-        let op = Op::NewOrder { client_order_id, instrument, side, qty, px, tif, reduce_only, expires_at };
-        match c.new_order(op).unwrap() {
-            NewOrderReply::Accepted { order_id } => return order_id,
-            NewOrderReply::Rejected { reasons }
-                if reasons.iter().all(|r| matches!(r, RejectReason::GatewayBusy | RejectReason::MarginUnavailable)) =>
-            {
-                env.ctl(json!({"ref_price": {"instrument": "X", "px": "100"}}));
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            other => panic!("order {key} was refused: {other:?}"),
-        }
-    }
-    panic!("order {key} was never accepted");
-}
-
-/// The venue's own list of orders that are open, by client id.
-fn open_at_venue(env: &mut Env) -> std::collections::BTreeSet<String> {
-    let dump = env.venue_dump();
-    dump["orders"]
-        .as_array()
-        .expect("orders")
-        .iter()
-        .filter(|o| o["status"] == "open")
-        .map(|o| o["client"].as_str().expect("client id").to_string())
-        .collect()
 }
 
 /// S8, G7. Entry into REDUCING through a real node with many orders resting
