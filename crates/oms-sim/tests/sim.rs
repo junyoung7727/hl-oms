@@ -544,7 +544,47 @@ fn profile_margin_days_crosses_three_utc_days_with_restarts() {
     assert_eq!(day_base(&w), Some((19_676, amount("94"))));
     assert_eq!(w.stats.roll_losses, 1);
 
-    let all = margin_days_runs();
+    // S13: a restart in the middle of the day keeps the latch and the base.
+    w.restart().unwrap();
+    w.sleep(60 * SECOND).unwrap();
+    assert_eq!(reported_value(&w), Some(amount("94")), "reports arrive again after the restart");
+    assert!(is_reducing(&w), "a restart does not end REDUCING");
+    assert_eq!(day_base(&w), Some((19_676, amount("94"))), "a restart does not move the base");
+    // The 6 come back. The second midnight: the base becomes the 100 of
+    // the first report of day 19677, and the latch stays.
+    w.venue.deposit(amount("6"));
+    w.sleep(24 * HOUR).unwrap();
+    assert_eq!(day_base(&w), Some((19_677, amount("100"))));
+    assert!(is_reducing(&w), "a new day does not end REDUCING");
+    // A withdrawal of 1 during day 19677 does not move the base: it is set
+    // once per day. Then a restart and the third midnight.
+    w.venue.deposit(amount("-1"));
+    w.sleep(HOUR).unwrap();
+    assert_eq!(reported_value(&w), Some(amount("99")));
+    assert_eq!(day_base(&w), Some((19_677, amount("100"))), "the base is set once per day");
+    w.restart().unwrap();
+    w.sleep(24 * HOUR).unwrap();
+    assert_eq!(day_base(&w), Some((19_678, amount("99"))));
+    assert!(is_reducing(&w), "neither restart nor new day ended REDUCING");
+    assert_eq!(w.stats.crashes, 2);
+    // The journal: one base per UTC day by a report, none by anything else.
+    let bases: Vec<(u64, oms_core::Amount)> = w
+        .durable
+        .iter()
+        .flat_map(|r| &r.events)
+        .filter_map(|e| match e {
+            oms_core::Event::DayBaseSet { day, value, set_by: oms_core::BaseSetBy::Report } => Some((*day, *value)),
+            oms_core::Event::DayBaseSet { .. } => panic!("no operator set a base here: {e:?}"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(bases, vec![(19_675, amount("100")), (19_676, amount("94")), (19_677, amount("100")), (19_678, amount("99"))]);
+    assert_eq!(w.stats.day_rolls, 3);
+    // The operator's clear ends it, on the newest report.
+    w.operator(oms_core::OperatorCmd::ClearReduce { note: "checked by hand".into() }).unwrap();
+    assert!(!is_reducing(&w));
+    assert_eq!(reducing_rules(&w), vec![oms_core::RuleId::DailyLoss], "REDUCING was entered once in three days");
+
     let all = margin_days_runs();
     for (i, s) in all.iter().enumerate() {
         assert!(s.sim_seconds >= 50 * 3600, "run {i} lasted {} s", s.sim_seconds);

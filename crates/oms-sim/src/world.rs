@@ -462,7 +462,6 @@ struct MarginBefore {
     exposure: Option<i128>,
     reducing: bool,
     day_base: Option<Amount>,
-    base_day: Option<u64>,
 }
 
 pub const INSTANCE: u64 = 0x51_4d_55_4c;
@@ -1114,7 +1113,6 @@ impl World {
             exposure: self.oracle_exposure(),
             reducing: self.core.margin.reducing.is_some(),
             day_base: self.core.margin.day_base.as_ref().map(|b| b.value),
-            base_day: self.core.margin.day_base.as_ref().map(|b| b.day),
         }
     }
 
