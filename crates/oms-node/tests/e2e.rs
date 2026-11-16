@@ -594,7 +594,7 @@ fn random_kills_under_load_keep_books_consistent() {
 fn node_polls_margin_and_status_shows_value_and_age() {
     let mut env = Env::new("margin-poll");
     env.extra_runtime = "margin_poll_ms = 100".into();
-    env.extra_policy = "\n[core.policy.margin]\n".into();
+    env.extra_policy = "\n[core.policy.margin]\naccount_modes_allowed = [\"standard\"]\n".into();
     env.ctl(json!({"account_value": {"value": "250.5"}}));
     env.start_node();
     env.wait_ready();
@@ -668,7 +668,7 @@ fn node_polls_margin_and_status_shows_value_and_age() {
 fn status_shows_account_exposure() {
     let mut env = Env::new("margin-exposure");
     env.extra_runtime = "margin_poll_ms = 100".into();
-    env.extra_policy = "\n[core.policy.margin]\n".into();
+    env.extra_policy = "\n[core.policy.margin]\naccount_modes_allowed = [\"standard\"]\n".into();
     env.ctl(json!({"account_value": {"value": "100"}}));
     env.start_node();
     env.wait_ready();
@@ -713,7 +713,7 @@ fn status_shows_account_exposure() {
 fn status_shows_reducing_its_rule_and_the_day_base() {
     let mut env = Env::new("margin-reducing-status");
     env.extra_runtime = "margin_poll_ms = 100".into();
-    env.extra_policy = "\n[core.policy.margin]\n".into();
+    env.extra_policy = "\n[core.policy.margin]\naccount_modes_allowed = [\"standard\"]\n".into();
     env.ctl(json!({"account_value": {"value": "100"}}));
     env.start_node();
     env.wait_ready();
@@ -767,4 +767,100 @@ fn status_shows_reducing_its_rule_and_the_day_base() {
     // Exposure 10 + 100 is far below 2 x 94.99: only the hold answers.
     let r = c.new_order(order_op("k1", Side::Buy, "1", "100", Tif::Gtc, 5_000)).unwrap();
     assert_eq!(r, NewOrderReply::Rejected { reasons: vec![RejectReason::Hold(HoldReason::Reducing)] });
+}
+
+/// S17, S18 at the process level. With a margin policy the node asks the
+/// venue for the setting of every instrument and for the account mode when
+/// the link comes up, asks again for the settings on a timer, and `status`
+/// shows what the venue told and whether it is what the policy asks for. A
+/// setting changed at the venue holds the instrument after the next poll.
+/// The account mode is read once per link session. The node only reads:
+/// the gateway has no request that changes either.
+#[test]
+fn node_reads_venue_setting_and_account_mode_and_status_shows_them() {
+    let mut env = Env::new("venue-setting");
+    env.extra_runtime = "margin_poll_ms = 100\nvenue_setting_poll_ms = 200".into();
+    env.extra_policy = "\n[core.policy.margin]\naccount_modes_allowed = [\"standard\"]\n".into();
+    env.start_node();
+    env.wait_ready();
+
+    let margin = |env: &Env| env.status()["core"]["margin"].clone();
+    let shown = |env: &Env, key: &str, want: serde_json::Value| {
+        env.wait(Duration::from_secs(5), || {
+            env.try_status().is_some_and(|st| st["core"]["margin"][key] == want)
+        })
+    };
+    // What the simulated venue starts with: isolated at leverage 2, mode
+    // "standard". Both are what the policy asks for.
+    let as_configured = json!({"X": {"isolated": true, "leverage": 2, "as_configured": true}});
+    assert_eq!(margin(&env)["venue_settings"], as_configured);
+    assert_eq!(margin(&env)["account_mode"], json!({"mode": "standard", "allowed": true}));
+
+    // The setting poll repeats while the instrument has no position.
+    let asked = env.venue_dump()["venue_setting_queries"].as_u64().expect("venue_setting_queries");
+    assert!(asked >= 1);
+    let repeated = (0..50).any(|_| {
+        std::thread::sleep(Duration::from_millis(100));
+        env.venue_dump()["venue_setting_queries"].as_u64().unwrap() >= asked + 3
+    });
+    assert!(repeated, "the venue-setting poll did not repeat");
+
+    // The operator changes the instrument to cross margin at leverage 3 at
+    // the venue. The next poll shows it and the instrument is held.
+    env.ctl(json!({"venue_setting": {"instrument": "X", "isolated": false, "leverage": 3}}));
+    let differs = json!({"X": {"isolated": false, "leverage": 3, "as_configured": false}});
+    assert!(shown(&env, "venue_settings", differs), "status did not follow the venue: {}", margin(&env));
+    assert_eq!(env.status()["core"]["holds"], json!([{"venue_setting": "X"}]));
+    env.ctl(json!({"ref_price": {"instrument": "X", "px": "100"}}));
+    let mut c = env.client("a");
+    let reply = c.new_order(order_op("k1", Side::Buy, "1", "100", Tif::Gtc, 5_000)).unwrap();
+    match reply {
+        NewOrderReply::Rejected { reasons } => {
+            assert!(reasons.contains(&RejectReason::Hold(HoldReason::VenueSetting(InstrumentId::new("X").unwrap()))), "{reasons:?}")
+        }
+        other => panic!("a plain order passed a differing venue setting: {other:?}"),
+    }
+
+    // Changed back at the venue: the hold goes with the next poll.
+    env.ctl(json!({"venue_setting": {"instrument": "X", "isolated": true, "leverage": 2}}));
+    assert!(shown(&env, "venue_settings", as_configured.clone()), "status did not follow the venue: {}", margin(&env));
+    assert_eq!(env.status()["core"]["holds"], json!([]));
+
+    // The account mode is read when the link comes up, not on a timer: one
+    // query so far, and a change at the venue is seen in the next session.
+    assert_eq!(env.venue_dump()["account_mode_queries"], 1);
+    env.ctl(json!({"account_mode": {"mode": "unifiedAccount"}}));
+    std::thread::sleep(Duration::from_millis(600));
+    assert_eq!(margin(&env)["account_mode"], json!({"mode": "standard", "allowed": true}));
+    let session = env.status()["core"]["link"]["session"].clone();
+    env.ctl(json!("kick_streams"));
+    let unified = json!({"mode": "unifiedAccount", "allowed": false});
+    assert!(shown(&env, "account_mode", unified), "status did not show the new mode: {}", margin(&env));
+    assert_ne!(env.status()["core"]["link"]["session"], session);
+    // The settings were asked again in the new session, and the account is
+    // held by its mode alone.
+    assert!(shown(&env, "venue_settings", as_configured), "{}", margin(&env));
+    assert!(
+        env.wait(Duration::from_secs(10), || env.status()["core"]["holds"] == json!(["account_mode"])),
+        "holds: {}",
+        env.status()["core"]["holds"]
+    );
+    assert_eq!(env.venue_dump()["account_mode_queries"], 2);
+
+    // Back to the listed mode, next session: ready to trade again.
+    env.ctl(json!({"account_mode": {"mode": "standard"}}));
+    env.ctl(json!("kick_streams"));
+    assert!(shown(&env, "account_mode", json!({"mode": "standard", "allowed": true})), "{}", margin(&env));
+    env.wait_ready();
+    drop(c);
+    drop(env);
+
+    // No margin policy: the node asks for neither.
+    let mut env = Env::new("venue-setting-off");
+    env.extra_runtime = "venue_setting_poll_ms = 100".into();
+    env.start_node();
+    env.wait_ready();
+    std::thread::sleep(Duration::from_millis(600));
+    assert_eq!(env.venue_dump()["venue_setting_queries"], 0);
+    assert_eq!(env.venue_dump()["account_mode_queries"], 0);
 }

@@ -2172,6 +2172,425 @@ fn latch_and_day_base_replay_to_the_same_state() {
     assert_eq!(recs, h.log);
 }
 
+// ---- C-MARGIN: venue setting and account mode -------------------------------
+
+/// S17. With a margin policy the OMS must know, in the current link session,
+/// that the instrument has the margin mode and the leverage the policy asks
+/// for (isolated, 2). Until the venue has told it, a plain order on that
+/// instrument is refused. An answer to a query of an earlier link session
+/// tells nothing about this one.
+#[test]
+fn instrument_with_unknown_venue_setting_holds_plain_orders() {
+    let mut h = H::configured(config_with_margin());
+    h.link_up_and_sync_only();
+    h.tell_account_mode();
+    h.report_margin("1000");
+    h.ref_price("X", "100");
+
+    // Everything else is in order: the setting is the only reason.
+    assert_eq!(
+        h.reject("a", "k1", Side::Buy, "1", "100"),
+        vec![RejectReason::Hold(HoldReason::VenueSetting(iid("X")))]
+    );
+
+    // A late answer that belongs to link session 0 is dropped.
+    let out = h.venue(VenueInput::VenueSetting {
+        session: 0,
+        instrument: iid("X"),
+        isolated: true,
+        leverage: 2,
+    });
+    assert_eq!(names(&out), Vec::<&str>::new());
+    assert_eq!(
+        h.reject("a", "k1", Side::Buy, "1", "100"),
+        vec![RejectReason::Hold(HoldReason::VenueSetting(iid("X")))]
+    );
+
+    // The answer of this session is recorded as it came. The OMS only
+    // reads the setting: nothing is sent to the venue.
+    let out = h.venue_setting("X", true, 2);
+    assert_eq!(
+        out.events,
+        vec![Event::VenueSettingNoted {
+            session: 1,
+            instrument: iid("X"),
+            isolated: true,
+            leverage: 2,
+        }]
+    );
+    assert_eq!(out.commands, vec![]);
+    h.accept("a", "k1", Side::Buy, "1", "100");
+    assert_eq!(
+        h.commands.len(),
+        1,
+        "only the order itself went to the venue"
+    );
+}
+
+fn venue_setting_hold(instrument: &str) -> Vec<RejectReason> {
+    vec![RejectReason::Hold(HoldReason::VenueSetting(iid(
+        instrument,
+    )))]
+}
+
+fn submit(h: &mut H, r: NewOrderReq) -> Result<OrderId, Vec<RejectReason>> {
+    match h.new_order(r) {
+        NewOrderReply::Accepted { order_id } => Ok(order_id),
+        NewOrderReply::Rejected { reasons } => Err(reasons),
+        other => panic!("unexpected reply {other:?}"),
+    }
+}
+
+/// S17. The policy asks for isolated margin at leverage 2. An instrument the
+/// venue has on cross margin, or at another leverage, refuses plain orders.
+/// The hold is about that instrument alone: the other instrument trades.
+#[test]
+fn a_setting_that_differs_from_config_holds_only_that_instrument() {
+    let mut h = H::ready_with(config_xy());
+    h.report_margin("1000");
+    h.ref_price("X", "100");
+    h.ref_price("Y", "100");
+
+    // Cross margin at the right leverage.
+    h.venue_setting("X", false, 2);
+    let r = req_on(&h, "X", "x1", Side::Buy, "1", "100");
+    assert_eq!(submit(&mut h, r), Err(venue_setting_hold("X")));
+    let r = req_on(&h, "Y", "y1", Side::Buy, "1", "100");
+    assert!(submit(&mut h, r).is_ok(), "the hold on X also held Y");
+
+    // Isolated margin at leverage 3, and at leverage 1: both differ from 2.
+    for leverage in [3, 1] {
+        h.venue_setting("X", true, leverage);
+        let r = req_on(&h, "X", "x1", Side::Buy, "1", "100");
+        assert_eq!(
+            submit(&mut h, r),
+            Err(venue_setting_hold("X")),
+            "leverage {leverage}"
+        );
+    }
+    let r = req_on(&h, "Y", "y2", Side::Buy, "1", "100");
+    assert!(submit(&mut h, r).is_ok(), "the hold on X also held Y");
+
+    // Now Y differs and X is as configured: the hold moves with the fact.
+    h.venue_setting("X", true, 2);
+    h.venue_setting("Y", false, 3);
+    let r = req_on(&h, "X", "x1", Side::Buy, "1", "100");
+    assert!(submit(&mut h, r).is_ok());
+    let r = req_on(&h, "Y", "y3", Side::Buy, "1", "100");
+    assert_eq!(submit(&mut h, r), Err(venue_setting_hold("Y")));
+}
+
+/// S17. A setting that matches the policy releases the hold at once. What
+/// the venue told in one link session says nothing about the next one: the
+/// operator may have changed the setting while the link was down. After a
+/// link loss the setting is unknown until the venue tells it again.
+#[test]
+fn a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again() {
+    let mut h = H::ready_with(config_with_margin());
+    h.report_margin("1000");
+    h.ref_price("X", "100");
+
+    h.venue_setting("X", false, 2);
+    assert_eq!(
+        h.reject("a", "k1", Side::Buy, "1", "100"),
+        venue_setting_hold("X")
+    );
+    h.venue_setting("X", true, 2);
+    h.accept("a", "k1", Side::Buy, "1", "100");
+
+    // The link is lost and comes back as session 2, fully synced. The
+    // setting told in session 1 does not count.
+    link_down(&mut h);
+    h.link_up_and_sync_only();
+    assert_eq!(h.session, 2);
+    h.tell_account_mode();
+    h.report_margin("1000");
+    h.ref_price("X", "100");
+    assert_eq!(
+        h.reject("a", "k2", Side::Buy, "1", "100"),
+        venue_setting_hold("X")
+    );
+
+    // Told again in session 2: released.
+    h.venue_setting("X", true, 2);
+    h.accept("a", "k2", Side::Buy, "1", "100");
+}
+
+/// The next margin report of the current link session: account value 1000
+/// and one position on X with this margin mode and leverage.
+fn report_with_position_on_x(
+    h: &mut H,
+    leverage_type: LeverageType,
+    leverage_value: u32,
+) -> Output {
+    h.margin_seq += 1;
+    h.venue(VenueInput::MarginReport(MarginReportIn {
+        session: h.session,
+        seq: h.margin_seq,
+        queried_at: h.now,
+        account_value: amt("1000"),
+        positions: vec![MarginPosition {
+            leverage_type,
+            leverage_value,
+            ..position("X", 40)
+        }],
+    }))
+}
+
+/// S17. A position in a margin report states the margin mode and the
+/// leverage of its instrument, so every report is a source of the venue
+/// setting: a position that turns out to be on cross margin, or at another
+/// leverage, raises the hold with the report that shows it.
+#[test]
+fn a_cross_position_in_a_margin_report_raises_the_hold() {
+    let mut h = H::ready_with(config_with_margin());
+    h.ref_price("X", "100");
+
+    // The position is as the policy asks: no hold. The first report also
+    // sets the day base; the setting itself gets no event of its own.
+    let out = report_with_position_on_x(&mut h, LeverageType::Isolated, 2);
+    assert_eq!(names(&out), vec!["margin_reported", "day_base_set"]);
+    h.accept("a", "k1", Side::Buy, "1", "100");
+
+    // The next report shows the position on cross margin.
+    let out = report_with_position_on_x(&mut h, LeverageType::Cross, 2);
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(
+        h.reject("a", "k2", Side::Buy, "1", "100"),
+        venue_setting_hold("X")
+    );
+
+    // Isolated again, but at leverage 3.
+    report_with_position_on_x(&mut h, LeverageType::Isolated, 3);
+    assert_eq!(
+        h.reject("a", "k2", Side::Buy, "1", "100"),
+        venue_setting_hold("X")
+    );
+
+    // A report that shows the policy's setting releases the hold.
+    report_with_position_on_x(&mut h, LeverageType::Isolated, 2);
+    h.accept("a", "k2", Side::Buy, "1", "100");
+    // The state rebuilt from the journal holds the same settings.
+    assert_eq!(h.rebuilt().margin, h.core.margin);
+}
+
+/// S17. The operator must see which instrument to fix at the venue: the
+/// hold query lists one `VenueSetting` hold per instrument whose setting is
+/// unknown or differs, each with its instrument. Without a margin policy
+/// the hold does not exist.
+#[test]
+fn venue_setting_hold_names_its_instrument_in_holds() {
+    let mut h = H::configured(config_xy());
+    h.link_up_and_sync_only();
+    h.tell_account_mode();
+    let hold = |i: &str| HoldReason::VenueSetting(iid(i));
+    assert_eq!(h.core.holds(None), vec![hold("X"), hold("Y")]);
+
+    h.venue_setting("X", true, 2);
+    assert_eq!(h.core.holds(None), vec![hold("Y")]);
+    // The query for one strategy shows it too.
+    assert_eq!(h.core.holds(Some(&sid("a"))), vec![hold("Y")]);
+
+    // Known but different is the same hold.
+    h.venue_setting("Y", true, 3);
+    assert_eq!(h.core.holds(None), vec![hold("Y")]);
+    h.venue_setting("Y", true, 2);
+    assert_eq!(h.core.holds(None), vec![]);
+
+    // No margin policy: no such hold, and the input leaves no trace.
+    let mut h = H::configured(config());
+    h.link_up_and_sync_only();
+    assert_eq!(h.core.holds(None), vec![]);
+    let out = h.venue_setting("X", false, 3);
+    assert_eq!(names(&out), Vec::<&str>::new());
+    assert!(h.core.margin.is_empty());
+}
+
+fn account_mode_hold() -> Vec<RejectReason> {
+    vec![RejectReason::Hold(HoldReason::AccountMode)]
+}
+
+/// `config_xy()` with these account modes on the allow-list.
+fn config_allowing(modes: &[&str]) -> CoreConfig {
+    let mut cfg = config_xy();
+    let margin = cfg.policy.margin.as_mut().unwrap();
+    margin.account_modes_allowed = modes.iter().map(|m| m.to_string()).collect();
+    cfg
+}
+
+/// S18. In a unified account or under portfolio margin the numbers of a
+/// margin report do not mean what the rules take them to mean. Both modes
+/// refuse plain orders on the whole account, also when the configuration
+/// lists them as allowed.
+#[test]
+fn unified_or_portfolio_account_mode_holds_the_account() {
+    // The operator listed both modes by mistake, next to a mode that is
+    // allowed.
+    let mut h = H::ready_with(config_allowing(&[
+        "unifiedAccount",
+        "portfolioMargin",
+        "standard",
+    ]));
+    h.report_margin("1000");
+    h.ref_price("X", "100");
+    h.ref_price("Y", "100");
+
+    for mode in ["unifiedAccount", "portfolioMargin"] {
+        let out = h.account_mode(mode);
+        assert_eq!(
+            out.events,
+            vec![Event::AccountModeNoted {
+                session: 1,
+                mode: mode.into(),
+            }]
+        );
+        assert_eq!(out.commands, vec![]);
+        assert_eq!(h.core.holds(None), vec![HoldReason::AccountMode], "{mode}");
+        // The whole account: every instrument.
+        for instrument in ["X", "Y"] {
+            let r = req_on(&h, instrument, "k1", Side::Buy, "1", "100");
+            assert_eq!(
+                submit(&mut h, r),
+                Err(account_mode_hold()),
+                "{mode} on {instrument}"
+            );
+        }
+    }
+
+    // The venue names the listed mode that can be allowed: released.
+    h.account_mode("standard");
+    assert_eq!(h.core.holds(None), vec![]);
+    h.accept("a", "k1", Side::Buy, "1", "100");
+}
+
+/// S18. Only a mode the configuration lists lets plain orders through. A
+/// mode that is not listed, an empty answer, and no answer at all in this
+/// link session each hold the account. "standard" stands here for whatever
+/// the venue calls its ordinary mode; which string that is on the real
+/// venue is not known (T10), so the operator has to list it.
+#[test]
+fn an_account_mode_off_the_allow_list_or_unknown_holds_the_account() {
+    let mut h = H::configured(config_allowing(&["standard"]));
+    h.link_up_and_sync_only();
+    h.venue_setting("X", true, 2);
+    h.venue_setting("Y", true, 2);
+    h.report_margin("1000");
+    h.ref_price("X", "100");
+
+    // The venue has not told the mode in this link session.
+    assert_eq!(h.core.holds(None), vec![HoldReason::AccountMode]);
+    assert_eq!(
+        h.reject("a", "k1", Side::Buy, "1", "100"),
+        account_mode_hold()
+    );
+
+    // The listed mode releases the account.
+    h.account_mode("standard");
+    assert_eq!(h.core.holds(None), vec![]);
+    h.accept("a", "k1", Side::Buy, "1", "100");
+
+    // A mode that is not listed, and an empty answer.
+    for mode in ["dexAbstraction", "Standard", ""] {
+        h.account_mode(mode);
+        assert_eq!(
+            h.reject("a", "k2", Side::Buy, "1", "100"),
+            account_mode_hold(),
+            "mode {mode:?}"
+        );
+    }
+    h.account_mode("standard");
+    h.accept("a", "k2", Side::Buy, "1", "100");
+
+    // A new link session: the mode told in session 1 does not count, and a
+    // late answer to a query of session 1 is dropped.
+    link_down(&mut h);
+    h.link_up_and_sync_only();
+    h.venue_setting("X", true, 2);
+    h.venue_setting("Y", true, 2);
+    h.report_margin("1000");
+    h.ref_price("X", "100");
+    let out = h.venue(VenueInput::AccountMode {
+        session: 1,
+        mode: "standard".into(),
+    });
+    assert_eq!(names(&out), Vec::<&str>::new());
+    assert_eq!(h.core.holds(None), vec![HoldReason::AccountMode]);
+    assert_eq!(
+        h.reject("a", "k3", Side::Buy, "1", "100"),
+        account_mode_hold()
+    );
+    h.account_mode("standard");
+    h.accept("a", "k3", Side::Buy, "1", "100");
+
+    // The default allow-list is empty: no mode passes until one is listed.
+    let mut h = H::configured(config_allowing(&[]));
+    h.link_up_and_sync_only();
+    h.venue_setting("X", true, 2);
+    h.venue_setting("Y", true, 2);
+    h.account_mode("standard");
+    assert_eq!(h.core.holds(None), vec![HoldReason::AccountMode]);
+}
+
+/// Submits a sell of 1 X at 100 with the venue's reduce-only flag.
+fn reduce_only_sell(h: &mut H, key: &str) -> Result<OrderId, Vec<RejectReason>> {
+    let r = h.reduce_only_req("a", key, Side::Sell, "1", "100");
+    submit(h, r)
+}
+
+/// S17, S18. Both holds are in the right column of the hold table: they
+/// refuse plain orders and let an order with the venue's reduce-only flag
+/// through, so a position can be reduced while the setting or the mode is
+/// wrong or unknown.
+#[test]
+fn reduce_only_order_passes_the_venue_setting_and_account_mode_holds() {
+    let mut h = H::ready_with(config_with_margin());
+    h.report_margin("1000");
+    h.ref_price("X", "100");
+    h.long("a", "k0", "3");
+
+    // The instrument is on cross margin at leverage 3.
+    h.venue_setting("X", false, 3);
+    assert_eq!(
+        h.reject("a", "p1", Side::Sell, "1", "100"),
+        venue_setting_hold("X")
+    );
+    let id =
+        reduce_only_sell(&mut h, "r1").expect("the venue-setting hold refused a reduce-only order");
+    assert_eq!(h.sends().last(), Some(&id));
+
+    // The setting is right again; the account is in unified mode.
+    h.venue_setting("X", true, 2);
+    h.account_mode("unifiedAccount");
+    assert_eq!(
+        h.reject("a", "p2", Side::Sell, "1", "100"),
+        account_mode_hold()
+    );
+    let id =
+        reduce_only_sell(&mut h, "r2").expect("the account-mode hold refused a reduce-only order");
+    assert_eq!(h.sends().last(), Some(&id));
+
+    // A new link session in which the venue has told neither: both holds
+    // at once, both unknown. (The margin report of session 1 stays and is
+    // still fresh.)
+    link_down(&mut h);
+    h.link_up_and_sync_only();
+    assert_eq!(
+        h.reject("a", "p3", Side::Sell, "1", "100"),
+        vec![
+            RejectReason::Hold(HoldReason::VenueSetting(iid("X"))),
+            RejectReason::Hold(HoldReason::AccountMode),
+        ]
+    );
+    let id = reduce_only_sell(&mut h, "r3")
+        .expect("unknown setting and mode refused a reduce-only order");
+    assert_eq!(h.sends().last(), Some(&id));
+    // The holds are still there.
+    assert_eq!(
+        h.core.holds(None),
+        vec![HoldReason::VenueSetting(iid("X")), HoldReason::AccountMode]
+    );
+}
+
 // ---- C-MARGIN: stale cancel ---------------------------------------------------
 
 fn stale_cancel(id: OrderId) -> Event {

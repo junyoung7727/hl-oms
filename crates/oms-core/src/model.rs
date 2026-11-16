@@ -7,6 +7,7 @@
 use crate::ids::*;
 use crate::num::*;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -282,6 +283,14 @@ pub enum HoldReason {
     /// The account is REDUCING: a margin rule tripped and only the operator
     /// clears it (C-MARGIN).
     Reducing,
+    /// The venue's margin mode or leverage of this instrument is not known
+    /// in the current link session, or differs from the margin policy
+    /// (C-MARGIN). Refuses plain orders on this instrument only.
+    VenueSetting(InstrumentId),
+    /// The venue's account mode is not known in the current link session,
+    /// is unified account or portfolio margin, or is not on the allow-list
+    /// of the margin policy (C-MARGIN). Refuses plain orders on the account.
+    AccountMode,
 }
 
 impl HoldReason {
@@ -294,6 +303,7 @@ impl HoldReason {
             HoldReason::NoConfig | HoldReason::LinkDown | HoldReason::OperatorAccount | HoldReason::OperatorStrategy | HoldReason::StorageLow => false,
             HoldReason::Reducing => true,
             HoldReason::Resync | HoldReason::InDoubt | HoldReason::Mismatch => true,
+            HoldReason::VenueSetting(_) | HoldReason::AccountMode => true,
         }
     }
 }
@@ -392,6 +402,26 @@ pub struct MarginState {
     /// activated while the link is up sets it to the activation time.
     #[serde(default)]
     pub link_up_at: Option<Ts>,
+    /// The venue setting of each configured instrument as the venue told it
+    /// in the current link session. An instrument that is not listed is
+    /// unknown. Emptied when the link changes.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub venue_settings: BTreeMap<InstrumentId, VenueSettingSeen>,
+    /// The account mode as the venue told it in the current link session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_mode: Option<String>,
+}
+
+/// Account modes in which the margin rules must not run, whatever the
+/// allow-list says: the numbers of a margin report mean something else
+/// there.
+pub const ACCOUNT_MODES_NEVER_ALLOWED: [&str; 2] = ["unifiedAccount", "portfolioMargin"];
+
+/// Margin mode and leverage of one instrument at the venue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VenueSettingSeen {
+    pub isolated: bool,
+    pub leverage: u32,
 }
 
 /// A margin rule that acts on its own: it latches REDUCING or cancels

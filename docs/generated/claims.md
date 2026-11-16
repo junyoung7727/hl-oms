@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `5cdc232525a84bb4`, 검증 결과의 다이제스트 `44860df661c2396d`.
+> 소스 다이제스트 `f05ef3c23bb68966`, 검증 결과의 다이제스트 `44860df661c2396d`.
 
-주장 63건: 통과 0, 실패 0, 미실행 2, 이전 버전 결과 61.
+주장 64건: 통과 0, 실패 0, 미실행 4, 이전 버전 결과 60.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -66,9 +66,10 @@
 | V-MARGIN-1 | 증거금 정책이 있으면 감소 전용 주문은 재확인, 결과 불명, 불일치 차단을 통과하고, 일반 주문은 모든 차단에서 거절된다. 정책 구역은 선택이고, 없으면 저널 기록에 바이트를 더하지 않는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios reduce_only && cargo test -p oms-core --test margin` |
 | V-MARGIN-2 | 증거금 정책이 있으면 현재 링크 세션의 증거금 보고가 마지막 보고로 기록된다. 다른 세션의 보고, 링크가 내려간 동안의 보고, 순번이 크지 않은 보고는 버린다. 읽지 못한 보고와 최대 레버리지가 0인 보고는 사유와 함께 거부로 기록되고 마지막 보고를 바꾸지 않는다. 나이가 0 이상 30초 이하인 보고가 없으면 일반 주문은 MarginUnavailable로 거절된다. 감소 전용 주문은 보고가 없어도 받는다. 정책이 없으면 증거금 입력은 상태를 바꾸지 않고 기록되지 않는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test margin` |
 | V-MARGIN-3 | 증거금 정책이 있으면 일반 주문은 받은 뒤의 계좌 노출이 한도 × 계좌 가치를 넘고 받기 전보다 커질 때 AccountLeverage로 거절된다. 정확히 한도와 같으면 받는다. 계좌 가치가 0 이하면 일반 주문을 모두 거절한다. 노출은 포지션과 모든 미체결 주문(감소 전용 포함)을 지정가와 참조 가격 중 높은 값으로 센 종목별 값의 합이다. 미체결 주문은 종결 증거가 올 때까지 노출에 남고 OMS는 그 주문을 고치거나 만료시키지 않는다. 가격이 움직여 한도를 넘어도 래치는 없다. 감소 전용 주문은 검사를 건너뛰지만 합에는 들어간다. 노출이 있는 종목에 신선한 참조 가격이 없으면 일반 주문은 MarginUnavailable로 거절된다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test margin` |
-| V-MARGIN-11 | 증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이, 계좌 노출을 보여 준다. 정책이 없으면 묻지 않는다. 조회한 계좌 가치가 기준 금액보다 5 %를 넘게 낮아지면 status가 감소 전용 상태와 그 규칙, 기준 금액을 보여 주고 일반 주문이 Hold(Reducing)으로 거절된다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e node_polls_margin && cargo test -p oms-node --test e2e status_shows_account_exposure && cargo test -p oms-node --test e2e status_shows_reducing` |
+| V-MARGIN-11 | 증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이, 계좌 노출을 보여 준다. 링크가 올라오면 종목마다 거래소 설정을, 그리고 계좌 모드를 묻고, 포지션이 없는 종목의 설정은 정해진 간격으로 다시 묻는다. status는 종목별 거래소 설정과 계좌 모드, 그것이 정책과 맞는지를 보여 준다. 정책이 없으면 묻지 않는다. 조회한 계좌 가치가 기준 금액보다 5 %를 넘게 낮아지면 status가 감소 전용 상태와 그 규칙, 기준 금액을 보여 주고 일반 주문이 Hold(Reducing)으로 거절된다 | 프로세스 | 미실행 | `cargo test -p oms-node --test e2e node_polls_margin && cargo test -p oms-node --test e2e status_shows_account_exposure && cargo test -p oms-node --test e2e status_shows_reducing && cargo test -p oms-node --test e2e node_reads_venue_setting` |
 | V-MARGIN-5 | 증거금 정책이 있으면 첫 증거금 보고가 그 계좌 가치를 조회 시각의 UTC 날짜와 함께 기준 금액으로 정한다. 같은 날의 뒤 보고는 기준을 바꾸지 않는다. 받은 보고의 계좌 가치가 기준 금액보다 5 %를 넘게 낮으면 계좌가 감소 전용 상태로 들어간다(기준 100에서 95.00은 아니고 94.99는 들어간다). 뒤 UTC 날짜의 첫 보고는 옛 기준으로 먼저 판정된 뒤에 새 기준이 되고, 여러 날의 공백 뒤에도 기준은 한 번만 넘어간다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test margin` |
 | V-MARGIN-4 | 감소 전용 상태로 들어가는 입력 안에서, 감소 전용 표시가 없고 취소 요청이 없거나 취소 시도가 다 된 모든 열린 주문에 규칙 이름으로 취소 요청이 나간다. 표시 없는 익절 주문도 취소된다. 감소 전용 표시가 있는 주문은 그대로 둔다. 감소 전용 상태에서 일반 주문은 포지션을 줄이는 방향이어도 Hold(Reducing)으로 거절되고, 감소 전용 주문은 받는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-9 | 증거금 정책이 있으면, 종목의 거래소 설정(증거금 방식과 레버리지)을 이번 링크 세션에서 받지 못한 동안 그 종목의 일반 주문은 VenueSetting(종목) 차단으로 거절된다. 옛 세션의 응답은 버린다. 받은 설정의 증거금 방식이나 레버리지가 정책과 다르면 그 종목만 같은 차단에 걸리고 다른 종목은 걸리지 않는다. 맞는 설정을 받으면 바로 풀리고, 링크가 바뀌면 다시 모르는 것이 된다. 증거금 보고의 포지션에 적힌 방식과 레버리지도 설정의 출처다. 차단 조회는 걸린 종목마다 그 종목 이름과 함께 차단을 보여 준다. 계좌 모드가 unifiedAccount나 portfolioMargin이면 허용 목록에 적혀 있어도 계좌의 모든 종목의 일반 주문이 AccountMode 차단으로 거절된다. 허용 목록에 없는 모드, 빈 응답, 이번 링크 세션에서 받지 못한 모드도 같다. 기본 허용 목록은 비어 있어서 운영자가 모드를 적기 전에는 일반 주문이 나가지 않는다. 감소 전용 주문은 두 차단을 모두 통과한다. OMS는 설정을 읽기만 하고 거래소로 아무것도 보내지 않는다 | 단위 | 미실행 | `cargo test -p oms-core --test margin` |
 | V-MARGIN-7 | 증거금 정책이 있고 링크가 올라와 있을 때, 마지막으로 받은 증거금 보고의 조회 시각에서 60초가 넘게 지나면 틱이 감소 전용 표시가 없고 취소 요청이 없는 모든 열린 주문에 Rule(MarginStale) 이름으로 취소 요청을 한 번 낸다. 정확히 60초에는 내지 않는다. 감소 전용 표시가 있는 주문은 그대로 둔다. 아무 상태도 걸리지 않는다 | 단위 | 미실행 | `cargo test -p oms-core --test margin` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
@@ -727,7 +728,7 @@
 - 판정 기준과 근거: 종료 코드 3과 오류 문구
 - 재현: `cargo test -p oms-node --test e2e configuration_changes && cargo test -p oms-node --lib config::tests`
 - 뒷받침하는 것: 요구 R13, C-BOOT
-- 확인하지 않은 범위: 설정 파일의 그 밖의 검증 규칙. 조회 weight 예산 검사와 runtime.venue_setting_poll_ms(뒤 티켓). account_modes_allowed의 내용
+- 확인하지 않은 범위: 설정 파일의 그 밖의 검증 규칙. 조회 weight 예산 검사(뒤 티켓). account_modes_allowed의 내용(목록에 무엇을 적든 설정은 읽힌다. 허용 여부는 코어가 판정한다: V-MARGIN-9)
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
@@ -1269,7 +1270,7 @@
 - 판정 기준과 근거: C-MARGIN의 차단 표와 설정 표. 기대값은 손으로 적었다
 - 재현: `cargo test -p oms-core --test scenarios reduce_only && cargo test -p oms-core --test margin`
 - 뒷받침하는 것: C-MARGIN, ADR-018 §7의 8
-- 확인하지 않은 범위: 거래소가 감소 전용 주문의 포지션 확대를 실제로 막는지(T5). `Reducing`, `VenueSetting`, `AccountMode` 차단은 뒤 티켓에서 생긴다. 정책 값을 읽는 규칙은 아직 없다
+- 확인하지 않은 범위: 거래소가 감소 전용 주문의 포지션 확대를 실제로 막는지(T5). `Reducing` 차단은 뒤 티켓에서 생긴다(`VenueSetting`, `AccountMode` 차단의 통과는 V-MARGIN-9)
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
@@ -1340,25 +1341,26 @@
 | `core/mirrored_books_have_equal_exposure_and_equal_decisions` | 이전 버전 결과 | last result: passed |
 | `core/exposure_is_exact_at_extreme_price_and_quantity` | 이전 버전 결과 | last result: passed |
 
-## V-MARGIN-11 — 증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이, 계좌 노출을 보여 준다. 정책이 없으면 묻지 않는다. 조회한 계좌 가치가 기준 금액보다 5 %를 넘게 낮아지면 status가 감소 전용 상태와 그 규칙, 기준 금액을 보여 주고 일반 주문이 Hold(Reducing)으로 거절된다
+## V-MARGIN-11 — 증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이, 계좌 노출을 보여 준다. 링크가 올라오면 종목마다 거래소 설정을, 그리고 계좌 모드를 묻고, 포지션이 없는 종목의 설정은 정해진 간격으로 다시 묻는다. status는 종목별 거래소 설정과 계좌 모드, 그것이 정책과 맞는지를 보여 준다. 정책이 없으면 묻지 않는다. 조회한 계좌 가치가 기준 금액보다 5 %를 넘게 낮아지면 status가 감소 전용 상태와 그 규칙, 기준 금액을 보여 주고 일반 주문이 Hold(Reducing)으로 거절된다
 
-- 상태: **이전 버전 결과**
+- 상태: **미실행**
 - 왜 중요한가: 코어의 규칙이 옳아도 조회가 연결되지 않으면 보고가 없어 모든 일반 주문이 거절되거나, 운영자가 왜 거절되는지 볼 수 없다
 - 수준: 프로세스
-- 전제와 범위: 실제 oms-node와 simvenue 프로세스. 조회 간격 100 ms로 줄인 설정 2회(계좌 가치 따라가기, 일 손실 진입), 정책 없는 설정 1회
+- 전제와 범위: 실제 oms-node와 simvenue 프로세스. 조회 간격 100 ms(거래소 설정은 200 ms)로 줄인 설정 3회(계좌 가치 따라가기, 일 손실 진입, 거래소 설정과 계좌 모드), 정책 없는 설정 2회
 - 실제 구성요소: oms-node(재조정 태스크의 타이머, 게이트웨이, 입력 큐, 저널, status), 소켓
-- 모의·시뮬레이션: 거래소(simvenue). 계좌 가치는 시험이 정한다
-- 주입한 장애: 없음
-- 판정 기준과 근거: status의 core.margin(account_value, age_us, seq, fresh, account_exposure, reducing, day_base), core.holds, simvenue가 센 조회 수
-- 재현: `cargo test -p oms-node --test e2e node_polls_margin && cargo test -p oms-node --test e2e status_shows_account_exposure && cargo test -p oms-node --test e2e status_shows_reducing`
+- 모의·시뮬레이션: 거래소(simvenue). 계좌 가치, 종목의 거래소 설정, 계좌 모드는 시험이 정한다
+- 주입한 장애: 거래소에서 바뀐 종목 설정(교차, 레버리지 3), 바뀐 계좌 모드(unifiedAccount), 스트림 끊김으로 생긴 새 링크 세션
+- 판정 기준과 근거: status의 core.margin(account_value, age_us, seq, fresh, account_exposure, reducing, day_base, venue_settings, account_mode), core.holds, simvenue가 센 조회 수
+- 재현: `cargo test -p oms-node --test e2e node_polls_margin && cargo test -p oms-node --test e2e status_shows_account_exposure && cargo test -p oms-node --test e2e status_shows_reducing && cargo test -p oms-node --test e2e node_reads_venue_setting`
 - 뒷받침하는 것: C-MARGIN
-- 확인하지 않은 범위: 기본 간격 5초 그대로의 실행. Hyperliquid 게이트웨이(아직 이 조회에 답하지 않는다: 티켓 09). 운영자 명령과 재시작(뒤 티켓). 정확한 시간
+- 확인하지 않은 범위: 기본 간격 5초(거래소 설정은 60초) 그대로의 실행. Hyperliquid 게이트웨이(아직 이 조회들에 답하지 않는다: 티켓 09). 포지션이 있는 종목의 설정이 보고로 갱신되는 것(simvenue의 보고에는 포지션이 없다: 티켓 10). 운영자 명령과 재시작(뒤 티켓). 정확한 시간
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
 | `e2e/node_polls_margin_and_status_shows_value_and_age` | 이전 버전 결과 | last result: passed |
 | `e2e/status_shows_account_exposure` | 이전 버전 결과 | last result: passed |
 | `e2e/status_shows_reducing_its_rule_and_the_day_base` | 이전 버전 결과 | last result: passed |
+| `e2e/node_reads_venue_setting_and_account_mode_and_status_shows_them` | 미실행 |  |
 
 ## V-MARGIN-5 — 증거금 정책이 있으면 첫 증거금 보고가 그 계좌 가치를 조회 시각의 UTC 날짜와 함께 기준 금액으로 정한다. 같은 날의 뒤 보고는 기준을 바꾸지 않는다. 받은 보고의 계좌 가치가 기준 금액보다 5 %를 넘게 낮으면 계좌가 감소 전용 상태로 들어간다(기준 100에서 95.00은 아니고 94.99는 들어간다). 뒤 UTC 날짜의 첫 보고는 옛 기준으로 먼저 판정된 뒤에 새 기준이 되고, 여러 날의 공백 뒤에도 기준은 한 번만 넘어간다
 
@@ -1409,6 +1411,31 @@
 | `core/a_new_day_does_not_clear_reducing` | 이전 버전 결과 | last result: passed |
 | `core/an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing` | 이전 버전 결과 | last result: passed |
 | `core/latch_and_day_base_replay_to_the_same_state` | 이전 버전 결과 | last result: passed |
+
+## V-MARGIN-9 — 증거금 정책이 있으면, 종목의 거래소 설정(증거금 방식과 레버리지)을 이번 링크 세션에서 받지 못한 동안 그 종목의 일반 주문은 VenueSetting(종목) 차단으로 거절된다. 옛 세션의 응답은 버린다. 받은 설정의 증거금 방식이나 레버리지가 정책과 다르면 그 종목만 같은 차단에 걸리고 다른 종목은 걸리지 않는다. 맞는 설정을 받으면 바로 풀리고, 링크가 바뀌면 다시 모르는 것이 된다. 증거금 보고의 포지션에 적힌 방식과 레버리지도 설정의 출처다. 차단 조회는 걸린 종목마다 그 종목 이름과 함께 차단을 보여 준다. 계좌 모드가 unifiedAccount나 portfolioMargin이면 허용 목록에 적혀 있어도 계좌의 모든 종목의 일반 주문이 AccountMode 차단으로 거절된다. 허용 목록에 없는 모드, 빈 응답, 이번 링크 세션에서 받지 못한 모드도 같다. 기본 허용 목록은 비어 있어서 운영자가 모드를 적기 전에는 일반 주문이 나가지 않는다. 감소 전용 주문은 두 차단을 모두 통과한다. OMS는 설정을 읽기만 하고 거래소로 아무것도 보내지 않는다
+
+- 상태: **미실행**
+- 왜 중요한가: 거래소의 레버리지나 증거금 방식이 계획과 다르면 주문이 계획하지 않은 증거금을 쓴다. 확인하지 못한 설정을 맞다고 가정하면 그 차이를 아무도 모른다
+- 수준: 단위
+- 전제와 범위: 코어의 차단 계산과 신규 주문 검사. 정책 기본값(격리, 레버리지 2), 종목 하나 또는 둘
+- 실제 구성요소: oms-core
+- 모의·시뮬레이션: 거래소 설정 응답과 증거금 보고는 시험이 입력
+- 주입한 장애: 설정을 받지 못한 링크 세션, 옛 세션의 늦은 응답, 교차 증거금, 레버리지 3과 1, 허용 목록에 잘못 적힌 통합 계좌와 포트폴리오 증거금
+- 판정 기준과 근거: C-MARGIN의 '거래소 설정과 계좌 모드'. 기대값은 손으로 적었다. 변이 M43~M50
+- 재현: `cargo test -p oms-core --test margin`
+- 뒷받침하는 것: C-MARGIN
+- 확인하지 않은 범위: 어느 문자열이 표준 모드인지(T10): 시험의 standard는 임의의 이름이다. 포지션이 없을 때 거래소가 설정을 알려 주는지(T11). 거래소가 걸려 있는 주문에 레버리지를 적용하는지(T8)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/instrument_with_unknown_venue_setting_holds_plain_orders` | 미실행 |  |
+| `core/a_setting_that_differs_from_config_holds_only_that_instrument` | 미실행 |  |
+| `core/a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again` | 미실행 |  |
+| `core/a_cross_position_in_a_margin_report_raises_the_hold` | 미실행 |  |
+| `core/venue_setting_hold_names_its_instrument_in_holds` | 미실행 |  |
+| `core/unified_or_portfolio_account_mode_holds_the_account` | 미실행 |  |
+| `core/an_account_mode_off_the_allow_list_or_unknown_holds_the_account` | 미실행 |  |
+| `core/reduce_only_order_passes_the_venue_setting_and_account_mode_holds` | 미실행 |  |
 
 ## V-MARGIN-7 — 증거금 정책이 있고 링크가 올라와 있을 때, 마지막으로 받은 증거금 보고의 조회 시각에서 60초가 넘게 지나면 틱이 감소 전용 표시가 없고 취소 요청이 없는 모든 열린 주문에 Rule(MarginStale) 이름으로 취소 요청을 한 번 낸다. 정확히 60초에는 내지 않는다. 감소 전용 표시가 있는 주문은 그대로 둔다. 아무 상태도 걸리지 않는다
 
