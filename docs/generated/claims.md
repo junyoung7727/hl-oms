@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `4d9045ac72f70e95`, 검증 결과의 다이제스트 `2cf32bd373ac7282`.
+> 소스 다이제스트 `262ce748758e2e9f`, 검증 결과의 다이제스트 `2cf32bd373ac7282`.
 
-주장 68건: 통과 0, 실패 0, 미실행 2, 이전 버전 결과 66.
+주장 68건: 통과 0, 실패 0, 미실행 3, 이전 버전 결과 65.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -24,7 +24,7 @@
 | V-RECON-2 | 노드가 죽어 있는 동안 거래소에서 일어난 체결, 거래소 주도 취소, 부분 체결을 재시작 뒤 거래소 조회로 모두 반영한다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e events_missed` |
 | V-EXT-1 | OMS가 내지 않은 체결은 기장되고 불일치로 표시되어 신규 주문을 막으며, 운영자가 확인해야 풀린다 | 시뮬레이션 | 이전 버전 결과 | `cargo test --release -p oms-sim --test sim profile_external` |
 | V-REPLAY-1 | 기록된 이벤트만 적용해 만든 상태는 살아 있는 상태와 같고, 기록된 입력을 다시 판단하면 기록된 이벤트가 나온다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios && oms-node verify --data-dir <dir> --re-decide` |
-| V-SIM-1 | 네트워크 장애, 통보 중복·지연, 링크 단절, 프로세스 재시작, 키 삭제가 임의로 섞인 실행의 매 단계에서: 구조 불변조건이 성립하고, 거래소의 실제 포지션이 OMS가 설명하는 범위 안에 있고, 한도를 넘지 않고, 같은 주문이 두 번 전송되지 않는다 | 시뮬레이션 | 이전 버전 결과 | `OMS_SIM_SEEDS=400 cargo test --release -p oms-sim --test sim -- --nocapture   (실패 시: OMS_SIM_PROFILE=<이름> OMS_SIM_SEED=<n>)` |
+| V-SIM-1 | 네트워크 장애, 통보 중복·지연, 링크 단절, 프로세스 재시작, 키 삭제가 임의로 섞인 실행의 매 단계에서: 구조 불변조건이 성립하고, 거래소의 실제 포지션이 OMS가 설명하는 범위 안에 있고, 한도를 넘지 않고, 같은 주문이 두 번 전송되지 않는다 | 시뮬레이션 | 미실행 | `OMS_SIM_SEEDS=400 cargo test --release -p oms-sim --test sim -- --nocapture   (실패 시: OMS_SIM_PROFILE=<이름> OMS_SIM_SEED=<n>)` |
 | V-SIM-2 | 장애가 멈추면 장부가 가상 거래소와 일치한다: 주문별 체결량과 상태, 포지션, 수수료 합. 차단 사유와 거짓 불일치가 남지 않는다 | 시뮬레이션 | 이전 버전 결과 | `V-SIM-1과 같다` |
 | V-SIM-3 | 같은 seed는 바이트 단위로 같은 저널을 만든다 | 시뮬레이션 | 이전 버전 결과 | `cargo test --release -p oms-sim` |
 | V-COMMIT-1 | flush가 실패하면 그 배치의 응답, 전송 명령, 읽기 모델 변경이 하나도 나가지 않고 프로세스가 입력을 닫는다. 성공한 경우 응답 시점에 읽기 모델은 이미 갱신돼 있다 | 프로세스 내부 | 이전 버전 결과 | `cargo test -p oms-node --features failpoints --test pipeline` |
@@ -465,7 +465,7 @@
 
 ## V-SIM-1 — 네트워크 장애, 통보 중복·지연, 링크 단절, 프로세스 재시작, 키 삭제가 임의로 섞인 실행의 매 단계에서: 구조 불변조건이 성립하고, 거래소의 실제 포지션이 OMS가 설명하는 범위 안에 있고, 한도를 넘지 않고, 같은 주문이 두 번 전송되지 않는다
 
-- 상태: **이전 버전 결과**
+- 상태: **미실행**
 - 왜 중요한가: 예제 시험이 생각하지 못한 순서를 찾는다. 실제로 결함 넷을 찾아 고쳤다
 - 수준: 시뮬레이션
 - 전제와 범위: 프로파일 6개(calm, lossy, crashy, weak_evidence, purge, skewed). 실행당 1500단계. seed 수는 결과의 notes에 있다. 한 종목, 두 전략, 가상 시계
@@ -485,6 +485,7 @@
 | `sim/profile_weak_evidence` | 이전 버전 결과 | last result: passed |
 | `sim/profile_purge` | 이전 버전 결과 | last result: passed |
 | `sim/profile_skewed` | 이전 버전 결과 | last result: passed |
+| `sim/profile_margin_calm` | 미실행 |  |
 
 ## V-SIM-2 — 장애가 멈추면 장부가 가상 거래소와 일치한다: 주문별 체결량과 상태, 포지션, 수수료 합. 차단 사유와 거짓 불일치가 남지 않는다
 
@@ -1541,6 +1542,7 @@
 | `sim/world_account_value_follows_fills_price_fees_and_funding` | 미실행 |  |
 | `sim/a_loss_made_only_of_fees_and_funding_enters_reducing` | 미실행 |  |
 | `sim/world_refuses_a_reduce_only_order_that_would_grow_the_position` | 미실행 |  |
+| `sim/profile_margin_calm` | 미실행 |  |
 
 ## V-MARGIN-10 — Hyperliquid 게이트웨이는 문서의 clearinghouseState 응답 예를 증거금 보고 입력으로 옮긴다: 계좌 가치는 marginSummary.accountValue, 포지션마다 종목, 부호 있는 수량, 포지션 가치, 사용 증거금, 증거금 방식, 레버리지, 최대 레버리지. 어느 포지션이든 maxLeverage가 없거나 0이거나 정수가 아니면 보고 전체를 사유와 함께 거부 입력(MarginReportInvalid)으로 바꾸고, 멀쩡한 다른 포지션도 보고하지 않는다. 계좌 가치, 수량, 포지션 가치, 사용 증거금, 레버리지 가운데 하나라도 없거나 읽을 수 없을 때, 증거금 방식이 isolated도 cross도 아닐 때, 포지션 목록이 없을 때도 같다. 어떤 값도 0이나 기본값으로 채우지 않고 어떤 포지션도 건너뛰지 않는다. 설정에 없는 종목의 포지션도 보고에 남는다(번역 함수는 설정된 종목을 받지 않는다). activeAssetData 응답 예는 그 종목의 거래소 설정 입력(증거금 방식, 레버리지)이 된다. 방식이 isolated도 cross도 아니거나, 레버리지가 정수가 아니거나, 응답이 다른 종목의 것이면 입력을 만들지 않는다(설정은 모름으로 남아 그 종목이 막힌다). userAbstraction 응답(문자열 하나)은 글자 그대로 계좌 모드 입력이 된다. 문서에 없는 문자열을 문서에 있는 값으로 바꾸지 않고, 문자열이 아니거나 64자를 넘으면 입력을 만들지 않는다. 세 조회의 요청 본문은 문서의 것과 같다(clearinghouseState, activeAssetData, userAbstraction). 게이트웨이의 요청 예산은 취소를 막지 않으므로 취소 500건 뒤에는 조회가 기다린다: 가득 찬 예산(1200)에서는 700이 남아 증거금 조회가 바로 나가고, 시작 직후(600)에는 100이 남아 10.1초, 빈 예산에서는 15.1초를 기다린다
 

@@ -52,6 +52,14 @@ fn run_profile(p: Profile) -> Vec<SimStats> {
         sum(|s| s.mismatches),
         sum(|s| s.external_fills),
     );
+    if p.margin {
+        println!(
+            "profile={} margin: leverage_checked={} leverage_rejects={}",
+            p.name,
+            sum(|s| s.leverage_checked),
+            sum(|s| s.leverage_rejects),
+        );
+    }
     all
 }
 
@@ -322,4 +330,29 @@ fn a_loss_made_only_of_fees_and_funding_enters_reducing() {
     assert_eq!(reducing_rules(&w), vec![oms_core::RuleId::DailyLoss]);
     assert!(w.core.holds(None).contains(&oms_core::HoldReason::Reducing));
     assert_eq!(w.venue.mark(&x()), oms_core::Px::parse("100").unwrap(), "the price never moved");
+}
+
+/// Every seed of `margin_calm`, run once for the tests that read it.
+fn margin_calm_runs() -> &'static [SimStats] {
+    static RUNS: std::sync::OnceLock<Vec<SimStats>> = std::sync::OnceLock::new();
+    RUNS.get_or_init(|| run_profile(Profile::margin_calm()))
+}
+
+fn total(all: &[SimStats], f: fn(&SimStats) -> u64) -> u64 {
+    all.iter().map(f).sum()
+}
+
+/// S5 under random interleavings. The run itself fails (`leverage-gate`)
+/// when a plain order was accepted that took the account exposure above
+/// twice the account value at acceptance. The exposure is worked out by the
+/// world from the core's books, not by the core's own function.
+#[test]
+fn profile_margin_calm() {
+    let all = margin_calm_runs();
+    if all.len() >= 10 {
+        // The profile must reach the rule: orders were judged, and some
+        // were refused by it.
+        assert!(total(all, |s| s.leverage_checked) > 0, "no accepted plain order was judged");
+        assert!(total(all, |s| s.leverage_rejects) > 0, "the leverage gate never refused an order");
+    }
 }

@@ -59,6 +59,12 @@ pub struct Profile {
     /// rules: such a run draws the same random numbers and writes the same
     /// journal as before.
     pub margin: bool,
+    /// Share of new orders that carry the reduce-only flag (margin only).
+    pub p_reduce_only: u32,
+    // actions per step of the venue's margin model and of the operator
+    pub p_price: u32,
+    pub p_funding: u32,
+    pub p_clear: u32,
 }
 
 impl Profile {
@@ -93,6 +99,10 @@ impl Profile {
             closed_retention_us: 3_600_000_000,
             dedup_grace_us: 60_000_000,
             margin: false,
+            p_reduce_only: 0,
+            p_price: 0,
+            p_funding: 0,
+            p_clear: 0,
         }
     }
 
@@ -165,6 +175,23 @@ impl Profile {
         }
     }
 
+    /// `calm` with the margin rules on: the venue's account value follows
+    /// fills, price moves, fees and funding, some orders are reduce-only,
+    /// and an operator clears REDUCING now and then. No fault is injected.
+    pub fn margin_calm() -> Profile {
+        Profile {
+            name: "margin_calm",
+            margin: true,
+            p_reduce_only: 150,
+            p_price: 60,
+            p_funding: 10,
+            p_clear: 15,
+            ..Profile::calm()
+        }
+    }
+
+    /// The profiles that existed before the margin rules. None of them sets
+    /// a margin policy.
     pub fn all() -> Vec<Profile> {
         vec![
             Profile::calm(),
@@ -203,6 +230,11 @@ pub struct SimStats {
     pub final_digest: u64,
     pub trace_hash: u64,
     pub sim_seconds: u64,
+    // margin profiles
+    /// Accepted plain orders that the `leverage-gate` check judged.
+    pub leverage_checked: u64,
+    /// Requests refused with `AccountLeverage`.
+    pub leverage_rejects: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -252,10 +284,29 @@ enum Net {
     RefPrice { epoch: u32, session: u64, px: Px, ts: Ts },
 }
 
+impl Net {
+    /// Traffic that never ends: the reconcile timer and, in a margin
+    /// profile, the margin poll with its query, its answer and the
+    /// reference price.
+    fn is_periodic(&self) -> bool {
+        match self {
+            Net::Reconcile { .. } | Net::MarginPoll { .. } | Net::RefPrice { .. } => true,
+            Net::QueryArrive { q, .. } => matches!(q, Query::Margin { .. }),
+            Net::QueryResp { inputs, .. } => inputs.iter().all(|i| matches!(i, VenueInput::MarginReport(_))),
+            _ => false,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 enum Inflight {
     Place(OrderId),
     Cancel(OrderId, u32),
+}
+
+/// What the world notes before an input, to judge the core's answer to it.
+struct MarginBefore {
+    exposure: Option<i128>,
 }
 
 pub const INSTANCE: u64 = 0x51_4d_55_4c;
@@ -430,6 +481,7 @@ impl World {
 
     fn feed(&mut self, input: Input) -> Result<(), Violation> {
         self.stats.inputs += 1;
+        let before = self.p.margin.then(|| self.margin_before());
         let out = self
             .core
             .handle(self.now, &input)
@@ -437,6 +489,9 @@ impl World {
         self.core
             .check_invariants()
             .map_err(|e| self.violation("structural-invariant", format!("{e} after {input:?}")))?;
+        if let Some(before) = before {
+            self.check_margin_rules(&input, &out, &before)?;
+        }
         let rec = (!out.events.is_empty()).then(|| {
             let pending_records = self.pending.iter().filter(|(r, _)| r.is_some()).count();
             Record {
@@ -872,6 +927,66 @@ impl World {
         }
     }
 
+    // ---- margin rules: what the world checks after every input ------------
+
+    fn margin_before(&self) -> MarginBefore {
+        MarginBefore { exposure: self.oracle_exposure() }
+    }
+
+    /// Account exposure worked out by the world from the core's books: the
+    /// position and every open order's reserved quantity, an order valued
+    /// at the higher of its limit and the reference price. Units of 1e-16
+    /// quote. `None` while there is no reference price. The world has one
+    /// instrument.
+    fn oracle_exposure(&self) -> Option<i128> {
+        let reference = i128::from(self.core.ref_px.get(&inst())?.px.0);
+        let position = i128::from(self.core.account_book(&inst()).pos.0) * reference;
+        let (mut buys, mut sells) = (0i128, 0i128);
+        for o in self.core.open.iter().filter_map(|id| self.core.order(*id)) {
+            let value = i128::from(o.reserved.0) * i128::from(o.px.0).max(reference);
+            match o.side {
+                Side::Buy => buys += value,
+                Side::Sell => sells += value,
+            }
+        }
+        Some((position + buys).max(sells - position).max(0))
+    }
+
+    fn check_margin_rules(&mut self, input: &Input, out: &Output, before: &MarginBefore) -> Result<(), Violation> {
+        let Input::NewOrder(req) = input else { return Ok(()) };
+        match &out.reply {
+            Some(Reply::NewOrder(NewOrderReply::Rejected { reasons })) => {
+                if reasons.contains(&RejectReason::AccountLeverage) {
+                    self.stats.leverage_rejects += 1;
+                }
+            }
+            Some(Reply::NewOrder(NewOrderReply::Accepted { order_id })) if !req.reduce_only => {
+                // S5: at acceptance the exposure is within twice the
+                // account value, or the order did not raise it.
+                self.stats.leverage_checked += 1;
+                let value = self.core.margin.report.as_ref().map(|r| r.account_value.0);
+                let (Some(value), Some(was), Some(is)) = (value, before.exposure, self.oracle_exposure()) else {
+                    return Err(self.violation(
+                        "leverage-gate",
+                        format!("plain order {order_id} accepted without an account value or a reference price"),
+                    ));
+                };
+                let limit = 2 * i128::from(oms_core::num::SCALE) * i128::from(value);
+                if value <= 0 || (is > limit && is > was) {
+                    return Err(self.violation(
+                        "leverage-gate",
+                        format!(
+                            "plain order {order_id} accepted: exposure {was} -> {is} (1e-16), limit {limit}, account value {}",
+                            Amount(value)
+                        ),
+                    ));
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     // ---- faults -----------------------------------------------------------
 
     /// Rebuilds a core from the durable records alone.
@@ -931,15 +1046,23 @@ impl World {
             2 => Tif::Alo,
             _ => Tif::Gtc,
         };
+        let px = if self.p.margin {
+            // Near the venue's mark, so that a fill is not itself a large
+            // gain or loss.
+            Px(self.venue.mark(&inst()).0 + (self.rng.range(0, 5) as i64 - 2) * PX_TICK)
+        } else {
+            Px(self.rng.range(90, 110) as i64 * PX_TICK)
+        };
+        let reduce_only = self.p.margin && self.rng.chance(self.p.p_reduce_only);
         let req = NewOrderReq {
             strategy,
             client_order_id: ClientOrderId::new(format!("k{}", self.key_counter)).expect("valid id"),
             instrument: inst(),
             side,
             qty: Qty(lots as i64 * QTY_STEP),
-            px: Px(self.rng.range(90, 110) as i64 * PX_TICK),
+            px,
             tif,
-            reduce_only: false,
+            reduce_only,
             expires_at: self.now + self.rng.range(800_000, 5_000_000),
         };
         self.stats.requests += 1;
@@ -1022,6 +1145,29 @@ impl World {
             OperatorCmd::Resume { scope: Scope::Account, note: "sim".into() }
         };
         self.feed(Input::Operator(cmd))
+    }
+
+    /// The venue's mark moves by one tick, inside 80..=120.
+    fn act_price(&mut self) {
+        let step = if self.rng.chance(500) { PX_TICK } else { -PX_TICK };
+        let px = (self.venue.mark(&inst()).0 + step).clamp(80 * PX_TICK, 120 * PX_TICK);
+        self.venue.set_mark(&inst(), Px(px));
+    }
+
+    /// The venue charges (or pays) funding of 0.01 % to 0.3 % of the
+    /// position value.
+    fn act_funding(&mut self) {
+        let rate = self.rng.range(100, 3_000) as i64;
+        let rate = if self.rng.chance(500) { rate } else { -rate };
+        self.venue.charge_funding(&inst(), rate);
+    }
+
+    /// The operator asks to end REDUCING. The core may refuse.
+    fn act_clear(&mut self) -> Result<(), Violation> {
+        if self.core.margin.reducing.is_none() {
+            return Ok(());
+        }
+        self.feed(Input::Operator(OperatorCmd::ClearReduce { note: "sim".into() }))
     }
 
     // ---- checks -----------------------------------------------------------
@@ -1202,6 +1348,12 @@ impl World {
             self.act_external_fill();
         } else if pick(p.p_operator) {
             self.act_operator()?;
+        } else if pick(p.p_price) {
+            self.act_price();
+        } else if pick(p.p_funding) {
+            self.act_funding();
+        } else if pick(p.p_clear) {
+            self.act_clear()?;
         }
         self.check_always()
     }
@@ -1219,6 +1371,8 @@ impl World {
             self.now += 100_000;
             self.drain_due()?;
             self.feed(Input::Tick)?;
+            // The operator ends REDUCING once the numbers are fresh.
+            self.act_clear()?;
             self.commit()?;
             self.check_always()?;
             if self.external_seen {
@@ -1234,7 +1388,8 @@ impl World {
                 && self.core.needs().is_empty()
                 && !self.core.has_in_doubt()
                 && self.core.parked_fills.is_empty()
-                && self.queue.values().all(|e| matches!(e, Net::Reconcile { .. }));
+                && self.core.margin.reducing.is_none()
+                && self.queue.values().all(|e| e.is_periodic());
             settled_for = if quiet { settled_for + 1 } else { 0 };
             // Several quiet reconcile rounds in a row, so periodic sweeps ran.
             if settled_for >= 40 {

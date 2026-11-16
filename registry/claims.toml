@@ -268,7 +268,7 @@ real = "oms-core의 판단과 상태"
 simulated = "저널과 커밋 게이트(내구 접두부 모델), 게이트웨이, 네트워크, 거래소, 전략, 시계"
 faults = "요청 유실 4%, 요청 지연 6%(만료를 넘기기도), 응답 유실 8%, 미전송 3%, 스트림 중복 15%·지연 20%, 조회 유실 10%, 링크 단절, 재시작 1.2%/단계, 거래소 시계 1초 지연"
 criterion = "불변조건 I-RES, I-BOOK, I-ATTR, I-KEY, I-FILL, I-PHASE, I-QTY, I-BRIDGE, I-ONCE. 비교 대상은 가상 거래소가 따로 유지하는 실제 장부다"
-tests = ["sim/profile_calm", "sim/profile_lossy", "sim/profile_crashy", "sim/profile_weak_evidence", "sim/profile_purge", "sim/profile_skewed"]
+tests = ["sim/profile_calm", "sim/profile_lossy", "sim/profile_crashy", "sim/profile_weak_evidence", "sim/profile_purge", "sim/profile_skewed", "sim/profile_margin_calm"]
 repro = "OMS_SIM_SEEDS=400 cargo test --release -p oms-sim --test sim -- --nocapture   (실패 시: OMS_SIM_PROFILE=<이름> OMS_SIM_SEED=<n>)"
 supports = "I-QTY, I-BRIDGE, I-ONCE, 구조 불변조건"
 not_covered = "실제 저널·스레드·소켓. 여러 종목. 설정 변경. 운영자 조정. 장애가 계속되는 프로파일에서는 요청의 대부분이 차단으로 거절된다. 수용 비율은 결과의 notes에 있다"
@@ -1003,7 +1003,7 @@ real = "없음(모형 자체의 산술)"
 simulated = "거래소의 계좌 가치 계산. 우리 모형이고 거래소의 문서화된 산술이 아니다"
 faults = "없음"
 criterion = "손으로 푼 예의 값과 같다"
-tests = ["sim/world_account_value_follows_fills_price_fees_and_funding", "sim/a_loss_made_only_of_fees_and_funding_enters_reducing", "sim/world_refuses_a_reduce_only_order_that_would_grow_the_position"]
+tests = ["sim/world_account_value_follows_fills_price_fees_and_funding", "sim/a_loss_made_only_of_fees_and_funding_enters_reducing", "sim/world_refuses_a_reduce_only_order_that_would_grow_the_position", "sim/profile_margin_calm"]
 repro = "cargo test -p oms-sim --test sim world_"
 supports = "C-MARGIN"
 not_covered = "실제 거래소가 계좌 가치를 이렇게 계산하는지(T2, T3: 수수료와 펀딩이 어느 잔고에서 나가는지). 청산. 증거금 구간"
