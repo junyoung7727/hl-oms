@@ -1591,3 +1591,34 @@ fn a_cross_position_in_a_margin_report_raises_the_hold() {
     // The state rebuilt from the journal holds the same settings.
     assert_eq!(h.rebuilt().margin, h.core.margin);
 }
+
+/// S17. The operator must see which instrument to fix at the venue: the
+/// hold query lists one `VenueSetting` hold per instrument whose setting is
+/// unknown or differs, each with its instrument. Without a margin policy
+/// the hold does not exist.
+#[test]
+fn venue_setting_hold_names_its_instrument_in_holds() {
+    let mut h = H::configured(config_xy());
+    h.link_up_and_sync_only();
+    let hold = |i: &str| HoldReason::VenueSetting(iid(i));
+    assert_eq!(h.core.holds(None), vec![hold("X"), hold("Y")]);
+
+    h.venue_setting("X", true, 2);
+    assert_eq!(h.core.holds(None), vec![hold("Y")]);
+    // The query for one strategy shows it too.
+    assert_eq!(h.core.holds(Some(&sid("a"))), vec![hold("Y")]);
+
+    // Known but different is the same hold.
+    h.venue_setting("Y", true, 3);
+    assert_eq!(h.core.holds(None), vec![hold("Y")]);
+    h.venue_setting("Y", true, 2);
+    assert_eq!(h.core.holds(None), vec![]);
+
+    // No margin policy: no such hold, and the input leaves no trace.
+    let mut h = H::configured(config());
+    h.link_up_and_sync_only();
+    assert_eq!(h.core.holds(None), vec![]);
+    let out = h.venue_setting("X", false, 3);
+    assert_eq!(names(&out), Vec::<&str>::new());
+    assert!(h.core.margin.is_empty());
+}
