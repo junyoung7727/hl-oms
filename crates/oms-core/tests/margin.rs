@@ -1067,6 +1067,148 @@ proptest! {
     }
 }
 
+/// Instruments X, Y and Z with every limit as wide as the number types
+/// allow, so that only the leverage gate judges an order.
+fn config_extreme() -> CoreConfig {
+    let mut cfg = config_with_margin();
+    let spec = InstrumentSpec {
+        qty_step: Qty(1),
+        px_tick: Px(1),
+        px_max_sig_figs: None,
+        min_notional: Amount(0),
+        max_order_qty: Qty(i64::MAX),
+        max_order_notional: Amount(i64::MAX),
+        price_band_bps: None,
+        account_pos_min: SQty(-i64::MAX),
+        account_pos_max: SQty(i64::MAX),
+    };
+    let limit = PosLimit {
+        min: SQty(-i64::MAX),
+        max: SQty(i64::MAX),
+    };
+    for name in ["X", "Y", "Z"] {
+        cfg.instruments.insert(iid(name), spec.clone());
+        for strategy in cfg.strategies.values_mut() {
+            strategy.limits.insert(iid(name), limit.clone());
+        }
+    }
+    cfg
+}
+
+/// The decision on one order in a fresh account with this account value,
+/// with the reference price at the order's price. `None` is an acceptance.
+fn decide_alone(side: Side, qty: &str, price: &str, account_value: &str) -> Option<Vec<RejectReason>> {
+    let mut h = H::ready_with(config_extreme());
+    h.report_margin(account_value);
+    h.ref_price("X", price);
+    let r = req_on(&h, "X", "k1", side, qty, price);
+    match h.new_order(r) {
+        NewOrderReply::Accepted { .. } => None,
+        NewOrderReply::Rejected { reasons } => Some(reasons),
+        other => panic!("unexpected reply {other:?}"),
+    }
+}
+
+/// G3. The gate compares exact products. Near the limit no rounding flips a
+/// decision, at the largest prices and quantities nothing overflows into an
+/// acceptance, and a sum that does not fit is refused, never wrapped.
+///
+/// The limit is 2.0, so an order of quantity q at price p is accepted alone
+/// exactly when p x q <= 2 x account value. Values below are decimal
+/// literals worked out by hand; the generated part compares against its own
+/// i128 product of the raw 1e-8 integers.
+#[test]
+fn exposure_is_exact_at_extreme_price_and_quantity() {
+    let leverage = Some(vec![RejectReason::AccountLeverage]);
+
+    // 90 000 000 000 x 1 = 2 x 45 000 000 000.
+    assert_eq!(decide_alone(Side::Buy, "1", "90000000000", "45000000000"), None);
+    assert_eq!(decide_alone(Side::Buy, "1", "90000000000", "44999999999.99999999"), leverage);
+    assert_eq!(decide_alone(Side::Sell, "1", "90000000000", "45000000000"), None);
+    assert_eq!(decide_alone(Side::Sell, "1", "90000000000", "44999999999.99999999"), leverage);
+    // One quantity step more is 900 more: 2 x 45 000 000 450.
+    assert_eq!(decide_alone(Side::Buy, "1.00000001", "90000000000", "45000000450"), None);
+    assert_eq!(decide_alone(Side::Buy, "1.00000001", "90000000000", "45000000449.99999999"), leverage);
+    // The largest quantity at price 1: 92 233 720 368.54775807. Half of it
+    // is 46 116 860 184.273879035, which is not a multiple of 1e-8: the
+    // value just below refuses, the value just above accepts.
+    assert_eq!(decide_alone(Side::Buy, "92233720368.54775807", "1", "46116860184.27387904"), None);
+    assert_eq!(decide_alone(Side::Buy, "92233720368.54775807", "1", "46116860184.27387903"), leverage);
+    // Products below 1e-8 quote: 0.00000001 x 4.00000003 = 4.00000003e-8,
+    // just above 2 x 0.00000002. Rounded to 1e-8 it would equal the limit.
+    assert_eq!(decide_alone(Side::Buy, "4.00000003", "0.00000001", "0.00000002"), leverage);
+    assert_eq!(decide_alone(Side::Buy, "4.00000003", "0.00000001", "0.00000003"), None);
+    assert_eq!(decide_alone(Side::Buy, "4", "0.00000001", "0.00000002"), None);
+
+    // The largest quantity rests on X and on Y at 0.5, and 10 000 on Z,
+    // with the largest account value: 2 x 46 116 860 184.273879035 + 5 000
+    // is inside the limit.
+    let max = "92233720368.54775807";
+    let mut h = H::ready_with(config_extreme());
+    h.report_margin(max);
+    for (n, (name, qty)) in [("X", max), ("Y", max), ("Z", "10000")].into_iter().enumerate() {
+        h.ref_price(name, "0.5");
+        let r = req_on(&h, name, &format!("k{n}"), Side::Buy, qty, "0.5");
+        accepted(h.new_order(r));
+    }
+    assert_eq!(exposure(&h), "92233725368.54775807");
+    // The price of X goes to the largest price. The order on X is now
+    // worth (2^63 - 1)^2 x 1e-16; the published value is exact (worked
+    // out outside this code: M^2 + M x 5e7 + 5e19 with M = 2^63 - 1).
+    h.ref_price("X", max);
+    assert_eq!(exposure(&h), "8507059173069578449923.9646574582501249");
+    // Far above the limit: the smallest plain order is refused for
+    // leverage, not accepted by a wrapped number.
+    let r = req_on(&h, "Z", "k3", Side::Buy, "0.00000001", "0.5");
+    assert_eq!(rejected(h.new_order(r)), vec![RejectReason::AccountLeverage]);
+    // The price of Y goes there too. The sum no longer fits in an i128: the
+    // exposure is unknown and a plain order is refused with `Overflow`.
+    h.ref_price("Y", max);
+    assert_eq!(h.core.account_exposure(), None);
+    let r = req_on(&h, "Z", "k4", Side::Buy, "0.00000001", "0.5");
+    assert_eq!(rejected(h.new_order(r)), vec![RejectReason::Overflow]);
+    // A reduce-only order is not judged by the gate.
+    let r = NewOrderReq {
+        reduce_only: true,
+        ..req_on(&h, "Z", "k5", Side::Sell, "0.00000001", "0.5")
+    };
+    accepted(h.new_order(r));
+
+    // Generated: any price and quantity whose order notional fits. The
+    // boundary account value comes from the test's own i128 product.
+    let notional_cap = i128::from(i64::MAX) * 100_000_000;
+    let raw_px = prop_oneof![1i64..=1_000, 1i64..=10_000_000_000, 1i64..=i64::MAX];
+    let cases = raw_px.prop_flat_map(move |px| {
+        let max_qty = i64::try_from(notional_cap / i128::from(px)).unwrap_or(i64::MAX);
+        // Half of the cases land exactly on a multiple of the limit factor
+        // when the range allows it.
+        let on_grid = (1..=(max_qty / 200_000_000).max(1)).prop_map(move |k| k.saturating_mul(200_000_000).min(max_qty));
+        (Just(px), prop_oneof![1..=max_qty, on_grid])
+    });
+    let mut runner = proptest::test_runner::TestRunner::default();
+    let result = runner.run(&cases, |(px, qty)| {
+        let product = i128::from(px) * i128::from(qty);
+        let (floor, exact) = (product / 200_000_000, product % 200_000_000 == 0);
+        let (refused_at, accepted_at) = if exact { (floor - 1, floor) } else { (floor, floor + 1) };
+        let amount = |raw: i128| Amount(i64::try_from(raw).expect("fits")).to_string();
+        let (qty, px) = (Qty(qty).to_string(), Px(px).to_string());
+        prop_assert_eq!(
+            decide_alone(Side::Buy, &qty, &px, &amount(refused_at)),
+            Some(vec![RejectReason::AccountLeverage]),
+            "{} at {} with account value {}", &qty, &px, amount(refused_at)
+        );
+        prop_assert_eq!(
+            decide_alone(Side::Sell, &qty, &px, &amount(accepted_at)),
+            None,
+            "{} at {} with account value {}", &qty, &px, amount(accepted_at)
+        );
+        Ok(())
+    });
+    if let Err(e) = result {
+        panic!("{e}");
+    }
+}
+
 // ---- C-MARGIN: replay ---------------------------------------------------------
 
 /// S13. Margin state comes only from journal events. A core rebuilt from the

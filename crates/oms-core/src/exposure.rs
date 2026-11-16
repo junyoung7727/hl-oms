@@ -45,7 +45,7 @@ impl Core {
     /// the position can reach, valued as the leverage gate values it, with
     /// the last reference price of each instrument whatever its age. `None`
     /// when an instrument with a position or an order has no reference
-    /// price at all.
+    /// price at all, or when the sum does not fit in an `i128`.
     pub fn account_exposure(&self) -> Option<Exposure> {
         self.exposure_with(None, None).ok().map(Exposure)
     }
@@ -93,17 +93,20 @@ impl Core {
             // market is.
             let value = i128::from(qty.0) * i128::from(px.0.max(reference(i)?));
             let leg = legs.entry(i).or_default();
-            match side {
-                Side::Buy => leg.0 += value,
-                Side::Sell => leg.1 += value,
-            }
+            let sum = match side {
+                Side::Buy => &mut leg.0,
+                Side::Sell => &mut leg.1,
+            };
+            *sum = sum.checked_add(value).ok_or(Unvalued::Overflow)?;
         }
+        // One product of two 1e-8 integers always fits in an i128. A sum of
+        // them may not: it is then reported, never wrapped.
         let mut account = 0i128;
         for (i, (buys, sells)) in legs {
             let position = i128::from(self.account_book(i).pos.0) * i128::from(reference(i)?);
-            let up = (position + buys).max(0);
-            let down = (sells - position).max(0);
-            account += up.max(down);
+            let up = position.checked_add(buys).ok_or(Unvalued::Overflow)?.max(0);
+            let down = sells.checked_sub(position).ok_or(Unvalued::Overflow)?.max(0);
+            account = account.checked_add(up.max(down)).ok_or(Unvalued::Overflow)?;
         }
         Ok(account)
     }
@@ -119,8 +122,12 @@ impl Core {
         if report.account_value.0 <= 0 {
             return Some(RejectReason::AccountLeverage);
         }
-        let (Ok(before), Ok(after)) = (self.exposure_with(None, Some(at)), self.exposure_with(Some(r), Some(at))) else {
-            return Some(RejectReason::MarginUnavailable);
+        let (before, after) = match (self.exposure_with(None, Some(at)), self.exposure_with(Some(r), Some(at))) {
+            (Ok(before), Ok(after)) => (before, after),
+            (Err(Unvalued::NoReferencePrice), _) | (_, Err(Unvalued::NoReferencePrice)) => {
+                return Some(RejectReason::MarginUnavailable);
+            }
+            (Err(Unvalued::Overflow), _) | (_, Err(Unvalued::Overflow)) => return Some(RejectReason::Overflow),
         };
         let limit = i128::from(policy.max_account_leverage.0) * i128::from(report.account_value.0);
         // Above the limit alone does not refuse: a price move can put the
@@ -132,5 +139,9 @@ impl Core {
 
 /// Why an exposure has no value.
 enum Unvalued {
+    /// An instrument with a position or an order has no reference price
+    /// (or, where freshness is asked for, no fresh one).
     NoReferencePrice,
+    /// The sum does not fit in an `i128`.
+    Overflow,
 }

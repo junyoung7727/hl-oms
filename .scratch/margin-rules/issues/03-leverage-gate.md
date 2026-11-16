@@ -20,7 +20,7 @@
 - [x] Test `account_value_zero_or_negative_rejects` (seam A): fails when a plain order passes with account value 0 or below.
 - [x] Test `adding_an_order_never_lowers_exposure` (seam A, property, G3): fails when any generated accepted order lowers the published account exposure.
 - [x] Test `mirrored_books_have_equal_exposure_and_equal_decisions` (seam A, property, G3): fails when swapping every side and the sign of every position changes the exposure or a decision.
-- [ ] Test `exposure_is_exact_at_extreme_price_and_quantity` (seam A, property, G3): fails when an overflow or a rounding flips a decision near the limit; expected values come from independent `i128` multiplication on literals.
+- [x] Test `exposure_is_exact_at_extreme_price_and_quantity` (seam A, property, G3): fails when an overflow or a rounding flips a decision near the limit; expected values come from independent `i128` multiplication on literals.
 - [ ] Test `status_shows_account_exposure` (seam C): fails when the exposure is missing from the status.
 - [ ] Mutants: the limit comparison (`>` against `≥`), the "after greater than before" clause, the `max(limit, reference)` valuation, and the sum over instruments are each caught by a named test.
 - [ ] Stated and not proven here: exposure after a price move is not watched between orders; mid is not mark; the venue may refuse an order the gate accepts (fees at the edge).
