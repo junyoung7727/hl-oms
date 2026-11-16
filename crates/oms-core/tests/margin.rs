@@ -2590,3 +2590,272 @@ fn reduce_only_order_passes_the_venue_setting_and_account_mode_holds() {
         vec![HoldReason::VenueSetting(iid("X")), HoldReason::AccountMode]
     );
 }
+
+// ---- C-MARGIN: clear and rebase ------------------------------------------------
+
+fn clear_reduce(h: &mut H, note: &str) -> Output {
+    h.inp(Input::Operator(OperatorCmd::ClearReduce {
+        note: note.into(),
+    }))
+}
+
+fn refused(out: &Output) -> &str {
+    assert_eq!(out.events, vec![], "a refused command changed the state");
+    assert_eq!(out.commands, vec![]);
+    match &out.reply {
+        Some(Reply::Operator(Err(text))) => text,
+        other => panic!("the command was not refused: {other:?}"),
+    }
+}
+
+/// S14. `clear-reduce` is refused when the account is not REDUCING
+/// (`NotReducing`), when the note is empty or blank (`NoteRequired`), and
+/// when the newest margin report is older than 30 s (`MarginUnavailable`).
+/// A refusal records nothing and the latch stays.
+#[test]
+fn clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing() {
+    let mut h = at_base_100();
+
+    // Not REDUCING: a fresh report and a note are not enough.
+    let out = clear_reduce(&mut h, "nothing to clear");
+    assert_eq!(refused(&out), "not_reducing: the account is not REDUCING");
+
+    h.advance(5 * SEC);
+    h.report_margin("94");
+    let latch = h.core.margin.reducing.clone();
+    assert_eq!(latch.as_ref().map(|r| r.rule), Some(RuleId::DailyLoss));
+    let queried_at = h.core.margin.report.as_ref().map(|r| r.queried_at).unwrap();
+
+    // REDUCING and a fresh report, but no reason given.
+    for note in ["", "  \t"] {
+        let out = clear_reduce(&mut h, note);
+        assert_eq!(refused(&out), "note_required: the command needs a note");
+        assert_eq!(h.core.margin.reducing, latch);
+    }
+
+    // REDUCING and a note, but the report is 30 s and one microsecond old
+    // when the command is recorded.
+    next_input_at(&mut h, queried_at + 30 * SEC + 1);
+    let out = clear_reduce(&mut h, "looked at the account");
+    assert_eq!(h.now, queried_at + 30_000_001);
+    assert_eq!(refused(&out), "margin_unavailable: no fresh margin report");
+    assert_eq!(h.core.margin.reducing, latch);
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+    assert_eq!(
+        h.core.margin.day_base.as_ref().map(|b| b.value),
+        Some(amt("100"))
+    );
+}
+
+fn operator_base_set(day: u64, value: &str) -> Event {
+    Event::DayBaseSet {
+        day,
+        value: amt(value),
+        set_by: BaseSetBy::Operator,
+    }
+}
+
+/// S14. A clear takes the account value of the newest report as the new day
+/// base and ends REDUCING, in that order, in one input. A report that is
+/// exactly 30 s old is fresh enough. Plain orders are accepted again. The
+/// release is not a licence: against the new base of 94 a report of 94 or of
+/// 89.30 (a loss of exactly 5 %) does not trip, and 89.29 trips again. A
+/// second clear with nothing to clear is refused.
+#[test]
+fn clear_reduce_rebases_the_day_and_a_further_loss_latches_again() {
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    h.report_margin("94");
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+    let queried_at = h.core.margin.report.as_ref().map(|r| r.queried_at).unwrap();
+
+    next_input_at(&mut h, queried_at + 30 * SEC);
+    let out = clear_reduce(&mut h, "loss understood, strategy b switched off");
+    assert_eq!(out.reply, Some(Reply::Operator(Ok("cleared".into()))));
+    assert_eq!(
+        out.events,
+        vec![
+            operator_base_set(20_000, "94"),
+            Event::ReducingCleared {
+                note: "loss understood, strategy b switched off".into(),
+                old_base: Some(amt("100")),
+                new_base: amt("94"),
+            },
+        ]
+    );
+    assert_eq!(out.commands, vec![]);
+    assert_eq!(h.core.margin.reducing, None);
+    assert_eq!(h.core.holds(None), vec![]);
+    assert_eq!(
+        h.core.margin.day_base,
+        Some(DayBase {
+            day: 20_000,
+            value: amt("94"),
+            set_by: BaseSetBy::Operator,
+        })
+    );
+
+    // The same value again, and a loss of exactly 5 % of 94 (4.70): neither
+    // trips, and the base is not touched by a report of the same day.
+    for value in ["94", "89.3"] {
+        h.advance(5 * SEC);
+        let out = h.report_margin(value);
+        assert_eq!(names(&out), vec!["margin_reported"], "at {value}");
+        assert_eq!(h.core.holds(None), vec![], "at {value}");
+    }
+    h.ref_price("X", "100");
+    h.accept("a", "k1", Side::Buy, "0.1", "100");
+
+    // One cent more is past the limit: REDUCING again, judged against 94.
+    h.advance(5 * SEC);
+    let out = h.report_margin("89.29");
+    assert_eq!(
+        out.events[1],
+        Event::ReducingEntered {
+            rule: RuleId::DailyLoss,
+            detail: "account value 89.29 is more than 500 bps below the day base 94".into(),
+        }
+    );
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+
+    // A clear, and then a second one: the second finds nothing to clear.
+    let out = clear_reduce(&mut h, "second release");
+    assert_eq!(out.reply, Some(Reply::Operator(Ok("cleared".into()))));
+    let out = clear_reduce(&mut h, "second release, sent twice");
+    assert_eq!(refused(&out), "not_reducing: the account is not REDUCING");
+    assert_eq!(
+        h.core.margin.day_base.as_ref().map(|b| b.value),
+        Some(amt("89.29"))
+    );
+}
+
+fn rebase_day(h: &mut H, note: &str) -> Output {
+    h.inp(Input::Operator(OperatorCmd::RebaseDay {
+        note: note.into(),
+    }))
+}
+
+/// S15. `rebase-day` sets the day base to the account value of the newest
+/// report and does nothing else: it does not enter REDUCING, and under
+/// REDUCING it leaves the latch as it is. It needs a fresh report and a
+/// note. The day is the report's day, also when that is earlier than the
+/// day of the base.
+#[test]
+fn rebase_day_sets_the_base_and_leaves_the_latch_alone() {
+    // A deposit of 10 while the account is NORMAL.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    h.report_margin("110");
+    let out = rebase_day(&mut h, "deposit of 10");
+    assert_eq!(out.reply, Some(Reply::Operator(Ok("rebased".into()))));
+    assert_eq!(out.events, vec![operator_base_set(20_000, "110")]);
+    assert_eq!(out.commands, vec![]);
+    assert_eq!(h.core.margin.reducing, None);
+    assert_eq!(
+        h.core.margin.day_base,
+        Some(DayBase {
+            day: 20_000,
+            value: amt("110"),
+            set_by: BaseSetBy::Operator,
+        })
+    );
+
+    // Against 110 a value of 104.5 is a loss of exactly 5 %; 104 trips.
+    h.advance(5 * SEC);
+    h.report_margin("104");
+    let latch = h.core.margin.reducing.clone();
+    assert_eq!(
+        latch.as_ref().map(|r| r.detail.as_str()),
+        Some("account value 104 is more than 500 bps below the day base 110")
+    );
+    let queried_at = h.core.margin.report.as_ref().map(|r| r.queried_at).unwrap();
+
+    // No reason given: refused, nothing recorded.
+    let out = rebase_day(&mut h, " ");
+    assert_eq!(refused(&out), "note_required: the command needs a note");
+
+    // Under REDUCING the base moves and the latch does not.
+    let out = rebase_day(&mut h, "base to the value after the loss");
+    assert_eq!(out.events, vec![operator_base_set(20_000, "104")]);
+    assert_eq!(h.core.margin.reducing, latch, "a rebase changed the latch");
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+    assert_eq!(
+        h.core.margin.day_base.as_ref().map(|b| b.value),
+        Some(amt("104"))
+    );
+
+    // A report 30 s and one microsecond old is not fresh: refused.
+    next_input_at(&mut h, queried_at + 30 * SEC + 1);
+    let out = rebase_day(&mut h, "too late");
+    assert_eq!(refused(&out), "margin_unavailable: no fresh margin report");
+    assert_eq!(
+        h.core.margin.day_base.as_ref().map(|b| b.value),
+        Some(amt("104"))
+    );
+
+    // The base is of day 20 001. The wall clock stepped back, so the next
+    // query is dated 5 s before midnight, on day 20 000. That report does
+    // not move the base; the operator's rebase takes its value and its day.
+    let mut h = on_day_20_000();
+    next_input_at(&mut h, 20_001 * DAY + 2 * SEC);
+    h.report_margin("100");
+    assert_eq!(h.core.margin.day_base.as_ref().map(|b| b.day), Some(20_001));
+    h.margin_seq += 1;
+    let out = h.margin_report(h.session, h.margin_seq, 20_001 * DAY - 5 * SEC, "101");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    let out = rebase_day(&mut h, "rebase on the report of the earlier day");
+    assert_eq!(out.events, vec![operator_base_set(20_000, "101")]);
+}
+
+/// S15. The OMS does not see transfers. A withdrawal lowers the account
+/// value, and the daily-loss rule reads the drop as a loss: this is the
+/// safe side. A withdrawal of 6 from 100 alone enters REDUCING. A
+/// withdrawal of 4 does not, but then a trading loss of 2 does, at 94.
+/// After `rebase-day` at 96 the same 94 is a loss of 2 against 96 and does
+/// not trip. The other side is a stated non-guarantee and is shown here as
+/// it is: a deposit of 10 hides a loss of 14 until a rebase or the next UTC
+/// day.
+#[test]
+fn a_withdrawal_without_rebase_reads_as_a_loss() {
+    // 100, then 6 withdrawn and nothing lost in trading.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    let out = h.report_margin("94");
+    assert_eq!(
+        out.events.get(1),
+        Some(&Event::ReducingEntered {
+            rule: RuleId::DailyLoss,
+            detail: "account value 94 is more than 500 bps below the day base 100".into(),
+        })
+    );
+
+    // 100, then 4 withdrawn (96), then 2 lost (94), and no rebase.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    h.report_margin("96");
+    assert_eq!(h.core.margin.reducing, None);
+    h.advance(5 * SEC);
+    h.report_margin("94");
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+
+    // The same with a rebase after the withdrawal: the loss of 2 is
+    // measured against 96.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    h.report_margin("96");
+    let out = rebase_day(&mut h, "withdrawal of 4");
+    assert_eq!(out.events, vec![operator_base_set(20_000, "96")]);
+    h.advance(5 * SEC);
+    h.report_margin("94");
+    assert_eq!(h.core.margin.reducing, None);
+    assert_eq!(h.core.holds(None), vec![]);
+
+    // Not guaranteed: 100, then 10 deposited (110), then 14 lost (96). The
+    // loss is 14 % of the day's start and the rule does not see it.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    h.report_margin("110");
+    h.advance(5 * SEC);
+    h.report_margin("96");
+    assert_eq!(h.core.margin.reducing, None);
+}

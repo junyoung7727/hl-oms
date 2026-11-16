@@ -223,6 +223,14 @@ pub enum Event {
     /// The venue told the account mode in the current link session
     /// (C-MARGIN).
     AccountModeNoted { session: u64, mode: String },
+    /// The operator ended REDUCING (C-MARGIN, 해제). The `DayBaseSet` that
+    /// made `new_base` the day base is the event before this one.
+    ReducingCleared {
+        note: String,
+        /// The day base the tripped rule was judged against, if any.
+        old_base: Option<Amount>,
+        new_base: Amount,
+    },
 }
 
 /// Stable reason codes for a refused new-order request.
@@ -397,6 +405,7 @@ impl Event {
             Event::ReducingEntered { .. } => "reducing_entered",
             Event::VenueSettingNoted { .. } => "venue_setting_noted",
             Event::AccountModeNoted { .. } => "account_mode_noted",
+            Event::ReducingCleared { .. } => "reducing_cleared",
         }
     }
 }

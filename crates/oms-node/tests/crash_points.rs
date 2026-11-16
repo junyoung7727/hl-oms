@@ -15,6 +15,8 @@ mod common;
 use common::*;
 use oms_api::client::ClientError;
 use oms_core::*;
+use serde_json::json;
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 /// Starts a node that aborts at `point` when it commits a new order, sends
@@ -148,4 +150,208 @@ fn a_flush_error_after_the_write_stops_the_node_and_the_record_may_survive() {
         panic!("the record written before the failed flush was not found")
     };
     settle_as_not_placed(&mut env, order_id);
+}
+
+// ---- C-MARGIN: the latch and the day base at the commit boundaries ---------------
+
+/// The node aborts at `point` when it commits a margin report that produced
+/// the event `on` (`reducing_entered` or `day_base_set`).
+fn crash_on(point: &str, on: &str) -> Vec<(String, String)> {
+    vec![("OMS_CRASH_AT".into(), point.into()), ("OMS_CRASH_ON".into(), on.into())]
+}
+
+/// Waits for the node to abort at `point`.
+fn wait_abort(env: &mut Env, point: &str) {
+    let exit = env.wait_exit(Duration::from_secs(5));
+    assert!(env.node.is_none(), "the node did not stop at {point}: {}", env.log_tail(5));
+    assert_ne!(exit, Some(0));
+    assert!(env.log_tail(5).contains(point), "{}", env.log_tail(5));
+}
+
+/// A node with the day base 100 and two plain orders resting at the venue.
+/// Returns the venue client ids of the two orders.
+fn two_resting_plain_orders(env: &mut Env) -> BTreeSet<String> {
+    env.ctl(json!({"ref_price": {"instrument": "X", "px": "100"}}));
+    let mut c = env.client("a");
+    let bid = rest(env, &mut c, "bid", Side::Buy, "90", false);
+    let ask = rest(env, &mut c, "ask", Side::Sell, "110", false);
+    assert!(env.wait(Duration::from_secs(5), || env.status()["core"]["working"] == 2));
+    BTreeSet::from([env.cloid(bid), env.cloid(ask)])
+}
+
+/// The restarted node is in a new link session and has taken margin reports
+/// in it.
+fn wait_restarted(env: &Env, boot: u64, holds: serde_json::Value) {
+    let ok = env.wait(Duration::from_secs(20), || {
+        env.try_status().is_some_and(|st| {
+            let core = &st["core"];
+            core["boot"] == boot
+                && core["holds"] == holds
+                && core["margin"]["session"] == core["link"]["session"]
+                && core["margin"]["seq"].as_u64().is_some_and(|n| n >= 2)
+        })
+    });
+    assert!(ok, "after the restart: {:?}\n{}", env.try_status().map(|st| st["core"].to_string()), env.log_tail(20));
+}
+
+/// G4, "중단과 재실행" row 1. The node decides to enter REDUCING and stops
+/// before the record is written. After the restart there is no latch, no
+/// cancel request and no record of either; the day base is the old one; the
+/// two orders still rest at the venue. The next report that breaches the
+/// limit decides again: REDUCING is entered once and both orders are
+/// cancelled.
+#[test]
+fn stopped_before_the_write_of_a_reducing_decision_the_next_report_decides_again() {
+    let mut env = margin_node_with("crash-reducing-before-write", "100", crash_on("before_write", "reducing_entered"));
+    let base = env.status()["core"]["margin"]["day_base"].clone();
+    assert_eq!(base["value"], "100");
+    let resting = two_resting_plain_orders(&mut env);
+
+    env.ctl(json!({"account_value": {"value": "94"}}));
+    wait_abort(&mut env, "before_write");
+    assert_eq!(open_at_venue(&mut env), resting, "a cancel reached the venue before the record was written");
+    assert_eq!(env.journal_count("reducing_entered"), 0);
+    assert_eq!(env.journal_count("cancel_requested"), 0);
+
+    // The venue states 100 again, so the restarted node has no reason to
+    // latch: what it shows is what the journal holds.
+    env.ctl(json!({"account_value": {"value": "100"}}));
+    env.node_env.clear();
+    env.start_node();
+    wait_restarted(&env, 2, json!([]));
+    let st = env.status();
+    assert_eq!(st["core"]["margin"]["reducing"], serde_json::Value::Null);
+    assert_eq!(st["core"]["margin"]["day_base"], base);
+    assert_eq!(st["core"]["open_orders"], 2);
+    assert_eq!(open_at_venue(&mut env), resting);
+    assert_eq!(env.journal_count("reducing_entered"), 0);
+    assert_eq!(env.journal_count("cancel_requested"), 0);
+
+    // The same loss again: this time the decision is recorded and acted on.
+    lose_to(&mut env, "94");
+    assert!(
+        env.wait(Duration::from_secs(10), || env.status()["core"]["open_orders"] == 0),
+        "the orders were not cancelled: {}",
+        env.status()["core"]
+    );
+    assert_eq!(open_at_venue(&mut env), BTreeSet::new());
+    assert_eq!(env.journal_count("reducing_entered"), 1);
+    assert_eq!(env.journal_count("cancel_requested"), 2);
+    assert_eq!(env.status()["core"]["margin"]["day_base"], base);
+}
+
+/// G4, "중단과 재실행" row 2. The record that enters REDUCING and asks for
+/// the cancels reached the file, and the node stops before a cancel left
+/// for the venue: after the write, after the flush, and after the read
+/// model learned the record. After the restart the latch and the cancel
+/// requests are restored from the journal (the venue states 100 again, so
+/// nothing is decided anew), the cancels that were never sent are sent, and
+/// the reduce-only order is left open. Nothing is requested twice.
+#[test]
+fn stopped_after_the_reducing_decision_is_durable_the_cancels_are_sent_after_restart() {
+    for point in ["after_write", "after_sync", "after_reply"] {
+        let mut env = margin_node_with(&format!("crash-reducing-{point}"), "100", crash_on(point, "reducing_entered"));
+        let base = env.status()["core"]["margin"]["day_base"].clone();
+        let plain = two_resting_plain_orders(&mut env);
+        let mut c = env.client("a");
+        let flagged = rest(&mut env, &mut c, "flagged", Side::Sell, "120", true);
+        let flagged = BTreeSet::from([env.cloid(flagged)]);
+        assert!(env.wait(Duration::from_secs(5), || env.status()["core"]["working"] == 3));
+        drop(c);
+        let all: BTreeSet<String> = plain.union(&flagged).cloned().collect();
+
+        env.ctl(json!({"account_value": {"value": "94"}}));
+        wait_abort(&mut env, point);
+        assert_eq!(open_at_venue(&mut env), all, "{point}: a cancel reached the venue before the stop");
+        assert_eq!(env.journal_count("reducing_entered"), 1, "{point}");
+        assert_eq!(env.journal_count("cancel_requested"), 2, "{point}");
+
+        env.ctl(json!({"account_value": {"value": "100"}}));
+        env.node_env.clear();
+        env.start_node();
+        wait_restarted(&env, 2, json!(["reducing"]));
+        let st = env.status();
+        assert_eq!(st["core"]["margin"]["reducing"]["rule"], "daily_loss", "{point}");
+        assert_eq!(
+            st["core"]["margin"]["reducing"]["detail"],
+            "account value 94 is more than 500 bps below the day base 100",
+            "{point}"
+        );
+        assert_eq!(st["core"]["margin"]["day_base"], base, "{point}");
+
+        // The cancels recorded before the stop reach the venue now.
+        let mut left = open_at_venue(&mut env);
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        while left != flagged && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+            left = open_at_venue(&mut env);
+        }
+        assert_eq!(left, flagged, "{point}: a recorded rule cancel was never sent, or the reduce-only order was cancelled");
+        assert!(
+            env.wait(Duration::from_secs(10), || env.status()["core"]["open_orders"] == 1),
+            "{point}: {}",
+            env.status()["core"]
+        );
+        assert_eq!(env.journal_count("reducing_entered"), 1, "{point}");
+        assert_eq!(env.journal_count("cancel_requested"), 2, "{point}");
+        assert_eq!(env.status()["core"]["mismatches_unacked"], json!([]), "{point}");
+    }
+}
+
+/// G4, "중단과 재실행" row 3. The first margin report of a new node sets the
+/// day base, and the node stops at each commit boundary of that record.
+/// Stopped before the write, the base does not exist after the restart and
+/// the next report sets it, to its own value (the venue states 105 by
+/// then). Stopped at any later boundary, the base of 100 is in the journal
+/// and the restarted node keeps it. In every case the journal holds exactly
+/// one `day_base_set`, also after further reports, and its day and value
+/// are those of the report in the same record.
+#[test]
+fn stopped_around_a_day_base_set_the_base_is_set_exactly_once() {
+    for (point, written, expected) in [
+        ("before_write", 0, "105"),
+        ("after_write", 1, "100"),
+        ("after_sync", 1, "100"),
+        ("after_reply", 1, "100"),
+    ] {
+        let mut env = Env::new(&format!("crash-day-base-{point}"));
+        env.extra_runtime = "margin_poll_ms = 100".into();
+        env.extra_policy = "\n[core.policy.margin]\naccount_modes_allowed = [\"standard\"]\n".into();
+        env.node_env = crash_on(point, "day_base_set");
+        env.ctl(json!({"account_value": {"value": "100"}}));
+        env.start_node();
+        wait_abort(&mut env, point);
+        assert_eq!(env.journal_count("day_base_set"), written, "{point}");
+
+        env.ctl(json!({"account_value": {"value": "105"}}));
+        env.node_env.clear();
+        env.start_node();
+        wait_restarted(&env, 2, json!([]));
+        let shown = env.status()["core"]["margin"]["day_base"].clone();
+        assert_eq!(shown["value"], expected, "{point}: {shown}");
+        assert_eq!(shown["set_by"], "report", "{point}");
+
+        // Further reports do not set it again.
+        let seq = env.status()["core"]["margin"]["seq"].as_u64().expect("seq");
+        wait_margin(&env, "three more reports", |m| m["seq"].as_u64().is_some_and(|n| n >= seq + 3));
+        assert_eq!(env.status()["core"]["margin"]["day_base"], shown, "{point}");
+        let sets: Vec<(Input, Event)> = env
+            .journal_records()
+            .into_iter()
+            .flat_map(|r| {
+                let input = r.input.clone();
+                r.events.into_iter().filter(|e| e.name() == "day_base_set").map(move |e| (input.clone(), e))
+            })
+            .collect();
+        assert_eq!(sets.len(), 1, "{point}: the day base was set {} times", sets.len());
+        // The one event carries the day and the value of its own report.
+        let (Input::Venue(VenueInput::MarginReport(report)), Event::DayBaseSet { day, value, set_by }) = &sets[0] else {
+            panic!("{point}: {:?}", sets[0])
+        };
+        assert_eq!(*value, report.account_value, "{point}");
+        assert_eq!(value.to_string(), expected, "{point}");
+        assert_eq!(*day, report.queried_at / 86_400_000_000, "{point}");
+        assert_eq!(*set_by, BaseSetBy::Report, "{point}");
+        assert_eq!(shown["day"], *day, "{point}");
+    }
 }
