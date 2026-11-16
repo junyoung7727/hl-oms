@@ -367,6 +367,13 @@ impl Tx<'_> {
                 }
             }
         }
+        // Leverage gate (C-MARGIN). A reduce-only order is not judged; it
+        // still counts in the exposure of the orders that follow.
+        if let Some(margin) = &cfg.policy.margin {
+            if !r.reduce_only && r.qty.0 > 0 && r.px.0 > 0 {
+                why.extend(core.leverage_gate(margin, r, self.at));
+            }
+        }
         why.dedup();
         why
     }
