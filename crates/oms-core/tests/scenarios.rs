@@ -1201,6 +1201,33 @@ fn reduce_only_order_is_accepted_during_resync() {
 }
 
 #[test]
+fn reduce_only_order_is_accepted_while_another_order_is_in_doubt() {
+    let mut h = H::ready_with(config_with_margin());
+    h.long("a", "k1", "1");
+    // Strategy b's order gets no answer: its outcome is unknown.
+    let b = h.accept("b", "k1", Side::Buy, "1", "100");
+    h.venue(VenueInput::SendResult {
+        order_id: b,
+        outcome: SendOutcome::Unknown { reason: "timeout".into() },
+        timing: Default::default(),
+    });
+    assert_eq!(h.core.holds(None), vec![HoldReason::InDoubt]);
+
+    assert_eq!(
+        h.reject("a", "k2", Side::Sell, "1", "100"),
+        vec![RejectReason::Hold(HoldReason::InDoubt)]
+    );
+    let r = h.reduce_only_req("a", "k3", Side::Sell, "1", "100");
+    let order_id = match h.new_order(r) {
+        NewOrderReply::Accepted { order_id } => order_id,
+        other => panic!("the in-doubt hold refused a reduce-only order: {other:?}"),
+    };
+    assert!(h.order(order_id).reduce_only);
+    assert_eq!(h.sends().last(), Some(&order_id));
+    assert_eq!(h.core.holds(None), vec![HoldReason::InDoubt]);
+}
+
+#[test]
 fn acknowledging_one_mismatch_does_not_clear_another() {
     let mut h = H::ready();
     let session = h.session;
