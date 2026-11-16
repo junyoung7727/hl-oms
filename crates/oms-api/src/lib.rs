@@ -101,6 +101,16 @@ pub enum Op {
         delta: SQty,
         note: String,
     },
+    /// End REDUCING; the current account value becomes the day base
+    /// (C-MARGIN).
+    ClearReduce {
+        note: String,
+    },
+    /// Take the current account value as the day base, after a deposit or a
+    /// withdrawal (C-MARGIN).
+    RebaseDay {
+        note: String,
+    },
     /// Write a snapshot now.
     Snapshot,
 }

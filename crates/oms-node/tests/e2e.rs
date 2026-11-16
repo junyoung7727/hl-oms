@@ -768,3 +768,54 @@ fn status_shows_reducing_its_rule_and_the_day_base() {
     let r = c.new_order(order_op("k1", Side::Buy, "1", "100", Tif::Gtc, 5_000)).unwrap();
     assert_eq!(r, NewOrderReply::Rejected { reasons: vec![RejectReason::Hold(HoldReason::Reducing)] });
 }
+
+// ---- C-MARGIN: operator commands, restart (ticket 05) ---------------------------
+
+/// A node with a margin policy at its defaults and a 100 ms margin poll,
+/// ready, with the venue's account value already shown in `status`: the
+/// first report became the day base.
+fn margin_node(name: &str, account_value: &str) -> Env {
+    let mut env = Env::new(name);
+    env.extra_runtime = "margin_poll_ms = 100".into();
+    env.extra_policy = "\n[core.policy.margin]\n".into();
+    env.ctl(json!({"account_value": {"value": account_value}}));
+    env.start_node();
+    env.wait_ready();
+    wait_margin(&env, "the account value", |m| m["account_value"] == account_value);
+    env
+}
+
+/// Waits until `core.margin` of `status` satisfies `cond`.
+fn wait_margin(env: &Env, what: &str, cond: impl Fn(&serde_json::Value) -> bool) {
+    let ok = env.wait(Duration::from_secs(5), || env.try_status().is_some_and(|st| cond(&st["core"]["margin"])));
+    assert!(ok, "status never showed {what}: {}", env.status()["core"]["margin"]);
+}
+
+/// The venue's account value changes and the node enters REDUCING on it.
+fn lose_to(env: &mut Env, account_value: &str) {
+    env.ctl(json!({"account_value": {"value": account_value}}));
+    wait_margin(env, "REDUCING", |m| m["reducing"]["rule"] == "daily_loss" && m["account_value"] == account_value);
+}
+
+/// S14. `clear-reduce` and `rebase-day` exist only on the admin socket. From
+/// a strategy connection both are refused with `forbidden`, nothing reaches
+/// the core, and the latch and the day base stay as they were: a strategy
+/// cannot release itself.
+#[test]
+fn strategy_socket_cannot_clear_reducing_or_rebase() {
+    let mut env = margin_node("margin-strategy-socket", "100");
+    lose_to(&mut env, "94");
+    let before = env.status()["core"]["margin"].clone();
+    assert_eq!(before["day_base"]["value"], "100");
+    let records = env.status()["core"]["stats"].clone();
+
+    let mut c = env.client("a");
+    assert_eq!(api_error(c.call(Op::ClearReduce { note: "let me trade".into() })), ErrorCode::Forbidden);
+    assert_eq!(api_error(c.call(Op::RebaseDay { note: "let me trade".into() })), ErrorCode::Forbidden);
+
+    let st = env.status();
+    assert_eq!(st["core"]["margin"]["reducing"], before["reducing"]);
+    assert_eq!(st["core"]["margin"]["day_base"], before["day_base"]);
+    assert_eq!(st["core"]["holds"], json!(["reducing"]));
+    assert_eq!(st["core"]["stats"], records);
+}

@@ -10,7 +10,7 @@
 - [x] Test `clear_reduce_rebases_the_day_and_a_further_loss_latches_again` (seam A, S14): fails when after a clear at 94 a report at 94 or at 89.30 re-latches, or one at 89.29 does not.
 - [x] Test `rebase_day_sets_the_base_and_leaves_the_latch_alone` (seam A, S15): fails when the base does not move, or the latch changes.
 - [x] Test `a_withdrawal_without_rebase_reads_as_a_loss` (seam A, S15): fails when a drop in account value caused by a withdrawal stops latching. The unsafe side (a deposit hides a loss) is a stated non-guarantee.
-- [ ] Test `strategy_socket_cannot_clear_reducing_or_rebase` (seam C, S14): fails when either command works from the strategy socket.
+- [x] Test `strategy_socket_cannot_clear_reducing_or_rebase` (seam C, S14): fails when either command works from the strategy socket.
 - [ ] Test `omsctl_clear_reduce_and_rebase_day_work_end_to_end` (seam C, S14): fails when the commands, their replies or the status fields (state, rule, day base) are not wired.
 - [ ] Test `reducing_and_day_base_survive_a_node_kill` (seam C, S13): fails when after a kill and restart the status shows no latch or a new base.
 - [ ] Test `reducing_cancels_every_resting_plain_order_through_the_node` (seam C, S8, G7): fails when with many resting plain orders at the simulated venue one of them is still open after entry, or a reduce-only one is cancelled.
