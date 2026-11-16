@@ -100,7 +100,8 @@ fn margin_report_of_the_current_session_is_recorded() {
         positions: vec![position("X", 40), position("NOT-CONFIGURED", 20)],
     };
     let out = h.venue(VenueInput::MarginReport(report.clone()));
-    assert_eq!(names(&out), vec!["margin_reported"]);
+    // The first report of a run also sets the day base.
+    assert_eq!(names(&out), vec!["margin_reported", "day_base_set"]);
     assert_eq!(h.core.margin.report, Some(report));
     // Nothing is sent to the venue because of a report.
     assert_eq!(out.commands, vec![]);
@@ -140,7 +141,8 @@ fn margin_report_of_an_old_session_or_with_the_link_down_is_ignored() {
 
     // A report of session 2 is recorded.
     let out = h.margin_report(2, 1, h.now, "100");
-    assert_eq!(names(&out), vec!["margin_reported"]);
+    // The first report of a run also sets the day base.
+    assert_eq!(names(&out), vec!["margin_reported", "day_base_set"]);
     assert_eq!(recorded(&h), Some((2, 1, amt("100"))));
 
     // The link goes down. The answer to a query of session 2 arrives late.
@@ -353,7 +355,8 @@ fn margin_report_dated_after_the_record_time_is_not_fresh() {
     let queried_at = h.now + 10 * SEC;
     let out = h.margin_report(1, 1, queried_at, "1000");
     // The report is recorded: the number decides the order, not the time.
-    assert_eq!(names(&out), vec!["margin_reported"]);
+    // The first report of a run also sets the day base.
+    assert_eq!(names(&out), vec!["margin_reported", "day_base_set"]);
 
     // Ten seconds before its query time.
     assert_eq!(
@@ -936,13 +939,27 @@ fn plain_order_is_rejected_when_an_exposed_instrument_has_no_fresh_reference_pri
     accepted(h.new_order(r));
 }
 
+/// `gate()` with the daily-loss limit out of reach. A fall of the account
+/// value from 100 to zero or below is also a daily loss, and under the
+/// default policy it enters REDUCING: the reject list of a plain order is
+/// then `[Hold(Reducing), AccountLeverage]` and the hold stays. This setup
+/// leaves the leverage gate as the only rule that can answer.
+fn gate_without_daily_loss() -> H {
+    let mut cfg = config_with_margin();
+    cfg.policy.margin.as_mut().unwrap().daily_loss_bps = u32::MAX;
+    let mut h = H::ready_with(cfg);
+    h.report_margin("100");
+    h.ref_price("X", "100");
+    h
+}
+
 /// An account value of zero or below carries no exposure at all: every
 /// plain order is refused, also one that would not raise exposure. A
 /// reduce-only order is still accepted, and nothing latches.
 #[test]
 fn account_value_zero_or_negative_rejects() {
     for value in ["0", "-0.00000001", "-5"] {
-        let mut h = gate();
+        let mut h = gate_without_daily_loss();
         h.long("a", "k1", "2");
         h.report_margin(value);
         assert_eq!(
@@ -967,7 +984,7 @@ fn account_value_zero_or_negative_rejects() {
     }
     // The smallest positive value is not "zero or below": an order that
     // does not raise exposure passes.
-    let mut h = gate();
+    let mut h = gate_without_daily_loss();
     h.long("a", "k1", "2");
     h.report_margin("0.00000001");
     h.accept("a", "k2", Side::Sell, "1", "100");
@@ -1399,6 +1416,742 @@ fn margin_events_replay_to_the_same_state() {
     // The rebuilt core judges freshness as the live one does.
     assert!(rebuilt.margin_report_is_fresh(last_at + 30 * SEC));
     assert!(!rebuilt.margin_report_is_fresh(last_at + 30 * SEC + 1));
+
+    // Re-deciding every recorded input gives the recorded events.
+    let mut c = Core::new(7);
+    for rec in &h.log {
+        let out = c.handle(rec.at, &rec.input).unwrap();
+        assert_eq!(
+            out.events, rec.events,
+            "record {} re-decided differently",
+            rec.seq
+        );
+    }
+    assert_eq!(c.digest(), h.core.digest());
+
+    // The serialised forms (snapshot, journal) read back unchanged.
+    let back: Core = serde_json::from_str(&serde_json::to_string(&h.core).unwrap()).unwrap();
+    assert_eq!(back, h.core);
+    let recs: Vec<Record> = serde_json::from_str(&serde_json::to_string(&h.log).unwrap()).unwrap();
+    assert_eq!(recs, h.log);
+}
+
+// ---- C-MARGIN: daily loss and the day base ------------------------------------
+
+/// Microseconds in one UTC day, written out: 24 × 3600 × 1 000 000.
+const DAY: u64 = 86_400_000_000;
+
+/// A margin policy at its defaults, and the node clock at 10:00:00 UTC of
+/// day 20 000. No margin report has arrived yet.
+fn on_day_20_000() -> H {
+    let mut h = H::ready_with(config_with_margin());
+    next_input_at(&mut h, 20_000 * DAY + 36_000 * SEC);
+    h
+}
+
+/// S12. The first margin report sets the day base to its account value, on
+/// the UTC day of its query time. A later report of the same day leaves the
+/// base alone.
+#[test]
+fn first_report_sets_the_day_base() {
+    let mut h = on_day_20_000();
+    assert_eq!(h.core.margin.day_base, None);
+
+    let out = h.report_margin("100");
+    assert_eq!(
+        out.events.last(),
+        Some(&Event::DayBaseSet {
+            day: 20_000,
+            value: amt("100"),
+            set_by: BaseSetBy::Report,
+        })
+    );
+    assert_eq!(names(&out), vec!["margin_reported", "day_base_set"]);
+    let base = DayBase {
+        day: 20_000,
+        value: amt("100"),
+        set_by: BaseSetBy::Report,
+    };
+    assert_eq!(h.core.margin.day_base, Some(base.clone()));
+
+    // Later the same day, with another value: the base stays.
+    h.advance(3_600 * SEC);
+    let out = h.report_margin("103");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.day_base, Some(base));
+}
+
+/// S8. Base 100 and a limit of 5 %: an account value of 95.00 is a loss of
+/// exactly 5 % and does not trip the rule; 94.99 is more and does. The
+/// account is then REDUCING with the rule `DailyLoss`. The day base stays.
+#[test]
+fn loss_greater_than_five_percent_of_the_base_enters_reducing() {
+    let mut h = on_day_20_000();
+    h.report_margin("100");
+
+    h.advance(5 * SEC);
+    let out = h.report_margin("95");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.reducing, None);
+    assert_eq!(h.core.holds(None), vec![]);
+
+    h.advance(5 * SEC);
+    let out = h.report_margin("94.99");
+    let entered_at = h.now;
+    assert_eq!(names(&out), vec!["margin_reported", "reducing_entered"]);
+    assert_eq!(
+        out.events[1],
+        Event::ReducingEntered {
+            rule: RuleId::DailyLoss,
+            detail: "account value 94.99 is more than 500 bps below the day base 100".into(),
+        }
+    );
+    assert_eq!(
+        h.core.margin.reducing,
+        Some(Reducing {
+            rule: RuleId::DailyLoss,
+            detail: "account value 94.99 is more than 500 bps below the day base 100".into(),
+            since: entered_at,
+        })
+    );
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+    // Nothing is sent to the venue: there is no order to cancel, and the
+    // OMS never closes a position.
+    assert_eq!(out.commands, vec![]);
+    assert_eq!(
+        h.core.margin.day_base.as_ref().map(|b| (b.day, b.value)),
+        Some((20_000, amt("100")))
+    );
+}
+
+// ---- C-MARGIN: REDUCING -------------------------------------------------------
+
+/// Day 20 000, a reference price of 100 for X, and a first margin report of
+/// 100 that became the day base.
+fn at_base_100() -> H {
+    let mut h = on_day_20_000();
+    let venue_ts = h.now;
+    h.venue(VenueInput::RefPrice {
+        instrument: iid("X"),
+        px: px("100"),
+        venue_ts,
+    });
+    h.report_margin("100");
+    assert_eq!(
+        h.core.margin.day_base.as_ref().map(|b| b.value),
+        Some(amt("100"))
+    );
+    h
+}
+
+/// A resting order the venue acknowledged.
+fn resting(h: &mut H, strategy: &str, key: &str, side: Side, qty: &str, price: &str) -> OrderId {
+    let id = h.accept(strategy, key, side, qty, price);
+    h.placed_open(id, key);
+    assert_eq!(h.order(id).phase, Phase::Working);
+    id
+}
+
+/// A resting order with the venue's reduce-only flag.
+fn resting_reduce_only(
+    h: &mut H,
+    strategy: &str,
+    key: &str,
+    side: Side,
+    qty: &str,
+    price: &str,
+) -> OrderId {
+    let r = h.reduce_only_req(strategy, key, side, qty, price);
+    let id = match h.new_order(r) {
+        NewOrderReply::Accepted { order_id } => order_id,
+        other => panic!("the reduce-only order was refused: {other:?}"),
+    };
+    h.placed_open(id, key);
+    id
+}
+
+fn rule_cancel(id: OrderId) -> Event {
+    Event::CancelRequested {
+        order_id: id,
+        by: Actor::Rule(RuleId::DailyLoss),
+    }
+}
+
+fn cancel_sent(id: OrderId, attempt: u32) -> Event {
+    Event::CancelSent {
+        order_id: id,
+        attempt,
+    }
+}
+
+/// Every attempt of the order's current cancel request ends without an
+/// answer from the venue, until the five attempts of the default policy are
+/// used up. The core then raises `CancelStuck` and sends no further attempt.
+fn exhaust_cancel(h: &mut H, id: OrderId) {
+    let first = h.order(id).cancel.as_ref().unwrap().attempts;
+    for attempt in first..first + 5 {
+        h.venue(VenueInput::CancelResult {
+            order_id: id,
+            attempt,
+            outcome: CancelOutcome::Unknown {
+                reason: "timeout".into(),
+            },
+            timing: Default::default(),
+        });
+        h.advance(SEC);
+        h.tick();
+    }
+    let c = h.order(id).cancel.as_ref().unwrap();
+    assert_eq!((c.used(), c.inflight, c.confirmed), (5, false, false));
+    assert_eq!(h.unacked_mismatches(), vec![MismatchKind::CancelStuck]);
+}
+
+/// S8, S24. In the input that enters REDUCING every resting plain order gets
+/// a cancel by `Rule(DailyLoss)`, and the cancel goes to the venue. A sell
+/// that would take profit but carries no reduce-only flag is a plain order
+/// and is cancelled. An order with the flag is kept. An order whose cancel
+/// the strategy already asked for gets no second request, unless every
+/// attempt of that request is used up: then the rule asks again.
+#[test]
+fn entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones() {
+    let mut h = at_base_100();
+    h.long("a", "k1", "1");
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    let take_profit = resting(&mut h, "a", "tp", Side::Sell, "0.5", "110");
+    let flagged = resting_reduce_only(&mut h, "a", "flagged", Side::Sell, "0.5", "120");
+    let asked = resting(&mut h, "b", "asked", Side::Buy, "0.2", "90");
+    assert_eq!(
+        h.cancel("b", asked),
+        CancelReply::Requested { order_id: asked }
+    );
+    assert_eq!(h.cancels(), vec![(asked, 1)]);
+    let given_up = resting(&mut h, "b", "given-up", Side::Buy, "0.2", "90");
+    h.cancel("b", given_up);
+    exhaust_cancel(&mut h, given_up);
+
+    let out = h.report_margin("94.99");
+    assert_eq!(names(&out)[..2], ["margin_reported", "reducing_entered"]);
+    assert_eq!(
+        out.events[2..],
+        [
+            rule_cancel(bid),
+            cancel_sent(bid, 1),
+            rule_cancel(take_profit),
+            cancel_sent(take_profit, 1),
+            rule_cancel(given_up),
+            cancel_sent(given_up, 6),
+        ]
+    );
+    let sent: Vec<OrderId> = out
+        .commands
+        .iter()
+        .map(|c| match c {
+            VenueCommand::SendCancel { order_id, .. } => *order_id,
+            other => panic!("entering REDUCING sent something that is not a cancel: {other:?}"),
+        })
+        .collect();
+    assert_eq!(sent, vec![bid, take_profit, given_up]);
+
+    let by = |id: OrderId| h.order(id).cancel.as_ref().map(|c| c.by.clone());
+    assert_eq!(by(bid), Some(Actor::Rule(RuleId::DailyLoss)));
+    assert_eq!(by(take_profit), Some(Actor::Rule(RuleId::DailyLoss)));
+    assert_eq!(by(flagged), None, "a reduce-only order was cancelled");
+    assert_eq!(by(asked), Some(Actor::Strategy(sid("b"))));
+    assert_eq!(by(given_up), Some(Actor::Rule(RuleId::DailyLoss)));
+    assert_eq!(h.order(flagged).phase, Phase::Working);
+    // A cancel request frees nothing: the plain orders keep their
+    // reservation until the venue reports them closed.
+    assert_eq!(h.acct().buy_open, q("0.6"));
+    assert_eq!(h.acct().sell_open, q("1"));
+}
+
+/// S8. While the account is REDUCING a plain order is refused with
+/// `Hold(Reducing)`, also a plain sell that would only reduce the long
+/// position: "reduce-only" is the venue flag on the order, not a direction
+/// the OMS works out. The same sell with the flag is accepted and sent.
+#[test]
+fn under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted() {
+    let mut h = at_base_100();
+    h.long("a", "k1", "1");
+    h.report_margin("94.99");
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+
+    assert_eq!(
+        h.reject("a", "k2", Side::Buy, "0.1", "100"),
+        vec![RejectReason::Hold(HoldReason::Reducing)]
+    );
+    assert_eq!(
+        h.reject("a", "k3", Side::Sell, "0.5", "100"),
+        vec![RejectReason::Hold(HoldReason::Reducing)]
+    );
+
+    let r = h.reduce_only_req("a", "k4", Side::Sell, "0.5", "100");
+    let order_id = match h.new_order(r) {
+        NewOrderReply::Accepted { order_id } => order_id,
+        other => panic!("a reduce-only order was refused under REDUCING: {other:?}"),
+    };
+    assert!(h.order(order_id).reduce_only);
+    assert_eq!(h.sends().last(), Some(&order_id));
+    // The accepted order is not cancelled by the latch that is already set.
+    assert_eq!(h.order(order_id).cancel, None);
+}
+
+/// S9. An order that is still waiting for its send result when the account
+/// enters REDUCING gets the rule's cancel request at once, but no cancel is
+/// sent: the venue may not have the order yet. The cancel goes out in the
+/// input that brings the venue's acknowledgement. Until then the order can
+/// fill.
+#[test]
+fn an_order_pending_send_at_entry_is_cancelled_once_acknowledged() {
+    let mut h = at_base_100();
+    let pending = h.accept("a", "k1", Side::Buy, "1", "100");
+    assert_eq!(h.order(pending).phase, Phase::PendingSend);
+
+    let out = h.report_margin("94.99");
+    assert_eq!(
+        out.events[1..],
+        [
+            Event::ReducingEntered {
+                rule: RuleId::DailyLoss,
+                detail: "account value 94.99 is more than 500 bps below the day base 100".into(),
+            },
+            rule_cancel(pending),
+        ]
+    );
+    assert_eq!(
+        out.commands,
+        vec![],
+        "a cancel was sent before the venue acknowledged the order"
+    );
+    assert_eq!(h.cancels(), vec![]);
+
+    // Ticks in between send nothing either.
+    h.advance(SEC);
+    h.tick();
+    assert_eq!(h.cancels(), vec![]);
+
+    let out = h.placed_open(pending, "v1");
+    assert_eq!(names(&out), vec!["order_acked", "cancel_sent"]);
+    assert_eq!(out.events[1], cancel_sent(pending, 1));
+    assert_eq!(h.cancels(), vec![(pending, 1)]);
+    assert_eq!(
+        h.order(pending).cancel.as_ref().map(|c| c.by.clone()),
+        Some(Actor::Rule(RuleId::DailyLoss))
+    );
+}
+
+/// S4. A rule cancel can lose the race to a fill. A fill that arrives after
+/// the rule's cancel was sent is booked, and the venue's final status
+/// decides how the order ends, as it does for a strategy's cancel
+/// (`cancel_race_final_status_decides`).
+#[test]
+fn a_rule_cancel_that_races_a_fill_books_the_fill() {
+    // The cancel lost: the order filled completely before it arrived.
+    let mut h = at_base_100();
+    let a = resting(&mut h, "a", "k1", Side::Buy, "1", "100");
+    h.report_margin("94.99");
+    assert_eq!(h.cancels(), vec![(a, 1)]);
+    h.fill(a, "t1", "1", "100");
+    h.venue(VenueInput::CancelResult {
+        order_id: a,
+        attempt: 1,
+        outcome: CancelOutcome::Rejected {
+            reason: "already filled".into(),
+        },
+        timing: Default::default(),
+    });
+    assert_eq!(h.order(a).phase, Phase::Closed);
+    assert_eq!(
+        h.order(a).close.as_ref().unwrap().reason,
+        CloseReason::Filled
+    );
+    assert_eq!(h.acct().pos, sq("1"));
+    assert_eq!(h.acct().buy_open, q("0"));
+    assert_eq!(h.unacked_mismatches(), vec![]);
+    // The position grew while REDUCING. The OMS does not close it.
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+    assert_eq!(h.sends(), vec![a]);
+
+    // The cancel won for the rest: 0.4 filled after the cancel was sent, and
+    // the venue's final status says cancelled with 0.4 filled.
+    let mut h = at_base_100();
+    let a = resting(&mut h, "a", "k1", Side::Buy, "1", "100");
+    h.report_margin("94.99");
+    h.fill(a, "t1", "0.4", "100");
+    h.venue(VenueInput::CancelResult {
+        order_id: a,
+        attempt: 1,
+        outcome: CancelOutcome::Confirmed,
+        timing: Default::default(),
+    });
+    assert_eq!(
+        h.order(a).phase,
+        Phase::Working,
+        "a confirmed cancel is not terminal evidence"
+    );
+    assert_eq!(h.acct().buy_open, q("0.6"));
+    h.status(
+        a,
+        VenueStatus::Canceled {
+            reason: "user".into(),
+        },
+        Some("0.4"),
+    );
+    assert_eq!(h.order(a).phase, Phase::Closed);
+    assert_eq!(
+        h.order(a).close.as_ref().unwrap().reason,
+        CloseReason::Canceled {
+            venue_reason: "user".into()
+        }
+    );
+    assert_eq!(h.acct().pos, sq("0.4"));
+    assert_eq!(h.acct().buy_open, q("0"));
+    assert_eq!(h.unacked_mismatches(), vec![]);
+}
+
+/// S10. The rule's cancel gets no answer from the venue and its attempts
+/// run out: the core raises `CancelStuck`. The mismatch and REDUCING both
+/// refuse plain orders. Neither refuses a reduce-only order, so the stuck
+/// cancel of the rule does not trap the position.
+#[test]
+fn a_stuck_rule_cancel_does_not_block_reduce_only_orders() {
+    let mut h = at_base_100();
+    h.long("a", "k1", "1");
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    h.report_margin("94.99");
+    assert_eq!(h.cancels(), vec![(bid, 1)]);
+    exhaust_cancel(&mut h, bid);
+    assert_eq!(h.cancels().len(), 5);
+    assert_eq!(h.order(bid).phase, Phase::Working);
+    assert_eq!(
+        h.core.holds(None),
+        vec![HoldReason::Mismatch, HoldReason::Reducing]
+    );
+
+    assert_eq!(
+        h.reject("a", "k2", Side::Sell, "0.5", "100"),
+        vec![
+            RejectReason::Hold(HoldReason::Mismatch),
+            RejectReason::Hold(HoldReason::Reducing)
+        ]
+    );
+    let r = h.reduce_only_req("a", "k3", Side::Sell, "0.5", "100");
+    let order_id = match h.new_order(r) {
+        NewOrderReply::Accepted { order_id } => order_id,
+        other => panic!("a stuck rule cancel refused a reduce-only order: {other:?}"),
+    };
+    assert_eq!(h.sends().last(), Some(&order_id));
+}
+
+/// S8. REDUCING is entered once. A later report that breaches the limit
+/// again emits no second entry event and no new cancel, also not for an
+/// order whose rule cancel has used up its attempts. The first entry stays
+/// recorded as it was.
+#[test]
+fn reducing_is_entered_once() {
+    let mut h = at_base_100();
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    h.report_margin("94.99");
+    let first_entry = h.core.margin.reducing.clone();
+    assert!(first_entry.is_some());
+    exhaust_cancel(&mut h, bid);
+    assert_eq!(h.cancels().len(), 5);
+
+    h.advance(5 * SEC);
+    let out = h.report_margin("90");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(out.commands, vec![]);
+    assert_eq!(h.cancels().len(), 5);
+    assert_eq!(h.core.margin.reducing, first_entry);
+    assert_eq!(
+        h.order(bid).cancel.as_ref().map(|c| c.used()),
+        Some(5),
+        "the stuck cancel got a new budget"
+    );
+}
+
+fn daily_loss_entered(value: &str, base: &str) -> Event {
+    Event::ReducingEntered {
+        rule: RuleId::DailyLoss,
+        detail: format!("account value {value} is more than 500 bps below the day base {base}"),
+    }
+}
+
+fn base_set(day: u64, value: &str) -> Event {
+    Event::DayBaseSet {
+        day,
+        value: amt(value),
+        set_by: BaseSetBy::Report,
+    }
+}
+
+/// S12. The first report of a later UTC day is judged against the old base
+/// first, and only then becomes the new base. So a loss taken across
+/// midnight is not absorbed into the new day. After a gap of several days
+/// the base rolls once, to the day of the report.
+#[test]
+fn first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day() {
+    // Base 100 on day 20 000. Five seconds into day 20 001 the account is
+    // worth 94: a loss of 6 % of the old base.
+    let mut h = at_base_100();
+    next_input_at(&mut h, 20_001 * DAY + 5 * SEC);
+    let out = h.report_margin("94");
+    assert_eq!(
+        out.events[1..],
+        [daily_loss_entered("94", "100"), base_set(20_001, "94")]
+    );
+
+    // No report for three days. The first one after the gap is judged
+    // against the base of day 20 000, and the base rolls once.
+    let mut h = at_base_100();
+    next_input_at(&mut h, 20_003 * DAY + 5 * SEC);
+    let out = h.report_margin("94.99");
+    assert_eq!(
+        out.events[1..],
+        [
+            daily_loss_entered("94.99", "100"),
+            base_set(20_003, "94.99")
+        ]
+    );
+    h.advance(5 * SEC);
+    let out = h.report_margin("94.99");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+
+    // A roll without a breach: 97 on the next day is 3 % below 100. From
+    // then on the base is 97, and 5 % of 97 is 4.85: 92.15 does not trip,
+    // 92.14 does.
+    let mut h = at_base_100();
+    next_input_at(&mut h, 20_001 * DAY + 5 * SEC);
+    let out = h.report_margin("97");
+    assert_eq!(out.events[1..], [base_set(20_001, "97")]);
+    h.advance(5 * SEC);
+    let out = h.report_margin("92.15");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    h.advance(5 * SEC);
+    let out = h.report_margin("92.14");
+    assert_eq!(out.events[1..], [daily_loss_entered("92.14", "97")]);
+}
+
+/// S12. A new UTC day rolls the day base and leaves REDUCING in place: the
+/// entry stays as it was recorded, and a plain order is still refused,
+/// although the account lost nothing against the new base.
+#[test]
+fn a_new_day_does_not_clear_reducing() {
+    let mut h = at_base_100();
+    h.report_margin("94.99");
+    let entry = h.core.margin.reducing.clone();
+    assert_eq!(entry.as_ref().map(|r| r.rule), Some(RuleId::DailyLoss));
+
+    next_input_at(&mut h, 20_001 * DAY + 5 * SEC);
+    let venue_ts = h.now;
+    h.venue(VenueInput::RefPrice {
+        instrument: iid("X"),
+        px: px("100"),
+        venue_ts,
+    });
+    let out = h.report_margin("94.99");
+    assert_eq!(out.events[1..], [base_set(20_001, "94.99")]);
+    assert_eq!(h.core.margin.reducing, entry);
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+    assert_eq!(
+        h.reject("a", "k1", Side::Buy, "0.1", "100"),
+        vec![RejectReason::Hold(HoldReason::Reducing)]
+    );
+}
+
+/// G5. The wall clock stepped backwards across midnight: a report carries a
+/// query time of the day before the base's day. It is recorded and judged,
+/// but it never moves the base back, whatever its value.
+#[test]
+fn a_report_of_an_earlier_day_does_not_change_the_day_base() {
+    let mut h = at_base_100();
+    let base = h.core.margin.day_base.clone();
+    assert_eq!(base.as_ref().map(|b| b.day), Some(20_000));
+
+    // Asked at 23:59:50 of day 19 999, recorded on day 20 000.
+    let earlier = 20_000 * DAY - 10 * SEC;
+    let out = h.margin_report(1, 2, earlier, "120");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.day_base, base);
+
+    // Such a report is still judged against the base it did not change.
+    let out = h.margin_report(1, 3, earlier, "94.99");
+    assert_eq!(out.events[1..], [daily_loss_entered("94.99", "100")]);
+    assert_eq!(h.core.margin.day_base, base);
+}
+
+/// G9. The rule acts on a report, not on the loss itself. Two consecutive
+/// reports five seconds apart show 100 and then 88: REDUCING is entered on
+/// the second report, when 12 % of the base is already lost. Nothing
+/// happens between the two reports. The 5 % limit is not a cap on the loss.
+#[test]
+fn a_loss_between_two_reports_enters_reducing_on_the_next_report() {
+    let mut h = at_base_100();
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+
+    // The account loses 12 between the polls. No input tells the core.
+    h.advance(5 * SEC);
+    h.tick();
+    assert_eq!(h.core.holds(None), vec![]);
+    assert_eq!(h.order(bid).cancel, None);
+
+    let out = h.report_margin("88");
+    assert_eq!(
+        out.events[1..],
+        [
+            daily_loss_entered("88", "100"),
+            rule_cancel(bid),
+            cancel_sent(bid, 1)
+        ]
+    );
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+}
+
+/// S11. Every recorded report is judged, also one that is older than the
+/// freshness limit of 30 s when it arrives. Its values were computed by the
+/// venue and are the newest the OMS has, and entering REDUCING is the safe
+/// side. Freshness only gates what releases risk.
+#[test]
+fn a_report_older_than_the_freshness_limit_on_arrival_is_still_judged() {
+    let mut h = at_base_100();
+    h.advance(60 * SEC);
+
+    // The answer was 40 s on the way: its query time is 40 s before the
+    // time it is recorded at.
+    let recorded_at = h.now + 1_000;
+    let out = h.margin_report(1, 2, recorded_at - 40 * SEC, "94.99");
+    assert_eq!(h.now, recorded_at);
+    assert!(
+        !h.core.margin_report_is_fresh(recorded_at),
+        "a report that is 40 s old counts as fresh"
+    );
+    assert_eq!(out.events[1..], [daily_loss_entered("94.99", "100")]);
+    assert_eq!(
+        h.core.margin.reducing.as_ref().map(|r| (r.rule, r.since)),
+        Some((RuleId::DailyLoss, recorded_at))
+    );
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+}
+
+/// S19. The venue sells the position by itself (a liquidation would look
+/// like this to the OMS: a fill for no order of this instance), and the
+/// next report shows the loss. The external fill raises a mismatch, the
+/// report enters REDUCING, and both stay. A reduce-only order is accepted
+/// under both. The shape of a real liquidation fill is not verified (T6).
+#[test]
+fn an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing() {
+    let mut h = at_base_100();
+    h.long("a", "k1", "1");
+
+    let venue_ts = h.now;
+    h.venue(VenueInput::Fill(FillIn {
+        key: fkey("liq-1"),
+        order_id: None,
+        venue_oid: Some(void("venue-own-order")),
+        instrument: iid("X"),
+        side: Side::Sell,
+        qty: q("1"),
+        px: px("95"),
+        fee: Amount::ZERO,
+        venue_ts,
+    }));
+    assert_eq!(h.unacked_mismatches(), vec![MismatchKind::ExternalFill]);
+    assert_eq!(h.acct().pos, sq("0"));
+    assert_eq!(h.book("a").pos, sq("1"));
+
+    let out = h.report_margin("94.99");
+    assert_eq!(out.events[1..], [daily_loss_entered("94.99", "100")]);
+    assert_eq!(
+        h.core.holds(None),
+        vec![HoldReason::Mismatch, HoldReason::Reducing]
+    );
+    assert_eq!(h.unacked_mismatches(), vec![MismatchKind::ExternalFill]);
+
+    // The strategy's own ledger is still long 1: it may send a reduce-only
+    // order, and neither the mismatch nor REDUCING refuses it.
+    let r = h.reduce_only_req("a", "k2", Side::Sell, "0.5", "100");
+    let order_id = match h.new_order(r) {
+        NewOrderReply::Accepted { order_id } => order_id,
+        other => {
+            panic!("a reduce-only order was refused after an external fill and a loss: {other:?}")
+        }
+    };
+    assert_eq!(h.sends().last(), Some(&order_id));
+    assert_eq!(
+        h.reject("a", "k3", Side::Sell, "0.5", "100"),
+        vec![
+            RejectReason::Hold(HoldReason::Mismatch),
+            RejectReason::Hold(HoldReason::Reducing)
+        ]
+    );
+}
+
+// ---- C-MARGIN: replay of the latch and the day base ----------------------------
+
+/// S13. The latch and the day base are journal state. After a day roll, an
+/// entry into REDUCING with a rule cancel, and a restart, a core rebuilt
+/// from the journal equals the live one: still REDUCING for the first rule,
+/// with the base of the day it was last set on. A restart does not re-base.
+/// Re-deciding the recorded inputs gives the recorded events.
+#[test]
+fn latch_and_day_base_replay_to_the_same_state() {
+    let mut h = at_base_100();
+    h.long("a", "k1", "1");
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    let flagged = resting_reduce_only(&mut h, "a", "flagged", Side::Sell, "0.5", "120");
+
+    // Day 20 001: the base rolls to 97. Later that day 92.14 trips the rule.
+    next_input_at(&mut h, 20_001 * DAY + 5 * SEC);
+    h.report_margin("97");
+    h.advance(5 * SEC);
+    h.report_margin("92.14");
+    let entered_at = h.now;
+    let base = DayBase {
+        day: 20_001,
+        value: amt("97"),
+        set_by: BaseSetBy::Report,
+    };
+    let latch = Reducing {
+        rule: RuleId::DailyLoss,
+        detail: "account value 92.14 is more than 500 bps below the day base 97".into(),
+        since: entered_at,
+    };
+    assert_eq!(h.core.margin.day_base, Some(base.clone()));
+    assert_eq!(h.core.margin.reducing, Some(latch.clone()));
+
+    // The process restarts and the link comes back as session 2.
+    h.inp(Input::Boot {
+        binary: "test".into(),
+    });
+    assert_eq!(
+        h.core.margin.day_base,
+        Some(base.clone()),
+        "the restart re-based the day"
+    );
+    assert_eq!(h.core.margin.reducing, Some(latch.clone()));
+    h.link_up_and_sync();
+    h.margin_report(2, 1, h.now, "80");
+    assert_eq!(h.core.margin.day_base, Some(base.clone()));
+    assert_eq!(h.core.margin.reducing, Some(latch.clone()));
+
+    // Rebuilt from the events alone, as recovery does.
+    let rebuilt = h.rebuilt();
+    assert_eq!(rebuilt.digest(), h.core.digest());
+    assert_eq!(rebuilt, h.core);
+    assert_eq!(rebuilt.margin.day_base, Some(base));
+    assert_eq!(rebuilt.margin.reducing, Some(latch));
+    assert!(rebuilt.holds(None).contains(&HoldReason::Reducing));
+    assert_eq!(
+        rebuilt
+            .order(bid)
+            .and_then(|o| o.cancel.as_ref())
+            .map(|c| c.by.clone()),
+        Some(Actor::Rule(RuleId::DailyLoss))
+    );
+    assert_eq!(
+        rebuilt.order(flagged).map(|o| o.cancel.is_none()),
+        Some(true)
+    );
 
     // Re-deciding every recorded input gives the recorded events.
     let mut c = Core::new(7);

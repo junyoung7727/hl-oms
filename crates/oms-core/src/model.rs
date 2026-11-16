@@ -111,6 +111,9 @@ pub struct Close {
 pub enum Actor {
     Strategy(StrategyId),
     Operator,
+    /// A margin rule of the core itself (C-MARGIN). The API builds only the
+    /// two actors above; a request from outside cannot carry this one.
+    Rule(RuleId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -276,6 +279,9 @@ pub enum HoldReason {
     OperatorStrategy,
     /// Journal storage is running low.
     StorageLow,
+    /// The account is REDUCING: a margin rule tripped and only the operator
+    /// clears it (C-MARGIN).
+    Reducing,
 }
 
 impl HoldReason {
@@ -286,6 +292,7 @@ impl HoldReason {
     pub fn refuses_only_plain_orders(&self) -> bool {
         match self {
             HoldReason::NoConfig | HoldReason::LinkDown | HoldReason::OperatorAccount | HoldReason::OperatorStrategy | HoldReason::StorageLow => false,
+            HoldReason::Reducing => true,
             HoldReason::Resync | HoldReason::InDoubt | HoldReason::Mismatch => true,
         }
     }
@@ -372,7 +379,53 @@ pub struct MarginState {
     /// Why the most recent refused report was refused. Shown to the operator;
     /// no rule reads it.
     pub last_rejection: Option<MarginRejection>,
+    /// The account value the daily loss is measured against. Changed only by
+    /// `day_base_set`; a restart and a link change keep it.
+    #[serde(default)]
+    pub day_base: Option<DayBase>,
+    /// Set while the account is REDUCING. One latch for the whole account.
+    #[serde(default)]
+    pub reducing: Option<Reducing>,
 }
+
+/// A margin rule that acts on its own: it latches REDUCING or cancels
+/// orders.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleId {
+    /// The account value fell more than `daily_loss_bps` below the day base.
+    DailyLoss,
+}
+
+/// The REDUCING latch (C-MARGIN, 감소 전용 상태).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Reducing {
+    /// The rule that tripped first. A later trigger does not replace it.
+    pub rule: RuleId,
+    /// The numbers the rule saw, for the operator.
+    pub detail: String,
+    pub since: Ts,
+}
+
+/// The day base of the daily-loss rule (C-MARGIN, 일 손실과 기준 금액).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DayBase {
+    /// UTC day number (days since 1970-01-01) of the query time of the
+    /// report the value was taken from.
+    pub day: u64,
+    pub value: Amount,
+    pub set_by: BaseSetBy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BaseSetBy {
+    /// The first report, or the first report of a later UTC day.
+    Report,
+}
+
+/// Microseconds in one UTC day.
+pub const DAY_US: u64 = 86_400_000_000;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MarginRejection {

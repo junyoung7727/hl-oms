@@ -188,6 +188,9 @@ impl Core {
         if self.storage_low {
             v.push(HoldReason::StorageLow);
         }
+        if self.margin.reducing.is_some() {
+            v.push(HoldReason::Reducing);
+        }
         v
     }
 
@@ -770,6 +773,20 @@ impl Core {
                     queried_at: *queried_at,
                     reason: reason.clone(),
                     at,
+                });
+            }
+            Event::DayBaseSet { day, value, set_by } => {
+                self.margin.day_base = Some(DayBase {
+                    day: *day,
+                    value: *value,
+                    set_by: *set_by,
+                });
+            }
+            Event::ReducingEntered { rule, detail } => {
+                self.margin.reducing = Some(Reducing {
+                    rule: *rule,
+                    detail: detail.clone(),
+                    since: at,
                 });
             }
         }
