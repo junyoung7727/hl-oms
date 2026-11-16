@@ -16,7 +16,16 @@ impl Core {
         let Some(report) = &self.margin.report else {
             return false;
         };
-        let after = i128::from(r.qty.0) * i128::from(r.px.0);
+        // Every resting order of the instrument counts at its remaining
+        // reserved quantity until terminal evidence releases it.
+        let resting: i128 = self
+            .open
+            .iter()
+            .filter_map(|id| self.orders.get(id))
+            .filter(|o| o.instrument == r.instrument)
+            .map(|o| i128::from(o.reserved.0) * i128::from(o.px.0))
+            .sum();
+        let after = resting + i128::from(r.qty.0) * i128::from(r.px.0);
         let limit = i128::from(policy.max_account_leverage.0) * i128::from(report.account_value.0);
         after > limit
     }

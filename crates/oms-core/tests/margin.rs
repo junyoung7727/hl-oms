@@ -482,6 +482,47 @@ fn order_exactly_at_the_limit_is_accepted() {
     h.accept("a", "k1", Side::Sell, "2", "100");
 }
 
+/// S1. An order that does not fill stays as it is. Over two hours of ticks,
+/// with a fresh margin report and a fresh reference price at every 5 s poll
+/// (so the stale cancel does not apply), the OMS sends no cancel, changes no
+/// price and closes nothing. The order keeps its exposure: it still fills
+/// the limit, so the smallest further buy is refused.
+#[test]
+fn an_unfilled_resting_order_keeps_its_exposure_and_is_never_repriced_or_expired_by_the_oms() {
+    let mut h = gate();
+    let id = h.accept("a", "k1", Side::Buy, "2", "100");
+    h.placed_open(id, "v1");
+    let resting = h.order(id).clone();
+    assert_eq!(resting.phase, Phase::Working);
+    let commands_before = h.commands.len();
+
+    let mut seen = std::collections::BTreeSet::new();
+    for _ in 0..1440 {
+        h.advance(5 * SEC);
+        for out in [h.report_margin("100"), h.ref_price("X", "100"), h.tick()] {
+            seen.extend(names(&out));
+        }
+    }
+    assert!(h.now - resting.accepted_at > 7_200 * SEC);
+
+    // Nothing was sent to the venue and no event touched the order.
+    assert_eq!(h.commands.len(), commands_before);
+    assert_eq!(h.cancels(), vec![]);
+    assert_eq!(
+        seen.into_iter().collect::<Vec<_>>(),
+        vec!["margin_reported", "purged", "ref_price_updated"]
+    );
+    assert_eq!(h.order(id), &resting, "the OMS changed a resting order");
+    assert_eq!(h.order(id).px, px("100"));
+    assert_eq!(h.order(id).reserved, q("2"));
+
+    // It still counts: 2 at 100 is the whole limit of 200.
+    assert_eq!(
+        h.reject("a", "k2", Side::Buy, "0.1", "100"),
+        vec![RejectReason::AccountLeverage]
+    );
+}
+
 // ---- C-MARGIN: replay ---------------------------------------------------------
 
 /// S13. Margin state comes only from journal events. A core rebuilt from the
