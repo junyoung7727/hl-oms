@@ -4,7 +4,7 @@
 
 **Blocked by:** 10
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Test `profile_margin_days_crosses_three_utc_days_with_restarts` (seam D, S12, S13, G8): fails when over the seeds of the standard run an invariant breaks, a day roll absorbs a loss, the base rolls more than once per day, or a restart or a day roll clears REDUCING.
 - [ ] Test `margin_journal_records_stay_within_one_per_poll` (seam D, G8): fails when the run journals more margin records than polls made (17 280 per virtual day at 5 s).
