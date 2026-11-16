@@ -304,15 +304,15 @@ necessity = "수량 한도 안에서도 증거금 부족이나 청산이 일어�
 sources = ["FIA24", "REQ"]
 applicability = "적용"
 reason = "요구 R04, R05. 기존 문서의 미결 D1, D2"
-handling = "증거금 규칙은 결정했고 아직 구현하지 않았다(ADR-018, C-MARGIN). 지금 코드에는 주문당 금액 상한만 있다"
+handling = "증거금 규칙을 구현했다(ADR-018, C-MARGIN). 증거금 정책이 있으면: 일반 주문이 계좌 노출(포지션과 모든 미체결 주문)을 계좌 가치의 2배 위로 올리면 거절한다. 거래소의 증거금 보고에서 일 손실이 5 %를 넘거나 격리 포지션의 증거금이 유지증거금률 + 0.25 %p 아래면 감소 전용 상태가 되어 일반 주문을 거절하고 걸린 일반 주문을 취소한다. 해제는 운영자만 한다. 보고가 30초보다 오래되면 일반 주문을 거절하고 60초 넘게 끊기면 걸린 일반 주문을 취소한다. 거래소의 레버리지·증거금 방식·계좌 모드가 정책과 다르면 막는다. 정책이 없으면 전과 같이 주문당 금액 상한만 있다. mainnet은 정책 없이 시작하지 않는다"
 design = "결정"
-impl = "미구현"
-verify = "해당없음"
+impl = "구현"
+verify = "부분"
 adr = ["ADR-008", "ADR-018"]
 contracts = ["C-MARGIN"]
-code = []
-claims = []
-open = "영향: 구현 전까지 계좌 담보를 보지 않는다. 거래소가 증거금 부족으로 거부·취소하는 것에 의존한다. 해소: U-02는 결정됨. 통합 브랜치 margin-rules의 티켓(.scratch/margin-rules/issues/)으로 구현한다. U-03(긴급 시장가 수치)은 미결이다. 단계: 실거래 전."
+code = ["crates/oms-core/src/exposure.rs", "crates/oms-core/src/decide.rs", "crates/oms-core/src/core.rs", "crates/oms-core/src/model.rs", "crates/oms-core/src/config.rs", "crates/oms-node/src/venue/reconciler.rs", "crates/oms-node/src/venue/hyperliquid/wire.rs", "crates/oms-node/src/config.rs"]
+claims = ["V-MARGIN-1", "V-MARGIN-2", "V-MARGIN-3", "V-MARGIN-4", "V-MARGIN-5", "V-MARGIN-6", "V-MARGIN-7", "V-MARGIN-8", "V-MARGIN-9", "V-MARGIN-10", "V-MARGIN-11", "V-MARGIN-12"]
+open = "검증은 가상 거래소와 시뮬레이션까지다. 실제 거래소에서는 아무것도 확인하지 않았다: 규칙이 읽는 숫자의 뜻은 가정 T1~T11이고(ADR-018 §8), 증거금 조회는 testnet에도 보낸 적이 없다. 규칙은 손실을 5 %에서 멈춘다고 보장하지 않는다(두 보고 사이의 손실, 체결에 지는 취소). 대조기가 모르는 거래소 설정을 1초마다 되묻는 문제가 남아 있다(검증 문서 §11.5). U-02는 결정됨. U-03(긴급 시장가 수치)은 미결이다. 영향: 실제 거래소의 숫자가 가정과 다르면 규칙이 틀리게 걸리거나 걸리지 않는다. 해소: testnet 예행과 T1~T11 확인(U-01, 사용자 승인 필요). 단계: 실거래 전."
 
 [[item]]
 id = "D-RISK-05"

@@ -1,6 +1,6 @@
 # ADR-018 증거금 규칙: 계좌 레버리지 검사, 감소 전용 상태, 거래소 설정 확인
 
-상태: 채택(미구현). 구현은 `.scratch/margin-rules/issues/`의 티켓 단위로 진행한다. 실제 거래소에서는 검증하지 않는다(U-01).
+상태: 채택, 구현됨(2026-11-16. `.scratch/margin-rules/issues/`의 티켓 01~12). 실제 거래소에서는 검증하지 않았다(U-01): §8의 가정 T1~T11은 하나도 확인하지 않았고, testnet 예행과 그 확인은 mainnet 전에 사용자의 승인을 받아 한다. 구현하며 스펙과 다르게 한 것과 보장하지 않는 것은 [검증 문서 §11](../verification/README.md)에 있다.
 
 사용자 결정 U-02에 대한 결정이다. 용어는 [GLOSSARY.md](../../GLOSSARY.md)를 따른다. 동작의 세부는 [C-MARGIN](../contracts/margin.md)에 있다.
 아래의 "문서"는 Hyperliquid 공식 문서를 뜻하고, 정리본은 [research/hyperliquid-protocol.md](../research/hyperliquid-protocol.md)다.

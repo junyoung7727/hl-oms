@@ -493,6 +493,25 @@ fn order_exactly_at_the_limit_is_accepted() {
     h.accept("a", "k1", Side::Sell, "2", "100");
 }
 
+/// S5, S11. The gate judges only with a fresh margin report. The last
+/// report said 100, so a buy of 2.01 at 100 (201 against 200) would be past
+/// the limit on its numbers; one microsecond after the report stopped being
+/// fresh the order has the one reason `MarginUnavailable`, and the old
+/// account value is not judged.
+#[test]
+fn without_a_fresh_report_an_order_past_the_limit_is_rejected_margin_unavailable_only() {
+    let mut h = gate();
+    let t1 = h.now;
+    h.margin_report(1, 2, t1, "100");
+    next_input_at(&mut h, t1 + 30 * SEC + 1 - 1_000);
+    h.ref_price("X", "100");
+    assert_eq!(h.now + 1_000, t1 + 30_000_001);
+    assert_eq!(
+        h.reject("a", "k1", Side::Buy, "2.01", "100"),
+        vec![RejectReason::MarginUnavailable]
+    );
+}
+
 /// S1. An order that does not fill stays as it is. Over two hours of ticks,
 /// with a fresh margin report and a fresh reference price at every 5 s poll
 /// (so the stale cancel does not apply), the OMS sends no cancel, changes no
