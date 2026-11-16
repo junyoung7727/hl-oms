@@ -1665,8 +1665,11 @@ fn reach_after(b: &Book, side: Side, qty: Qty) -> Option<i64> {
 }
 
 /// Whether the margin of a position is below (maintenance margin rate +
-/// `buffer_bps`) of its value.
+/// `buffer_bps`) of its value. The maintenance margin rate is 1 / (2 ×
+/// maximum leverage); both sides are multiplied by 2 × maximum leverage ×
+/// 10 000, so nothing is divided.
 fn mm_buffer_is_used_up(p: &MarginPosition, buffer_bps: u32) -> bool {
     let (margin, value) = (i128::from(p.margin_used.0), i128::from(p.position_value.0));
-    margin * 80 * 10_000 < value * (10_000 + 80 * i128::from(buffer_bps))
+    let twice_max_leverage = 2 * i128::from(p.max_leverage);
+    margin * twice_max_leverage * 10_000 < value * (10_000 + twice_max_leverage * i128::from(buffer_bps))
 }

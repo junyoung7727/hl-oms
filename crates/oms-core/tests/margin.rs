@@ -2940,3 +2940,50 @@ fn isolated_margin_below_mmr_plus_buffer_enters_reducing() {
     // OMS never closes a position.
     assert_eq!(out.commands, vec![]);
 }
+
+/// S16. The maintenance margin rate of a position is 1 / (2 × its maximum
+/// leverage), read from the same report. Maximum leverage 25 gives 2 %, so
+/// the line is 2.25 % of the value: 4.50 on 200. Maximum leverage 50 gives
+/// 1 %, so the line is 1.25 %: 2.50 on 200. Each position is judged at its
+/// own rate, not at the 1.25 % of maximum leverage 40.
+///
+/// Not proven: margin tiers (T9). A large position has a lower maximum
+/// leverage at the venue than the one in the report.
+#[test]
+fn mmr_follows_the_max_leverage_of_each_position() {
+    let mut h = at_base_100();
+
+    // Each position exactly on its own line: none trips. At 1.25 % + 0.25 %
+    // the position on Z (2.50 < 3.00) would.
+    h.advance(5 * SEC);
+    let out = report_positions(
+        &mut h,
+        vec![
+            position_with("X", 40, "200", "3"),
+            position_with("Y", 25, "200", "4.5"),
+            position_with("Z", 50, "200", "2.5"),
+        ],
+    );
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.reducing, None);
+
+    // The position on Y is one cent under its line of 4.50. At 1.25 % +
+    // 0.25 % it would be far above the line (3.00).
+    h.advance(5 * SEC);
+    let out = report_positions(
+        &mut h,
+        vec![
+            position_with("X", 40, "200", "3"),
+            position_with("Y", 25, "200", "4.49"),
+            position_with("Z", 50, "200", "2.5"),
+        ],
+    );
+    assert_eq!(
+        out.events[1..],
+        [mm_buffer_entered(
+            "position Y: isolated margin 4.49 is below the maintenance margin \
+             at maximum leverage 25 plus 25 bps of the position value 200"
+        )]
+    );
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+}
