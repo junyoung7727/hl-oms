@@ -221,8 +221,12 @@ impl Tx<'_> {
         let cfg = &core.config;
         let mut why = Vec::new();
 
+        // Hold table (ADR-008 §7 as amended by ADR-018): with a margin
+        // policy, a reduce-only order passes the holds that refuse only
+        // plain orders. Without one every hold refuses every new order.
+        let table_applies = cfg.policy.margin.is_some();
         for h in core.holds(Some(&r.strategy)) {
-            if cfg.policy.margin.is_some() && r.reduce_only && matches!(h, HoldReason::Resync | HoldReason::InDoubt | HoldReason::Mismatch) {
+            if table_applies && r.reduce_only && h.refuses_only_plain_orders() {
                 continue;
             }
             why.push(R::Hold(h));
