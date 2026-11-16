@@ -12,7 +12,7 @@
 - [x] Test `a_cross_position_is_not_judged_by_the_mm_rule` (seam A): fails when a cross-margin position trips the rule (it is the venue-setting hold's case).
 - [x] Test `clear_reduce_is_refused_while_the_mm_condition_holds` (seam A, S14): fails when the clear succeeds, or the refusal reason is not `MmBufferActive`. There is no way out of a false latch; that is a stated non-guarantee.
 - [x] Test `reducing_records_the_rule_that_tripped_first` (seam A, S16): fails when a later MM trigger overwrites `DailyLoss` in the latch, or the reverse.
-- [ ] Test `an_old_report_on_arrival_is_still_judged_by_the_mm_rule` (seam A, S11): an accepted report whose query time is 40 s before the record time carries isolated margin 2.99 on position value 200 at maximum leverage 40. Fails when the account does not enter REDUCING with `Rule(MmBuffer)` on that report.
+- [x] Test `an_old_report_on_arrival_is_still_judged_by_the_mm_rule` (seam A, S11): an accepted report whose query time is 40 s before the record time carries isolated margin 2.99 on position value 200 at maximum leverage 40. Fails when the account does not enter REDUCING with `Rule(MmBuffer)` on that report.
 - [ ] Test `mm_comparison_is_exact_at_extreme_values` (seam A, property, G3): fails when an overflow or a rounding flips the result near the boundary; expected values come from independent `i128` multiplication on literals.
 - [ ] Mutants: an MM judgement that runs only on a fresh report, the MM comparison direction, the buffer term and the factor 2 × maximum leverage are each caught by a named test.
 - [ ] Stated and not proven here: margin tiers (T9); the rule fires 0.13–0.37 % of price before liquidation and a 5 s poll can step over it.

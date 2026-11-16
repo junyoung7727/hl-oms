@@ -3172,3 +3172,39 @@ fn reducing_records_the_rule_that_tripped_first() {
         Some(RuleId::MmBuffer)
     );
 }
+
+/// S11. Every recorded report is judged by the MM-buffer rule, also one
+/// that is older than the freshness limit of 30 s when it arrives: its
+/// numbers are the newest the OMS has and entering REDUCING is the safe
+/// side. Here the answer was 40 s on the way and shows isolated margin 2.99
+/// on a value of 200 at maximum leverage 40.
+#[test]
+fn an_old_report_on_arrival_is_still_judged_by_the_mm_rule() {
+    let mut h = at_base_100();
+    h.advance(60 * SEC);
+
+    // The harness records the next input 1 ms after `now`.
+    let recorded_at = h.now + 1_000;
+    let out = report_positions_asked_at(
+        &mut h,
+        recorded_at - 40 * SEC,
+        vec![position_with("X", 40, "200", "2.99")],
+    );
+    assert_eq!(h.now, recorded_at);
+    assert!(
+        !h.core.margin_report_is_fresh(recorded_at),
+        "a report that is 40 s old counts as fresh"
+    );
+    assert_eq!(
+        out.events[1..],
+        [mm_buffer_entered(
+            "position X: isolated margin 2.99 is below the maintenance margin \
+             at maximum leverage 40 plus 25 bps of the position value 200"
+        )]
+    );
+    assert_eq!(
+        h.core.margin.reducing.as_ref().map(|r| (r.rule, r.since)),
+        Some((RuleId::MmBuffer, recorded_at))
+    );
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+}
