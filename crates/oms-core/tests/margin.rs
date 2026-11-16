@@ -2368,3 +2368,32 @@ fn stale_cancel_does_not_reissue_an_exhausted_cancel() {
     let c = h.order(bid).cancel.as_ref().unwrap();
     assert_eq!((c.by.clone(), c.used()), (Actor::Strategy(sid("a")), 5));
 }
+
+/// S23. A stale episode latches nothing. While it lasts a plain order is
+/// refused with `MarginUnavailable` only; the first report recorded after
+/// it restores acceptance, the account is not REDUCING and has no hold, and
+/// the tick cancels nothing more.
+#[test]
+fn a_fresh_report_after_a_stale_episode_restores_acceptance_without_a_latch() {
+    let mut h = at_base_100();
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    h.advance(61 * SEC);
+    assert_eq!(
+        decided(&h.tick()),
+        vec![stale_cancel(bid), cancel_sent(bid, 1)]
+    );
+    h.ref_price("X", "100");
+    assert_eq!(
+        h.reject("a", "k2", Side::Buy, "0.2", "90"),
+        vec![RejectReason::MarginUnavailable]
+    );
+
+    h.report_margin("100");
+    assert_eq!(h.core.margin.reducing, None, "REDUCING appeared");
+    assert_eq!(h.core.holds(None), vec![]);
+    let again = h.accept("a", "k3", Side::Buy, "0.2", "90");
+    h.placed_open(again, "k3");
+    h.advance(SEC);
+    assert_eq!(decided(&h.tick()), vec![]);
+    assert_eq!(h.order(again).cancel, None);
+}
