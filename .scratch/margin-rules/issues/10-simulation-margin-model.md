@@ -4,7 +4,7 @@
 
 **Blocked by:** 03, 05, 06, 07, 08
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Test `world_account_value_follows_fills_price_fees_and_funding` (seam D, model unit, G10): fails when the model's account value differs from a hand-worked example with one fill, one price move, one fee and one funding charge. Does not prove the venue computes it this way.
 - [ ] Test `a_loss_made_only_of_fees_and_funding_enters_reducing` (seam D, G10): fails when fees and funding that take the account more than 5 % below the base do not latch.
