@@ -1458,9 +1458,9 @@ impl Tx<'_> {
         }
         for id in self.open_ids() {
             let Some(o) = self.core.orders.get(&id) else { continue };
-            let is_plain = !o.reduce_only;
+            let plain_order = !o.reduce_only;
             let not_asked_yet = o.cancel.is_none();
-            if is_plain && not_asked_yet {
+            if plain_order && not_asked_yet {
                 self.emit(Event::CancelRequested {
                     order_id: id,
                     by: Actor::Rule(RuleId::MarginStale),

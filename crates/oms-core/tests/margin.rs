@@ -2342,6 +2342,9 @@ fn stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off() {
     h.advance(61 * SEC);
     assert_eq!(decided(&h.tick()), vec![], "a cancel without a policy");
     assert_eq!(h.order(bid).cancel, None);
+    // And the link-up left nothing in the margin state: the state of a run
+    // without a policy keeps the bytes it had before these rules.
+    assert!(h.core.margin.is_empty(), "{:?}", h.core.margin);
 }
 
 /// S23. The stale cancel asks only for orders that have no cancel request.

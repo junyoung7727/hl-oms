@@ -13,9 +13,9 @@
 - [x] Test `a_fresh_report_after_a_stale_episode_restores_acceptance_without_a_latch` (seam A, S23): fails when plain orders stay rejected, or REDUCING appears.
 - [x] Test `stale_age_starts_at_policy_activation_when_the_link_is_already_up` (seam A, S23; added by the implementer): fails when orders that rest from before a margin policy activated with the link up are cancelled at once, at exactly 60 s after the activation, or never.
 - [x] Test `a_forward_clock_jump_reads_the_report_as_stale_and_cancels` (seam A, G5): fails when after the record time jumps forward by an hour a plain order is accepted on the old report, or the tick requests no cancel.
-- [ ] Mutants: the stale limit comparison, the link-up baseline, and the "no cancel request yet" filter are each caught by a named test.
-- [ ] Stated and not proven here: the position stays; nothing is cancelled while the link is down; a cancel can lose the race to a fill.
-- [ ] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
-- [ ] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
-- [ ] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
+- [x] Mutants: the stale limit comparison, the link-up baseline, and the "no cancel request yet" filter are each caught by a named test.
+- [x] Stated and not proven here: the position stays; nothing is cancelled while the link is down; a cancel can lose the race to a fill.
+- [x] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
+- [x] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
+- [x] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
 - [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
