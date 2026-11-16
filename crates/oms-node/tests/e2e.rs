@@ -705,6 +705,50 @@ fn status_shows_account_exposure() {
     assert_eq!(env.status()["core"]["margin"]["account_exposure"], "150");
 }
 
+/// C-MARGIN: the venue process answers the margin query from its margin
+/// model, positions included, and `status` shows them. Hand-worked, venue
+/// fee 2 bps, venue setting isolated at leverage 2, maximum leverage 40:
+///   account 100, buy 1 at 100 with the mark at 100: fee 0.02 -> 99.98,
+///     position value 100, margin 100 / 2 = 50
+///   mark 100 -> 101: account 100.98, position value 101, margin 50.5
+/// The setting of an instrument with a position reaches the core through
+/// the report: after the venue is switched to cross margin at leverage 3
+/// the report says so and the instrument is held.
+#[test]
+fn margin_report_of_the_venue_process_carries_its_positions() {
+    let mut env = margin_node("margin-positions", "100");
+    let mut c = env.client("a");
+    let id = rest(&mut env, &mut c, "p", Side::Buy, "100", false);
+    assert!(env.wait(Duration::from_secs(5), || phase_of(&mut c, id) == Phase::Working));
+    let cloid = env.cloid(id);
+    env.ctl(json!({"fill": {"client": cloid}}));
+    let position = |value: &str, margin: &str, isolated: &str, leverage: u32| {
+        json!([{
+            "instrument": "X",
+            "szi": "1",
+            "position_value": value,
+            "margin_used": margin,
+            "leverage_type": isolated,
+            "leverage_value": leverage,
+            "max_leverage": 40,
+        }])
+    };
+    let first = position("100", "50", "isolated", 2);
+    wait_margin(&env, "the position", |m| m["positions"] == first && m["account_value"] == "99.98");
+
+    env.ctl(json!({"ref_price": {"instrument": "X", "px": "101"}}));
+    let moved = position("101", "50.5", "isolated", 2);
+    wait_margin(&env, "the price move", |m| m["positions"] == moved && m["account_value"] == "100.98");
+    assert_eq!(env.status()["core"]["holds"], json!([]));
+
+    env.ctl(json!({"venue_setting": {"instrument": "X", "isolated": false, "leverage": 3}}));
+    let cross = position("101", "33.66666666", "cross", 3);
+    wait_margin(&env, "the changed setting", |m| {
+        m["positions"] == cross && m["venue_settings"] == json!({"X": {"isolated": false, "leverage": 3, "as_configured": false}})
+    });
+    assert_eq!(env.status()["core"]["holds"], json!([{"venue_setting": "X"}]));
+}
+
 /// C-MARGIN: the operator sees the daily-loss rule in `status`. The first
 /// report the node polls becomes the day base. When the venue's account
 /// value falls more than 5 % below it, status shows REDUCING with the rule,

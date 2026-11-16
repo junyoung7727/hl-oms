@@ -29,7 +29,6 @@ struct State {
     margin_queries: u64,
     /// Margin mode and leverage per instrument, where a control changed
     /// them. Every other instrument is isolated at leverage 2.
-    venue_settings: std::collections::BTreeMap<InstrumentId, VenueSettingResult>,
     account_mode: String,
     venue_setting_queries: u64,
     account_mode_queries: u64,
@@ -127,6 +126,9 @@ impl State {
                     px,
                     tif,
                     expires_at,
+                    // The wire of this process does not carry the flag: the
+                    // venue process treats every order as a plain one.
+                    reduce_only: false,
                 };
                 let result = match self.venue.place(now, &req, immediate) {
                     PlaceResp::Placed { oid, .. } => PlaceResult::Placed(wire_order(&self.venue.orders[&oid])),
@@ -172,15 +174,17 @@ impl State {
             SimOp::Margin => {
                 self.margin_queries += 1;
                 Ok(json(&MarginResult {
-                    account_value: self.venue.account_value,
+                    account_value: self.venue.account_value(),
+                    positions: self.venue.margin_positions(),
                 }))
             }
             SimOp::VenueSetting { instrument } => {
                 self.venue_setting_queries += 1;
-                let setting = self.venue_settings.get(&instrument).cloned().unwrap_or(VenueSettingResult {
-                    isolated: true,
-                    leverage: 2,
-                });
+                let (mode, leverage) = self.venue.setting(&instrument);
+                let setting = VenueSettingResult {
+                    isolated: mode == LeverageType::Isolated,
+                    leverage,
+                };
                 Ok(json(&setting))
             }
             SimOp::AccountMode => {
@@ -247,13 +251,16 @@ impl State {
                 Ok(serde_json::Value::Null)
             }
             Ctl::RefPrice { instrument, px } => {
+                // The price the venue publishes is also the mark of its
+                // margin model.
+                self.venue.set_mark(&instrument, px);
                 self.broadcast(&StreamLine {
                     stream: StreamMsg::RefPrice { instrument, px, ts: now },
                 });
                 Ok(serde_json::Value::Null)
             }
             Ctl::AccountValue { value } => {
-                self.venue.account_value = value;
+                self.venue.set_account_value(value);
                 Ok(serde_json::Value::Null)
             }
             Ctl::VenueSetting {
@@ -261,7 +268,8 @@ impl State {
                 isolated,
                 leverage,
             } => {
-                self.venue_settings.insert(instrument, VenueSettingResult { isolated, leverage });
+                let mode = if isolated { LeverageType::Isolated } else { LeverageType::Cross };
+                self.venue.settings.insert(instrument, (mode, leverage));
                 Ok(serde_json::Value::Null)
             }
             Ctl::AccountMode { mode } => {
@@ -411,7 +419,6 @@ async fn main() {
         refuse_streams: false,
         requests: 0,
         margin_queries: 0,
-        venue_settings: std::collections::BTreeMap::new(),
         account_mode: SIM_STANDARD_MODE.into(),
         venue_setting_queries: 0,
         account_mode_queries: 0,

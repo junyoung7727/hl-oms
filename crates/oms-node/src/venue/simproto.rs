@@ -176,6 +176,10 @@ pub struct WirePosition {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MarginResult {
     pub account_value: Amount,
+    /// Every position of the account, with its value, margin, margin mode,
+    /// leverage and maximum leverage.
+    #[serde(default)]
+    pub positions: Vec<MarginPosition>,
 }
 
 /// Answer to `SimOp::VenueSetting`.
