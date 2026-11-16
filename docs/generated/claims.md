@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `c3f2513ec299a816`, 검증 결과의 다이제스트 `84bbfc41882f370d`.
+> 소스 다이제스트 `090aaadd6de92e57`, 검증 결과의 다이제스트 `84bbfc41882f370d`.
 
-주장 58건: 통과 0, 실패 0, 미실행 3, 이전 버전 결과 55.
+주장 58건: 통과 0, 실패 0, 미실행 4, 이전 버전 결과 54.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -36,7 +36,7 @@
 | V-JRN-4 | 스냅샷은 완전한 파일로만 나타나고, 손상된 스냅샷은 건너뛰며, 정상 종료 뒤 재시작은 스냅샷에서 같은 상태로 돌아온다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-journal --lib snapshot` |
 | V-JRN-5 | 기록 스키마가 다른 빌드는 옛 세그먼트를 읽고 새 세그먼트를 시작하며, 읽을 수 없는 스키마를 만난 빌드는 시작을 거부한다 | 단위 | 이전 버전 결과 | `cargo test -p oms-journal a_schema_change` |
 | V-BOOT-1 | 재시작은 결과 기록이 없는 전송을 불명으로 표시하고, 신규 주문을 다시 보내지 않으며, 요청돼 있던 취소만 다시 보낸다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e a_kill_during_send` |
-| V-CFG-1 | 설정은 버전이 커야 활성화되고, 같은 버전에 다른 내용이면 시작을 거부한다. 노출이 남은 종목·전략은 제거할 수 없다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e configuration_changes` |
+| V-CFG-1 | 설정은 버전이 커야 활성화되고, 같은 버전에 다른 내용이면 시작을 거부한다. 노출이 남은 종목·전략은 제거할 수 없다. mainnet은 증거금 정책(policy.margin) 없이는 시작하지 않고, 정책의 값이 C-MARGIN 설정 표의 범위를 벗어나면 어느 거래소 설정에서도 시작하지 않는다 | 프로세스 | 미실행 | `cargo test -p oms-node --test e2e configuration_changes && cargo test -p oms-node --lib config::tests` |
 | V-OVL-1 | 입력 큐는 상한을 넘지 않고, 가득 찬 큐는 다른 큐에 영향을 주지 않으며, 배치마다 세 큐가 지분을 받는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-node --lib queues` |
 | V-OVL-2 | 큐보다 빠르게 온 요청은 즉시 거절되고 기록을 남기지 않으며, 그 직후에도 취소는 수용된다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e overload -- --nocapture` |
 | V-OVL-3 | 저장 공간이 부족하면 신규 주문만 거절하고 체결과 취소는 계속 처리한다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios storage_low` |
@@ -709,25 +709,26 @@
 | `core/restart_puts_outstanding_sends_in_doubt_and_never_resends` | 이전 버전 결과 | last result: passed |
 | `e2e/a_kill_during_send_does_not_duplicate_the_order` | 이전 버전 결과 | last result: passed |
 
-## V-CFG-1 — 설정은 버전이 커야 활성화되고, 같은 버전에 다른 내용이면 시작을 거부한다. 노출이 남은 종목·전략은 제거할 수 없다
+## V-CFG-1 — 설정은 버전이 커야 활성화되고, 같은 버전에 다른 내용이면 시작을 거부한다. 노출이 남은 종목·전략은 제거할 수 없다. mainnet은 증거금 정책(policy.margin) 없이는 시작하지 않고, 정책의 값이 C-MARGIN 설정 표의 범위를 벗어나면 어느 거래소 설정에서도 시작하지 않는다
 
-- 상태: **이전 버전 결과**
+- 상태: **미실행**
 - 왜 중요한가: 설정 변경이 추적되지 않으면 사고 분석이 불가능하다
 - 수준: 프로세스
-- 전제와 범위: 코어 예제, 실제 노드 1회
+- 전제와 범위: 코어 예제, 실제 노드 1회, 노드 설정 검사의 단위 시험(증거금 정책)
 - 실제 구성요소: oms-core, oms-node
 - 모의·시뮬레이션: 없음
-- 주입한 장애: 버전을 올리지 않은 변경
+- 주입한 장애: 버전을 올리지 않은 변경. 정책 없는 mainnet 설정, 0인 한도, 신선도 한도보다 크지 않은 보고 끊김 취소 한도
 - 판정 기준과 근거: 종료 코드 3과 오류 문구
-- 재현: `cargo test -p oms-node --test e2e configuration_changes`
+- 재현: `cargo test -p oms-node --test e2e configuration_changes && cargo test -p oms-node --lib config::tests`
 - 뒷받침하는 것: 요구 R13, C-BOOT
-- 확인하지 않은 범위: 설정 파일의 그 밖의 검증 규칙
+- 확인하지 않은 범위: 설정 파일의 그 밖의 검증 규칙. 조회 weight 예산 검사와 runtime.venue_setting_poll_ms(뒤 티켓). account_modes_allowed의 내용
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
 | `core/configuration_changes_are_validated_against_existing_exposure` | 이전 버전 결과 | last result: passed |
 | `e2e/configuration_changes_need_a_new_version` | 이전 버전 결과 | last result: passed |
 | `core/f10_config_validation_enforces_the_parked_fill_wait_rule` | 이전 버전 결과 | last result: passed |
+| `node-unit/config::tests::mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused` | 미실행 |  |
 
 ## V-OVL-1 — 입력 큐는 상한을 넘지 않고, 가득 찬 큐는 다른 큐에 영향을 주지 않으며, 배치마다 세 큐가 지분을 받는다
 

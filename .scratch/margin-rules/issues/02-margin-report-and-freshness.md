@@ -15,7 +15,7 @@
 - [x] Test `reduce_only_order_needs_no_fresh_report` (seam A, S11): fails when a reduce-only order is rejected for staleness.
 - [x] Test `without_a_margin_policy_no_margin_check_runs` (seam A, S21): fails when with no margin policy an order is rejected for margin, or a report changes state.
 - [x] Test `margin_events_replay_to_the_same_state` (seam A, S13): fails when the state rebuilt from the journal differs in digest.
-- [ ] Test `mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused` (seam node unit, S21): fails when mainnet loads with no margin policy, or a zero limit, or a stale-cancel limit not greater than the freshness limit, loads.
+- [x] Test `mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused` (seam node unit, S21): fails when mainnet loads with no margin policy, or a zero limit, or a stale-cancel limit not greater than the freshness limit, loads.
 - [ ] Test `node_polls_margin_and_status_shows_value_and_age` (seam C, S11): fails when the 5 s timer, the simulated venue answer, the sequence number, the core input or the status fields are not wired.
 - [ ] An absent margin policy still adds no bytes to a journal record after this ticket (criterion of ticket 01; ticket 10 checks it against literals recorded on main).
 - [ ] Mutants: the session guard, the sequence guard and the freshness comparison (both ends) are each caught by a named test.

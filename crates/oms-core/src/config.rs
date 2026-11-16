@@ -252,6 +252,24 @@ impl CoreConfig {
         if p.unmatched_fill_wait_us <= p.max_expiry_horizon_us.saturating_add(p.absence_margin_us) {
             errs.push("policy: unmatched_fill_wait_us must exceed max_expiry_horizon_us + absence_margin_us".to_string());
         }
+        if let Some(m) = &p.margin {
+            // The 설정 table of C-MARGIN.
+            if m.max_account_leverage.0 <= 0 {
+                errs.push("policy.margin: max_account_leverage must be greater than 0".to_string());
+            }
+            if m.daily_loss_bps == 0 {
+                errs.push("policy.margin: daily_loss_bps must be greater than 0".to_string());
+            }
+            if m.margin_max_age_us == 0 {
+                errs.push("policy.margin: margin_max_age_us must be greater than 0".to_string());
+            }
+            if m.stale_cancel_us <= m.margin_max_age_us {
+                errs.push("policy.margin: stale_cancel_us must be greater than margin_max_age_us".to_string());
+            }
+            if m.venue_leverage == 0 {
+                errs.push("policy.margin: venue_leverage must be at least 1".to_string());
+            }
+        }
         if errs.is_empty() { Ok(()) } else { Err(errs) }
     }
 }
