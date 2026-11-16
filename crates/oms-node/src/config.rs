@@ -87,6 +87,9 @@ pub struct RuntimeConfig {
     pub storage_low_bytes: u64,
     pub reconcile_ms: u64,
     pub sweep_ms: u64,
+    /// Time between margin queries while the link is up. Used only with a
+    /// margin policy (`[core.policy.margin]`).
+    pub margin_poll_ms: u64,
     pub worker_threads: usize,
     /// Run journal writes on the core thread instead of a separate commit
     /// thread. For the layout comparison in ADR-012 only.
@@ -106,6 +109,7 @@ impl Default for RuntimeConfig {
             storage_low_bytes: 1 << 30,
             reconcile_ms: 500,
             sweep_ms: 15_000,
+            margin_poll_ms: 5_000,
             worker_threads: 2,
             inline_commit: false,
         }
@@ -225,6 +229,9 @@ impl NodeConfig {
         if r.orders_queue == 0 || r.control_queue == 0 || r.venue_queue == 0 || r.max_batch == 0 {
             return Err("[runtime] queue sizes and max_batch must be positive".into());
         }
+        if r.margin_poll_ms == 0 {
+            return Err("[runtime] margin_poll_ms must be greater than 0".into());
+        }
         if self.api.window == 0 || self.api.max_connections == 0 || self.api.admin_max_connections == 0 {
             return Err("[api] window, max_connections and admin_max_connections must be positive".into());
         }
@@ -241,6 +248,10 @@ impl NodeConfig {
         if let VenueConfig::Hyperliquid(h) = &self.venue {
             match h.network.as_str() {
                 "testnet" => {}
+                // Real money is not traded without the margin rules.
+                "mainnet" if h.mainnet_confirmed && self.core.policy.margin.is_none() => {
+                    return Err("[venue] mainnet requires [core.policy.margin] (the margin rules, C-MARGIN)".into());
+                }
                 "mainnet" if h.mainnet_confirmed => {}
                 "mainnet" => return Err("[venue] mainnet requires mainnet_confirmed = true".into()),
                 other => return Err(format!("[venue] unknown network {other}")),
@@ -258,5 +269,100 @@ impl NodeConfig {
 
     pub fn admin_socket_path(&self) -> PathBuf {
         self.data_dir.join(&self.api.admin_socket)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SIM: &str = "kind = \"sim\"\nsocket = \"venue.sock\"";
+
+    fn hyperliquid(network: &str) -> String {
+        format!("kind = \"hyperliquid\"\nnetwork = \"{network}\"\naccount_address = \"0xTEST\"\nmainnet_confirmed = true")
+    }
+
+    /// Parses and validates a configuration with the given venue table,
+    /// `[runtime]` lines and, if `margin` is given, a `[core.policy.margin]`
+    /// table with those lines.
+    fn check(venue: &str, runtime: &str, margin: Option<&str>) -> Result<(), String> {
+        let margin = margin.map(|m| format!("[core.policy.margin]\n{m}")).unwrap_or_default();
+        let text = format!(
+            r#"
+data_dir = "d"
+
+[runtime]
+{runtime}
+
+[venue]
+{venue}
+
+[core]
+version = 1
+
+[core.instruments.X]
+qty_step = "0.001"
+px_tick = "0.1"
+min_notional = "10"
+max_order_qty = "100"
+max_order_notional = "1000000"
+account_pos_min = "-10"
+account_pos_max = "10"
+
+[core.strategies.a]
+enabled = true
+max_open_orders = 50
+[core.strategies.a.limits.X]
+min = "-10"
+max = "10"
+
+[core.policy]
+
+{margin}
+"#
+        );
+        let cfg: NodeConfig = toml::from_str(&text).map_err(|e| format!("parse: {e}"))?;
+        cfg.validate()
+    }
+
+    fn refused(venue: &str, runtime: &str, margin: Option<&str>, because: &str) {
+        match check(venue, runtime, margin) {
+            Ok(()) => panic!("loaded, but must be refused ({because}): margin {margin:?}, runtime {runtime:?}"),
+            Err(e) => assert!(e.contains(because), "refused for another reason than {because:?}: {e}"),
+        }
+    }
+
+    /// S21. Mainnet does not start without a margin policy, and a margin
+    /// policy with a value outside the contract's 설정 table does not load
+    /// on any venue.
+    #[test]
+    fn mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused() {
+        // Mainnet: the section must be there. Empty is enough: the defaults
+        // of the contract apply.
+        refused(&hyperliquid("mainnet"), "", None, "mainnet requires [core.policy.margin]");
+        assert_eq!(check(&hyperliquid("mainnet"), "", Some("")), Ok(()));
+        // Elsewhere the section stays optional.
+        assert_eq!(check(&hyperliquid("testnet"), "", None), Ok(()));
+        assert_eq!(check(SIM, "", None), Ok(()));
+        assert_eq!(check(SIM, "", Some("")), Ok(()));
+
+        // A limit of zero.
+        refused(SIM, "", Some("max_account_leverage = \"0\""), "max_account_leverage must be greater than 0");
+        refused(SIM, "", Some("daily_loss_bps = 0"), "daily_loss_bps must be greater than 0");
+        refused(SIM, "", Some("margin_max_age_us = 0"), "margin_max_age_us must be greater than 0");
+        refused(SIM, "", Some("venue_leverage = 0"), "venue_leverage must be at least 1");
+        refused(SIM, "margin_poll_ms = 0", Some(""), "margin_poll_ms must be greater than 0");
+        // The MM buffer may be zero.
+        assert_eq!(check(SIM, "", Some("mm_buffer_bps = 0")), Ok(()));
+
+        // The stale-cancel limit must be greater than the freshness limit:
+        // equal is refused, one microsecond more loads.
+        let because = "stale_cancel_us must be greater than margin_max_age_us";
+        refused(SIM, "", Some("margin_max_age_us = 30000000\nstale_cancel_us = 30000000"), because);
+        refused(SIM, "", Some("stale_cancel_us = 29999999"), because);
+        assert_eq!(check(SIM, "", Some("margin_max_age_us = 30000000\nstale_cancel_us = 30000001")), Ok(()));
+
+        // The same bad values are refused on mainnet too.
+        refused(&hyperliquid("mainnet"), "", Some("daily_loss_bps = 0"), "daily_loss_bps must be greater than 0");
     }
 }

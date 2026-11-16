@@ -1168,6 +1168,7 @@ fn holds_are_independent() {
 #[test]
 fn reduce_only_order_is_accepted_during_resync() {
     let mut h = H::ready_with(config_with_margin());
+    h.report_margin("1000");
     h.long("a", "k1", "1");
     h.venue(VenueInput::Link {
         up: false,
@@ -1203,6 +1204,7 @@ fn reduce_only_order_is_accepted_during_resync() {
 #[test]
 fn reduce_only_order_is_accepted_while_another_order_is_in_doubt() {
     let mut h = H::ready_with(config_with_margin());
+    h.report_margin("1000");
     h.long("a", "k1", "1");
     // Strategy b's order gets no answer: its outcome is unknown.
     let b = h.accept("b", "k1", Side::Buy, "1", "100");
@@ -1232,6 +1234,7 @@ fn reduce_only_order_is_accepted_while_another_order_is_in_doubt() {
 #[test]
 fn reduce_only_order_is_accepted_under_an_unacknowledged_mismatch() {
     let mut h = H::ready_with(config_with_margin());
+    h.report_margin("1000");
     h.long("a", "k1", "1");
     // Strategy b's resting order cannot be cancelled: every attempt ends
     // without an answer until the attempts are used up.
@@ -1280,6 +1283,7 @@ fn reduce_only_order_is_rejected_by_every_block_all_hold() {
     }
     fn long_one() -> H {
         let mut h = H::ready_with(config_with_margin());
+        h.report_margin("1000");
         h.long("a", "k1", "1");
         h
     }

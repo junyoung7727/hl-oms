@@ -85,7 +85,8 @@ pub fn config() -> CoreConfig {
     }
 }
 
-/// `config()` with a margin policy at its default values.
+/// `config()` with a margin policy at its default values. A plain order then
+/// needs a fresh margin report: see `H::report_margin`.
 pub fn config_with_margin() -> CoreConfig {
     let mut cfg = config();
     cfg.policy.margin = Some(MarginPolicy::default());
@@ -99,6 +100,8 @@ pub struct H {
     pub session: u64,
     pub log: Vec<Record>,
     pub commands: Vec<VenueCommand>,
+    /// Number of the last margin query made with `report_margin`.
+    pub margin_seq: u64,
 }
 
 impl H {
@@ -110,6 +113,7 @@ impl H {
             session: 0,
             log: Vec::new(),
             commands: Vec::new(),
+            margin_seq: 0,
         }
     }
 
@@ -191,6 +195,26 @@ impl H {
 
     pub fn venue(&mut self, v: VenueInput) -> Output {
         self.inp(Input::Venue(v))
+    }
+
+    /// A margin report of link session `session` with number `seq`, asked
+    /// for at `queried_at`, with no positions.
+    pub fn margin_report(&mut self, session: u64, seq: u64, queried_at: Ts, account_value: &str) -> Output {
+        self.venue(VenueInput::MarginReport(MarginReportIn {
+            session,
+            seq,
+            queried_at,
+            account_value: amt(account_value),
+            positions: vec![],
+        }))
+    }
+
+    /// The next margin query of the current link session, asked now and
+    /// answered at once with this account value. With a margin policy a
+    /// plain order needs such a report no older than 30 s.
+    pub fn report_margin(&mut self, account_value: &str) -> Output {
+        self.margin_seq += 1;
+        self.margin_report(self.session, self.margin_seq, self.now, account_value)
     }
 
     pub fn tick(&mut self) -> Output {

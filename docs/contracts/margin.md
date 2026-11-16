@@ -1,7 +1,12 @@
 # 증거금 규칙 계약
 
 상태: 채택(일부 구현). 이 계약은 만들 동작을 적은 것이다. 각 절은 그 절을 맡은 티켓이 머지될 때 구현되고, 그때 이벤트와 주장(V-MARGIN-n)이 `registry/`에 들어온다.
-지금 코드에 있는 것: 선택 구역 `policy.margin`과 그 기본값("설정". 값을 읽는 규칙과 노드의 설정 검사는 아직 없다), "차단 표"의 `Resync`, `InDoubt`, `Mismatch`(티켓 01, V-MARGIN-1). 나머지 절은 아직 코드에 없다.
+지금 코드에 있는 것:
+
+- 선택 구역 `policy.margin`과 그 기본값, "차단 표"의 `Resync`, `InDoubt`, `Mismatch`(티켓 01, V-MARGIN-1).
+- 입력 `MarginReport`, `MarginReportInvalid`와 이벤트 `MarginReported`, `MarginReportRejected`, "신선도"의 보고 조건(일반 주문의 `MarginUnavailable`, 감소 전용 주문의 면제), 노드의 설정 검사 가운데 mainnet 조건과 값의 범위, `runtime.margin_poll_ms` 간격의 조회, `status`의 계좌 가치와 나이(티켓 02, V-MARGIN-2, V-MARGIN-11).
+
+아직 코드에 없는 것: 받은 보고를 판정하는 규칙(일 손실, 유지증거금 여유)과 감소 전용 상태, 레버리지 검사, "신선도"의 참조 가격 조건, 보고 끊김 취소, 거래소 설정과 계좌 모드, 해제와 기준 재설정, 조회 weight 예산 검사, `runtime.venue_setting_poll_ms`. 가상 거래소(simvenue)의 보고는 계좌 가치만 담고 포지션은 비어 있다. Hyperliquid 게이트웨이는 아직 증거금 조회에 답하지 않는다. 그래서 그 게이트웨이에서 `policy.margin`을 켜면 보고가 없어 일반 주문이 모두 `MarginUnavailable`로 거절된다(안전한 쪽).
 
 설계 근거: [ADR-018](../adr/ADR-018-margin-rules.md). 용어: [GLOSSARY.md](../../GLOSSARY.md). 스펙과 티켓: `.scratch/margin-rules/`.
 실제 거래소에서는 아무것도 확인하지 않는다(U-01). 가정 T1~T11은 ADR-018 §8에 있다.
@@ -34,8 +39,8 @@
 |---|---|---|---|
 | `MarginReport { session, seq, queried_at, account_value, positions[] }` | 링크가 올라와 있고, `session`이 현재 세션이고, `seq`가 이 세션에서 받은 마지막 보고의 `seq`보다 크다 | `MarginReported` | 마지막 보고(값, 조회 시각, 순번) |
 | 같은 입력 | 위 조건이 아니다 | 없음(입력을 버린다) | 없음 |
-| `MarginReportInvalid { session, seq, queried_at, reason }` | 현재 세션 | `MarginReportRejected { reason }` | 마지막 거부 사유. 마지막 보고는 그대로다 |
-| `MarginReport`인데 어느 포지션의 `max_leverage`가 0 | 현재 세션 | `MarginReportRejected` | 위와 같다. 코어가 직접 거부한다 |
+| `MarginReportInvalid { session, seq, queried_at, reason }` | 링크가 올라와 있고 현재 세션이다 | `MarginReportRejected { reason }` | 마지막 거부 사유. 마지막 보고는 그대로다 |
+| `MarginReport`인데 어느 포지션의 `max_leverage`가 0 | 첫 행의 조건(링크, 세션, `seq`)이 맞다 | `MarginReportRejected` | 위와 같다. 코어가 직접 거부한다 |
 | `VenueSetting { session, instrument, isolated, leverage }` | 현재 세션 | `VenueSettingNoted` | 그 종목의 거래소 설정 |
 | `AccountMode { session, mode }` | 현재 세션 | `AccountModeNoted` | 계좌 모드 |
 | 운영자 `ClearReduce { note }` | 아래 "해제" | `DayBaseSet { set_by: Operator }`, `ReducingCleared { note, old_base, new_base }` | 기준 금액, 감소 전용 상태 해제 |
@@ -178,6 +183,14 @@ N_down = max(0, −pos × ref + Σ_매도 예약 × max(지정가, ref))
 |---|---|---|
 | 차단 표 | V-MARGIN-1 | `scenarios::reduce_only_order_is_accepted_during_resync`, `reduce_only_order_is_accepted_while_another_order_is_in_doubt`, `reduce_only_order_is_accepted_under_an_unacknowledged_mismatch`, `reduce_only_order_is_rejected_by_every_block_all_hold`, `reduce_only_order_is_still_bound_by_the_strategy_position_limit`, `without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order`. 변이 M21~M23 |
 | 설정(구역의 유무와 기본값) | V-MARGIN-1 | `margin::absent_margin_policy_adds_no_bytes_to_a_journal_record`, `margin::empty_margin_section_takes_the_contract_defaults` |
+| 입력, 상태, 이벤트(보고 수신) | V-MARGIN-2 | `margin::margin_report_of_the_current_session_is_recorded`, `margin_report_of_an_old_session_or_with_the_link_down_is_ignored`, `late_margin_report_with_a_lower_sequence_is_ignored`, `invalid_margin_report_is_journaled_and_never_becomes_fresh`. 변이 M24~M27 |
+| 신선도(보고 조건) | V-MARGIN-2 | `margin::plain_order_is_rejected_margin_unavailable_without_a_fresh_report`, `margin_report_dated_after_the_record_time_is_not_fresh`, `reduce_only_order_needs_no_fresh_report`. 변이 M28~M31 |
+| 설정(정책이 없을 때) | V-MARGIN-2 | `margin::without_a_margin_policy_no_margin_check_runs` |
+| 중단과 재실행(재생) | V-MARGIN-2, V-REPLAY-1 | `margin::margin_events_replay_to_the_same_state` |
+| 설정(노드의 설정 검사) | V-CFG-1 | `config::tests::mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused` (oms-node 단위) |
+| 조회와 `status` | V-MARGIN-11 | `e2e::node_polls_margin_and_status_shows_value_and_age` |
+
+보고 수신과 신선도의 시험이 보이지 않는 것: 새 보고를 받지 못하는 동안에는 어떤 규칙도 판정하지 않는다(판정은 받은 보고마다 한 번이다. 판정하는 규칙 자체가 뒤 티켓에서 온다). 거래소의 계좌 가치가 격리 포지션의 자산을 포함하는지(T2). 참조 가격이 오래됐을 때의 `MarginUnavailable`(레버리지 검사와 함께 온다). 기본 간격 5초 그대로의 실행(프로세스 시험은 100 ms로 줄였다).
 
 차단 표의 시험이 보이지 않는 것: `Reducing`, `VenueSetting(종목)`, `AccountMode`(아직 없는 사유), 귀속되지 않은 포지션을 OMS로 줄이는 길(없다), 거래소가 감소 전용 주문의 포지션 확대를 막는지(T5).
 

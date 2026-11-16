@@ -105,6 +105,9 @@ pub struct SimVenue {
     pub place_requests: BTreeMap<u128, u32>,
     /// Client ids that produced more than one live order. Must stay empty.
     pub duplicate_placements: Vec<u128>,
+    /// Account value the venue states in a margin report. A control knob:
+    /// nothing in this model moves it.
+    pub account_value: Amount,
 }
 
 impl SimVenue {

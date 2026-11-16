@@ -253,7 +253,7 @@ real = "oms-core. e2e에서는 실제 저널 파일"
 simulated = "시나리오에서는 저널이 메모리의 벡터"
 faults = "없음"
 criterion = "상태의 구조적 동등 비교와 이벤트 목록의 동등 비교"
-tests = ["core/recorded_inputs_re_decide_to_the_recorded_events", "core/restart_puts_outstanding_sends_in_doubt_and_never_resends", "sim/profile_crashy", "e2e/vertical_slice_new_partial_fill_cancel_restart", "e2e/random_kills_under_load_keep_books_consistent"]
+tests = ["core/recorded_inputs_re_decide_to_the_recorded_events", "core/restart_puts_outstanding_sends_in_doubt_and_never_resends", "sim/profile_crashy", "e2e/vertical_slice_new_partial_fill_cancel_restart", "e2e/random_kills_under_load_keep_books_consistent", "core/margin_events_replay_to_the_same_state"]
 repro = "cargo test -p oms-core --test scenarios && oms-node verify --data-dir <dir> --re-decide"
 supports = "I-REPLAY, I-DET"
 not_covered = "다른 빌드가 쓴 저널. 다른 CPU 구조"
@@ -440,18 +440,18 @@ not_covered = "내구화와 전송 사이의 각 경계는 V-COMMIT-4가 따로 
 
 [[claim]]
 id = "V-CFG-1"
-statement = "설정은 버전이 커야 활성화되고, 같은 버전에 다른 내용이면 시작을 거부한다. 노출이 남은 종목·전략은 제거할 수 없다"
+statement = "설정은 버전이 커야 활성화되고, 같은 버전에 다른 내용이면 시작을 거부한다. 노출이 남은 종목·전략은 제거할 수 없다. mainnet은 증거금 정책(policy.margin) 없이는 시작하지 않고, 정책의 값이 C-MARGIN 설정 표의 범위를 벗어나면 어느 거래소 설정에서도 시작하지 않는다"
 why = "설정 변경이 추적되지 않으면 사고 분석이 불가능하다"
 level = "프로세스"
-scope = "코어 예제, 실제 노드 1회"
+scope = "코어 예제, 실제 노드 1회, 노드 설정 검사의 단위 시험(증거금 정책)"
 real = "oms-core, oms-node"
 simulated = "없음"
-faults = "버전을 올리지 않은 변경"
+faults = "버전을 올리지 않은 변경. 정책 없는 mainnet 설정, 0인 한도, 신선도 한도보다 크지 않은 보고 끊김 취소 한도"
 criterion = "종료 코드 3과 오류 문구"
-tests = ["core/configuration_changes_are_validated_against_existing_exposure", "e2e/configuration_changes_need_a_new_version", "core/f10_config_validation_enforces_the_parked_fill_wait_rule"]
-repro = "cargo test -p oms-node --test e2e configuration_changes"
+tests = ["core/configuration_changes_are_validated_against_existing_exposure", "e2e/configuration_changes_need_a_new_version", "core/f10_config_validation_enforces_the_parked_fill_wait_rule", "node-unit/config::tests::mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused"]
+repro = "cargo test -p oms-node --test e2e configuration_changes && cargo test -p oms-node --lib config::tests"
 supports = "요구 R13, C-BOOT"
-not_covered = "설정 파일의 그 밖의 검증 규칙"
+not_covered = "설정 파일의 그 밖의 검증 규칙. 조회 weight 예산 검사와 runtime.venue_setting_poll_ms(뒤 티켓). account_modes_allowed의 내용"
 
 [[claim]]
 id = "V-OVL-1"
@@ -857,3 +857,33 @@ tests = ["core/absent_margin_policy_adds_no_bytes_to_a_journal_record", "core/em
 repro = "cargo test -p oms-core --test scenarios reduce_only && cargo test -p oms-core --test margin"
 supports = "C-MARGIN, ADR-018 §7의 8"
 not_covered = "거래소가 감소 전용 주문의 포지션 확대를 실제로 막는지(T5). `Reducing`, `VenueSetting`, `AccountMode` 차단은 뒤 티켓에서 생긴다. 정책 값을 읽는 규칙은 아직 없다"
+
+[[claim]]
+id = "V-MARGIN-2"
+statement = "증거금 정책이 있으면 현재 링크 세션의 증거금 보고가 마지막 보고로 기록된다. 다른 세션의 보고, 링크가 내려간 동안의 보고, 순번이 크지 않은 보고는 버린다. 읽지 못한 보고와 최대 레버리지가 0인 보고는 사유와 함께 거부로 기록되고 마지막 보고를 바꾸지 않는다. 나이가 0 이상 30초 이하인 보고가 없으면 일반 주문은 MarginUnavailable로 거절된다. 감소 전용 주문은 보고가 없어도 받는다. 정책이 없으면 증거금 입력은 상태를 바꾸지 않고 기록되지 않는다"
+why = "규칙이 읽는 계좌 가치는 거래소 보고에서만 온다. 늦거나 다른 세션의 보고, 읽지 못한 보고가 마지막 보고가 되면 규칙이 틀린 값으로 판정한다"
+level = "단위"
+scope = "증거금 보고 입력 둘(MarginReport, MarginReportInvalid)과 이벤트 둘(margin_reported, margin_report_rejected)"
+real = "oms-core"
+simulated = "보고는 시험이 입력"
+faults = "링크 재접속, 늦게 온 응답, 중복 응답, 읽지 못한 응답, 최대 레버리지 0"
+criterion = "C-MARGIN의 '입력, 상태, 이벤트'. 기대값은 손으로 적었다"
+tests = ["core/margin_report_of_the_current_session_is_recorded", "core/margin_report_of_an_old_session_or_with_the_link_down_is_ignored", "core/late_margin_report_with_a_lower_sequence_is_ignored", "core/invalid_margin_report_is_journaled_and_never_becomes_fresh", "core/plain_order_is_rejected_margin_unavailable_without_a_fresh_report", "core/margin_report_dated_after_the_record_time_is_not_fresh", "core/reduce_only_order_needs_no_fresh_report", "core/without_a_margin_policy_no_margin_check_runs", "core/margin_events_replay_to_the_same_state"]
+repro = "cargo test -p oms-core --test margin"
+supports = "C-MARGIN"
+not_covered = "실제 거래소 응답의 모양과 값의 뜻(T1, T2). 새 보고를 받지 못하는 동안에는 규칙을 판정하지 않는다"
+
+[[claim]]
+id = "V-MARGIN-11"
+statement = "증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이를 보여 준다. 정책이 없으면 묻지 않는다"
+why = "코어의 규칙이 옳아도 조회가 연결되지 않으면 보고가 없어 모든 일반 주문이 거절되거나, 운영자가 왜 거절되는지 볼 수 없다"
+level = "프로세스"
+scope = "실제 oms-node와 simvenue 프로세스. 조회 간격 100 ms로 줄인 설정 1회, 정책 없는 설정 1회"
+real = "oms-node(재조정 태스크의 타이머, 게이트웨이, 입력 큐, 저널, status), 소켓"
+simulated = "거래소(simvenue). 계좌 가치는 시험이 정한다"
+faults = "없음"
+criterion = "status의 core.margin(account_value, age_us, seq, fresh)과 simvenue가 센 조회 수"
+tests = ["e2e/node_polls_margin_and_status_shows_value_and_age"]
+repro = "cargo test -p oms-node --test e2e node_polls_margin"
+supports = "C-MARGIN"
+not_covered = "기본 간격 5초 그대로의 실행. Hyperliquid 게이트웨이(아직 이 조회에 답하지 않는다: 티켓 09). 운영자 명령과 재시작(뒤 티켓). 정확한 시간"

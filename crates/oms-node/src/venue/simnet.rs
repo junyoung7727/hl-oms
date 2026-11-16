@@ -363,6 +363,29 @@ impl Gateway {
                     })
                     .await;
             }
+            QueryReq::Margin { seq } => {
+                // No answer: no input. The last report keeps ageing.
+                let Ok(resp) = self.requests.call(SimOp::Margin).await else {
+                    return;
+                };
+                let input = match serde_json::from_value::<MarginResult>(resp.result) {
+                    Ok(r) => VenueInput::MarginReport(MarginReportIn {
+                        session,
+                        seq,
+                        queried_at,
+                        account_value: r.account_value,
+                        positions: Vec::new(),
+                    }),
+                    // An answer that cannot be read is refused as a whole.
+                    Err(e) => VenueInput::MarginReportInvalid {
+                        session,
+                        seq,
+                        queried_at,
+                        reason: format!("unreadable margin answer: {e}"),
+                    },
+                };
+                self.input.send(input).await;
+            }
         }
     }
 

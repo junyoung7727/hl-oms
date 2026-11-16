@@ -64,3 +64,449 @@ fn empty_margin_section_takes_the_contract_defaults() {
     assert!(h.core.config.policy.margin.is_some());
     assert_eq!(h.rebuilt().config, h.core.config);
 }
+
+// ---- C-MARGIN: margin report intake -----------------------------------------
+
+fn names(out: &Output) -> Vec<&'static str> {
+    out.events.iter().map(Event::name).collect()
+}
+
+/// An isolated position as the venue reports it.
+fn position(instrument: &str, max_leverage: u32) -> MarginPosition {
+    MarginPosition {
+        instrument: iid(instrument),
+        szi: sq("2"),
+        position_value: amt("200"),
+        margin_used: amt("100"),
+        leverage_type: LeverageType::Isolated,
+        leverage_value: 2,
+        max_leverage,
+    }
+}
+
+/// A report of the current link session becomes the newest report: one
+/// `margin_reported` event, and the state holds the report as it came. A
+/// position on an instrument that is not configured is kept.
+#[test]
+fn margin_report_of_the_current_session_is_recorded() {
+    let mut h = H::ready_with(config_with_margin());
+    let queried_at = h.now;
+    let report = MarginReportIn {
+        session: h.session,
+        seq: 1,
+        queried_at,
+        account_value: amt("100"),
+        positions: vec![position("X", 40), position("NOT-CONFIGURED", 20)],
+    };
+    let out = h.venue(VenueInput::MarginReport(report.clone()));
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.report, Some(report));
+    // Nothing is sent to the venue because of a report.
+    assert_eq!(out.commands, vec![]);
+}
+
+fn link_down(h: &mut H) {
+    h.venue(VenueInput::Link {
+        up: false,
+        session: h.session,
+        reason: "ws closed".into(),
+    });
+}
+
+/// The account value of the newest recorded report, with its number.
+fn recorded(h: &H) -> Option<(u64, u64, Amount)> {
+    h.core
+        .margin
+        .report
+        .as_ref()
+        .map(|r| (r.session, r.seq, r.account_value))
+}
+
+/// An answer that belongs to an earlier link session, or that arrives while
+/// the link is down, is dropped: no event, nothing stored.
+#[test]
+fn margin_report_of_an_old_session_or_with_the_link_down_is_ignored() {
+    let mut h = H::ready_with(config_with_margin());
+    let old = h.session;
+    link_down(&mut h);
+    h.link_up_and_sync();
+    assert_eq!((old, h.session), (1, 2));
+
+    // The answer to a query of session 1 arrives in session 2.
+    let out = h.margin_report(old, 9, h.now, "50");
+    assert_eq!(names(&out), Vec::<&str>::new());
+    assert_eq!(recorded(&h), None);
+
+    // A report of session 2 is recorded.
+    let out = h.margin_report(2, 1, h.now, "100");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(recorded(&h), Some((2, 1, amt("100"))));
+
+    // The link goes down. The answer to a query of session 2 arrives late.
+    link_down(&mut h);
+    let out = h.margin_report(2, 2, h.now, "50");
+    assert_eq!(names(&out), Vec::<&str>::new());
+    // The last report stays as it was.
+    assert_eq!(recorded(&h), Some((2, 1, amt("100"))));
+    // Nothing of the dropped reports reached the journal.
+    let journaled = h
+        .log
+        .iter()
+        .filter(|rec| matches!(rec.input, Input::Venue(VenueInput::MarginReport(_))))
+        .count();
+    assert_eq!(journaled, 1);
+}
+
+/// Answers can overtake each other. A report whose number is not greater
+/// than that of the last report recorded in this session is dropped: not
+/// stored, not judged. The numbers start again with a new link session.
+#[test]
+fn late_margin_report_with_a_lower_sequence_is_ignored() {
+    let mut h = H::ready_with(config_with_margin());
+    h.margin_report(1, 5, h.now, "100");
+    assert_eq!(recorded(&h), Some((1, 5, amt("100"))));
+
+    // Query 4 was sent before query 5 and is answered after it. Its query
+    // time is the older one, but the number alone decides.
+    let out = h.margin_report(1, 4, h.now - SEC, "50");
+    assert_eq!(names(&out), Vec::<&str>::new());
+    assert_eq!(recorded(&h), Some((1, 5, amt("100"))));
+
+    // The same number again (a duplicated answer) is not greater either,
+    // also when it claims a later query time.
+    let out = h.margin_report(1, 5, h.now + SEC, "60");
+    assert_eq!(names(&out), Vec::<&str>::new());
+    assert_eq!(recorded(&h), Some((1, 5, amt("100"))));
+
+    // The next number is recorded.
+    let out = h.margin_report(1, 6, h.now, "99");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(recorded(&h), Some((1, 6, amt("99"))));
+
+    // A new link session starts its own numbering: number 1 of session 2 is
+    // newer than number 6 of session 1.
+    link_down(&mut h);
+    h.link_up_and_sync();
+    let out = h.margin_report(2, 1, h.now, "98");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(recorded(&h), Some((2, 1, amt("98"))));
+}
+
+/// S25. A report that cannot be read, or that names a zero maximum leverage,
+/// is refused as a whole. The refusal and its reason are journaled. The last
+/// good report stays exactly as it was, so its age keeps counting from its
+/// own query time.
+#[test]
+fn invalid_margin_report_is_journaled_and_never_becomes_fresh() {
+    let mut h = H::ready_with(config_with_margin());
+    let good_at = h.now;
+    h.margin_report(1, 1, good_at, "100");
+    let good = h.core.margin.report.clone();
+    assert_eq!(good.as_ref().map(|r| r.queried_at), Some(good_at));
+
+    // The gateway could not read the answer to query 2.
+    h.advance(5 * SEC);
+    let unreadable_at = h.now;
+    let out = h.venue(VenueInput::MarginReportInvalid {
+        session: 1,
+        seq: 2,
+        queried_at: unreadable_at,
+        reason: "marginSummary.accountValue: not a number".into(),
+    });
+    assert_eq!(
+        out.events,
+        vec![Event::MarginReportRejected {
+            session: 1,
+            seq: 2,
+            queried_at: unreadable_at,
+            reason: "marginSummary.accountValue: not a number".into(),
+        }]
+    );
+    assert_eq!(
+        h.core.margin.report, good,
+        "an unreadable report replaced the last good one"
+    );
+    assert_eq!(
+        h.core
+            .margin
+            .last_rejection
+            .as_ref()
+            .map(|r| (r.seq, r.reason.as_str())),
+        Some((2, "marginSummary.accountValue: not a number"))
+    );
+
+    // Query 3 is readable but one position has a maximum leverage of zero.
+    // The core refuses it itself: the value would divide by zero in the
+    // maintenance margin rate.
+    h.advance(5 * SEC);
+    let zero_at = h.now;
+    let out = h.venue(VenueInput::MarginReport(MarginReportIn {
+        session: 1,
+        seq: 3,
+        queried_at: zero_at,
+        account_value: amt("70"),
+        positions: vec![position("X", 40), position("Y", 0)],
+    }));
+    assert_eq!(
+        out.events,
+        vec![Event::MarginReportRejected {
+            session: 1,
+            seq: 3,
+            queried_at: zero_at,
+            reason: "position Y: max_leverage is zero".into(),
+        }]
+    );
+    assert_eq!(
+        h.core.margin.report, good,
+        "a report with a zero maximum leverage was recorded"
+    );
+    assert_eq!(
+        h.core.margin.last_rejection.as_ref().map(|r| r.seq),
+        Some(3)
+    );
+
+    // Both refusals are in the journal with their reasons, and the rebuilt
+    // state shows the same last reason.
+    let reasons: Vec<&str> = h
+        .log
+        .iter()
+        .flat_map(|rec| &rec.events)
+        .filter_map(|ev| match ev {
+            Event::MarginReportRejected { reason, .. } => Some(reason.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        reasons,
+        vec![
+            "marginSummary.accountValue: not a number",
+            "position Y: max_leverage is zero"
+        ]
+    );
+    assert_eq!(h.rebuilt().margin, h.core.margin);
+
+    // A refused report does not block the next good one.
+    let out = h.margin_report(1, 4, h.now, "99");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(recorded(&h), Some((1, 4, amt("99"))));
+}
+
+// ---- C-MARGIN: freshness ----------------------------------------------------
+
+/// Moves the harness clock so that the next input is recorded at `at`.
+fn next_input_at(h: &mut H, at: Ts) {
+    assert!(at >= h.now + 1_000, "the record time cannot go backwards");
+    h.now = at - 1_000;
+}
+
+/// S11. With a margin policy a plain order needs a margin report whose age
+/// (record time minus query time) is at most 30 s. Exactly 30 s is fresh;
+/// one microsecond more is not.
+#[test]
+fn plain_order_is_rejected_margin_unavailable_without_a_fresh_report() {
+    let mut h = H::ready_with(config_with_margin());
+
+    // No report was ever recorded.
+    assert_eq!(
+        h.reject("a", "k1", Side::Buy, "1", "100"),
+        vec![RejectReason::MarginUnavailable]
+    );
+
+    // A report asked for at t0. An order recorded exactly 30 s later is
+    // accepted.
+    let t0 = h.now;
+    h.margin_report(1, 1, t0, "1000");
+    next_input_at(&mut h, t0 + 30 * SEC);
+    let id = h.accept("a", "k2", Side::Buy, "1", "100");
+    assert_eq!(h.order(id).accepted_at, t0 + 30_000_000);
+
+    // A second report asked for at t1. An order recorded 30 s and one
+    // microsecond later is rejected, and the reason is the only one.
+    let t1 = h.now;
+    h.margin_report(1, 2, t1, "1000");
+    next_input_at(&mut h, t1 + 30 * SEC + 1);
+    assert_eq!(h.now + 1_000, t1 + 30_000_001);
+    assert_eq!(
+        h.reject("a", "k3", Side::Buy, "1", "100"),
+        vec![RejectReason::MarginUnavailable]
+    );
+    // The refusal is not a hold: it latches nothing.
+    assert_eq!(h.core.holds(None), vec![]);
+
+    // A new report makes plain orders acceptable again.
+    h.margin_report(1, 3, h.now, "1000");
+    h.accept("a", "k4", Side::Buy, "1", "100");
+}
+
+/// G5. The wall clock stepped backwards after a query was sent: the report
+/// carries a query time after the record time. Its age is negative, and a
+/// negative age is not fresh. Age zero is.
+#[test]
+fn margin_report_dated_after_the_record_time_is_not_fresh() {
+    let mut h = H::ready_with(config_with_margin());
+    let queried_at = h.now + 10 * SEC;
+    let out = h.margin_report(1, 1, queried_at, "1000");
+    // The report is recorded: the number decides the order, not the time.
+    assert_eq!(names(&out), vec!["margin_reported"]);
+
+    // Ten seconds before its query time.
+    assert_eq!(
+        h.reject("a", "k1", Side::Buy, "1", "100"),
+        vec![RejectReason::MarginUnavailable]
+    );
+    // One microsecond before its query time.
+    next_input_at(&mut h, queried_at - 1);
+    assert_eq!(
+        h.reject("a", "k2", Side::Buy, "1", "100"),
+        vec![RejectReason::MarginUnavailable]
+    );
+
+    // A second report, again dated ten seconds ahead. An order recorded
+    // exactly at its query time sees age zero and is accepted.
+    let queried_at = h.now + 10 * SEC;
+    h.margin_report(1, 2, queried_at, "1000");
+    next_input_at(&mut h, queried_at);
+    let id = h.accept("a", "k3", Side::Buy, "1", "100");
+    assert_eq!(h.order(id).accepted_at, queried_at);
+}
+
+/// S11. An order with the venue's reduce-only flag needs no margin report:
+/// a strategy can reduce while the venue's queries fail. The same order
+/// without the flag is refused.
+#[test]
+fn reduce_only_order_needs_no_fresh_report() {
+    let mut h = H::ready_with(config_with_margin());
+    h.report_margin("1000");
+    h.long("a", "k1", "1");
+
+    // Reports stop. 31 s later the last one is not fresh.
+    h.advance(31 * SEC);
+    assert_eq!(
+        h.reject("a", "k2", Side::Sell, "1", "100"),
+        vec![RejectReason::MarginUnavailable]
+    );
+    let r = h.reduce_only_req("a", "k3", Side::Sell, "1", "100");
+    let order_id = match h.new_order(r) {
+        NewOrderReply::Accepted { order_id } => order_id,
+        other => panic!("a reduce-only order was refused for staleness: {other:?}"),
+    };
+    assert!(h.order(order_id).reduce_only);
+    assert_eq!(h.sends().last(), Some(&order_id));
+}
+
+/// S21. Without a margin policy the rules are off: no order is refused for
+/// margin, and a margin input of any kind changes nothing and is not
+/// journaled.
+#[test]
+fn without_a_margin_policy_no_margin_check_runs() {
+    let mut h = H::ready();
+    assert_eq!(h.core.config.policy.margin, None);
+    let digest = h.core.digest();
+    let journaled = h.log.len();
+
+    let out = h.margin_report(1, 1, h.now, "100");
+    assert_eq!(names(&out), Vec::<&str>::new());
+    let out = h.venue(VenueInput::MarginReportInvalid {
+        session: 1,
+        seq: 2,
+        queried_at: h.now,
+        reason: "unreadable".into(),
+    });
+    assert_eq!(names(&out), Vec::<&str>::new());
+    let out = h.venue(VenueInput::MarginReport(MarginReportIn {
+        session: 1,
+        seq: 3,
+        queried_at: h.now,
+        account_value: amt("100"),
+        positions: vec![position("X", 0)],
+    }));
+    assert_eq!(names(&out), Vec::<&str>::new());
+
+    assert!(h.core.margin.is_empty());
+    assert_eq!(h.core.digest(), digest, "a margin input changed the state");
+    assert_eq!(h.log.len(), journaled, "a margin input was journaled");
+
+    // A plain order is accepted with no report at all, also a long time
+    // after the inputs above.
+    h.advance(120 * SEC);
+    h.accept("a", "k1", Side::Buy, "1", "100");
+}
+
+// ---- C-MARGIN: replay ---------------------------------------------------------
+
+/// S13. Margin state comes only from journal events. A core rebuilt from the
+/// journal, a core that re-decides the recorded inputs, and a core read back
+/// from its serialised form all equal the live one, digest included.
+#[test]
+fn margin_events_replay_to_the_same_state() {
+    let mut h = H::ready_with(config_with_margin());
+    h.margin_report(1, 1, h.now, "100");
+    h.accept("a", "k1", Side::Buy, "1", "100");
+    h.venue(VenueInput::MarginReportInvalid {
+        session: 1,
+        seq: 2,
+        queried_at: h.now,
+        reason: "unreadable".into(),
+    });
+    h.margin_report(1, 3, h.now, "97.5");
+    h.margin_report(1, 2, h.now, "50"); // late: dropped, not journaled
+    link_down(&mut h);
+    h.link_up_and_sync();
+    let last_at = h.now;
+    h.venue(VenueInput::MarginReport(MarginReportIn {
+        session: 2,
+        seq: 1,
+        queried_at: last_at,
+        account_value: amt("96"),
+        positions: vec![position("X", 40)],
+    }));
+    h.advance(31 * SEC);
+    h.reject("a", "k2", Side::Buy, "1", "100");
+
+    // Rebuilt from the events alone, as recovery does.
+    let rebuilt = h.rebuilt();
+    assert_eq!(rebuilt.digest(), h.core.digest());
+    assert_eq!(rebuilt, h.core);
+    // The comparison is about something: the rebuilt state holds the last
+    // report and the last refusal.
+    let report = rebuilt.margin.report.as_ref().unwrap();
+    assert_eq!(
+        (
+            report.session,
+            report.seq,
+            report.queried_at,
+            report.account_value
+        ),
+        (2, 1, last_at, amt("96"))
+    );
+    assert_eq!(report.positions, vec![position("X", 40)]);
+    assert_eq!(
+        rebuilt
+            .margin
+            .last_rejection
+            .as_ref()
+            .map(|r| (r.seq, r.reason.as_str())),
+        Some((2, "unreadable"))
+    );
+    // The rebuilt core judges freshness as the live one does.
+    assert!(rebuilt.margin_report_is_fresh(last_at + 30 * SEC));
+    assert!(!rebuilt.margin_report_is_fresh(last_at + 30 * SEC + 1));
+
+    // Re-deciding every recorded input gives the recorded events.
+    let mut c = Core::new(7);
+    for rec in &h.log {
+        let out = c.handle(rec.at, &rec.input).unwrap();
+        assert_eq!(
+            out.events, rec.events,
+            "record {} re-decided differently",
+            rec.seq
+        );
+    }
+    assert_eq!(c.digest(), h.core.digest());
+
+    // The serialised forms (snapshot, journal) read back unchanged.
+    let back: Core = serde_json::from_str(&serde_json::to_string(&h.core).unwrap()).unwrap();
+    assert_eq!(back, h.core);
+    let recs: Vec<Record> = serde_json::from_str(&serde_json::to_string(&h.log).unwrap()).unwrap();
+    assert_eq!(recs, h.log);
+}

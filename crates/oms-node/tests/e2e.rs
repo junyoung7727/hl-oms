@@ -585,3 +585,67 @@ fn random_kills_under_load_keep_books_consistent() {
     assert_eq!(code, 0, "{err}");
     println!("verify: {}", out.replace('\n', " "));
 }
+
+/// S11 at the process level. With a margin policy the node asks the venue
+/// for a margin report on a timer, each report reaches the core with a
+/// rising number, and `status` shows the account value and its age. Without
+/// a margin policy the node never asks.
+#[test]
+fn node_polls_margin_and_status_shows_value_and_age() {
+    let mut env = Env::new("margin-poll");
+    env.extra_runtime = "margin_poll_ms = 100".into();
+    env.extra_policy = "\n[core.policy.margin]\n".into();
+    env.ctl(json!({"account_value": {"value": "250.5"}}));
+    env.start_node();
+    env.wait_ready();
+
+    // The venue's value arrives in the durable state.
+    let shown = |env: &Env, value: &str| {
+        env.wait(Duration::from_secs(5), || {
+            env.try_status().is_some_and(|st| st["core"]["margin"]["account_value"] == value)
+        })
+    };
+    assert!(shown(&env, "250.5"), "status never showed the account value: {}", env.status()["core"]["margin"]);
+    let first = env.status()["core"]["margin"].clone();
+    assert_eq!(first["fresh"], true);
+    let age = first["age_us"].as_u64().expect("age_us is a number");
+    assert!(age < 3_000_000, "the report shown is {age} us old with a 100 ms poll");
+    assert_eq!(first["session"], env.status()["core"]["link"]["session"]);
+
+    // The poll repeats: the number of the report shown keeps rising and its
+    // query time moves forward.
+    let seq0 = first["seq"].as_u64().expect("seq is a number");
+    assert!(seq0 >= 1);
+    assert!(
+        env.wait(Duration::from_secs(5), || {
+            env.status()["core"]["margin"]["seq"].as_u64().is_some_and(|n| n >= seq0 + 3)
+        }),
+        "the margin poll did not repeat: {}",
+        env.status()["core"]["margin"]
+    );
+    let later = env.status()["core"]["margin"].clone();
+    assert!(later["queried_at"].as_u64().unwrap() > first["queried_at"].as_u64().unwrap());
+    // With a 100 ms poll the age shown stays far below the 30 s limit.
+    assert!(later["age_us"].as_u64().unwrap() < 3_000_000);
+
+    // A change at the venue is seen by the next poll.
+    env.ctl(json!({"account_value": {"value": "249"}}));
+    assert!(shown(&env, "249"), "status did not follow the venue: {}", env.status()["core"]["margin"]);
+
+    // The report is what a plain order needs: it is accepted.
+    let mut c = env.client("a");
+    accept(&mut c, "k1", Side::Buy, "1", "100");
+    assert_eq!(env.status()["core"]["margin"]["last_rejection"], serde_json::Value::Null);
+    assert!(env.venue_dump()["margin_queries"].as_u64().unwrap() >= 4);
+    drop(c);
+    drop(env);
+
+    // No margin policy: the node never sends the query, and status says so.
+    let mut env = Env::new("margin-poll-off");
+    env.extra_runtime = "margin_poll_ms = 100".into();
+    env.start_node();
+    env.wait_ready();
+    std::thread::sleep(Duration::from_millis(600));
+    assert_eq!(env.venue_dump()["margin_queries"], 0);
+    assert_eq!(env.status()["core"]["margin"], serde_json::Value::Null);
+}
