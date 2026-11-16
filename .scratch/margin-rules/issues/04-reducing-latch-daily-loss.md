@@ -20,7 +20,7 @@
 - [x] Test `a_report_of_an_earlier_day_does_not_change_the_day_base` (seam A, G5): fails when a report dated a day before the base re-bases.
 - [x] Test `a_loss_between_two_reports_enters_reducing_on_the_next_report` (seam A, G9): fails when reports at 100 and then 88 do not latch on the second report. It documents that 12 % was already lost.
 - [x] Test `a_report_older_than_the_freshness_limit_on_arrival_is_still_judged` (seam A, S11): an accepted report whose query time is 40 s before the record time shows 94.99 on base 100. Fails when the account does not enter REDUCING with `Rule(DailyLoss)` on that report.
-- [ ] Test `an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing` (seam A, S19): fails when after an external fill and a loss report the account is not REDUCING with a mismatch open, or a reduce-only order is then refused.
+- [x] Test `an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing` (seam A, S19): fails when after an external fill and a loss report the account is not REDUCING with a mismatch open, or a reduce-only order is then refused.
 - [ ] Test `latch_and_day_base_replay_to_the_same_state` (seam A, S13): fails when replay loses the latch or re-bases the day.
 - [ ] Mutants: a daily-loss judgement that runs only on a fresh report, the loss comparison, the order "judge, then roll", the entry cancel filter (reduce-only kept), the single-entry guard and the `Reducing` row of the hold table are each caught by a named test.
 - [ ] Stated and not proven here: a rule cancel can lose the race to a fill; losses between two reports and losses while no new report is accepted are not stopped; the shape of a real liquidation fill (T6).

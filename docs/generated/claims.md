@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `80ee6696421c3bda`, 검증 결과의 다이제스트 `0a86a80a92f2313c`.
+> 소스 다이제스트 `55e9ff1c10feb9ff`, 검증 결과의 다이제스트 `0a86a80a92f2313c`.
 
 주장 61건: 통과 0, 실패 0, 미실행 3, 이전 버전 결과 58.
 
@@ -1369,4 +1369,5 @@
 | `core/a_stuck_rule_cancel_does_not_block_reduce_only_orders` | 미실행 |  |
 | `core/reducing_is_entered_once` | 미실행 |  |
 | `core/a_new_day_does_not_clear_reducing` | 미실행 |  |
+| `core/an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing` | 미실행 |  |
 

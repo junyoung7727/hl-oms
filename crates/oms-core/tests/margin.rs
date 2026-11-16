@@ -1097,3 +1097,54 @@ fn a_report_older_than_the_freshness_limit_on_arrival_is_still_judged() {
     );
     assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
 }
+
+/// S19. The venue sells the position by itself (a liquidation would look
+/// like this to the OMS: a fill for no order of this instance), and the
+/// next report shows the loss. The external fill raises a mismatch, the
+/// report enters REDUCING, and both stay. A reduce-only order is accepted
+/// under both. The shape of a real liquidation fill is not verified (T6).
+#[test]
+fn an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing() {
+    let mut h = at_base_100();
+    h.long("a", "k1", "1");
+
+    let venue_ts = h.now;
+    h.venue(VenueInput::Fill(FillIn {
+        key: fkey("liq-1"),
+        order_id: None,
+        venue_oid: Some(void("venue-own-order")),
+        instrument: iid("X"),
+        side: Side::Sell,
+        qty: q("1"),
+        px: px("95"),
+        fee: Amount::ZERO,
+        venue_ts,
+    }));
+    assert_eq!(h.unacked_mismatches(), vec![MismatchKind::ExternalFill]);
+    assert_eq!(h.acct().pos, sq("0"));
+    assert_eq!(h.book("a").pos, sq("1"));
+
+    let out = h.report_margin("94.99");
+    assert_eq!(out.events[1..], [daily_loss_entered("94.99", "100")]);
+    assert_eq!(
+        h.core.holds(None),
+        vec![HoldReason::Mismatch, HoldReason::Reducing]
+    );
+    assert_eq!(h.unacked_mismatches(), vec![MismatchKind::ExternalFill]);
+
+    // The strategy's own ledger is still long 1: it may send a reduce-only
+    // order, and neither the mismatch nor REDUCING refuses it.
+    let r = h.reduce_only_req("a", "k2", Side::Sell, "0.5", "100");
+    let order_id = match h.new_order(r) {
+        NewOrderReply::Accepted { order_id } => order_id,
+        other => panic!("a reduce-only order was refused after an external fill and a loss: {other:?}"),
+    };
+    assert_eq!(h.sends().last(), Some(&order_id));
+    assert_eq!(
+        h.reject("a", "k3", Side::Sell, "0.5", "100"),
+        vec![
+            RejectReason::Hold(HoldReason::Mismatch),
+            RejectReason::Hold(HoldReason::Reducing)
+        ]
+    );
+}
