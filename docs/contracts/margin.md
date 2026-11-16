@@ -1,6 +1,7 @@
 # 증거금 규칙 계약
 
-상태: 채택(미구현). 이 계약은 만들 동작을 적은 것이다. 지금 코드에는 이 동작이 없다. 각 절은 그 절을 맡은 티켓이 머지될 때 구현되고, 그때 이벤트와 주장(V-MARGIN-n)이 `registry/`에 들어온다.
+상태: 채택(일부 구현). 이 계약은 만들 동작을 적은 것이다. 각 절은 그 절을 맡은 티켓이 머지될 때 구현되고, 그때 이벤트와 주장(V-MARGIN-n)이 `registry/`에 들어온다.
+지금 코드에 있는 것: 선택 구역 `policy.margin`과 그 기본값("설정". 값을 읽는 규칙과 노드의 설정 검사는 아직 없다), "차단 표"의 `Resync`, `InDoubt`, `Mismatch`(티켓 01, V-MARGIN-1). 나머지 절은 아직 코드에 없다.
 
 설계 근거: [ADR-018](../adr/ADR-018-margin-rules.md). 용어: [GLOSSARY.md](../../GLOSSARY.md). 스펙과 티켓: `.scratch/margin-rules/`.
 실제 거래소에서는 아무것도 확인하지 않는다(U-01). 가정 T1~T11은 ADR-018 §8에 있다.
@@ -171,6 +172,13 @@ N_down = max(0, −pos × ref + Σ_매도 예약 × max(지정가, ref))
 
 ## 검증
 
-시험은 아직 없다. 계획한 시험 이름은 티켓 파일(`.scratch/margin-rules/issues/`)의 수용 기준에 있다. 시험이 들어오는 티켓이 이 절과 `registry/claims.toml`을 채운다.
+계획한 시험 이름은 티켓 파일(`.scratch/margin-rules/issues/`)의 수용 기준에 있다. 시험이 들어오는 티켓이 이 절과 `registry/claims.toml`을 채운다. 아래 표에 없는 절은 아직 시험이 없다.
+
+| 절 | 주장 | 시험 |
+|---|---|---|
+| 차단 표 | V-MARGIN-1 | `scenarios::reduce_only_order_is_accepted_during_resync`, `reduce_only_order_is_accepted_while_another_order_is_in_doubt`, `reduce_only_order_is_accepted_under_an_unacknowledged_mismatch`, `reduce_only_order_is_rejected_by_every_block_all_hold`, `reduce_only_order_is_still_bound_by_the_strategy_position_limit`, `without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order`. 변이 M21~M23 |
+| 설정(구역의 유무와 기본값) | V-MARGIN-1 | `margin::absent_margin_policy_adds_no_bytes_to_a_journal_record`, `margin::empty_margin_section_takes_the_contract_defaults` |
+
+차단 표의 시험이 보이지 않는 것: `Reducing`, `VenueSetting(종목)`, `AccountMode`(아직 없는 사유), 귀속되지 않은 포지션을 OMS로 줄이는 길(없다), 거래소가 감소 전용 주문의 포지션 확대를 막는지(T5).
 
 확인하지 않는 것: 실제 거래소의 응답 모양과 값의 뜻(T1, T2), 수수료와 펀딩이 빠지는 잔고(T3), 감소 전용 주문의 세부 처리(T5), 청산 체결의 모양(T6), 그 밖의 T4, T7~T11. testnet 실주문 예행은 이 작업 밖이고 mainnet 전에 필요하다(U-01, U-09).

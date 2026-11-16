@@ -17,9 +17,9 @@
 - [x] The margin policy section is optional and absent by default. An absent section adds no bytes to a journal record (it is serialised as absent, not as an empty value), so journals of runs without a policy keep the bytes they have on main. Ticket 10 checks this against literals recorded on main.
 - [x] The existing tests `holds_are_independent` and `cancels_are_accepted_while_new_orders_are_held` stay green: a plain order is refused under every hold.
 - [x] Mutants: the existing mutant on the hold push is rewritten for the table; new mutants "a partial hold also refuses reduce-only", "a block-all hold lets reduce-only pass" and "the table applies without a margin policy" are each caught by a named test.
-- [ ] ADR-008 §7 carries the amended text and table from ADR-018; the hold rows `Reducing`, `VenueSetting` and `AccountMode` are named there as arriving with later tickets.
+- [x] ADR-008 §7 carries the amended text and table from ADR-018; the hold rows `Reducing`, `VenueSetting` and `AccountMode` are named there as arriving with later tickets.
 - [ ] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
-- [ ] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
+- [x] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
 - [ ] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
 - [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
 
