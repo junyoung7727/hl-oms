@@ -4,7 +4,7 @@
 
 **Blocked by:** 05
 
-**Status:** ready-for-merge
+**Status:** done
 
 - [x] Test `isolated_margin_below_mmr_plus_buffer_enters_reducing` (seam A, S16): fails when 2.99 does not latch with `Rule(MmBuffer)`, or 3.00 does. Does not prove that the venue's margin field is the isolated equity (T1).
 - [x] Test `mmr_follows_the_max_leverage_of_each_position` (seam A, S16): fails when a position with maximum leverage 25 is judged at 1.25 % and not at 2 %.
@@ -19,7 +19,7 @@
 - [x] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
 - [x] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
 - [x] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
-- [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
+- [x] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
 
 ## Comments
 
@@ -42,3 +42,4 @@
   - Conflicts were in the mutant list, the claim list (V-MARGIN-8 and V-MARGIN-10 both kept), the contract entry of C-MARGIN (code list of ticket 09, claims of both), the contract's "what is in the code" list and the mutant table. No conflict in Rust code outside the mutant list. The hand-written mutant total is 88.
   - Contract, "not yet in the code": the MM buffer (this ticket), the Hyperliquid queries and the query weight check (ticket 09) are no longer listed. What is left is the simulated venue reporting positions (ticket 10).
   - No test needed a changed setup: no test of ticket 07, 08 or 09 was edited. Workspace tests on the merged branch: 275 passed, 0 failed, 0 ignored. Clippy with warnings denied is clean.
+- Merged into `margin-rules` as 0797c2a (merger claude-fable-5-2, 2026-11-16). Gate: workspace tests 275 passed, 0 failed, 0 ignored; clippy with warnings denied clean; generated documents in step; `verify --extended` without `--live-testnet` 297 tests in 9 suites, all passed (source 2cf32bd373ac7282); full `xtask mutants` 88 of 88 killed, M80–M88 included; secret scan, selftest and `rustfmt_added` pass. No code defect was found during the merge. Performance was not measured again.
