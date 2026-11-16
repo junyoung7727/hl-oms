@@ -2397,3 +2397,32 @@ fn a_fresh_report_after_a_stale_episode_restores_acceptance_without_a_latch() {
     assert_eq!(decided(&h.tick()), vec![]);
     assert_eq!(h.order(again).cancel, None);
 }
+
+/// G5. The wall clock steps forward by an hour between two inputs. The
+/// stored report then reads as an hour old: a plain order is not accepted
+/// on it, and the next tick asks to cancel the resting plain orders. The
+/// reduce-only order stays.
+#[test]
+fn a_forward_clock_jump_reads_the_report_as_stale_and_cancels() {
+    let mut h = at_base_100();
+    h.long("a", "k1", "1");
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    let flagged = resting_reduce_only(&mut h, "a", "flagged", Side::Sell, "0.5", "120");
+    h.report_margin("100");
+    h.commands.clear();
+
+    h.advance(3_600 * SEC);
+    h.ref_price("X", "100");
+    assert_eq!(
+        h.reject("a", "k2", Side::Buy, "0.2", "90"),
+        vec![RejectReason::MarginUnavailable],
+        "a plain order was accepted on the old report"
+    );
+    assert_eq!(
+        decided(&h.tick()),
+        vec![stale_cancel(bid), cancel_sent(bid, 1)]
+    );
+    assert_eq!(h.cancels(), vec![(bid, 1)]);
+    assert_eq!(h.order(flagged).cancel, None);
+    assert_eq!(h.core.margin.reducing, None);
+}
