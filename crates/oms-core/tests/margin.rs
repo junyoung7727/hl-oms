@@ -2343,3 +2343,28 @@ fn stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off() {
     assert_eq!(decided(&h.tick()), vec![], "a cancel without a policy");
     assert_eq!(h.order(bid).cancel, None);
 }
+
+/// S23. The stale cancel asks only for orders that have no cancel request.
+/// An order whose cancel used up its attempts gets no new request and no
+/// new budget on a tick, unlike at the entry into REDUCING: a tick comes
+/// every second, and the stuck cancel is already with the operator.
+#[test]
+fn stale_cancel_does_not_reissue_an_exhausted_cancel() {
+    let mut h = at_base_100();
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    h.cancel("a", bid);
+    exhaust_cancel(&mut h, bid);
+    let queried_at = h.now;
+    h.report_margin("100");
+    assert_eq!(h.cancels().len(), 5);
+
+    next_input_at(&mut h, queried_at + 60 * SEC + 1_000);
+    let out = h.tick();
+    assert_eq!(decided(&out), vec![], "a spent cancel was asked for again");
+    h.advance(SEC);
+    let out = h.tick();
+    assert_eq!(decided(&out), vec![], "a spent cancel was asked for again");
+    assert_eq!(h.cancels().len(), 5);
+    let c = h.order(bid).cancel.as_ref().unwrap();
+    assert_eq!((c.by.clone(), c.used()), (Actor::Strategy(sid("a")), 5));
+}
