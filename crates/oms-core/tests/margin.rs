@@ -1023,3 +1023,24 @@ fn a_new_day_does_not_clear_reducing() {
         vec![RejectReason::Hold(HoldReason::Reducing)]
     );
 }
+
+/// G5. The wall clock stepped backwards across midnight: a report carries a
+/// query time of the day before the base's day. It is recorded and judged,
+/// but it never moves the base back, whatever its value.
+#[test]
+fn a_report_of_an_earlier_day_does_not_change_the_day_base() {
+    let mut h = at_base_100();
+    let base = h.core.margin.day_base.clone();
+    assert_eq!(base.as_ref().map(|b| b.day), Some(20_000));
+
+    // Asked at 23:59:50 of day 19 999, recorded on day 20 000.
+    let earlier = 20_000 * DAY - 10 * SEC;
+    let out = h.margin_report(1, 2, earlier, "120");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.day_base, base);
+
+    // Such a report is still judged against the base it did not change.
+    let out = h.margin_report(1, 3, earlier, "94.99");
+    assert_eq!(out.events[1..], [daily_loss_entered("94.99", "100")]);
+    assert_eq!(h.core.margin.day_base, base);
+}
