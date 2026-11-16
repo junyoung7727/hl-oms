@@ -777,14 +777,17 @@ impl Tx<'_> {
         self.roll_day_base(r)
     }
 
-    /// MM buffer (C-MARGIN, 유지증거금 여유): a position of a recorded
-    /// report is close to liquidation.
+    /// MM buffer (C-MARGIN, 유지증거금 여유): an isolated position of a
+    /// recorded report is close to liquidation. A cross position is not
+    /// judged: its margin is the account's (the venue-setting hold names
+    /// it).
     fn judge_mm_buffer(&mut self, r: &MarginReportIn) -> Result<(), CoreFault> {
         let Some(policy) = &self.core.config.policy.margin else {
             return Ok(());
         };
         let buffer_bps = policy.mm_buffer_bps;
-        let Some(p) = r.positions.iter().find(|p| p.position_value.0 > 0 && mm_buffer_is_used_up(p, buffer_bps)) else {
+        let judged = |p: &&MarginPosition| p.leverage_type == LeverageType::Isolated && p.position_value.0 > 0;
+        let Some(p) = r.positions.iter().filter(judged).find(|p| mm_buffer_is_used_up(p, buffer_bps)) else {
             return Ok(());
         };
         let detail = format!(

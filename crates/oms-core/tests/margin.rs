@@ -3037,3 +3037,24 @@ fn a_trigger_on_one_instrument_blocks_plain_orders_on_all() {
     };
     accepted(h.new_order(r));
 }
+
+/// The rule judges isolated positions only. The margin of a cross position
+/// is shared with the account and its `margin_used` is not what stands
+/// between the position and liquidation, so the same numbers that trip the
+/// rule on an isolated position latch nothing on a cross one. A cross
+/// position is the venue-setting hold's case: plain orders on X are held
+/// until the operator fixes the margin mode at the venue.
+#[test]
+fn a_cross_position_is_not_judged_by_the_mm_rule() {
+    let mut h = at_base_100();
+
+    h.advance(5 * SEC);
+    let cross = MarginPosition {
+        leverage_type: LeverageType::Cross,
+        ..position_with("X", 40, "200", "2.99")
+    };
+    let out = report_positions(&mut h, vec![cross]);
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.reducing, None);
+    assert_eq!(h.core.holds(None), vec![HoldReason::VenueSetting(iid("X"))]);
+}
