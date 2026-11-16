@@ -122,7 +122,7 @@ impl Hist {
     pub fn summary(&self) -> HistSummary {
         HistSummary {
             count: self.count,
-            mean_us: if self.count == 0 { 0 } else { self.sum / self.count },
+            mean_us: self.sum.checked_div(self.count).unwrap_or(0),
             p50_us: self.quantile(0.50),
             p90_us: self.quantile(0.90),
             p99_us: self.quantile(0.99),

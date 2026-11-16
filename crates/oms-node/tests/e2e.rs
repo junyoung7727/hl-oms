@@ -521,7 +521,7 @@ fn random_kills_under_load_keep_books_consistent() {
                 let mut mine = std::collections::VecDeque::new();
                 while !stop.load(std::sync::atomic::Ordering::Relaxed) {
                     i += 1;
-                    let side = if (i + w as u64) % 2 == 0 { Side::Buy } else { Side::Sell };
+                    let side = if (i + w as u64).is_multiple_of(2) { Side::Buy } else { Side::Sell };
                     let op = order_op(&format!("r{}", base + i), side, "0.01", "100", Tif::Gtc, 700);
                     match c.new_order(op) {
                         Ok(NewOrderReply::Accepted { order_id }) => {

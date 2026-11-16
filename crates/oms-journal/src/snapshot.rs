@@ -120,11 +120,15 @@ pub fn load_latest_snapshot(dir: &Path) -> Result<(Option<(SnapshotInfo, Vec<u8>
     load_snapshot_where(dir, |_, payload| Ok(payload.to_vec()))
 }
 
+/// What [`load_snapshot_where`] returns: the accepted snapshot, if any, and
+/// every snapshot file that was skipped, with the reason.
+pub type SnapshotLoad<T> = (Option<(SnapshotInfo, T)>, Vec<(PathBuf, String)>);
+
 /// Like [`load_latest_snapshot`], but the caller decides whether a snapshot
 /// whose file is intact is also usable (state schema, owner, content digest).
 /// One that `accept` refuses is skipped with its reason and the next older
 /// one is tried: a snapshot is only a shortcut, never a reason to stop.
-pub fn load_snapshot_where<T, F>(dir: &Path, mut accept: F) -> Result<(Option<(SnapshotInfo, T)>, Vec<(PathBuf, String)>), Error>
+pub fn load_snapshot_where<T, F>(dir: &Path, mut accept: F) -> Result<SnapshotLoad<T>, Error>
 where
     F: FnMut(&SnapshotInfo, &[u8]) -> Result<T, String>,
 {

@@ -73,6 +73,9 @@ async fn guard(State(app): State<App>, req: Request, next: Next) -> Response {
     resp
 }
 
+// The error is the HTTP response itself and is returned at once by every
+// caller; boxing it would add an allocation to the error path for no gain.
+#[allow(clippy::result_large_err)]
 fn need(app: &App) -> Result<&Arc<ApiCtx>, Response> {
     app.ctx
         .as_ref()

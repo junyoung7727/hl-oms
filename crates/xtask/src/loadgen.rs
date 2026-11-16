@@ -75,7 +75,8 @@ fn connection(cfg: &LoadCfg, index: u64, start: Instant, per_conn: u64, interval
     }
 
     // intended and actual send instants, indexed by request id - 1.
-    let times: Arc<Mutex<Vec<(Instant, Option<Instant>)>>> = Arc::new(Mutex::new(Vec::with_capacity(per_conn as usize)));
+    type SendTimes = Vec<(Instant, Option<Instant>)>;
+    let times: Arc<Mutex<SendTimes>> = Arc::new(Mutex::new(Vec::with_capacity(per_conn as usize)));
     let result = Arc::new(Mutex::new(ConnResult::default()));
 
     let (r_times, r_result) = (times.clone(), result.clone());

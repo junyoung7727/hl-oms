@@ -110,6 +110,9 @@ impl InputQueues {
 
     /// Enqueues without waiting. Returns the message if the lane is full or
     /// the queues are closed.
+    // The error hands the message back to the caller by value; boxing it
+    // would allocate on the overload path.
+    #[allow(clippy::result_large_err)]
     pub fn try_push(&self, lane: Lane, msg: CoreMsg) -> Result<(), CoreMsg> {
         let i = lane as usize;
         let mut g = self.lock();

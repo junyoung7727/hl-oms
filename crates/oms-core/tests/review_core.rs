@@ -117,7 +117,7 @@ fn fuzz_input(r: &mut Rng, core: &Core, now: Ts, unique_oids: bool) -> Input {
         }),
         24..=33 => {
             let outcome = match r.below(6) {
-                0 | 1 | 2 => SendOutcome::Placed {
+                0..=2 => SendOutcome::Placed {
                     venue_oid: venue_oid_for(r, oid),
                     status: StatusIn {
                         status: match r.below(5) {

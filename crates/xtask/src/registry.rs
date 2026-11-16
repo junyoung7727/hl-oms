@@ -359,7 +359,7 @@ pub fn run(root: &Path) -> i32 {
     let consideration_ids: Vec<String> = considerations.iter().map(|i| s(i, "id").to_string()).collect();
     for (n, row) in coverage.iter().enumerate() {
         let owner = format!("coverage row {} ({} / {})", n + 1, s(row, "source"), s(row, "element"));
-        if !source_ids.contains(&s(row, "source").to_string()) {
+        if !source_ids.contains(s(row, "source")) {
             errors.push(format!("{owner}: unknown source"));
         }
         let status = s(row, "status");
