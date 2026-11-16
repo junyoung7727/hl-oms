@@ -4,7 +4,7 @@
 
 **Blocked by:** 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] The core benchmark has a case with the margin policy on and about 500 resting orders; its median and p99 decision times are recorded as evidence and written beside the earlier figures (median 22 µs, p99 29 µs at 500 open orders without the gate).
 - [ ] Claims V-PERF-1 to V-PERF-5 are rerun on the current source and are `passed`, not `stale`; a claim that no longer meets its criterion is a finding written in this file under `## Comments` with the numbers.
