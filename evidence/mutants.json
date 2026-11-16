@@ -206,8 +206,80 @@
       "note": "",
       "test": "cargo test -p oms-core --test scenarios without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order",
       "what": "the hold table applies although no margin policy is set"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / report intake",
+      "id": "M24-margin-report-of-another-session-taken",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin margin_report_of_an_old_session_or_with_the_link_down_is_ignored",
+      "what": "a margin report is taken although it belongs to another link session"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / report intake",
+      "id": "M25-margin-report-taken-with-link-down",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin margin_report_of_an_old_session_or_with_the_link_down_is_ignored",
+      "what": "a margin report is taken while the link is down"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / report intake",
+      "id": "M26-no-margin-sequence-guard",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin late_margin_report_with_a_lower_sequence_is_ignored",
+      "what": "a margin report with a lower number replaces a newer one"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / report intake",
+      "id": "M27-margin-sequence-guard-lets-equal-pass",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin late_margin_report_with_a_lower_sequence_is_ignored",
+      "what": "a margin report with the same number as the last one is taken again"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / freshness",
+      "id": "M28-old-margin-report-is-fresh",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin plain_order_is_rejected_margin_unavailable_without_a_fresh_report",
+      "what": "a margin report of any age counts as fresh"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / freshness",
+      "id": "M29-margin-report-at-the-age-limit-is-stale",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin plain_order_is_rejected_margin_unavailable_without_a_fresh_report",
+      "what": "a margin report exactly as old as the limit does not count as fresh"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / freshness",
+      "id": "M30-future-margin-report-is-fresh",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin margin_report_dated_after_the_record_time_is_not_fresh",
+      "what": "a margin report dated after the record time counts as fresh"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / freshness",
+      "id": "M31-margin-report-of-age-zero-is-stale",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin margin_report_dated_after_the_record_time_is_not_fresh",
+      "what": "a margin report asked for at the record time itself does not count as fresh"
     }
   ],
-  "source_digest": "84bbfc41882f370d",
-  "taken_at_us": 1794806474695048
+  "source_digest": "0a86a80a92f2313c",
+  "taken_at_us": 1794808562682019
 }
