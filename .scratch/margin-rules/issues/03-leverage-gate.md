@@ -6,7 +6,7 @@
 
 **Status:** claimed
 
-- [ ] Test `order_past_twice_the_account_value_is_rejected_account_leverage` (seam A, S5): fails when a buy of 2.01 at 100 is accepted.
+- [x] Test `order_past_twice_the_account_value_is_rejected_account_leverage` (seam A, S5): fails when a buy of 2.01 at 100 is accepted.
 - [ ] Test `order_exactly_at_the_limit_is_accepted` (seam A, S5): fails when a buy of 2.00 at 100 is rejected.
 - [ ] Test `an_unfilled_resting_order_keeps_its_exposure_and_is_never_repriced_or_expired_by_the_oms` (seam A, S1): the test feeds a fresh margin report and a fresh reference price at every poll interval over hours of ticks (so the stale cancel of ticket 06 does not apply), and fails when the order then has a cancel, a new price, or no longer counts in the gate.
 - [ ] Test `resting_order_counts_at_the_higher_of_limit_and_reference` (seam A, S1): fails when a sell at 150 counts at 100, or a buy at 50 counts at 50.

@@ -16,6 +16,7 @@ pub mod config;
 pub mod core;
 mod decide;
 pub mod event;
+mod exposure;
 pub mod ids;
 pub mod input;
 pub mod model;

@@ -234,6 +234,9 @@ pub enum RejectReason {
     /// (C-MARGIN). Not a hold: it depends on the time, and holds are derived
     /// from state alone.
     MarginUnavailable,
+    /// A plain order would raise account exposure above the leverage limit
+    /// times the account value (C-MARGIN). Nothing latches.
+    AccountLeverage,
 }
 
 /// What the gateway must do. Commands are produced only by live processing,

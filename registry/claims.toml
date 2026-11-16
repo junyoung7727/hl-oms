@@ -874,6 +874,21 @@ supports = "C-MARGIN"
 not_covered = "실제 거래소 응답의 모양과 값의 뜻(T1, T2). 새 보고를 받지 못하는 동안에는 규칙을 판정하지 않는다"
 
 [[claim]]
+id = "V-MARGIN-3"
+statement = "증거금 정책이 있으면 일반 주문은 받은 뒤의 계좌 노출이 한도 × 계좌 가치를 넘고 받기 전보다 커질 때 AccountLeverage로 거절된다. 정확히 한도와 같으면 받는다. 노출은 포지션과 모든 미체결 주문(감소 전용 포함)을 지정가와 참조 가격 중 높은 값으로 센 종목별 값의 합이다"
+why = "수량 한도만으로는 계좌 가치의 몇 배가 되는 포지션을 막지 못한다. 아직 체결되지 않은 주문도 나중에 체결되면 한도를 넘길 수 있다"
+level = "단위"
+scope = "신규 주문 검사 안의 레버리지 검사. 계좌 가치 100, 한도 2.0, 참조 가격 100의 손 계산 값"
+real = "oms-core"
+simulated = "증거금 보고와 참조 가격은 시험이 입력"
+faults = "없음"
+criterion = "C-MARGIN의 '계좌 레버리지 검사'. 기대값은 손으로 적었다"
+tests = ["core/order_past_twice_the_account_value_is_rejected_account_leverage"]
+repro = "cargo test -p oms-core --test margin"
+supports = "C-MARGIN"
+not_covered = "주문 사이에 가격이 움직인 뒤의 노출은 지켜보지 않는다. 참조 가격(mid)은 mark가 아니다. 검사가 받은 주문을 거래소가 거절할 수 있다(경계의 수수료). 계좌 가치가 격리 포지션의 자산을 포함하는지(T2)"
+
+[[claim]]
 id = "V-MARGIN-11"
 statement = "증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이를 보여 준다. 정책이 없으면 묻지 않는다"
 why = "코어의 규칙이 옳아도 조회가 연결되지 않으면 보고가 없어 모든 일반 주문이 거절되거나, 운영자가 왜 거절되는지 볼 수 없다"

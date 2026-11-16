@@ -432,6 +432,43 @@ fn without_a_margin_policy_no_margin_check_runs() {
     h.accept("a", "k1", Side::Buy, "1", "100");
 }
 
+// ---- C-MARGIN: leverage gate ------------------------------------------------
+
+/// The worked numbers of the leverage gate: account value 100, limit 2.0
+/// (the default), reference price of X 100. So the account may carry an
+/// exposure of 200.
+fn gate() -> H {
+    let mut h = H::ready_with(config_with_margin());
+    h.report_margin("100");
+    h.ref_price("X", "100");
+    h
+}
+
+/// S5. A plain order that would take account exposure above twice the
+/// account value is refused with `AccountLeverage`: a buy of 2.01 at 100 is
+/// an exposure of 201 against a limit of 200. Nothing latches.
+#[test]
+fn order_past_twice_the_account_value_is_rejected_account_leverage() {
+    let mut h = gate();
+    assert_eq!(
+        h.reject("a", "k1", Side::Buy, "2.01", "100"),
+        vec![RejectReason::AccountLeverage]
+    );
+    // The smallest step past the limit: 2.001 at 100 is 200.1.
+    assert_eq!(
+        h.reject("a", "k2", Side::Buy, "2.001", "100"),
+        vec![RejectReason::AccountLeverage]
+    );
+    // The same on the sell side.
+    assert_eq!(
+        h.reject("a", "k3", Side::Sell, "2.01", "100"),
+        vec![RejectReason::AccountLeverage]
+    );
+    // The refusal is not a hold and reserved nothing.
+    assert_eq!(h.core.holds(None), vec![]);
+    assert_eq!(h.acct().buy_open, q("0"));
+}
+
 // ---- C-MARGIN: replay ---------------------------------------------------------
 
 /// S13. Margin state comes only from journal events. A core rebuilt from the

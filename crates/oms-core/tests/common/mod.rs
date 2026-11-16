@@ -217,6 +217,16 @@ impl H {
         self.margin_report(self.session, self.margin_seq, self.now, account_value)
     }
 
+    /// The venue's reference price (mid) of `instrument`, recorded now.
+    pub fn ref_price(&mut self, instrument: &str, price: &str) -> Output {
+        let venue_ts = self.now;
+        self.venue(VenueInput::RefPrice {
+            instrument: iid(instrument),
+            px: px(price),
+            venue_ts,
+        })
+    }
+
     pub fn tick(&mut self) -> Output {
         self.inp(Input::Tick)
     }

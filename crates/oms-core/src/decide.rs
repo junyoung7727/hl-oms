@@ -367,6 +367,12 @@ impl Tx<'_> {
                 }
             }
         }
+        // Leverage gate (C-MARGIN).
+        if let Some(margin) = &cfg.policy.margin {
+            if r.qty.0 > 0 && r.px.0 > 0 && core.leverage_gate_refuses(margin, r) {
+                why.push(R::AccountLeverage);
+            }
+        }
         why.dedup();
         why
     }
