@@ -530,8 +530,71 @@
       "note": "",
       "test": "cargo test -p oms-node --test e2e strategy_socket_cannot_clear_reducing_or_rebase",
       "what": "rebase-day is taken from a strategy connection"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / stale cancel",
+      "id": "M60-stale-cancel-at-exactly-the-limit",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin report_stale_past_the_cancel_limit_cancels_each_plain_order_once",
+      "what": "the stale cancel fires when the report is exactly stale_cancel_us old"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / stale cancel",
+      "id": "M61-stale-age-ignores-link-up",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin stale_age_starts_at_link_up_when_no_report_has_arrived",
+      "what": "the stale age is measured from the last report only, never from the moment the link session came up"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / stale cancel",
+      "id": "M62-stale-cancel-asks-again",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin stale_cancel_does_not_reissue_an_exhausted_cancel",
+      "what": "the stale cancel also asks for an order that already has a cancel request"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / stale cancel",
+      "id": "M63-stale-cancel-takes-reduce-only-orders",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin report_stale_past_the_cancel_limit_cancels_each_plain_order_once",
+      "what": "the stale cancel also cancels orders with the reduce-only flag"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / stale cancel",
+      "id": "M64-stale-cancel-with-the-link-down",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off",
+      "what": "the stale cancel asks for cancels while the link is down"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / stale cancel",
+      "id": "M65-policy-activation-sets-no-stale-baseline",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin stale_age_starts_at_policy_activation_when_the_link_is_already_up",
+      "what": "a margin policy activated while the link is up gets no moment to measure the stale age from"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / stale cancel",
+      "id": "M66-link-up-time-kept-without-a-policy",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off",
+      "what": "the link-up time is stored in the margin state also without a margin policy"
     }
   ],
-  "source_digest": "ea6d6a6eba72fa74",
-  "taken_at_us": 1794819254494130
+  "source_digest": "95ca03971f3a393c",
+  "taken_at_us": 1794820584465555
 }

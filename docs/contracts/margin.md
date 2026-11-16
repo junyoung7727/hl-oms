@@ -8,10 +8,11 @@
 - "계좌 레버리지 검사" 전체와 거절 사유 `AccountLeverage`, "신선도"의 참조 가격 조건, `status`의 계좌 노출(티켓 03, V-MARGIN-3, V-MARGIN-11).
 - "일 손실과 기준 금액" 전부(운영자가 기준을 정하는 `set_by: Operator`는 빼고), "감소 전용 상태"의 진입과 그 안의 규칙 취소(`Rule(DailyLoss)`), 차단 사유 `Reducing`과 "차단 표"의 그 행, 이벤트 `DayBaseSet`, `ReducingEntered`, `status`의 감소 전용 상태(`core.margin.reducing`: 규칙, 내용, 시각. 정상이면 null)와 기준 금액(`core.margin.day_base`)(티켓 04, V-MARGIN-4, V-MARGIN-5, V-MARGIN-11).
 - "해제와 기준 재설정" 전부(유지증거금 여유 조건과 거절 사유 `MmBufferActive`는 빼고: 티켓 07), 운영자 입력 `ClearReduce`, `RebaseDay`, 이벤트 `ReducingCleared`, `DayBaseSet`의 `set_by: Operator`, 운영 소켓의 `clear_reduce`, `rebase_day`와 `omsctl clear-reduce`, `omsctl rebase-day`, "중단과 재실행"의 프로세스 시험(티켓 05, V-MARGIN-6, V-MARGIN-11).
+- "보고 끊김 취소" 전부와 규칙 이름 `Rule(MarginStale)`(티켓 06, V-MARGIN-7).
 - "거래소 설정과 계좌 모드" 전체: 입력 `VenueSetting`, `AccountMode`와 이벤트 `VenueSettingNoted`, `AccountModeNoted`, 차단 `VenueSetting(종목)`, `AccountMode`, 노드의 두 조회와 `runtime.venue_setting_poll_ms`, 가상 거래소의 응답과 제어 명령(`venue_setting`, `account_mode`), `status`의 종목별 거래소 설정과 계좌 모드(티켓 08, V-MARGIN-9, V-MARGIN-11).
 - "Hyperliquid 조회" 전체: Hyperliquid 게이트웨이의 증거금 조회, 거래소 설정 조회, 계좌 모드 조회와 그 응답의 번역, 조회 weight 예산 검사, 증거금 정책을 담은 Hyperliquid 예제 설정(티켓 09, V-MARGIN-10, V-CFG-1). 실제 거래소에는 한 번도 묻지 않았다.
 
-아직 코드에 없는 것: 유지증거금 여유 판정(`Rule(MmBuffer)`)과 그 조건이 참일 때의 해제 거절(`MmBufferActive`), 보고 끊김 취소. 가상 거래소(simvenue)의 보고는 계좌 가치만 담고 포지션은 비어 있다. simvenue는 참조 가격을 스스로 내지 않고 제어 명령(`ref_price`)을 받았을 때만 낸다. 그래서 simvenue에서 `policy.margin`을 켜면 그 명령으로 가격을 준 뒤 15초 동안만 일반 주문을 받는다. 가상 거래소는 모든 종목을 격리·레버리지 2로, 계좌 모드를 `standard`(가상 거래소가 붙인 이름이고 Hyperliquid의 값이 아니다)로 답한다. 기본 허용 목록은 비어 있으므로 simvenue에서 일반 주문을 내려면 `account_modes_allowed = ["standard"]`를 적어야 한다.
+아직 코드에 없는 것: 유지증거금 여유 판정(`Rule(MmBuffer)`)과 그 조건이 참일 때의 해제 거절(`MmBufferActive`). 가상 거래소(simvenue)의 보고는 계좌 가치만 담고 포지션은 비어 있다. simvenue는 참조 가격을 스스로 내지 않고 제어 명령(`ref_price`)을 받았을 때만 낸다. 그래서 simvenue에서 `policy.margin`을 켜면 그 명령으로 가격을 준 뒤 15초 동안만 일반 주문을 받는다. 가상 거래소는 모든 종목을 격리·레버리지 2로, 계좌 모드를 `standard`(가상 거래소가 붙인 이름이고 Hyperliquid의 값이 아니다)로 답한다. 기본 허용 목록은 비어 있으므로 simvenue에서 일반 주문을 내려면 `account_modes_allowed = ["standard"]`를 적어야 한다.
 
 설계 근거: [ADR-018](../adr/ADR-018-margin-rules.md). 용어: [GLOSSARY.md](../../GLOSSARY.md). 스펙과 티켓: `.scratch/margin-rules/`.
 실제 거래소에서는 아무것도 확인하지 않는다(U-01). 가정 T1~T11은 ADR-018 §8에 있다.
@@ -137,6 +138,7 @@ N_down = max(0, −pos × ref + Σ_매도 예약 × max(지정가, ref))
 - 동작: `Tick`이 `reduce_only`가 아니고 취소 요청이 없는 모든 열린 주문에 `CancelRequested { by: Rule(MarginStale) }`를 낸다. 주문마다 한 번이다. 취소 시도가 다 된 주문에 다시 내지 않는다.
 - 래치도 차단도 없다. 새 보고를 받으면 끝나고, 일반 주문을 다시 받는다.
 - 링크가 내려가 있으면 아무것도 취소하지 않는다.
+- "현재 링크 세션이 올라온 시각"은 상태 `margin.link_up_at`이고, `policy.margin`이 있을 때 링크가 올라오는 이벤트(`LinkChanged { up: true }`)가 그 기록 시각으로 정한다. 링크가 이미 올라와 있는 동안 `policy.margin`이 없던 설정에서 있는 설정으로 바뀌면 그 설정 이벤트의 기록 시각으로 정한다(정책이 켜지기 전부터 걸려 있던 주문이 곧바로 취소되지도, 영영 남지도 않게).
 
 ### 차단 표
 
@@ -272,13 +274,14 @@ Hyperliquid 게이트웨이는 세 조회를 `/info`로 보내고 응답을 코�
 | 조회와 `status` | V-MARGIN-11 | `e2e::node_polls_margin_and_status_shows_value_and_age`, `e2e::status_shows_account_exposure`, `e2e::status_shows_reducing_its_rule_and_the_day_base`, `e2e::node_reads_venue_setting_and_account_mode_and_status_shows_them` |
 | 일 손실과 기준 금액 | V-MARGIN-5 | `margin::first_report_sets_the_day_base`, `loss_greater_than_five_percent_of_the_base_enters_reducing`, `first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day`, `a_report_of_an_earlier_day_does_not_change_the_day_base`, `a_loss_between_two_reports_enters_reducing_on_the_next_report`, `a_report_older_than_the_freshness_limit_on_arrival_is_still_judged`. 변이 M37~M39 |
 | 감소 전용 상태(진입, 규칙 취소, 주문 받기) | V-MARGIN-4 | `margin::entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones`, `under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted`, `an_order_pending_send_at_entry_is_cancelled_once_acknowledged`, `a_rule_cancel_that_races_a_fill_books_the_fill`, `a_stuck_rule_cancel_does_not_block_reduce_only_orders`, `reducing_is_entered_once`, `a_new_day_does_not_clear_reducing`, `an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing`. 변이 M40~M42. 기존 시험 `scenarios::cancel_race_final_status_decides`는 그대로 통과한다 |
+| 보고 끊김 취소 | V-MARGIN-7 | `margin::report_stale_past_the_cancel_limit_cancels_each_plain_order_once`, `stale_age_starts_at_link_up_when_no_report_has_arrived`, `stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off`, `stale_cancel_does_not_reissue_an_exhausted_cancel`, `a_fresh_report_after_a_stale_episode_restores_acceptance_without_a_latch`, `a_forward_clock_jump_reads_the_report_as_stale_and_cancels`, `stale_age_starts_at_policy_activation_when_the_link_is_already_up`. 변이 M60~M66 |
 | 중단과 재실행(재생: 감소 전용 상태와 기준 금액) | V-MARGIN-4, V-MARGIN-5, V-REPLAY-1 | `margin::latch_and_day_base_replay_to_the_same_state` |
 | 거래소 설정과 계좌 모드(종목 설정) | V-MARGIN-9 | `margin::instrument_with_unknown_venue_setting_holds_plain_orders`, `a_setting_that_differs_from_config_holds_only_that_instrument`, `a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again`, `a_cross_position_in_a_margin_report_raises_the_hold`, `venue_setting_hold_names_its_instrument_in_holds`. 변이 M43~M45 |
 | 거래소 설정과 계좌 모드(계좌 모드) | V-MARGIN-9 | `margin::unified_or_portfolio_account_mode_holds_the_account`, `an_account_mode_off_the_allow_list_or_unknown_holds_the_account`. 변이 M46~M49 |
-| Hyperliquid 조회(증거금 보고의 번역) | V-MARGIN-10 | `wire::tests::documented_clearinghouse_state_parses_to_a_margin_report`, `missing_zero_or_unparseable_max_leverage_rejects_the_whole_report`, `any_unparseable_number_rejects_the_whole_report`, `a_position_on_an_unconfigured_coin_is_kept` (oms-node 단위). 변이 M80~M86 |
-| Hyperliquid 조회(거래소 설정, 계좌 모드, 요청 본문) | V-MARGIN-10 | `wire::tests::documented_active_asset_data_parses_leverage_and_mode`, `user_abstraction_values_parse_and_an_unknown_value_stays_unknown`, `margin_and_setting_request_json` (oms-node 단위). 변이 M87~M89 |
-| Hyperliquid 조회(조회 weight 예산, 예제 설정) | V-CFG-1 | `config::tests::steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused`, `example_config_with_a_margin_policy_loads` (oms-node 단위). 변이 M90, M91 |
-| Hyperliquid 조회(취소 폭주 뒤의 요청 예산) | V-MARGIN-10 | `venue::hyperliquid::tests::a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time` (oms-node 단위). 변이 M92 |
+| Hyperliquid 조회(증거금 보고의 번역) | V-MARGIN-10 | `wire::tests::documented_clearinghouse_state_parses_to_a_margin_report`, `missing_zero_or_unparseable_max_leverage_rejects_the_whole_report`, `any_unparseable_number_rejects_the_whole_report`, `a_position_on_an_unconfigured_coin_is_kept` (oms-node 단위). 변이 M67~M73 |
+| Hyperliquid 조회(거래소 설정, 계좌 모드, 요청 본문) | V-MARGIN-10 | `wire::tests::documented_active_asset_data_parses_leverage_and_mode`, `user_abstraction_values_parse_and_an_unknown_value_stays_unknown`, `margin_and_setting_request_json` (oms-node 단위). 변이 M74~M76 |
+| Hyperliquid 조회(조회 weight 예산, 예제 설정) | V-CFG-1 | `config::tests::steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused`, `example_config_with_a_margin_policy_loads` (oms-node 단위). 변이 M77, M78 |
+| Hyperliquid 조회(취소 폭주 뒤의 요청 예산) | V-MARGIN-10 | `venue::hyperliquid::tests::a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time` (oms-node 단위). 변이 M79 |
 | 차단 표(거래소 설정, 계좌 모드) | V-MARGIN-9 | `margin::reduce_only_order_passes_the_venue_setting_and_account_mode_holds`. 변이 M50 |
 | 설정(`runtime.venue_setting_poll_ms`) | V-CFG-1 | `config::tests::mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused` (oms-node 단위) |
 | 해제와 기준 재설정 | V-MARGIN-6 | `margin::clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing`, `clear_reduce_rebases_the_day_and_a_further_loss_latches_again`, `rebase_day_sets_the_base_and_leaves_the_latch_alone`, `a_withdrawal_without_rebase_reads_as_a_loss`. 변이 M51~M57 |
@@ -293,6 +296,8 @@ Hyperliquid 게이트웨이는 세 조회를 `/info`로 보내고 응답을 코�
 일 손실과 감소 전용 상태의 시험이 보이지 않는 것: 규칙 취소가 체결보다 먼저 닿는다는 것(취소는 체결에 질 수 있고, 그때는 체결을 기장한다). 두 보고 사이에 난 손실과 새 보고를 받지 못하는 동안의 손실은 막지 못한다(100 다음 보고가 88이면 12 %를 잃은 뒤에 걸린다). 실제 청산 체결의 모양(T6. 외부 체결과 손실 보고의 조합으로만 본다). 입금이 가리는 손실. 감소 전용 상태인 채로 `policy.margin`을 없앤 설정을 켜면 상태는 남고 차단 표는 꺼지므로 `Reducing`이 감소 전용 주문까지 막는다.
 
 해제, 기준 재설정, 중단 지점의 시험이 보이지 않는 것: 운영자의 판단이 옳은 것. 입금이 가린 손실(100, 입금 10, 손실 14는 걸리지 않는다. `a_withdrawal_without_rebase_reads_as_a_loss`가 그대로 보여 준다). 유지증거금 여유 조건이 참일 때의 해제 거절(티켓 07). 디스크 유실과 전원 장애(중단은 프로세스 `abort()`와 SIGKILL이다. 운영체제는 살아 있다). `omsctl` 실행 파일의 `main`(인자 수집, 출력, 종료 코드. 시험은 그 실행 파일이 부르는 `oms_api::ctl::run`을 부른다). 가상 거래소에는 요청 예산이 없으므로 취소 300건 뒤에 Hyperliquid 게이트웨이의 조회가 얼마나 밀리는지(티켓 09). `policy.margin`을 없앤 설정이 켜진 동안에는 해제할 수 없다(`margin_unavailable`). 정책을 다시 켜야 한다.
+
+보고 끊김 취소의 시험이 보이지 않는 것: 포지션은 그대로 남는다(OMS는 닫지 않는다). 감소 전용 주문은 남는다. 링크가 내려가 있는 동안에는 아무것도 취소하지 않는다(취소를 보낼 수 없다. 링크가 돌아오면 그 세션이 올라온 시각부터 다시 60초를 잰다). 취소가 체결보다 먼저 닿는다는 것(취소는 체결에 질 수 있고, 그때는 체결을 기장한다). 취소 시도가 다 된 주문은 다시 요청하지 않는다(운영자가 `CancelStuck` 불일치로 본다). 틱이 오는 간격만큼 늦을 수 있다. 무작위로 섞인 실행에서의 동작(시뮬레이션은 티켓 10).
 
 차단 표의 시험이 보이지 않는 것: 귀속되지 않은 포지션을 OMS로 줄이는 길(없다), 거래소가 감소 전용 주문의 포지션 확대를 막는지(T5).
 
