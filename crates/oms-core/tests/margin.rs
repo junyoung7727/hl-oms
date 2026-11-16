@@ -523,6 +523,37 @@ fn an_unfilled_resting_order_keeps_its_exposure_and_is_never_repriced_or_expired
     );
 }
 
+/// S1. An order counts at the higher of its limit price and the reference
+/// price (100 here): a sell far above the market at the price it would
+/// really fill at, a buy far below the market at the market.
+#[test]
+fn resting_order_counts_at_the_higher_of_limit_and_reference() {
+    // A sell of 1 at 150 counts 150, not 100.
+    let mut h = gate();
+    h.accept("a", "k1", Side::Sell, "1", "150");
+    // 150 + 0.6 x 100 = 210 is past the limit of 200.
+    assert_eq!(
+        h.reject("a", "k2", Side::Sell, "0.6", "100"),
+        vec![RejectReason::AccountLeverage]
+    );
+    // 150 + 0.5 x 100 = 200 is at the limit.
+    h.accept("a", "k3", Side::Sell, "0.5", "100");
+
+    // A buy at 50 counts at 100, not at 50: 2.2 x 100 = 220.
+    let mut h = gate();
+    assert_eq!(
+        h.reject("a", "k1", Side::Buy, "2.2", "50"),
+        vec![RejectReason::AccountLeverage]
+    );
+    // 2 x 100 = 200 is at the limit, and the resting order keeps counting
+    // at 100: a further 0.2 at 50 would make 220.
+    h.accept("a", "k2", Side::Buy, "2", "50");
+    assert_eq!(
+        h.reject("a", "k3", Side::Buy, "0.2", "50"),
+        vec![RejectReason::AccountLeverage]
+    );
+}
+
 // ---- C-MARGIN: replay ---------------------------------------------------------
 
 /// S13. Margin state comes only from journal events. A core rebuilt from the

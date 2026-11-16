@@ -8,6 +8,7 @@
 use crate::config::MarginPolicy;
 use crate::core::Core;
 use crate::input::NewOrderReq;
+use crate::num::{Px, Qty};
 
 impl Core {
     /// Whether the leverage gate refuses this plain order. The caller has
@@ -16,6 +17,11 @@ impl Core {
         let Some(report) = &self.margin.report else {
             return false;
         };
+        // An order is valued at the higher of its limit price and the
+        // reference price: the worse of where it rests and where the market
+        // is.
+        let reference = self.ref_px.get(&r.instrument).map_or(0, |p| p.px.0);
+        let value = |qty: Qty, px: Px| i128::from(qty.0) * i128::from(px.0.max(reference));
         // Every resting order of the instrument counts at its remaining
         // reserved quantity until terminal evidence releases it.
         let resting: i128 = self
@@ -23,9 +29,9 @@ impl Core {
             .iter()
             .filter_map(|id| self.orders.get(id))
             .filter(|o| o.instrument == r.instrument)
-            .map(|o| i128::from(o.reserved.0) * i128::from(o.px.0))
+            .map(|o| value(o.reserved, o.px))
             .sum();
-        let after = resting + i128::from(r.qty.0) * i128::from(r.px.0);
+        let after = resting + value(r.qty, r.px);
         let limit = i128::from(policy.max_account_leverage.0) * i128::from(report.account_value.0);
         after > limit
     }
