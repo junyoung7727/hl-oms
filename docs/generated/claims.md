@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `8fba69000fab132b`, 검증 결과의 다이제스트 `0a86a80a92f2313c`.
+> 소스 다이제스트 `9e799aec72e53ae2`, 검증 결과의 다이제스트 `0a86a80a92f2313c`.
 
 주장 60건: 통과 0, 실패 0, 미실행 2, 이전 버전 결과 58.
 
@@ -1321,6 +1321,7 @@
 | 시험 | 결과 | 비고 |
 |---|---|---|
 | `core/order_past_twice_the_account_value_is_rejected_account_leverage` | 미실행 |  |
+| `core/order_exactly_at_the_limit_is_accepted` | 미실행 |  |
 
 ## V-MARGIN-11 — 증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이를 보여 준다. 정책이 없으면 묻지 않는다
 

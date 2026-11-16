@@ -469,6 +469,19 @@ fn order_past_twice_the_account_value_is_rejected_account_leverage() {
     assert_eq!(h.acct().buy_open, q("0"));
 }
 
+/// S5. Exactly at the limit is accepted: a buy of 2.00 at 100 is an exposure
+/// of 200 against a limit of 200.
+#[test]
+fn order_exactly_at_the_limit_is_accepted() {
+    let mut h = gate();
+    let id = h.accept("a", "k1", Side::Buy, "2", "100");
+    assert_eq!(h.order(id).reserved, q("2"));
+
+    // The same on the sell side, in a fresh account.
+    let mut h = gate();
+    h.accept("a", "k1", Side::Sell, "2", "100");
+}
+
 // ---- C-MARGIN: replay ---------------------------------------------------------
 
 /// S13. Margin state comes only from journal events. A core rebuilt from the
