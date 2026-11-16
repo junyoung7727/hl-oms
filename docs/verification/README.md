@@ -59,7 +59,7 @@ cargo run --release -p xtask -- docs              # 결과를 주장과 묶어 �
 
 ### 이전 실행 (소스 `c2addecd59bc4a5a`, 2026-10-05 10:53 ~ 11:09, 저장소와 빌드 출력이 모두 970 EVO Plus 2TB에 있음)
 
-결과 파일은 `evidence/archive/c2addecd59bc4a5a/results.json`에 보관했다. 아래 표는 그 소스에 대한 기록이고, 현재 소스의 상태가 아니다.
+그 결과 파일은 지금 트리에는 없고 git 이력에 있다: `git show a32b9ab:evidence/latest/results.json`. 아래 표는 그 소스에 대한 기록이고, 현재 소스의 상태가 아니다.
 
 | 묶음 | 결과 | 실행한 양 |
 |---|---|---|
