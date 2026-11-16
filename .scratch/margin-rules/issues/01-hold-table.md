@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** claimed
+**Status:** ready-for-merge
 
 - [x] Test `reduce_only_order_is_accepted_during_resync` (seam A, S3): fails when the resync hold still rejects a reduce-only order.
 - [x] Test `reduce_only_order_is_accepted_while_another_order_is_in_doubt` (seam A, S3): fails when the in-doubt hold still rejects it.
@@ -18,9 +18,9 @@
 - [x] The existing tests `holds_are_independent` and `cancels_are_accepted_while_new_orders_are_held` stay green: a plain order is refused under every hold.
 - [x] Mutants: the existing mutant on the hold push is rewritten for the table; new mutants "a partial hold also refuses reduce-only", "a block-all hold lets reduce-only pass" and "the table applies without a margin policy" are each caught by a named test.
 - [x] ADR-008 §7 carries the amended text and table from ADR-018; the hold rows `Reducing`, `VenueSetting` and `AccountMode` are named there as arriving with later tickets.
-- [ ] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
+- [x] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
 - [x] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
-- [ ] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
+- [x] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
 - [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
 
 ## Comments
@@ -28,3 +28,14 @@
 - Spec review r1 (reviewer claude-opus-5-5, head 37c6330), 2026-11-16. Finding 1 (blocking, correct): the hold table was unconditional and contradicted "no margin policy = behaviour unchanged". Resolution: option (a). The table applies only when a margin policy is set. This ticket now waits for ticket 02 (policy section), gains the test `without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order` and one mutant, and names S21. The same rule is written in ADR-018 §4, §7 item 8 and the ADR-008 amendment text, the contract (설정, 차단 표), spec.md (Solution 7, Hold table, Further Notes) and spec-ko.md (§2, 차단 표, §7, S21, §14). Re-deciding a journal recorded without a policy is unchanged.
 - Spec review r2 (reviewer claude-opus-5-5, head 1a78dfb), 2026-11-16. Finding 1 (blocking, correct): since r1 this ticket waited for ticket 02, so the tickets were not numbered in dependency order and the prefactoring was not first. Resolution: the reviewer's option 2. This ticket adds the optional margin policy section itself and reads only its presence, so it has no blocker and is first again. Ticket 02 is now blocked by this ticket. The criterion "an absent policy adds no journal bytes" moved here from ticket 02, because the section is born here. The table rule itself (applies only with a margin policy) is unchanged. Updated with it: spec.md Further Notes (D3.1), spec-ko.md §7 and §14, the pull request body.
 - Spec review r2 (reviewer claude-opus-5-5, head 1a78dfb), 2026-11-16. Finding 5 (nit, correct): the contract's hold-table section said a reduce-only order passes only the right-hand holds and the leverage gate, and left out the freshness exemption that its 신선도 section grants. Resolution: the contract, spec.md (Hold table) and spec-ko.md (차단 표) now name three things a reduce-only order passes: the right-hand holds, the margin-report freshness check and the leverage gate. No change to this ticket's tests; the freshness exemption is tested in ticket 02 (`reduce_only_order_needs_no_fresh_report`).
+- Implementation (implementer claude-fable-5-2, branch `t01-hold-table`), 2026-11-16.
+  - Built: the optional section `policy.margin` (`MarginPolicy`, eight core values with the defaults of the contract's 설정 table; `Ratio` is the fixed-point type of the leverage limit). The hold table as `HoldReason::refuses_only_plain_orders`, a match without a wildcard arm, read by the new-order check only when `policy.margin` is present. Six hold-table tests beside the existing hold tests in `crates/oms-core/tests/scenarios.rs`; two tests of the section in the new file `crates/oms-core/tests/margin.rs`. Claim V-MARGIN-1 under C-MARGIN. Mutants M21, M22, M23 added and M07 reworded; all four were run with `xtask mutants --only` and killed. ADR-008 §7 carries the amended text and table.
+  - Tests added beyond the planned names (no planned name was renamed): `absent_margin_policy_adds_no_bytes_to_a_journal_record` and `empty_margin_section_takes_the_contract_defaults`. They carry the criterion "optional, absent by default, no journal bytes".
+  - Deviation from "seen red for the reason named": `reduce_only_order_is_rejected_by_every_block_all_hold` and `reduce_only_order_is_still_bound_by_the_strategy_position_limit` pin behaviour that the earlier cycles never broke, so each passed when first run. Each was seen red by breaking its rule on purpose in the working tree (not committed); the failure line is in its commit body. The other six tests were red before their code existed.
+  - Between the commits of the resync test and the no-policy test the table applied also without a margin policy. The no-policy test was red for exactly that and its commit adds the condition. The branch tip has the condition.
+  - The no-config case of the block-all test runs without a margin policy, because a core without a configuration has no policy. It checks that `Hold(NoConfig)` is among the reasons.
+  - Code changed because it conflicted with the spec: none. No existing test was changed.
+  - `git merge margin-rules` made no merge commit: the integration tip was still the commit this branch started from.
+  - Not run here: the extended verification (the merger runs it), the full mutant run (`evidence/mutants.json` is still the older result; ticket 12). The evidence in `docs/generated` reads "이전 버전 결과" until the merger's run, because the source digest changed.
+  - Still not guaranteed: no rule reads a policy value yet, and the node does not check the section (ticket 02), so a section with bad values is accepted by the core. The holds `Reducing`, `VenueSetting`, `AccountMode` do not exist yet. Journal bytes without a policy are checked by "no `margin` key in the configuration record", not against literals recorded on main (ticket 10). A strategy that has room in its own position limit can still send a reduce-only order against a position it does not own; whether the venue then refuses or shrinks it is T5.
+  - Local gate on the branch tip: `cargo test --workspace --locked` 190 passed, 0 failed, 0 ignored; clippy with warnings denied clean; generated documents in step; secret scan and `rustfmt_added.sh` pass.
