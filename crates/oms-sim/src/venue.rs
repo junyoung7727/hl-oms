@@ -217,7 +217,7 @@ impl SimVenue {
                     .unwrap_or(Amount(position_value.0 / i64::from(leverage_value.max(1))));
                 MarginPosition {
                     instrument: i.clone(),
-                    szi: SQty(*q),
+                    qty: SQty(*q),
                     position_value,
                     margin_used,
                     leverage_type,

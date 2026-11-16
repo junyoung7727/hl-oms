@@ -519,7 +519,7 @@ impl Gateway {
                 self.input.send(input).await;
             }
             QueryReq::VenueSetting { instrument } => {
-                let body = venue_setting_request(&self.account, instrument.as_str());
+                let body = venue_setting_request(&self.account, &instrument);
                 let Some(resp) = self.info(body, f64::from(WEIGHT_OTHER_INFO_QUERY)).await else { return };
                 match venue_setting_input(&resp, session, &instrument) {
                     Some(input) => {

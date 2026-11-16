@@ -176,8 +176,10 @@ pub struct MarginReportIn {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MarginPosition {
     pub instrument: InstrumentId,
-    /// Signed position size.
-    pub szi: SQty,
+    /// Signed quantity of the position: positive is long. The journal and
+    /// the status keep the key `szi` they were first written with.
+    #[serde(rename = "szi")]
+    pub qty: SQty,
     pub position_value: Amount,
     pub margin_used: Amount,
     pub leverage_type: LeverageType,

@@ -385,7 +385,7 @@ fn margin_report(body: &serde_json::Value) -> Result<(Amount, Vec<MarginPosition
             return Err(format!("assetPositions[{i}]: coin is missing or unusable"));
         };
         let at = |e: String| format!("assetPositions[{i}] ({coin}): {e}");
-        let szi = decimal(pos.get("szi"), "szi", SQty::parse).map_err(at)?;
+        let qty = decimal(pos.get("szi"), "szi", SQty::parse).map_err(at)?;
         let position_value = decimal(pos.get("positionValue"), "positionValue", Amount::parse).map_err(at)?;
         let margin_used = decimal(pos.get("marginUsed"), "marginUsed", Amount::parse).map_err(at)?;
         let leverage_type = match pos.pointer("/leverage/type") {
@@ -405,7 +405,7 @@ fn margin_report(body: &serde_json::Value) -> Result<(Amount, Vec<MarginPosition
         }
         positions.push(MarginPosition {
             instrument,
-            szi,
+            qty,
             position_value,
             margin_used,
             leverage_type,
@@ -488,18 +488,22 @@ pub const WEIGHT_OTHER_INFO_QUERY: u32 = 20;
 
 /// Body of the margin query (`/info`). The optional `dex` field is left
 /// out: the first perp dex.
-pub fn margin_request(user: &str) -> serde_json::Value {
-    serde_json::json!({"type": "clearinghouseState", "user": user})
+pub fn margin_request(account: &str) -> serde_json::Value {
+    serde_json::json!({"type": "clearinghouseState", "user": account})
 }
 
-/// Body of the venue-setting query for one coin (`/info`).
-pub fn venue_setting_request(user: &str, coin: &str) -> serde_json::Value {
-    serde_json::json!({"type": "activeAssetData", "user": user, "coin": coin})
+/// Body of the venue-setting query for one instrument (`/info`). The venue
+/// calls the instrument a coin. Its name there is the instrument id: the
+/// gateway does not start a link unless every configured instrument id is,
+/// letter for letter, a name of the venue's universe (`load_meta`), and
+/// orders find their asset by the same id.
+pub fn venue_setting_request(account: &str, instrument: &InstrumentId) -> serde_json::Value {
+    serde_json::json!({"type": "activeAssetData", "user": account, "coin": instrument.as_str()})
 }
 
 /// Body of the account-mode query (`/info`).
-pub fn account_mode_request(user: &str) -> serde_json::Value {
-    serde_json::json!({"type": "userAbstraction", "user": user})
+pub fn account_mode_request(account: &str) -> serde_json::Value {
+    serde_json::json!({"type": "userAbstraction", "user": account})
 }
 
 #[cfg(test)]
@@ -565,7 +569,7 @@ mod tests {
                 account_value: Amount(1_310_948_232_800),
                 positions: vec![MarginPosition {
                     instrument: InstrumentId::new("ETH").unwrap(),
-                    szi: SQty(3_350_000),
+                    qty: SQty(3_350_000),
                     position_value: Amount(10_002_765_000),
                     margin_used: Amount(496_782_600),
                     leverage_type: LeverageType::Isolated,
@@ -724,7 +728,7 @@ mod tests {
             panic!("refused");
         };
         assert_eq!(
-            (r.positions[1].leverage_type, r.positions[1].leverage_value, r.positions[1].szi),
+            (r.positions[1].leverage_type, r.positions[1].leverage_value, r.positions[1].qty),
             (LeverageType::Cross, 3, SQty(-3_350_000))
         );
     }
@@ -854,7 +858,7 @@ mod tests {
             documented(r#"{"type": "clearinghouseState", "user": "0xUSER"}"#)
         );
         assert_eq!(
-            venue_setting_request("0xUSER", "APT"),
+            venue_setting_request("0xUSER", &InstrumentId::new("APT").unwrap()),
             documented(r#"{"type": "activeAssetData", "user": "0xUSER", "coin": "APT"}"#)
         );
         assert_eq!(

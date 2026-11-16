@@ -76,7 +76,7 @@ fn names(out: &Output) -> Vec<&'static str> {
 fn position(instrument: &str, max_leverage: u32) -> MarginPosition {
     MarginPosition {
         instrument: iid(instrument),
-        szi: sq("2"),
+        qty: sq("2"),
         position_value: amt("200"),
         margin_used: amt("100"),
         leverage_type: LeverageType::Isolated,
