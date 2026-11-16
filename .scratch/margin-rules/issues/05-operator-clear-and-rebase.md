@@ -13,7 +13,7 @@
 - [x] Test `strategy_socket_cannot_clear_reducing_or_rebase` (seam C, S14): fails when either command works from the strategy socket.
 - [x] Test `omsctl_clear_reduce_and_rebase_day_work_end_to_end` (seam C, S14): fails when the commands, their replies or the status fields (state, rule, day base) are not wired.
 - [x] Test `reducing_and_day_base_survive_a_node_kill` (seam C, S13): fails when after a kill and restart the status shows no latch or a new base.
-- [ ] Test `reducing_cancels_every_resting_plain_order_through_the_node` (seam C, S8, G7): fails when with many resting plain orders at the simulated venue one of them is still open after entry, or a reduce-only one is cancelled.
+- [x] Test `reducing_cancels_every_resting_plain_order_through_the_node` (seam C, S8, G7): fails when with many resting plain orders at the simulated venue one of them is still open after entry, or a reduce-only one is cancelled.
 - [ ] Test `stopped_before_the_write_of_a_reducing_decision_the_next_report_decides_again` (seam C, crash point, G4): fails when after restart the latch or its cancels exist without a journal record, or the next breaching report does not latch.
 - [ ] Test `stopped_after_the_reducing_decision_is_durable_the_cancels_are_sent_after_restart` (seam C, crash point, G4): fails when after restart the latch is missing, or a recorded rule cancel is never sent.
 - [ ] Test `stopped_around_a_day_base_set_the_base_is_set_exactly_once` (seam C, crash point, G4): fails when after restart the base is missing, doubled, or differs from the report that set it.

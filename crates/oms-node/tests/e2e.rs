@@ -949,3 +949,100 @@ fn reducing_and_day_base_survive_a_node_kill() {
     assert_eq!(st["core"]["margin"]["day_base"], cleared["day_base"]);
     assert_eq!(st["core"]["margin"]["day_base"]["set_by"], "operator");
 }
+
+/// Places one resting order and returns its id. A refusal that is only a
+/// matter of pace (too many sends outstanding, the reference price not yet
+/// arrived) is tried again.
+fn rest(env: &mut Env, c: &mut oms_api::client::Client, key: &str, side: Side, px: &str, reduce_only: bool) -> OrderId {
+    for attempt in 0..100 {
+        let Op::NewOrder { client_order_id, instrument, side, qty, px, tif, expires_at, .. } =
+            order_op(&format!("{key}-{attempt}"), side, "1", px, Tif::Gtc, 60_000)
+        else {
+            unreachable!()
+        };
+        let op = Op::NewOrder { client_order_id, instrument, side, qty, px, tif, reduce_only, expires_at };
+        match c.new_order(op).unwrap() {
+            NewOrderReply::Accepted { order_id } => return order_id,
+            NewOrderReply::Rejected { reasons }
+                if reasons.iter().all(|r| matches!(r, RejectReason::GatewayBusy | RejectReason::MarginUnavailable)) =>
+            {
+                env.ctl(json!({"ref_price": {"instrument": "X", "px": "100"}}));
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            other => panic!("order {key} was refused: {other:?}"),
+        }
+    }
+    panic!("order {key} was never accepted");
+}
+
+/// The venue's own list of orders that are open, by client id.
+fn open_at_venue(env: &mut Env) -> std::collections::BTreeSet<String> {
+    let dump = env.venue_dump();
+    dump["orders"]
+        .as_array()
+        .expect("orders")
+        .iter()
+        .filter(|o| o["status"] == "open")
+        .map(|o| o["client"].as_str().expect("client id").to_string())
+        .collect()
+}
+
+/// S8, G7. Entry into REDUCING through a real node with many orders resting
+/// at the simulated venue: 300 plain orders of two strategies and 3
+/// reduce-only orders. After the loss report every plain order is cancelled
+/// at the venue and the three reduce-only orders are still open there. The
+/// burst of 300 cancels leaves the node working: margin reports keep
+/// arriving.
+#[test]
+fn reducing_cancels_every_resting_plain_order_through_the_node() {
+    let mut env = margin_node("margin-burst", "100000");
+    env.ctl(json!({"ref_price": {"instrument": "X", "px": "100"}}));
+    let mut a = env.client("a");
+    let mut b = env.client("b");
+    // Exposure: 150 buys at max(90, 100) = 15 000 against 150 sells at 110
+    // plus 3 at 120 = 16 860. Far below 2 x 100 000.
+    let mut plain = std::collections::BTreeSet::new();
+    for n in 0..150 {
+        let id = rest(&mut env, &mut a, &format!("bid{n}"), Side::Buy, "90", false);
+        plain.insert(env.cloid(id));
+        let id = rest(&mut env, &mut b, &format!("ask{n}"), Side::Sell, "110", false);
+        plain.insert(env.cloid(id));
+    }
+    let mut flagged = std::collections::BTreeSet::new();
+    for n in 0..3 {
+        let id = rest(&mut env, &mut a, &format!("flagged{n}"), Side::Sell, "120", true);
+        flagged.insert(env.cloid(id));
+    }
+    assert_eq!((plain.len(), flagged.len()), (300, 3));
+    assert!(
+        env.wait(Duration::from_secs(10), || env.status()["core"]["working"] == 303),
+        "the orders never rested: {}",
+        env.status()["core"]
+    );
+    let all: std::collections::BTreeSet<String> = plain.union(&flagged).cloned().collect();
+    assert_eq!(open_at_venue(&mut env), all);
+
+    // The account loses 5.001 % of the base.
+    lose_to(&mut env, "94999");
+    let mut left = open_at_venue(&mut env);
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    while left != flagged && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+        left = open_at_venue(&mut env);
+    }
+    let plain_left: Vec<&String> = left.intersection(&plain).collect();
+    assert!(plain_left.is_empty(), "{} plain orders are still open at the venue after entry", plain_left.len());
+    assert_eq!(left, flagged, "a reduce-only order was cancelled");
+    // The node agrees with the venue once the cancels are confirmed.
+    assert!(
+        env.wait(Duration::from_secs(10), || env.status()["core"]["open_orders"] == 3),
+        "the node still counts {} open orders",
+        env.status()["core"]["open_orders"]
+    );
+    let st = env.status();
+    assert_eq!(st["core"]["holds"], json!(["reducing"]));
+    assert_eq!(st["core"]["mismatches_unacked"], json!([]));
+    // After the burst the margin poll still runs.
+    let seq = st["core"]["margin"]["seq"].as_u64().expect("seq");
+    wait_margin(&env, "reports after the cancel burst", |m| m["seq"].as_u64().is_some_and(|n| n >= seq + 3));
+}
