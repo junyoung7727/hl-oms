@@ -263,12 +263,12 @@ id = "V-SIM-1"
 statement = "네트워크 장애, 통보 중복·지연, 링크 단절, 프로세스 재시작, 키 삭제가 임의로 섞인 실행의 매 단계에서: 구조 불변조건이 성립하고, 거래소의 실제 포지션이 OMS가 설명하는 범위 안에 있고, 한도를 넘지 않고, 같은 주문이 두 번 전송되지 않는다"
 why = "예제 시험이 생각하지 못한 순서를 찾는다. 실제로 결함 넷을 찾아 고쳤다"
 level = "시뮬레이션"
-scope = "프로파일 6개(calm, lossy, crashy, weak_evidence, purge, skewed)와 증거금 정책을 켠 2개(margin_calm, margin_lossy: 증거금 검사는 V-MARGIN-12). 실행당 1500단계. seed 수는 결과의 notes에 있다. 한 종목, 두 전략, 가상 시계"
+scope = "프로파일 6개(calm, lossy, crashy, weak_evidence, purge, skewed)와 증거금 정책을 켠 3개(margin_calm, margin_lossy, margin_days: 증거금 검사는 V-MARGIN-12). 실행당 1500단계(margin_days는 가상 시간 50시간, 약 15 000단계이고 seed는 10분의 1). seed 수는 결과의 notes에 있다. 한 종목, 두 전략, 가상 시계"
 real = "oms-core의 판단과 상태"
 simulated = "저널과 커밋 게이트(내구 접두부 모델), 게이트웨이, 네트워크, 거래소, 전략, 시계"
 faults = "요청 유실 4%, 요청 지연 6%(만료를 넘기기도), 응답 유실 8%, 미전송 3%, 스트림 중복 15%·지연 20%, 조회 유실 10%, 링크 단절, 재시작 1.2%/단계, 거래소 시계 1초 지연"
 criterion = "불변조건 I-RES, I-BOOK, I-ATTR, I-KEY, I-FILL, I-PHASE, I-QTY, I-BRIDGE, I-ONCE. 비교 대상은 가상 거래소가 따로 유지하는 실제 장부다"
-tests = ["sim/profile_calm", "sim/profile_lossy", "sim/profile_crashy", "sim/profile_weak_evidence", "sim/profile_purge", "sim/profile_skewed", "sim/profile_margin_calm", "sim/profile_margin_lossy"]
+tests = ["sim/profile_calm", "sim/profile_lossy", "sim/profile_crashy", "sim/profile_weak_evidence", "sim/profile_purge", "sim/profile_skewed", "sim/profile_margin_calm", "sim/profile_margin_lossy", "sim/profile_margin_days_crosses_three_utc_days_with_restarts"]
 repro = "OMS_SIM_SEEDS=400 cargo test --release -p oms-sim --test sim -- --nocapture   (실패 시: OMS_SIM_PROFILE=<이름> OMS_SIM_SEED=<n>)"
 supports = "I-QTY, I-BRIDGE, I-ONCE, 구조 불변조건"
 not_covered = "실제 저널·스레드·소켓. 여러 종목. 설정 변경. 운영자 조정. 장애가 계속되는 프로파일에서는 요청의 대부분이 차단으로 거절된다. 수용 비율은 결과의 notes에 있다"
@@ -995,18 +995,18 @@ not_covered = "거래소의 격리 포지션 marginUsed가 그 포지션의 자�
 
 [[claim]]
 id = "V-MARGIN-12"
-statement = "시뮬레이션의 가상 거래소는 계좌 가치를 자기 모형으로 계산한다: 현금 + 포지션 × 기준 가격. 체결은 낸 값과 수수료만큼, 펀딩은 그 금액만큼 현금을 줄이고, 가격 변화는 포지션 가치를 바꾼다. 손으로 푼 예(입금 100, 100에 0.5 매수와 수수료 0.01, 가격 104, 펀딩 0.1 %)에서 계좌 가치는 99.99, 101.99, 101.938이다. 가격이 움직이지 않아도 수수료와 펀딩만으로 계좌가 기준 금액보다 5 %를 넘게 내려가면 감소 전용 상태로 들어간다(100에서 95.00은 아니고 94.99는 들어간다). 가상 거래소는 포지션을 키우거나 반대쪽으로 넘기는 감소 전용 주문을 거절하고, 걸려 있는 감소 전용 주문은 남은 포지션만큼만 체결한 뒤 나머지를 취소한다. 증거금 정책을 켠 임의 순서의 실행(체결, 가격 변화, 펀딩, 운영자 해제, 그리고 margin_lossy에서는 보고 유실·지연·무응답, 링크 단절, 재시작)의 매 입력 뒤에: 받아들인 일반 주문은 신선한 보고가 있었고 노출이 계좌 가치의 2배 이내이거나 노출을 올리지 않았다. 감소 전용 상태에 들어가면 열려 있는 일반 주문마다 취소 요청이 있고, 그 상태인 동안 일반 주문은 받아들여지지 않는다. 감소 전용 상태는 증거금 보고로만 들어가고 운영자의 해제로만 끝난다(재시작, 새 UTC 날, 회복된 계좌 가치는 끝내지 않는다). 보고가 한도보다 오래 끊긴 뒤의 틱이 끝나면 열려 있는 일반 주문마다 취소 요청이 있다. 증거금 정책이 없는 기존 프로파일 일곱 개는 seed 다섯 개씩 main(84db0f9)에서 기록한 것과 같은 저널을 쓴다. 가상 시간 50시간짜리 실행(margin_days: UTC 자정 1시간 전에 시작해 자정을 세 번 넘고, 그 사이에 재시작, 링크 단절, 손실, 출금과 입금, 운영자의 해제와 기준 재설정이 섞인다)에서도 위 검사가 매 입력 뒤에 성립하고, 저널의 기준 금액은 실행마다 자정을 정확히 세 번 넘는다"
+statement = "시뮬레이션의 가상 거래소는 계좌 가치를 자기 모형으로 계산한다: 현금 + 포지션 × 기준 가격. 체결은 낸 값과 수수료만큼, 펀딩은 그 금액만큼 현금을 줄이고, 가격 변화는 포지션 가치를 바꾼다. 손으로 푼 예(입금 100, 100에 0.5 매수와 수수료 0.01, 가격 104, 펀딩 0.1 %)에서 계좌 가치는 99.99, 101.99, 101.938이다. 가격이 움직이지 않아도 수수료와 펀딩만으로 계좌가 기준 금액보다 5 %를 넘게 내려가면 감소 전용 상태로 들어간다(100에서 95.00은 아니고 94.99는 들어간다). 가상 거래소는 포지션을 키우거나 반대쪽으로 넘기는 감소 전용 주문을 거절하고, 걸려 있는 감소 전용 주문은 남은 포지션만큼만 체결한 뒤 나머지를 취소한다. 증거금 정책을 켠 임의 순서의 실행(체결, 가격 변화, 펀딩, 운영자 해제, 그리고 margin_lossy에서는 보고 유실·지연·무응답, 링크 단절, 재시작)의 매 입력 뒤에: 받아들인 일반 주문은 신선한 보고가 있었고 노출이 계좌 가치의 2배 이내이거나 노출을 올리지 않았다. 감소 전용 상태에 들어가면 열려 있는 일반 주문마다 취소 요청이 있고, 그 상태인 동안 일반 주문은 받아들여지지 않는다. 감소 전용 상태는 증거금 보고로만 들어가고 운영자의 해제로만 끝난다(재시작, 새 UTC 날, 회복된 계좌 가치는 끝내지 않는다). 보고가 한도보다 오래 끊긴 뒤의 틱이 끝나면 열려 있는 일반 주문마다 취소 요청이 있다. 증거금 정책이 없는 기존 프로파일 일곱 개는 seed 다섯 개씩 main(84db0f9)에서 기록한 것과 같은 저널을 쓴다. 가상 시간 50시간짜리 실행(margin_days: UTC 자정 1시간 전에 시작해 자정을 세 번 넘고, 그 사이에 재시작, 링크 단절, 손실, 출금과 입금, 운영자의 해제와 기준 재설정이 섞인다)에서도 위 검사가 매 입력 뒤에 성립하고, 기록된 보고가 그 전의 기준 금액보다 5 %를 넘게 낮으면 그 보고가 새 날의 기준을 정하는 보고여도 계좌는 감소 전용 상태가 되고, 저널의 기준 금액은 실행마다 자정을 정확히 세 번 넘고, 재시작과 새 날은 감소 전용 상태를 끝내지 않는다. 정해진 순서 하나(자정을 넘는 20초의 조회 끊김 동안 100에서 6 출금, 재시작, 자정 두 번 더)에서 새 날의 첫 보고 94는 상태를 걸고 나서 기준이 되고, 저널에는 날마다 기준이 하나다(100, 94, 100, 99). 저널의 증거금 기록(입력이 증거금 보고인 기록)은 조회 한 번에 하나를 넘지 않는다: 조용한 하루는 조회 17 280번에 기록 17 280건이고, 50시간 실행에서 기록 수는 조회 수 이하이고 같은 조회의 답은 두 번 기록되지 않는다"
 why = "일 손실 규칙은 거래소가 말한 계좌 가치만 읽는다. 시뮬레이션이 그 값을 체결·가격·수수료·펀딩에서 스스로 만들어야 규칙을 임의 순서의 실행에서 볼 수 있다. 예제 시험이 생각하지 못한 순서(취소 중의 진입, 재시작 직후의 보고, 앞지른 늦은 보고)는 여기서만 나온다"
 level = "시뮬레이션"
 scope = "가상 거래소의 증거금 모형(단위 3건). 프로파일 margin_calm, margin_lossy: 실행당 1500단계, 한 종목, 두 전략, 계좌 100, 증거금 시계는 계약 기본값의 50분의 1(조회 100 ms, 신선도 600 ms, 끊김 취소 1.2초), UTC 자정을 한 번 넘는다. 프로파일 margin_days: 가상 시간 50시간, 증거금 시계는 계약 기본값(조회 5초, 신선도 30초, 끊김 취소 60초), UTC 자정을 세 번 넘는다. 활동은 묶음으로 오고 그 사이 5초~10분은 타이머만 돈다. seed는 표준 실행의 10분의 1(최소 2개). 기존 프로파일 7개 × seed 5개의 저널 해시"
 real = "oms-core의 판단과 상태"
 simulated = "거래소와 그 증거금 모형(우리 모형이고 거래소의 문서화된 산술이 아니다), 저널과 커밋 게이트, 게이트웨이, 네트워크, 전략, 운영자, 시계"
-faults = "margin_calm: 없음. margin_lossy: lossy의 네트워크 장애, 링크 단절 0.3 %/단계, 재시작 0.2 %/단계, 증거금 조회 무응답 0.5~2.5초, 늦은 응답, 포지션 증거금을 0으로 말하는 거래소"
-criterion = "모형은 손으로 푼 예의 값. 실행은 검사 leverage-gate, margin-fresh, reducing-cancel, reducing-accept, reducing-entry, reducing-release, stale-cancel(노출은 세계가 코어의 장부에서 따로 계산한다)과 V-SIM-1, V-SIM-2의 검사. 프로파일이 각 규칙에 닿았는지는 seed 40개부터 확인한다. 저널 해시는 main에서 기록한 상수와 비교한다"
+faults = "margin_calm: 없음. margin_lossy: lossy의 네트워크 장애, 링크 단절 0.3 %/단계, 재시작 0.2 %/단계, 증거금 조회 무응답 0.5~2.5초, 늦은 응답, 포지션 증거금을 0으로 말하는 거래소. margin_days: margin_lossy의 장애(링크 단절 0.2 %/단계, 재시작 0.1 %/단계, 실행당 약 15 000단계), 증거금 조회 무응답 1분~1시간과 자정 둘 중 하나를 넘는 무응답, 두 번 도착하는 증거금 응답 5 %, 출금과 입금, 운영자의 기준 재설정"
+criterion = "모형은 손으로 푼 예의 값. 실행은 검사 leverage-gate, margin-fresh, reducing-cancel, reducing-accept, reducing-entry, reducing-release, stale-cancel, daily-loss(노출과 손실은 세계가 코어의 장부와 보고에서 따로 계산한다)와 V-SIM-1, V-SIM-2의 검사. 프로파일이 각 규칙에 닿았는지는 seed 40개부터 확인한다(margin_days는 흔한 것은 4개부터, 자정에 관한 것은 40개부터). 저널 해시는 main에서 기록한 상수와 비교한다. 여러 날 실행의 기대값(기준 금액, 17 280)은 손으로 적었다. 변이 M89~M100"
 tests = ["sim/world_account_value_follows_fills_price_fees_and_funding", "sim/a_loss_made_only_of_fees_and_funding_enters_reducing", "sim/world_refuses_a_reduce_only_order_that_would_grow_the_position", "sim/profile_margin_calm", "sim/profile_margin_calm_reducing_invariant", "sim/profile_margin_calm_release_invariant", "sim/profile_margin_lossy", "sim/existing_profiles_give_the_same_run_with_margin_off", "sim/profile_margin_days_crosses_three_utc_days_with_restarts", "sim/margin_journal_records_stay_within_one_per_poll"]
-repro = "cargo test -p oms-sim --test sim -- world_ a_loss_made profile_margin existing_profiles --nocapture   (실패 시: OMS_SIM_PROFILE=<이름> OMS_SIM_SEED=<n>)"
+repro = "cargo test -p oms-sim --test sim -- world_ a_loss_made profile_margin margin_journal existing_profiles --nocapture   (실패 시: OMS_SIM_PROFILE=<이름> OMS_SIM_SEED=<n>)"
 supports = "C-MARGIN"
-not_covered = "실제 거래소에 관한 것 전부: 계좌 가치와 증거금의 계산(T1, T2), 수수료와 펀딩이 어느 잔고에서 나가는지(T3), 감소 전용 주문의 처리(T5, 문서 인용을 가정으로 적었다). 취소가 체결보다 먼저 닿는 것. 주문을 받은 뒤 가격이 움직여 넘은 노출. 청산(모형에 없다). 증거금 구간. 여러 종목. 여러 UTC 날(티켓 11)"
+not_covered = "실제 거래소에 관한 것 전부: 계좌 가치와 증거금의 계산(T1, T2), 수수료와 펀딩이 어느 잔고에서 나가는지(T3), 감소 전용 주문의 처리(T5, 문서 인용을 가정으로 적었다). 취소가 체결보다 먼저 닿는 것. 주문을 받은 뒤 가격이 움직여 넘은 노출. 청산(모형에 없다). 증거금 구간. 여러 종목. 노드 프로세스를 실제로 며칠 돌리는 것(여러 날 실행은 가상 시간이다). 저널의 디스크 바이트(건수만 센다. 저널은 지워지지 않는다, U-04)와 증거금 기록이 아닌 기록의 수. margin_days의 seed는 표준 실행의 10분의 1이다"
 
 [[claim]]
 id = "V-MARGIN-10"

@@ -891,6 +891,42 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "oms-sim", "--test", "sim", "profile_margin_calm_release_invariant"],
         guards: "C-MARGIN / REDUCING release, simulation",
     },
+    Mutant {
+        id: "M97-sim-day-roll-absorbs-loss",
+        what: "a report sets the new day's base before it is judged against the old one (seen by the simulation over days)",
+        file: "crates/oms-core/src/decide.rs",
+        find: "        self.judge_daily_loss(r)?;\n        self.roll_day_base(r)\n",
+        replace: "        self.roll_day_base(r)?;\n        self.judge_daily_loss(r)\n",
+        test: &["-p", "oms-sim", "--test", "sim", "profile_margin_days_crosses_three_utc_days_with_restarts"],
+        guards: "C-MARGIN / day base, simulation over days",
+    },
+    Mutant {
+        id: "M98-sim-base-reset-within-day",
+        what: "every report of the same UTC day sets the day base again (seen by the simulation over days)",
+        file: "crates/oms-core/src/decide.rs",
+        find: "is_some_and(|base| day <= base.day)",
+        replace: "is_some_and(|base| day < base.day)",
+        test: &["-p", "oms-sim", "--test", "sim", "profile_margin_days_crosses_three_utc_days_with_restarts"],
+        guards: "C-MARGIN / day base, simulation over days",
+    },
+    Mutant {
+        id: "M99-sim-boot-forgets-day-base",
+        what: "a restart forgets the day base, so the next report sets it again (seen by the simulation over days)",
+        file: "crates/oms-core/src/core.rs",
+        find: "                self.boot = *boot;\n                self.link.up = false;",
+        replace: "                self.boot = *boot;\n                self.margin.day_base = None;\n                self.link.up = false;",
+        test: &["-p", "oms-sim", "--test", "sim", "profile_margin_days_crosses_three_utc_days_with_restarts"],
+        guards: "C-MARGIN / day base across a restart, simulation over days",
+    },
+    Mutant {
+        id: "M100-sim-repeated-poll-recorded",
+        what: "a margin answer that arrives twice is journalled twice (seen by the record count of the simulation over days)",
+        file: "crates/oms-core/src/decide.rs",
+        find: "if last_seq.is_some_and(|last| r.seq <= last) {",
+        replace: "if last_seq.is_some_and(|last| r.seq < last) {",
+        test: &["-p", "oms-sim", "--test", "sim", "margin_journal_records_stay_within_one_per_poll"],
+        guards: "C-MARGIN / journal growth, simulation over days",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
