@@ -161,3 +161,39 @@ async fn a_margin_query_the_gateway_had_no_room_for_goes_out_on_the_next_round()
         other => panic!("no margin query within 1 s of room in the queue: {other:?}"),
     }
 }
+
+/// The venue never tells the setting of X nor the account mode (its
+/// answers are lost or unreadable). The reconciler asks for each when the
+/// link session starts and then not again before `venue_setting_poll_ms`:
+/// the request budget counts one venue-setting query per instrument and
+/// poll period. With a period of 10 s, 2.5 s see one query of each kind.
+#[tokio::test(flavor = "current_thread")]
+async fn an_unanswered_setting_or_mode_query_is_repeated_at_the_setting_period_only() {
+    let published = Arc::new(Published::new(synced_core(), 0));
+    let (queries, mut issued) = mpsc::channel::<QueryReq>(64);
+    let round = Duration::from_millis(10);
+    let setting_period = Duration::from_secs(10);
+    tokio::spawn(reconciler::run(
+        published,
+        queries,
+        round,
+        HOUR,
+        HOUR,
+        setting_period,
+    ));
+
+    tokio::time::sleep(Duration::from_millis(2_500)).await;
+    let (mut settings, mut modes) = (0, 0);
+    while let Ok(q) = issued.try_recv() {
+        match q {
+            QueryReq::VenueSetting { instrument } => {
+                assert_eq!(instrument.as_str(), "X");
+                settings += 1;
+            }
+            QueryReq::AccountMode => modes += 1,
+            QueryReq::Margin { .. } => {}
+            other => panic!("a query nothing asked for: {other:?}"),
+        }
+    }
+    assert_eq!((settings, modes), (1, 1));
+}

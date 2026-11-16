@@ -12,10 +12,10 @@
 //! With a margin policy it also asks for a margin report on its own timer
 //! (C-MARGIN). Each such query gets a number that only rises while this
 //! process lives, so it rises within every link session. It asks for the
-//! venue setting of an instrument and for the account mode while the core
-//! does not know them in the current link session, and again for the
-//! setting of every instrument without a position on a second timer. It
-//! never asks the venue to change either.
+//! venue setting of an instrument and for the account mode when a link
+//! session starts, again while the core does not know them, and again for
+//! the setting of every instrument without a position, each at most once
+//! per `venue_setting_poll_ms`. It never asks the venue to change either.
 
 use super::QueryReq;
 use crate::published::Published;
@@ -44,7 +44,9 @@ pub async fn run(
     margin_poll: Duration,
     venue_setting_poll: Duration,
 ) {
-    let mut last_setting_poll = Instant::now();
+    let mut session_seen: u64 = 0;
+    let mut setting_asked: HashMap<InstrumentId, Instant> = HashMap::new();
+    let mut mode_asked: Option<Instant> = None;
     let mut margin_seq: u64 = 0;
     let mut last_margin: Option<Instant> = None;
     let mut asked: HashMap<OrderId, (u32, Instant)> = HashMap::new();
@@ -54,7 +56,7 @@ pub async fn run(
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tick.tick().await;
-        let (needs, link_up, fills_since, margin_rules, settings_unknown, mode_unknown, flat) = {
+        let (needs, link_up, session, fills_since, margin_rules, settings_unknown, mode_unknown, flat) = {
             let p = published.read();
             let margin_rules = p.core.config.policy.margin.is_some();
             // Instruments whose venue setting the core has not been told in
@@ -73,6 +75,7 @@ pub async fn run(
             (
                 p.core.needs(),
                 p.core.link.up,
+                p.core.link.session,
                 p.core.sync.fills_up_to.max(p.core.fill_floor),
                 margin_rules,
                 settings_unknown,
@@ -144,29 +147,46 @@ pub async fn run(
                 Err(_) => {}
             }
         }
-        // A venue setting that is not known yet is asked for at once and
-        // then once per second until the answer is recorded.
-        let mut settings_wanted: Vec<InstrumentId> = Vec::new();
-        if !settings_unknown.is_empty() && due(&mut last_account, "venue_settings", now) {
-            settings_wanted = settings_unknown;
+        // Venue settings and the account mode are told per link session,
+        // so their timers start again with each session.
+        if session != session_seen {
+            session_seen = session;
+            setting_asked.clear();
+            mode_asked = None;
         }
-        // A setting that is known can be changed at the venue at any time:
-        // it is asked for again on a timer.
-        if margin_rules && now.duration_since(last_setting_poll) >= venue_setting_poll {
-            last_setting_poll = now;
-            for instrument in flat {
-                if !settings_wanted.contains(&instrument) {
-                    settings_wanted.push(instrument);
+        // A venue setting is asked for when the core does not know it in
+        // this link session (at once when the session starts), and when
+        // the instrument has no position (a known setting can be changed
+        // at the venue at any time, and no margin report states it). Each
+        // instrument is asked about at most once per `venue_setting_poll`,
+        // answered or not: the request budget counts exactly that. The
+        // timer moves only when the gateway took the query.
+        let asked_about = settings_unknown.iter().chain(flat.iter().filter(|i| !settings_unknown.contains(i)));
+        for instrument in asked_about.filter(|_| margin_rules) {
+            let waited = setting_asked.get(instrument).is_none_or(|t| now.duration_since(*t) >= venue_setting_poll);
+            if !waited {
+                continue;
+            }
+            let query = QueryReq::VenueSetting {
+                instrument: instrument.clone(),
+            };
+            match queries.try_send(query) {
+                Ok(()) => {
+                    setting_asked.insert(instrument.clone(), now);
                 }
+                Err(_) if queries.is_closed() => return,
+                Err(_) => {}
             }
         }
-        for instrument in settings_wanted {
-            wanted.push(QueryReq::VenueSetting { instrument });
-        }
-        // The account mode is asked for once per link session: at link-up,
-        // and again each second until the answer is recorded.
-        if mode_unknown && due(&mut last_account, "account_mode", now) {
-            wanted.push(QueryReq::AccountMode);
+        // The account mode is read once per link session. While the core
+        // has no answer it is asked for again at the same pace as a
+        // setting, not faster.
+        if mode_unknown && mode_asked.is_none_or(|t| now.duration_since(t) >= venue_setting_poll) {
+            match queries.try_send(QueryReq::AccountMode) {
+                Ok(()) => mode_asked = Some(now),
+                Err(_) if queries.is_closed() => return,
+                Err(_) => {}
+            }
         }
         for q in wanted {
             // If the gateway is busy the query is simply not issued this
