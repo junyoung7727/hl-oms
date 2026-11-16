@@ -1467,11 +1467,17 @@ fn instrument_with_unknown_venue_setting_holds_plain_orders() {
     );
     assert_eq!(out.commands, vec![]);
     h.accept("a", "k1", Side::Buy, "1", "100");
-    assert_eq!(h.commands.len(), 1, "only the order itself went to the venue");
+    assert_eq!(
+        h.commands.len(),
+        1,
+        "only the order itself went to the venue"
+    );
 }
 
 fn venue_setting_hold(instrument: &str) -> Vec<RejectReason> {
-    vec![RejectReason::Hold(HoldReason::VenueSetting(iid(instrument)))]
+    vec![RejectReason::Hold(HoldReason::VenueSetting(iid(
+        instrument,
+    )))]
 }
 
 fn submit(h: &mut H, r: NewOrderReq) -> Result<OrderId, Vec<RejectReason>> {
@@ -1503,7 +1509,11 @@ fn a_setting_that_differs_from_config_holds_only_that_instrument() {
     for leverage in [3, 1] {
         h.venue_setting("X", true, leverage);
         let r = req_on(&h, "X", "x1", Side::Buy, "1", "100");
-        assert_eq!(submit(&mut h, r), Err(venue_setting_hold("X")), "leverage {leverage}");
+        assert_eq!(
+            submit(&mut h, r),
+            Err(venue_setting_hold("X")),
+            "leverage {leverage}"
+        );
     }
     let r = req_on(&h, "Y", "y2", Side::Buy, "1", "100");
     assert!(submit(&mut h, r).is_ok(), "the hold on X also held Y");
@@ -1528,7 +1538,10 @@ fn a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again() {
     h.ref_price("X", "100");
 
     h.venue_setting("X", false, 2);
-    assert_eq!(h.reject("a", "k1", Side::Buy, "1", "100"), venue_setting_hold("X"));
+    assert_eq!(
+        h.reject("a", "k1", Side::Buy, "1", "100"),
+        venue_setting_hold("X")
+    );
     h.venue_setting("X", true, 2);
     h.accept("a", "k1", Side::Buy, "1", "100");
 
@@ -1540,7 +1553,10 @@ fn a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again() {
     h.tell_account_mode();
     h.report_margin("1000");
     h.ref_price("X", "100");
-    assert_eq!(h.reject("a", "k2", Side::Buy, "1", "100"), venue_setting_hold("X"));
+    assert_eq!(
+        h.reject("a", "k2", Side::Buy, "1", "100"),
+        venue_setting_hold("X")
+    );
 
     // Told again in session 2: released.
     h.venue_setting("X", true, 2);
@@ -1549,7 +1565,11 @@ fn a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again() {
 
 /// The next margin report of the current link session: account value 1000
 /// and one position on X with this margin mode and leverage.
-fn report_with_position_on_x(h: &mut H, leverage_type: LeverageType, leverage_value: u32) -> Output {
+fn report_with_position_on_x(
+    h: &mut H,
+    leverage_type: LeverageType,
+    leverage_value: u32,
+) -> Output {
     h.margin_seq += 1;
     h.venue(VenueInput::MarginReport(MarginReportIn {
         session: h.session,
@@ -1581,11 +1601,17 @@ fn a_cross_position_in_a_margin_report_raises_the_hold() {
     // The next report shows the position on cross margin.
     let out = report_with_position_on_x(&mut h, LeverageType::Cross, 2);
     assert_eq!(names(&out), vec!["margin_reported"]);
-    assert_eq!(h.reject("a", "k2", Side::Buy, "1", "100"), venue_setting_hold("X"));
+    assert_eq!(
+        h.reject("a", "k2", Side::Buy, "1", "100"),
+        venue_setting_hold("X")
+    );
 
     // Isolated again, but at leverage 3.
     report_with_position_on_x(&mut h, LeverageType::Isolated, 3);
-    assert_eq!(h.reject("a", "k2", Side::Buy, "1", "100"), venue_setting_hold("X"));
+    assert_eq!(
+        h.reject("a", "k2", Side::Buy, "1", "100"),
+        venue_setting_hold("X")
+    );
 
     // A report that shows the policy's setting releases the hold.
     report_with_position_on_x(&mut h, LeverageType::Isolated, 2);
@@ -1646,7 +1672,11 @@ fn config_allowing(modes: &[&str]) -> CoreConfig {
 fn unified_or_portfolio_account_mode_holds_the_account() {
     // The operator listed both modes by mistake, next to a mode that is
     // allowed.
-    let mut h = H::ready_with(config_allowing(&["unifiedAccount", "portfolioMargin", "standard"]));
+    let mut h = H::ready_with(config_allowing(&[
+        "unifiedAccount",
+        "portfolioMargin",
+        "standard",
+    ]));
     h.report_margin("1000");
     h.ref_price("X", "100");
     h.ref_price("Y", "100");
@@ -1665,7 +1695,11 @@ fn unified_or_portfolio_account_mode_holds_the_account() {
         // The whole account: every instrument.
         for instrument in ["X", "Y"] {
             let r = req_on(&h, instrument, "k1", Side::Buy, "1", "100");
-            assert_eq!(submit(&mut h, r), Err(account_mode_hold()), "{mode} on {instrument}");
+            assert_eq!(
+                submit(&mut h, r),
+                Err(account_mode_hold()),
+                "{mode} on {instrument}"
+            );
         }
     }
 
@@ -1691,7 +1725,10 @@ fn an_account_mode_off_the_allow_list_or_unknown_holds_the_account() {
 
     // The venue has not told the mode in this link session.
     assert_eq!(h.core.holds(None), vec![HoldReason::AccountMode]);
-    assert_eq!(h.reject("a", "k1", Side::Buy, "1", "100"), account_mode_hold());
+    assert_eq!(
+        h.reject("a", "k1", Side::Buy, "1", "100"),
+        account_mode_hold()
+    );
 
     // The listed mode releases the account.
     h.account_mode("standard");
@@ -1701,7 +1738,11 @@ fn an_account_mode_off_the_allow_list_or_unknown_holds_the_account() {
     // A mode that is not listed, and an empty answer.
     for mode in ["dexAbstraction", "Standard", ""] {
         h.account_mode(mode);
-        assert_eq!(h.reject("a", "k2", Side::Buy, "1", "100"), account_mode_hold(), "mode {mode:?}");
+        assert_eq!(
+            h.reject("a", "k2", Side::Buy, "1", "100"),
+            account_mode_hold(),
+            "mode {mode:?}"
+        );
     }
     h.account_mode("standard");
     h.accept("a", "k2", Side::Buy, "1", "100");
@@ -1720,7 +1761,10 @@ fn an_account_mode_off_the_allow_list_or_unknown_holds_the_account() {
     });
     assert_eq!(names(&out), Vec::<&str>::new());
     assert_eq!(h.core.holds(None), vec![HoldReason::AccountMode]);
-    assert_eq!(h.reject("a", "k3", Side::Buy, "1", "100"), account_mode_hold());
+    assert_eq!(
+        h.reject("a", "k3", Side::Buy, "1", "100"),
+        account_mode_hold()
+    );
     h.account_mode("standard");
     h.accept("a", "k3", Side::Buy, "1", "100");
 
@@ -1752,15 +1796,23 @@ fn reduce_only_order_passes_the_venue_setting_and_account_mode_holds() {
 
     // The instrument is on cross margin at leverage 3.
     h.venue_setting("X", false, 3);
-    assert_eq!(h.reject("a", "p1", Side::Sell, "1", "100"), venue_setting_hold("X"));
-    let id = reduce_only_sell(&mut h, "r1").expect("the venue-setting hold refused a reduce-only order");
+    assert_eq!(
+        h.reject("a", "p1", Side::Sell, "1", "100"),
+        venue_setting_hold("X")
+    );
+    let id =
+        reduce_only_sell(&mut h, "r1").expect("the venue-setting hold refused a reduce-only order");
     assert_eq!(h.sends().last(), Some(&id));
 
     // The setting is right again; the account is in unified mode.
     h.venue_setting("X", true, 2);
     h.account_mode("unifiedAccount");
-    assert_eq!(h.reject("a", "p2", Side::Sell, "1", "100"), account_mode_hold());
-    let id = reduce_only_sell(&mut h, "r2").expect("the account-mode hold refused a reduce-only order");
+    assert_eq!(
+        h.reject("a", "p2", Side::Sell, "1", "100"),
+        account_mode_hold()
+    );
+    let id =
+        reduce_only_sell(&mut h, "r2").expect("the account-mode hold refused a reduce-only order");
     assert_eq!(h.sends().last(), Some(&id));
 
     // A new link session in which the venue has told neither: both holds
@@ -1775,7 +1827,8 @@ fn reduce_only_order_passes_the_venue_setting_and_account_mode_holds() {
             RejectReason::Hold(HoldReason::AccountMode),
         ]
     );
-    let id = reduce_only_sell(&mut h, "r3").expect("unknown setting and mode refused a reduce-only order");
+    let id = reduce_only_sell(&mut h, "r3")
+        .expect("unknown setting and mode refused a reduce-only order");
     assert_eq!(h.sends().last(), Some(&id));
     // The holds are still there.
     assert_eq!(
