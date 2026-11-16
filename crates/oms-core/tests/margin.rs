@@ -631,7 +631,14 @@ fn resting(h: &mut H, strategy: &str, key: &str, side: Side, qty: &str, price: &
 }
 
 /// A resting order with the venue's reduce-only flag.
-fn resting_reduce_only(h: &mut H, strategy: &str, key: &str, side: Side, qty: &str, price: &str) -> OrderId {
+fn resting_reduce_only(
+    h: &mut H,
+    strategy: &str,
+    key: &str,
+    side: Side,
+    qty: &str,
+    price: &str,
+) -> OrderId {
     let r = h.reduce_only_req(strategy, key, side, qty, price);
     let id = match h.new_order(r) {
         NewOrderReply::Accepted { order_id } => order_id,
@@ -691,7 +698,10 @@ fn entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones() {
     let take_profit = resting(&mut h, "a", "tp", Side::Sell, "0.5", "110");
     let flagged = resting_reduce_only(&mut h, "a", "flagged", Side::Sell, "0.5", "120");
     let asked = resting(&mut h, "b", "asked", Side::Buy, "0.2", "90");
-    assert_eq!(h.cancel("b", asked), CancelReply::Requested { order_id: asked });
+    assert_eq!(
+        h.cancel("b", asked),
+        CancelReply::Requested { order_id: asked }
+    );
     assert_eq!(h.cancels(), vec![(asked, 1)]);
     let given_up = resting(&mut h, "b", "given-up", Side::Buy, "0.2", "90");
     h.cancel("b", given_up);
@@ -976,7 +986,10 @@ fn first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day
     let out = h.report_margin("94.99");
     assert_eq!(
         out.events[1..],
-        [daily_loss_entered("94.99", "100"), base_set(20_003, "94.99")]
+        [
+            daily_loss_entered("94.99", "100"),
+            base_set(20_003, "94.99")
+        ]
     );
     h.advance(5 * SEC);
     let out = h.report_margin("94.99");
@@ -1137,7 +1150,9 @@ fn an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing() {
     let r = h.reduce_only_req("a", "k2", Side::Sell, "0.5", "100");
     let order_id = match h.new_order(r) {
         NewOrderReply::Accepted { order_id } => order_id,
-        other => panic!("a reduce-only order was refused after an external fill and a loss: {other:?}"),
+        other => {
+            panic!("a reduce-only order was refused after an external fill and a loss: {other:?}")
+        }
     };
     assert_eq!(h.sends().last(), Some(&order_id));
     assert_eq!(
