@@ -316,7 +316,7 @@ fn stopped_around_a_day_base_set_the_base_is_set_exactly_once() {
     ] {
         let mut env = Env::new(&format!("crash-day-base-{point}"));
         env.extra_runtime = "margin_poll_ms = 100".into();
-        env.extra_policy = "\n[core.policy.margin]\n".into();
+        env.extra_policy = "\n[core.policy.margin]\naccount_modes_allowed = [\"standard\"]\n".into();
         env.node_env = crash_on(point, "day_base_set");
         env.ctl(json!({"account_value": {"value": "100"}}));
         env.start_node();

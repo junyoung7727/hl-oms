@@ -175,6 +175,7 @@ pub fn run(cfg: NodeConfig) -> i32 {
             Duration::from_millis(cfg.runtime.reconcile_ms),
             Duration::from_millis(cfg.runtime.sweep_ms),
             Duration::from_millis(cfg.runtime.margin_poll_ms),
+            Duration::from_millis(cfg.runtime.venue_setting_poll_ms),
         ));
         let tick_queues = queues.clone();
         let tick_ms = cfg.runtime.tick_ms.max(10);

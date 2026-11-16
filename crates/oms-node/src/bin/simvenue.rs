@@ -27,6 +27,12 @@ struct State {
     refuse_streams: bool,
     requests: u64,
     margin_queries: u64,
+    /// Margin mode and leverage per instrument, where a control changed
+    /// them. Every other instrument is isolated at leverage 2.
+    venue_settings: std::collections::BTreeMap<InstrumentId, VenueSettingResult>,
+    account_mode: String,
+    venue_setting_queries: u64,
+    account_mode_queries: u64,
 }
 
 fn now_us() -> Ts {
@@ -169,6 +175,20 @@ impl State {
                     account_value: self.venue.account_value,
                 }))
             }
+            SimOp::VenueSetting { instrument } => {
+                self.venue_setting_queries += 1;
+                let setting = self.venue_settings.get(&instrument).cloned().unwrap_or(VenueSettingResult {
+                    isolated: true,
+                    leverage: 2,
+                });
+                Ok(json(&setting))
+            }
+            SimOp::AccountMode => {
+                self.account_mode_queries += 1;
+                Ok(json(&AccountModeResult {
+                    mode: self.account_mode.clone(),
+                }))
+            }
             SimOp::Subscribe => Err("subscribe is handled by the connection".into()),
             SimOp::Ctl { action } => self.ctl(action, now),
         }
@@ -236,6 +256,18 @@ impl State {
                 self.venue.account_value = value;
                 Ok(serde_json::Value::Null)
             }
+            Ctl::VenueSetting {
+                instrument,
+                isolated,
+                leverage,
+            } => {
+                self.venue_settings.insert(instrument, VenueSettingResult { isolated, leverage });
+                Ok(serde_json::Value::Null)
+            }
+            Ctl::AccountMode { mode } => {
+                self.account_mode = mode;
+                Ok(serde_json::Value::Null)
+            }
             Ctl::Dump => Ok(serde_json::json!({
                 "orders": self.venue.orders.values().map(wire_order).collect::<Vec<_>>(),
                 "positions": self.venue.positions.iter().map(|(i, q)| (i.to_string(), SQty(*q).to_string())).collect::<std::collections::BTreeMap<_, _>>(),
@@ -245,6 +277,8 @@ impl State {
                 "duplicate_placements": self.venue.duplicate_placements.len(),
                 "requests": self.requests,
                 "margin_queries": self.margin_queries,
+                "venue_setting_queries": self.venue_setting_queries,
+                "account_mode_queries": self.account_mode_queries,
                 "streams": self.streams.len(),
             })),
         }
@@ -377,6 +411,10 @@ async fn main() {
         refuse_streams: false,
         requests: 0,
         margin_queries: 0,
+        venue_settings: std::collections::BTreeMap::new(),
+        account_mode: SIM_STANDARD_MODE.into(),
+        venue_setting_queries: 0,
+        account_mode_queries: 0,
     }));
     eprintln!("simvenue listening on {path}");
     loop {

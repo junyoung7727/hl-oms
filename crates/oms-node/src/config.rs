@@ -90,6 +90,9 @@ pub struct RuntimeConfig {
     /// Time between margin queries while the link is up. Used only with a
     /// margin policy (`[core.policy.margin]`).
     pub margin_poll_ms: u64,
+    /// Time between venue-setting queries for an instrument without a
+    /// position, while the link is up. Used only with a margin policy.
+    pub venue_setting_poll_ms: u64,
     pub worker_threads: usize,
     /// Run journal writes on the core thread instead of a separate commit
     /// thread. For the layout comparison in ADR-012 only.
@@ -110,6 +113,7 @@ impl Default for RuntimeConfig {
             reconcile_ms: 500,
             sweep_ms: 15_000,
             margin_poll_ms: 5_000,
+            venue_setting_poll_ms: 60_000,
             worker_threads: 2,
             inline_commit: false,
         }
@@ -232,6 +236,9 @@ impl NodeConfig {
         if r.margin_poll_ms == 0 {
             return Err("[runtime] margin_poll_ms must be greater than 0".into());
         }
+        if r.venue_setting_poll_ms == 0 {
+            return Err("[runtime] venue_setting_poll_ms must be greater than 0".into());
+        }
         if self.api.window == 0 || self.api.max_connections == 0 || self.api.admin_max_connections == 0 {
             return Err("[api] window, max_connections and admin_max_connections must be positive".into());
         }
@@ -352,6 +359,8 @@ max = "10"
         refused(SIM, "", Some("margin_max_age_us = 0"), "margin_max_age_us must be greater than 0");
         refused(SIM, "", Some("venue_leverage = 0"), "venue_leverage must be at least 1");
         refused(SIM, "margin_poll_ms = 0", Some(""), "margin_poll_ms must be greater than 0");
+        refused(SIM, "venue_setting_poll_ms = 0", Some(""), "venue_setting_poll_ms must be greater than 0");
+        assert_eq!(check(SIM, "venue_setting_poll_ms = 1", Some("")), Ok(()));
         // The MM buffer may be zero.
         assert_eq!(check(SIM, "", Some("mm_buffer_bps = 0")), Ok(()));
 

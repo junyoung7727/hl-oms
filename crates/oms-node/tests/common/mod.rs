@@ -424,7 +424,7 @@ pub fn margin_node_with(name: &str, account_value: &str, node_env: Vec<(String, 
     let mut env = Env::new(name);
     env.node_env = node_env;
     env.extra_runtime = "margin_poll_ms = 100".into();
-    env.extra_policy = "\n[core.policy.margin]\n".into();
+    env.extra_policy = "\n[core.policy.margin]\naccount_modes_allowed = [\"standard\"]\n".into();
     env.ctl(json!({"account_value": {"value": account_value}}));
     env.start_node();
     env.wait_ready();
