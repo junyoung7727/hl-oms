@@ -369,6 +369,17 @@ pub struct SyncState {
 pub struct MarginState {
     /// The newest report recorded. It stays, and ages, across link changes.
     pub report: Option<crate::input::MarginReportIn>,
+    /// Why the most recent refused report was refused. Shown to the operator;
+    /// no rule reads it.
+    pub last_rejection: Option<MarginRejection>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarginRejection {
+    pub seq: u64,
+    pub queried_at: Ts,
+    pub reason: String,
+    pub at: Ts,
 }
 
 impl MarginState {

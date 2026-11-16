@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `9320d9a5867a9dce`, 검증 결과의 다이제스트 `84bbfc41882f370d`.
+> 소스 다이제스트 `6cf326659ef2add3`, 검증 결과의 다이제스트 `84bbfc41882f370d`.
 
 주장 58건: 통과 0, 실패 0, 미실행 2, 이전 버전 결과 56.
 
@@ -64,7 +64,7 @@
 | V-FUZZ-1 | 가정을 지키지 않는 임의의 거래소 입력(순서 역전, 중복, 낡은 상태, 식별자 없는 체결, 부재 응답, 링크 변동, 재시작)에서도 코어는 결함으로 멈추지 않고, 불변조건과 재생 일치가 유지되고, 주문당 전송은 한 번이며, 차단 중 수용이 없고, 새 체결은 반드시 기장되거나 대기하고, 정직하게 정리된 뒤에는 차단이 남지 않는다 | 속성 | 이전 버전 결과 | `cargo test --release -p oms-core --test review_core examined_fuzz` |
 | V-MIS-1 | 불일치 14종 각각을 일으키는 시험이 있고, 같은 대상의 반복은 확인되기 전까지 한 건으로 남는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core` |
 | V-MARGIN-1 | 증거금 정책이 있으면 감소 전용 주문은 재확인, 결과 불명, 불일치 차단을 통과하고, 일반 주문은 모든 차단에서 거절된다. 정책 구역은 선택이고, 없으면 저널 기록에 바이트를 더하지 않는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios reduce_only && cargo test -p oms-core --test margin` |
-| V-MARGIN-2 | 증거금 정책이 있으면 현재 링크 세션의 증거금 보고가 마지막 보고로 기록된다 | 단위 | 미실행 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-2 | 증거금 정책이 있으면 현재 링크 세션의 증거금 보고가 마지막 보고로 기록된다. 다른 세션의 보고, 링크가 내려간 동안의 보고, 순번이 크지 않은 보고는 버린다. 읽지 못한 보고와 최대 레버리지가 0인 보고는 사유와 함께 거부로 기록되고 마지막 보고를 바꾸지 않는다 | 단위 | 미실행 | `cargo test -p oms-core --test margin` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -1274,15 +1274,15 @@
 | `core/reduce_only_order_is_still_bound_by_the_strategy_position_limit` | 이전 버전 결과 | last result: passed |
 | `core/without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order` | 이전 버전 결과 | last result: passed |
 
-## V-MARGIN-2 — 증거금 정책이 있으면 현재 링크 세션의 증거금 보고가 마지막 보고로 기록된다
+## V-MARGIN-2 — 증거금 정책이 있으면 현재 링크 세션의 증거금 보고가 마지막 보고로 기록된다. 다른 세션의 보고, 링크가 내려간 동안의 보고, 순번이 크지 않은 보고는 버린다. 읽지 못한 보고와 최대 레버리지가 0인 보고는 사유와 함께 거부로 기록되고 마지막 보고를 바꾸지 않는다
 
 - 상태: **미실행**
 - 왜 중요한가: 규칙이 읽는 계좌 가치는 거래소 보고에서만 온다. 늦거나 다른 세션의 보고, 읽지 못한 보고가 마지막 보고가 되면 규칙이 틀린 값으로 판정한다
 - 수준: 단위
-- 전제와 범위: 증거금 보고 입력과 그 이벤트
+- 전제와 범위: 증거금 보고 입력 둘(MarginReport, MarginReportInvalid)과 이벤트 둘(margin_reported, margin_report_rejected)
 - 실제 구성요소: oms-core
 - 모의·시뮬레이션: 보고는 시험이 입력
-- 주입한 장애: 없음
+- 주입한 장애: 링크 재접속, 늦게 온 응답, 중복 응답, 읽지 못한 응답, 최대 레버리지 0
 - 판정 기준과 근거: C-MARGIN의 '입력, 상태, 이벤트'. 기대값은 손으로 적었다
 - 재현: `cargo test -p oms-core --test margin`
 - 뒷받침하는 것: C-MARGIN
@@ -1293,4 +1293,5 @@
 | `core/margin_report_of_the_current_session_is_recorded` | 미실행 |  |
 | `core/margin_report_of_an_old_session_or_with_the_link_down_is_ignored` | 미실행 |  |
 | `core/late_margin_report_with_a_lower_sequence_is_ignored` | 미실행 |  |
+| `core/invalid_margin_report_is_journaled_and_never_becomes_fresh` | 미실행 |  |
 

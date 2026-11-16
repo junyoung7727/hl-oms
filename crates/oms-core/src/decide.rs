@@ -598,16 +598,35 @@ impl Tx<'_> {
                 Ok(())
             }
             VenueInput::MarginReport(r) => self.on_margin_report(r),
+            VenueInput::MarginReportInvalid {
+                session,
+                seq,
+                queried_at,
+                reason,
+            } => {
+                if !self.margin_session_is_current(*session) {
+                    return Ok(());
+                }
+                self.emit(Event::MarginReportRejected {
+                    session: *session,
+                    seq: *seq,
+                    queried_at: *queried_at,
+                    reason: reason.clone(),
+                })
+            }
         }
     }
 
     // ---- margin reports (C-MARGIN) ----------------------------------------
 
+    /// An answer to a query of another link session, or one that arrives
+    /// while the link is down, is dropped: not stored and not judged.
+    fn margin_session_is_current(&self, session: u64) -> bool {
+        self.core.link.up && session == self.core.link.session
+    }
+
     fn on_margin_report(&mut self, r: &MarginReportIn) -> Result<(), CoreFault> {
-        // An answer to a query of another link session, or one that arrives
-        // while the link is down, is dropped: not stored and not judged.
-        let of_this_session = self.core.link.up && r.session == self.core.link.session;
-        if !of_this_session {
+        if !self.margin_session_is_current(r.session) {
             return Ok(());
         }
         // Answers can overtake each other. The query number decides which is
@@ -615,6 +634,16 @@ impl Tx<'_> {
         let last_seq = self.core.margin.report.as_ref().filter(|last| last.session == r.session).map(|last| last.seq);
         if last_seq.is_some_and(|last| r.seq <= last) {
             return Ok(());
+        }
+        // A report is one fact. One value that no rule can use refuses the
+        // whole report; the last recorded report stays and keeps ageing.
+        if let Some(p) = r.positions.iter().find(|p| p.max_leverage == 0) {
+            return self.emit(Event::MarginReportRejected {
+                session: r.session,
+                seq: r.seq,
+                queried_at: r.queried_at,
+                reason: format!("position {}: max_leverage is zero", p.instrument),
+            });
         }
         self.emit(Event::MarginReported { report: r.clone() })
     }

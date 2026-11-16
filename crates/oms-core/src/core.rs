@@ -750,6 +750,14 @@ impl Core {
             Event::MarginReported { report } => {
                 self.margin.report = Some(report.clone());
             }
+            Event::MarginReportRejected { seq, queried_at, reason, .. } => {
+                self.margin.last_rejection = Some(MarginRejection {
+                    seq: *seq,
+                    queried_at: *queried_at,
+                    reason: reason.clone(),
+                    at,
+                });
+            }
         }
         Ok(())
     }

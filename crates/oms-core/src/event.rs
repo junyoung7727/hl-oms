@@ -192,6 +192,14 @@ pub enum Event {
     MarginReported {
         report: MarginReportIn,
     },
+    /// A margin report was refused as a whole. The last recorded report
+    /// stays and keeps ageing.
+    MarginReportRejected {
+        session: u64,
+        seq: u64,
+        queried_at: Ts,
+        reason: String,
+    },
 }
 
 /// Stable reason codes for a refused new-order request.
@@ -354,6 +362,7 @@ impl Event {
             Event::PositionAdjusted { .. } => "position_adjusted",
             Event::Purged { .. } => "purged",
             Event::MarginReported { .. } => "margin_reported",
+            Event::MarginReportRejected { .. } => "margin_report_rejected",
         }
     }
 }
@@ -380,6 +389,7 @@ impl Input {
                 VenueInput::Positions { .. } => "venue.positions",
                 VenueInput::RefPrice { .. } => "venue.ref_price",
                 VenueInput::MarginReport(_) => "venue.margin_report",
+                VenueInput::MarginReportInvalid { .. } => "venue.margin_report_invalid",
             },
         }
     }

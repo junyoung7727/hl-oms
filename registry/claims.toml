@@ -860,15 +860,15 @@ not_covered = "거래소가 감소 전용 주문의 포지션 확대를 실제�
 
 [[claim]]
 id = "V-MARGIN-2"
-statement = "증거금 정책이 있으면 현재 링크 세션의 증거금 보고가 마지막 보고로 기록된다"
+statement = "증거금 정책이 있으면 현재 링크 세션의 증거금 보고가 마지막 보고로 기록된다. 다른 세션의 보고, 링크가 내려간 동안의 보고, 순번이 크지 않은 보고는 버린다. 읽지 못한 보고와 최대 레버리지가 0인 보고는 사유와 함께 거부로 기록되고 마지막 보고를 바꾸지 않는다"
 why = "규칙이 읽는 계좌 가치는 거래소 보고에서만 온다. 늦거나 다른 세션의 보고, 읽지 못한 보고가 마지막 보고가 되면 규칙이 틀린 값으로 판정한다"
 level = "단위"
-scope = "증거금 보고 입력과 그 이벤트"
+scope = "증거금 보고 입력 둘(MarginReport, MarginReportInvalid)과 이벤트 둘(margin_reported, margin_report_rejected)"
 real = "oms-core"
 simulated = "보고는 시험이 입력"
-faults = "없음"
+faults = "링크 재접속, 늦게 온 응답, 중복 응답, 읽지 못한 응답, 최대 레버리지 0"
 criterion = "C-MARGIN의 '입력, 상태, 이벤트'. 기대값은 손으로 적었다"
-tests = ["core/margin_report_of_the_current_session_is_recorded", "core/margin_report_of_an_old_session_or_with_the_link_down_is_ignored", "core/late_margin_report_with_a_lower_sequence_is_ignored"]
+tests = ["core/margin_report_of_the_current_session_is_recorded", "core/margin_report_of_an_old_session_or_with_the_link_down_is_ignored", "core/late_margin_report_with_a_lower_sequence_is_ignored", "core/invalid_margin_report_is_journaled_and_never_becomes_fresh"]
 repro = "cargo test -p oms-core --test margin"
 supports = "C-MARGIN"
 not_covered = "실제 거래소 응답의 모양과 값의 뜻(T1, T2). 새 보고를 받지 못하는 동안에는 규칙을 판정하지 않는다"

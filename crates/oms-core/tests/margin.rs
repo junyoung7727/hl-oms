@@ -191,3 +191,83 @@ fn late_margin_report_with_a_lower_sequence_is_ignored() {
     assert_eq!(names(&out), vec!["margin_reported"]);
     assert_eq!(recorded(&h), Some((2, 1, amt("98"))));
 }
+
+/// S25. A report that cannot be read, or that names a zero maximum leverage,
+/// is refused as a whole. The refusal and its reason are journaled. The last
+/// good report stays exactly as it was, so its age keeps counting from its
+/// own query time.
+#[test]
+fn invalid_margin_report_is_journaled_and_never_becomes_fresh() {
+    let mut h = H::ready_with(config_with_margin());
+    let good_at = h.now;
+    h.margin_report(1, 1, good_at, "100");
+    let good = h.core.margin.report.clone();
+    assert_eq!(good.as_ref().map(|r| r.queried_at), Some(good_at));
+
+    // The gateway could not read the answer to query 2.
+    h.advance(5 * SEC);
+    let unreadable_at = h.now;
+    let out = h.venue(VenueInput::MarginReportInvalid {
+        session: 1,
+        seq: 2,
+        queried_at: unreadable_at,
+        reason: "marginSummary.accountValue: not a number".into(),
+    });
+    assert_eq!(
+        out.events,
+        vec![Event::MarginReportRejected {
+            session: 1,
+            seq: 2,
+            queried_at: unreadable_at,
+            reason: "marginSummary.accountValue: not a number".into(),
+        }]
+    );
+    assert_eq!(h.core.margin.report, good, "an unreadable report replaced the last good one");
+    assert_eq!(
+        h.core.margin.last_rejection.as_ref().map(|r| (r.seq, r.reason.as_str())),
+        Some((2, "marginSummary.accountValue: not a number"))
+    );
+
+    // Query 3 is readable but one position has a maximum leverage of zero.
+    // The core refuses it itself: the value would divide by zero in the
+    // maintenance margin rate.
+    h.advance(5 * SEC);
+    let zero_at = h.now;
+    let out = h.venue(VenueInput::MarginReport(MarginReportIn {
+        session: 1,
+        seq: 3,
+        queried_at: zero_at,
+        account_value: amt("70"),
+        positions: vec![position("X", 40), position("Y", 0)],
+    }));
+    assert_eq!(
+        out.events,
+        vec![Event::MarginReportRejected {
+            session: 1,
+            seq: 3,
+            queried_at: zero_at,
+            reason: "position Y: max_leverage is zero".into(),
+        }]
+    );
+    assert_eq!(h.core.margin.report, good, "a report with a zero maximum leverage was recorded");
+    assert_eq!(h.core.margin.last_rejection.as_ref().map(|r| r.seq), Some(3));
+
+    // Both refusals are in the journal with their reasons, and the rebuilt
+    // state shows the same last reason.
+    let reasons: Vec<&str> = h
+        .log
+        .iter()
+        .flat_map(|rec| &rec.events)
+        .filter_map(|ev| match ev {
+            Event::MarginReportRejected { reason, .. } => Some(reason.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(reasons, vec!["marginSummary.accountValue: not a number", "position Y: max_leverage is zero"]);
+    assert_eq!(h.rebuilt().margin, h.core.margin);
+
+    // A refused report does not block the next good one.
+    let out = h.margin_report(1, 4, h.now, "99");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(recorded(&h), Some((1, 4, amt("99"))));
+}

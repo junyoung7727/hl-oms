@@ -128,6 +128,14 @@ pub enum VenueInput {
     },
     /// The venue's answer to one margin query (C-MARGIN).
     MarginReport(MarginReportIn),
+    /// The venue answered a margin query and the gateway could not read the
+    /// answer as a whole report. No part of it is used.
+    MarginReportInvalid {
+        session: u64,
+        seq: u64,
+        queried_at: Ts,
+        reason: String,
+    },
 }
 
 /// What the venue said about the account's margin at one moment. The whole
