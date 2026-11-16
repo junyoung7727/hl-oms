@@ -26,10 +26,10 @@ struct State {
     auto_fill: AutoFill,
     refuse_streams: bool,
     requests: u64,
+    // The account value, the margin of a position, the venue settings and
+    // the account mode live in `venue`, the model. Here are only counters
+    // of the three margin queries.
     margin_queries: u64,
-    /// Margin mode and leverage per instrument, where a control changed
-    /// them. Every other instrument is isolated at leverage 2.
-    account_mode: String,
     venue_setting_queries: u64,
     account_mode_queries: u64,
 }
@@ -190,7 +190,7 @@ impl State {
             SimOp::AccountMode => {
                 self.account_mode_queries += 1;
                 Ok(json(&AccountModeResult {
-                    mode: self.account_mode.clone(),
+                    mode: self.venue.account_mode.clone(),
                 }))
             }
             SimOp::Subscribe => Err("subscribe is handled by the connection".into()),
@@ -277,7 +277,7 @@ impl State {
                 Ok(serde_json::Value::Null)
             }
             Ctl::AccountMode { mode } => {
-                self.account_mode = mode;
+                self.venue.account_mode = mode;
                 Ok(serde_json::Value::Null)
             }
             Ctl::Dump => Ok(serde_json::json!({
@@ -423,7 +423,6 @@ async fn main() {
         refuse_streams: false,
         requests: 0,
         margin_queries: 0,
-        account_mode: SIM_STANDARD_MODE.into(),
         venue_setting_queries: 0,
         account_mode_queries: 0,
     }));

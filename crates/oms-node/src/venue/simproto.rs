@@ -198,10 +198,6 @@ pub struct AccountModeResult {
     pub mode: String,
 }
 
-/// What the simulated venue calls its ordinary account mode. This is the
-/// simulated venue's own name, not a Hyperliquid value (T10).
-pub const SIM_STANDARD_MODE: &str = "standard";
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamMsg {
