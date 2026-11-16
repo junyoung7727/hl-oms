@@ -82,6 +82,11 @@ pub struct Profile {
     pub stale_cancel_us: u64,
     /// How long the venue leaves margin queries unanswered, in polls.
     pub outage_polls: (u64, u64),
+    /// Share of UTC midnights over which the venue leaves margin queries
+    /// unanswered: from some time in the hour before it to some time in the
+    /// ten minutes after it. The first report of the new day is then the
+    /// first to show what the account lost meanwhile (S12).
+    pub p_night_outage: u32,
     pub reconcile_every_us: u64,
     /// Share of steps before which nothing acts for a while: only the
     /// timers run (margin poll, reconcile, tick).
@@ -140,6 +145,7 @@ impl Profile {
             margin_max_age_us: 600_000,
             stale_cancel_us: 1_200_000,
             outage_polls: (5, 25),
+            p_night_outage: 0,
             reconcile_every_us: 300_000,
             p_idle: 0,
             idle_us: (0, 0),
@@ -272,8 +278,9 @@ impl Profile {
     /// midnights. Activity comes in bursts with pauses of up to ten minutes
     /// in between, during which only the timers run. On top of the faults
     /// of `margin_lossy` (rarer per step, the run has about ten times the
-    /// steps): margin queries unanswered for up to an hour, withdrawals and
-    /// deposits, and the operator's `rebase-day`.
+    /// steps): margin queries unanswered for up to an hour, and over every
+    /// second midnight; withdrawals and deposits; the operator's
+    /// `rebase-day`.
     pub fn margin_days() -> Profile {
         let policy = MarginPolicy::default();
         Profile {
@@ -285,6 +292,7 @@ impl Profile {
             margin_max_age_us: policy.margin_max_age_us,
             stale_cancel_us: policy.stale_cancel_us,
             outage_polls: (12, 720),
+            p_night_outage: 500,
             reconcile_every_us: 2_000_000,
             p_idle: 40,
             idle_us: (5_000_000, 600_000_000),
@@ -376,6 +384,10 @@ pub struct SimStats {
     /// Durable `day_base_set` records by a report that replaced the base of
     /// an earlier UTC day: the midnights the day base crossed.
     pub day_rolls: u64,
+    /// Reports that rolled the day base and whose account value was more
+    /// than the daily-loss limit below the old base, the account not being
+    /// REDUCING before: a loss first seen across a midnight.
+    pub roll_losses: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -450,6 +462,7 @@ struct MarginBefore {
     exposure: Option<i128>,
     reducing: bool,
     day_base: Option<Amount>,
+    base_day: Option<u64>,
 }
 
 pub const INSTANCE: u64 = 0x51_4d_55_4c;
@@ -486,6 +499,10 @@ pub struct World {
     margin_seq: u64,
     /// The venue answers no margin query before this time.
     margin_out_until: Ts,
+    /// The venue answers no margin query from the first time to the second
+    /// (an outage over a midnight), and the midnight that was drawn for.
+    night_out: (Ts, Ts),
+    night_drawn_for: Ts,
     /// The venue states no margin for the position before this time.
     mm_squeeze_until: Ts,
     /// When the current link session came up, by the world's own clock.
@@ -589,6 +606,8 @@ impl World {
             external_seen: false,
             margin_seq: 0,
             margin_out_until: 0,
+            night_out: (0, 0),
+            night_drawn_for: 0,
             mm_squeeze_until: 0,
             link_up_at: None,
             base_in_journal: false,
@@ -1021,6 +1040,7 @@ impl World {
     fn answer(&self, session: u64, queried_at: Ts, q: Query) -> Vec<VenueInput> {
         match q {
             Query::Margin { .. } if self.now < self.margin_out_until => Vec::new(),
+            Query::Margin { .. } if self.night_out.0 <= self.now && self.now < self.night_out.1 => Vec::new(),
             Query::Margin { seq } => vec![VenueInput::MarginReport(MarginReportIn {
                 session,
                 seq,
@@ -1094,6 +1114,7 @@ impl World {
             exposure: self.oracle_exposure(),
             reducing: self.core.margin.reducing.is_some(),
             day_base: self.core.margin.day_base.as_ref().map(|b| b.value),
+            base_day: self.core.margin.day_base.as_ref().map(|b| b.day),
         }
     }
 
@@ -1199,8 +1220,38 @@ impl World {
         Ok(())
     }
 
+    /// S12, for a report the core recorded: it is judged against the day
+    /// base that stood before it. A report more than 5 % below that base
+    /// leaves the account REDUCING, also when the same report starts a new
+    /// UTC day.
+    fn check_day_base(&mut self, report: &MarginReportIn, out: &Output, before: &MarginBefore) -> Result<(), Violation> {
+        let value = i128::from(report.account_value.0);
+        let rolled = out.events.iter().any(|e| matches!(e, Event::DayBaseSet { set_by: BaseSetBy::Report, .. }));
+        let Some(base) = before.day_base.map(|b| i128::from(b.0)) else { return Ok(()) };
+        let lost_too_much = (base - value) * 10_000 > 500 * base;
+        if lost_too_much && self.core.margin.reducing.is_none() {
+            return Err(self.violation(
+                "daily-loss",
+                format!(
+                    "a report of account value {} is more than 5 % below the day base {} and the account is not REDUCING (the report set a new base: {rolled})",
+                    report.account_value,
+                    Amount(base as i64)
+                ),
+            ));
+        }
+        self.stats.roll_losses += u64::from(lost_too_much && rolled && !before.reducing);
+        Ok(())
+    }
+
     fn check_margin_rules(&mut self, input: &Input, out: &Output, before: &MarginBefore) -> Result<(), Violation> {
         self.check_release(input, out, before)?;
+        let recorded = out.events.iter().find_map(|e| match e {
+            Event::MarginReported { report } => Some(report),
+            _ => None,
+        });
+        if let Some(report) = recorded {
+            self.check_day_base(report, out, before)?;
+        }
         let is_report = matches!(input, Input::Venue(VenueInput::MarginReport(_)));
         if is_report && out.events.is_empty() {
             self.stats.reports_dropped += 1;
@@ -1490,6 +1541,22 @@ impl World {
         self.margin_out_until = self.now + self.rng.range(lo * self.p.margin_poll_us, hi * self.p.margin_poll_us);
     }
 
+    /// Decides, within the hour before a UTC midnight, whether the venue
+    /// leaves margin queries unanswered over that midnight, and from when
+    /// to when.
+    fn draw_night_outage(&mut self) {
+        let midnight = (self.now / DAY_US + 1) * DAY_US;
+        let left = midnight - self.now;
+        if self.night_drawn_for == midnight || left > 3_600_000_000 {
+            return;
+        }
+        self.night_drawn_for = midnight;
+        if self.rng.chance(self.p.p_night_outage) {
+            let from = midnight - self.rng.range(0, left);
+            self.night_out = (from, midnight + self.rng.range(self.p.margin_poll_us, 600_000_000));
+        }
+    }
+
     /// The venue states a margin of zero for the position for two to ten
     /// polls (0.2 to 1 s on the fast margin clock).
     fn act_mm_squeeze(&mut self) {
@@ -1712,6 +1779,9 @@ impl World {
     }
 
     fn one_step(&mut self) -> Result<(), Violation> {
+        if self.p.p_night_outage > 0 {
+            self.draw_night_outage();
+        }
         if self.p.p_idle > 0 && self.rng.chance(self.p.p_idle) {
             let us = self.rng.range(self.p.idle_us.0, self.p.idle_us.1);
             self.idle(us)?;
@@ -1770,6 +1840,7 @@ impl World {
     fn quiesce(&mut self) -> Result<(), Violation> {
         self.calm = true;
         self.margin_out_until = 0;
+        self.night_out = (0, 0);
         self.end_mm_squeeze();
         if self.core.halt_account.is_some() {
             self.act_operator()?;
@@ -1812,7 +1883,7 @@ impl World {
     // ---- scripted runs ----------------------------------------------------
     //
     // A test that needs one exact sequence drives the world itself with the
-    // three calls below and with `venue`, and reads `core`, `durable` and
+    // calls below and with `venue`, and reads `core`, `durable` and
     // `stats`. Random actions are those of `run` only.
 
     /// Boots the core, activates the configuration and lets the link come up.
@@ -1836,6 +1907,20 @@ impl World {
             self.check_always()?;
         }
         self.commit()
+    }
+
+    /// Lets `us` of virtual time pass with nothing acting: the timers run,
+    /// each message at its own time, and the core gets one tick per margin
+    /// poll interval. For spans too long for `advance`. Everything is
+    /// durable at the end.
+    pub fn sleep(&mut self, us: u64) -> Result<(), Violation> {
+        self.idle(us)?;
+        self.commit()
+    }
+
+    /// The venue answers no margin query for the next `us`.
+    pub fn margin_outage(&mut self, us: u64) {
+        self.margin_out_until = self.now + us;
     }
 
     /// One operator command.

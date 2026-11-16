@@ -89,6 +89,12 @@ fn run_profile_seeds(p: Profile, seeds: Vec<u64>) -> Vec<SimStats> {
             sum(|s| s.stale_rule_cancels),
             sum(|s| s.mm_entries),
         );
+        println!(
+            "profile={} margin: day_rolls={} roll_losses={}",
+            p.name,
+            sum(|s| s.day_rolls),
+            sum(|s| s.roll_losses),
+        );
     }
     all
 }
@@ -490,13 +496,55 @@ fn margin_days_runs() -> &'static [SimStats] {
     RUNS.get_or_init(|| run_profile_seeds(Profile::margin_days(), soak_seeds()))
 }
 
+const SECOND: u64 = 1_000_000;
+const HOUR: u64 = 3_600 * SECOND;
+
+fn day_base(w: &World) -> Option<(u64, oms_core::Amount)> {
+    w.core.margin.day_base.as_ref().map(|b| (b.day, b.value))
+}
+
 /// S12, S13, G8: the margin rules over several UTC days, on the contract's
-/// own clock (poll 5 s). A run starts one hour before a UTC midnight and
-/// lasts 50 hours of virtual time, with restarts, link drops, losses,
-/// withdrawals and deposits, clears and rebases in between. Every check of
-/// `margin_lossy` runs after every input.
+/// own clock (poll 5 s). First one exact sequence, then the random runs of
+/// `margin_days`: a run starts one hour before a UTC midnight and lasts 50
+/// hours of virtual time, with restarts, link drops, losses, withdrawals
+/// and deposits, clears and rebases in between. Every check of
+/// `margin_lossy` runs after every input, and a run fails (`daily-loss`)
+/// when a recorded report is more than 5 % below the day base that stood
+/// before it and the account is not REDUCING after it.
 #[test]
 fn profile_margin_days_crosses_three_utc_days_with_restarts() {
+    // The exact sequence: no random action, the clock of `margin_days`.
+    // Day numbers are UTC days since 1970; the run starts on day 19675, one
+    // hour before day 19676.
+    let days = Profile::margin_days();
+    let mut w = World::new(1, Profile {
+        name: "margin_days_scripted",
+        margin: true,
+        start_at: days.start_at,
+        margin_poll_us: days.margin_poll_us,
+        margin_max_age_us: days.margin_max_age_us,
+        stale_cancel_us: days.stale_cancel_us,
+        reconcile_every_us: days.reconcile_every_us,
+        ..Profile::calm()
+    });
+    w.start().unwrap();
+    w.advance(10 * SECOND).unwrap();
+    assert_eq!(day_base(&w), Some((19_675, amount("100"))), "the first report sets the base");
+    // Ten seconds before midnight the venue stops answering margin queries
+    // for twenty seconds, and 6 leave the account meanwhile.
+    w.sleep(HOUR - 20 * SECOND).unwrap();
+    assert_eq!(w.now, 19_676 * oms_core::DAY_US - 10 * SECOND);
+    w.margin_outage(20 * SECOND);
+    w.venue.deposit(amount("-6"));
+    w.sleep(40 * SECOND).unwrap();
+    // The first report of day 19676 says 94. It is judged against the 100
+    // of the day before, and only then becomes the base of the new day.
+    assert_eq!(reported_value(&w), Some(amount("94")));
+    assert_eq!(reducing_rules(&w), vec![oms_core::RuleId::DailyLoss], "a loss across midnight is not absorbed by the new base");
+    assert_eq!(day_base(&w), Some((19_676, amount("94"))));
+    assert_eq!(w.stats.roll_losses, 1);
+
+    let all = margin_days_runs();
     let all = margin_days_runs();
     for (i, s) in all.iter().enumerate() {
         assert!(s.sim_seconds >= 50 * 3600, "run {i} lasted {} s", s.sim_seconds);
@@ -510,6 +558,7 @@ fn profile_margin_days_crosses_three_utc_days_with_restarts() {
     }
     if all.len() >= 40 {
         assert!(total(all, |s| s.reducing_day_rolls) > 0, "no run crossed midnight while REDUCING");
+        assert!(total(all, |s| s.roll_losses) > 0, "no loss was first seen by the report that rolled the day");
     }
 }
 
