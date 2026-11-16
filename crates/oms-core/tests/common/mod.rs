@@ -271,6 +271,15 @@ impl H {
         })
     }
 
+    /// The venue's answer, in the current link session, to the
+    /// account-mode query.
+    pub fn account_mode(&mut self, mode: &str) -> Output {
+        self.venue(VenueInput::AccountMode {
+            session: self.session,
+            mode: mode.into(),
+        })
+    }
+
     pub fn tick(&mut self) -> Output {
         self.inp(Input::Tick)
     }

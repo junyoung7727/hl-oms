@@ -208,6 +208,9 @@ pub enum Event {
         isolated: bool,
         leverage: u32,
     },
+    /// The venue told the account mode in the current link session
+    /// (C-MARGIN).
+    AccountModeNoted { session: u64, mode: String },
 }
 
 /// Stable reason codes for a refused new-order request.
@@ -379,6 +382,7 @@ impl Event {
             Event::MarginReported { .. } => "margin_reported",
             Event::MarginReportRejected { .. } => "margin_report_rejected",
             Event::VenueSettingNoted { .. } => "venue_setting_noted",
+            Event::AccountModeNoted { .. } => "account_mode_noted",
         }
     }
 }
@@ -407,6 +411,7 @@ impl Input {
                 VenueInput::MarginReport(_) => "venue.margin_report",
                 VenueInput::MarginReportInvalid { .. } => "venue.margin_report_invalid",
                 VenueInput::VenueSetting { .. } => "venue.venue_setting",
+                VenueInput::AccountMode { .. } => "venue.account_mode",
             },
         }
     }

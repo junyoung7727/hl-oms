@@ -1622,3 +1622,52 @@ fn venue_setting_hold_names_its_instrument_in_holds() {
     assert_eq!(names(&out), Vec::<&str>::new());
     assert!(h.core.margin.is_empty());
 }
+
+fn account_mode_hold() -> Vec<RejectReason> {
+    vec![RejectReason::Hold(HoldReason::AccountMode)]
+}
+
+/// `config_xy()` with these account modes on the allow-list.
+fn config_allowing(modes: &[&str]) -> CoreConfig {
+    let mut cfg = config_xy();
+    let margin = cfg.policy.margin.as_mut().unwrap();
+    margin.account_modes_allowed = modes.iter().map(|m| m.to_string()).collect();
+    cfg
+}
+
+/// S18. In a unified account or under portfolio margin the numbers of a
+/// margin report do not mean what the rules take them to mean. Both modes
+/// refuse plain orders on the whole account, also when the configuration
+/// lists them as allowed.
+#[test]
+fn unified_or_portfolio_account_mode_holds_the_account() {
+    // The operator listed both modes by mistake, next to a mode that is
+    // allowed.
+    let mut h = H::ready_with(config_allowing(&["unifiedAccount", "portfolioMargin", "standard"]));
+    h.report_margin("1000");
+    h.ref_price("X", "100");
+    h.ref_price("Y", "100");
+
+    for mode in ["unifiedAccount", "portfolioMargin"] {
+        let out = h.account_mode(mode);
+        assert_eq!(
+            out.events,
+            vec![Event::AccountModeNoted {
+                session: 1,
+                mode: mode.into(),
+            }]
+        );
+        assert_eq!(out.commands, vec![]);
+        assert_eq!(h.core.holds(None), vec![HoldReason::AccountMode], "{mode}");
+        // The whole account: every instrument.
+        for instrument in ["X", "Y"] {
+            let r = req_on(&h, instrument, "k1", Side::Buy, "1", "100");
+            assert_eq!(submit(&mut h, r), Err(account_mode_hold()), "{mode} on {instrument}");
+        }
+    }
+
+    // The venue names the listed mode that can be allowed: released.
+    h.account_mode("standard");
+    assert_eq!(h.core.holds(None), vec![]);
+    h.accept("a", "k1", Side::Buy, "1", "100");
+}

@@ -648,6 +648,15 @@ impl Tx<'_> {
                     leverage: *leverage,
                 })
             }
+            VenueInput::AccountMode { session, mode } => {
+                if !self.takes_margin_input(*session) {
+                    return Ok(());
+                }
+                self.emit(Event::AccountModeNoted {
+                    session: *session,
+                    mode: mode.clone(),
+                })
+            }
         }
     }
 

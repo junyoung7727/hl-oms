@@ -281,6 +281,10 @@ pub enum HoldReason {
     /// in the current link session, or differs from the margin policy
     /// (C-MARGIN). Refuses plain orders on this instrument only.
     VenueSetting(InstrumentId),
+    /// The venue's account mode is not known in the current link session,
+    /// is unified account or portfolio margin, or is not on the allow-list
+    /// of the margin policy (C-MARGIN). Refuses plain orders on the account.
+    AccountMode,
 }
 
 impl HoldReason {
@@ -291,7 +295,7 @@ impl HoldReason {
     pub fn refuses_only_plain_orders(&self) -> bool {
         match self {
             HoldReason::NoConfig | HoldReason::LinkDown | HoldReason::OperatorAccount | HoldReason::OperatorStrategy | HoldReason::StorageLow => false,
-            HoldReason::Resync | HoldReason::InDoubt | HoldReason::Mismatch | HoldReason::VenueSetting(_) => true,
+            HoldReason::Resync | HoldReason::InDoubt | HoldReason::Mismatch | HoldReason::VenueSetting(_) | HoldReason::AccountMode => true,
         }
     }
 }
@@ -382,7 +386,15 @@ pub struct MarginState {
     /// unknown. Emptied when the link changes.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub venue_settings: BTreeMap<InstrumentId, VenueSettingSeen>,
+    /// The account mode as the venue told it in the current link session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_mode: Option<String>,
 }
+
+/// Account modes in which the margin rules must not run, whatever the
+/// allow-list says: the numbers of a margin report mean something else
+/// there.
+pub const ACCOUNT_MODES_NEVER_ALLOWED: [&str; 2] = ["unifiedAccount", "portfolioMargin"];
 
 /// Margin mode and leverage of one instrument at the venue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

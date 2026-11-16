@@ -11,7 +11,7 @@
 - [x] Test `a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again` (seam A, S17): fails when the hold stays after a match, or the setting counts as known in a new session.
 - [x] Test `a_cross_position_in_a_margin_report_raises_the_hold` (seam A, S17): fails when the position's mode in a margin report is not used as a source.
 - [x] Test `venue_setting_hold_names_its_instrument_in_holds` (seam A, S17): fails when the hold query does not show the instrument.
-- [ ] Test `unified_or_portfolio_account_mode_holds_the_account` (seam A, S18): fails when either mode lets a plain order through, also when it is on the allow-list.
+- [x] Test `unified_or_portfolio_account_mode_holds_the_account` (seam A, S18): fails when either mode lets a plain order through, also when it is on the allow-list.
 - [ ] Test `an_account_mode_off_the_allow_list_or_unknown_holds_the_account` (seam A, S18): fails when an unlisted value, or no value in this link session, passes.
 - [ ] Test `reduce_only_order_passes_the_venue_setting_and_account_mode_holds` (seam A, S17, S18): fails when it is rejected by either hold.
 - [ ] Test `node_reads_venue_setting_and_account_mode_and_status_shows_them` (seam C, S17, S18): fails when the queries, the simulated venue answers, the inputs or the status fields are not wired.

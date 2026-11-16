@@ -144,6 +144,9 @@ pub enum VenueInput {
         isolated: bool,
         leverage: u32,
     },
+    /// The venue's answer to the account-mode query: the account-wide
+    /// margin scheme, as the venue names it (C-MARGIN).
+    AccountMode { session: u64, mode: String },
 }
 
 /// What the venue said about the account's margin at one moment. The whole

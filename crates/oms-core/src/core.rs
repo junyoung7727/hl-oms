@@ -194,6 +194,9 @@ impl Core {
                     v.push(HoldReason::VenueSetting(instrument.clone()));
                 }
             }
+            if !self.account_mode_is_allowed() {
+                v.push(HoldReason::AccountMode);
+            }
         }
         v
     }
@@ -212,6 +215,16 @@ impl Core {
         let mode_matches = seen.isolated == policy.isolated;
         let leverage_matches = seen.leverage == policy.venue_leverage;
         mode_matches && leverage_matches
+    }
+
+    /// Whether the account mode lets the margin rules run (C-MARGIN, 거래소
+    /// 설정과 계좌 모드).
+    pub fn account_mode_is_allowed(&self) -> bool {
+        let Some(mode) = &self.margin.account_mode else {
+            return true;
+        };
+        let never_allowed = ACCOUNT_MODES_NEVER_ALLOWED.contains(&mode.as_str());
+        !never_allowed
     }
 
     /// Whether a margin report exists that is fresh at record time `at`
@@ -823,6 +836,9 @@ impl Core {
                         leverage: *leverage,
                     },
                 );
+            }
+            Event::AccountModeNoted { mode, .. } => {
+                self.margin.account_mode = Some(mode.clone());
             }
         }
         Ok(())
