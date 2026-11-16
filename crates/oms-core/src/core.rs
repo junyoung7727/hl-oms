@@ -68,6 +68,10 @@ pub struct Core {
     pub last_fill_at: Ts,
     pub last_purge_at: Ts,
     pub stats: Stats,
+    /// Margin reports (C-MARGIN). Not serialised while empty, so the state
+    /// of a run without a margin policy keeps its bytes and its digest.
+    #[serde(default, skip_serializing_if = "MarginState::is_empty")]
+    pub margin: MarginState,
 }
 
 impl Core {
@@ -99,6 +103,7 @@ impl Core {
             last_fill_at: 0,
             last_purge_at: 0,
             stats: Stats::default(),
+            margin: MarginState::default(),
         }
     }
 
@@ -741,6 +746,9 @@ impl Core {
                 self.mismatches
                     .retain(|_, m| m.acked.as_ref().is_none_or(|a| a.at >= *cutoff));
                 self.last_purge_at = at;
+            }
+            Event::MarginReported { report } => {
+                self.margin.report = Some(report.clone());
             }
         }
         Ok(())

@@ -363,6 +363,20 @@ pub struct SyncState {
     pub positions_session: u64,
 }
 
+/// What the core knows from margin reports (C-MARGIN). Empty until the first
+/// report is recorded, and always empty without a margin policy.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarginState {
+    /// The newest report recorded. It stays, and ages, across link changes.
+    pub report: Option<crate::input::MarginReportIn>,
+}
+
+impl MarginState {
+    pub fn is_empty(&self) -> bool {
+        *self == MarginState::default()
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Stats {
     pub accepted: u64,

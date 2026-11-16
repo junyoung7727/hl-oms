@@ -193,6 +193,18 @@ impl H {
         self.inp(Input::Venue(v))
     }
 
+    /// A margin report of link session `session` with number `seq`, asked
+    /// for at `queried_at`, with no positions.
+    pub fn margin_report(&mut self, session: u64, seq: u64, queried_at: Ts, account_value: &str) -> Output {
+        self.venue(VenueInput::MarginReport(MarginReportIn {
+            session,
+            seq,
+            queried_at,
+            account_value: amt(account_value),
+            positions: vec![],
+        }))
+    }
+
     pub fn tick(&mut self) -> Output {
         self.inp(Input::Tick)
     }

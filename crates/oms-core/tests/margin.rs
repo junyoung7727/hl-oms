@@ -64,3 +64,43 @@ fn empty_margin_section_takes_the_contract_defaults() {
     assert!(h.core.config.policy.margin.is_some());
     assert_eq!(h.rebuilt().config, h.core.config);
 }
+
+// ---- C-MARGIN: margin report intake -----------------------------------------
+
+fn names(out: &Output) -> Vec<&'static str> {
+    out.events.iter().map(Event::name).collect()
+}
+
+/// An isolated position as the venue reports it.
+fn position(instrument: &str, max_leverage: u32) -> MarginPosition {
+    MarginPosition {
+        instrument: iid(instrument),
+        szi: sq("2"),
+        position_value: amt("200"),
+        margin_used: amt("100"),
+        leverage_type: LeverageType::Isolated,
+        leverage_value: 2,
+        max_leverage,
+    }
+}
+
+/// A report of the current link session becomes the newest report: one
+/// `margin_reported` event, and the state holds the report as it came. A
+/// position on an instrument that is not configured is kept.
+#[test]
+fn margin_report_of_the_current_session_is_recorded() {
+    let mut h = H::ready_with(config_with_margin());
+    let queried_at = h.now;
+    let report = MarginReportIn {
+        session: h.session,
+        seq: 1,
+        queried_at,
+        account_value: amt("100"),
+        positions: vec![position("X", 40), position("NOT-CONFIGURED", 20)],
+    };
+    let out = h.venue(VenueInput::MarginReport(report.clone()));
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.report, Some(report));
+    // Nothing is sent to the venue because of a report.
+    assert_eq!(out.commands, vec![]);
+}

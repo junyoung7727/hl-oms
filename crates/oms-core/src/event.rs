@@ -187,6 +187,11 @@ pub enum Event {
         /// than this is treated as a re-delivery from now on.
         fill_floor: Ts,
     },
+    /// A margin report of the current link session was taken as the newest
+    /// one (C-MARGIN).
+    MarginReported {
+        report: MarginReportIn,
+    },
 }
 
 /// Stable reason codes for a refused new-order request.
@@ -348,6 +353,7 @@ impl Event {
             Event::RefPriceUpdated { .. } => "ref_price_updated",
             Event::PositionAdjusted { .. } => "position_adjusted",
             Event::Purged { .. } => "purged",
+            Event::MarginReported { .. } => "margin_reported",
         }
     }
 }
@@ -373,6 +379,7 @@ impl Input {
                 VenueInput::OpenOrders { .. } => "venue.open_orders",
                 VenueInput::Positions { .. } => "venue.positions",
                 VenueInput::RefPrice { .. } => "venue.ref_price",
+                VenueInput::MarginReport(_) => "venue.margin_report",
             },
         }
     }

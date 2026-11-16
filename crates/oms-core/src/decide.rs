@@ -597,7 +597,14 @@ impl Tx<'_> {
                 }
                 Ok(())
             }
+            VenueInput::MarginReport(r) => self.on_margin_report(r),
         }
+    }
+
+    // ---- margin reports (C-MARGIN) ----------------------------------------
+
+    fn on_margin_report(&mut self, r: &MarginReportIn) -> Result<(), CoreFault> {
+        self.emit(Event::MarginReported { report: r.clone() })
     }
 
     fn on_link(&mut self, up: bool, session: u64, reason: &str) -> Result<(), CoreFault> {

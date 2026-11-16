@@ -126,6 +126,47 @@ pub enum VenueInput {
         px: Px,
         venue_ts: Ts,
     },
+    /// The venue's answer to one margin query (C-MARGIN).
+    MarginReport(MarginReportIn),
+}
+
+/// What the venue said about the account's margin at one moment. The whole
+/// report is one fact: it is recorded as it came or not at all.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarginReportIn {
+    /// Link session in which the query was sent.
+    pub session: u64,
+    /// Number of the query. It rises within a link session, so a late answer
+    /// is told from a new one without reading a clock.
+    pub seq: u64,
+    /// Node time immediately before the query was sent.
+    pub queried_at: Ts,
+    pub account_value: Amount,
+    /// Every position the venue listed, also on instruments that are not
+    /// configured here.
+    pub positions: Vec<MarginPosition>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarginPosition {
+    pub instrument: InstrumentId,
+    /// Signed position size.
+    pub szi: SQty,
+    pub position_value: Amount,
+    pub margin_used: Amount,
+    pub leverage_type: LeverageType,
+    pub leverage_value: u32,
+    /// The venue's maximum leverage for the instrument. Never zero in a
+    /// report that was recorded.
+    pub max_leverage: u32,
+}
+
+/// Margin mode of one instrument at the venue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LeverageType {
+    Isolated,
+    Cross,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

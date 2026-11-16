@@ -194,13 +194,13 @@ adr = ["ADR-005", "ADR-014", "ADR-017"]
 code = ["crates/oms-node/src/venue/mod.rs", "crates/oms-node/src/venue/simnet.rs", "crates/oms-node/src/venue/hyperliquid/mod.rs"]
 claims = ["V-HL-1", "V-HL-2", "V-HL-3", "V-SLICE-1"]
 
-# 일부 구현(차단 표, 티켓 01). 이벤트와 주장은 그것을 추가하는 티켓이 함께 채운다(.scratch/margin-rules/issues/).
+# 일부 구현(차단 표: 티켓 01, 증거금 보고 수신과 신선도: 티켓 02). 이벤트와 주장은 그것을 추가하는 티켓이 함께 채운다(.scratch/margin-rules/issues/).
 [[contract]]
 id = "C-MARGIN"
 title = "증거금 규칙"
 file = "docs/contracts/margin.md"
-summary = "계좌 레버리지 검사, 일 손실과 유지증거금 여유로 들어가는 감소 전용 상태, 보고 끊김 취소, 거래소 설정 확인. 차단 표만 구현, 나머지는 미구현(ADR-018)"
-events = []
+summary = "계좌 레버리지 검사, 일 손실과 유지증거금 여유로 들어가는 감소 전용 상태, 보고 끊김 취소, 거래소 설정 확인. 차단 표와 증거금 보고 수신·신선도만 구현, 나머지는 미구현(ADR-018)"
+events = ["margin_reported"]
 adr = ["ADR-008", "ADR-018"]
-code = ["crates/oms-core/src/config.rs", "crates/oms-core/src/decide.rs"]
-claims = ["V-MARGIN-1"]
+code = ["crates/oms-core/src/config.rs", "crates/oms-core/src/decide.rs", "crates/oms-core/src/core.rs"]
+claims = ["V-MARGIN-1", "V-MARGIN-2"]
