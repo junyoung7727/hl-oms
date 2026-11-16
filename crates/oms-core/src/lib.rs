@@ -30,5 +30,5 @@ pub use ids::*;
 pub use input::*;
 pub use model::*;
 pub use needs::Need;
-pub use num::{Amount, Px, Qty, SQty};
+pub use num::{Amount, Px, Qty, Ratio, SQty};
 pub use record::Record;

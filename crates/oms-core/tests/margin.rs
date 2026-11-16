@@ -37,3 +37,30 @@ fn absent_margin_policy_adds_no_bytes_to_a_journal_record() {
     assert_eq!(&back, activation);
     assert_eq!(h.core.config.policy.margin, None);
 }
+
+/// An empty section turns the rules on with the defaults of the contract's
+/// 설정 table: limit 2x, daily loss 5 %, MM buffer 0.25 percentage points,
+/// report age 30 s, stale cancel 60 s, venue setting 2x isolated, no extra
+/// account mode allowed.
+#[test]
+fn empty_margin_section_takes_the_contract_defaults() {
+    let policy: Policy = serde_json::from_str(r#"{"margin":{}}"#).unwrap();
+    assert_eq!(
+        serde_json::to_value(&policy.margin).unwrap(),
+        serde_json::json!({
+            "max_account_leverage": "2",
+            "daily_loss_bps": 500,
+            "mm_buffer_bps": 25,
+            "margin_max_age_us": 30_000_000,
+            "stale_cancel_us": 60_000_000,
+            "venue_leverage": 2,
+            "isolated": true,
+            "account_modes_allowed": [],
+        })
+    );
+    // The section is domain state: it is journaled with the configuration
+    // and restored by replay.
+    let h = H::ready_with(CoreConfig { policy, ..config() });
+    assert!(h.core.config.policy.margin.is_some());
+    assert_eq!(h.rebuilt().config, h.core.config);
+}
