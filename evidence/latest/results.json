@@ -1,15 +1,15 @@
 {
   "core_purity": "ok",
   "environment": {
-    "busiest_processes": "514 qlab;94.3 python;20.2 WebKitWebProces;",
+    "busiest_processes": "91.2 python;20.2 WebKitWebProces; 6.1 chrome;",
     "cpu": "Intel(R) Core(TM) i9-14900K",
     "cpus_online": "32",
     "device_model": "Samsung SSD 980 500GB",
-    "df": "/dev/nvme0n1p2  457G  360G   74G  84% /",
+    "df": "/dev/nvme0n1p2  457G  361G   73G  84% /",
     "energy_pref": "balance_performance",
     "governor": "powersave",
     "kernel": "7.0.0-42-generic",
-    "loadavg": "9.08 7.38 6.73",
+    "loadavg": "2.95 3.84 4.28",
     "memory": "30Gi",
     "mount": "/dev/nvme0n1p2 ext4 rw,relatime,stripe=32",
     "os": "Ubuntu 26.04 LTS",
@@ -17,11 +17,11 @@
     "write_cache": "write back"
   },
   "extended": "/mnt/nvme/gitproject/.cargo-target/hl-oms-integ-extended",
-  "finished_at_us": 1794813299401674,
+  "finished_at_us": 1794816777583572,
   "live_testnet": false,
   "mode": "full",
-  "source_digest": "9557b57c6b2d6836",
-  "started_at_us": 1794812752925488,
+  "source_digest": "44860df661c2396d",
+  "started_at_us": 1794816228745798,
   "suites": [
     {
       "command": "cargo test --release -p oms-core",
@@ -30,7 +30,7 @@
       "name": "core",
       "notes": [],
       "ok": true,
-      "seconds": 14.8,
+      "seconds": 15.5,
       "tests": [
         {
           "name": "ids::tests::rejects_invalid_identifiers",
@@ -41,19 +41,19 @@
           "result": "passed"
         },
         {
-          "name": "num::tests::formats_canonically",
-          "result": "passed"
-        },
-        {
           "name": "num::tests::notional_overflow_is_reported",
           "result": "passed"
         },
         {
-          "name": "num::tests::notional_rounds_in_the_documented_direction",
+          "name": "num::tests::formats_canonically",
           "result": "passed"
         },
         {
           "name": "num::tests::parses_business_examples",
+          "result": "passed"
+        },
+        {
+          "name": "num::tests::notional_rounds_in_the_documented_direction",
           "result": "passed"
         },
         {
@@ -81,7 +81,7 @@
           "result": "passed"
         },
         {
-          "name": "a_fill_that_contradicts_its_order_is_booked_to_the_account_and_flagged",
+          "name": "a_fill_for_a_purged_order_is_booked_as_external",
           "result": "passed"
         },
         {
@@ -89,11 +89,7 @@
           "result": "passed"
         },
         {
-          "name": "a_fill_after_any_kind_of_close_is_booked_and_flagged",
-          "result": "passed"
-        },
-        {
-          "name": "a_fill_for_a_purged_order_is_booked_as_external",
+          "name": "a_fill_that_contradicts_its_order_is_booked_to_the_account_and_flagged",
           "result": "passed"
         },
         {
@@ -101,11 +97,11 @@
           "result": "passed"
         },
         {
-          "name": "every_remaining_reject_reason_has_a_case",
+          "name": "a_fill_after_any_kind_of_close_is_booked_and_flagged",
           "result": "passed"
         },
         {
-          "name": "memory_capacity_and_arithmetic_overflow_are_rejections_not_faults",
+          "name": "every_remaining_reject_reason_has_a_case",
           "result": "passed"
         },
         {
@@ -117,6 +113,10 @@
           "result": "passed"
         },
         {
+          "name": "memory_capacity_and_arithmetic_overflow_are_rejections_not_faults",
+          "result": "passed"
+        },
+        {
           "name": "the_three_ways_a_fill_input_changes_nothing",
           "result": "passed"
         },
@@ -125,11 +125,35 @@
           "result": "passed"
         },
         {
+          "name": "a_report_of_an_earlier_day_does_not_change_the_day_base",
+          "result": "passed"
+        },
+        {
+          "name": "a_new_day_does_not_clear_reducing",
+          "result": "passed"
+        },
+        {
+          "name": "a_report_older_than_the_freshness_limit_on_arrival_is_still_judged",
+          "result": "passed"
+        },
+        {
+          "name": "a_loss_between_two_reports_enters_reducing_on_the_next_report",
+          "result": "passed"
+        },
+        {
           "name": "absent_margin_policy_adds_no_bytes_to_a_journal_record",
           "result": "passed"
         },
         {
-          "name": "empty_margin_section_takes_the_contract_defaults",
+          "name": "a_rule_cancel_that_races_a_fill_books_the_fill",
+          "result": "passed"
+        },
+        {
+          "name": "a_stuck_rule_cancel_does_not_block_reduce_only_orders",
+          "result": "passed"
+        },
+        {
+          "name": "an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing",
           "result": "passed"
         },
         {
@@ -137,11 +161,7 @@
           "result": "passed"
         },
         {
-          "name": "late_margin_report_with_a_lower_sequence_is_ignored",
-          "result": "passed"
-        },
-        {
-          "name": "exposure_is_the_sum_over_instruments",
+          "name": "an_order_pending_send_at_entry_is_cancelled_once_acknowledged",
           "result": "passed"
         },
         {
@@ -149,7 +169,7 @@
           "result": "passed"
         },
         {
-          "name": "margin_report_of_an_old_session_or_with_the_link_down_is_ignored",
+          "name": "empty_margin_section_takes_the_contract_defaults",
           "result": "passed"
         },
         {
@@ -157,11 +177,35 @@
           "result": "passed"
         },
         {
-          "name": "margin_report_of_the_current_session_is_recorded",
+          "name": "exposure_is_the_sum_over_instruments",
+          "result": "passed"
+        },
+        {
+          "name": "first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day",
+          "result": "passed"
+        },
+        {
+          "name": "first_report_sets_the_day_base",
+          "result": "passed"
+        },
+        {
+          "name": "entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones",
           "result": "passed"
         },
         {
           "name": "invalid_margin_report_is_journaled_and_never_becomes_fresh",
+          "result": "passed"
+        },
+        {
+          "name": "late_margin_report_with_a_lower_sequence_is_ignored",
+          "result": "passed"
+        },
+        {
+          "name": "margin_report_of_an_old_session_or_with_the_link_down_is_ignored",
+          "result": "passed"
+        },
+        {
+          "name": "margin_report_of_the_current_session_is_recorded",
           "result": "passed"
         },
         {
@@ -173,11 +217,31 @@
           "result": "passed"
         },
         {
-          "name": "order_exactly_at_the_limit_is_accepted",
+          "name": "plain_order_is_rejected_when_an_exposed_instrument_has_no_fresh_reference_price",
           "result": "passed"
         },
         {
-          "name": "plain_order_is_rejected_margin_unavailable_without_a_fresh_report",
+          "name": "latch_and_day_base_replay_to_the_same_state",
+          "result": "passed"
+        },
+        {
+          "name": "reduce_only_order_needs_no_fresh_report",
+          "result": "passed"
+        },
+        {
+          "name": "reducing_is_entered_once",
+          "result": "passed"
+        },
+        {
+          "name": "resting_order_counts_at_the_higher_of_limit_and_reference",
+          "result": "passed"
+        },
+        {
+          "name": "without_a_margin_policy_no_margin_check_runs",
+          "result": "passed"
+        },
+        {
+          "name": "loss_greater_than_five_percent_of_the_base_enters_reducing",
           "result": "passed"
         },
         {
@@ -185,7 +249,11 @@
           "result": "passed"
         },
         {
-          "name": "reduce_only_order_needs_no_fresh_report",
+          "name": "order_exactly_at_the_limit_is_accepted",
+          "result": "passed"
+        },
+        {
+          "name": "plain_order_is_rejected_margin_unavailable_without_a_fresh_report",
           "result": "passed"
         },
         {
@@ -197,19 +265,11 @@
           "result": "passed"
         },
         {
+          "name": "under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted",
+          "result": "passed"
+        },
+        {
           "name": "margin_events_replay_to_the_same_state",
-          "result": "passed"
-        },
-        {
-          "name": "without_a_margin_policy_no_margin_check_runs",
-          "result": "passed"
-        },
-        {
-          "name": "resting_order_counts_at_the_higher_of_limit_and_reference",
-          "result": "passed"
-        },
-        {
-          "name": "plain_order_is_rejected_when_an_exposed_instrument_has_no_fresh_reference_price",
           "result": "passed"
         },
         {
@@ -233,6 +293,18 @@
           "result": "passed"
         },
         {
+          "name": "f1_cancel_attempts_spent_in_doubt_do_not_strand_the_order_once_it_is_found",
+          "result": "passed"
+        },
+        {
+          "name": "f1_a_rejected_cancel_is_retried_only_while_the_order_is_not_terminal",
+          "result": "passed"
+        },
+        {
+          "name": "f1_cancel_can_be_reissued_after_transient_failures_used_up_the_attempts",
+          "result": "passed"
+        },
+        {
           "name": "f1_a_cancel_without_any_result_is_retried_after_a_timeout",
           "result": "passed"
         },
@@ -241,39 +313,7 @@
           "result": "passed"
         },
         {
-          "name": "f1_a_rejected_cancel_is_retried_only_while_the_order_is_not_terminal",
-          "result": "passed"
-        },
-        {
-          "name": "f1_cancel_attempts_spent_in_doubt_do_not_strand_the_order_once_it_is_found",
-          "result": "passed"
-        },
-        {
-          "name": "f1_cancel_can_be_reissued_after_transient_failures_used_up_the_attempts",
-          "result": "passed"
-        },
-        {
-          "name": "f3_a_reappearing_order_is_reported_as_open_after_close",
-          "result": "passed"
-        },
-        {
           "name": "f2_parked_fill_is_booked_to_its_order_when_another_fill_reveals_the_venue_id",
-          "result": "passed"
-        },
-        {
-          "name": "f3_placed_evidence_for_an_order_closed_as_not_placed_is_flagged",
-          "result": "passed"
-        },
-        {
-          "name": "f4_stale_session_evidence_that_acknowledges_an_order_does_not_satisfy_resync",
-          "result": "passed"
-        },
-        {
-          "name": "f5_stale_link_down_does_not_take_a_newer_session_down",
-          "result": "passed"
-        },
-        {
-          "name": "f6_a_venue_order_id_reported_for_two_orders_keeps_the_state_recoverable",
           "result": "passed"
         },
         {
@@ -289,6 +329,26 @@
           "result": "passed"
         },
         {
+          "name": "f6_a_venue_order_id_reported_for_two_orders_keeps_the_state_recoverable",
+          "result": "passed"
+        },
+        {
+          "name": "f5_stale_link_down_does_not_take_a_newer_session_down",
+          "result": "passed"
+        },
+        {
+          "name": "f3_a_reappearing_order_is_reported_as_open_after_close",
+          "result": "passed"
+        },
+        {
+          "name": "f3_placed_evidence_for_an_order_closed_as_not_placed_is_flagged",
+          "result": "passed"
+        },
+        {
+          "name": "f4_stale_session_evidence_that_acknowledges_an_order_does_not_satisfy_resync",
+          "result": "passed"
+        },
+        {
           "name": "f7_external_fills_do_not_grow_the_mismatch_list_without_bound",
           "result": "passed"
         },
@@ -297,23 +357,7 @@
           "result": "passed"
         },
         {
-          "name": "a_key_is_forgotten_only_after_its_request_expired",
-          "result": "passed"
-        },
-        {
-          "name": "a_parked_fill_is_external_once_no_order_can_own_it",
-          "result": "passed"
-        },
-        {
           "name": "a_pending_cancel_is_sent_when_the_link_returns",
-          "result": "passed"
-        },
-        {
-          "name": "a_rejection_does_not_consume_the_key",
-          "result": "passed"
-        },
-        {
-          "name": "an_in_doubt_order_seen_in_the_open_order_sweep_is_acknowledged",
           "result": "passed"
         },
         {
@@ -321,11 +365,19 @@
           "result": "passed"
         },
         {
-          "name": "a_send_without_any_result_becomes_in_doubt_after_the_timeout",
+          "name": "a_parked_fill_is_external_once_no_order_can_own_it",
+          "result": "passed"
+        },
+        {
+          "name": "a_key_is_forgotten_only_after_its_request_expired",
           "result": "passed"
         },
         {
           "name": "acknowledging_one_mismatch_does_not_clear_another",
+          "result": "passed"
+        },
+        {
+          "name": "a_send_without_any_result_becomes_in_doubt_after_the_timeout",
           "result": "passed"
         },
         {
@@ -337,7 +389,15 @@
           "result": "passed"
         },
         {
+          "name": "a_rejection_does_not_consume_the_key",
+          "result": "passed"
+        },
+        {
           "name": "cancel_is_authorised_per_owner_and_idempotent",
+          "result": "passed"
+        },
+        {
+          "name": "an_in_doubt_order_seen_in_the_open_order_sweep_is_acknowledged",
           "result": "passed"
         },
         {
@@ -345,11 +405,15 @@
           "result": "passed"
         },
         {
+          "name": "cancel_is_retried_with_backoff_and_then_flagged",
+          "result": "passed"
+        },
+        {
           "name": "cancel_race_final_status_decides",
           "result": "passed"
         },
         {
-          "name": "cancel_is_retried_with_backoff_and_then_flagged",
+          "name": "concurrent_requests_cannot_double_spend_headroom",
           "result": "passed"
         },
         {
@@ -365,19 +429,7 @@
           "result": "passed"
         },
         {
-          "name": "concurrent_requests_cannot_double_spend_headroom",
-          "result": "passed"
-        },
-        {
-          "name": "definite_gateway_failures_close_and_release",
-          "result": "passed"
-        },
-        {
           "name": "expiry_rules",
-          "result": "passed"
-        },
-        {
-          "name": "fia_7_1_reservation_follows_potential_fills",
           "result": "passed"
         },
         {
@@ -385,7 +437,15 @@
           "result": "passed"
         },
         {
+          "name": "definite_gateway_failures_close_and_release",
+          "result": "passed"
+        },
+        {
           "name": "fill_before_send_result_acknowledges_the_order",
+          "result": "passed"
+        },
+        {
+          "name": "fia_7_1_reservation_follows_potential_fills",
           "result": "passed"
         },
         {
@@ -405,23 +465,15 @@
           "result": "passed"
         },
         {
-          "name": "holds_are_independent",
-          "result": "passed"
-        },
-        {
-          "name": "in_doubt_order_found_by_query_becomes_working",
-          "result": "passed"
-        },
-        {
           "name": "link_loss_blocks_new_orders_and_resync_is_required_after_it_returns",
           "result": "passed"
         },
         {
-          "name": "missing_fills_after_sync_are_flagged_and_stay_reserved",
+          "name": "no_configuration_means_nothing_is_accepted",
           "result": "passed"
         },
         {
-          "name": "no_configuration_means_nothing_is_accepted",
+          "name": "missing_fills_after_sync_are_flagged_and_stay_reserved",
           "result": "passed"
         },
         {
@@ -441,15 +493,31 @@
           "result": "passed"
         },
         {
-          "name": "overfill_is_booked_in_full_and_flagged",
-          "result": "passed"
-        },
-        {
           "name": "position_adjustment_is_explicit_and_keeps_the_ledgers_consistent",
           "result": "passed"
         },
         {
+          "name": "overfill_is_booked_in_full_and_flagged",
+          "result": "passed"
+        },
+        {
+          "name": "holds_are_independent",
+          "result": "passed"
+        },
+        {
+          "name": "in_doubt_order_found_by_query_becomes_working",
+          "result": "passed"
+        },
+        {
           "name": "position_check_uses_the_reachable_range",
+          "result": "passed"
+        },
+        {
+          "name": "stale_session_evidence_does_not_satisfy_resync",
+          "result": "passed"
+        },
+        {
+          "name": "price_band_bounds_only_the_aggressive_side_and_needs_a_fresh_reference",
           "result": "passed"
         },
         {
@@ -461,7 +529,7 @@
           "result": "passed"
         },
         {
-          "name": "reduce_only_order_is_still_bound_by_the_strategy_position_limit",
+          "name": "recorded_inputs_re_decide_to_the_recorded_events",
           "result": "passed"
         },
         {
@@ -469,31 +537,7 @@
           "result": "passed"
         },
         {
-          "name": "price_band_bounds_only_the_aggressive_side_and_needs_a_fresh_reference",
-          "result": "passed"
-        },
-        {
-          "name": "restart_puts_outstanding_sends_in_doubt_and_never_resends",
-          "result": "passed"
-        },
-        {
-          "name": "same_key_same_request_creates_one_order_and_one_send",
-          "result": "passed"
-        },
-        {
-          "name": "recorded_inputs_re_decide_to_the_recorded_events",
-          "result": "passed"
-        },
-        {
-          "name": "significant_figure_rule_exempts_integers",
-          "result": "passed"
-        },
-        {
-          "name": "same_key_different_request_is_a_conflict_without_effect",
-          "result": "passed"
-        },
-        {
-          "name": "stale_session_evidence_does_not_satisfy_resync",
+          "name": "reduce_only_order_is_still_bound_by_the_strategy_position_limit",
           "result": "passed"
         },
         {
@@ -505,7 +549,7 @@
           "result": "passed"
         },
         {
-          "name": "the_key_scope_is_per_strategy",
+          "name": "strategy_reduction_is_not_account_reduction",
           "result": "passed"
         },
         {
@@ -513,7 +557,19 @@
           "result": "passed"
         },
         {
-          "name": "unidentified_fill_is_booked_as_external_after_the_wait_and_holds_trading",
+          "name": "reduce_only_order_is_rejected_by_every_block_all_hold",
+          "result": "passed"
+        },
+        {
+          "name": "same_key_different_request_is_a_conflict_without_effect",
+          "result": "passed"
+        },
+        {
+          "name": "significant_figure_rule_exempts_integers",
+          "result": "passed"
+        },
+        {
+          "name": "same_key_same_request_creates_one_order_and_one_send",
           "result": "passed"
         },
         {
@@ -521,19 +577,23 @@
           "result": "passed"
         },
         {
-          "name": "reduce_only_order_is_rejected_by_every_block_all_hold",
-          "result": "passed"
-        },
-        {
-          "name": "the_duplicate_answer_survives_restart",
-          "result": "passed"
-        },
-        {
           "name": "without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order",
           "result": "passed"
         },
         {
-          "name": "strategy_reduction_is_not_account_reduction",
+          "name": "restart_puts_outstanding_sends_in_doubt_and_never_resends",
+          "result": "passed"
+        },
+        {
+          "name": "unidentified_fill_is_booked_as_external_after_the_wait_and_holds_trading",
+          "result": "passed"
+        },
+        {
+          "name": "the_key_scope_is_per_strategy",
+          "result": "passed"
+        },
+        {
+          "name": "the_duplicate_answer_survives_restart",
           "result": "passed"
         }
       ],
@@ -546,7 +606,7 @@
       "name": "journal",
       "notes": [],
       "ok": true,
-      "seconds": 2.2,
+      "seconds": 2.5,
       "tests": [
         {
           "name": "frame::tests::zero_filled_tail_is_not_a_frame",
@@ -557,11 +617,11 @@
           "result": "passed"
         },
         {
-          "name": "frame::tests::roundtrip_and_layout",
+          "name": "frame::tests::every_truncation_and_every_bit_flip_is_detected",
           "result": "passed"
         },
         {
-          "name": "frame::tests::every_truncation_and_every_bit_flip_is_detected",
+          "name": "frame::tests::roundtrip_and_layout",
           "result": "passed"
         },
         {
@@ -573,11 +633,11 @@
           "result": "passed"
         },
         {
-          "name": "a_second_writer_is_refused",
+          "name": "appends_must_be_consecutive",
           "result": "passed"
         },
         {
-          "name": "appends_must_be_consecutive",
+          "name": "a_second_writer_is_refused",
           "result": "passed"
         },
         {
@@ -589,15 +649,19 @@
           "result": "passed"
         },
         {
-          "name": "truncation_can_be_disabled",
-          "result": "passed"
-        },
-        {
           "name": "a_journal_of_another_instance_is_refused",
           "result": "passed"
         },
         {
+          "name": "truncation_can_be_disabled",
+          "result": "passed"
+        },
+        {
           "name": "verify_all_reads_without_modifying",
+          "result": "passed"
+        },
+        {
+          "name": "damage_in_the_last_record_is_treated_as_an_incomplete_tail",
           "result": "passed"
         },
         {
@@ -609,10 +673,6 @@
           "result": "passed"
         },
         {
-          "name": "damage_in_the_last_record_is_treated_as_an_incomplete_tail",
-          "result": "passed"
-        },
-        {
           "name": "garbage_and_zero_tails_are_truncated",
           "result": "passed"
         },
@@ -621,11 +681,11 @@
           "result": "passed"
         },
         {
-          "name": "a_missing_middle_segment_is_a_gap",
+          "name": "rotation_keeps_sequences_consecutive_across_segments",
           "result": "passed"
         },
         {
-          "name": "rotation_keeps_sequences_consecutive_across_segments",
+          "name": "a_missing_middle_segment_is_a_gap",
           "result": "passed"
         },
         {
@@ -674,7 +734,7 @@
       "name": "api",
       "notes": [],
       "ok": true,
-      "seconds": 1.8,
+      "seconds": 2.3,
       "tests": [
         {
           "name": "tests::wire_examples",
@@ -692,26 +752,26 @@
         "caught as expected: [bridge] seed 1 profile lossy step 426: venue position -1.61 outside [-1.79, -1.71] (booked -1.71)",
         "caught as expected: [bridge] seed 1 profile lossy step 426: venue position -1.61 outside [-1.79, -1.71] (booked -1.71)",
         "profile=external seeds=400 inputs=1074783 records=388690 requests=198303 accepted=5955 rejected=186380 duplicates=4645 conflicts=1323 sends=5955 venue_orders=5166 venue_fills=6105 crashes=0 link_drops=3231 in_doubt=669 not_placed=475 parked=367 purged=0 mismatches=777 external_fills=3706",
-        "profile=purge seeds=400 inputs=1050152 records=463462 requests=269386 accepted=33952 rejected=213882 duplicates=14462 conflicts=4128 sends=33952 venue_orders=29329 venue_fills=34308 crashes=5957 link_drops=0 in_doubt=4200 not_placed=2878 parked=0 purged=33702 mismatches=0 external_fills=0",
-        "profile=crashy seeds=400 inputs=824380 records=331391 requests=198256 accepted=13835 rejected=174057 duplicates=5048 conflicts=1347 sends=13835 venue_orders=11923 venue_fills=14342 crashes=7296 link_drops=1397 in_doubt=2065 not_placed=1158 parked=0 purged=0 mismatches=0 external_fills=0",
-        "profile=skewed seeds=400 inputs=823596 records=331701 requests=198224 accepted=13842 rejected=174106 duplicates=5020 conflicts=1303 sends=13842 venue_orders=12038 venue_fills=14548 crashes=7279 link_drops=1389 in_doubt=2047 not_placed=1066 parked=0 purged=0 mismatches=0 external_fills=0",
         "profile=weak_evidence seeds=400 inputs=821450 records=327965 requests=198272 accepted=13445 rejected=174742 duplicates=4944 conflicts=1297 sends=13445 venue_orders=11624 venue_fills=14109 crashes=7273 link_drops=1371 in_doubt=2083 not_placed=1110 parked=2060 purged=0 mismatches=0 external_fills=0",
+        "profile=purge seeds=400 inputs=1050152 records=463462 requests=269386 accepted=33952 rejected=213882 duplicates=14462 conflicts=4128 sends=33952 venue_orders=29329 venue_fills=34308 crashes=5957 link_drops=0 in_doubt=4200 not_placed=2878 parked=0 purged=33702 mismatches=0 external_fills=0",
+        "profile=skewed seeds=400 inputs=823596 records=331701 requests=198224 accepted=13842 rejected=174106 duplicates=5020 conflicts=1303 sends=13842 venue_orders=12038 venue_fills=14548 crashes=7279 link_drops=1389 in_doubt=2047 not_placed=1066 parked=0 purged=0 mismatches=0 external_fills=0",
+        "profile=crashy seeds=400 inputs=824380 records=331391 requests=198256 accepted=13835 rejected=174057 duplicates=5048 conflicts=1347 sends=13835 venue_orders=11923 venue_fills=14342 crashes=7296 link_drops=1397 in_doubt=2065 not_placed=1158 parked=0 purged=0 mismatches=0 external_fills=0",
         "profile=lossy seeds=400 inputs=1364431 records=475926 requests=197532 accepted=27817 rejected=157554 duplicates=9604 conflicts=2557 sends=27817 venue_orders=23963 venue_fills=27762 crashes=0 link_drops=3200 in_doubt=3246 not_placed=2367 parked=0 purged=0 mismatches=0 external_fills=0",
         "profile=calm seeds=400 inputs=1622587 records=755900 requests=150221 accepted=139108 rejected=11113 duplicates=0 conflicts=0 sends=139108 venue_orders=135341 venue_fills=132101 crashes=0 link_drops=0 in_doubt=0 not_placed=0 parked=0 purged=0 mismatches=0 external_fills=0"
       ],
       "ok": true,
-      "seconds": 48.2,
+      "seconds": 46.0,
       "tests": [
         {
           "name": "rng::tests::matches_the_reference_sequence",
           "result": "passed"
         },
         {
-          "name": "absence_rule_depends_on_the_clock_margin",
+          "name": "absence_rule_depends_on_venue_side_expiry",
           "result": "passed"
         },
         {
-          "name": "absence_rule_depends_on_venue_side_expiry",
+          "name": "absence_rule_depends_on_the_clock_margin",
           "result": "passed"
         },
         {
@@ -723,11 +783,11 @@
           "result": "passed"
         },
         {
-          "name": "profile_purge",
+          "name": "profile_weak_evidence",
           "result": "passed"
         },
         {
-          "name": "profile_crashy",
+          "name": "profile_purge",
           "result": "passed"
         },
         {
@@ -735,7 +795,7 @@
           "result": "passed"
         },
         {
-          "name": "profile_weak_evidence",
+          "name": "profile_crashy",
           "result": "passed"
         },
         {
@@ -759,31 +819,11 @@
       "seconds": 0.2,
       "tests": [
         {
-          "name": "queues::tests::close_drains_then_ends",
-          "result": "passed"
-        },
-        {
-          "name": "queues::tests::ticks_coalesce",
-          "result": "passed"
-        },
-        {
           "name": "queues::tests::a_full_lane_refuses_and_never_grows",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::sign::tests::expires_after_is_appended_as_in_the_sdk_source",
-          "result": "passed"
-        },
-        {
-          "name": "util::tests::quantiles_of_a_known_distribution",
-          "result": "passed"
-        },
-        {
-          "name": "http::tests::the_document_viewer_cannot_leave_its_directories",
-          "result": "passed"
-        },
-        {
-          "name": "queues::tests::every_lane_gets_a_share_of_each_batch",
+          "name": "queues::tests::close_drains_then_ends",
           "result": "passed"
         },
         {
@@ -791,27 +831,7 @@
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::sign::tests::action_hash_matches_the_sdk_vector",
-          "result": "passed"
-        },
-        {
-          "name": "venue::hyperliquid::tests::a_fill_page_proves_completeness_only_when_it_is_certainly_the_last",
-          "result": "passed"
-        },
-        {
-          "name": "venue::hyperliquid::wire::tests::anything_else_is_unclear_not_a_failure",
-          "result": "passed"
-        },
-        {
-          "name": "venue::hyperliquid::wire::tests::documented_place_answers",
-          "result": "passed"
-        },
-        {
-          "name": "venue::hyperliquid::wire::tests::odd_coin_names_are_mapped_not_dropped",
-          "result": "passed"
-        },
-        {
-          "name": "venue::hyperliquid::wire::tests::order_wire_json",
+          "name": "http::tests::the_document_viewer_cannot_leave_its_directories",
           "result": "passed"
         },
         {
@@ -819,7 +839,23 @@
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::wire::tests::fill_translation",
+          "name": "venue::hyperliquid::sign::tests::expires_after_is_appended_as_in_the_sdk_source",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::tests::a_fill_page_proves_completeness_only_when_it_is_certainly_the_last",
+          "result": "passed"
+        },
+        {
+          "name": "queues::tests::ticks_coalesce",
+          "result": "passed"
+        },
+        {
+          "name": "util::tests::quantiles_of_a_known_distribution",
+          "result": "passed"
+        },
+        {
+          "name": "queues::tests::every_lane_gets_a_share_of_each_batch",
           "result": "passed"
         },
         {
@@ -827,7 +863,31 @@
           "result": "passed"
         },
         {
+          "name": "venue::hyperliquid::sign::tests::action_hash_matches_the_sdk_vector",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::wire::tests::anything_else_is_unclear_not_a_failure",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::wire::tests::order_wire_json",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::wire::tests::odd_coin_names_are_mapped_not_dropped",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::wire::tests::fill_translation",
+          "result": "passed"
+        },
+        {
           "name": "venue::hyperliquid::wire::tests::documented_cancel_answers",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::wire::tests::documented_place_answers",
           "result": "passed"
         },
         {
@@ -835,11 +895,7 @@
           "result": "passed"
         },
         {
-          "name": "config::tests::mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused",
-          "result": "passed"
-        },
-        {
-          "name": "venue::hyperliquid::sign::tests::order_signature_matches_the_sdk_vectors",
+          "name": "venue::hyperliquid::sign::tests::dummy_action_signature_matches_the_sdk_vectors",
           "result": "passed"
         },
         {
@@ -847,11 +903,15 @@
           "result": "passed"
         },
         {
+          "name": "config::tests::mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused",
+          "result": "passed"
+        },
+        {
           "name": "venue::hyperliquid::sign::tests::order_with_cloid_signature_matches_the_sdk_vectors",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::sign::tests::dummy_action_signature_matches_the_sdk_vectors",
+          "name": "venue::hyperliquid::sign::tests::order_signature_matches_the_sdk_vectors",
           "result": "passed"
         },
         {
@@ -870,10 +930,10 @@
         "40 requests accepted=10 commits=2"
       ],
       "ok": true,
-      "seconds": 7.1,
+      "seconds": 7.6,
       "tests": [
         {
-          "name": "stopped_after_the_write_the_order_exists_and_is_resolved_without_a_send",
+          "name": "stopped_before_the_write_the_request_never_happened",
           "result": "passed"
         },
         {
@@ -881,7 +941,7 @@
           "result": "passed"
         },
         {
-          "name": "stopped_before_the_write_the_request_never_happened",
+          "name": "stopped_after_the_write_the_order_exists_and_is_resolved_without_a_send",
           "result": "passed"
         },
         {
@@ -913,12 +973,12 @@
       "log": "evidence/latest/e2e.log",
       "name": "e2e",
       "notes": [
-        "accepted=105 rejected=26 overloaded=469 queues={\"accepted\":[218,4,132],\"capacity\":[4096,256,8],\"depth\":[0,0,0],\"high_water\":[93,2,8],\"refused\":[0,0,469]}",
-        "rounds=20 accepted=1051 venue_orders=1051",
-        "verify: {   \"records\": 5934,   \"last_seq\": 5934,   \"state_digest\": 1613002161582177890,   \"re_decided\": true,   \"torn_tail_bytes\": 0,   \"open_orders\": 0,   \"orders_in_memory\": 1059 } "
+        "accepted=79 rejected=16 overloaded=505 queues={\"accepted\":[166,4,96],\"capacity\":[4096,256,8],\"depth\":[0,0,0],\"high_water\":[82,2,8],\"refused\":[0,0,505]}",
+        "rounds=20 accepted=1218 venue_orders=1218",
+        "verify: {   \"records\": 6945,   \"last_seq\": 6945,   \"state_digest\": 5276851628035295124,   \"re_decided\": true,   \"torn_tail_bytes\": 0,   \"open_orders\": 0,   \"orders_in_memory\": 1225 } "
       ],
       "ok": true,
-      "seconds": 28.7,
+      "seconds": 30.9,
       "tests": [
         {
           "name": "a_repeated_request_never_creates_a_second_order",
@@ -937,11 +997,11 @@
           "result": "passed"
         },
         {
-          "name": "a_kill_during_send_does_not_duplicate_the_order",
+          "name": "external_activity_is_detected_and_needs_an_operator",
           "result": "passed"
         },
         {
-          "name": "external_activity_is_detected_and_needs_an_operator",
+          "name": "a_kill_during_send_does_not_duplicate_the_order",
           "result": "passed"
         },
         {
@@ -966,6 +1026,10 @@
         },
         {
           "name": "status_shows_account_exposure",
+          "result": "passed"
+        },
+        {
+          "name": "status_shows_reducing_its_rule_and_the_day_base",
           "result": "passed"
         },
         {
@@ -1036,7 +1100,7 @@
         "profile=calm seeds=3000 inputs=12160230 records=5672361 requests=1125479 accepted=1042911 rejected=82568 duplicates=0 conflicts=0 sends=1042911 venue_orders=1014339 venue_fills=991662 crashes=0 link_drops=0 in_doubt=0 not_placed=0 parked=0 purged=0 mismatches=0 external_fills=0"
       ],
       "ok": true,
-      "seconds": 330.4,
+      "seconds": 326.5,
       "tests": [
         {
           "name": "rng::tests::matches_the_reference_sequence",
@@ -1091,11 +1155,11 @@
       "log": "evidence/latest/kills-extended.log",
       "name": "kills-extended",
       "notes": [
-        "rounds=60 accepted=3053 venue_orders=3053",
-        "verify: {   \"records\": 17302,   \"last_seq\": 17302,   \"state_digest\": 984681533212560854,   \"re_decided\": true,   \"torn_tail_bytes\": 0,   \"open_orders\": 0,   \"orders_in_memory\": 3084 } "
+        "rounds=60 accepted=3290 venue_orders=3290",
+        "verify: {   \"records\": 18667,   \"last_seq\": 18667,   \"state_digest\": 6623987423769848992,   \"re_decided\": true,   \"torn_tail_bytes\": 0,   \"open_orders\": 0,   \"orders_in_memory\": 3325 } "
       ],
       "ok": true,
-      "seconds": 113.0,
+      "seconds": 117.4,
       "tests": [
         {
           "name": "random_kills_under_load_keep_books_consistent",

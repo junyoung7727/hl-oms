@@ -323,8 +323,62 @@
       "note": "",
       "test": "cargo test -p oms-core --test margin exposure_is_the_sum_over_instruments",
       "what": "account exposure is the largest instrument exposure, not the sum over instruments"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / daily loss",
+      "id": "M37-daily-loss-judged-only-on-a-fresh-report",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin a_report_older_than_the_freshness_limit_on_arrival_is_still_judged",
+      "what": "a report that is older than the freshness limit when it arrives is recorded but not judged for the daily loss"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / daily loss",
+      "id": "M38-daily-loss-trips-at-exactly-the-limit",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin loss_greater_than_five_percent_of_the_base_enters_reducing",
+      "what": "a loss of exactly the daily-loss limit enters REDUCING"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / daily loss",
+      "id": "M39-day-rolls-before-the-report-is-judged",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day",
+      "what": "the first report of a new day becomes the day base before it is judged, so a loss across midnight is absorbed"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / REDUCING",
+      "id": "M40-entering-reducing-cancels-reduce-only-orders",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones",
+      "what": "entering REDUCING also cancels orders with the reduce-only flag"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / REDUCING",
+      "id": "M41-reducing-entered-again",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin reducing_is_entered_once",
+      "what": "a trigger while the account is already REDUCING enters it again and asks for cancels again"
+    },
+    {
+      "file": "crates/oms-core/src/model.rs",
+      "guards": "C-MARGIN / hold table (ADR-008 §7)",
+      "id": "M42-reducing-refuses-reduce-only-orders",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted",
+      "what": "the hold Reducing refuses every new order, reduce-only included"
     }
   ],
-  "source_digest": "9557b57c6b2d6836",
-  "taken_at_us": 1794813360155345
+  "source_digest": "44860df661c2396d",
+  "taken_at_us": 1794816843215477
 }
