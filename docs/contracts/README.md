@@ -13,7 +13,7 @@
 | C-OVERLOAD | [overload.md](overload.md) | 감당할 수 없는 양이 오면 무엇이 거절되고 무엇이 기다리는가 |
 | C-GW | [gateway.md](gateway.md) | 거래소와 통신하는 부분이 지켜야 하는 것 |
 | C-API, C-OPS | [api.md](api.md) | 전략과 운영자가 보는 인터페이스 |
-| C-MARGIN(미구현) | [margin.md](margin.md) | 계좌 가치에 비해 얼마나 큰 주문까지 받는가. 손실이 커지면 무엇이 멈추고 누가 푸는가 |
+| C-MARGIN(구현됨. 실제 거래소 미확인) | [margin.md](margin.md) | 계좌 가치에 비해 얼마나 큰 주문까지 받는가. 손실이 커지면 무엇이 멈추고 누가 푸는가 |
 | — | [identifiers.md](identifiers.md) | 식별자의 범위와 수명 |
 
 계약과 이벤트·코드·시험의 연결표는 [generated/traceability.md](../generated/traceability.md)에 있다.
