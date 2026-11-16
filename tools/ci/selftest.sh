@@ -114,6 +114,54 @@ printf 'x\n' > run.log
 git add -f run.log
 expect fail "log file" tools/ci/secret_scan.sh
 reset
+# One text file for each forbidden name, so that only the name rule can
+# catch it.
+for name in notes.pem id.key trades.jsonl "journal-$(printf '%020d' 2).oj" tail.at-8.1.bin snapshot.tmp .env.local data/readme.txt crates/x/data/readme.txt; do
+  mkdir -p "$(dirname "$name")"
+  printf 'text\n' > "$name"
+  git add -f "$name"
+  expect fail "forbidden name: $name" tools/ci/secret_scan.sh
+  reset
+done
+# No hex and no forbidden name, so that only the binary check can catch it.
+printf 'a\0b\n' > probe.dat
+expect fail "binary file with no key and an ordinary name" scan
+reset
+# One sample for each credential shape. The filler has no hex run, and each
+# sample is joined at run time, so this file holds no credential shape.
+token() { # token <label> <first part> <second part> <filler>
+  printf 'token = "%s%s%s"\n' "$2" "$3" "$4" > probe.toml
+  expect fail "credential shape: $1" scan
+  reset
+}
+token "AWS access key id" AK IA "$(hex ZQ 8)"
+token "sk- key" s k- "$(hex Zq 10)"
+token "Slack token" xo xb- "$(hex Zq 5)"
+token "GitHub fine-grained token" github _pat_ "$(hex Zq 20)"
+# File names that git prints in quoted form unless asked for raw paths.
+printf 'k = "%s"\n' "$(hex 6d 32)" > '키.toml'
+expect fail "key in a file with a non-ASCII name" scan
+reset
+mkdir -p '데이터'
+printf 'k = "%s"\n' "$(hex 6d 32)" > '데이터/설정.toml'
+expect fail "key under a directory with a non-ASCII name" scan
+reset
+printf 'k = "%s"\n' "$(hex 6d 32)" > "$(printf 'tab\tname.toml')"
+expect fail "key in a file with a tab in its name" scan
+reset
+printf 'k = "%s"\n' "$(hex 6d 32)" > 'quote"back\slash.toml'
+expect fail "key in a file with a quote and a backslash in its name" scan
+reset
+printf 'text\n' > '로그.log'
+git add -f '로그.log'
+expect fail "log file with a non-ASCII name" tools/ci/secret_scan.sh
+reset
+printf 'a\0b\n' > '자료.dat'
+expect fail "binary file with a non-ASCII name" scan
+reset
+printf 'text\n' > '메모.md'
+expect ok "clean text file with a non-ASCII name" scan
+reset
 
 # ---- format check of added files -------------------------------------------
 fmt() { g add -A && g commit -q -m probe && tools/ci/rustfmt_added.sh "$base"; }
@@ -133,6 +181,15 @@ g add -A && g commit -q -m probe
 # The case is only worth something if git really reports a rename.
 expect ok "git reports the move as a rename" bash -c 'git diff --name-status "$1"...HEAD | grep -qE "^R[0-9]+[[:space:]]main.rs[[:space:]]moved.rs$"' _ "$base"
 expect fail "unformatted code in a renamed file" tools/ci/rustfmt_added.sh "$base"
+undo
+printf 'fn broken( {\n' > tests/probe_broken.rs
+expect fail "new file that rustfmt cannot parse" fmt
+undo
+printf 'pub fn probe() {}\n' > 'tests/시험.rs'
+expect ok "formatted new file with a non-ASCII name" fmt
+undo
+printf 'pub fn  probe( ){}\n' > 'tests/시험.rs'
+expect fail "unformatted new file with a non-ASCII name" fmt
 undo
 printf 'pub fn  more( ){}\n' >> tests/common/mod.rs
 expect ok "unformatted code added to an existing file (exempt by design)" fmt
