@@ -4,7 +4,7 @@
 
 **Blocked by:** 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11
 
-**Status:** ready-for-merge
+**Status:** done
 
 - [x] The core benchmark has a case with the margin policy on and about 500 resting orders; its median and p99 decision times are recorded as evidence and written beside the earlier figures (median 22 µs, p99 29 µs at 500 open orders without the gate).
 - [x] Claims V-PERF-1 to V-PERF-5 are rerun on the current source and are `passed`, not `stale`; a claim that no longer meets its criterion is a finding written in this file under `## Comments` with the numbers.
@@ -13,7 +13,7 @@
 - [x] The contract's verification section lists the real tests per rule and repeats what is not verified (T1–T11).
 - [x] The README status paragraph, the scope document, the verification overview and the runbook state: margin rules implemented; not run against any real venue; the testnet rehearsal and T1–T11 are required before mainnet and need the owner's approval; claim V-HL-3 is not run and why.
 - [x] The considerations registry row D-RISK-04 and its line in the review-criteria document (`docs/02-review-criteria.md`) state the implemented state: the code, the claims and the verification status of the margin rules; U-03 stays open.
-- [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
+- [x] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
 
 ## Comments
 
@@ -46,3 +46,7 @@
     - `docs/verification/README.md` section 11.5 and `spec-ko.md` section 15 say the adversarial review of the whole branch has not happened yet; update them when it has.
   - Still not guaranteed (the full list is `docs/verification/README.md` section 11): everything about the real venue (T1 to T11; no request was sent, V-HL-3 is not run); the reconciler finding of ticket 09 is open and has no test; the `activeAssetData` fixture was written from memory and not compared with the documentation; the response time of a node with the margin policy on; the cost of a REDUCING entry; that the 115 mutants cover the rule code (they are hand-picked; the gateway's query arms, the reconciler's timing and the status output have none); performance on a quiet host or another device.
   - Local gate on the branch tip (`git merge margin-rules`: already up to date at b8e32fa): `cargo test --workspace --locked` 288 passed, 0 failed, 0 ignored; clippy with warnings denied clean; generated documents in step; secret scan and `rustfmt_added.sh` pass. Not run here: `verify --extended` and `tools/ci/selftest.sh` (the merger's; the last checklist line is open).
+- Merge (merger claude-fable-5-2), 2026-11-16: merge commit f6aa696 on `margin-rules`. The merge changed no file under `crates/` and not `Cargo.lock` relative to the ticket tip 5d854b6 (`git diff 5d854b6 f6aa696 -- crates Cargo.lock` is empty), so `evidence/perf/` and `evidence/mutants.json` are the ticket's runs and were not rerun. `cargo test --workspace --locked`: 288 passed, 0 failed, 0 ignored. Clippy with warnings denied clean; generated documents in step; secret scan, `selftest.sh` and `rustfmt_added.sh` pass. No gate step failed and nothing was fixed during the merge.
+  - Evidence (05e9011, source `9468258ab606c562`, 2026-11-16 21:56 to 22:08 KST): `verify --extended` without `--live-testnet`, 319 tests in 9 suites, all passed (`core` 169, one more than the kept run; `sim` 21, 66 s; `sim-extended` 21, 499 s; `e2e` 31 with 20 kills, 1077 accepted; `kills-extended` 111 s, 60 kills, 3234 accepted, 18 186 records re-decided). `hl-live` was not run; no request was sent to a venue. Claims: 67 of 68 passed, 1 not run (V-HL-3), 0 failed, 0 stale. Mutants: 115 of 115 killed (the ticket's run). V-PERF-1 to V-PERF-5 passed (the ticket's run).
+  - Documents: the README status paragraph and section 1 of `docs/verification/README.md` (heading, suite rows, the paragraph with the claim counts, the sentence on performance results) now describe this run.
+  - Not done here: the adversarial review of the whole branch. `docs/verification/README.md` section 11.5 and `spec-ko.md` section 15 still say it has not happened, which is true.
