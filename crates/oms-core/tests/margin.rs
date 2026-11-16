@@ -3146,3 +3146,482 @@ fn stale_age_starts_at_policy_activation_when_the_link_is_already_up() {
         "orders from before the policy are never cancelled"
     );
 }
+
+// ---- C-MARGIN: MM buffer --------------------------------------------------------
+
+/// A position as the venue reports it, at the venue setting the policy asks
+/// for (isolated, 2x), with this maximum leverage, value and margin.
+fn position_with(
+    instrument: &str,
+    max_leverage: u32,
+    position_value: &str,
+    margin_used: &str,
+) -> MarginPosition {
+    MarginPosition {
+        position_value: amt(position_value),
+        margin_used: amt(margin_used),
+        ..position(instrument, max_leverage)
+    }
+}
+
+/// The next margin report of the current link session, asked now: account
+/// value 100 (the day base of `at_base_100`, so the daily-loss rule is
+/// silent) and these positions.
+fn report_positions(h: &mut H, positions: Vec<MarginPosition>) -> Output {
+    report_positions_asked_at(h, h.now, positions)
+}
+
+fn report_positions_asked_at(h: &mut H, queried_at: Ts, positions: Vec<MarginPosition>) -> Output {
+    h.margin_seq += 1;
+    h.venue(VenueInput::MarginReport(MarginReportIn {
+        session: h.session,
+        seq: h.margin_seq,
+        queried_at,
+        account_value: amt("100"),
+        positions,
+    }))
+}
+
+fn mm_buffer_entered(detail: &str) -> Event {
+    Event::ReducingEntered {
+        rule: RuleId::MmBuffer,
+        detail: detail.into(),
+    }
+}
+
+/// S16. Maximum leverage 40 gives a maintenance margin rate of 1/80 =
+/// 1.25 %. With the buffer of 0.25 percentage points the line is 1.5 % of
+/// the position value: 3.00 on a value of 200. An isolated margin of
+/// exactly 3.00 does not trip the rule; 2.99 does, and the account is then
+/// REDUCING with the rule `MmBuffer`.
+///
+/// Not proven: that the venue's margin field of an isolated position is its
+/// equity (T1).
+#[test]
+fn isolated_margin_below_mmr_plus_buffer_enters_reducing() {
+    let mut h = at_base_100();
+
+    h.advance(5 * SEC);
+    let out = report_positions(&mut h, vec![position_with("X", 40, "200", "3")]);
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.reducing, None);
+    assert_eq!(h.core.holds(None), vec![]);
+
+    h.advance(5 * SEC);
+    let out = report_positions(&mut h, vec![position_with("X", 40, "200", "2.99")]);
+    let entered_at = h.now;
+    let detail = "position X: isolated margin 2.99 is below the maintenance margin \
+                  at maximum leverage 40 plus 25 bps of the position value 200";
+    assert_eq!(names(&out), vec!["margin_reported", "reducing_entered"]);
+    assert_eq!(out.events[1], mm_buffer_entered(detail));
+    assert_eq!(
+        h.core.margin.reducing,
+        Some(Reducing {
+            rule: RuleId::MmBuffer,
+            detail: detail.into(),
+            since: entered_at,
+        })
+    );
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+    // Nothing is sent to the venue: there is no order to cancel, and the
+    // OMS never closes a position.
+    assert_eq!(out.commands, vec![]);
+}
+
+/// S16. The maintenance margin rate of a position is 1 / (2 × its maximum
+/// leverage), read from the same report. Maximum leverage 25 gives 2 %, so
+/// the line is 2.25 % of the value: 4.50 on 200. Maximum leverage 50 gives
+/// 1 %, so the line is 1.25 %: 2.50 on 200. Each position is judged at its
+/// own rate, not at the 1.25 % of maximum leverage 40.
+///
+/// Not proven: margin tiers (T9). A large position has a lower maximum
+/// leverage at the venue than the one in the report.
+#[test]
+fn mmr_follows_the_max_leverage_of_each_position() {
+    let mut h = at_base_100();
+
+    // Each position exactly on its own line: none trips. At 1.25 % + 0.25 %
+    // the position on Z (2.50 < 3.00) would.
+    h.advance(5 * SEC);
+    let out = report_positions(
+        &mut h,
+        vec![
+            position_with("X", 40, "200", "3"),
+            position_with("Y", 25, "200", "4.5"),
+            position_with("Z", 50, "200", "2.5"),
+        ],
+    );
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.reducing, None);
+
+    // The position on Y is one cent under its line of 4.50. At 1.25 % +
+    // 0.25 % it would be far above the line (3.00).
+    h.advance(5 * SEC);
+    let out = report_positions(
+        &mut h,
+        vec![
+            position_with("X", 40, "200", "3"),
+            position_with("Y", 25, "200", "4.49"),
+            position_with("Z", 50, "200", "2.5"),
+        ],
+    );
+    assert_eq!(
+        out.events[1..],
+        [mm_buffer_entered(
+            "position Y: isolated margin 4.49 is below the maintenance margin \
+             at maximum leverage 25 plus 25 bps of the position value 200"
+        )]
+    );
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+}
+
+/// S16. The latch is one for the whole account. The position on X is under
+/// its line; the plain order resting on Y is cancelled in the name of the
+/// rule, and a new plain order is refused on Y as on X. A reduce-only order
+/// on Y is still accepted.
+#[test]
+fn a_trigger_on_one_instrument_blocks_plain_orders_on_all() {
+    let mut h = H::ready_with(config_xy());
+    h.ref_price("X", "100");
+    h.ref_price("Y", "100");
+    h.report_margin("100");
+    let bid_on_y = accepted({
+        let r = req_on(&h, "Y", "bid-y", Side::Buy, "0.2", "90");
+        h.new_order(r)
+    });
+    h.placed_open(bid_on_y, "bid-y");
+
+    h.advance(5 * SEC);
+    let out = report_positions(&mut h, vec![position_with("X", 40, "200", "2.99")]);
+    let by_the_rule = Actor::Rule(RuleId::MmBuffer);
+    assert_eq!(
+        out.events[1..],
+        [
+            mm_buffer_entered(
+                "position X: isolated margin 2.99 is below the maintenance margin \
+                 at maximum leverage 40 plus 25 bps of the position value 200"
+            ),
+            Event::CancelRequested {
+                order_id: bid_on_y,
+                by: by_the_rule.clone(),
+            },
+            cancel_sent(bid_on_y, 1),
+        ]
+    );
+    assert_eq!(
+        h.order(bid_on_y).cancel.as_ref().map(|c| c.by.clone()),
+        Some(by_the_rule)
+    );
+
+    let held = vec![RejectReason::Hold(HoldReason::Reducing)];
+    for (n, instrument) in ["Y", "X"].into_iter().enumerate() {
+        let r = req_on(
+            &h,
+            instrument,
+            &format!("plain-{n}"),
+            Side::Buy,
+            "0.1",
+            "100",
+        );
+        assert_eq!(
+            rejected(h.new_order(r)),
+            held,
+            "plain order on {instrument}"
+        );
+    }
+    let r = NewOrderReq {
+        reduce_only: true,
+        ..req_on(&h, "Y", "flagged-y", Side::Sell, "0.1", "100")
+    };
+    accepted(h.new_order(r));
+}
+
+/// The rule judges isolated positions only. The margin of a cross position
+/// is shared with the account and its `margin_used` is not what stands
+/// between the position and liquidation, so the same numbers that trip the
+/// rule on an isolated position latch nothing on a cross one. A cross
+/// position is the venue-setting hold's case: plain orders on X are held
+/// until the operator fixes the margin mode at the venue.
+#[test]
+fn a_cross_position_is_not_judged_by_the_mm_rule() {
+    let mut h = at_base_100();
+
+    h.advance(5 * SEC);
+    let cross = MarginPosition {
+        leverage_type: LeverageType::Cross,
+        ..position_with("X", 40, "200", "2.99")
+    };
+    let out = report_positions(&mut h, vec![cross]);
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.reducing, None);
+    assert_eq!(h.core.holds(None), vec![HoldReason::VenueSetting(iid("X"))]);
+}
+
+/// S14. While the newest margin report shows a position under its line, the
+/// operator cannot clear REDUCING: the refusal is `MmBufferActive`, nothing
+/// is recorded and the latch stays. It does not matter which rule set the
+/// latch. The condition is asked before the note. A report that shows the
+/// position back on its line lets the clear through.
+///
+/// Not guaranteed: a way out of a false latch. If the venue's margin field
+/// does not mean what the rule assumes (T1), the condition can read true
+/// for as long as the position exists; there is no force option.
+#[test]
+fn clear_reduce_is_refused_while_the_mm_condition_holds() {
+    let active = "mm_buffer_active: a position is below its maintenance margin \
+                  plus the buffer on the last margin report";
+
+    // The MM-buffer rule set the latch, and the condition is still true.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    report_positions(&mut h, vec![position_with("X", 40, "200", "2.99")]);
+    let latch = h.core.margin.reducing.clone();
+    assert_eq!(latch.as_ref().map(|r| r.rule), Some(RuleId::MmBuffer));
+    for note in ["position looked at", ""] {
+        let out = clear_reduce(&mut h, note);
+        assert_eq!(refused(&out), active, "note {note:?}");
+        assert_eq!(h.core.margin.reducing, latch);
+    }
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+
+    // A newer report still shows it: refused again.
+    h.advance(5 * SEC);
+    report_positions(&mut h, vec![position_with("X", 40, "200", "2.5")]);
+    let out = clear_reduce(&mut h, "position looked at");
+    assert_eq!(refused(&out), active);
+
+    // Margin was added at the venue: exactly on the line is not under it.
+    h.advance(5 * SEC);
+    report_positions(&mut h, vec![position_with("X", 40, "200", "3")]);
+    let out = clear_reduce(&mut h, "margin added at the venue");
+    assert_eq!(out.reply, Some(Reply::Operator(Ok("cleared".into()))));
+    assert_eq!(
+        out.events,
+        vec![
+            operator_base_set(20_000, "100"),
+            Event::ReducingCleared {
+                note: "margin added at the venue".into(),
+                old_base: Some(amt("100")),
+                new_base: amt("100"),
+            },
+        ]
+    );
+    assert_eq!(h.core.holds(None), vec![]);
+
+    // The daily-loss rule set the latch; a later report shows a position
+    // under its line. The clear is refused for that position.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    h.report_margin("94");
+    let latch = h.core.margin.reducing.clone();
+    assert_eq!(latch.as_ref().map(|r| r.rule), Some(RuleId::DailyLoss));
+    h.advance(5 * SEC);
+    report_positions(&mut h, vec![position_with("X", 40, "200", "2.99")]);
+    let out = clear_reduce(&mut h, "loss understood");
+    assert_eq!(refused(&out), active);
+    assert_eq!(h.core.margin.reducing, latch);
+}
+
+/// S16. The latch records the rule that tripped first, with what it saw. A
+/// later trigger of the other rule changes nothing and emits nothing,
+/// whichever of the two came first. When one report trips both, the MM
+/// buffer is judged before the daily loss and is the one recorded.
+#[test]
+fn reducing_records_the_rule_that_tripped_first() {
+    let under_the_line = || vec![position_with("X", 40, "200", "2.99")];
+
+    // Daily loss first, then a position under its line.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    h.report_margin("94");
+    let first = h.core.margin.reducing.clone();
+    assert_eq!(first.as_ref().map(|r| r.rule), Some(RuleId::DailyLoss));
+    h.advance(5 * SEC);
+    let out = report_positions(&mut h, under_the_line());
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.reducing, first);
+
+    // A position under its line first, then a loss of 6 %.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    report_positions(&mut h, under_the_line());
+    let first = h.core.margin.reducing.clone();
+    assert_eq!(first.as_ref().map(|r| r.rule), Some(RuleId::MmBuffer));
+    h.advance(5 * SEC);
+    let out = h.report_margin("94");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.core.margin.reducing, first);
+
+    // Both in one report: account value 94 against the base of 100, and
+    // the position under its line.
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    h.margin_seq += 1;
+    let out = h.venue(VenueInput::MarginReport(MarginReportIn {
+        session: h.session,
+        seq: h.margin_seq,
+        queried_at: h.now,
+        account_value: amt("94"),
+        positions: under_the_line(),
+    }));
+    assert_eq!(names(&out), vec!["margin_reported", "reducing_entered"]);
+    assert_eq!(
+        h.core.margin.reducing.as_ref().map(|r| r.rule),
+        Some(RuleId::MmBuffer)
+    );
+}
+
+/// S11. Every recorded report is judged by the MM-buffer rule, also one
+/// that is older than the freshness limit of 30 s when it arrives: its
+/// numbers are the newest the OMS has and entering REDUCING is the safe
+/// side. Here the answer was 40 s on the way and shows isolated margin 2.99
+/// on a value of 200 at maximum leverage 40.
+#[test]
+fn an_old_report_on_arrival_is_still_judged_by_the_mm_rule() {
+    let mut h = at_base_100();
+    h.advance(60 * SEC);
+
+    // The harness records the next input 1 ms after `now`.
+    let recorded_at = h.now + 1_000;
+    let out = report_positions_asked_at(
+        &mut h,
+        recorded_at - 40 * SEC,
+        vec![position_with("X", 40, "200", "2.99")],
+    );
+    assert_eq!(h.now, recorded_at);
+    assert!(
+        !h.core.margin_report_is_fresh(recorded_at),
+        "a report that is 40 s old counts as fresh"
+    );
+    assert_eq!(
+        out.events[1..],
+        [mm_buffer_entered(
+            "position X: isolated margin 2.99 is below the maintenance margin \
+             at maximum leverage 40 plus 25 bps of the position value 200"
+        )]
+    );
+    assert_eq!(
+        h.core.margin.reducing.as_ref().map(|r| (r.rule, r.since)),
+        Some((RuleId::MmBuffer, recorded_at))
+    );
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+}
+
+/// Whether a first margin report with one isolated position of this
+/// maximum leverage, value and margin (raw 1e-8 integers) enters REDUCING
+/// by the MM-buffer rule, under a policy with this buffer.
+fn mm_rule_trips(max_leverage: u32, buffer_bps: u32, value: i64, margin: i64) -> bool {
+    let mut cfg = config_with_margin();
+    if let Some(policy) = cfg.policy.margin.as_mut() {
+        policy.mm_buffer_bps = buffer_bps;
+    }
+    let mut h = H::ready_with(cfg);
+    let out = report_positions(
+        &mut h,
+        vec![MarginPosition {
+            position_value: Amount(value),
+            margin_used: Amount(margin),
+            ..position("X", max_leverage)
+        }],
+    );
+    let rule = h.core.margin.reducing.as_ref().map(|r| r.rule);
+    assert!(
+        rule.is_none() || rule == Some(RuleId::MmBuffer),
+        "another rule tripped: {rule:?}"
+    );
+    assert_eq!(
+        rule.is_some(),
+        names(&out).contains(&"reducing_entered"),
+        "the latch and the event disagree"
+    );
+    rule.is_some()
+}
+
+/// G3. The rule compares exact products: no rounding flips the result next
+/// to the line, and nothing overflows at the largest amounts, leverages and
+/// buffers. Values in the first part are literals worked out by hand, as
+/// raw 1e-8 integers; the generated part takes the line from its own i128
+/// product.
+#[test]
+fn mm_comparison_is_exact_at_extreme_values() {
+    const MAX: i64 = 9_223_372_036_854_775_807;
+
+    // The largest position value at maximum leverage 40 and 25 bps: the
+    // line is 1.5 % of it, 138 350 580 552 821 637.105 raw.
+    assert!(mm_rule_trips(40, 25, MAX, 138_350_580_552_821_637));
+    assert!(!mm_rule_trips(40, 25, MAX, 138_350_580_552_821_638));
+    // The smallest position value: the line is 0.015 raw. A line rounded
+    // down to 0 would let a margin of 0 pass.
+    assert!(mm_rule_trips(40, 25, 1, 0));
+    assert!(!mm_rule_trips(40, 25, 1, 1));
+    // Maximum leverage 1 and no buffer: the line is half of the value,
+    // 4 611 686 018 427 387 903.5 raw.
+    assert!(mm_rule_trips(1, 0, MAX, 4_611_686_018_427_387_903));
+    assert!(!mm_rule_trips(1, 0, MAX, 4_611_686_018_427_387_904));
+    // The largest maximum leverage and no buffer: the line is the value
+    // divided by 8 589 934 590, which is 1 073 741 824.25 raw.
+    assert!(mm_rule_trips(u32::MAX, 0, MAX, 1_073_741_824));
+    assert!(!mm_rule_trips(u32::MAX, 0, MAX, 1_073_741_825));
+    // A buffer of 10 000 bps is the whole value on top of the maintenance
+    // margin: also a margin equal to the value is under the line.
+    assert!(mm_rule_trips(40, 10_000, MAX, MAX));
+    assert!(mm_rule_trips(40, 10_000, 1, 1));
+    // The largest buffer with the largest leverage and value: the line is
+    // more than 429 496 times the value. Its scaled product does not fit in
+    // an i128; the answer is still "under the line", for every margin.
+    assert!(mm_rule_trips(u32::MAX, u32::MAX, MAX, MAX));
+    assert!(mm_rule_trips(u32::MAX, u32::MAX, MAX, 0));
+    assert!(mm_rule_trips(1, u32::MAX, MAX, MAX));
+    // A negative margin is under every line, also the most negative one.
+    assert!(mm_rule_trips(40, 25, 1, -1));
+    assert!(mm_rule_trips(u32::MAX, u32::MAX, MAX, i64::MIN));
+    assert!(mm_rule_trips(40, 0, MAX, i64::MIN));
+    // A position value of zero or below is not judged, whatever its margin.
+    assert!(!mm_rule_trips(40, 25, 0, 0));
+    assert!(!mm_rule_trips(40, 25, 0, -1));
+    assert!(!mm_rule_trips(40, 25, -1, i64::MIN));
+    assert!(!mm_rule_trips(u32::MAX, u32::MAX, i64::MIN, i64::MIN));
+
+    // Generated. The line in raw units is value × (10 000 + 2 × leverage ×
+    // buffer) / (2 × leverage × 10 000). The largest margin under it and
+    // the smallest margin on or above it come from the test's own product;
+    // with a buffer of at most 1 000 000 bps that product fits.
+    let leverage = prop_oneof![1u32..=100, 1u32..=u32::MAX];
+    let buffer = prop_oneof![Just(0u32), Just(25u32), 0u32..=10_000, 0u32..=1_000_000];
+    let value = prop_oneof![1i64..=1_000, 1i64..=10_000_000_000_000, 1i64..=i64::MAX];
+    let mut runner = proptest::test_runner::TestRunner::default();
+    let result = runner.run(&(leverage, buffer, value), |(leverage, buffer, value)| {
+        let scale = 2 * i128::from(leverage) * 10_000;
+        let scaled_line =
+            i128::from(value) * (10_000 + 2 * i128::from(leverage) * i128::from(buffer));
+        let (floor, on_a_unit) = (scaled_line / scale, scaled_line % scale == 0);
+        let first_not_under = if on_a_unit { floor } else { floor + 1 };
+        let last_under = first_not_under - 1;
+        match i64::try_from(last_under) {
+            Ok(margin) => prop_assert!(
+                mm_rule_trips(leverage, buffer, value, margin),
+                "margin {} did not trip: leverage {}, buffer {}, value {}",
+                margin,
+                leverage,
+                buffer,
+                value
+            ),
+            // The line is above every margin that can be written.
+            Err(_) => prop_assert!(mm_rule_trips(leverage, buffer, value, i64::MAX)),
+        }
+        if let Ok(margin) = i64::try_from(first_not_under) {
+            prop_assert!(
+                !mm_rule_trips(leverage, buffer, value, margin),
+                "margin {} tripped: leverage {}, buffer {}, value {}",
+                margin,
+                leverage,
+                buffer,
+                value
+            );
+        }
+        Ok(())
+    });
+    if let Err(e) = result {
+        panic!("{e}");
+    }
+}

@@ -599,6 +599,15 @@ impl Tx<'_> {
         if !clear_on_a_fresh_report {
             return Some(MarginRefusal::MarginUnavailable);
         }
+        // A position near liquidation is not released into more risk. There
+        // is no way around this: no force option.
+        let mm_condition_holds = match (&self.core.config.policy.margin, &self.core.margin.report) {
+            (Some(policy), Some(report)) => position_under_the_mm_line(report, policy.mm_buffer_bps).is_some(),
+            _ => false,
+        };
+        if mm_condition_holds {
+            return Some(MarginRefusal::MmBufferActive);
+        }
         let clear_has_a_note = !note.trim().is_empty();
         if !clear_has_a_note {
             return Some(MarginRefusal::NoteRequired);
@@ -772,8 +781,28 @@ impl Tx<'_> {
             });
         }
         self.emit(Event::MarginReported { report: r.clone() })?;
+        self.judge_mm_buffer(r)?;
         self.judge_daily_loss(r)?;
         self.roll_day_base(r)
+    }
+
+    /// MM buffer (C-MARGIN, 유지증거금 여유): an isolated position of a
+    /// recorded report is close to liquidation. A cross position is not
+    /// judged: its margin is the account's (the venue-setting hold names
+    /// it).
+    fn judge_mm_buffer(&mut self, r: &MarginReportIn) -> Result<(), CoreFault> {
+        let Some(policy) = &self.core.config.policy.margin else {
+            return Ok(());
+        };
+        let buffer_bps = policy.mm_buffer_bps;
+        let Some(p) = position_under_the_mm_line(r, buffer_bps) else {
+            return Ok(());
+        };
+        let detail = format!(
+            "position {}: isolated margin {} is below the maintenance margin at maximum leverage {} plus {} bps of the position value {}",
+            p.instrument, p.margin_used, p.max_leverage, buffer_bps, p.position_value
+        );
+        self.enter_reducing(RuleId::MmBuffer, detail)
     }
 
     /// Daily loss (C-MARGIN): the account value of a recorded report is more
@@ -1683,5 +1712,31 @@ fn reach_after(b: &Book, side: Side, qty: Qty) -> Option<i64> {
     match side {
         Side::Buy => b.upper()?.checked_add(qty.0),
         Side::Sell => b.lower()?.checked_sub(qty.0),
+    }
+}
+
+/// The first position of the report that the MM-buffer rule judges and
+/// finds under its line. Judged: isolated, with a position value above
+/// zero.
+fn position_under_the_mm_line(r: &MarginReportIn, buffer_bps: u32) -> Option<&MarginPosition> {
+    let judged = |p: &&MarginPosition| p.leverage_type == LeverageType::Isolated && p.position_value.0 > 0;
+    r.positions.iter().filter(judged).find(|p| mm_buffer_is_used_up(p, buffer_bps))
+}
+
+/// Whether the margin of a position is below (maintenance margin rate +
+/// `buffer_bps`) of its value. The maintenance margin rate is 1 / (2 ×
+/// maximum leverage); both sides are multiplied by 2 × maximum leverage ×
+/// 10 000, so nothing is divided. For a position value above zero only.
+fn mm_buffer_is_used_up(p: &MarginPosition, buffer_bps: u32) -> bool {
+    let (margin, value) = (i128::from(p.margin_used.0), i128::from(p.position_value.0));
+    let twice_max_leverage = 2 * i128::from(p.max_leverage);
+    // At most 2^63 × 2^33 × 2^14: it fits.
+    let scaled_margin = margin * twice_max_leverage * 10_000;
+    // The factor is below 2^66. The product with a value above zero can
+    // pass the largest i128 only upwards, and is then above every scaled
+    // margin.
+    match value.checked_mul(10_000 + twice_max_leverage * i128::from(buffer_bps)) {
+        Some(scaled_line) => scaled_margin < scaled_line,
+        None => true,
     }
 }

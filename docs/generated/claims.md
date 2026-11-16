@@ -1,82 +1,83 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `0b8724e65a18fdc6`, 검증 결과의 다이제스트 `0b8724e65a18fdc6`.
+> 소스 다이제스트 `2cf32bd373ac7282`, 검증 결과의 다이제스트 `0b8724e65a18fdc6`.
 
-주장 66건: 통과 60, 실패 0, 미실행 1, 이전 버전 결과 5.
+주장 67건: 통과 0, 실패 0, 미실행 4, 이전 버전 결과 63.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
-| V-NUM-1 | 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다 | 단위 | 통과 | `cargo test -p oms-core --lib` |
-| V-NUM-2 | 한도 비교용 금액은 정확한 곱 이상인 가장 작은 1e-8 단위 값이고, 넘치면 보고된다 | 속성 | 통과 | `cargo test -p oms-core --lib notional` |
-| V-NEW-1 | 수용된 주문들이 어떤 순서로 체결되어도 계좌와 전략의 포지션은 설정한 구간을 벗어나지 않으며, 두 요청이 같은 여유를 쓰지 못한다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios` |
-| V-NEW-2 | 수량·가격 단위, 유효숫자, 최소·최대 금액, 가격대, 만료 시각, 종목·전략의 허용 여부, 용량을 검사하고 해당하는 사유를 모두 돌려준다. 거절 사유의 종류마다 시험이 있다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios && cargo test -p oms-core --test gaps` |
-| V-IDEM-1 | 같은 (전략, 키)로는 주문이 하나만 만들어지고 전송 명령도 한 번만 나온다. 다른 내용의 요청은 충돌로 거절된다. 키는 요청이 만료된 뒤에만 잊는다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios` |
-| V-IDEM-2 | 재전송, 충돌 요청, 재시작, 키 삭제가 임의로 섞여도 키당 수용 1회, 키당 전송 1회, 거래소의 클라이언트 ID당 접수 요청 1회가 유지된다 | 시뮬레이션 | 통과 | `OMS_SIM_SEEDS=400 cargo test --release -p oms-sim --test sim` |
-| V-IDEM-3 | 실제 소켓으로 여러 연결이 같은 요청을 동시에 보내도, 노드를 강제 종료한 뒤에도, 주문은 하나이고 거래소 접수 요청도 하나다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e a_repeated_request` |
-| V-DOUBT-1 | 전송 결과를 모르면 예약을 유지하고 신규 주문을 막으며 다시 보내지 않는다. 존재 증거가 오면 정상 주문이 된다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios` |
-| V-DOUBT-2 | '찾을 수 없음'은 전송 만료 + 여유가 지난 뒤의 조회일 때만 주문을 닫는다. 거래소가 만료를 강제하지 않는 설정에서는 절대 닫지 않는다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios not_found && cargo test -p oms-node --test e2e a_lost_request` |
-| V-DOUBT-3 | 부재 판정은 두 가정(거래소가 만료를 강제한다, 시계 차이가 여유보다 작다)에 의존하며, 가정을 깨면 시험이 위반을 잡는다 | 시뮬레이션 | 통과 | `cargo test --release -p oms-sim --test sim absence_rule -- --nocapture` |
-| V-FILL-1 | 체결은 한 번만 기장되고, 접수 응답보다 먼저 와도, 주인을 아직 몰라도, 수량을 넘어도 버려지지 않는다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios fill && cargo test -p oms-core --test gaps && cargo test -p oms-core --test review_core f2` |
-| V-CANCEL-1 | 취소 요청은 예약을 풀지 않고, 취소 중 체결은 기장되며, 최종 수량은 종결 통보가 정한다. 취소는 차단 중에도 받고, 간격을 두고 상한까지 재시도한다. 상한에 이른 뒤 다시 요청하면 새 시도가 나가고, 결과가 오지 않는 시도는 시간 초과 뒤 불명으로 처리된다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios cancel && cargo test -p oms-core --test review_core f1` |
-| V-TERM-1 | 종결 통보가 체결보다 먼저 와도 아직 기장되지 않은 수량은 예약에 남고, 최종 수량을 모를 때는 체결 동기화가 종결 시각을 지난 뒤에만 닫는다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios terminal` |
-| V-RECON-1 | 링크가 돌아오면 미종결 주문의 증거, 체결, 열린 주문, 포지션을 현재 세션에서 다시 확인할 때까지 신규 주문을 막는다. 포지션은 예약으로 설명되는 범위로 검사하고, 오래된 스냅샷은 판정하지 않는다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios` |
-| V-RECON-2 | 노드가 죽어 있는 동안 거래소에서 일어난 체결, 거래소 주도 취소, 부분 체결을 재시작 뒤 거래소 조회로 모두 반영한다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e events_missed` |
-| V-EXT-1 | OMS가 내지 않은 체결은 기장되고 불일치로 표시되어 신규 주문을 막으며, 운영자가 확인해야 풀린다 | 시뮬레이션 | 통과 | `cargo test --release -p oms-sim --test sim profile_external` |
-| V-REPLAY-1 | 기록된 이벤트만 적용해 만든 상태는 살아 있는 상태와 같고, 기록된 입력을 다시 판단하면 기록된 이벤트가 나온다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios && oms-node verify --data-dir <dir> --re-decide` |
-| V-SIM-1 | 네트워크 장애, 통보 중복·지연, 링크 단절, 프로세스 재시작, 키 삭제가 임의로 섞인 실행의 매 단계에서: 구조 불변조건이 성립하고, 거래소의 실제 포지션이 OMS가 설명하는 범위 안에 있고, 한도를 넘지 않고, 같은 주문이 두 번 전송되지 않는다 | 시뮬레이션 | 통과 | `OMS_SIM_SEEDS=400 cargo test --release -p oms-sim --test sim -- --nocapture   (실패 시: OMS_SIM_PROFILE=<이름> OMS_SIM_SEED=<n>)` |
-| V-SIM-2 | 장애가 멈추면 장부가 가상 거래소와 일치한다: 주문별 체결량과 상태, 포지션, 수수료 합. 차단 사유와 거짓 불일치가 남지 않는다 | 시뮬레이션 | 통과 | `V-SIM-1과 같다` |
-| V-SIM-3 | 같은 seed는 바이트 단위로 같은 저널을 만든다 | 시뮬레이션 | 통과 | `cargo test --release -p oms-sim` |
-| V-COMMIT-1 | flush가 실패하면 그 배치의 응답, 전송 명령, 읽기 모델 변경이 하나도 나가지 않고 프로세스가 입력을 닫는다. 성공한 경우 응답 시점에 읽기 모델은 이미 갱신돼 있다 | 프로세스 내부 | 통과 | `cargo test -p oms-node --features failpoints --test pipeline` |
-| V-COMMIT-2 | 부하 중 임의 시점에 노드를 강제 종료하고 다시 띄우기를 반복해도, 대조가 끝난 뒤 주문별 체결량·상태와 포지션이 거래소와 일치하고 같은 주문이 두 번 접수 요청되지 않는다 | 프로세스 | 통과 | `OMS_KILL_ROUNDS=20 cargo test -p oms-node --test e2e random_kills -- --nocapture` |
-| V-COMMIT-3 | 함께 도착한 입력은 flush를 공유하고, 응답은 판단 순서대로 나온다 | 프로세스 내부 | 통과 | `cargo test -p oms-node --features failpoints --test pipeline -- --nocapture` |
-| V-JRN-1 | 프레임의 모든 절단과 모든 단일 비트 반전이 감지되고, 0으로 채워진 꼬리는 프레임으로 읽히지 않는다 | 단위 | 통과 | `cargo test -p oms-journal --lib` |
-| V-JRN-2 | 저널의 끝이 불완전하면 유효한 접두부만 남기고 원본 바이트를 보존한 뒤 이어 쓸 수 있다. 중간이 손상됐거나 세그먼트가 빠졌거나 다른 인스턴스의 것이거나 스냅샷보다 짧으면 시작을 거부하고, 거부한 디렉터리의 파일은 건드리지 않는다 | 속성 | 통과 | `cargo test -p oms-journal && cargo test -p oms-node --test e2e journal_damage` |
-| V-JRN-3 | 같은 데이터 디렉터리를 두 프로세스가 쓸 수 없고, 다른 인스턴스의 저널은 거부된다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e only_one_node` |
-| V-JRN-4 | 스냅샷은 완전한 파일로만 나타나고, 손상된 스냅샷은 건너뛰며, 정상 종료 뒤 재시작은 스냅샷에서 같은 상태로 돌아온다 | 프로세스 | 통과 | `cargo test -p oms-journal --lib snapshot` |
-| V-JRN-5 | 기록 스키마가 다른 빌드는 옛 세그먼트를 읽고 새 세그먼트를 시작하며, 읽을 수 없는 스키마를 만난 빌드는 시작을 거부한다 | 단위 | 통과 | `cargo test -p oms-journal a_schema_change` |
-| V-BOOT-1 | 재시작은 결과 기록이 없는 전송을 불명으로 표시하고, 신규 주문을 다시 보내지 않으며, 요청돼 있던 취소만 다시 보낸다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e a_kill_during_send` |
-| V-CFG-1 | 설정은 버전이 커야 활성화되고, 같은 버전에 다른 내용이면 시작을 거부한다. 노출이 남은 종목·전략은 제거할 수 없다. mainnet은 증거금 정책(policy.margin) 없이는 시작하지 않고, 정책의 값이 C-MARGIN 설정 표의 범위를 벗어나면 어느 거래소 설정에서도 시작하지 않는다. 저장소의 Hyperliquid 예제 설정은 증거금 정책(소유자가 정한 값)을 담고 검사를 통과한다. Hyperliquid 설정에 증거금 정책이 있으면 설정에서 계산한 분당 조회 weight(216 + 종목마다 20, 기본 간격)가 600을 넘을 때 시작하지 않는다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e configuration_changes && cargo test -p oms-node --lib config::tests` |
-| V-OVL-1 | 입력 큐는 상한을 넘지 않고, 가득 찬 큐는 다른 큐에 영향을 주지 않으며, 배치마다 세 큐가 지분을 받는다 | 단위 | 통과 | `cargo test -p oms-node --lib queues` |
-| V-OVL-2 | 큐보다 빠르게 온 요청은 즉시 거절되고 기록을 남기지 않으며, 그 직후에도 취소는 수용된다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e overload -- --nocapture` |
-| V-OVL-3 | 저장 공간이 부족하면 신규 주문만 거절하고 체결과 취소는 계속 처리한다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios storage_low` |
-| V-API-1 | 전략 연결은 자기 주문만 보고 취소하며, 운영 명령은 운영 소켓에서만 받아들여진다. 알 수 없는 전략과 잘못된 요청은 거절된다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e a_strategy_sees` |
-| V-API-2 | 문서의 요청 예가 그대로 해석되고, 수치에 JSON 숫자를 쓰면 거부된다 | 단위 | 통과 | `cargo test -p oms-api` |
-| V-SLICE-1 | 신규 주문 → 영속 접수 → 거래소 접수 → 부분 체결 → 잔량 취소 → 종결이 실제 프로세스에서 이어지고, 구독자는 저널 순서로 이벤트를 받으며, 정상 종료 뒤 재시작해도 상태가 같고 재전송이 없다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e vertical_slice` |
-| V-LINK-1 | 스트림이 끊기면 신규 주문을 막고, 그동안의 취소 요청을 기억했다가 복귀 뒤 보내며, 놓친 체결을 메운 뒤에야 거래를 재개한다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e link_loss` |
-| V-HL-1 | L1 액션의 해시와 서명이 공식 Python SDK의 결과와 같고, 서명 키는 출력되지 않는다 | 단위 | 통과 | `cargo test -p oms-node --lib sign` |
-| V-HL-2 | 문서에 실린 응답 예를 올바르게 해석한다. 문서에 없는 주문 응답 형태와 최상위 오류는 결과 불명으로 두고, 문서의 표에 없는 상태 이름에서는 아무 결론도 내지 않으며, 종결 상태에서 최종 수량을 추정하지 않는다. 체결 조회는 마지막 쪽임이 확실할 때만 완료를 선언한다 | 단위 | 통과 | `cargo test -p oms-node --lib hyperliquid` |
+| V-NUM-1 | 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --lib` |
+| V-NUM-2 | 한도 비교용 금액은 정확한 곱 이상인 가장 작은 1e-8 단위 값이고, 넘치면 보고된다 | 속성 | 이전 버전 결과 | `cargo test -p oms-core --lib notional` |
+| V-NEW-1 | 수용된 주문들이 어떤 순서로 체결되어도 계좌와 전략의 포지션은 설정한 구간을 벗어나지 않으며, 두 요청이 같은 여유를 쓰지 못한다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios` |
+| V-NEW-2 | 수량·가격 단위, 유효숫자, 최소·최대 금액, 가격대, 만료 시각, 종목·전략의 허용 여부, 용량을 검사하고 해당하는 사유를 모두 돌려준다. 거절 사유의 종류마다 시험이 있다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios && cargo test -p oms-core --test gaps` |
+| V-IDEM-1 | 같은 (전략, 키)로는 주문이 하나만 만들어지고 전송 명령도 한 번만 나온다. 다른 내용의 요청은 충돌로 거절된다. 키는 요청이 만료된 뒤에만 잊는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios` |
+| V-IDEM-2 | 재전송, 충돌 요청, 재시작, 키 삭제가 임의로 섞여도 키당 수용 1회, 키당 전송 1회, 거래소의 클라이언트 ID당 접수 요청 1회가 유지된다 | 시뮬레이션 | 이전 버전 결과 | `OMS_SIM_SEEDS=400 cargo test --release -p oms-sim --test sim` |
+| V-IDEM-3 | 실제 소켓으로 여러 연결이 같은 요청을 동시에 보내도, 노드를 강제 종료한 뒤에도, 주문은 하나이고 거래소 접수 요청도 하나다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e a_repeated_request` |
+| V-DOUBT-1 | 전송 결과를 모르면 예약을 유지하고 신규 주문을 막으며 다시 보내지 않는다. 존재 증거가 오면 정상 주문이 된다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios` |
+| V-DOUBT-2 | '찾을 수 없음'은 전송 만료 + 여유가 지난 뒤의 조회일 때만 주문을 닫는다. 거래소가 만료를 강제하지 않는 설정에서는 절대 닫지 않는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios not_found && cargo test -p oms-node --test e2e a_lost_request` |
+| V-DOUBT-3 | 부재 판정은 두 가정(거래소가 만료를 강제한다, 시계 차이가 여유보다 작다)에 의존하며, 가정을 깨면 시험이 위반을 잡는다 | 시뮬레이션 | 이전 버전 결과 | `cargo test --release -p oms-sim --test sim absence_rule -- --nocapture` |
+| V-FILL-1 | 체결은 한 번만 기장되고, 접수 응답보다 먼저 와도, 주인을 아직 몰라도, 수량을 넘어도 버려지지 않는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios fill && cargo test -p oms-core --test gaps && cargo test -p oms-core --test review_core f2` |
+| V-CANCEL-1 | 취소 요청은 예약을 풀지 않고, 취소 중 체결은 기장되며, 최종 수량은 종결 통보가 정한다. 취소는 차단 중에도 받고, 간격을 두고 상한까지 재시도한다. 상한에 이른 뒤 다시 요청하면 새 시도가 나가고, 결과가 오지 않는 시도는 시간 초과 뒤 불명으로 처리된다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios cancel && cargo test -p oms-core --test review_core f1` |
+| V-TERM-1 | 종결 통보가 체결보다 먼저 와도 아직 기장되지 않은 수량은 예약에 남고, 최종 수량을 모를 때는 체결 동기화가 종결 시각을 지난 뒤에만 닫는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios terminal` |
+| V-RECON-1 | 링크가 돌아오면 미종결 주문의 증거, 체결, 열린 주문, 포지션을 현재 세션에서 다시 확인할 때까지 신규 주문을 막는다. 포지션은 예약으로 설명되는 범위로 검사하고, 오래된 스냅샷은 판정하지 않는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios` |
+| V-RECON-2 | 노드가 죽어 있는 동안 거래소에서 일어난 체결, 거래소 주도 취소, 부분 체결을 재시작 뒤 거래소 조회로 모두 반영한다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e events_missed` |
+| V-EXT-1 | OMS가 내지 않은 체결은 기장되고 불일치로 표시되어 신규 주문을 막으며, 운영자가 확인해야 풀린다 | 시뮬레이션 | 이전 버전 결과 | `cargo test --release -p oms-sim --test sim profile_external` |
+| V-REPLAY-1 | 기록된 이벤트만 적용해 만든 상태는 살아 있는 상태와 같고, 기록된 입력을 다시 판단하면 기록된 이벤트가 나온다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios && oms-node verify --data-dir <dir> --re-decide` |
+| V-SIM-1 | 네트워크 장애, 통보 중복·지연, 링크 단절, 프로세스 재시작, 키 삭제가 임의로 섞인 실행의 매 단계에서: 구조 불변조건이 성립하고, 거래소의 실제 포지션이 OMS가 설명하는 범위 안에 있고, 한도를 넘지 않고, 같은 주문이 두 번 전송되지 않는다 | 시뮬레이션 | 이전 버전 결과 | `OMS_SIM_SEEDS=400 cargo test --release -p oms-sim --test sim -- --nocapture   (실패 시: OMS_SIM_PROFILE=<이름> OMS_SIM_SEED=<n>)` |
+| V-SIM-2 | 장애가 멈추면 장부가 가상 거래소와 일치한다: 주문별 체결량과 상태, 포지션, 수수료 합. 차단 사유와 거짓 불일치가 남지 않는다 | 시뮬레이션 | 이전 버전 결과 | `V-SIM-1과 같다` |
+| V-SIM-3 | 같은 seed는 바이트 단위로 같은 저널을 만든다 | 시뮬레이션 | 이전 버전 결과 | `cargo test --release -p oms-sim` |
+| V-COMMIT-1 | flush가 실패하면 그 배치의 응답, 전송 명령, 읽기 모델 변경이 하나도 나가지 않고 프로세스가 입력을 닫는다. 성공한 경우 응답 시점에 읽기 모델은 이미 갱신돼 있다 | 프로세스 내부 | 이전 버전 결과 | `cargo test -p oms-node --features failpoints --test pipeline` |
+| V-COMMIT-2 | 부하 중 임의 시점에 노드를 강제 종료하고 다시 띄우기를 반복해도, 대조가 끝난 뒤 주문별 체결량·상태와 포지션이 거래소와 일치하고 같은 주문이 두 번 접수 요청되지 않는다 | 프로세스 | 이전 버전 결과 | `OMS_KILL_ROUNDS=20 cargo test -p oms-node --test e2e random_kills -- --nocapture` |
+| V-COMMIT-3 | 함께 도착한 입력은 flush를 공유하고, 응답은 판단 순서대로 나온다 | 프로세스 내부 | 이전 버전 결과 | `cargo test -p oms-node --features failpoints --test pipeline -- --nocapture` |
+| V-JRN-1 | 프레임의 모든 절단과 모든 단일 비트 반전이 감지되고, 0으로 채워진 꼬리는 프레임으로 읽히지 않는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-journal --lib` |
+| V-JRN-2 | 저널의 끝이 불완전하면 유효한 접두부만 남기고 원본 바이트를 보존한 뒤 이어 쓸 수 있다. 중간이 손상됐거나 세그먼트가 빠졌거나 다른 인스턴스의 것이거나 스냅샷보다 짧으면 시작을 거부하고, 거부한 디렉터리의 파일은 건드리지 않는다 | 속성 | 이전 버전 결과 | `cargo test -p oms-journal && cargo test -p oms-node --test e2e journal_damage` |
+| V-JRN-3 | 같은 데이터 디렉터리를 두 프로세스가 쓸 수 없고, 다른 인스턴스의 저널은 거부된다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e only_one_node` |
+| V-JRN-4 | 스냅샷은 완전한 파일로만 나타나고, 손상된 스냅샷은 건너뛰며, 정상 종료 뒤 재시작은 스냅샷에서 같은 상태로 돌아온다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-journal --lib snapshot` |
+| V-JRN-5 | 기록 스키마가 다른 빌드는 옛 세그먼트를 읽고 새 세그먼트를 시작하며, 읽을 수 없는 스키마를 만난 빌드는 시작을 거부한다 | 단위 | 이전 버전 결과 | `cargo test -p oms-journal a_schema_change` |
+| V-BOOT-1 | 재시작은 결과 기록이 없는 전송을 불명으로 표시하고, 신규 주문을 다시 보내지 않으며, 요청돼 있던 취소만 다시 보낸다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e a_kill_during_send` |
+| V-CFG-1 | 설정은 버전이 커야 활성화되고, 같은 버전에 다른 내용이면 시작을 거부한다. 노출이 남은 종목·전략은 제거할 수 없다. mainnet은 증거금 정책(policy.margin) 없이는 시작하지 않고, 정책의 값이 C-MARGIN 설정 표의 범위를 벗어나면 어느 거래소 설정에서도 시작하지 않는다. 저장소의 Hyperliquid 예제 설정은 증거금 정책(소유자가 정한 값)을 담고 검사를 통과한다. Hyperliquid 설정에 증거금 정책이 있으면 설정에서 계산한 분당 조회 weight(216 + 종목마다 20, 기본 간격)가 600을 넘을 때 시작하지 않는다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e configuration_changes && cargo test -p oms-node --lib config::tests` |
+| V-OVL-1 | 입력 큐는 상한을 넘지 않고, 가득 찬 큐는 다른 큐에 영향을 주지 않으며, 배치마다 세 큐가 지분을 받는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-node --lib queues` |
+| V-OVL-2 | 큐보다 빠르게 온 요청은 즉시 거절되고 기록을 남기지 않으며, 그 직후에도 취소는 수용된다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e overload -- --nocapture` |
+| V-OVL-3 | 저장 공간이 부족하면 신규 주문만 거절하고 체결과 취소는 계속 처리한다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios storage_low` |
+| V-API-1 | 전략 연결은 자기 주문만 보고 취소하며, 운영 명령은 운영 소켓에서만 받아들여진다. 알 수 없는 전략과 잘못된 요청은 거절된다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e a_strategy_sees` |
+| V-API-2 | 문서의 요청 예가 그대로 해석되고, 수치에 JSON 숫자를 쓰면 거부된다 | 단위 | 이전 버전 결과 | `cargo test -p oms-api` |
+| V-SLICE-1 | 신규 주문 → 영속 접수 → 거래소 접수 → 부분 체결 → 잔량 취소 → 종결이 실제 프로세스에서 이어지고, 구독자는 저널 순서로 이벤트를 받으며, 정상 종료 뒤 재시작해도 상태가 같고 재전송이 없다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e vertical_slice` |
+| V-LINK-1 | 스트림이 끊기면 신규 주문을 막고, 그동안의 취소 요청을 기억했다가 복귀 뒤 보내며, 놓친 체결을 메운 뒤에야 거래를 재개한다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e link_loss` |
+| V-HL-1 | L1 액션의 해시와 서명이 공식 Python SDK의 결과와 같고, 서명 키는 출력되지 않는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-node --lib sign` |
+| V-HL-2 | 문서에 실린 응답 예를 올바르게 해석한다. 문서에 없는 주문 응답 형태와 최상위 오류는 결과 불명으로 두고, 문서의 표에 없는 상태 이름에서는 아무 결론도 내지 않으며, 종결 상태에서 최종 수량을 추정하지 않는다. 체결 조회는 마지막 쪽임이 확실할 때만 완료를 선언한다 | 단위 | 이전 버전 결과 | `cargo test -p oms-node --lib hyperliquid` |
 | V-HL-3 | 실제 testnet에 대해 게이트웨이가 메타를 읽어 종목 규칙을 통과시키고, 사용자 스트림을 구독해 링크를 올리고, 주문 조회(없음)·열린 주문·포지션·체결 조회·참조 가격을 해석한다 | 실제 거래소(읽기 전용) | 미실행 | `OMS_LIVE_TESTNET=1 cargo test -p oms-node --test hl_live -- --nocapture` |
-| V-PURE-1 | 도메인 코어의 소스에 시계·파일·네트워크·스레드·난수·해시 컬렉션·부동소수점·unsafe가 없고 의존성은 serde와 serde_json뿐이다 | 소스 검사 | 통과 | `cargo run -p xtask -- verify --quick` |
+| V-PURE-1 | 도메인 코어의 소스에 시계·파일·네트워크·스레드·난수·해시 컬렉션·부동소수점·unsafe가 없고 의존성은 serde와 serde_json뿐이다 | 소스 검사 | 이전 버전 결과 | `cargo run -p xtask -- verify --quick` |
 | V-PERF-1 | 초당 200건의 open-loop 부하에서 로컬 응답 지연 p99가 20 ms 이하이고 오류와 미응답이 없다 | 측정 | 이전 버전 결과 | `cargo run --release -p xtask -- perf --dir <NVMe 디렉터리> --rates 20,200,2000 --seconds 60 --label nvme-final` |
 | V-PERF-2 | 초당 2000건의 부하에서 (가) 수용 한도를 푼 설정에서는 큐가 상한 안에 머물고 미응답이 없으며, (나) 기본 한도에서는 초과분이 overloaded로 즉시 거절되고 저널에 기록을 남기지 않는다 | 측정 | 이전 버전 결과 | `xtask perf --label nvme-final --rates 20,200,2000 --seconds 60  /  xtask perf --label nvme-default-limits --rates 2000 --seconds 60 --default-limits` |
 | V-PERF-3 | 스냅샷 이후 기록 5만 건의 재생이 5초 이내에 끝난다 | 측정 | 이전 버전 결과 | `cargo run --release -p xtask -- recovery-time --dir <디렉터리>` |
-| V-MUT-1 | 핵심 보호 로직을 일부러 깨뜨리면 관련 시험이 실패한다 | 변이 | 통과 | `cargo run -p xtask -- mutants` |
-| V-HIST-1 | 단계 지연 히스토그램이 보고하는 백분위는 실제 값 이상이고 12.5% 이내로 크다 | 단위 | 통과 | `cargo test -p oms-node --lib util` |
-| V-COMMIT-4 | 커밋 순서의 경계마다 프로세스를 멈추면 결과가 경계별 장애 표와 같다: 쓰기 전에 멈추면 요청이 없었던 것이 되고, 쓴 뒤·flush 뒤·응답 뒤에 멈추면 주문은 남되 한 번도 전송되지 않고 결과 불명을 거쳐 "놓이지 않음"으로 닫히며, 같은 요청을 다시 보내면 같은 주문으로 답한다 | 프로세스 | 통과 | `cargo test -p oms-node --features failpoints --test crash_points` |
-| V-COMMIT-5 | 실제 디스크에 둔 저널로 강제 종료를 60회 반복해도 V-COMMIT-2의 성질이 유지된다 | 프로세스 | 통과 | `cargo run --release -p xtask -- verify --extended <실제 디스크의 디렉터리>` |
-| V-BOOT-2 | 저널이 여러 세그먼트에 걸쳐 있어도 강제 종료 뒤 스냅샷과 저널로 같은 상태로 돌아오고, `verify --re-decide`는 입력과 맞지 않는 기록을 잡아내며, 종료 중의 저널 실패는 정상 종료로 보고되지 않는다 | 프로세스 | 통과 | `cargo test -p oms-node --test review_node` |
-| V-API-3 | 거래 소켓의 연결이 아무리 많아도 운영 소켓은 열리고, 끊긴 구독자는 연결 자리를 돌려주며, 한 연결은 구독을 하나만 가진다 | 프로세스 | 통과 | `cargo test -p oms-node --test review_node` |
-| V-DASH-1 | 대시보드의 문서 열람 경로는 docs/, crates/, registry/ 아래의 .md, .rs, .toml만 읽는다 | 단위 | 통과 | `cargo test -p oms-node --lib http` |
+| V-MUT-1 | 핵심 보호 로직을 일부러 깨뜨리면 관련 시험이 실패한다 | 변이 | 이전 버전 결과 | `cargo run -p xtask -- mutants` |
+| V-HIST-1 | 단계 지연 히스토그램이 보고하는 백분위는 실제 값 이상이고 12.5% 이내로 크다 | 단위 | 이전 버전 결과 | `cargo test -p oms-node --lib util` |
+| V-COMMIT-4 | 커밋 순서의 경계마다 프로세스를 멈추면 결과가 경계별 장애 표와 같다: 쓰기 전에 멈추면 요청이 없었던 것이 되고, 쓴 뒤·flush 뒤·응답 뒤에 멈추면 주문은 남되 한 번도 전송되지 않고 결과 불명을 거쳐 "놓이지 않음"으로 닫히며, 같은 요청을 다시 보내면 같은 주문으로 답한다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --features failpoints --test crash_points` |
+| V-COMMIT-5 | 실제 디스크에 둔 저널로 강제 종료를 60회 반복해도 V-COMMIT-2의 성질이 유지된다 | 프로세스 | 이전 버전 결과 | `cargo run --release -p xtask -- verify --extended <실제 디스크의 디렉터리>` |
+| V-BOOT-2 | 저널이 여러 세그먼트에 걸쳐 있어도 강제 종료 뒤 스냅샷과 저널로 같은 상태로 돌아오고, `verify --re-decide`는 입력과 맞지 않는 기록을 잡아내며, 종료 중의 저널 실패는 정상 종료로 보고되지 않는다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test review_node` |
+| V-API-3 | 거래 소켓의 연결이 아무리 많아도 운영 소켓은 열리고, 끊긴 구독자는 연결 자리를 돌려주며, 한 연결은 구독을 하나만 가진다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test review_node` |
+| V-DASH-1 | 대시보드의 문서 열람 경로는 docs/, crates/, registry/ 아래의 .md, .rs, .toml만 읽는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-node --lib http` |
 | V-PERF-4 | 커밋 스레드 구성과 인라인 구성을 같은 조건에서 잰 결과가 보관돼 있다(ADR-012의 비교) | 측정 | 이전 버전 결과 | `xtask perf --label nvme-compare-thread --rates 200,2000,8000 --seconds 10  /  같은 명령에 --inline --label nvme-compare-inline` |
 | V-PERF-5 | 저장 장치의 동기 쓰기 시간과 코어의 판단 시간을 잰 결과가 보관돼 있다 | 측정 | 이전 버전 결과 | `xtask fsync-probe --dir <디렉터리> --label nvme  /  xtask core-bench` |
-| V-SIM-4 | 프로파일마다 seed 3000개로 V-SIM-1, V-SIM-2, V-EXT-1의 성질이 유지된다 | 시뮬레이션 | 통과 | `cargo run --release -p xtask -- verify --extended <실제 디스크의 디렉터리>` |
-| V-FUZZ-1 | 가정을 지키지 않는 임의의 거래소 입력(순서 역전, 중복, 낡은 상태, 식별자 없는 체결, 부재 응답, 링크 변동, 재시작)에서도 코어는 결함으로 멈추지 않고, 불변조건과 재생 일치가 유지되고, 주문당 전송은 한 번이며, 차단 중 수용이 없고, 새 체결은 반드시 기장되거나 대기하고, 정직하게 정리된 뒤에는 차단이 남지 않는다 | 속성 | 통과 | `cargo test --release -p oms-core --test review_core examined_fuzz` |
-| V-MIS-1 | 불일치 14종 각각을 일으키는 시험이 있고, 같은 대상의 반복은 확인되기 전까지 한 건으로 남는다 | 단위 | 통과 | `cargo test -p oms-core` |
-| V-MARGIN-1 | 증거금 정책이 있으면 감소 전용 주문은 재확인, 결과 불명, 불일치 차단을 통과하고, 일반 주문은 모든 차단에서 거절된다. 정책 구역은 선택이고, 없으면 저널 기록에 바이트를 더하지 않는다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios reduce_only && cargo test -p oms-core --test margin` |
-| V-MARGIN-2 | 증거금 정책이 있으면 현재 링크 세션의 증거금 보고가 마지막 보고로 기록된다. 다른 세션의 보고, 링크가 내려간 동안의 보고, 순번이 크지 않은 보고는 버린다. 읽지 못한 보고와 최대 레버리지가 0인 보고는 사유와 함께 거부로 기록되고 마지막 보고를 바꾸지 않는다. 나이가 0 이상 30초 이하인 보고가 없으면 일반 주문은 MarginUnavailable로 거절된다. 감소 전용 주문은 보고가 없어도 받는다. 정책이 없으면 증거금 입력은 상태를 바꾸지 않고 기록되지 않는다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
-| V-MARGIN-3 | 증거금 정책이 있으면 일반 주문은 받은 뒤의 계좌 노출이 한도 × 계좌 가치를 넘고 받기 전보다 커질 때 AccountLeverage로 거절된다. 정확히 한도와 같으면 받는다. 계좌 가치가 0 이하면 일반 주문을 모두 거절한다. 노출은 포지션과 모든 미체결 주문(감소 전용 포함)을 지정가와 참조 가격 중 높은 값으로 센 종목별 값의 합이다. 미체결 주문은 종결 증거가 올 때까지 노출에 남고 OMS는 그 주문을 고치거나 만료시키지 않는다. 가격이 움직여 한도를 넘어도 래치는 없다. 감소 전용 주문은 검사를 건너뛰지만 합에는 들어간다. 노출이 있는 종목에 신선한 참조 가격이 없으면 일반 주문은 MarginUnavailable로 거절된다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
-| V-MARGIN-11 | 증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이, 계좌 노출을 보여 준다. 링크가 올라오면 종목마다 거래소 설정을, 그리고 계좌 모드를 묻고, 포지션이 없는 종목의 설정은 정해진 간격으로 다시 묻는다. status는 종목별 거래소 설정과 계좌 모드, 그것이 정책과 맞는지를 보여 준다. 정책이 없으면 묻지 않는다. 조회한 계좌 가치가 기준 금액보다 5 %를 넘게 낮아지면 status가 감소 전용 상태와 그 규칙, 기준 금액을 보여 주고 일반 주문이 Hold(Reducing)으로 거절된다. 해제(clear-reduce)와 기준 재설정(rebase-day)은 전략 소켓에서 forbidden으로 거절되고 코어에 닿지 않는다. 운영자 도구(omsctl)의 clear-reduce --note와 rebase-day --note는 운영자 소켓으로 실행 중인 노드의 코어에 닿고, 응답과 status(상태, 규칙, 기준 금액)가 그 결과를 보여 준다. 감소 전용 상태에서 노드 프로세스를 강제 종료(SIGKILL)하고 다시 띄우면 status가 같은 상태(규칙, 내용, 진입 시각)와 같은 기준 금액을 보여 주고, 해제한 뒤의 강제 종료도 해제와 운영자의 기준을 그대로 남긴다. 가상 거래소에 일반 주문 300건과 감소 전용 주문 3건이 걸린 채로 감소 전용 상태에 들어가면 일반 주문은 모두 거래소에서 취소되고 감소 전용 주문 3건은 열린 채로 남으며, 그 뒤에도 증거금 조회가 이어진다. 감소 전용 상태를 결정한 기록이 쓰이기 전에 노드가 멈추면 재시작 뒤에 상태도 취소 요청도 그 기록도 없고 기준 금액은 그대로이며, 다음에 한도를 넘는 보고가 한 번 다시 결정한다. 그 기록이 파일에 닿은 뒤(쓰기 뒤, 내구화 뒤, 읽기 모델 반영 뒤)에 취소가 나가기 전에 멈추면 재시작 뒤에 상태와 취소 요청이 저널에서 복원되고, 보내지 못한 취소가 거래소로 나가며, 감소 전용 주문은 남는다. 기준 금액을 정하는 기록의 각 경계에서 멈춰도 저널의 day_base_set은 정확히 하나이고, 그 날짜와 값은 같은 기록의 보고의 것이다(쓰기 전에 멈추면 다음 보고가 정한다) | 프로세스 | 통과 | `cargo test -p oms-node --test e2e node_polls_margin && cargo test -p oms-node --test e2e status_shows_account_exposure && cargo test -p oms-node --test e2e status_shows_reducing && cargo test -p oms-node --test e2e node_reads_venue_setting && cargo test -p oms-node --test e2e -- strategy_socket_cannot omsctl_clear reducing_ && cargo test -p oms-node --features failpoints --test crash_points -- reducing day_base` |
-| V-MARGIN-5 | 증거금 정책이 있으면 첫 증거금 보고가 그 계좌 가치를 조회 시각의 UTC 날짜와 함께 기준 금액으로 정한다. 같은 날의 뒤 보고는 기준을 바꾸지 않는다. 받은 보고의 계좌 가치가 기준 금액보다 5 %를 넘게 낮으면 계좌가 감소 전용 상태로 들어간다(기준 100에서 95.00은 아니고 94.99는 들어간다). 뒤 UTC 날짜의 첫 보고는 옛 기준으로 먼저 판정된 뒤에 새 기준이 되고, 여러 날의 공백 뒤에도 기준은 한 번만 넘어간다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
-| V-MARGIN-4 | 감소 전용 상태로 들어가는 입력 안에서, 감소 전용 표시가 없고 취소 요청이 없거나 취소 시도가 다 된 모든 열린 주문에 규칙 이름으로 취소 요청이 나간다. 표시 없는 익절 주문도 취소된다. 감소 전용 표시가 있는 주문은 그대로 둔다. 감소 전용 상태에서 일반 주문은 포지션을 줄이는 방향이어도 Hold(Reducing)으로 거절되고, 감소 전용 주문은 받는다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
-| V-MARGIN-9 | 증거금 정책이 있으면, 종목의 거래소 설정(증거금 방식과 레버리지)을 이번 링크 세션에서 받지 못한 동안 그 종목의 일반 주문은 VenueSetting(종목) 차단으로 거절된다. 옛 세션의 응답은 버린다. 받은 설정의 증거금 방식이나 레버리지가 정책과 다르면 그 종목만 같은 차단에 걸리고 다른 종목은 걸리지 않는다. 맞는 설정을 받으면 바로 풀리고, 링크가 바뀌면 다시 모르는 것이 된다. 증거금 보고의 포지션에 적힌 방식과 레버리지도 설정의 출처다. 차단 조회는 걸린 종목마다 그 종목 이름과 함께 차단을 보여 준다. 계좌 모드가 unifiedAccount나 portfolioMargin이면 허용 목록에 적혀 있어도 계좌의 모든 종목의 일반 주문이 AccountMode 차단으로 거절된다. 허용 목록에 없는 모드, 빈 응답, 이번 링크 세션에서 받지 못한 모드도 같다. 기본 허용 목록은 비어 있어서 운영자가 모드를 적기 전에는 일반 주문이 나가지 않는다. 감소 전용 주문은 두 차단을 모두 통과한다. OMS는 설정을 읽기만 하고 거래소로 아무것도 보내지 않는다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
-| V-MARGIN-6 | 운영자의 해제(clear-reduce)는 계좌가 감소 전용 상태가 아니면 NotReducing으로, 증거금 보고가 30초보다 오래됐으면 MarginUnavailable로, 사유가 비었으면 NoteRequired로 거절되고, 거절은 아무것도 기록하지 않는다. 받아들인 해제는 한 입력 안에서 마지막 보고의 계좌 가치를 새 기준 금액으로 정하고(day_base_set, set_by: operator) 감소 전용 상태를 끝낸다(reducing_cleared). 정확히 30초 된 보고는 신선하다. 그 뒤 새 기준 94에서 94와 89.30은 걸리지 않고 89.29는 다시 걸린다. 두 번째 해제는 NotReducing이다. 기준 재설정(rebase-day)은 신선한 보고와 사유가 있을 때 마지막 보고의 계좌 가치와 그 날짜(기준보다 앞선 날짜라도)를 기준 금액으로 정하고, 감소 전용 상태는 건드리지 않는다. 기준 재설정 없이 출금하면 그만큼이 손실로 읽힌다(100에서 6을 출금하면 걸린다) | 단위 | 통과 | `cargo test -p oms-core --test margin` |
-| V-MARGIN-7 | 증거금 정책이 있고 링크가 올라와 있을 때, 마지막으로 받은 증거금 보고의 조회 시각에서 60초가 넘게 지나면 틱이 감소 전용 표시가 없고 취소 요청이 없는 모든 열린 주문에 Rule(MarginStale) 이름으로 취소 요청을 한 번 낸다. 정확히 60초에는 내지 않는다. 감소 전용 표시가 있는 주문은 그대로 둔다. 아무 상태도 걸리지 않는다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
-| V-MARGIN-10 | Hyperliquid 게이트웨이는 문서의 clearinghouseState 응답 예를 증거금 보고 입력으로 옮긴다: 계좌 가치는 marginSummary.accountValue, 포지션마다 종목, 부호 있는 수량, 포지션 가치, 사용 증거금, 증거금 방식, 레버리지, 최대 레버리지. 어느 포지션이든 maxLeverage가 없거나 0이거나 정수가 아니면 보고 전체를 사유와 함께 거부 입력(MarginReportInvalid)으로 바꾸고, 멀쩡한 다른 포지션도 보고하지 않는다. 계좌 가치, 수량, 포지션 가치, 사용 증거금, 레버리지 가운데 하나라도 없거나 읽을 수 없을 때, 증거금 방식이 isolated도 cross도 아닐 때, 포지션 목록이 없을 때도 같다. 어떤 값도 0이나 기본값으로 채우지 않고 어떤 포지션도 건너뛰지 않는다. 설정에 없는 종목의 포지션도 보고에 남는다(번역 함수는 설정된 종목을 받지 않는다). activeAssetData 응답 예는 그 종목의 거래소 설정 입력(증거금 방식, 레버리지)이 된다. 방식이 isolated도 cross도 아니거나, 레버리지가 정수가 아니거나, 응답이 다른 종목의 것이면 입력을 만들지 않는다(설정은 모름으로 남아 그 종목이 막힌다). userAbstraction 응답(문자열 하나)은 글자 그대로 계좌 모드 입력이 된다. 문서에 없는 문자열을 문서에 있는 값으로 바꾸지 않고, 문자열이 아니거나 64자를 넘으면 입력을 만들지 않는다. 세 조회의 요청 본문은 문서의 것과 같다(clearinghouseState, activeAssetData, userAbstraction). 게이트웨이의 요청 예산은 취소를 막지 않으므로 취소 500건 뒤에는 조회가 기다린다: 가득 찬 예산(1200)에서는 700이 남아 증거금 조회가 바로 나가고, 시작 직후(600)에는 100이 남아 10.1초, 빈 예산에서는 15.1초를 기다린다 | 단위 | 통과 | `cargo test -p oms-node --lib venue::hyperliquid` |
+| V-SIM-4 | 프로파일마다 seed 3000개로 V-SIM-1, V-SIM-2, V-EXT-1의 성질이 유지된다 | 시뮬레이션 | 이전 버전 결과 | `cargo run --release -p xtask -- verify --extended <실제 디스크의 디렉터리>` |
+| V-FUZZ-1 | 가정을 지키지 않는 임의의 거래소 입력(순서 역전, 중복, 낡은 상태, 식별자 없는 체결, 부재 응답, 링크 변동, 재시작)에서도 코어는 결함으로 멈추지 않고, 불변조건과 재생 일치가 유지되고, 주문당 전송은 한 번이며, 차단 중 수용이 없고, 새 체결은 반드시 기장되거나 대기하고, 정직하게 정리된 뒤에는 차단이 남지 않는다 | 속성 | 이전 버전 결과 | `cargo test --release -p oms-core --test review_core examined_fuzz` |
+| V-MIS-1 | 불일치 14종 각각을 일으키는 시험이 있고, 같은 대상의 반복은 확인되기 전까지 한 건으로 남는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core` |
+| V-MARGIN-1 | 증거금 정책이 있으면 감소 전용 주문은 재확인, 결과 불명, 불일치 차단을 통과하고, 일반 주문은 모든 차단에서 거절된다. 정책 구역은 선택이고, 없으면 저널 기록에 바이트를 더하지 않는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios reduce_only && cargo test -p oms-core --test margin` |
+| V-MARGIN-2 | 증거금 정책이 있으면 현재 링크 세션의 증거금 보고가 마지막 보고로 기록된다. 다른 세션의 보고, 링크가 내려간 동안의 보고, 순번이 크지 않은 보고는 버린다. 읽지 못한 보고와 최대 레버리지가 0인 보고는 사유와 함께 거부로 기록되고 마지막 보고를 바꾸지 않는다. 나이가 0 이상 30초 이하인 보고가 없으면 일반 주문은 MarginUnavailable로 거절된다. 감소 전용 주문은 보고가 없어도 받는다. 정책이 없으면 증거금 입력은 상태를 바꾸지 않고 기록되지 않는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-3 | 증거금 정책이 있으면 일반 주문은 받은 뒤의 계좌 노출이 한도 × 계좌 가치를 넘고 받기 전보다 커질 때 AccountLeverage로 거절된다. 정확히 한도와 같으면 받는다. 계좌 가치가 0 이하면 일반 주문을 모두 거절한다. 노출은 포지션과 모든 미체결 주문(감소 전용 포함)을 지정가와 참조 가격 중 높은 값으로 센 종목별 값의 합이다. 미체결 주문은 종결 증거가 올 때까지 노출에 남고 OMS는 그 주문을 고치거나 만료시키지 않는다. 가격이 움직여 한도를 넘어도 래치는 없다. 감소 전용 주문은 검사를 건너뛰지만 합에는 들어간다. 노출이 있는 종목에 신선한 참조 가격이 없으면 일반 주문은 MarginUnavailable로 거절된다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-11 | 증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이, 계좌 노출을 보여 준다. 링크가 올라오면 종목마다 거래소 설정을, 그리고 계좌 모드를 묻고, 포지션이 없는 종목의 설정은 정해진 간격으로 다시 묻는다. status는 종목별 거래소 설정과 계좌 모드, 그것이 정책과 맞는지를 보여 준다. 정책이 없으면 묻지 않는다. 조회한 계좌 가치가 기준 금액보다 5 %를 넘게 낮아지면 status가 감소 전용 상태와 그 규칙, 기준 금액을 보여 주고 일반 주문이 Hold(Reducing)으로 거절된다. 해제(clear-reduce)와 기준 재설정(rebase-day)은 전략 소켓에서 forbidden으로 거절되고 코어에 닿지 않는다. 운영자 도구(omsctl)의 clear-reduce --note와 rebase-day --note는 운영자 소켓으로 실행 중인 노드의 코어에 닿고, 응답과 status(상태, 규칙, 기준 금액)가 그 결과를 보여 준다. 감소 전용 상태에서 노드 프로세스를 강제 종료(SIGKILL)하고 다시 띄우면 status가 같은 상태(규칙, 내용, 진입 시각)와 같은 기준 금액을 보여 주고, 해제한 뒤의 강제 종료도 해제와 운영자의 기준을 그대로 남긴다. 가상 거래소에 일반 주문 300건과 감소 전용 주문 3건이 걸린 채로 감소 전용 상태에 들어가면 일반 주문은 모두 거래소에서 취소되고 감소 전용 주문 3건은 열린 채로 남으며, 그 뒤에도 증거금 조회가 이어진다. 감소 전용 상태를 결정한 기록이 쓰이기 전에 노드가 멈추면 재시작 뒤에 상태도 취소 요청도 그 기록도 없고 기준 금액은 그대로이며, 다음에 한도를 넘는 보고가 한 번 다시 결정한다. 그 기록이 파일에 닿은 뒤(쓰기 뒤, 내구화 뒤, 읽기 모델 반영 뒤)에 취소가 나가기 전에 멈추면 재시작 뒤에 상태와 취소 요청이 저널에서 복원되고, 보내지 못한 취소가 거래소로 나가며, 감소 전용 주문은 남는다. 기준 금액을 정하는 기록의 각 경계에서 멈춰도 저널의 day_base_set은 정확히 하나이고, 그 날짜와 값은 같은 기록의 보고의 것이다(쓰기 전에 멈추면 다음 보고가 정한다) | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e node_polls_margin && cargo test -p oms-node --test e2e status_shows_account_exposure && cargo test -p oms-node --test e2e status_shows_reducing && cargo test -p oms-node --test e2e node_reads_venue_setting && cargo test -p oms-node --test e2e -- strategy_socket_cannot omsctl_clear reducing_ && cargo test -p oms-node --features failpoints --test crash_points -- reducing day_base` |
+| V-MARGIN-5 | 증거금 정책이 있으면 첫 증거금 보고가 그 계좌 가치를 조회 시각의 UTC 날짜와 함께 기준 금액으로 정한다. 같은 날의 뒤 보고는 기준을 바꾸지 않는다. 받은 보고의 계좌 가치가 기준 금액보다 5 %를 넘게 낮으면 계좌가 감소 전용 상태로 들어간다(기준 100에서 95.00은 아니고 94.99는 들어간다). 뒤 UTC 날짜의 첫 보고는 옛 기준으로 먼저 판정된 뒤에 새 기준이 되고, 여러 날의 공백 뒤에도 기준은 한 번만 넘어간다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-4 | 감소 전용 상태로 들어가는 입력 안에서, 감소 전용 표시가 없고 취소 요청이 없거나 취소 시도가 다 된 모든 열린 주문에 규칙 이름으로 취소 요청이 나간다. 표시 없는 익절 주문도 취소된다. 감소 전용 표시가 있는 주문은 그대로 둔다. 감소 전용 상태에서 일반 주문은 포지션을 줄이는 방향이어도 Hold(Reducing)으로 거절되고, 감소 전용 주문은 받는다. 유지증거금 여유 규칙으로 들어갈 때도 같다(취소의 이름은 Rule(MmBuffer)) | 단위 | 미실행 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-9 | 증거금 정책이 있으면, 종목의 거래소 설정(증거금 방식과 레버리지)을 이번 링크 세션에서 받지 못한 동안 그 종목의 일반 주문은 VenueSetting(종목) 차단으로 거절된다. 옛 세션의 응답은 버린다. 받은 설정의 증거금 방식이나 레버리지가 정책과 다르면 그 종목만 같은 차단에 걸리고 다른 종목은 걸리지 않는다. 맞는 설정을 받으면 바로 풀리고, 링크가 바뀌면 다시 모르는 것이 된다. 증거금 보고의 포지션에 적힌 방식과 레버리지도 설정의 출처다. 차단 조회는 걸린 종목마다 그 종목 이름과 함께 차단을 보여 준다. 계좌 모드가 unifiedAccount나 portfolioMargin이면 허용 목록에 적혀 있어도 계좌의 모든 종목의 일반 주문이 AccountMode 차단으로 거절된다. 허용 목록에 없는 모드, 빈 응답, 이번 링크 세션에서 받지 못한 모드도 같다. 기본 허용 목록은 비어 있어서 운영자가 모드를 적기 전에는 일반 주문이 나가지 않는다. 감소 전용 주문은 두 차단을 모두 통과한다. OMS는 설정을 읽기만 하고 거래소로 아무것도 보내지 않는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-6 | 운영자의 해제(clear-reduce)는 계좌가 감소 전용 상태가 아니면 NotReducing으로, 증거금 보고가 30초보다 오래됐으면 MarginUnavailable로, 사유가 비었으면 NoteRequired로 거절되고, 거절은 아무것도 기록하지 않는다. 받아들인 해제는 한 입력 안에서 마지막 보고의 계좌 가치를 새 기준 금액으로 정하고(day_base_set, set_by: operator) 감소 전용 상태를 끝낸다(reducing_cleared). 정확히 30초 된 보고는 신선하다. 그 뒤 새 기준 94에서 94와 89.30은 걸리지 않고 89.29는 다시 걸린다. 두 번째 해제는 NotReducing이다. 기준 재설정(rebase-day)은 신선한 보고와 사유가 있을 때 마지막 보고의 계좌 가치와 그 날짜(기준보다 앞선 날짜라도)를 기준 금액으로 정하고, 감소 전용 상태는 건드리지 않는다. 기준 재설정 없이 출금하면 그만큼이 손실로 읽힌다(100에서 6을 출금하면 걸린다). 마지막 보고에서 유지증거금 여유 조건이 참이면(어느 규칙으로 들어왔든) 해제는 MmBufferActive로 거절되고, 이 조건은 사유보다 먼저 본다. 포지션이 선 위로 돌아온 보고(가치 200, 최대 레버리지 40에서 3.00) 뒤에는 해제된다 | 단위 | 미실행 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-7 | 증거금 정책이 있고 링크가 올라와 있을 때, 마지막으로 받은 증거금 보고의 조회 시각에서 60초가 넘게 지나면 틱이 감소 전용 표시가 없고 취소 요청이 없는 모든 열린 주문에 Rule(MarginStale) 이름으로 취소 요청을 한 번 낸다. 정확히 60초에는 내지 않는다. 감소 전용 표시가 있는 주문은 그대로 둔다. 아무 상태도 걸리지 않는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-8 | 증거금 정책이 있으면, 받은 증거금 보고의 포지션 가운데 포지션 가치가 0보다 큰 것의 격리 증거금이 (유지증거금률 + 0.25 %p) × 포지션 가치보다 작으면 계좌가 감소 전용 상태로 들어가고 규칙은 MmBuffer로 남는다. 최대 레버리지 40, 포지션 가치 200에서 3.00은 걸리지 않고 2.99는 걸린다. 유지증거금률은 그 포지션의 최대 레버리지(같은 보고의 값)로 1 / (2 × 최대 레버리지)이다: 최대 레버리지 25, 가치 200에서 4.50은 걸리지 않고 4.49는 걸리며, 최대 레버리지 50에서는 2.50이 걸리지 않는다. 한 종목의 포지션이 걸려도 래치는 계좌 전체에 하나다: 다른 종목에 걸려 있는 일반 주문이 Rule(MmBuffer) 이름으로 취소되고, 모든 종목의 새 일반 주문이 Hold(Reducing)으로 거절되며, 감소 전용 주문은 받는다. 교차 증거금 포지션은 판정하지 않는다(그 종목은 VenueSetting 차단에 걸린다). 래치에는 먼저 건 규칙이 남는다: 일 손실로 들어간 뒤의 유지증거금 여유 판정도, 그 반대도 아무것도 내지 않고 바꾸지 않는다. 한 보고가 둘 다 걸면 유지증거금 여유를 먼저 판정하므로 MmBuffer가 남는다. 받은 보고는 도착했을 때 이미 30초보다 오래됐어도 판정한다(조회 뒤 40초에 기록된 보고의 2.99도 건다). 비교는 나눗셈 없는 정확한 곱으로 한다: 가장 큰 금액·최대 레버리지·여유에서도 넘침이 결과를 뒤집지 않고(곱이 i128에 들어가지 않으면 선 아래로 본다), 선 바로 옆에서 반올림이 결과를 뒤집지 않는다. 포지션 가치가 0 이하인 포지션은 판정하지 않는다 | 단위 | 미실행 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-10 | Hyperliquid 게이트웨이는 문서의 clearinghouseState 응답 예를 증거금 보고 입력으로 옮긴다: 계좌 가치는 marginSummary.accountValue, 포지션마다 종목, 부호 있는 수량, 포지션 가치, 사용 증거금, 증거금 방식, 레버리지, 최대 레버리지. 어느 포지션이든 maxLeverage가 없거나 0이거나 정수가 아니면 보고 전체를 사유와 함께 거부 입력(MarginReportInvalid)으로 바꾸고, 멀쩡한 다른 포지션도 보고하지 않는다. 계좌 가치, 수량, 포지션 가치, 사용 증거금, 레버리지 가운데 하나라도 없거나 읽을 수 없을 때, 증거금 방식이 isolated도 cross도 아닐 때, 포지션 목록이 없을 때도 같다. 어떤 값도 0이나 기본값으로 채우지 않고 어떤 포지션도 건너뛰지 않는다. 설정에 없는 종목의 포지션도 보고에 남는다(번역 함수는 설정된 종목을 받지 않는다). activeAssetData 응답 예는 그 종목의 거래소 설정 입력(증거금 방식, 레버리지)이 된다. 방식이 isolated도 cross도 아니거나, 레버리지가 정수가 아니거나, 응답이 다른 종목의 것이면 입력을 만들지 않는다(설정은 모름으로 남아 그 종목이 막힌다). userAbstraction 응답(문자열 하나)은 글자 그대로 계좌 모드 입력이 된다. 문서에 없는 문자열을 문서에 있는 값으로 바꾸지 않고, 문자열이 아니거나 64자를 넘으면 입력을 만들지 않는다. 세 조회의 요청 본문은 문서의 것과 같다(clearinghouseState, activeAssetData, userAbstraction). 게이트웨이의 요청 예산은 취소를 막지 않으므로 취소 500건 뒤에는 조회가 기다린다: 가득 찬 예산(1200)에서는 700이 남아 증거금 조회가 바로 나가고, 시작 직후(600)에는 100이 남아 10.1초, 빈 예산에서는 15.1초를 기다린다 | 단위 | 이전 버전 결과 | `cargo test -p oms-node --lib venue::hyperliquid` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 수치 오류는 모든 한도 검사를 무력화한다
 - 수준: 단위
 - 전제와 범위: 손으로 쓴 예제와, 모든 i64 값에 대한 왕복(property test, 기본 256회)
@@ -90,18 +91,18 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/num::tests::parses_business_examples` | 통과 |  |
-| `core/num::tests::rejects_instead_of_rounding` | 통과 |  |
-| `core/num::tests::formats_canonically` | 통과 |  |
-| `core/num::tests::format_parse_roundtrip` | 통과 |  |
-| `core/num::tests::serde_roundtrip_is_exact` | 통과 |  |
-| `core/num::tests::significant_digits_examples` | 통과 |  |
-| `core/ids::tests::rejects_invalid_identifiers` | 통과 |  |
-| `core/ids::tests::venue_client_id_roundtrip` | 통과 |  |
+| `core/num::tests::parses_business_examples` | 이전 버전 결과 | last result: passed |
+| `core/num::tests::rejects_instead_of_rounding` | 이전 버전 결과 | last result: passed |
+| `core/num::tests::formats_canonically` | 이전 버전 결과 | last result: passed |
+| `core/num::tests::format_parse_roundtrip` | 이전 버전 결과 | last result: passed |
+| `core/num::tests::serde_roundtrip_is_exact` | 이전 버전 결과 | last result: passed |
+| `core/num::tests::significant_digits_examples` | 이전 버전 결과 | last result: passed |
+| `core/ids::tests::rejects_invalid_identifiers` | 이전 버전 결과 | last result: passed |
+| `core/ids::tests::venue_client_id_roundtrip` | 이전 버전 결과 | last result: passed |
 
 ## V-NUM-2 — 한도 비교용 금액은 정확한 곱 이상인 가장 작은 1e-8 단위 값이고, 넘치면 보고된다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 노출을 과소 계산하면 한도가 뚫린다
 - 수준: 속성
 - 전제와 범위: 가격 0~2e7, 수량 0~2e4 범위의 임의 값(property test)
@@ -115,13 +116,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/num::tests::notional_ceil_is_the_least_upper_bound` | 통과 |  |
-| `core/num::tests::notional_rounds_in_the_documented_direction` | 통과 |  |
-| `core/num::tests::notional_overflow_is_reported` | 통과 |  |
+| `core/num::tests::notional_ceil_is_the_least_upper_bound` | 이전 버전 결과 | last result: passed |
+| `core/num::tests::notional_rounds_in_the_documented_direction` | 이전 버전 결과 | last result: passed |
+| `core/num::tests::notional_overflow_is_reported` | 이전 버전 결과 | last result: passed |
 
 ## V-NEW-1 — 수용된 주문들이 어떤 순서로 체결되어도 계좌와 전략의 포지션은 설정한 구간을 벗어나지 않으며, 두 요청이 같은 여유를 쓰지 못한다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 요구 R02. 한도 초과는 직접 손실 위험이다
 - 수준: 단위
 - 전제와 범위: 요구 문서의 실행 예와 반례 넷(동시 요청, 반대 방향 미체결, 전략 청산 대 계좌 한도). 한 종목, 두 전략
@@ -135,15 +136,15 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/fia_7_1_reservation_follows_potential_fills` | 통과 |  |
-| `core/concurrent_requests_cannot_double_spend_headroom` | 통과 |  |
-| `core/open_orders_on_the_other_side_do_not_create_headroom` | 통과 |  |
-| `core/strategy_reduction_is_not_account_reduction` | 통과 |  |
-| `core/capacity_limits_bound_open_orders_and_outstanding_sends` | 통과 |  |
+| `core/fia_7_1_reservation_follows_potential_fills` | 이전 버전 결과 | last result: passed |
+| `core/concurrent_requests_cannot_double_spend_headroom` | 이전 버전 결과 | last result: passed |
+| `core/open_orders_on_the_other_side_do_not_create_headroom` | 이전 버전 결과 | last result: passed |
+| `core/strategy_reduction_is_not_account_reduction` | 이전 버전 결과 | last result: passed |
+| `core/capacity_limits_bound_open_orders_and_outstanding_sends` | 이전 버전 결과 | last result: passed |
 
 ## V-NEW-2 — 수량·가격 단위, 유효숫자, 최소·최대 금액, 가격대, 만료 시각, 종목·전략의 허용 여부, 용량을 검사하고 해당하는 사유를 모두 돌려준다. 거절 사유의 종류마다 시험이 있다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 거래소가 거부할 주문을 미리 걸러 한도를 아끼고, 가격 입력 실수를 막는다
 - 수준: 단위
 - 전제와 범위: 경계값 예제. 가격대는 5%에서 정확히 경계 양쪽. 최소 금액은 내림, 최대 금액은 올림으로 비교한다
@@ -157,19 +158,19 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/field_validation_reasons` | 통과 |  |
-| `core/significant_figure_rule_exempts_integers` | 통과 |  |
-| `core/price_band_bounds_only_the_aggressive_side_and_needs_a_fresh_reference` | 통과 |  |
-| `core/expiry_rules` | 통과 |  |
-| `core/no_configuration_means_nothing_is_accepted` | 통과 |  |
-| `core/every_remaining_reject_reason_has_a_case` | 통과 |  |
-| `core/the_strategy_bound_binds_on_its_own` | 통과 |  |
-| `core/memory_capacity_and_arithmetic_overflow_are_rejections_not_faults` | 통과 |  |
-| `core/f9_min_notional_is_not_passed_by_rounding_up` | 통과 |  |
+| `core/field_validation_reasons` | 이전 버전 결과 | last result: passed |
+| `core/significant_figure_rule_exempts_integers` | 이전 버전 결과 | last result: passed |
+| `core/price_band_bounds_only_the_aggressive_side_and_needs_a_fresh_reference` | 이전 버전 결과 | last result: passed |
+| `core/expiry_rules` | 이전 버전 결과 | last result: passed |
+| `core/no_configuration_means_nothing_is_accepted` | 이전 버전 결과 | last result: passed |
+| `core/every_remaining_reject_reason_has_a_case` | 이전 버전 결과 | last result: passed |
+| `core/the_strategy_bound_binds_on_its_own` | 이전 버전 결과 | last result: passed |
+| `core/memory_capacity_and_arithmetic_overflow_are_rejections_not_faults` | 이전 버전 결과 | last result: passed |
+| `core/f9_min_notional_is_not_passed_by_rounding_up` | 이전 버전 결과 | last result: passed |
 
 ## V-IDEM-1 — 같은 (전략, 키)로는 주문이 하나만 만들어지고 전송 명령도 한 번만 나온다. 다른 내용의 요청은 충돌로 거절된다. 키는 요청이 만료된 뒤에만 잊는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 재전송이 주문을 복제하면 안 된다
 - 수준: 단위
 - 전제와 범위: 같은 요청, 다른 요청, 다른 전략의 같은 키, 거절 뒤 재시도, 재시작 뒤, 삭제 전후
@@ -183,16 +184,16 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/same_key_same_request_creates_one_order_and_one_send` | 통과 |  |
-| `core/same_key_different_request_is_a_conflict_without_effect` | 통과 |  |
-| `core/the_key_scope_is_per_strategy` | 통과 |  |
-| `core/a_rejection_does_not_consume_the_key` | 통과 |  |
-| `core/the_duplicate_answer_survives_restart` | 통과 |  |
-| `core/a_key_is_forgotten_only_after_its_request_expired` | 통과 |  |
+| `core/same_key_same_request_creates_one_order_and_one_send` | 이전 버전 결과 | last result: passed |
+| `core/same_key_different_request_is_a_conflict_without_effect` | 이전 버전 결과 | last result: passed |
+| `core/the_key_scope_is_per_strategy` | 이전 버전 결과 | last result: passed |
+| `core/a_rejection_does_not_consume_the_key` | 이전 버전 결과 | last result: passed |
+| `core/the_duplicate_answer_survives_restart` | 이전 버전 결과 | last result: passed |
+| `core/a_key_is_forgotten_only_after_its_request_expired` | 이전 버전 결과 | last result: passed |
 
 ## V-IDEM-2 — 재전송, 충돌 요청, 재시작, 키 삭제가 임의로 섞여도 키당 수용 1회, 키당 전송 1회, 거래소의 클라이언트 ID당 접수 요청 1회가 유지된다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: V-IDEM-1의 예제가 놓친 조합을 찾는다
 - 수준: 시뮬레이션
 - 전제와 범위: 프로파일 lossy, crashy, purge. 프로파일당 seed 수는 결과의 notes에 있다. purge는 보존 1초, 재전송 20%
@@ -206,13 +207,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `sim/profile_lossy` | 통과 |  |
-| `sim/profile_crashy` | 통과 |  |
-| `sim/profile_purge` | 통과 |  |
+| `sim/profile_lossy` | 이전 버전 결과 | last result: passed |
+| `sim/profile_crashy` | 이전 버전 결과 | last result: passed |
+| `sim/profile_purge` | 이전 버전 결과 | last result: passed |
 
 ## V-IDEM-3 — 실제 소켓으로 여러 연결이 같은 요청을 동시에 보내도, 노드를 강제 종료한 뒤에도, 주문은 하나이고 거래소 접수 요청도 하나다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 코어의 성질이 실제 프로세스 경계를 넘어 유지되는지 확인한다
 - 수준: 프로세스
 - 전제와 범위: 연결 8개의 동시 요청 1회, 강제 종료 1회
@@ -226,11 +227,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/a_repeated_request_never_creates_a_second_order` | 통과 |  |
+| `e2e/a_repeated_request_never_creates_a_second_order` | 이전 버전 결과 | last result: passed |
 
 ## V-DOUBT-1 — 전송 결과를 모르면 예약을 유지하고 신규 주문을 막으며 다시 보내지 않는다. 존재 증거가 오면 정상 주문이 된다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 응답 유실을 실패로 읽으면 예약 없는 체결이나 중복 주문이 생긴다
 - 수준: 단위
 - 전제와 범위: 불명 → 차단, 조회로 발견, 확실한 실패(미전송, 거부)는 즉시 종결, 결과가 아예 없을 때의 시간 초과
@@ -244,15 +245,15 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/unknown_send_outcome_keeps_the_reservation_and_blocks_new_exposure` | 통과 |  |
-| `core/in_doubt_order_found_by_query_becomes_working` | 통과 |  |
-| `core/definite_gateway_failures_close_and_release` | 통과 |  |
-| `core/a_send_without_any_result_becomes_in_doubt_after_the_timeout` | 통과 |  |
-| `core/an_in_doubt_order_seen_in_the_open_order_sweep_is_acknowledged` | 통과 |  |
+| `core/unknown_send_outcome_keeps_the_reservation_and_blocks_new_exposure` | 이전 버전 결과 | last result: passed |
+| `core/in_doubt_order_found_by_query_becomes_working` | 이전 버전 결과 | last result: passed |
+| `core/definite_gateway_failures_close_and_release` | 이전 버전 결과 | last result: passed |
+| `core/a_send_without_any_result_becomes_in_doubt_after_the_timeout` | 이전 버전 결과 | last result: passed |
+| `core/an_in_doubt_order_seen_in_the_open_order_sweep_is_acknowledged` | 이전 버전 결과 | last result: passed |
 
 ## V-DOUBT-2 — '찾을 수 없음'은 전송 만료 + 여유가 지난 뒤의 조회일 때만 주문을 닫는다. 거래소가 만료를 강제하지 않는 설정에서는 절대 닫지 않는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 너무 일찍 닫으면 그 뒤에 놓인 주문이 예약 없이 체결된다
 - 수준: 단위
 - 전제와 범위: 여유 10초의 경계 양쪽. 실제 프로세스에서는 만료 1.5초 + 여유 0.3초 이전에 닫히지 않음을 시간으로 확인
@@ -266,14 +267,14 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/not_found_closes_an_in_doubt_order_only_after_expiry_plus_margin` | 통과 |  |
-| `core/not_found_never_closes_when_the_venue_does_not_enforce_expiry` | 통과 |  |
-| `core/not_found_is_ignored_while_the_send_is_simply_outstanding` | 통과 |  |
-| `e2e/a_lost_request_is_closed_only_after_its_send_window` | 통과 |  |
+| `core/not_found_closes_an_in_doubt_order_only_after_expiry_plus_margin` | 이전 버전 결과 | last result: passed |
+| `core/not_found_never_closes_when_the_venue_does_not_enforce_expiry` | 이전 버전 결과 | last result: passed |
+| `core/not_found_is_ignored_while_the_send_is_simply_outstanding` | 이전 버전 결과 | last result: passed |
+| `e2e/a_lost_request_is_closed_only_after_its_send_window` | 이전 버전 결과 | last result: passed |
 
 ## V-DOUBT-3 — 부재 판정은 두 가정(거래소가 만료를 강제한다, 시계 차이가 여유보다 작다)에 의존하며, 가정을 깨면 시험이 위반을 잡는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 가정이 실제로 필요한지, 그리고 검사가 실제로 잡아내는지 확인한다
 - 수준: 시뮬레이션
 - 전제와 범위: 거래소가 만료를 무시하는 실행과 시계가 6초 어긋난 실행(여유 2초). 각각 seed 60개 안에서 위반을 찾는다
@@ -287,12 +288,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `sim/absence_rule_depends_on_venue_side_expiry` | 통과 |  |
-| `sim/absence_rule_depends_on_the_clock_margin` | 통과 |  |
+| `sim/absence_rule_depends_on_venue_side_expiry` | 이전 버전 결과 | last result: passed |
+| `sim/absence_rule_depends_on_the_clock_margin` | 이전 버전 결과 | last result: passed |
 
 ## V-FILL-1 — 체결은 한 번만 기장되고, 접수 응답보다 먼저 와도, 주인을 아직 몰라도, 수량을 넘어도 버려지지 않는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 체결 유실이나 이중 기장은 포지션 오차다
 - 수준: 단위
 - 전제와 범위: 중복, 순서 역전, 거래소 ID만 있는 체결의 대기와 해소(상태 통보로, 다른 체결로), 주인 없는 체결의 외부 기장, 초과 체결, 체결만으로 전량 체결 종결, 취소·부재·수동으로 닫은 주문의 체결, 메모리에서 지워진 주문의 체결, 설정에 없는 종목의 체결, 통계 합계가 넘치는 체결
@@ -306,23 +307,23 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/duplicate_fill_is_booked_once` | 통과 |  |
-| `core/fill_before_send_result_acknowledges_the_order` | 통과 |  |
-| `core/fill_by_venue_id_before_the_id_is_known_is_parked_then_booked` | 통과 |  |
-| `core/unidentified_fill_is_booked_as_external_after_the_wait_and_holds_trading` | 통과 |  |
-| `core/a_parked_fill_is_external_once_no_order_can_own_it` | 통과 |  |
-| `core/overfill_is_booked_in_full_and_flagged` | 통과 |  |
-| `core/full_fill_by_fills_alone_closes_the_order` | 통과 |  |
-| `core/f2_parked_fill_is_booked_to_its_order_when_another_fill_reveals_the_venue_id` | 통과 |  |
-| `core/a_fill_after_any_kind_of_close_is_booked_and_flagged` | 통과 |  |
-| `core/a_fill_for_a_purged_order_is_booked_as_external` | 통과 |  |
-| `core/a_fill_on_an_instrument_that_is_not_configured_is_booked_as_external_without_a_fault` | 통과 |  |
-| `core/the_three_ways_a_fill_input_changes_nothing` | 통과 |  |
-| `core/f6_reporting_counter_overflow_does_not_fail_stop_fill_booking` | 통과 |  |
+| `core/duplicate_fill_is_booked_once` | 이전 버전 결과 | last result: passed |
+| `core/fill_before_send_result_acknowledges_the_order` | 이전 버전 결과 | last result: passed |
+| `core/fill_by_venue_id_before_the_id_is_known_is_parked_then_booked` | 이전 버전 결과 | last result: passed |
+| `core/unidentified_fill_is_booked_as_external_after_the_wait_and_holds_trading` | 이전 버전 결과 | last result: passed |
+| `core/a_parked_fill_is_external_once_no_order_can_own_it` | 이전 버전 결과 | last result: passed |
+| `core/overfill_is_booked_in_full_and_flagged` | 이전 버전 결과 | last result: passed |
+| `core/full_fill_by_fills_alone_closes_the_order` | 이전 버전 결과 | last result: passed |
+| `core/f2_parked_fill_is_booked_to_its_order_when_another_fill_reveals_the_venue_id` | 이전 버전 결과 | last result: passed |
+| `core/a_fill_after_any_kind_of_close_is_booked_and_flagged` | 이전 버전 결과 | last result: passed |
+| `core/a_fill_for_a_purged_order_is_booked_as_external` | 이전 버전 결과 | last result: passed |
+| `core/a_fill_on_an_instrument_that_is_not_configured_is_booked_as_external_without_a_fault` | 이전 버전 결과 | last result: passed |
+| `core/the_three_ways_a_fill_input_changes_nothing` | 이전 버전 결과 | last result: passed |
+| `core/f6_reporting_counter_overflow_does_not_fail_stop_fill_booking` | 이전 버전 결과 | last result: passed |
 
 ## V-CANCEL-1 — 취소 요청은 예약을 풀지 않고, 취소 중 체결은 기장되며, 최종 수량은 종결 통보가 정한다. 취소는 차단 중에도 받고, 간격을 두고 상한까지 재시도한다. 상한에 이른 뒤 다시 요청하면 새 시도가 나가고, 결과가 오지 않는 시도는 시간 초과 뒤 불명으로 처리된다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 취소했다는 이유로 위험을 0으로 보면 안 된다
 - 수준: 단위
 - 전제와 범위: 기존 계약 문서의 취소 경합 사례 4a, 4b, 4c. 소유권, 중복 취소, 미접수 주문의 취소, 재시도 상한, 상한 뒤의 재요청(전략과 운영자), 결과 불명 중에 쓴 시도, 거부된 취소, 결과 없는 취소, 중지 중 취소, 링크 복귀 시 전송
@@ -336,24 +337,24 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/cancel_race_final_status_decides` | 통과 |  |
-| `core/final_quantity_below_booked_fills_is_flagged` | 통과 |  |
-| `core/cancel_is_authorised_per_owner_and_idempotent` | 통과 |  |
-| `core/cancel_of_an_unacknowledged_order_is_sent_once_the_order_is_acknowledged` | 통과 |  |
-| `core/cancel_is_retried_with_backoff_and_then_flagged` | 통과 |  |
-| `core/cancels_are_accepted_while_new_orders_are_held` | 통과 |  |
-| `core/a_pending_cancel_is_sent_when_the_link_returns` | 통과 |  |
-| `core/cancel_all_requests_every_open_order_in_scope` | 통과 |  |
-| `core/holds_are_independent` | 통과 |  |
-| `core/f1_cancel_can_be_reissued_after_transient_failures_used_up_the_attempts` | 통과 |  |
-| `core/f1_acknowledging_cancel_stuck_releases_the_hold` | 통과 |  |
-| `core/f1_cancel_attempts_spent_in_doubt_do_not_strand_the_order_once_it_is_found` | 통과 |  |
-| `core/f1_a_rejected_cancel_is_retried_only_while_the_order_is_not_terminal` | 통과 |  |
-| `core/f1_a_cancel_without_any_result_is_retried_after_a_timeout` | 통과 |  |
+| `core/cancel_race_final_status_decides` | 이전 버전 결과 | last result: passed |
+| `core/final_quantity_below_booked_fills_is_flagged` | 이전 버전 결과 | last result: passed |
+| `core/cancel_is_authorised_per_owner_and_idempotent` | 이전 버전 결과 | last result: passed |
+| `core/cancel_of_an_unacknowledged_order_is_sent_once_the_order_is_acknowledged` | 이전 버전 결과 | last result: passed |
+| `core/cancel_is_retried_with_backoff_and_then_flagged` | 이전 버전 결과 | last result: passed |
+| `core/cancels_are_accepted_while_new_orders_are_held` | 이전 버전 결과 | last result: passed |
+| `core/a_pending_cancel_is_sent_when_the_link_returns` | 이전 버전 결과 | last result: passed |
+| `core/cancel_all_requests_every_open_order_in_scope` | 이전 버전 결과 | last result: passed |
+| `core/holds_are_independent` | 이전 버전 결과 | last result: passed |
+| `core/f1_cancel_can_be_reissued_after_transient_failures_used_up_the_attempts` | 이전 버전 결과 | last result: passed |
+| `core/f1_acknowledging_cancel_stuck_releases_the_hold` | 이전 버전 결과 | last result: passed |
+| `core/f1_cancel_attempts_spent_in_doubt_do_not_strand_the_order_once_it_is_found` | 이전 버전 결과 | last result: passed |
+| `core/f1_a_rejected_cancel_is_retried_only_while_the_order_is_not_terminal` | 이전 버전 결과 | last result: passed |
+| `core/f1_a_cancel_without_any_result_is_retried_after_a_timeout` | 이전 버전 결과 | last result: passed |
 
 ## V-TERM-1 — 종결 통보가 체결보다 먼저 와도 아직 기장되지 않은 수량은 예약에 남고, 최종 수량을 모를 때는 체결 동기화가 종결 시각을 지난 뒤에만 닫는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 종결을 일찍 확정하면 뒤이은 체결이 예약 없이 기장된다
 - 수준: 단위
 - 전제와 범위: 최종 수량을 아는 경우와 모르는 경우. 체결이 끝내 오지 않는 경우
@@ -367,13 +368,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/terminal_before_fills_keeps_the_unbooked_quantity_reserved` | 통과 |  |
-| `core/terminal_without_final_quantity_waits_for_fill_sync` | 통과 |  |
-| `core/missing_fills_after_sync_are_flagged_and_stay_reserved` | 통과 |  |
+| `core/terminal_before_fills_keeps_the_unbooked_quantity_reserved` | 이전 버전 결과 | last result: passed |
+| `core/terminal_without_final_quantity_waits_for_fill_sync` | 이전 버전 결과 | last result: passed |
+| `core/missing_fills_after_sync_are_flagged_and_stay_reserved` | 이전 버전 결과 | last result: passed |
 
 ## V-RECON-1 — 링크가 돌아오면 미종결 주문의 증거, 체결, 열린 주문, 포지션을 현재 세션에서 다시 확인할 때까지 신규 주문을 막는다. 포지션은 예약으로 설명되는 범위로 검사하고, 오래된 스냅샷은 판정하지 않는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 끊긴 동안의 변화를 모른 채 주문하면 안 되고, 거짓 불일치로 거래를 막아도 안 된다
 - 수준: 단위
 - 전제와 범위: 세션 전환, 이전 세션의 늦은 답(접수 증거 포함)과 늦은 단절 통보, 네 확인을 하나씩 뺀 경우, 범위 안/밖의 포지션, 조회 뒤 기장된 체결, 외부 주문과 고아 주문, 클라이언트 ID 없이 나열된 우리 주문, 불일치 확인의 독립성, 명시적 조정
@@ -387,21 +388,21 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/link_loss_blocks_new_orders_and_resync_is_required_after_it_returns` | 통과 |  |
-| `core/stale_session_evidence_does_not_satisfy_resync` | 통과 |  |
-| `core/position_check_uses_the_reachable_range` | 통과 |  |
-| `core/a_position_snapshot_older_than_the_last_booked_fill_is_inconclusive` | 통과 |  |
-| `core/foreign_and_orphan_open_orders_are_flagged` | 통과 |  |
-| `core/acknowledging_one_mismatch_does_not_clear_another` | 통과 |  |
-| `core/position_adjustment_is_explicit_and_keeps_the_ledgers_consistent` | 통과 |  |
-| `core/each_part_of_the_re_confirmation_is_required` | 통과 |  |
-| `core/f4_stale_session_evidence_that_acknowledges_an_order_does_not_satisfy_resync` | 통과 |  |
-| `core/f5_stale_link_down_does_not_take_a_newer_session_down` | 통과 |  |
-| `core/f8_own_unacknowledged_order_listed_without_client_id_is_not_flagged_foreign` | 통과 |  |
+| `core/link_loss_blocks_new_orders_and_resync_is_required_after_it_returns` | 이전 버전 결과 | last result: passed |
+| `core/stale_session_evidence_does_not_satisfy_resync` | 이전 버전 결과 | last result: passed |
+| `core/position_check_uses_the_reachable_range` | 이전 버전 결과 | last result: passed |
+| `core/a_position_snapshot_older_than_the_last_booked_fill_is_inconclusive` | 이전 버전 결과 | last result: passed |
+| `core/foreign_and_orphan_open_orders_are_flagged` | 이전 버전 결과 | last result: passed |
+| `core/acknowledging_one_mismatch_does_not_clear_another` | 이전 버전 결과 | last result: passed |
+| `core/position_adjustment_is_explicit_and_keeps_the_ledgers_consistent` | 이전 버전 결과 | last result: passed |
+| `core/each_part_of_the_re_confirmation_is_required` | 이전 버전 결과 | last result: passed |
+| `core/f4_stale_session_evidence_that_acknowledges_an_order_does_not_satisfy_resync` | 이전 버전 결과 | last result: passed |
+| `core/f5_stale_link_down_does_not_take_a_newer_session_down` | 이전 버전 결과 | last result: passed |
+| `core/f8_own_unacknowledged_order_listed_without_client_id_is_not_flagged_foreign` | 이전 버전 결과 | last result: passed |
 
 ## V-RECON-2 — 노드가 죽어 있는 동안 거래소에서 일어난 체결, 거래소 주도 취소, 부분 체결을 재시작 뒤 거래소 조회로 모두 반영한다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 복구가 저널만이 아니라 거래소 상태까지 맞추는지 확인한다
 - 수준: 프로세스
 - 전제와 범위: 주문 3건(전량 체결, 부분 체결 후 거래소 취소, 부분 체결 후 잔존). 1회
@@ -415,11 +416,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/events_missed_while_down_are_recovered_from_the_venue` | 통과 |  |
+| `e2e/events_missed_while_down_are_recovered_from_the_venue` | 이전 버전 결과 | last result: passed |
 
 ## V-EXT-1 — OMS가 내지 않은 체결은 기장되고 불일치로 표시되어 신규 주문을 막으며, 운영자가 확인해야 풀린다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 외부 활동은 한도 계산의 전제를 깬다
 - 수준: 시뮬레이션
 - 전제와 범위: 코어 예제, 시뮬레이션 external 프로파일(외부 체결을 임의 시점에 주입), 실제 프로세스 1회
@@ -433,13 +434,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/unidentified_fill_is_booked_as_external_after_the_wait_and_holds_trading` | 통과 |  |
-| `sim/profile_external` | 통과 |  |
-| `e2e/external_activity_is_detected_and_needs_an_operator` | 통과 |  |
+| `core/unidentified_fill_is_booked_as_external_after_the_wait_and_holds_trading` | 이전 버전 결과 | last result: passed |
+| `sim/profile_external` | 이전 버전 결과 | last result: passed |
+| `e2e/external_activity_is_detected_and_needs_an_operator` | 이전 버전 결과 | last result: passed |
 
 ## V-REPLAY-1 — 기록된 이벤트만 적용해 만든 상태는 살아 있는 상태와 같고, 기록된 입력을 다시 판단하면 기록된 이벤트가 나온다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 복구의 정확성과 판단의 재현성
 - 수준: 단위
 - 전제와 범위: 시나리오 시험 전부(매 입력 뒤 그림자 상태 비교), 시뮬레이션의 최종 검사, 실제 저널에 대한 verify --re-decide
@@ -453,17 +454,17 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/recorded_inputs_re_decide_to_the_recorded_events` | 통과 |  |
-| `core/restart_puts_outstanding_sends_in_doubt_and_never_resends` | 통과 |  |
-| `sim/profile_crashy` | 통과 |  |
-| `e2e/vertical_slice_new_partial_fill_cancel_restart` | 통과 |  |
-| `e2e/random_kills_under_load_keep_books_consistent` | 통과 |  |
-| `core/margin_events_replay_to_the_same_state` | 통과 |  |
-| `core/latch_and_day_base_replay_to_the_same_state` | 통과 |  |
+| `core/recorded_inputs_re_decide_to_the_recorded_events` | 이전 버전 결과 | last result: passed |
+| `core/restart_puts_outstanding_sends_in_doubt_and_never_resends` | 이전 버전 결과 | last result: passed |
+| `sim/profile_crashy` | 이전 버전 결과 | last result: passed |
+| `e2e/vertical_slice_new_partial_fill_cancel_restart` | 이전 버전 결과 | last result: passed |
+| `e2e/random_kills_under_load_keep_books_consistent` | 이전 버전 결과 | last result: passed |
+| `core/margin_events_replay_to_the_same_state` | 이전 버전 결과 | last result: passed |
+| `core/latch_and_day_base_replay_to_the_same_state` | 이전 버전 결과 | last result: passed |
 
 ## V-SIM-1 — 네트워크 장애, 통보 중복·지연, 링크 단절, 프로세스 재시작, 키 삭제가 임의로 섞인 실행의 매 단계에서: 구조 불변조건이 성립하고, 거래소의 실제 포지션이 OMS가 설명하는 범위 안에 있고, 한도를 넘지 않고, 같은 주문이 두 번 전송되지 않는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 예제 시험이 생각하지 못한 순서를 찾는다. 실제로 결함 넷을 찾아 고쳤다
 - 수준: 시뮬레이션
 - 전제와 범위: 프로파일 6개(calm, lossy, crashy, weak_evidence, purge, skewed). 실행당 1500단계. seed 수는 결과의 notes에 있다. 한 종목, 두 전략, 가상 시계
@@ -477,16 +478,16 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `sim/profile_calm` | 통과 |  |
-| `sim/profile_lossy` | 통과 |  |
-| `sim/profile_crashy` | 통과 |  |
-| `sim/profile_weak_evidence` | 통과 |  |
-| `sim/profile_purge` | 통과 |  |
-| `sim/profile_skewed` | 통과 |  |
+| `sim/profile_calm` | 이전 버전 결과 | last result: passed |
+| `sim/profile_lossy` | 이전 버전 결과 | last result: passed |
+| `sim/profile_crashy` | 이전 버전 결과 | last result: passed |
+| `sim/profile_weak_evidence` | 이전 버전 결과 | last result: passed |
+| `sim/profile_purge` | 이전 버전 결과 | last result: passed |
+| `sim/profile_skewed` | 이전 버전 결과 | last result: passed |
 
 ## V-SIM-2 — 장애가 멈추면 장부가 가상 거래소와 일치한다: 주문별 체결량과 상태, 포지션, 수수료 합. 차단 사유와 거짓 불일치가 남지 않는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 안전 조건만으로는 '모두 거절'도 통과한다. 수렴을 따로 확인한다
 - 수준: 시뮬레이션
 - 전제와 범위: V-SIM-1과 같은 실행의 끝. 장애 주입을 멈추고 가상 시간 최대 90초를 준다
@@ -500,16 +501,16 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `sim/profile_calm` | 통과 |  |
-| `sim/profile_lossy` | 통과 |  |
-| `sim/profile_crashy` | 통과 |  |
-| `sim/profile_weak_evidence` | 통과 |  |
-| `sim/profile_purge` | 통과 |  |
-| `sim/profile_skewed` | 통과 |  |
+| `sim/profile_calm` | 이전 버전 결과 | last result: passed |
+| `sim/profile_lossy` | 이전 버전 결과 | last result: passed |
+| `sim/profile_crashy` | 이전 버전 결과 | last result: passed |
+| `sim/profile_weak_evidence` | 이전 버전 결과 | last result: passed |
+| `sim/profile_purge` | 이전 버전 결과 | last result: passed |
+| `sim/profile_skewed` | 이전 버전 결과 | last result: passed |
 
 ## V-SIM-3 — 같은 seed는 바이트 단위로 같은 저널을 만든다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 실패한 실행을 재현할 수 있어야 한다
 - 수준: 시뮬레이션
 - 전제와 범위: seed 3개, crashy 프로파일
@@ -523,12 +524,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `sim/a_seed_reproduces_the_same_run` | 통과 |  |
-| `sim/rng::tests::matches_the_reference_sequence` | 통과 |  |
+| `sim/a_seed_reproduces_the_same_run` | 이전 버전 결과 | last result: passed |
+| `sim/rng::tests::matches_the_reference_sequence` | 이전 버전 결과 | last result: passed |
 
 ## V-COMMIT-1 — flush가 실패하면 그 배치의 응답, 전송 명령, 읽기 모델 변경이 하나도 나가지 않고 프로세스가 입력을 닫는다. 성공한 경우 응답 시점에 읽기 모델은 이미 갱신돼 있다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 커밋 게이트(I-WAL)의 핵심
 - 수준: 프로세스 내부
 - 전제와 범위: 커밋 스레드 구성과 인라인 구성 각각 1회. 주문 1건 성공 후 1건 실패
@@ -542,12 +543,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `pipeline/outputs_follow_durability_with_a_commit_thread` | 통과 |  |
-| `pipeline/outputs_follow_durability_with_inline_commit` | 통과 |  |
+| `pipeline/outputs_follow_durability_with_a_commit_thread` | 이전 버전 결과 | last result: passed |
+| `pipeline/outputs_follow_durability_with_inline_commit` | 이전 버전 결과 | last result: passed |
 
 ## V-COMMIT-2 — 부하 중 임의 시점에 노드를 강제 종료하고 다시 띄우기를 반복해도, 대조가 끝난 뒤 주문별 체결량·상태와 포지션이 거래소와 일치하고 같은 주문이 두 번 접수 요청되지 않는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 실제 스레드·저널·소켓에서 커밋 게이트와 복구가 함께 성립하는지
 - 수준: 프로세스
 - 전제와 범위: 회차 수는 결과의 notes에 있다(시험의 기본 12, 수용 시험 20). 두 전략이 주문과 취소를 계속 보낸다. 종료 시점은 60~460 ms 뒤 임의
@@ -561,12 +562,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/random_kills_under_load_keep_books_consistent` | 통과 |  |
-| `e2e/a_kill_during_send_does_not_duplicate_the_order` | 통과 |  |
+| `e2e/random_kills_under_load_keep_books_consistent` | 이전 버전 결과 | last result: passed |
+| `e2e/a_kill_during_send_does_not_duplicate_the_order` | 이전 버전 결과 | last result: passed |
 
 ## V-COMMIT-3 — 함께 도착한 입력은 flush를 공유하고, 응답은 판단 순서대로 나온다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 그룹 커밋이 실제로 일어나는지
 - 수준: 프로세스 내부
 - 전제와 범위: 요청 40건을 한꺼번에
@@ -580,11 +581,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `pipeline/inputs_that_arrive_together_share_a_flush` | 통과 |  |
+| `pipeline/inputs_that_arrive_together_share_a_flush` | 이전 버전 결과 | last result: passed |
 
 ## V-JRN-1 — 프레임의 모든 절단과 모든 단일 비트 반전이 감지되고, 0으로 채워진 꼬리는 프레임으로 읽히지 않는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 손상 감지의 기초
 - 수준: 단위
 - 전제와 범위: 프레임 하나의 모든 절단 위치와 모든 비트
@@ -598,14 +599,14 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `journal/frame::tests::roundtrip_and_layout` | 통과 |  |
-| `journal/frame::tests::every_truncation_and_every_bit_flip_is_detected` | 통과 |  |
-| `journal/frame::tests::zero_filled_tail_is_not_a_frame` | 통과 |  |
-| `journal/frame::tests::finds_a_later_frame_behind_damage` | 통과 |  |
+| `journal/frame::tests::roundtrip_and_layout` | 이전 버전 결과 | last result: passed |
+| `journal/frame::tests::every_truncation_and_every_bit_flip_is_detected` | 이전 버전 결과 | last result: passed |
+| `journal/frame::tests::zero_filled_tail_is_not_a_frame` | 이전 버전 결과 | last result: passed |
+| `journal/frame::tests::finds_a_later_frame_behind_damage` | 이전 버전 결과 | last result: passed |
 
 ## V-JRN-2 — 저널의 끝이 불완전하면 유효한 접두부만 남기고 원본 바이트를 보존한 뒤 이어 쓸 수 있다. 중간이 손상됐거나 세그먼트가 빠졌거나 다른 인스턴스의 것이거나 스냅샷보다 짧으면 시작을 거부하고, 거부한 디렉터리의 파일은 건드리지 않는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 손상을 건너뛰고 복구했다고 말하면 안 된다
 - 수준: 속성
 - 전제와 범위: 마지막 기록의 모든 절단 위치, 임의 크기·배치·절단 위치(property test 64회), 쓰레기·0 꼬리, 중간 비트 반전, 세그먼트 누락, 회전 중 중단. 실제 노드에서 꼬리와 중간 손상 각 1회
@@ -619,29 +620,29 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `journal/every_truncation_of_the_last_record_recovers_the_prefix` | 통과 |  |
-| `journal/recovery_returns_the_longest_valid_prefix` | 통과 |  |
-| `journal/garbage_and_zero_tails_are_truncated` | 통과 |  |
-| `journal/damage_in_the_middle_is_refused_and_nothing_is_modified` | 통과 |  |
-| `journal/a_missing_middle_segment_is_a_gap` | 통과 |  |
-| `journal/an_incomplete_newest_segment_is_removed_and_preserved` | 통과 |  |
-| `journal/truncation_can_be_disabled` | 통과 |  |
-| `journal/damage_in_the_last_record_is_treated_as_an_incomplete_tail` | 통과 |  |
-| `journal/rotation_keeps_sequences_consecutive_across_segments` | 통과 |  |
-| `journal/verify_all_reads_without_modifying` | 통과 |  |
-| `journal/records_are_durable_only_after_sync` | 통과 |  |
-| `journal/appends_must_be_consecutive` | 통과 |  |
-| `e2e/journal_damage_is_handled_by_position` | 통과 |  |
-| `journal/a_foreign_instance_journal_is_refused_without_being_modified` | 통과 |  |
-| `journal/a_snapshot_newer_than_the_journal_is_refused_without_modifying_it` | 통과 |  |
-| `journal/a_snapshot_without_any_segment_is_not_accepted_silently` | 통과 |  |
-| `journal/header_only_newest_segment_is_clean` | 통과 |  |
-| `journal/stale_and_out_of_order_frames_are_classified_conservatively` | 통과 |  |
-| `journal/an_incomplete_newest_segment_after_a_snapshot_at_the_boundary_is_set_aside` | 통과 |  |
+| `journal/every_truncation_of_the_last_record_recovers_the_prefix` | 이전 버전 결과 | last result: passed |
+| `journal/recovery_returns_the_longest_valid_prefix` | 이전 버전 결과 | last result: passed |
+| `journal/garbage_and_zero_tails_are_truncated` | 이전 버전 결과 | last result: passed |
+| `journal/damage_in_the_middle_is_refused_and_nothing_is_modified` | 이전 버전 결과 | last result: passed |
+| `journal/a_missing_middle_segment_is_a_gap` | 이전 버전 결과 | last result: passed |
+| `journal/an_incomplete_newest_segment_is_removed_and_preserved` | 이전 버전 결과 | last result: passed |
+| `journal/truncation_can_be_disabled` | 이전 버전 결과 | last result: passed |
+| `journal/damage_in_the_last_record_is_treated_as_an_incomplete_tail` | 이전 버전 결과 | last result: passed |
+| `journal/rotation_keeps_sequences_consecutive_across_segments` | 이전 버전 결과 | last result: passed |
+| `journal/verify_all_reads_without_modifying` | 이전 버전 결과 | last result: passed |
+| `journal/records_are_durable_only_after_sync` | 이전 버전 결과 | last result: passed |
+| `journal/appends_must_be_consecutive` | 이전 버전 결과 | last result: passed |
+| `e2e/journal_damage_is_handled_by_position` | 이전 버전 결과 | last result: passed |
+| `journal/a_foreign_instance_journal_is_refused_without_being_modified` | 이전 버전 결과 | last result: passed |
+| `journal/a_snapshot_newer_than_the_journal_is_refused_without_modifying_it` | 이전 버전 결과 | last result: passed |
+| `journal/a_snapshot_without_any_segment_is_not_accepted_silently` | 이전 버전 결과 | last result: passed |
+| `journal/header_only_newest_segment_is_clean` | 이전 버전 결과 | last result: passed |
+| `journal/stale_and_out_of_order_frames_are_classified_conservatively` | 이전 버전 결과 | last result: passed |
+| `journal/an_incomplete_newest_segment_after_a_snapshot_at_the_boundary_is_set_aside` | 이전 버전 결과 | last result: passed |
 
 ## V-JRN-3 — 같은 데이터 디렉터리를 두 프로세스가 쓸 수 없고, 다른 인스턴스의 저널은 거부된다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 두 writer는 순번과 주문 ID를 충돌시킨다
 - 수준: 프로세스
 - 전제와 범위: 같은 호스트
@@ -655,13 +656,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `journal/a_second_writer_is_refused` | 통과 |  |
-| `journal/a_journal_of_another_instance_is_refused` | 통과 |  |
-| `e2e/only_one_node_can_own_a_data_directory` | 통과 |  |
+| `journal/a_second_writer_is_refused` | 이전 버전 결과 | last result: passed |
+| `journal/a_journal_of_another_instance_is_refused` | 이전 버전 결과 | last result: passed |
+| `e2e/only_one_node_can_own_a_data_directory` | 이전 버전 결과 | last result: passed |
 
 ## V-JRN-4 — 스냅샷은 완전한 파일로만 나타나고, 손상된 스냅샷은 건너뛰며, 정상 종료 뒤 재시작은 스냅샷에서 같은 상태로 돌아온다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 스냅샷이 복구를 오염시키면 안 된다
 - 수준: 프로세스
 - 전제와 범위: 스냅샷 파일의 모든 절단 위치, 비트 반전, 임시 파일 잔존. 실제 노드의 정상 종료·재시작 1회
@@ -675,14 +676,14 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `journal/snapshot::tests::newest_valid_snapshot_wins_and_damaged_ones_are_skipped` | 통과 |  |
-| `journal/snapshot::tests::truncated_snapshot_is_rejected` | 통과 |  |
-| `e2e/vertical_slice_new_partial_fill_cancel_restart` | 통과 |  |
-| `e2e/a_snapshot_whose_digest_does_not_match_is_skipped_not_fatal` | 통과 |  |
+| `journal/snapshot::tests::newest_valid_snapshot_wins_and_damaged_ones_are_skipped` | 이전 버전 결과 | last result: passed |
+| `journal/snapshot::tests::truncated_snapshot_is_rejected` | 이전 버전 결과 | last result: passed |
+| `e2e/vertical_slice_new_partial_fill_cancel_restart` | 이전 버전 결과 | last result: passed |
+| `e2e/a_snapshot_whose_digest_does_not_match_is_skipped_not_fatal` | 이전 버전 결과 | last result: passed |
 
 ## V-JRN-5 — 기록 스키마가 다른 빌드는 옛 세그먼트를 읽고 새 세그먼트를 시작하며, 읽을 수 없는 스키마를 만난 빌드는 시작을 거부한다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 형식 변경이 조용한 오독으로 이어지면 안 된다
 - 수준: 단위
 - 전제와 범위: 스키마 1 → 2 전환 1회(저널 계층)
@@ -696,12 +697,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `journal/a_schema_change_starts_a_new_segment` | 통과 |  |
-| `journal/a_schema_change_right_after_a_rotation_can_still_write` | 통과 |  |
+| `journal/a_schema_change_starts_a_new_segment` | 이전 버전 결과 | last result: passed |
+| `journal/a_schema_change_right_after_a_rotation_can_still_write` | 이전 버전 결과 | last result: passed |
 
 ## V-BOOT-1 — 재시작은 결과 기록이 없는 전송을 불명으로 표시하고, 신규 주문을 다시 보내지 않으며, 요청돼 있던 취소만 다시 보낸다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 재시작이 주문을 복제하면 안 된다
 - 수준: 프로세스
 - 전제와 범위: 코어 예제 1건, 실제 프로세스에서 전송 중 강제 종료 1회(거래소가 400 ms 지연 중)
@@ -715,12 +716,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/restart_puts_outstanding_sends_in_doubt_and_never_resends` | 통과 |  |
-| `e2e/a_kill_during_send_does_not_duplicate_the_order` | 통과 |  |
+| `core/restart_puts_outstanding_sends_in_doubt_and_never_resends` | 이전 버전 결과 | last result: passed |
+| `e2e/a_kill_during_send_does_not_duplicate_the_order` | 이전 버전 결과 | last result: passed |
 
 ## V-CFG-1 — 설정은 버전이 커야 활성화되고, 같은 버전에 다른 내용이면 시작을 거부한다. 노출이 남은 종목·전략은 제거할 수 없다. mainnet은 증거금 정책(policy.margin) 없이는 시작하지 않고, 정책의 값이 C-MARGIN 설정 표의 범위를 벗어나면 어느 거래소 설정에서도 시작하지 않는다. 저장소의 Hyperliquid 예제 설정은 증거금 정책(소유자가 정한 값)을 담고 검사를 통과한다. Hyperliquid 설정에 증거금 정책이 있으면 설정에서 계산한 분당 조회 weight(216 + 종목마다 20, 기본 간격)가 600을 넘을 때 시작하지 않는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 설정 변경이 추적되지 않으면 사고 분석이 불가능하다
 - 수준: 프로세스
 - 전제와 범위: 코어 예제, 실제 노드 1회, 노드 설정 검사의 단위 시험(증거금 정책)
@@ -734,16 +735,16 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/configuration_changes_are_validated_against_existing_exposure` | 통과 |  |
-| `e2e/configuration_changes_need_a_new_version` | 통과 |  |
-| `core/f10_config_validation_enforces_the_parked_fill_wait_rule` | 통과 |  |
-| `node-unit/config::tests::mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused` | 통과 |  |
-| `node-unit/config::tests::example_config_with_a_margin_policy_loads` | 통과 |  |
-| `node-unit/config::tests::steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused` | 통과 |  |
+| `core/configuration_changes_are_validated_against_existing_exposure` | 이전 버전 결과 | last result: passed |
+| `e2e/configuration_changes_need_a_new_version` | 이전 버전 결과 | last result: passed |
+| `core/f10_config_validation_enforces_the_parked_fill_wait_rule` | 이전 버전 결과 | last result: passed |
+| `node-unit/config::tests::mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused` | 이전 버전 결과 | last result: passed |
+| `node-unit/config::tests::example_config_with_a_margin_policy_loads` | 이전 버전 결과 | last result: passed |
+| `node-unit/config::tests::steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused` | 이전 버전 결과 | last result: passed |
 
 ## V-OVL-1 — 입력 큐는 상한을 넘지 않고, 가득 찬 큐는 다른 큐에 영향을 주지 않으며, 배치마다 세 큐가 지분을 받는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 과부하가 메모리 고갈이나 취소 굶주림으로 바뀌면 안 된다
 - 수준: 단위
 - 전제와 범위: 큐 자료구조
@@ -757,14 +758,14 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/queues::tests::a_full_lane_refuses_and_never_grows` | 통과 |  |
-| `node-unit/queues::tests::every_lane_gets_a_share_of_each_batch` | 통과 |  |
-| `node-unit/queues::tests::ticks_coalesce` | 통과 |  |
-| `node-unit/queues::tests::close_drains_then_ends` | 통과 |  |
+| `node-unit/queues::tests::a_full_lane_refuses_and_never_grows` | 이전 버전 결과 | last result: passed |
+| `node-unit/queues::tests::every_lane_gets_a_share_of_each_batch` | 이전 버전 결과 | last result: passed |
+| `node-unit/queues::tests::ticks_coalesce` | 이전 버전 결과 | last result: passed |
+| `node-unit/queues::tests::close_drains_then_ends` | 이전 버전 결과 | last result: passed |
 
 ## V-OVL-2 — 큐보다 빠르게 온 요청은 즉시 거절되고 기록을 남기지 않으며, 그 직후에도 취소는 수용된다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 과부하 보호가 실제 프로세스에서 작동하는지
 - 수준: 프로세스
 - 전제와 범위: 주문 큐 8, 한 연결에서 600건을 응답을 읽지 않고 전송. 1회
@@ -778,11 +779,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/overload_is_refused_at_the_door_and_cancels_still_work` | 통과 |  |
+| `e2e/overload_is_refused_at_the_door_and_cancels_still_work` | 이전 버전 결과 | last result: passed |
 
 ## V-OVL-3 — 저장 공간이 부족하면 신규 주문만 거절하고 체결과 취소는 계속 처리한다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 저장 공간 부족이 체결 유실로 이어지면 안 된다
 - 수준: 단위
 - 전제와 범위: 코어 예제
@@ -796,11 +797,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/storage_low_blocks_new_orders_but_not_fills_or_cancels` | 통과 |  |
+| `core/storage_low_blocks_new_orders_but_not_fills_or_cancels` | 이전 버전 결과 | last result: passed |
 
 ## V-API-1 — 전략 연결은 자기 주문만 보고 취소하며, 운영 명령은 운영 소켓에서만 받아들여진다. 알 수 없는 전략과 잘못된 요청은 거절된다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 권한 경계
 - 수준: 프로세스
 - 전제와 범위: 두 전략, 거래 소켓과 운영 소켓. 같은 OS 사용자
@@ -814,12 +815,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/a_strategy_sees_and_cancels_only_its_own_orders` | 통과 |  |
-| `e2e/external_activity_is_detected_and_needs_an_operator` | 통과 |  |
+| `e2e/a_strategy_sees_and_cancels_only_its_own_orders` | 이전 버전 결과 | last result: passed |
+| `e2e/external_activity_is_detected_and_needs_an_operator` | 이전 버전 결과 | last result: passed |
 
 ## V-API-2 — 문서의 요청 예가 그대로 해석되고, 수치에 JSON 숫자를 쓰면 거부된다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 프로토콜 문서와 구현의 일치
 - 수준: 단위
 - 전제와 범위: 신규 주문 요청과 응답의 예
@@ -833,11 +834,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `api/tests::wire_examples` | 통과 |  |
+| `api/tests::wire_examples` | 이전 버전 결과 | last result: passed |
 
 ## V-SLICE-1 — 신규 주문 → 영속 접수 → 거래소 접수 → 부분 체결 → 잔량 취소 → 종결이 실제 프로세스에서 이어지고, 구독자는 저널 순서로 이벤트를 받으며, 정상 종료 뒤 재시작해도 상태가 같고 재전송이 없다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 첫 수직 구현의 완료 조건
 - 수준: 프로세스
 - 전제와 범위: 주문 1건, 1회
@@ -851,12 +852,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/vertical_slice_new_partial_fill_cancel_restart` | 통과 |  |
-| `e2e/a_lost_response_is_covered_by_stream_evidence` | 통과 |  |
+| `e2e/vertical_slice_new_partial_fill_cancel_restart` | 이전 버전 결과 | last result: passed |
+| `e2e/a_lost_response_is_covered_by_stream_evidence` | 이전 버전 결과 | last result: passed |
 
 ## V-LINK-1 — 스트림이 끊기면 신규 주문을 막고, 그동안의 취소 요청을 기억했다가 복귀 뒤 보내며, 놓친 체결을 메운 뒤에야 거래를 재개한다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 실제 소켓 단절에서의 재확인
 - 수준: 프로세스
 - 전제와 범위: 단절 1회, 그 사이 체결 1건과 취소 요청 1건
@@ -870,11 +871,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/link_loss_holds_new_orders_until_resynchronised` | 통과 |  |
+| `e2e/link_loss_holds_new_orders_until_resynchronised` | 이전 버전 결과 | last result: passed |
 
 ## V-HL-1 — L1 액션의 해시와 서명이 공식 Python SDK의 결과와 같고, 서명 키는 출력되지 않는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 서명이 한 바이트라도 다르면 모든 요청이 거부된다
 - 수준: 단위
 - 전제와 범위: SDK 시험 벡터 5종(액션 해시, 임의 액션, 주문, cloid 주문, 예약 취소 2종; mainnet과 testnet). expiresAfter는 바이트 배치만
@@ -888,17 +889,17 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/venue::hyperliquid::sign::tests::action_hash_matches_the_sdk_vector` | 통과 |  |
-| `node-unit/venue::hyperliquid::sign::tests::dummy_action_signature_matches_the_sdk_vectors` | 통과 |  |
-| `node-unit/venue::hyperliquid::sign::tests::order_signature_matches_the_sdk_vectors` | 통과 |  |
-| `node-unit/venue::hyperliquid::sign::tests::order_with_cloid_signature_matches_the_sdk_vectors` | 통과 |  |
-| `node-unit/venue::hyperliquid::sign::tests::schedule_cancel_signature_matches_the_sdk_vectors` | 통과 |  |
-| `node-unit/venue::hyperliquid::sign::tests::expires_after_is_appended_as_in_the_sdk_source` | 통과 |  |
-| `node-unit/venue::hyperliquid::sign::tests::the_address_is_derived_and_the_key_is_not_printed` | 통과 |  |
+| `node-unit/venue::hyperliquid::sign::tests::action_hash_matches_the_sdk_vector` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::sign::tests::dummy_action_signature_matches_the_sdk_vectors` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::sign::tests::order_signature_matches_the_sdk_vectors` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::sign::tests::order_with_cloid_signature_matches_the_sdk_vectors` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::sign::tests::schedule_cancel_signature_matches_the_sdk_vectors` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::sign::tests::expires_after_is_appended_as_in_the_sdk_source` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::sign::tests::the_address_is_derived_and_the_key_is_not_printed` | 이전 버전 결과 | last result: passed |
 
 ## V-HL-2 — 문서에 실린 응답 예를 올바르게 해석한다. 문서에 없는 주문 응답 형태와 최상위 오류는 결과 불명으로 두고, 문서의 표에 없는 상태 이름에서는 아무 결론도 내지 않으며, 종결 상태에서 최종 수량을 추정하지 않는다. 체결 조회는 마지막 쪽임이 확실할 때만 완료를 선언한다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 모르는 응답을 실패로 읽으면 예약 없는 주문이 생긴다
 - 수준: 단위
 - 전제와 범위: 문서의 주문·취소 응답 예, 상태 이름 표 전체(29개), 체결 필드, 체결 쪽 판정의 경계(499, 500, 2000, 겹침만 있는 쪽, 10000건)
@@ -912,16 +913,16 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/venue::hyperliquid::wire::tests::documented_place_answers` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::anything_else_is_unclear_not_a_failure` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::documented_cancel_answers` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::status_mapping` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::fill_translation` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::order_wire_json` | 통과 |  |
-| `node-unit/venue::hyperliquid::tests::the_budget_stops_orders_before_cancels` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::odd_coin_names_are_mapped_not_dropped` | 통과 |  |
-| `node-unit/venue::hyperliquid::tests::a_fill_page_proves_completeness_only_when_it_is_certainly_the_last` | 통과 |  |
-| `e2e/hyperliquid_fills_on_spot_coins_are_translatable` | 통과 |  |
+| `node-unit/venue::hyperliquid::wire::tests::documented_place_answers` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::wire::tests::anything_else_is_unclear_not_a_failure` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::wire::tests::documented_cancel_answers` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::wire::tests::status_mapping` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::wire::tests::fill_translation` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::wire::tests::order_wire_json` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::tests::the_budget_stops_orders_before_cancels` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::wire::tests::odd_coin_names_are_mapped_not_dropped` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::tests::a_fill_page_proves_completeness_only_when_it_is_certainly_the_last` | 이전 버전 결과 | last result: passed |
+| `e2e/hyperliquid_fills_on_spot_coins_are_translatable` | 이전 버전 결과 | last result: passed |
 
 ## V-HL-3 — 실제 testnet에 대해 게이트웨이가 메타를 읽어 종목 규칙을 통과시키고, 사용자 스트림을 구독해 링크를 올리고, 주문 조회(없음)·열린 주문·포지션·체결 조회·참조 가격을 해석한다
 
@@ -943,7 +944,7 @@
 
 ## V-PURE-1 — 도메인 코어의 소스에 시계·파일·네트워크·스레드·난수·해시 컬렉션·부동소수점·unsafe가 없고 의존성은 serde와 serde_json뿐이다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 결정적 실행의 전제
 - 수준: 소스 검사
 - 전제와 범위: crates/oms-core/src의 모든 줄(주석 제외)과 Cargo.toml
@@ -957,7 +958,7 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `source/core_purity` | 통과 |  |
+| `source/core_purity` | 이전 버전 결과 | last result: passed |
 
 ## V-PERF-1 — 초당 200건의 open-loop 부하에서 로컬 응답 지연 p99가 20 ms 이하이고 오류와 미응답이 없다
 
@@ -1016,7 +1017,7 @@
 
 ## V-MUT-1 — 핵심 보호 로직을 일부러 깨뜨리면 관련 시험이 실패한다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 시험이 실제로 그 로직을 지키고 있는지
 - 수준: 변이
 - 전제와 범위: 선별한 변이 목록(docs/verification/README.md). 각 변이는 소스의 한 곳을 바꾼다
@@ -1030,11 +1031,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `mutants/all` | 통과 | 79 mutants, survived: [] |
+| `mutants/all` | 이전 버전 결과 | 79 mutants, survived: [] |
 
 ## V-HIST-1 — 단계 지연 히스토그램이 보고하는 백분위는 실제 값 이상이고 12.5% 이내로 크다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 대시보드의 지연 수치를 얼마나 믿을 수 있는지
 - 수준: 단위
 - 전제와 범위: 0~5000과 큰 값 몇 개
@@ -1048,12 +1049,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/util::tests::histogram_bounds_hold_for_every_value` | 통과 |  |
-| `node-unit/util::tests::quantiles_of_a_known_distribution` | 통과 |  |
+| `node-unit/util::tests::histogram_bounds_hold_for_every_value` | 이전 버전 결과 | last result: passed |
+| `node-unit/util::tests::quantiles_of_a_known_distribution` | 이전 버전 결과 | last result: passed |
 
 ## V-COMMIT-4 — 커밋 순서의 경계마다 프로세스를 멈추면 결과가 경계별 장애 표와 같다: 쓰기 전에 멈추면 요청이 없었던 것이 되고, 쓴 뒤·flush 뒤·응답 뒤에 멈추면 주문은 남되 한 번도 전송되지 않고 결과 불명을 거쳐 "놓이지 않음"으로 닫히며, 같은 요청을 다시 보내면 같은 주문으로 답한다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: C-COMMIT의 표가 설계에 그치지 않고 실제 프로세스에서 성립하는지. 간격 검토에서 이 표에 대응하는 시험이 없다는 지적을 받았다
 - 수준: 프로세스
 - 전제와 범위: 경계 넷(쓰기 전, 쓴 뒤 flush 전, flush 뒤 공개 전, 응답 뒤 전송 명령 전)과 flush 오류 뒤 프로세스가 살아 있는 경우 하나. 각 1회, 주문 1건
@@ -1067,15 +1068,15 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `pipeline/stopped_before_the_write_the_request_never_happened` | 통과 |  |
-| `pipeline/stopped_after_the_write_the_order_exists_and_is_resolved_without_a_send` | 통과 |  |
-| `pipeline/stopped_after_the_flush_the_order_is_in_doubt_and_never_sent` | 통과 |  |
-| `pipeline/stopped_after_the_reply_the_accepted_order_is_never_sent_and_closes_as_not_placed` | 통과 |  |
-| `pipeline/a_flush_error_after_the_write_stops_the_node_and_the_record_may_survive` | 통과 |  |
+| `pipeline/stopped_before_the_write_the_request_never_happened` | 이전 버전 결과 | last result: passed |
+| `pipeline/stopped_after_the_write_the_order_exists_and_is_resolved_without_a_send` | 이전 버전 결과 | last result: passed |
+| `pipeline/stopped_after_the_flush_the_order_is_in_doubt_and_never_sent` | 이전 버전 결과 | last result: passed |
+| `pipeline/stopped_after_the_reply_the_accepted_order_is_never_sent_and_closes_as_not_placed` | 이전 버전 결과 | last result: passed |
+| `pipeline/a_flush_error_after_the_write_stops_the_node_and_the_record_may_survive` | 이전 버전 결과 | last result: passed |
 
 ## V-COMMIT-5 — 실제 디스크에 둔 저널로 강제 종료를 60회 반복해도 V-COMMIT-2의 성질이 유지된다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 문서에 인용하는 더 긴 실행의 수치를 보관된 결과로 뒷받침한다
 - 수준: 프로세스
 - 전제와 범위: 60회. 저널은 `--extended`에 준 디렉터리(실제 장치)
@@ -1089,11 +1090,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `kills-extended/random_kills_under_load_keep_books_consistent` | 통과 |  |
+| `kills-extended/random_kills_under_load_keep_books_consistent` | 이전 버전 결과 | last result: passed |
 
 ## V-BOOT-2 — 저널이 여러 세그먼트에 걸쳐 있어도 강제 종료 뒤 스냅샷과 저널로 같은 상태로 돌아오고, `verify --re-decide`는 입력과 맞지 않는 기록을 잡아내며, 종료 중의 저널 실패는 정상 종료로 보고되지 않는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 간격 검토가 찾은 결함(종료 중 실패의 종료 코드)과, 검토자가 깨려다 실패한 것의 기록
 - 수준: 프로세스
 - 전제와 범위: 4 KiB 세그먼트와 25건 주기 스냅샷으로 주문 60건. 체크섬이 맞는 기록 하나의 이벤트 조작. 데이터 디렉터리를 읽기 전용으로 만든 뒤 종료
@@ -1107,13 +1108,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/many_small_segments_survive_a_kill_and_a_clean_restart` | 통과 |  |
-| `e2e/re_decide_detects_a_record_whose_events_differ_from_the_decision` | 통과 |  |
-| `e2e/a_journal_failure_during_the_shutdown_drain_is_not_reported_as_a_clean_stop` | 통과 |  |
+| `e2e/many_small_segments_survive_a_kill_and_a_clean_restart` | 이전 버전 결과 | last result: passed |
+| `e2e/re_decide_detects_a_record_whose_events_differ_from_the_decision` | 이전 버전 결과 | last result: passed |
+| `e2e/a_journal_failure_during_the_shutdown_drain_is_not_reported_as_a_clean_stop` | 이전 버전 결과 | last result: passed |
 
 ## V-API-3 — 거래 소켓의 연결이 아무리 많아도 운영 소켓은 열리고, 끊긴 구독자는 연결 자리를 돌려주며, 한 연결은 구독을 하나만 가진다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 간격 검토가 찾은 결함: 구독하고 떠난 연결 넷이 운영자까지 막을 수 있었다
 - 수준: 프로세스
 - 전제와 범위: 연결 상한 4에서 침묵하는 연결 4개, 구독 후 끊은 연결 4개, 한 연결의 구독 3000회
@@ -1127,13 +1128,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/idle_trading_connections_do_not_lock_the_operator_out` | 통과 |  |
-| `e2e/a_departed_subscriber_gives_its_connection_slot_back` | 통과 |  |
-| `e2e/one_connection_cannot_register_thousands_of_subscriptions` | 통과 |  |
+| `e2e/idle_trading_connections_do_not_lock_the_operator_out` | 이전 버전 결과 | last result: passed |
+| `e2e/a_departed_subscriber_gives_its_connection_slot_back` | 이전 버전 결과 | last result: passed |
+| `e2e/one_connection_cannot_register_thousands_of_subscriptions` | 이전 버전 결과 | last result: passed |
 
 ## V-DASH-1 — 대시보드의 문서 열람 경로는 docs/, crates/, registry/ 아래의 .md, .rs, .toml만 읽는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 읽기 전용 화면이 설정 파일이나 데이터 디렉터리를 내보내면 안 된다
 - 수준: 단위
 - 전제와 범위: 허용되는 경로 4개와 거부돼야 하는 경로 14개
@@ -1147,7 +1148,7 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/http::tests::the_document_viewer_cannot_leave_its_directories` | 통과 |  |
+| `node-unit/http::tests::the_document_viewer_cannot_leave_its_directories` | 이전 버전 결과 | last result: passed |
 
 ## V-PERF-4 — 커밋 스레드 구성과 인라인 구성을 같은 조건에서 잰 결과가 보관돼 있다(ADR-012의 비교)
 
@@ -1189,7 +1190,7 @@
 
 ## V-SIM-4 — 프로파일마다 seed 3000개로 V-SIM-1, V-SIM-2, V-EXT-1의 성질이 유지된다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 문서에 인용하는 더 긴 실행의 수치를 보관된 결과로 뒷받침한다
 - 수준: 시뮬레이션
 - 전제와 범위: 프로파일 7개 × seed 3000개 × 1500단계
@@ -1203,17 +1204,17 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `sim-extended/profile_calm` | 통과 |  |
-| `sim-extended/profile_lossy` | 통과 |  |
-| `sim-extended/profile_crashy` | 통과 |  |
-| `sim-extended/profile_weak_evidence` | 통과 |  |
-| `sim-extended/profile_purge` | 통과 |  |
-| `sim-extended/profile_skewed` | 통과 |  |
-| `sim-extended/profile_external` | 통과 |  |
+| `sim-extended/profile_calm` | 이전 버전 결과 | last result: passed |
+| `sim-extended/profile_lossy` | 이전 버전 결과 | last result: passed |
+| `sim-extended/profile_crashy` | 이전 버전 결과 | last result: passed |
+| `sim-extended/profile_weak_evidence` | 이전 버전 결과 | last result: passed |
+| `sim-extended/profile_purge` | 이전 버전 결과 | last result: passed |
+| `sim-extended/profile_skewed` | 이전 버전 결과 | last result: passed |
+| `sim-extended/profile_external` | 이전 버전 결과 | last result: passed |
 
 ## V-FUZZ-1 — 가정을 지키지 않는 임의의 거래소 입력(순서 역전, 중복, 낡은 상태, 식별자 없는 체결, 부재 응답, 링크 변동, 재시작)에서도 코어는 결함으로 멈추지 않고, 불변조건과 재생 일치가 유지되고, 주문당 전송은 한 번이며, 차단 중 수용이 없고, 새 체결은 반드시 기장되거나 대기하고, 정직하게 정리된 뒤에는 차단이 남지 않는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 간격 검토에서 검토자가 코어를 깨려고 쓴 시험이다. 깨지지 않은 범위를 기록으로 남긴다
 - 수준: 속성
 - 전제와 범위: seed 3000개 × 800단계. 한 종목, 두 전략. 거래소 주문 ID와 체결 키는 일관되게 유지한다
@@ -1227,11 +1228,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/examined_fuzz_arbitrary_venue_input_keeps_invariants_and_liveness` | 통과 |  |
+| `core/examined_fuzz_arbitrary_venue_input_keeps_invariants_and_liveness` | 이전 버전 결과 | last result: passed |
 
 ## V-MIS-1 — 불일치 14종 각각을 일으키는 시험이 있고, 같은 대상의 반복은 확인되기 전까지 한 건으로 남는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 탐지 수단으로 문서에 적은 불일치가 실제로 제기되는지. 간격 검토에서 시험 없는 종류 다섯이 지적됐다
 - 수준: 단위
 - 전제와 범위: Overfill, FillAfterClose, CumExceedsFinal, MissingFills, ExternalFill, FillFieldConflict, OrphanOrder, ForeignOrder, OpenAfterClose, PositionOutOfRange, ForeignPosition, StatusConflict, CancelStuck, ParkedFillOverflow. 외부 체결 300건
@@ -1245,26 +1246,26 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/overfill_is_booked_in_full_and_flagged` | 통과 |  |
-| `core/a_fill_after_any_kind_of_close_is_booked_and_flagged` | 통과 |  |
-| `core/final_quantity_below_booked_fills_is_flagged` | 통과 |  |
-| `core/missing_fills_after_sync_are_flagged_and_stay_reserved` | 통과 |  |
-| `core/unidentified_fill_is_booked_as_external_after_the_wait_and_holds_trading` | 통과 |  |
-| `core/a_fill_that_contradicts_its_order_is_booked_to_the_account_and_flagged` | 통과 |  |
-| `core/foreign_and_orphan_open_orders_are_flagged` | 통과 |  |
-| `core/f3_placed_evidence_for_an_order_closed_as_not_placed_is_flagged` | 통과 |  |
-| `core/f3_a_reappearing_order_is_reported_as_open_after_close` | 통과 |  |
-| `core/position_check_uses_the_reachable_range` | 통과 |  |
-| `core/a_position_on_an_instrument_that_is_not_configured_is_flagged` | 통과 |  |
-| `core/an_acknowledged_order_the_venue_no_longer_knows_is_reported_not_closed` | 통과 |  |
-| `core/f6_a_venue_order_id_reported_for_two_orders_keeps_the_state_recoverable` | 통과 |  |
-| `core/cancel_is_retried_with_backoff_and_then_flagged` | 통과 |  |
-| `core/too_many_unidentified_fills_are_booked_as_external_instead_of_waiting` | 통과 |  |
-| `core/f7_external_fills_do_not_grow_the_mismatch_list_without_bound` | 통과 |  |
+| `core/overfill_is_booked_in_full_and_flagged` | 이전 버전 결과 | last result: passed |
+| `core/a_fill_after_any_kind_of_close_is_booked_and_flagged` | 이전 버전 결과 | last result: passed |
+| `core/final_quantity_below_booked_fills_is_flagged` | 이전 버전 결과 | last result: passed |
+| `core/missing_fills_after_sync_are_flagged_and_stay_reserved` | 이전 버전 결과 | last result: passed |
+| `core/unidentified_fill_is_booked_as_external_after_the_wait_and_holds_trading` | 이전 버전 결과 | last result: passed |
+| `core/a_fill_that_contradicts_its_order_is_booked_to_the_account_and_flagged` | 이전 버전 결과 | last result: passed |
+| `core/foreign_and_orphan_open_orders_are_flagged` | 이전 버전 결과 | last result: passed |
+| `core/f3_placed_evidence_for_an_order_closed_as_not_placed_is_flagged` | 이전 버전 결과 | last result: passed |
+| `core/f3_a_reappearing_order_is_reported_as_open_after_close` | 이전 버전 결과 | last result: passed |
+| `core/position_check_uses_the_reachable_range` | 이전 버전 결과 | last result: passed |
+| `core/a_position_on_an_instrument_that_is_not_configured_is_flagged` | 이전 버전 결과 | last result: passed |
+| `core/an_acknowledged_order_the_venue_no_longer_knows_is_reported_not_closed` | 이전 버전 결과 | last result: passed |
+| `core/f6_a_venue_order_id_reported_for_two_orders_keeps_the_state_recoverable` | 이전 버전 결과 | last result: passed |
+| `core/cancel_is_retried_with_backoff_and_then_flagged` | 이전 버전 결과 | last result: passed |
+| `core/too_many_unidentified_fills_are_booked_as_external_instead_of_waiting` | 이전 버전 결과 | last result: passed |
+| `core/f7_external_fills_do_not_grow_the_mismatch_list_without_bound` | 이전 버전 결과 | last result: passed |
 
 ## V-MARGIN-1 — 증거금 정책이 있으면 감소 전용 주문은 재확인, 결과 불명, 불일치 차단을 통과하고, 일반 주문은 모든 차단에서 거절된다. 정책 구역은 선택이고, 없으면 저널 기록에 바이트를 더하지 않는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 모든 차단이 줄이는 주문까지 막으면 '줄이기만 허용'하는 상태를 만들 수 없다. 정책이 없는 실행의 저널은 바뀌면 안 된다
 - 수준: 단위
 - 전제와 범위: 차단 표(ADR-008 §7 개정)의 사유별 시험, 정책 구역의 직렬화와 기본값
@@ -1278,18 +1279,18 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/absent_margin_policy_adds_no_bytes_to_a_journal_record` | 통과 |  |
-| `core/empty_margin_section_takes_the_contract_defaults` | 통과 |  |
-| `core/reduce_only_order_is_accepted_during_resync` | 통과 |  |
-| `core/reduce_only_order_is_accepted_while_another_order_is_in_doubt` | 통과 |  |
-| `core/reduce_only_order_is_accepted_under_an_unacknowledged_mismatch` | 통과 |  |
-| `core/reduce_only_order_is_rejected_by_every_block_all_hold` | 통과 |  |
-| `core/reduce_only_order_is_still_bound_by_the_strategy_position_limit` | 통과 |  |
-| `core/without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order` | 통과 |  |
+| `core/absent_margin_policy_adds_no_bytes_to_a_journal_record` | 이전 버전 결과 | last result: passed |
+| `core/empty_margin_section_takes_the_contract_defaults` | 이전 버전 결과 | last result: passed |
+| `core/reduce_only_order_is_accepted_during_resync` | 이전 버전 결과 | last result: passed |
+| `core/reduce_only_order_is_accepted_while_another_order_is_in_doubt` | 이전 버전 결과 | last result: passed |
+| `core/reduce_only_order_is_accepted_under_an_unacknowledged_mismatch` | 이전 버전 결과 | last result: passed |
+| `core/reduce_only_order_is_rejected_by_every_block_all_hold` | 이전 버전 결과 | last result: passed |
+| `core/reduce_only_order_is_still_bound_by_the_strategy_position_limit` | 이전 버전 결과 | last result: passed |
+| `core/without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order` | 이전 버전 결과 | last result: passed |
 
 ## V-MARGIN-2 — 증거금 정책이 있으면 현재 링크 세션의 증거금 보고가 마지막 보고로 기록된다. 다른 세션의 보고, 링크가 내려간 동안의 보고, 순번이 크지 않은 보고는 버린다. 읽지 못한 보고와 최대 레버리지가 0인 보고는 사유와 함께 거부로 기록되고 마지막 보고를 바꾸지 않는다. 나이가 0 이상 30초 이하인 보고가 없으면 일반 주문은 MarginUnavailable로 거절된다. 감소 전용 주문은 보고가 없어도 받는다. 정책이 없으면 증거금 입력은 상태를 바꾸지 않고 기록되지 않는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 규칙이 읽는 계좌 가치는 거래소 보고에서만 온다. 늦거나 다른 세션의 보고, 읽지 못한 보고가 마지막 보고가 되면 규칙이 틀린 값으로 판정한다
 - 수준: 단위
 - 전제와 범위: 증거금 보고 입력 둘(MarginReport, MarginReportInvalid)과 이벤트 둘(margin_reported, margin_report_rejected)
@@ -1303,19 +1304,19 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/margin_report_of_the_current_session_is_recorded` | 통과 |  |
-| `core/margin_report_of_an_old_session_or_with_the_link_down_is_ignored` | 통과 |  |
-| `core/late_margin_report_with_a_lower_sequence_is_ignored` | 통과 |  |
-| `core/invalid_margin_report_is_journaled_and_never_becomes_fresh` | 통과 |  |
-| `core/plain_order_is_rejected_margin_unavailable_without_a_fresh_report` | 통과 |  |
-| `core/margin_report_dated_after_the_record_time_is_not_fresh` | 통과 |  |
-| `core/reduce_only_order_needs_no_fresh_report` | 통과 |  |
-| `core/without_a_margin_policy_no_margin_check_runs` | 통과 |  |
-| `core/margin_events_replay_to_the_same_state` | 통과 |  |
+| `core/margin_report_of_the_current_session_is_recorded` | 이전 버전 결과 | last result: passed |
+| `core/margin_report_of_an_old_session_or_with_the_link_down_is_ignored` | 이전 버전 결과 | last result: passed |
+| `core/late_margin_report_with_a_lower_sequence_is_ignored` | 이전 버전 결과 | last result: passed |
+| `core/invalid_margin_report_is_journaled_and_never_becomes_fresh` | 이전 버전 결과 | last result: passed |
+| `core/plain_order_is_rejected_margin_unavailable_without_a_fresh_report` | 이전 버전 결과 | last result: passed |
+| `core/margin_report_dated_after_the_record_time_is_not_fresh` | 이전 버전 결과 | last result: passed |
+| `core/reduce_only_order_needs_no_fresh_report` | 이전 버전 결과 | last result: passed |
+| `core/without_a_margin_policy_no_margin_check_runs` | 이전 버전 결과 | last result: passed |
+| `core/margin_events_replay_to_the_same_state` | 이전 버전 결과 | last result: passed |
 
 ## V-MARGIN-3 — 증거금 정책이 있으면 일반 주문은 받은 뒤의 계좌 노출이 한도 × 계좌 가치를 넘고 받기 전보다 커질 때 AccountLeverage로 거절된다. 정확히 한도와 같으면 받는다. 계좌 가치가 0 이하면 일반 주문을 모두 거절한다. 노출은 포지션과 모든 미체결 주문(감소 전용 포함)을 지정가와 참조 가격 중 높은 값으로 센 종목별 값의 합이다. 미체결 주문은 종결 증거가 올 때까지 노출에 남고 OMS는 그 주문을 고치거나 만료시키지 않는다. 가격이 움직여 한도를 넘어도 래치는 없다. 감소 전용 주문은 검사를 건너뛰지만 합에는 들어간다. 노출이 있는 종목에 신선한 참조 가격이 없으면 일반 주문은 MarginUnavailable로 거절된다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 수량 한도만으로는 계좌 가치의 몇 배가 되는 포지션을 막지 못한다. 아직 체결되지 않은 주문도 나중에 체결되면 한도를 넘길 수 있다
 - 수준: 단위
 - 전제와 범위: 신규 주문 검사 안의 레버리지 검사. 계좌 가치 100, 한도 2.0, 참조 가격 100의 손 계산 값. 성질 시험 셋(proptest 256건씩): 주문을 더하면 노출이 줄지 않는다, 롱과 숏을 뒤집어도 같다, 가장 큰 가격과 수량에서 정확하다
@@ -1329,25 +1330,25 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/order_past_twice_the_account_value_is_rejected_account_leverage` | 통과 |  |
-| `core/order_exactly_at_the_limit_is_accepted` | 통과 |  |
-| `core/an_unfilled_resting_order_keeps_its_exposure_and_is_never_repriced_or_expired_by_the_oms` | 통과 |  |
-| `core/resting_order_counts_at_the_higher_of_limit_and_reference` | 통과 |  |
-| `core/reduce_only_and_plain_buy_on_a_short_count_at_full_reach` | 통과 |  |
-| `core/exposure_is_the_sum_over_instruments` | 통과 |  |
-| `core/partial_fill_then_cancel_frees_exposure_only_on_terminal_evidence` | 통과 |  |
-| `core/a_venue_rejection_of_an_accepted_order_frees_its_exposure` | 통과 |  |
-| `core/after_a_passive_breach_a_plain_reducing_order_passes_and_an_increasing_one_does_not` | 통과 |  |
-| `core/reduce_only_order_skips_the_leverage_gate` | 통과 |  |
-| `core/plain_order_is_rejected_when_an_exposed_instrument_has_no_fresh_reference_price` | 통과 |  |
-| `core/account_value_zero_or_negative_rejects` | 통과 |  |
-| `core/adding_an_order_never_lowers_exposure` | 통과 |  |
-| `core/mirrored_books_have_equal_exposure_and_equal_decisions` | 통과 |  |
-| `core/exposure_is_exact_at_extreme_price_and_quantity` | 통과 |  |
+| `core/order_past_twice_the_account_value_is_rejected_account_leverage` | 이전 버전 결과 | last result: passed |
+| `core/order_exactly_at_the_limit_is_accepted` | 이전 버전 결과 | last result: passed |
+| `core/an_unfilled_resting_order_keeps_its_exposure_and_is_never_repriced_or_expired_by_the_oms` | 이전 버전 결과 | last result: passed |
+| `core/resting_order_counts_at_the_higher_of_limit_and_reference` | 이전 버전 결과 | last result: passed |
+| `core/reduce_only_and_plain_buy_on_a_short_count_at_full_reach` | 이전 버전 결과 | last result: passed |
+| `core/exposure_is_the_sum_over_instruments` | 이전 버전 결과 | last result: passed |
+| `core/partial_fill_then_cancel_frees_exposure_only_on_terminal_evidence` | 이전 버전 결과 | last result: passed |
+| `core/a_venue_rejection_of_an_accepted_order_frees_its_exposure` | 이전 버전 결과 | last result: passed |
+| `core/after_a_passive_breach_a_plain_reducing_order_passes_and_an_increasing_one_does_not` | 이전 버전 결과 | last result: passed |
+| `core/reduce_only_order_skips_the_leverage_gate` | 이전 버전 결과 | last result: passed |
+| `core/plain_order_is_rejected_when_an_exposed_instrument_has_no_fresh_reference_price` | 이전 버전 결과 | last result: passed |
+| `core/account_value_zero_or_negative_rejects` | 이전 버전 결과 | last result: passed |
+| `core/adding_an_order_never_lowers_exposure` | 이전 버전 결과 | last result: passed |
+| `core/mirrored_books_have_equal_exposure_and_equal_decisions` | 이전 버전 결과 | last result: passed |
+| `core/exposure_is_exact_at_extreme_price_and_quantity` | 이전 버전 결과 | last result: passed |
 
 ## V-MARGIN-11 — 증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이, 계좌 노출을 보여 준다. 링크가 올라오면 종목마다 거래소 설정을, 그리고 계좌 모드를 묻고, 포지션이 없는 종목의 설정은 정해진 간격으로 다시 묻는다. status는 종목별 거래소 설정과 계좌 모드, 그것이 정책과 맞는지를 보여 준다. 정책이 없으면 묻지 않는다. 조회한 계좌 가치가 기준 금액보다 5 %를 넘게 낮아지면 status가 감소 전용 상태와 그 규칙, 기준 금액을 보여 주고 일반 주문이 Hold(Reducing)으로 거절된다. 해제(clear-reduce)와 기준 재설정(rebase-day)은 전략 소켓에서 forbidden으로 거절되고 코어에 닿지 않는다. 운영자 도구(omsctl)의 clear-reduce --note와 rebase-day --note는 운영자 소켓으로 실행 중인 노드의 코어에 닿고, 응답과 status(상태, 규칙, 기준 금액)가 그 결과를 보여 준다. 감소 전용 상태에서 노드 프로세스를 강제 종료(SIGKILL)하고 다시 띄우면 status가 같은 상태(규칙, 내용, 진입 시각)와 같은 기준 금액을 보여 주고, 해제한 뒤의 강제 종료도 해제와 운영자의 기준을 그대로 남긴다. 가상 거래소에 일반 주문 300건과 감소 전용 주문 3건이 걸린 채로 감소 전용 상태에 들어가면 일반 주문은 모두 거래소에서 취소되고 감소 전용 주문 3건은 열린 채로 남으며, 그 뒤에도 증거금 조회가 이어진다. 감소 전용 상태를 결정한 기록이 쓰이기 전에 노드가 멈추면 재시작 뒤에 상태도 취소 요청도 그 기록도 없고 기준 금액은 그대로이며, 다음에 한도를 넘는 보고가 한 번 다시 결정한다. 그 기록이 파일에 닿은 뒤(쓰기 뒤, 내구화 뒤, 읽기 모델 반영 뒤)에 취소가 나가기 전에 멈추면 재시작 뒤에 상태와 취소 요청이 저널에서 복원되고, 보내지 못한 취소가 거래소로 나가며, 감소 전용 주문은 남는다. 기준 금액을 정하는 기록의 각 경계에서 멈춰도 저널의 day_base_set은 정확히 하나이고, 그 날짜와 값은 같은 기록의 보고의 것이다(쓰기 전에 멈추면 다음 보고가 정한다)
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 코어의 규칙이 옳아도 조회가 연결되지 않으면 보고가 없어 모든 일반 주문이 거절되거나, 운영자가 왜 거절되는지 볼 수 없다
 - 수준: 프로세스
 - 전제와 범위: 실제 oms-node와 simvenue 프로세스. 조회 간격 100 ms(거래소 설정은 200 ms)로 줄인 설정 3회(계좌 가치 따라가기, 일 손실 진입, 거래소 설정과 계좌 모드), 정책 없는 설정 2회. 티켓 05: 운영자 명령, 강제 종료 2회, 주문 303건의 감소 전용 상태 진입. 중단 지점 시험은 failpoints 기능으로 빌드한 노드
@@ -1361,21 +1362,21 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/node_polls_margin_and_status_shows_value_and_age` | 통과 |  |
-| `e2e/status_shows_account_exposure` | 통과 |  |
-| `e2e/status_shows_reducing_its_rule_and_the_day_base` | 통과 |  |
-| `e2e/node_reads_venue_setting_and_account_mode_and_status_shows_them` | 통과 |  |
-| `e2e/strategy_socket_cannot_clear_reducing_or_rebase` | 통과 |  |
-| `e2e/omsctl_clear_reduce_and_rebase_day_work_end_to_end` | 통과 |  |
-| `e2e/reducing_and_day_base_survive_a_node_kill` | 통과 |  |
-| `e2e/reducing_cancels_every_resting_plain_order_through_the_node` | 통과 |  |
-| `pipeline/stopped_before_the_write_of_a_reducing_decision_the_next_report_decides_again` | 통과 |  |
-| `pipeline/stopped_after_the_reducing_decision_is_durable_the_cancels_are_sent_after_restart` | 통과 |  |
-| `pipeline/stopped_around_a_day_base_set_the_base_is_set_exactly_once` | 통과 |  |
+| `e2e/node_polls_margin_and_status_shows_value_and_age` | 이전 버전 결과 | last result: passed |
+| `e2e/status_shows_account_exposure` | 이전 버전 결과 | last result: passed |
+| `e2e/status_shows_reducing_its_rule_and_the_day_base` | 이전 버전 결과 | last result: passed |
+| `e2e/node_reads_venue_setting_and_account_mode_and_status_shows_them` | 이전 버전 결과 | last result: passed |
+| `e2e/strategy_socket_cannot_clear_reducing_or_rebase` | 이전 버전 결과 | last result: passed |
+| `e2e/omsctl_clear_reduce_and_rebase_day_work_end_to_end` | 이전 버전 결과 | last result: passed |
+| `e2e/reducing_and_day_base_survive_a_node_kill` | 이전 버전 결과 | last result: passed |
+| `e2e/reducing_cancels_every_resting_plain_order_through_the_node` | 이전 버전 결과 | last result: passed |
+| `pipeline/stopped_before_the_write_of_a_reducing_decision_the_next_report_decides_again` | 이전 버전 결과 | last result: passed |
+| `pipeline/stopped_after_the_reducing_decision_is_durable_the_cancels_are_sent_after_restart` | 이전 버전 결과 | last result: passed |
+| `pipeline/stopped_around_a_day_base_set_the_base_is_set_exactly_once` | 이전 버전 결과 | last result: passed |
 
 ## V-MARGIN-5 — 증거금 정책이 있으면 첫 증거금 보고가 그 계좌 가치를 조회 시각의 UTC 날짜와 함께 기준 금액으로 정한다. 같은 날의 뒤 보고는 기준을 바꾸지 않는다. 받은 보고의 계좌 가치가 기준 금액보다 5 %를 넘게 낮으면 계좌가 감소 전용 상태로 들어간다(기준 100에서 95.00은 아니고 94.99는 들어간다). 뒤 UTC 날짜의 첫 보고는 옛 기준으로 먼저 판정된 뒤에 새 기준이 되고, 여러 날의 공백 뒤에도 기준은 한 번만 넘어간다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 일 손실은 기준 금액에 대해 잰다. 기준이 저널 상태가 아니면 재시작이 손실을 지운다
 - 수준: 단위
 - 전제와 범위: 이벤트 day_base_set, reducing_entered와 상태 day_base, reducing
@@ -1389,20 +1390,20 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/first_report_sets_the_day_base` | 통과 |  |
-| `core/loss_greater_than_five_percent_of_the_base_enters_reducing` | 통과 |  |
-| `core/first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day` | 통과 |  |
-| `core/a_report_of_an_earlier_day_does_not_change_the_day_base` | 통과 |  |
-| `core/a_loss_between_two_reports_enters_reducing_on_the_next_report` | 통과 |  |
-| `core/a_report_older_than_the_freshness_limit_on_arrival_is_still_judged` | 통과 |  |
-| `core/latch_and_day_base_replay_to_the_same_state` | 통과 |  |
+| `core/first_report_sets_the_day_base` | 이전 버전 결과 | last result: passed |
+| `core/loss_greater_than_five_percent_of_the_base_enters_reducing` | 이전 버전 결과 | last result: passed |
+| `core/first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day` | 이전 버전 결과 | last result: passed |
+| `core/a_report_of_an_earlier_day_does_not_change_the_day_base` | 이전 버전 결과 | last result: passed |
+| `core/a_loss_between_two_reports_enters_reducing_on_the_next_report` | 이전 버전 결과 | last result: passed |
+| `core/a_report_older_than_the_freshness_limit_on_arrival_is_still_judged` | 이전 버전 결과 | last result: passed |
+| `core/latch_and_day_base_replay_to_the_same_state` | 이전 버전 결과 | last result: passed |
 
-## V-MARGIN-4 — 감소 전용 상태로 들어가는 입력 안에서, 감소 전용 표시가 없고 취소 요청이 없거나 취소 시도가 다 된 모든 열린 주문에 규칙 이름으로 취소 요청이 나간다. 표시 없는 익절 주문도 취소된다. 감소 전용 표시가 있는 주문은 그대로 둔다. 감소 전용 상태에서 일반 주문은 포지션을 줄이는 방향이어도 Hold(Reducing)으로 거절되고, 감소 전용 주문은 받는다
+## V-MARGIN-4 — 감소 전용 상태로 들어가는 입력 안에서, 감소 전용 표시가 없고 취소 요청이 없거나 취소 시도가 다 된 모든 열린 주문에 규칙 이름으로 취소 요청이 나간다. 표시 없는 익절 주문도 취소된다. 감소 전용 표시가 있는 주문은 그대로 둔다. 감소 전용 상태에서 일반 주문은 포지션을 줄이는 방향이어도 Hold(Reducing)으로 거절되고, 감소 전용 주문은 받는다. 유지증거금 여유 규칙으로 들어갈 때도 같다(취소의 이름은 Rule(MmBuffer))
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 손실 한도를 넘은 계좌에 걸려 있는 일반 주문이 체결되면 위험이 더 는다. 줄이는 주문까지 취소하면 포지션을 줄일 길이 없다
 - 수준: 단위
-- 전제와 범위: 이벤트 reducing_entered와 그 입력 안의 cancel_requested(by: Rule(DailyLoss)), cancel_sent
+- 전제와 범위: 이벤트 reducing_entered와 그 입력 안의 cancel_requested(by: Rule(DailyLoss) 또는 Rule(MmBuffer)), cancel_sent
 - 실제 구성요소: oms-core
 - 모의·시뮬레이션: 보고와 거래소 통보는 시험이 입력
 - 주입한 장애: 취소 시도가 다 된 주문
@@ -1413,19 +1414,21 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones` | 통과 |  |
-| `core/under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted` | 통과 |  |
-| `core/an_order_pending_send_at_entry_is_cancelled_once_acknowledged` | 통과 |  |
-| `core/a_rule_cancel_that_races_a_fill_books_the_fill` | 통과 |  |
-| `core/a_stuck_rule_cancel_does_not_block_reduce_only_orders` | 통과 |  |
-| `core/reducing_is_entered_once` | 통과 |  |
-| `core/a_new_day_does_not_clear_reducing` | 통과 |  |
-| `core/an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing` | 통과 |  |
-| `core/latch_and_day_base_replay_to_the_same_state` | 통과 |  |
+| `core/entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones` | 이전 버전 결과 | last result: passed |
+| `core/under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted` | 이전 버전 결과 | last result: passed |
+| `core/an_order_pending_send_at_entry_is_cancelled_once_acknowledged` | 이전 버전 결과 | last result: passed |
+| `core/a_rule_cancel_that_races_a_fill_books_the_fill` | 이전 버전 결과 | last result: passed |
+| `core/a_stuck_rule_cancel_does_not_block_reduce_only_orders` | 이전 버전 결과 | last result: passed |
+| `core/reducing_is_entered_once` | 이전 버전 결과 | last result: passed |
+| `core/a_new_day_does_not_clear_reducing` | 이전 버전 결과 | last result: passed |
+| `core/an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing` | 이전 버전 결과 | last result: passed |
+| `core/latch_and_day_base_replay_to_the_same_state` | 이전 버전 결과 | last result: passed |
+| `core/a_trigger_on_one_instrument_blocks_plain_orders_on_all` | 미실행 |  |
+| `core/reducing_records_the_rule_that_tripped_first` | 미실행 |  |
 
 ## V-MARGIN-9 — 증거금 정책이 있으면, 종목의 거래소 설정(증거금 방식과 레버리지)을 이번 링크 세션에서 받지 못한 동안 그 종목의 일반 주문은 VenueSetting(종목) 차단으로 거절된다. 옛 세션의 응답은 버린다. 받은 설정의 증거금 방식이나 레버리지가 정책과 다르면 그 종목만 같은 차단에 걸리고 다른 종목은 걸리지 않는다. 맞는 설정을 받으면 바로 풀리고, 링크가 바뀌면 다시 모르는 것이 된다. 증거금 보고의 포지션에 적힌 방식과 레버리지도 설정의 출처다. 차단 조회는 걸린 종목마다 그 종목 이름과 함께 차단을 보여 준다. 계좌 모드가 unifiedAccount나 portfolioMargin이면 허용 목록에 적혀 있어도 계좌의 모든 종목의 일반 주문이 AccountMode 차단으로 거절된다. 허용 목록에 없는 모드, 빈 응답, 이번 링크 세션에서 받지 못한 모드도 같다. 기본 허용 목록은 비어 있어서 운영자가 모드를 적기 전에는 일반 주문이 나가지 않는다. 감소 전용 주문은 두 차단을 모두 통과한다. OMS는 설정을 읽기만 하고 거래소로 아무것도 보내지 않는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 거래소의 레버리지나 증거금 방식이 계획과 다르면 주문이 계획하지 않은 증거금을 쓴다. 확인하지 못한 설정을 맞다고 가정하면 그 차이를 아무도 모른다
 - 수준: 단위
 - 전제와 범위: 코어의 차단 계산과 신규 주문 검사. 정책 기본값(격리, 레버리지 2), 종목 하나 또는 둘
@@ -1439,18 +1442,18 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/instrument_with_unknown_venue_setting_holds_plain_orders` | 통과 |  |
-| `core/a_setting_that_differs_from_config_holds_only_that_instrument` | 통과 |  |
-| `core/a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again` | 통과 |  |
-| `core/a_cross_position_in_a_margin_report_raises_the_hold` | 통과 |  |
-| `core/venue_setting_hold_names_its_instrument_in_holds` | 통과 |  |
-| `core/unified_or_portfolio_account_mode_holds_the_account` | 통과 |  |
-| `core/an_account_mode_off_the_allow_list_or_unknown_holds_the_account` | 통과 |  |
-| `core/reduce_only_order_passes_the_venue_setting_and_account_mode_holds` | 통과 |  |
+| `core/instrument_with_unknown_venue_setting_holds_plain_orders` | 이전 버전 결과 | last result: passed |
+| `core/a_setting_that_differs_from_config_holds_only_that_instrument` | 이전 버전 결과 | last result: passed |
+| `core/a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again` | 이전 버전 결과 | last result: passed |
+| `core/a_cross_position_in_a_margin_report_raises_the_hold` | 이전 버전 결과 | last result: passed |
+| `core/venue_setting_hold_names_its_instrument_in_holds` | 이전 버전 결과 | last result: passed |
+| `core/unified_or_portfolio_account_mode_holds_the_account` | 이전 버전 결과 | last result: passed |
+| `core/an_account_mode_off_the_allow_list_or_unknown_holds_the_account` | 이전 버전 결과 | last result: passed |
+| `core/reduce_only_order_passes_the_venue_setting_and_account_mode_holds` | 이전 버전 결과 | last result: passed |
 
-## V-MARGIN-6 — 운영자의 해제(clear-reduce)는 계좌가 감소 전용 상태가 아니면 NotReducing으로, 증거금 보고가 30초보다 오래됐으면 MarginUnavailable로, 사유가 비었으면 NoteRequired로 거절되고, 거절은 아무것도 기록하지 않는다. 받아들인 해제는 한 입력 안에서 마지막 보고의 계좌 가치를 새 기준 금액으로 정하고(day_base_set, set_by: operator) 감소 전용 상태를 끝낸다(reducing_cleared). 정확히 30초 된 보고는 신선하다. 그 뒤 새 기준 94에서 94와 89.30은 걸리지 않고 89.29는 다시 걸린다. 두 번째 해제는 NotReducing이다. 기준 재설정(rebase-day)은 신선한 보고와 사유가 있을 때 마지막 보고의 계좌 가치와 그 날짜(기준보다 앞선 날짜라도)를 기준 금액으로 정하고, 감소 전용 상태는 건드리지 않는다. 기준 재설정 없이 출금하면 그만큼이 손실로 읽힌다(100에서 6을 출금하면 걸린다)
+## V-MARGIN-6 — 운영자의 해제(clear-reduce)는 계좌가 감소 전용 상태가 아니면 NotReducing으로, 증거금 보고가 30초보다 오래됐으면 MarginUnavailable로, 사유가 비었으면 NoteRequired로 거절되고, 거절은 아무것도 기록하지 않는다. 받아들인 해제는 한 입력 안에서 마지막 보고의 계좌 가치를 새 기준 금액으로 정하고(day_base_set, set_by: operator) 감소 전용 상태를 끝낸다(reducing_cleared). 정확히 30초 된 보고는 신선하다. 그 뒤 새 기준 94에서 94와 89.30은 걸리지 않고 89.29는 다시 걸린다. 두 번째 해제는 NotReducing이다. 기준 재설정(rebase-day)은 신선한 보고와 사유가 있을 때 마지막 보고의 계좌 가치와 그 날짜(기준보다 앞선 날짜라도)를 기준 금액으로 정하고, 감소 전용 상태는 건드리지 않는다. 기준 재설정 없이 출금하면 그만큼이 손실로 읽힌다(100에서 6을 출금하면 걸린다). 마지막 보고에서 유지증거금 여유 조건이 참이면(어느 규칙으로 들어왔든) 해제는 MmBufferActive로 거절되고, 이 조건은 사유보다 먼저 본다. 포지션이 선 위로 돌아온 보고(가치 200, 최대 레버리지 40에서 3.00) 뒤에는 해제된다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 해제는 위험을 다시 여는 유일한 길이다. 오래된 숫자로, 또는 사유 없이 풀리면 손실 한도가 뜻을 잃는다
 - 수준: 단위
 - 전제와 범위: 운영자 입력 ClearReduce와 RebaseDay, 그 거절 사유, 이벤트 day_base_set(운영자)과 reducing_cleared
@@ -1460,18 +1463,19 @@
 - 판정 기준과 근거: C-MARGIN의 '해제와 기준 재설정'. 기대값은 손으로 적었다
 - 재현: `cargo test -p oms-core --test margin`
 - 뒷받침하는 것: C-MARGIN
-- 확인하지 않은 범위: 운영자의 판단이 옳은 것. 입금이 가린 손실(100, 입금 10, 손실 14는 걸리지 않는다: 시험이 그대로 보여 준다). 유지증거금 여유 조건이 참일 때의 거절(MmBufferActive, 티켓 07)
+- 확인하지 않은 범위: 운영자의 판단이 옳은 것. 입금이 가린 손실(100, 입금 10, 손실 14는 걸리지 않는다: 시험이 그대로 보여 준다). 잘못 걸린 유지증거금 여유 래치에서 나가는 길(없다: 조건이 참으로 읽히는 동안에는 해제할 수 없고 강제 옵션이 없다)
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing` | 통과 |  |
-| `core/clear_reduce_rebases_the_day_and_a_further_loss_latches_again` | 통과 |  |
-| `core/rebase_day_sets_the_base_and_leaves_the_latch_alone` | 통과 |  |
-| `core/a_withdrawal_without_rebase_reads_as_a_loss` | 통과 |  |
+| `core/clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing` | 이전 버전 결과 | last result: passed |
+| `core/clear_reduce_rebases_the_day_and_a_further_loss_latches_again` | 이전 버전 결과 | last result: passed |
+| `core/rebase_day_sets_the_base_and_leaves_the_latch_alone` | 이전 버전 결과 | last result: passed |
+| `core/a_withdrawal_without_rebase_reads_as_a_loss` | 이전 버전 결과 | last result: passed |
+| `core/clear_reduce_is_refused_while_the_mm_condition_holds` | 미실행 |  |
 
 ## V-MARGIN-7 — 증거금 정책이 있고 링크가 올라와 있을 때, 마지막으로 받은 증거금 보고의 조회 시각에서 60초가 넘게 지나면 틱이 감소 전용 표시가 없고 취소 요청이 없는 모든 열린 주문에 Rule(MarginStale) 이름으로 취소 요청을 한 번 낸다. 정확히 60초에는 내지 않는다. 감소 전용 표시가 있는 주문은 그대로 둔다. 아무 상태도 걸리지 않는다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 증거금 보고를 못 받는 동안에는 일 손실도 유지증거금 여유도 판정하지 못한다. 그동안 걸려 있는 일반 주문이 체결되면 보지 못하는 채로 위험이 는다
 - 수준: 단위
 - 전제와 범위: 틱 안의 cancel_requested(by: Rule(MarginStale)), cancel_sent
@@ -1485,17 +1489,41 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/report_stale_past_the_cancel_limit_cancels_each_plain_order_once` | 통과 |  |
-| `core/stale_age_starts_at_link_up_when_no_report_has_arrived` | 통과 |  |
-| `core/stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off` | 통과 |  |
-| `core/stale_cancel_does_not_reissue_an_exhausted_cancel` | 통과 |  |
-| `core/a_fresh_report_after_a_stale_episode_restores_acceptance_without_a_latch` | 통과 |  |
-| `core/a_forward_clock_jump_reads_the_report_as_stale_and_cancels` | 통과 |  |
-| `core/stale_age_starts_at_policy_activation_when_the_link_is_already_up` | 통과 |  |
+| `core/report_stale_past_the_cancel_limit_cancels_each_plain_order_once` | 이전 버전 결과 | last result: passed |
+| `core/stale_age_starts_at_link_up_when_no_report_has_arrived` | 이전 버전 결과 | last result: passed |
+| `core/stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off` | 이전 버전 결과 | last result: passed |
+| `core/stale_cancel_does_not_reissue_an_exhausted_cancel` | 이전 버전 결과 | last result: passed |
+| `core/a_fresh_report_after_a_stale_episode_restores_acceptance_without_a_latch` | 이전 버전 결과 | last result: passed |
+| `core/a_forward_clock_jump_reads_the_report_as_stale_and_cancels` | 이전 버전 결과 | last result: passed |
+| `core/stale_age_starts_at_policy_activation_when_the_link_is_already_up` | 이전 버전 결과 | last result: passed |
+
+## V-MARGIN-8 — 증거금 정책이 있으면, 받은 증거금 보고의 포지션 가운데 포지션 가치가 0보다 큰 것의 격리 증거금이 (유지증거금률 + 0.25 %p) × 포지션 가치보다 작으면 계좌가 감소 전용 상태로 들어가고 규칙은 MmBuffer로 남는다. 최대 레버리지 40, 포지션 가치 200에서 3.00은 걸리지 않고 2.99는 걸린다. 유지증거금률은 그 포지션의 최대 레버리지(같은 보고의 값)로 1 / (2 × 최대 레버리지)이다: 최대 레버리지 25, 가치 200에서 4.50은 걸리지 않고 4.49는 걸리며, 최대 레버리지 50에서는 2.50이 걸리지 않는다. 한 종목의 포지션이 걸려도 래치는 계좌 전체에 하나다: 다른 종목에 걸려 있는 일반 주문이 Rule(MmBuffer) 이름으로 취소되고, 모든 종목의 새 일반 주문이 Hold(Reducing)으로 거절되며, 감소 전용 주문은 받는다. 교차 증거금 포지션은 판정하지 않는다(그 종목은 VenueSetting 차단에 걸린다). 래치에는 먼저 건 규칙이 남는다: 일 손실로 들어간 뒤의 유지증거금 여유 판정도, 그 반대도 아무것도 내지 않고 바꾸지 않는다. 한 보고가 둘 다 걸면 유지증거금 여유를 먼저 판정하므로 MmBuffer가 남는다. 받은 보고는 도착했을 때 이미 30초보다 오래됐어도 판정한다(조회 뒤 40초에 기록된 보고의 2.99도 건다). 비교는 나눗셈 없는 정확한 곱으로 한다: 가장 큰 금액·최대 레버리지·여유에서도 넘침이 결과를 뒤집지 않고(곱이 i128에 들어가지 않으면 선 아래로 본다), 선 바로 옆에서 반올림이 결과를 뒤집지 않는다. 포지션 가치가 0 이하인 포지션은 판정하지 않는다
+
+- 상태: **미실행**
+- 왜 중요한가: 격리 포지션이 청산에 가까운 계좌에 일반 주문을 더 받으면 위험이 는다. 판정은 거래소가 준 보고만 읽으므로 OMS 장부의 오류가 이 규칙을 끄지 못한다
+- 수준: 단위
+- 전제와 범위: 이벤트 reducing_entered(rule: mm_buffer)와 상태 reducing
+- 실제 구성요소: oms-core
+- 모의·시뮬레이션: 보고는 시험이 입력
+- 주입한 장애: 없음
+- 판정 기준과 근거: C-MARGIN의 '유지증거금 여유'. 기대값은 손으로 적었다
+- 재현: `cargo test -p oms-core --test margin`
+- 뒷받침하는 것: C-MARGIN
+- 확인하지 않은 범위: 거래소의 격리 포지션 marginUsed가 그 포지션의 자산이라는 것(T1. 틀리면 규칙이 양쪽으로 틀릴 수 있다). 증거금 구간(T9: 유지증거금률은 보고의 최대 레버리지 하나로만 계산한다). 규칙은 청산 가격의 0.13~0.37 % 앞에서 걸리고(BTC, 거래소 2배) 5초 간격의 조회가 그 사이를 건너뛸 수 있다. 새 보고를 받지 못하는 동안에는 판정하지 않는다
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/isolated_margin_below_mmr_plus_buffer_enters_reducing` | 미실행 |  |
+| `core/mmr_follows_the_max_leverage_of_each_position` | 미실행 |  |
+| `core/a_trigger_on_one_instrument_blocks_plain_orders_on_all` | 미실행 |  |
+| `core/a_cross_position_is_not_judged_by_the_mm_rule` | 미실행 |  |
+| `core/reducing_records_the_rule_that_tripped_first` | 미실행 |  |
+| `core/an_old_report_on_arrival_is_still_judged_by_the_mm_rule` | 미실행 |  |
+| `core/mm_comparison_is_exact_at_extreme_values` | 미실행 |  |
 
 ## V-MARGIN-10 — Hyperliquid 게이트웨이는 문서의 clearinghouseState 응답 예를 증거금 보고 입력으로 옮긴다: 계좌 가치는 marginSummary.accountValue, 포지션마다 종목, 부호 있는 수량, 포지션 가치, 사용 증거금, 증거금 방식, 레버리지, 최대 레버리지. 어느 포지션이든 maxLeverage가 없거나 0이거나 정수가 아니면 보고 전체를 사유와 함께 거부 입력(MarginReportInvalid)으로 바꾸고, 멀쩡한 다른 포지션도 보고하지 않는다. 계좌 가치, 수량, 포지션 가치, 사용 증거금, 레버리지 가운데 하나라도 없거나 읽을 수 없을 때, 증거금 방식이 isolated도 cross도 아닐 때, 포지션 목록이 없을 때도 같다. 어떤 값도 0이나 기본값으로 채우지 않고 어떤 포지션도 건너뛰지 않는다. 설정에 없는 종목의 포지션도 보고에 남는다(번역 함수는 설정된 종목을 받지 않는다). activeAssetData 응답 예는 그 종목의 거래소 설정 입력(증거금 방식, 레버리지)이 된다. 방식이 isolated도 cross도 아니거나, 레버리지가 정수가 아니거나, 응답이 다른 종목의 것이면 입력을 만들지 않는다(설정은 모름으로 남아 그 종목이 막힌다). userAbstraction 응답(문자열 하나)은 글자 그대로 계좌 모드 입력이 된다. 문서에 없는 문자열을 문서에 있는 값으로 바꾸지 않고, 문자열이 아니거나 64자를 넘으면 입력을 만들지 않는다. 세 조회의 요청 본문은 문서의 것과 같다(clearinghouseState, activeAssetData, userAbstraction). 게이트웨이의 요청 예산은 취소를 막지 않으므로 취소 500건 뒤에는 조회가 기다린다: 가득 찬 예산(1200)에서는 700이 남아 증거금 조회가 바로 나가고, 시작 직후(600)에는 100이 남아 10.1초, 빈 예산에서는 15.1초를 기다린다
 
-- 상태: **통과**
+- 상태: **이전 버전 결과**
 - 왜 중요한가: 증거금 규칙이 읽는 숫자는 모두 이 번역을 거친다. 필드를 하나 잘못 옮기면 규칙이 틀린 값으로 판정한다
 - 수준: 단위
 - 전제와 범위: 게이트웨이의 순수 번역 함수(JSON 응답 → 코어 입력)와 요청 본문 함수. 문서의 응답 예가 입력. 요청 예산은 시각을 시험이 주는 단위 시험
@@ -1509,12 +1537,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/venue::hyperliquid::wire::tests::documented_clearinghouse_state_parses_to_a_margin_report` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::missing_zero_or_unparseable_max_leverage_rejects_the_whole_report` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::any_unparseable_number_rejects_the_whole_report` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::a_position_on_an_unconfigured_coin_is_kept` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::documented_active_asset_data_parses_leverage_and_mode` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::user_abstraction_values_parse_and_an_unknown_value_stays_unknown` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::margin_and_setting_request_json` | 통과 |  |
-| `node-unit/venue::hyperliquid::tests::a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time` | 통과 |  |
+| `node-unit/venue::hyperliquid::wire::tests::documented_clearinghouse_state_parses_to_a_margin_report` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::wire::tests::missing_zero_or_unparseable_max_leverage_rejects_the_whole_report` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::wire::tests::any_unparseable_number_rejects_the_whole_report` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::wire::tests::a_position_on_an_unconfigured_coin_is_kept` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::wire::tests::documented_active_asset_data_parses_leverage_and_mode` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::wire::tests::user_abstraction_values_parse_and_an_unknown_value_stays_unknown` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::wire::tests::margin_and_setting_request_json` | 이전 버전 결과 | last result: passed |
+| `node-unit/venue::hyperliquid::tests::a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time` | 이전 버전 결과 | last result: passed |
 

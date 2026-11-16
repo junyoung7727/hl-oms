@@ -431,6 +431,9 @@ pub struct VenueSettingSeen {
 pub enum RuleId {
     /// The account value fell more than `daily_loss_bps` below the day base.
     DailyLoss,
+    /// The isolated margin of a position is below its maintenance margin
+    /// plus `mm_buffer_bps` of the position value.
+    MmBuffer,
     /// No margin report was accepted for longer than `stale_cancel_us`
     /// while the link was up. It cancels and latches nothing.
     MarginStale,
@@ -471,6 +474,7 @@ pub enum BaseSetBy {
 pub enum MarginRefusal {
     NotReducing,
     MarginUnavailable,
+    MmBufferActive,
     NoteRequired,
 }
 
@@ -480,6 +484,7 @@ impl MarginRefusal {
         match self {
             MarginRefusal::NotReducing => "not_reducing: the account is not REDUCING",
             MarginRefusal::MarginUnavailable => "margin_unavailable: no fresh margin report",
+            MarginRefusal::MmBufferActive => "mm_buffer_active: a position is below its maintenance margin plus the buffer on the last margin report",
             MarginRefusal::NoteRequired => "note_required: the command needs a note",
         }
     }

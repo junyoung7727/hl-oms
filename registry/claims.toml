@@ -920,15 +920,15 @@ not_covered = "실제 거래소의 계좌 가치가 뜻하는 것(T2). 입금과
 
 [[claim]]
 id = "V-MARGIN-4"
-statement = "감소 전용 상태로 들어가는 입력 안에서, 감소 전용 표시가 없고 취소 요청이 없거나 취소 시도가 다 된 모든 열린 주문에 규칙 이름으로 취소 요청이 나간다. 표시 없는 익절 주문도 취소된다. 감소 전용 표시가 있는 주문은 그대로 둔다. 감소 전용 상태에서 일반 주문은 포지션을 줄이는 방향이어도 Hold(Reducing)으로 거절되고, 감소 전용 주문은 받는다"
+statement = "감소 전용 상태로 들어가는 입력 안에서, 감소 전용 표시가 없고 취소 요청이 없거나 취소 시도가 다 된 모든 열린 주문에 규칙 이름으로 취소 요청이 나간다. 표시 없는 익절 주문도 취소된다. 감소 전용 표시가 있는 주문은 그대로 둔다. 감소 전용 상태에서 일반 주문은 포지션을 줄이는 방향이어도 Hold(Reducing)으로 거절되고, 감소 전용 주문은 받는다. 유지증거금 여유 규칙으로 들어갈 때도 같다(취소의 이름은 Rule(MmBuffer))"
 why = "손실 한도를 넘은 계좌에 걸려 있는 일반 주문이 체결되면 위험이 더 는다. 줄이는 주문까지 취소하면 포지션을 줄일 길이 없다"
 level = "단위"
-scope = "이벤트 reducing_entered와 그 입력 안의 cancel_requested(by: Rule(DailyLoss)), cancel_sent"
+scope = "이벤트 reducing_entered와 그 입력 안의 cancel_requested(by: Rule(DailyLoss) 또는 Rule(MmBuffer)), cancel_sent"
 real = "oms-core"
 simulated = "보고와 거래소 통보는 시험이 입력"
 faults = "취소 시도가 다 된 주문"
 criterion = "C-MARGIN의 '감소 전용 상태'. 기대값은 손으로 적었다"
-tests = ["core/entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones", "core/under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted", "core/an_order_pending_send_at_entry_is_cancelled_once_acknowledged", "core/a_rule_cancel_that_races_a_fill_books_the_fill", "core/a_stuck_rule_cancel_does_not_block_reduce_only_orders", "core/reducing_is_entered_once", "core/a_new_day_does_not_clear_reducing", "core/an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing", "core/latch_and_day_base_replay_to_the_same_state"]
+tests = ["core/entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones", "core/under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted", "core/an_order_pending_send_at_entry_is_cancelled_once_acknowledged", "core/a_rule_cancel_that_races_a_fill_books_the_fill", "core/a_stuck_rule_cancel_does_not_block_reduce_only_orders", "core/reducing_is_entered_once", "core/a_new_day_does_not_clear_reducing", "core/an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing", "core/latch_and_day_base_replay_to_the_same_state", "core/a_trigger_on_one_instrument_blocks_plain_orders_on_all", "core/reducing_records_the_rule_that_tripped_first"]
 repro = "cargo test -p oms-core --test margin"
 supports = "C-MARGIN"
 not_covered = "취소가 체결보다 먼저 닿는다는 것. 포지션이 닫힌다는 것(OMS는 닫지 않는다). 링크가 내려가 있는 동안의 동작"
@@ -950,7 +950,7 @@ not_covered = "어느 문자열이 표준 모드인지(T10): 시험의 standard�
 
 [[claim]]
 id = "V-MARGIN-6"
-statement = "운영자의 해제(clear-reduce)는 계좌가 감소 전용 상태가 아니면 NotReducing으로, 증거금 보고가 30초보다 오래됐으면 MarginUnavailable로, 사유가 비었으면 NoteRequired로 거절되고, 거절은 아무것도 기록하지 않는다. 받아들인 해제는 한 입력 안에서 마지막 보고의 계좌 가치를 새 기준 금액으로 정하고(day_base_set, set_by: operator) 감소 전용 상태를 끝낸다(reducing_cleared). 정확히 30초 된 보고는 신선하다. 그 뒤 새 기준 94에서 94와 89.30은 걸리지 않고 89.29는 다시 걸린다. 두 번째 해제는 NotReducing이다. 기준 재설정(rebase-day)은 신선한 보고와 사유가 있을 때 마지막 보고의 계좌 가치와 그 날짜(기준보다 앞선 날짜라도)를 기준 금액으로 정하고, 감소 전용 상태는 건드리지 않는다. 기준 재설정 없이 출금하면 그만큼이 손실로 읽힌다(100에서 6을 출금하면 걸린다)"
+statement = "운영자의 해제(clear-reduce)는 계좌가 감소 전용 상태가 아니면 NotReducing으로, 증거금 보고가 30초보다 오래됐으면 MarginUnavailable로, 사유가 비었으면 NoteRequired로 거절되고, 거절은 아무것도 기록하지 않는다. 받아들인 해제는 한 입력 안에서 마지막 보고의 계좌 가치를 새 기준 금액으로 정하고(day_base_set, set_by: operator) 감소 전용 상태를 끝낸다(reducing_cleared). 정확히 30초 된 보고는 신선하다. 그 뒤 새 기준 94에서 94와 89.30은 걸리지 않고 89.29는 다시 걸린다. 두 번째 해제는 NotReducing이다. 기준 재설정(rebase-day)은 신선한 보고와 사유가 있을 때 마지막 보고의 계좌 가치와 그 날짜(기준보다 앞선 날짜라도)를 기준 금액으로 정하고, 감소 전용 상태는 건드리지 않는다. 기준 재설정 없이 출금하면 그만큼이 손실로 읽힌다(100에서 6을 출금하면 걸린다). 마지막 보고에서 유지증거금 여유 조건이 참이면(어느 규칙으로 들어왔든) 해제는 MmBufferActive로 거절되고, 이 조건은 사유보다 먼저 본다. 포지션이 선 위로 돌아온 보고(가치 200, 최대 레버리지 40에서 3.00) 뒤에는 해제된다"
 why = "해제는 위험을 다시 여는 유일한 길이다. 오래된 숫자로, 또는 사유 없이 풀리면 손실 한도가 뜻을 잃는다"
 level = "단위"
 scope = "운영자 입력 ClearReduce와 RebaseDay, 그 거절 사유, 이벤트 day_base_set(운영자)과 reducing_cleared"
@@ -958,10 +958,10 @@ real = "oms-core"
 simulated = "보고는 시험이 입력"
 faults = "없음"
 criterion = "C-MARGIN의 '해제와 기준 재설정'. 기대값은 손으로 적었다"
-tests = ["core/clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing", "core/clear_reduce_rebases_the_day_and_a_further_loss_latches_again", "core/rebase_day_sets_the_base_and_leaves_the_latch_alone", "core/a_withdrawal_without_rebase_reads_as_a_loss"]
+tests = ["core/clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing", "core/clear_reduce_rebases_the_day_and_a_further_loss_latches_again", "core/rebase_day_sets_the_base_and_leaves_the_latch_alone", "core/a_withdrawal_without_rebase_reads_as_a_loss", "core/clear_reduce_is_refused_while_the_mm_condition_holds"]
 repro = "cargo test -p oms-core --test margin"
 supports = "C-MARGIN"
-not_covered = "운영자의 판단이 옳은 것. 입금이 가린 손실(100, 입금 10, 손실 14는 걸리지 않는다: 시험이 그대로 보여 준다). 유지증거금 여유 조건이 참일 때의 거절(MmBufferActive, 티켓 07)"
+not_covered = "운영자의 판단이 옳은 것. 입금이 가린 손실(100, 입금 10, 손실 14는 걸리지 않는다: 시험이 그대로 보여 준다). 잘못 걸린 유지증거금 여유 래치에서 나가는 길(없다: 조건이 참으로 읽히는 동안에는 해제할 수 없고 강제 옵션이 없다)"
 
 [[claim]]
 id = "V-MARGIN-7"
@@ -977,6 +977,21 @@ tests = ["core/report_stale_past_the_cancel_limit_cancels_each_plain_order_once"
 repro = "cargo test -p oms-core --test margin"
 supports = "C-MARGIN"
 not_covered = "포지션(그대로 남는다). 감소 전용 주문. 링크가 내려가 있는 동안(아무것도 취소하지 않는다). 취소가 체결보다 먼저 닿는다는 것"
+
+[[claim]]
+id = "V-MARGIN-8"
+statement = "증거금 정책이 있으면, 받은 증거금 보고의 포지션 가운데 포지션 가치가 0보다 큰 것의 격리 증거금이 (유지증거금률 + 0.25 %p) × 포지션 가치보다 작으면 계좌가 감소 전용 상태로 들어가고 규칙은 MmBuffer로 남는다. 최대 레버리지 40, 포지션 가치 200에서 3.00은 걸리지 않고 2.99는 걸린다. 유지증거금률은 그 포지션의 최대 레버리지(같은 보고의 값)로 1 / (2 × 최대 레버리지)이다: 최대 레버리지 25, 가치 200에서 4.50은 걸리지 않고 4.49는 걸리며, 최대 레버리지 50에서는 2.50이 걸리지 않는다. 한 종목의 포지션이 걸려도 래치는 계좌 전체에 하나다: 다른 종목에 걸려 있는 일반 주문이 Rule(MmBuffer) 이름으로 취소되고, 모든 종목의 새 일반 주문이 Hold(Reducing)으로 거절되며, 감소 전용 주문은 받는다. 교차 증거금 포지션은 판정하지 않는다(그 종목은 VenueSetting 차단에 걸린다). 래치에는 먼저 건 규칙이 남는다: 일 손실로 들어간 뒤의 유지증거금 여유 판정도, 그 반대도 아무것도 내지 않고 바꾸지 않는다. 한 보고가 둘 다 걸면 유지증거금 여유를 먼저 판정하므로 MmBuffer가 남는다. 받은 보고는 도착했을 때 이미 30초보다 오래됐어도 판정한다(조회 뒤 40초에 기록된 보고의 2.99도 건다). 비교는 나눗셈 없는 정확한 곱으로 한다: 가장 큰 금액·최대 레버리지·여유에서도 넘침이 결과를 뒤집지 않고(곱이 i128에 들어가지 않으면 선 아래로 본다), 선 바로 옆에서 반올림이 결과를 뒤집지 않는다. 포지션 가치가 0 이하인 포지션은 판정하지 않는다"
+why = "격리 포지션이 청산에 가까운 계좌에 일반 주문을 더 받으면 위험이 는다. 판정은 거래소가 준 보고만 읽으므로 OMS 장부의 오류가 이 규칙을 끄지 못한다"
+level = "단위"
+scope = "이벤트 reducing_entered(rule: mm_buffer)와 상태 reducing"
+real = "oms-core"
+simulated = "보고는 시험이 입력"
+faults = "없음"
+criterion = "C-MARGIN의 '유지증거금 여유'. 기대값은 손으로 적었다"
+tests = ["core/isolated_margin_below_mmr_plus_buffer_enters_reducing", "core/mmr_follows_the_max_leverage_of_each_position", "core/a_trigger_on_one_instrument_blocks_plain_orders_on_all", "core/a_cross_position_is_not_judged_by_the_mm_rule", "core/reducing_records_the_rule_that_tripped_first", "core/an_old_report_on_arrival_is_still_judged_by_the_mm_rule", "core/mm_comparison_is_exact_at_extreme_values"]
+repro = "cargo test -p oms-core --test margin"
+supports = "C-MARGIN"
+not_covered = "거래소의 격리 포지션 marginUsed가 그 포지션의 자산이라는 것(T1. 틀리면 규칙이 양쪽으로 틀릴 수 있다). 증거금 구간(T9: 유지증거금률은 보고의 최대 레버리지 하나로만 계산한다). 규칙은 청산 가격의 0.13~0.37 % 앞에서 걸리고(BTC, 거래소 2배) 5초 간격의 조회가 그 사이를 건너뛸 수 있다. 새 보고를 받지 못하는 동안에는 판정하지 않는다"
 
 [[claim]]
 id = "V-MARGIN-10"
