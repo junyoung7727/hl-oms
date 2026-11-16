@@ -593,8 +593,125 @@
       "note": "",
       "test": "cargo test -p oms-core --test margin stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off",
       "what": "the link-up time is stored in the margin state also without a margin policy"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M67-zero-max-leverage-reported",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib missing_zero_or_unparseable_max_leverage_rejects_the_whole_report",
+      "what": "a position with maxLeverage 0 is reported instead of refusing the whole answer"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M68-missing-max-leverage-defaulted",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib missing_zero_or_unparseable_max_leverage_rejects_the_whole_report",
+      "what": "a missing or unreadable maxLeverage is read as 1"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M69-unreadable-position-skipped",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib any_unparseable_number_rejects_the_whole_report",
+      "what": "a position whose size cannot be read is left out and the rest is reported"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M70-unreadable-margin-read-as-zero",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib any_unparseable_number_rejects_the_whole_report",
+      "what": "an unreadable marginUsed is reported as zero"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M71-unreadable-account-value-read-as-zero",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib any_unparseable_number_rejects_the_whole_report",
+      "what": "an unreadable account value is reported as zero"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M72-cross-only-account-value",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib documented_clearinghouse_state_parses_to_a_margin_report",
+      "what": "the account value is taken from crossMarginSummary, which leaves isolated margin out"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M73-unknown-position-mode-read-as-cross",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib any_unparseable_number_rejects_the_whole_report",
+      "what": "a position whose margin mode is not documented is reported as cross"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M74-unknown-setting-mode-read-as-isolated",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib documented_active_asset_data_parses_leverage_and_mode",
+      "what": "a venue setting whose margin mode is not documented is read as isolated"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M75-setting-of-another-coin-accepted",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib documented_active_asset_data_parses_leverage_and_mode",
+      "what": "the venue setting of another coin is taken as the setting of the instrument asked about"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M76-unknown-account-mode-read-as-default",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib user_abstraction_values_parse_and_an_unknown_value_stays_unknown",
+      "what": "an account mode that is not unifiedAccount or portfolioMargin is passed on as default"
+    },
+    {
+      "file": "crates/oms-node/src/config.rs",
+      "guards": "C-MARGIN / query weight budget",
+      "id": "M77-query-weight-above-budget-loads",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused",
+      "what": "a configuration whose query weight is above 600 per minute loads"
+    },
+    {
+      "file": "crates/oms-node/src/config.rs",
+      "guards": "C-MARGIN / query weight budget",
+      "id": "M78-venue-setting-queries-not-counted",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused",
+      "what": "the venue-setting queries are left out of the query weight"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/mod.rs",
+      "guards": "C-MARGIN / query weight budget",
+      "id": "M79-queries-use-the-reserve",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time",
+      "what": "an info query may use the budget reserved for orders and cancels"
     }
   ],
-  "source_digest": "95ca03971f3a393c",
-  "taken_at_us": 1794820584465555
+  "source_digest": "0b8724e65a18fdc6",
+  "taken_at_us": 1794822036816928
 }
