@@ -966,7 +966,7 @@ fn strategy_socket_cannot_clear_reducing_or_rebase() {
 fn omsctl(socket: &std::path::Path, args: &[&str]) -> Result<String, String> {
     let mut all = vec!["--socket".to_string(), socket.display().to_string()];
     all.extend(args.iter().map(|a| a.to_string()));
-    oms_api::ctl::run(&all)
+    oms_api::ctl::run(&all, &mut std::io::sink())
 }
 
 /// The `core.margin` part of what `omsctl status` prints.
