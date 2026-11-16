@@ -4,7 +4,7 @@
 
 **Blocked by:** 01, 02
 
-**Status:** ready-for-merge
+**Status:** done
 
 - [x] Test `instrument_with_unknown_venue_setting_holds_plain_orders` (seam A, S17): fails when a plain order is accepted before the setting is known in this link session.
 - [x] Test `a_setting_that_differs_from_config_holds_only_that_instrument` (seam A, S17): fails when cross mode or leverage 3 passes, or another instrument is held too.
@@ -20,7 +20,7 @@
 - [x] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
 - [x] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
 - [x] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
-- [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
+- [x] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
 
 ## Comments
 
@@ -40,3 +40,4 @@
   - Mutants renumbered M50-M57 to M43-M50 (xtask, the contract, the verification document, the claim), because M37-M42 are ticket 04's. Each of M43-M50, and the hold-table mutants M21 and M42, was killed again with `xtask mutants --only` on the merged code.
   - Tests changed for the overlap, meaning kept: (1) `a_cross_position_in_a_margin_report_raises_the_hold` (this ticket): its first report is the first report of the account, so with ticket 04 it also sets the day base; the expected event names of that report are now `margin_reported`, `day_base_set`. The assertion still says that the setting gets no event of its own. (2) `status_shows_reducing_its_rule_and_the_day_base` (ticket 04, process test): its margin policy now lists `account_modes_allowed = ["standard"]`, as the other process tests with a margin policy do; without it the account-mode hold stands next to `reducing` and no plain order is accepted before the loss. Its exact lists (`holds == ["reducing"]`, the single reject reason `Hold(Reducing)`) are unchanged. No core test of ticket 04 needed a change: the harness tells the setting and the mode at link-up.
   - Gate on the branch after the merge: workspace tests 242 passed, 0 failed; clippy clean; generated documents in step.
+- Merged into `margin-rules` (merger claude-fable-5-2), 2026-11-16: merge commit 9b90feb (ticket branch tip 054652d), evidence commit 48e6c28 for source `444207d7cf4d7911`. Gate: workspace tests 242 passed, 0 failed, 0 ignored; clippy clean; generated documents in step; `verify --extended` without the live-testnet suite 261 tests in 9 suites, all passed; mutants 50 of 50 killed (M43-M50 are in the stored run now); secret scan, selftest and rustfmt on added files ok. Nothing had to be fixed on `margin-rules` after the merge.
