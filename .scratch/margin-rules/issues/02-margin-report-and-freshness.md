@@ -12,7 +12,7 @@
 - [x] Test `invalid_margin_report_is_journaled_and_never_becomes_fresh` (seam A, S25): fails when an invalid report refreshes the age or is judged, or a zero maximum leverage reaches a rule, or no `margin_report_rejected` event carries the reason.
 - [x] Test `plain_order_is_rejected_margin_unavailable_without_a_fresh_report` (seam A, S11): fails when a plain order is accepted with no report or with one older than 30 s; exactly 30 s is fresh.
 - [x] Test `margin_report_dated_after_the_record_time_is_not_fresh` (seam A, G5): fails when a negative age counts as fresh.
-- [ ] Test `reduce_only_order_needs_no_fresh_report` (seam A, S11): fails when a reduce-only order is rejected for staleness.
+- [x] Test `reduce_only_order_needs_no_fresh_report` (seam A, S11): fails when a reduce-only order is rejected for staleness.
 - [ ] Test `without_a_margin_policy_no_margin_check_runs` (seam A, S21): fails when with no margin policy an order is rejected for margin, or a report changes state.
 - [ ] Test `margin_events_replay_to_the_same_state` (seam A, S13): fails when the state rebuilt from the journal differs in digest.
 - [ ] Test `mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused` (seam node unit, S21): fails when mainnet loads with no margin policy, or a zero limit, or a stale-cancel limit not greater than the freshness limit, loads.

@@ -231,8 +231,11 @@ impl Tx<'_> {
             }
             why.push(R::Hold(h));
         }
-        // Margin rules are on: a plain order needs a fresh margin report.
-        if cfg.policy.margin.is_some() && !core.margin_report_is_fresh(self.at) {
+        // Margin rules are on: a plain order needs a fresh margin report. A
+        // reduce-only order does not, so a position can be reduced while the
+        // venue's queries fail.
+        let needs_fresh_report = cfg.policy.margin.is_some() && !r.reduce_only;
+        if needs_fresh_report && !core.margin_report_is_fresh(self.at) {
             why.push(R::MarginUnavailable);
         }
         let Some(strategy) = cfg.strategies.get(&r.strategy) else {

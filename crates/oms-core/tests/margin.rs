@@ -338,3 +338,24 @@ fn margin_report_dated_after_the_record_time_is_not_fresh() {
     let id = h.accept("a", "k3", Side::Buy, "1", "100");
     assert_eq!(h.order(id).accepted_at, queried_at);
 }
+
+/// S11. An order with the venue's reduce-only flag needs no margin report:
+/// a strategy can reduce while the venue's queries fail. The same order
+/// without the flag is refused.
+#[test]
+fn reduce_only_order_needs_no_fresh_report() {
+    let mut h = H::ready_with(config_with_margin());
+    h.report_margin("1000");
+    h.long("a", "k1", "1");
+
+    // Reports stop. 31 s later the last one is not fresh.
+    h.advance(31 * SEC);
+    assert_eq!(h.reject("a", "k2", Side::Sell, "1", "100"), vec![RejectReason::MarginUnavailable]);
+    let r = h.reduce_only_req("a", "k3", Side::Sell, "1", "100");
+    let order_id = match h.new_order(r) {
+        NewOrderReply::Accepted { order_id } => order_id,
+        other => panic!("a reduce-only order was refused for staleness: {other:?}"),
+    };
+    assert!(h.order(order_id).reduce_only);
+    assert_eq!(h.sends().last(), Some(&order_id));
+}

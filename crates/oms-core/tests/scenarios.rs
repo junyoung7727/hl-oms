@@ -1344,7 +1344,6 @@ fn reduce_only_order_is_still_bound_by_the_strategy_position_limit() {
         },
     );
     let mut h = H::ready_with(cfg);
-    h.report_margin("1000");
     h.venue(VenueInput::Fill(FillIn {
         key: fkey("t1"),
         order_id: None,

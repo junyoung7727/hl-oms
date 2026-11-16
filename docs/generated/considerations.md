@@ -1,7 +1,7 @@
 # 검토 항목 대응표
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `f8cbbfbb99fdcff2`, 검증 결과의 다이제스트 `84bbfc41882f370d`.
+> 소스 다이제스트 `af79b7596fe6b2c5`, 검증 결과의 다이제스트 `84bbfc41882f370d`.
 
 항목 103건(일반 40, Rust·LMAX·OMS 40, 프로젝트 23).
 
