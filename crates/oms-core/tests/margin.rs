@@ -807,3 +807,72 @@ fn an_order_pending_send_at_entry_is_cancelled_once_acknowledged() {
         Some(Actor::Rule(RuleId::DailyLoss))
     );
 }
+
+/// S4. A rule cancel can lose the race to a fill. A fill that arrives after
+/// the rule's cancel was sent is booked, and the venue's final status
+/// decides how the order ends, as it does for a strategy's cancel
+/// (`cancel_race_final_status_decides`).
+#[test]
+fn a_rule_cancel_that_races_a_fill_books_the_fill() {
+    // The cancel lost: the order filled completely before it arrived.
+    let mut h = at_base_100();
+    let a = resting(&mut h, "a", "k1", Side::Buy, "1", "100");
+    h.report_margin("94.99");
+    assert_eq!(h.cancels(), vec![(a, 1)]);
+    h.fill(a, "t1", "1", "100");
+    h.venue(VenueInput::CancelResult {
+        order_id: a,
+        attempt: 1,
+        outcome: CancelOutcome::Rejected {
+            reason: "already filled".into(),
+        },
+        timing: Default::default(),
+    });
+    assert_eq!(h.order(a).phase, Phase::Closed);
+    assert_eq!(
+        h.order(a).close.as_ref().unwrap().reason,
+        CloseReason::Filled
+    );
+    assert_eq!(h.acct().pos, sq("1"));
+    assert_eq!(h.acct().buy_open, q("0"));
+    assert_eq!(h.unacked_mismatches(), vec![]);
+    // The position grew while REDUCING. The OMS does not close it.
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+    assert_eq!(h.sends(), vec![a]);
+
+    // The cancel won for the rest: 0.4 filled after the cancel was sent, and
+    // the venue's final status says cancelled with 0.4 filled.
+    let mut h = at_base_100();
+    let a = resting(&mut h, "a", "k1", Side::Buy, "1", "100");
+    h.report_margin("94.99");
+    h.fill(a, "t1", "0.4", "100");
+    h.venue(VenueInput::CancelResult {
+        order_id: a,
+        attempt: 1,
+        outcome: CancelOutcome::Confirmed,
+        timing: Default::default(),
+    });
+    assert_eq!(
+        h.order(a).phase,
+        Phase::Working,
+        "a confirmed cancel is not terminal evidence"
+    );
+    assert_eq!(h.acct().buy_open, q("0.6"));
+    h.status(
+        a,
+        VenueStatus::Canceled {
+            reason: "user".into(),
+        },
+        Some("0.4"),
+    );
+    assert_eq!(h.order(a).phase, Phase::Closed);
+    assert_eq!(
+        h.order(a).close.as_ref().unwrap().reason,
+        CloseReason::Canceled {
+            venue_reason: "user".into()
+        }
+    );
+    assert_eq!(h.acct().pos, sq("0.4"));
+    assert_eq!(h.acct().buy_open, q("0"));
+    assert_eq!(h.unacked_mismatches(), vec![]);
+}
