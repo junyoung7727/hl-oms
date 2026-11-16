@@ -239,3 +239,61 @@ fn stopped_before_the_write_of_a_reducing_decision_the_next_report_decides_again
     assert_eq!(env.journal_count("cancel_requested"), 2);
     assert_eq!(env.status()["core"]["margin"]["day_base"], base);
 }
+
+/// G4, "중단과 재실행" row 2. The record that enters REDUCING and asks for
+/// the cancels reached the file, and the node stops before a cancel left
+/// for the venue: after the write, after the flush, and after the read
+/// model learned the record. After the restart the latch and the cancel
+/// requests are restored from the journal (the venue states 100 again, so
+/// nothing is decided anew), the cancels that were never sent are sent, and
+/// the reduce-only order is left open. Nothing is requested twice.
+#[test]
+fn stopped_after_the_reducing_decision_is_durable_the_cancels_are_sent_after_restart() {
+    for point in ["after_write", "after_sync", "after_reply"] {
+        let mut env = margin_node_with(&format!("crash-reducing-{point}"), "100", crash_on(point, "reducing_entered"));
+        let base = env.status()["core"]["margin"]["day_base"].clone();
+        let plain = two_resting_plain_orders(&mut env);
+        let mut c = env.client("a");
+        let flagged = rest(&mut env, &mut c, "flagged", Side::Sell, "120", true);
+        let flagged = BTreeSet::from([env.cloid(flagged)]);
+        assert!(env.wait(Duration::from_secs(5), || env.status()["core"]["working"] == 3));
+        drop(c);
+        let all: BTreeSet<String> = plain.union(&flagged).cloned().collect();
+
+        env.ctl(json!({"account_value": {"value": "94"}}));
+        wait_abort(&mut env, point);
+        assert_eq!(open_at_venue(&mut env), all, "{point}: a cancel reached the venue before the stop");
+        assert_eq!(env.journal_count("reducing_entered"), 1, "{point}");
+        assert_eq!(env.journal_count("cancel_requested"), 2, "{point}");
+
+        env.ctl(json!({"account_value": {"value": "100"}}));
+        env.node_env.clear();
+        env.start_node();
+        wait_restarted(&env, 2, json!(["reducing"]));
+        let st = env.status();
+        assert_eq!(st["core"]["margin"]["reducing"]["rule"], "daily_loss", "{point}");
+        assert_eq!(
+            st["core"]["margin"]["reducing"]["detail"],
+            "account value 94 is more than 500 bps below the day base 100",
+            "{point}"
+        );
+        assert_eq!(st["core"]["margin"]["day_base"], base, "{point}");
+
+        // The cancels recorded before the stop reach the venue now.
+        let mut left = open_at_venue(&mut env);
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        while left != flagged && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+            left = open_at_venue(&mut env);
+        }
+        assert_eq!(left, flagged, "{point}: a recorded rule cancel was never sent, or the reduce-only order was cancelled");
+        assert!(
+            env.wait(Duration::from_secs(10), || env.status()["core"]["open_orders"] == 1),
+            "{point}: {}",
+            env.status()["core"]
+        );
+        assert_eq!(env.journal_count("reducing_entered"), 1, "{point}");
+        assert_eq!(env.journal_count("cancel_requested"), 2, "{point}");
+        assert_eq!(env.status()["core"]["mismatches_unacked"], json!([]), "{point}");
+    }
+}
