@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Test `report_stale_past_the_cancel_limit_cancels_each_plain_order_once` (seam A, S23): fails when there is no cancel by `Rule(MarginStale)` after 60 s, a cancel at or before 60 s, a second cancel on the next tick, or a cancel of a reduce-only order.
 - [ ] Test `stale_age_starts_at_link_up_when_no_report_has_arrived` (seam A, S23): fails when a node that never got a report never cancels.
