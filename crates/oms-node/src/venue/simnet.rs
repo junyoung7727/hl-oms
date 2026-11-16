@@ -363,6 +363,61 @@ impl Gateway {
                     })
                     .await;
             }
+            QueryReq::Margin { seq } => {
+                // No answer: no input. The last report keeps ageing.
+                let Ok(resp) = self.requests.call(SimOp::Margin).await else {
+                    return;
+                };
+                let input = match serde_json::from_value::<MarginResult>(resp.result) {
+                    Ok(r) => VenueInput::MarginReport(MarginReport {
+                        session,
+                        seq,
+                        queried_at,
+                        account_value: r.account_value,
+                        positions: r.positions,
+                    }),
+                    // An answer that cannot be read is refused as a whole.
+                    Err(e) => VenueInput::MarginReportInvalid {
+                        session,
+                        seq,
+                        queried_at,
+                        reason: format!("unreadable margin answer: {e}"),
+                    },
+                };
+                self.input.send(input).await;
+            }
+            QueryReq::AccountMode => {
+                // No answer, or one that cannot be read: no input. The mode
+                // stays unknown and the account stays held.
+                let Ok(resp) = self.requests.call(SimOp::AccountMode).await else {
+                    return;
+                };
+                let Ok(r) = serde_json::from_value::<AccountModeResult>(resp.result) else {
+                    return;
+                };
+                self.input.send(VenueInput::AccountMode { session, mode: r.mode }).await;
+            }
+            QueryReq::VenueSetting { instrument } => {
+                // No answer, or one that cannot be read: no input. The
+                // setting stays unknown and the instrument stays held.
+                let op = SimOp::VenueSetting {
+                    instrument: instrument.clone(),
+                };
+                let Ok(resp) = self.requests.call(op).await else {
+                    return;
+                };
+                let Ok(r) = serde_json::from_value::<VenueSettingResult>(resp.result) else {
+                    return;
+                };
+                self.input
+                    .send(VenueInput::VenueSetting {
+                        session,
+                        instrument,
+                        isolated: r.isolated,
+                        leverage: r.leverage,
+                    })
+                    .await;
+            }
         }
     }
 

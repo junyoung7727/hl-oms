@@ -1,22 +1,22 @@
 {
-  "build": "xtask src:c2addecd59bc4a5a",
+  "build": "xtask src:762a4acf55af90fb",
   "detail": {
     "bytes": 300,
     "count": 300,
-    "dir": "data/perf-fsync"
+    "dir": "/mnt/nvme/gitproject/.cargo-target/hl-oms-integ/perf-data-t13-fsync"
   },
   "environment": {
-    "busiest_processes": "100 ps;24.6 python3; 7.2 xtask;",
+    "busiest_processes": "77.7 python;29.2 chrome;18.4 WebKitWebProces;",
     "cpu": "Intel(R) Core(TM) i9-14900K",
     "cpus_online": "32",
     "device_model": "Samsung SSD 970 EVO Plus 2TB",
-    "df": "/dev/nvme0n1    1.8T   55G  1.7T   4% /mnt/nvme",
+    "df": "/dev/nvme1n1    1.8T  294G  1.5T  17% /mnt/nvme",
     "energy_pref": "balance_performance",
     "governor": "powersave",
-    "kernel": "7.0.0-34-generic",
-    "loadavg": "1.51 1.37 1.00",
+    "kernel": "7.0.0-42-generic",
+    "loadavg": "6.22 3.74 3.34",
     "memory": "30Gi",
-    "mount": "/dev/nvme0n1 ext4 rw,relatime",
+    "mount": "/dev/nvme1n1 ext4 rw,relatime",
     "os": "Ubuntu 26.04 LTS",
     "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)",
     "write_cache": "write back"
@@ -24,30 +24,30 @@
   "label": "fsync-nvme",
   "results": [
     {
-      "max": 5745,
-      "mean": 2537,
-      "min": 2348,
+      "max": 5741,
+      "mean": 2452,
+      "min": 2308,
       "name": "write+fdatasync",
-      "p50": 2505,
-      "p90": 2651,
-      "p99": 2897,
-      "p999": 5745,
+      "p50": 2406,
+      "p90": 2506,
+      "p99": 2875,
+      "p999": 5741,
       "samples": 300,
       "unit": "us"
     },
     {
-      "max": 5736,
-      "mean": 2527,
-      "min": 2345,
+      "max": 5734,
+      "mean": 2448,
+      "min": 2306,
       "name": "fdatasync",
-      "p50": 2494,
-      "p90": 2642,
-      "p99": 2877,
-      "p999": 5736,
+      "p50": 2404,
+      "p90": 2499,
+      "p99": 2874,
+      "p999": 5734,
       "samples": 300,
       "unit": "us"
     }
   ],
-  "taken_at_us": 1791165792601533,
+  "taken_at_us": 1794838943006220,
   "what": "append then fdatasync on one file: the floor for one journal commit on this device"
 }

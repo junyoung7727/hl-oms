@@ -1,27 +1,27 @@
 {
-  "build": "oms-node 0.1.0 src:c2addecd59bc4a5a",
+  "build": "oms-node 0.1.0 src:762a4acf55af90fb",
   "commit_layout": "commit_thread",
   "connections": 4,
   "durability": "fdatasync after every commit batch",
   "environment": {
-    "busiest_processes": "200 ps;26.9 xtask;11.4 python3;",
+    "busiest_processes": "200 ps;68.2 python;31.4 chrome;",
     "cpu": "Intel(R) Core(TM) i9-14900K",
     "cpus_online": "32",
     "device_model": "Samsung SSD 970 EVO Plus 2TB",
-    "df": "/dev/nvme0n1    1.8T   55G  1.7T   4% /mnt/nvme",
+    "df": "/dev/nvme1n1    1.8T  294G  1.5T  17% /mnt/nvme",
     "energy_pref": "balance_performance",
     "governor": "powersave",
-    "kernel": "7.0.0-34-generic",
-    "loadavg": "2.85 1.72 1.18",
+    "kernel": "7.0.0-42-generic",
+    "loadavg": "3.90 3.84 3.47",
     "memory": "30Gi",
-    "mount": "/dev/nvme0n1 ext4 rw,relatime",
+    "mount": "/dev/nvme1n1 ext4 rw,relatime",
     "os": "Ubuntu 26.04 LTS",
     "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)",
     "write_cache": "write back"
   },
   "label": "nvme-default-limits",
   "limits": "shipped defaults",
-  "node_config": "\ndata_dir = \"/mnt/nvme/gitproject/TradingSystem/OrderManagementSystem/data/perf/data\"\n\n[runtime]\ninline_commit = false\ntick_ms = 100\nreconcile_ms = 200\nsweep_ms = 5000\n\n\n[venue]\nkind = \"sim\"\nsocket = \"/mnt/nvme/gitproject/TradingSystem/OrderManagementSystem/data/perf/venue.sock\"\nrequest_timeout_ms = 2000\n\n[core]\nversion = 1\n\n[core.instruments.X]\nqty_step = \"0.001\"\npx_tick = \"0.1\"\nmin_notional = \"0\"\nmax_order_qty = \"100\"\nmax_order_notional = \"100000000\"\naccount_pos_min = \"-100000000\"\naccount_pos_max = \"100000000\"\n\n[core.strategies.a]\nenabled = true\nmax_open_orders = 500\n[core.strategies.a.limits.X]\nmin = \"-100000000\"\nmax = \"100000000\"\n\n# Every policy value at its shipped default.\n[core.policy]\n",
+  "node_config": "\ndata_dir = \"/mnt/nvme/gitproject/.cargo-target/hl-oms-integ/perf-data-t13-limits/data\"\n\n[runtime]\ninline_commit = false\ntick_ms = 100\nreconcile_ms = 200\nsweep_ms = 5000\n\n\n[venue]\nkind = \"sim\"\nsocket = \"/mnt/nvme/gitproject/.cargo-target/hl-oms-integ/perf-data-t13-limits/venue.sock\"\nrequest_timeout_ms = 2000\n\n[core]\nversion = 1\n\n[core.instruments.X]\nqty_step = \"0.001\"\npx_tick = \"0.1\"\nmin_notional = \"0\"\nmax_order_qty = \"100\"\nmax_order_notional = \"100000000\"\naccount_pos_min = \"-100000000\"\naccount_pos_max = \"100000000\"\n\n[core.strategies.a]\nenabled = true\nmax_open_orders = 500\n[core.strategies.a.limits.X]\nmin = \"-100000000\"\nmax = \"100000000\"\n\n# Every policy value at its shipped default.\n[core.policy]\n",
   "runs": [
     {
       "core_stats": {
@@ -36,14 +36,14 @@
       "ingress_rate_limited": 116901,
       "ingress_refused_overload": 0,
       "journal": {
-        "bytes_written": 4593760,
+        "bytes_written": 4628960,
         "durable_seq": 9317,
-        "last_commit_age_us": 941736,
-        "last_commit_at": 1791166046675199,
+        "last_commit_age_us": 738115,
+        "last_commit_at": 1794839212322351,
         "last_snapshot_at": 0,
         "last_snapshot_error": null,
         "last_snapshot_seq": 0,
-        "last_sync_us": 7498,
+        "last_sync_us": 4845,
         "records_since_snapshot": 9317
       },
       "load": {
@@ -58,39 +58,39 @@
           "Overloaded": 116901
         },
         "generator_lag": {
-          "max": 3449,
-          "mean": 67,
-          "min": 3,
+          "max": 4307,
+          "mean": 64,
+          "min": 4,
           "name": "generator lag (actual - intended send)",
-          "p50": 69,
-          "p90": 73,
-          "p99": 81,
-          "p999": 138,
+          "p50": 58,
+          "p90": 78,
+          "p99": 106,
+          "p999": 190,
           "samples": 120000,
           "unit": "us"
         },
         "latency_intended_to_response": {
-          "max": 11512,
-          "mean": 192,
-          "min": 8,
+          "max": 9189,
+          "mean": 176,
+          "min": 10,
           "name": "intended send -> response",
-          "p50": 111,
+          "p50": 94,
           "p90": 161,
-          "p99": 2860,
-          "p999": 5447,
+          "p99": 2870,
+          "p999": 5665,
           "samples": 120000,
           "unit": "us"
         },
         "latency_sent_to_response": {
-          "max": 11441,
-          "mean": 124,
-          "min": 1,
+          "max": 9115,
+          "mean": 111,
+          "min": 4,
           "name": "actual send -> response",
-          "p50": 42,
-          "p90": 90,
-          "p99": 2790,
-          "p999": 5391,
-          "samples": 119996,
+          "p50": 28,
+          "p90": 89,
+          "p99": 2801,
+          "p999": 5593,
+          "samples": 119999,
           "unit": "us"
         },
         "offered_rate": 2000,
@@ -98,21 +98,21 @@
         "seconds": 60,
         "sent": 120000,
         "unanswered": 0,
-        "wall_start_us": 1791165985909171
+        "wall_start_us": 1794839151358252
       },
       "pipeline": {
         "commands_released": 3099,
-        "commits": 7232,
+        "commits": 8032,
         "events_published": 0,
         "inputs": 19269,
-        "journal_bytes": 4593760,
+        "journal_bytes": 4628960,
         "last_batch": 1,
-        "last_commit_at": 1791166046675199,
+        "last_commit_at": 1794839212322351,
         "last_snapshot_at": 0,
         "last_snapshot_error": null,
         "last_snapshot_seq": 0,
-        "last_sync_us": 7498,
-        "max_batch": 32,
+        "last_sync_us": 4845,
+        "max_batch": 23,
         "noop_inputs": 9321,
         "records": 9317,
         "replies_released": 3100,
@@ -136,9 +136,9 @@
           0
         ],
         "high_water": [
-          94,
+          175,
           2,
-          6
+          5
         ],
         "refused": [
           0,
@@ -148,64 +148,64 @@
       },
       "stage_us": {
         "batch": {
-          "count": 7232,
-          "max_us": 32,
+          "count": 8032,
+          "max_us": 23,
           "mean_us": 1,
           "p50_us": 1,
           "p90_us": 2,
-          "p999_us": 19,
+          "p999_us": 17,
           "p99_us": 2
         },
         "core": {
           "count": 19269,
-          "max_us": 260,
-          "mean_us": 5,
+          "max_us": 160,
+          "mean_us": 4,
           "p50_us": 2,
           "p90_us": 14,
           "p999_us": 71,
-          "p99_us": 39
+          "p99_us": 35
         },
         "persist": {
           "count": 9317,
-          "max_us": 11632,
-          "mean_us": 3091,
+          "max_us": 14639,
+          "mean_us": 3271,
           "p50_us": 2815,
-          "p90_us": 5119,
-          "p999_us": 11263,
+          "p90_us": 5631,
+          "p999_us": 9215,
           "p99_us": 6143
         },
         "queue": {
           "count": 19269,
-          "max_us": 2886,
-          "mean_us": 76,
-          "p50_us": 25,
-          "p90_us": 143,
-          "p999_us": 2815,
+          "max_us": 2789,
+          "mean_us": 55,
+          "p50_us": 12,
+          "p90_us": 87,
+          "p999_us": 2789,
           "p99_us": 2047
         },
         "sync": {
-          "count": 7232,
-          "max_us": 9610,
-          "mean_us": 2603,
+          "count": 8032,
+          "max_us": 9044,
+          "mean_us": 2590,
           "p50_us": 2559,
           "p90_us": 2815,
-          "p999_us": 7679,
+          "p999_us": 6655,
           "p99_us": 5631
         },
         "total": {
           "count": 9317,
-          "max_us": 11651,
-          "mean_us": 3171,
+          "max_us": 14657,
+          "mean_us": 3333,
           "p50_us": 2815,
-          "p90_us": 5119,
-          "p999_us": 11651,
-          "p99_us": 9215
+          "p90_us": 5631,
+          "p999_us": 9215,
+          "p99_us": 8191
         }
       }
     }
   ],
   "seconds_per_rate": 60,
-  "source_digest": "c2addecd59bc4a5a",
-  "taken_at_us": 1791166047672961,
+  "source_digest": "762a4acf55af90fb",
+  "taken_at_us": 1794839213112839,
   "venue": "simvenue (auto-fill full), same host, Unix socket"
 }

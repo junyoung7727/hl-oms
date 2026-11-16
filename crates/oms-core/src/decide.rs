@@ -221,8 +221,26 @@ impl Tx<'_> {
         let cfg = &core.config;
         let mut why = Vec::new();
 
+        // Hold table (ADR-008 §7 as amended by ADR-018): with a margin
+        // policy, a reduce-only order passes the holds that refuse only
+        // plain orders. Without one every hold refuses every new order.
+        let margin_rules_on = cfg.policy.margin.is_some();
         for h in core.holds(Some(&r.strategy)) {
+            // A venue-setting hold is about one instrument only.
+            if matches!(&h, HoldReason::VenueSetting(i) if *i != r.instrument) {
+                continue;
+            }
+            if margin_rules_on && r.reduce_only && h.refuses_only_plain_orders() {
+                continue;
+            }
             why.push(R::Hold(h));
+        }
+        // Margin rules are on: a plain order needs a fresh margin report. A
+        // reduce-only order does not, so a position can be reduced while the
+        // venue's queries fail.
+        let needs_fresh_report = margin_rules_on && !r.reduce_only;
+        if needs_fresh_report && !core.margin_report_is_fresh(self.at) {
+            why.push(R::MarginUnavailable);
         }
         let Some(strategy) = cfg.strategies.get(&r.strategy) else {
             why.push(R::UnknownStrategy);
@@ -297,8 +315,8 @@ impl Tx<'_> {
                         let rf = i128::from(p.px.0);
                         let band = i128::from(bps);
                         let outside = match r.side {
-                            Side::Buy => px * 10_000 > rf * (10_000 + band),
-                            Side::Sell => px * 10_000 < rf * (10_000 - band),
+                            Side::Buy => px * ONE_IN_BPS > rf * (ONE_IN_BPS + band),
+                            Side::Sell => px * ONE_IN_BPS < rf * (ONE_IN_BPS - band),
                         };
                         if outside {
                             why.push(R::PriceBand);
@@ -351,6 +369,13 @@ impl Tx<'_> {
                         }
                     }
                 }
+            }
+        }
+        // Leverage gate (C-MARGIN). A reduce-only order is not judged; it
+        // still counts in the exposure of the orders that follow.
+        if let Some(margin) = &cfg.policy.margin {
+            if !r.reduce_only && r.qty.0 > 0 && r.px.0 > 0 {
+                why.extend(core.leverage_gate(margin, r, self.at));
             }
         }
         why.dedup();
@@ -543,9 +568,96 @@ impl Tx<'_> {
                     Ok("adjusted".into())
                 }
             }
+            OperatorCmd::ClearReduce { note } => match self.clear_reduce_refusal(note) {
+                Some(refusal) => Err(refusal.text().into()),
+                None => {
+                    self.clear_reduce(note)?;
+                    Ok("cleared".into())
+                }
+            },
+            OperatorCmd::RebaseDay { note } => match self.rebase_day_refusal(note) {
+                Some(refusal) => Err(refusal.text().into()),
+                None => {
+                    self.rebase_on_the_report()?;
+                    Ok("rebased".into())
+                }
+            },
         };
         self.out.reply = Some(Reply::Operator(reply));
         Ok(())
+    }
+
+    /// Why `clear-reduce` cannot be taken now, if it cannot (C-MARGIN, 해제).
+    /// The release is decided on numbers the venue gave within the last
+    /// `margin_max_age_us`, and every release carries a reason.
+    fn clear_reduce_refusal(&self, note: &str) -> Option<MarginRefusal> {
+        let nothing_to_clear = self.core.margin.reducing.is_none();
+        if nothing_to_clear {
+            return Some(MarginRefusal::NotReducing);
+        }
+        let clear_on_a_fresh_report = self.core.margin_report_is_fresh(self.at);
+        if !clear_on_a_fresh_report {
+            return Some(MarginRefusal::MarginUnavailable);
+        }
+        // A position near liquidation is not released into more risk. There
+        // is no way around this: no force option.
+        let mm_condition_holds = match (&self.core.config.policy.margin, &self.core.margin.report) {
+            (Some(policy), Some(report)) => position_under_the_mm_line(report, policy.mm_buffer_bps).is_some(),
+            _ => false,
+        };
+        if mm_condition_holds {
+            return Some(MarginRefusal::MmBufferActive);
+        }
+        let clear_has_a_note = !note.trim().is_empty();
+        if !clear_has_a_note {
+            return Some(MarginRefusal::NoteRequired);
+        }
+        None
+    }
+
+    /// Why `rebase-day` cannot be taken now, if it cannot (C-MARGIN, 기준
+    /// 재설정). It does not look at REDUCING.
+    fn rebase_day_refusal(&self, note: &str) -> Option<MarginRefusal> {
+        let rebase_on_a_fresh_report = self.core.margin_report_is_fresh(self.at);
+        if !rebase_on_a_fresh_report {
+            return Some(MarginRefusal::MarginUnavailable);
+        }
+        let rebase_has_a_note = !note.trim().is_empty();
+        if !rebase_has_a_note {
+            return Some(MarginRefusal::NoteRequired);
+        }
+        None
+    }
+
+    /// Ends REDUCING on the newest report: its account value becomes the day
+    /// base first, so that the loss that tripped the rule does not trip it
+    /// again on the next report, and a further loss is measured from here.
+    fn clear_reduce(&mut self, note: &str) -> Result<(), CoreFault> {
+        let old_base = self.core.margin.day_base.as_ref().map(|base| base.value);
+        let Some(new_base) = self.rebase_on_the_report()? else {
+            return Ok(());
+        };
+        self.emit(Event::ReducingCleared {
+            note: note.to_string(),
+            old_base,
+            new_base,
+        })
+    }
+
+    /// Sets the day base to the account value and the UTC day of the newest
+    /// report, by the operator. The day is the report's, also when it is
+    /// earlier than the base's. Returns the new base value.
+    fn rebase_on_the_report(&mut self) -> Result<Option<Amount>, CoreFault> {
+        let Some(report) = &self.core.margin.report else {
+            return Ok(None);
+        };
+        let (day, value) = (report.queried_at / DAY_US, report.account_value);
+        self.emit(Event::DayBaseSet {
+            day,
+            value,
+            set_by: BaseSetBy::Operator,
+        })?;
+        Ok(Some(value))
     }
 
     // ---- venue ------------------------------------------------------------
@@ -590,7 +702,180 @@ impl Tx<'_> {
                 }
                 Ok(())
             }
+            VenueInput::MarginReport(r) => self.on_margin_report(r),
+            VenueInput::MarginReportInvalid {
+                session,
+                seq,
+                queried_at,
+                reason,
+            } => {
+                if !self.takes_margin_input(*session) {
+                    return Ok(());
+                }
+                self.emit(Event::MarginReportRejected {
+                    session: *session,
+                    seq: *seq,
+                    queried_at: *queried_at,
+                    reason: reason.clone(),
+                })
+            }
+            VenueInput::VenueSetting {
+                session,
+                instrument,
+                isolated,
+                leverage,
+            } => {
+                if !self.takes_margin_input(*session) || !self.core.config.instruments.contains_key(instrument) {
+                    return Ok(());
+                }
+                self.emit(Event::VenueSettingNoted {
+                    session: *session,
+                    instrument: instrument.clone(),
+                    isolated: *isolated,
+                    leverage: *leverage,
+                })
+            }
+            VenueInput::AccountMode { session, mode } => {
+                if !self.takes_margin_input(*session) {
+                    return Ok(());
+                }
+                self.emit(Event::AccountModeNoted {
+                    session: *session,
+                    mode: mode.clone(),
+                })
+            }
         }
+    }
+
+    // ---- margin reports (C-MARGIN) ----------------------------------------
+
+    /// Whether a margin input of link session `session` is looked at at all.
+    /// Without a margin policy none is. An answer to a query of another link
+    /// session, or one that arrives while the link is down, is dropped: not
+    /// stored and not judged.
+    fn takes_margin_input(&self, session: u64) -> bool {
+        if self.core.config.policy.margin.is_none() {
+            return false;
+        }
+        self.core.link.up && session == self.core.link.session
+    }
+
+    fn on_margin_report(&mut self, r: &MarginReport) -> Result<(), CoreFault> {
+        if !self.takes_margin_input(r.session) {
+            return Ok(());
+        }
+        // Answers can overtake each other. The query number decides which is
+        // newer, not the query time: the wall clock can step backwards.
+        let last_seq = self.core.margin.report.as_ref().filter(|last| last.session == r.session).map(|last| last.seq);
+        if last_seq.is_some_and(|last| r.seq <= last) {
+            return Ok(());
+        }
+        // A report is one fact. One value that no rule can use refuses the
+        // whole report; the last recorded report stays and keeps ageing.
+        if let Some(p) = r.positions.iter().find(|p| p.max_leverage == 0) {
+            return self.emit(Event::MarginReportRejected {
+                session: r.session,
+                seq: r.seq,
+                queried_at: r.queried_at,
+                reason: format!("position {}: max_leverage is zero", p.instrument),
+            });
+        }
+        self.emit(Event::MarginReported { report: r.clone() })?;
+        self.judge_mm_buffer(r)?;
+        self.judge_daily_loss(r)?;
+        self.roll_day_base(r)
+    }
+
+    /// MM buffer (C-MARGIN, 유지증거금 여유): an isolated position of a
+    /// recorded report is close to liquidation. A cross position is not
+    /// judged: its margin is the account's (the venue-setting hold names
+    /// it).
+    fn judge_mm_buffer(&mut self, r: &MarginReport) -> Result<(), CoreFault> {
+        let Some(policy) = &self.core.config.policy.margin else {
+            return Ok(());
+        };
+        let buffer_bps = policy.mm_buffer_bps;
+        let Some(p) = position_under_the_mm_line(r, buffer_bps) else {
+            return Ok(());
+        };
+        let detail = format!(
+            "position {}: isolated margin {} is below the maintenance margin at maximum leverage {} plus {} bps of the position value {}",
+            p.instrument, p.margin_used, p.max_leverage, buffer_bps, p.position_value
+        );
+        self.enter_reducing(RuleId::MmBuffer, detail)
+    }
+
+    /// Daily loss (C-MARGIN): the account value of a recorded report is more
+    /// than `daily_loss_bps` below the day base.
+    fn judge_daily_loss(&mut self, r: &MarginReport) -> Result<(), CoreFault> {
+        let (Some(policy), Some(base)) = (&self.core.config.policy.margin, &self.core.margin.day_base) else {
+            return Ok(());
+        };
+        let (base_value, value) = (i128::from(base.value.0), i128::from(r.account_value.0));
+        let lost_too_much = (base_value - value) * ONE_IN_BPS > i128::from(policy.daily_loss_bps) * base_value;
+        if !lost_too_much {
+            return Ok(());
+        }
+        let detail = format!(
+            "account value {} is more than {} bps below the day base {}",
+            r.account_value, policy.daily_loss_bps, base.value
+        );
+        self.enter_reducing(RuleId::DailyLoss, detail)
+    }
+
+    /// Latches REDUCING for the whole account and, in the same input, asks
+    /// to cancel every open plain order. An order with the venue's
+    /// reduce-only flag is kept: it can only lower the position.
+    fn enter_reducing(&mut self, rule: RuleId, detail: String) -> Result<(), CoreFault> {
+        // Entered once: a second trigger emits nothing, and the rule that
+        // tripped first stays recorded.
+        if self.core.margin.reducing.is_some() {
+            return Ok(());
+        }
+        self.emit(Event::ReducingEntered { rule, detail })?;
+        // The latch is new, so a cancel that ran out of attempts earlier is
+        // asked for again with a new budget.
+        self.rule_cancel_plain_orders(rule, ExhaustedCancel::AskAgain)
+    }
+
+    /// Rule cancel: `rule` asks to cancel every open plain order that has
+    /// no cancel request and, if `exhausted` says so, every one whose
+    /// request used up its attempts. A reduce-only order is never asked
+    /// for: it can only lower the position.
+    fn rule_cancel_plain_orders(&mut self, rule: RuleId, exhausted: ExhaustedCancel) -> Result<(), CoreFault> {
+        for id in self.open_ids() {
+            let Some(o) = self.core.orders.get(&id) else { continue };
+            let is_plain = !o.reduce_only;
+            let not_asked_yet = o.cancel.is_none();
+            let asked_in_vain = exhausted == ExhaustedCancel::AskAgain && self.cancel_exhausted(id);
+            if is_plain && (not_asked_yet || asked_in_vain) {
+                self.emit(Event::CancelRequested {
+                    order_id: id,
+                    by: Actor::Rule(rule),
+                })?;
+                // Sent now if the venue has the order. An order still
+                // waiting for its send result keeps the request, and the
+                // cancel goes out when the venue acknowledges it.
+                self.maybe_send_cancel(id)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Sets the day base from a recorded report when there is none, or when
+    /// the report belongs to a later UTC day than the base. Runs after the
+    /// report was judged against the old base. A report of an earlier day
+    /// never moves the base back.
+    fn roll_day_base(&mut self, r: &MarginReport) -> Result<(), CoreFault> {
+        let day = r.queried_at / DAY_US;
+        if self.core.margin.day_base.as_ref().is_some_and(|base| day <= base.day) {
+            return Ok(());
+        }
+        self.emit(Event::DayBaseSet {
+            day,
+            value: r.account_value,
+            set_by: BaseSetBy::Report,
+        })
     }
 
     fn on_link(&mut self, up: bool, session: u64, reason: &str) -> Result<(), CoreFault> {
@@ -1295,6 +1580,35 @@ impl Tx<'_> {
 
     // ---- time -------------------------------------------------------------
 
+    /// Stale cancel (C-MARGIN): no margin report was accepted for longer
+    /// than `stale_cancel_us`. Every open plain order that has no cancel
+    /// request gets one, once. Nothing latches: the next recorded report
+    /// ends it.
+    fn stale_cancel(&mut self) -> Result<(), CoreFault> {
+        let Some(policy) = &self.core.config.policy.margin else {
+            return Ok(());
+        };
+        // With the link down a cancel cannot be sent, and no report can
+        // arrive: nothing is asked for.
+        if !self.core.link.up {
+            return Ok(());
+        }
+        // Measured from the query time of the last recorded report, or from
+        // the moment the current link session came up when that is later.
+        let margin = &self.core.margin;
+        let last_report_at = margin.report.as_ref().map(|r| r.queried_at);
+        let Some(blind_since) = last_report_at.max(margin.link_up_at) else {
+            return Ok(());
+        };
+        let blind_for = self.at.saturating_sub(blind_since);
+        if blind_for <= policy.stale_cancel_us {
+            return Ok(());
+        }
+        // One request per order: this runs on every tick, and a cancel
+        // that ran out of attempts is already with the operator.
+        self.rule_cancel_plain_orders(RuleId::MarginStale, ExhaustedCancel::Leave)
+    }
+
     fn tick(&mut self) -> Result<(), CoreFault> {
         let policy = self.core.config.policy.clone();
         for id in self.open_ids() {
@@ -1330,6 +1644,7 @@ impl Tx<'_> {
             }
             self.maybe_send_cancel(id)?;
         }
+        self.stale_cancel()?;
 
         // A parked fill is given up as external when no order of ours could
         // still turn out to own it, or when it has waited too long.
@@ -1392,6 +1707,20 @@ impl Tx<'_> {
     }
 }
 
+/// The whole, 100 %, in basis points. A comparison of the form
+/// `a x ONE_IN_BPS > b x bps` is `a > b x bps / 10 000` without a division.
+const ONE_IN_BPS: i128 = 10_000;
+
+/// What a rule cancel does with an order whose earlier cancel request used
+/// up its attempts.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ExhaustedCancel {
+    /// A new request, with a new budget of attempts.
+    AskAgain,
+    /// Nothing: the stuck cancel stays as it is.
+    Leave,
+}
+
 /// The furthest position the book can reach on `side` if `qty` more is
 /// accepted: `pos + buy_open + qty` for a buy, `pos - sell_open - qty` for a
 /// sell. `None` on overflow.
@@ -1399,5 +1728,31 @@ fn reach_after(b: &Book, side: Side, qty: Qty) -> Option<i64> {
     match side {
         Side::Buy => b.upper()?.checked_add(qty.0),
         Side::Sell => b.lower()?.checked_sub(qty.0),
+    }
+}
+
+/// The first position of the report that the MM-buffer rule judges and
+/// finds under its line. Judged: isolated, with a position value above
+/// zero.
+fn position_under_the_mm_line(r: &MarginReport, buffer_bps: u32) -> Option<&MarginPosition> {
+    let judged = |p: &&MarginPosition| p.leverage_type == LeverageType::Isolated && p.position_value.0 > 0;
+    r.positions.iter().filter(judged).find(|p| mm_buffer_is_used_up(p, buffer_bps))
+}
+
+/// Whether the margin of a position is below (maintenance margin rate +
+/// `buffer_bps`) of its value. The maintenance margin rate is 1 / (2 ×
+/// maximum leverage); both sides are multiplied by 2 × maximum leverage ×
+/// 10 000, so nothing is divided. For a position value above zero only.
+fn mm_buffer_is_used_up(p: &MarginPosition, buffer_bps: u32) -> bool {
+    let (margin, value) = (i128::from(p.margin_used.0), i128::from(p.position_value.0));
+    let twice_max_leverage = 2 * i128::from(p.max_leverage);
+    // At most 2^63 × 2^33 × 2^14: it fits.
+    let scaled_margin = margin * twice_max_leverage * ONE_IN_BPS;
+    // The factor is below 2^66. The product with a value above zero can
+    // pass the largest i128 only upwards, and is then above every scaled
+    // margin.
+    match value.checked_mul(ONE_IN_BPS + twice_max_leverage * i128::from(buffer_bps)) {
+        Some(scaled_line) => scaled_margin < scaled_line,
+        None => true,
     }
 }

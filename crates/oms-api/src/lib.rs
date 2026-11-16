@@ -17,6 +17,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
 pub mod client;
+pub mod ctl;
 
 use oms_core::*;
 use serde::{Deserialize, Serialize};
@@ -99,6 +100,16 @@ pub enum Op {
         /// `None` books to the unattributed ledger.
         strategy: Option<StrategyId>,
         delta: SQty,
+        note: String,
+    },
+    /// End REDUCING; the current account value becomes the day base
+    /// (C-MARGIN).
+    ClearReduce {
+        note: String,
+    },
+    /// Take the current account value as the day base, after a deposit or a
+    /// withdrawal (C-MARGIN).
+    RebaseDay {
         note: String,
     },
     /// Write a snapshot now.

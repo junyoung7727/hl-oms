@@ -69,6 +69,9 @@ pub fn status(ctx: &ApiCtx, strategy: Option<&StrategyId>) -> serde_json::Value 
             )
         })
         .collect();
+    // Margin rules (C-MARGIN): null without a margin policy. The age is
+    // this process's clock now minus the query time of the last report.
+    let margin = core.margin_view(now);
     serde_json::json!({
         "as_of": now,
         "source": "published state (durable records only) and process counters",
@@ -95,6 +98,7 @@ pub fn status(ctx: &ApiCtx, strategy: Option<&StrategyId>) -> serde_json::Value 
             "operator_halt_strategy": core.halt_strategy,
             "storage_low": core.storage_low,
             "fill_floor": core.fill_floor,
+            "margin": margin,
             "stats": core.stats,
         },
         "account": if strategy.is_none() { serde_json::to_value(&core.account).ok() } else { None },

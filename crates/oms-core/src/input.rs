@@ -70,6 +70,13 @@ pub enum OperatorCmd {
         delta: SQty,
         note: String,
     },
+    /// Ends REDUCING and takes the current account value as the new day
+    /// base (C-MARGIN, 해제). Needs a fresh margin report and a note.
+    ClearReduce { note: String },
+    /// Takes the current account value as the day base and leaves REDUCING
+    /// as it is (C-MARGIN, 기준 재설정). For use after a deposit or a
+    /// withdrawal. Needs a fresh margin report and a note.
+    RebaseDay { note: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,6 +133,68 @@ pub enum VenueInput {
         px: Px,
         venue_ts: Ts,
     },
+    /// The venue's answer to one margin query (C-MARGIN).
+    MarginReport(MarginReport),
+    /// The venue answered a margin query and the gateway could not read the
+    /// answer as a whole report. No part of it is used.
+    MarginReportInvalid {
+        session: u64,
+        seq: u64,
+        queried_at: Ts,
+        reason: String,
+    },
+    /// The venue's answer to one venue-setting query: the margin mode and
+    /// the leverage of one instrument (C-MARGIN). The OMS only reads them.
+    VenueSetting {
+        session: u64,
+        instrument: InstrumentId,
+        isolated: bool,
+        leverage: u32,
+    },
+    /// The venue's answer to the account-mode query: the account-wide
+    /// margin scheme, as the venue names it (C-MARGIN).
+    AccountMode { session: u64, mode: String },
+}
+
+/// What the venue said about the account's margin at one moment. The whole
+/// report is one fact: it is recorded as it came or not at all.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarginReport {
+    /// Link session in which the query was sent.
+    pub session: u64,
+    /// Number of the query. It rises within a link session, so a late answer
+    /// is told from a new one without reading a clock.
+    pub seq: u64,
+    /// Node time immediately before the query was sent.
+    pub queried_at: Ts,
+    pub account_value: Amount,
+    /// Every position the venue listed, also on instruments that are not
+    /// configured here.
+    pub positions: Vec<MarginPosition>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarginPosition {
+    pub instrument: InstrumentId,
+    /// Signed quantity of the position: positive is long. The journal and
+    /// the status keep the key `szi` they were first written with.
+    #[serde(rename = "szi")]
+    pub qty: SQty,
+    pub position_value: Amount,
+    pub margin_used: Amount,
+    pub leverage_type: LeverageType,
+    pub leverage_value: u32,
+    /// The venue's maximum leverage for the instrument. Never zero in a
+    /// report that was recorded.
+    pub max_leverage: u32,
+}
+
+/// Margin mode of one instrument at the venue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LeverageType {
+    Isolated,
+    Cross,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

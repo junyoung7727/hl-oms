@@ -40,6 +40,15 @@ pub enum SimOp {
     },
     OpenOrders,
     Positions,
+    /// The account's margin report. Answered with a `MarginResult`.
+    Margin,
+    /// Margin mode and leverage of one instrument. Answered with a
+    /// `VenueSettingResult`.
+    VenueSetting {
+        instrument: InstrumentId,
+    },
+    /// The account mode. Answered with an `AccountModeResult`.
+    AccountMode,
     /// Turns this connection into an event stream.
     Subscribe,
     Ctl {
@@ -69,6 +78,16 @@ pub enum Ctl {
     /// Refuse new stream subscriptions while set.
     RefuseStreams { on: bool },
     RefPrice { instrument: InstrumentId, px: Px },
+    /// Sets the account value the venue states in its margin reports.
+    AccountValue { value: Amount },
+    /// Sets the margin the venue states for the position on one instrument,
+    /// in place of its model's figure (position value / leverage).
+    MarginUsed { instrument: InstrumentId, value: Amount },
+    /// Sets the margin mode and the leverage the venue states for one
+    /// instrument. Stands for the operator changing it at the venue.
+    VenueSetting { instrument: InstrumentId, isolated: bool, leverage: u32 },
+    /// Sets the account mode the venue states.
+    AccountMode { mode: String },
     /// Counters and the venue's own view, for test assertions.
     Dump,
 }
@@ -156,6 +175,29 @@ pub struct WirePosition {
     pub qty: SQty,
 }
 
+/// Answer to `SimOp::Margin`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MarginResult {
+    pub account_value: Amount,
+    /// Every position of the account, with its value, margin, margin mode,
+    /// leverage and maximum leverage. The list is part of the answer: an
+    /// answer without it is unreadable, not an account without positions.
+    pub positions: Vec<MarginPosition>,
+}
+
+/// Answer to `SimOp::VenueSetting`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VenueSettingResult {
+    pub isolated: bool,
+    pub leverage: u32,
+}
+
+/// Answer to `SimOp::AccountMode`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AccountModeResult {
+    pub mode: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamMsg {
@@ -168,4 +210,24 @@ pub enum StreamMsg {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StreamLine {
     pub stream: StreamMsg,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A margin answer is one fact (C-MARGIN): an answer without its list
+    /// of positions is not read as "no positions". The gateway turns the
+    /// error into a rejected report.
+    #[test]
+    fn a_margin_answer_without_its_position_list_is_not_read() {
+        let whole = json!({"account_value": "100", "positions": []});
+        let read = serde_json::from_value::<MarginResult>(whole).map(|r| (r.account_value, r.positions.len()));
+        assert_eq!(read.ok(), Some((Amount(10_000_000_000), 0)));
+
+        let without_list = json!({"account_value": "100"});
+        let error = serde_json::from_value::<MarginResult>(without_list).map(|r| r.positions.len());
+        assert_eq!(error.map_err(|e| e.to_string()), Err("missing field `positions`".to_string()));
+    }
 }

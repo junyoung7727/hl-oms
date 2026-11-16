@@ -46,6 +46,7 @@ struct Asset {
 
 /// Request budget against the documented per-IP limit of 1200 weight per
 /// minute. Orders stop first, queries next; cancels may use the reserve.
+#[derive(Clone)]
 struct Budget {
     tokens: f64,
     last: Instant,
@@ -91,19 +92,32 @@ fn page_verdict(page_len: usize, new: usize, total_new: usize) -> PageVerdict {
 }
 
 impl Budget {
-    fn refill(&mut self) {
-        let now = Instant::now();
+    fn refill(&mut self, now: Instant) {
         self.tokens = (self.tokens + now.duration_since(self.last).as_secs_f64() * BUDGET_PER_SEC).min(BUDGET_MAX);
         self.last = now;
     }
     fn take(&mut self, weight: f64, keep: f64) -> bool {
-        self.refill();
+        self.take_at(Instant::now(), weight, keep)
+    }
+    /// `take` at a given time.
+    fn take_at(&mut self, now: Instant, weight: f64, keep: f64) -> bool {
+        self.refill(now);
         if self.tokens - weight >= keep {
             self.tokens -= weight;
             true
         } else {
             false
         }
+    }
+    /// One cancel. It may use the whole budget, the reserve included, and
+    /// the gateway sends it whatever this returns: a cancel lowers risk.
+    fn for_cancel(&mut self, now: Instant) -> bool {
+        self.take_at(now, 1.0, 0.0)
+    }
+    /// One info query. It goes only while the reserve for orders and
+    /// cancels stays untouched.
+    fn for_query(&mut self, now: Instant, weight: f64) -> bool {
+        self.take_at(now, weight, RESERVE_FOR_CANCELS + RESERVE_FOR_ORDERS)
     }
 }
 
@@ -189,7 +203,7 @@ impl Gateway {
     }
 
     async fn info(&self, body: serde_json::Value, weight: f64) -> Option<serde_json::Value> {
-        if !self.take_budget(weight, RESERVE_FOR_CANCELS + RESERVE_FOR_ORDERS) {
+        if !self.budget.lock().unwrap_or_else(|e| e.into_inner()).for_query(Instant::now(), weight) {
             return None;
         }
         match self.post("/info", &body).await {
@@ -379,8 +393,9 @@ impl Gateway {
                 reason: "the instrument is not in the venue's universe".into(),
             },
             Some(asset) => {
-                // Cancels may use the whole budget, including the reserve.
-                self.take_budget(1.0, 0.0);
+                // Cancels may use the whole budget, including the reserve,
+                // and are sent also when it is empty.
+                self.budget.lock().unwrap_or_else(|e| e.into_inner()).for_cancel(Instant::now());
                 match self
                     .exchange(CancelByCloidAction::single(asset.index, cloid.clone()), None)
                     .await
@@ -423,7 +438,7 @@ impl Gateway {
                 }
                 .to_hex();
                 let body = serde_json::json!({"type": "orderStatus", "user": self.account, "oid": cloid});
-                let Some(resp) = self.info(body, 2.0).await else { return };
+                let Some(resp) = self.info(body, f64::from(WEIGHT_ORDER_STATUS_QUERY)).await else { return };
                 match resp.get("status").and_then(|s| s.as_str()) {
                     Some("order") => {
                         let Some(u) = resp
@@ -465,7 +480,7 @@ impl Gateway {
             QueryReq::Fills { since } => self.sync_fills(session, since).await,
             QueryReq::OpenOrders => {
                 let body = serde_json::json!({"type": "frontendOpenOrders", "user": self.account});
-                let Some(resp) = self.info(body, 20.0).await else { return };
+                let Some(resp) = self.info(body, f64::from(WEIGHT_OTHER_INFO_QUERY)).await else { return };
                 let Ok(list) = serde_json::from_value::<Vec<HlOpenOrder>>(resp) else { return };
                 let orders = list
                     .iter()
@@ -489,9 +504,43 @@ impl Gateway {
                     })
                     .await;
             }
+            // The three queries of the margin rules (C-MARGIN). They only
+            // read. No answer gives no input: the last report keeps ageing,
+            // a setting or a mode stays unknown, and the core refuses plain
+            // orders on that ground, which is the safe side.
+            QueryReq::Margin { seq } => {
+                let body = margin_request(&self.account);
+                let Some(resp) = self.info(body, f64::from(WEIGHT_MARGIN_QUERY)).await else { return };
+                // The whole report, or the reason it is refused as a whole.
+                let input = margin_input(&resp, session, seq, queried_at);
+                if let VenueInput::MarginReportInvalid { reason, .. } = &input {
+                    warn!("the margin answer was refused as a whole", "seq": seq, "reason": reason.clone());
+                }
+                self.input.send(input).await;
+            }
+            QueryReq::VenueSetting { instrument } => {
+                let body = venue_setting_request(&self.account, &instrument);
+                let Some(resp) = self.info(body, f64::from(WEIGHT_OTHER_INFO_QUERY)).await else { return };
+                match venue_setting_input(&resp, session, &instrument) {
+                    Some(input) => {
+                        self.input.send(input).await;
+                    }
+                    None => warn!("the venue-setting answer could not be read; the setting stays unknown", "instrument": instrument.to_string()),
+                }
+            }
+            QueryReq::AccountMode => {
+                let body = account_mode_request(&self.account);
+                let Some(resp) = self.info(body, f64::from(WEIGHT_OTHER_INFO_QUERY)).await else { return };
+                match account_mode_input(&resp, session) {
+                    Some(input) => {
+                        self.input.send(input).await;
+                    }
+                    None => warn!("the account-mode answer could not be read; the mode stays unknown"),
+                }
+            }
             QueryReq::Positions => {
                 let body = serde_json::json!({"type": "clearinghouseState", "user": self.account});
-                let Some(resp) = self.info(body, 2.0).await else { return };
+                let Some(resp) = self.info(body, f64::from(WEIGHT_MARGIN_QUERY)).await else { return };
                 let Some(list) = resp.get("assetPositions").and_then(|a| a.as_array()) else {
                     return;
                 };
@@ -540,7 +589,7 @@ impl Gateway {
                 "type": "userFillsByTime", "user": self.account,
                 "startTime": start, "endTime": end, "aggregateByTime": false,
             });
-            let Some(resp) = self.info(body, 20.0).await else { return };
+            let Some(resp) = self.info(body, f64::from(WEIGHT_OTHER_INFO_QUERY)).await else { return };
             let Ok(fills) = serde_json::from_value::<Vec<HlFill>>(resp) else {
                 error!("the fills answer did not parse; fills are not declared complete");
                 return;
@@ -941,6 +990,56 @@ mod tests {
         assert!(!b.take(1.0, RESERVE_FOR_CANCELS));
         // A cancel may dip into the reserve.
         assert!(b.take(1.0, 0.0));
+    }
+
+    /// G7. Entering REDUCING can send a cancel for every open order at
+    /// once, at most 500 (the open-order limit). A cancel is never held
+    /// back by the local budget, so the queries pay for the burst: a query
+    /// goes only while 300 units stay in reserve for orders and cancels,
+    /// and the budget refills at 20 units per second up to 1200.
+    ///
+    /// Hand-worked, for the margin query (weight 2, so it needs 302):
+    /// - full budget, 1200: 500 cancels leave 700; the query goes at once.
+    /// - budget at start-up, 600: 500 cancels leave 100; the query needs
+    ///   202 more, 202 / 20 = 10.1 s.
+    /// - empty budget: the cancels leave 0; 302 / 20 = 15.1 s. This is the
+    ///   longest wait, and it is shorter than the 30 s after which a
+    ///   margin report stops being fresh.
+    #[test]
+    fn a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time() {
+        let t0 = Instant::now();
+        let after_burst = |tokens: f64| {
+            let mut b = Budget { tokens, last: t0 };
+            for _ in 0..500 {
+                // What the gateway does for one cancel.
+                b.for_cancel(t0);
+            }
+            b
+        };
+        // What the gateway does for the margin query, `ms` after the burst.
+        let margin_query_goes = |b: &Budget, ms: u64| b.clone().for_query(t0 + Duration::from_millis(ms), f64::from(WEIGHT_MARGIN_QUERY));
+        // Exactly `left` units are in the budget: all of them can be taken
+        // and one more cannot.
+        let holds = |b: &Budget, left: f64| b.clone().take_at(t0, left, 0.0) && !b.clone().take_at(t0, left + 1.0, 0.0);
+
+        let full = after_burst(1200.0);
+        assert!(holds(&full, 700.0));
+        assert!(margin_query_goes(&full, 0));
+
+        let start_up = after_burst(600.0);
+        assert!(holds(&start_up, 100.0));
+        assert!(!margin_query_goes(&start_up, 0));
+        assert!(!margin_query_goes(&start_up, 10_099));
+        assert!(margin_query_goes(&start_up, 10_101));
+
+        let empty = after_burst(0.0);
+        assert!(holds(&empty, 0.0));
+        assert!(!margin_query_goes(&empty, 15_099));
+        assert!(margin_query_goes(&empty, 15_101));
+        // The refill stops at 1200 however long nothing is sent.
+        let mut idle = empty.clone();
+        assert!(idle.take_at(t0 + Duration::from_secs(3600), 1200.0, 0.0));
+        assert!(!idle.take_at(t0 + Duration::from_secs(3600), 1.0, 0.0));
     }
 
     #[test]

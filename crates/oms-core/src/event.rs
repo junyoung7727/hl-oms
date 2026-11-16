@@ -187,6 +187,50 @@ pub enum Event {
         /// than this is treated as a re-delivery from now on.
         fill_floor: Ts,
     },
+    /// A margin report of the current link session was taken as the newest
+    /// one (C-MARGIN).
+    MarginReported {
+        report: MarginReport,
+    },
+    /// A margin report was refused as a whole. The last recorded report
+    /// stays and keeps ageing.
+    MarginReportRejected {
+        session: u64,
+        seq: u64,
+        queried_at: Ts,
+        reason: String,
+    },
+    /// The day base of the daily-loss rule was set (C-MARGIN).
+    DayBaseSet {
+        day: u64,
+        value: Amount,
+        set_by: BaseSetBy,
+    },
+    /// The account entered REDUCING (C-MARGIN). In the same input every
+    /// resting plain order gets a `CancelRequested` by this rule.
+    ReducingEntered {
+        rule: RuleId,
+        detail: String,
+    },
+    /// The venue told the margin mode and the leverage of one instrument in
+    /// the current link session (C-MARGIN).
+    VenueSettingNoted {
+        session: u64,
+        instrument: InstrumentId,
+        isolated: bool,
+        leverage: u32,
+    },
+    /// The venue told the account mode in the current link session
+    /// (C-MARGIN).
+    AccountModeNoted { session: u64, mode: String },
+    /// The operator ended REDUCING (C-MARGIN, 해제). The `DayBaseSet` that
+    /// made `new_base` the day base is the event before this one.
+    ReducingCleared {
+        note: String,
+        /// The day base the tripped rule was judged against, if any.
+        old_base: Option<Amount>,
+        new_base: Amount,
+    },
 }
 
 /// Stable reason codes for a refused new-order request.
@@ -217,6 +261,13 @@ pub enum RejectReason {
     ExpiryTooFar,
     Overflow,
     Hold(HoldReason),
+    /// A plain order needs a fresh margin report and there is none
+    /// (C-MARGIN). Not a hold: it depends on the time, and holds are derived
+    /// from state alone.
+    MarginUnavailable,
+    /// A plain order would raise account exposure above the leverage limit
+    /// times the account value (C-MARGIN). Nothing latches.
+    AccountLeverage,
 }
 
 /// What the gateway must do. Commands are produced only by live processing,
@@ -348,6 +399,13 @@ impl Event {
             Event::RefPriceUpdated { .. } => "ref_price_updated",
             Event::PositionAdjusted { .. } => "position_adjusted",
             Event::Purged { .. } => "purged",
+            Event::MarginReported { .. } => "margin_reported",
+            Event::MarginReportRejected { .. } => "margin_report_rejected",
+            Event::DayBaseSet { .. } => "day_base_set",
+            Event::ReducingEntered { .. } => "reducing_entered",
+            Event::VenueSettingNoted { .. } => "venue_setting_noted",
+            Event::AccountModeNoted { .. } => "account_mode_noted",
+            Event::ReducingCleared { .. } => "reducing_cleared",
         }
     }
 }
@@ -373,6 +431,10 @@ impl Input {
                 VenueInput::OpenOrders { .. } => "venue.open_orders",
                 VenueInput::Positions { .. } => "venue.positions",
                 VenueInput::RefPrice { .. } => "venue.ref_price",
+                VenueInput::MarginReport(_) => "venue.margin_report",
+                VenueInput::MarginReportInvalid { .. } => "venue.margin_report_invalid",
+                VenueInput::VenueSetting { .. } => "venue.venue_setting",
+                VenueInput::AccountMode { .. } => "venue.account_mode",
             },
         }
     }

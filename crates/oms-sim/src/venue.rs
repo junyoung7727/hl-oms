@@ -34,6 +34,7 @@ pub struct SimOrder {
     pub filled: Qty,
     pub status: SimStatus,
     pub updated_at: Ts,
+    pub reduce_only: bool,
 }
 
 impl SimOrder {
@@ -77,6 +78,8 @@ pub struct PlaceReq {
     pub px: Px,
     pub tif: Tif,
     pub expires_at: Ts,
+    /// The venue's reduce-only flag: the order may only shrink the position.
+    pub reduce_only: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -105,6 +108,22 @@ pub struct SimVenue {
     pub place_requests: BTreeMap<u128, u32>,
     /// Client ids that produced more than one live order. Must stay empty.
     pub duplicate_placements: Vec<u128>,
+    /// The margin model: what the account is worth. See `account_value`.
+    pub cash: Amount,
+    /// Mark price of each instrument. Until the driver sets one, the price
+    /// of the instrument's first fill stands in.
+    pub marks: BTreeMap<InstrumentId, Px>,
+    /// Margin mode and leverage the venue states for an instrument that is
+    /// not listed here: isolated, 2.
+    pub settings: BTreeMap<InstrumentId, (LeverageType, u32)>,
+    /// Maximum leverage the venue states for every instrument.
+    pub max_leverage: u32,
+    /// Control knob: the margin the venue states for a position, in place
+    /// of the model's value (see `margin_positions`).
+    pub margin_used_override: BTreeMap<InstrumentId, Amount>,
+    /// The account mode the venue states. `standard` is this model's own
+    /// name for the ordinary mode, not a Hyperliquid value (T10).
+    pub account_mode: String,
 }
 
 impl SimVenue {
@@ -114,8 +133,106 @@ impl SimVenue {
             next_tid: 1,
             enforce_expiry,
             fee_bps: 2,
+            max_leverage: 40,
+            account_mode: "standard".into(),
             ..SimVenue::default()
         }
+    }
+
+    // ---- margin model ----------------------------------------------------
+    //
+    // This is our own model, not the venue's documented arithmetic:
+    //   account value = cash + sum over instruments of position x mark
+    // A deposit adds to the cash. A fill moves the cash by the price paid or
+    // received and takes its fee. Funding is taken from the cash. So the
+    // account value follows fills, price, fees and funding, and a fill at
+    // the mark changes it by the fee alone.
+
+    /// Adds `amount` to the cash (negative: a withdrawal).
+    pub fn deposit(&mut self, amount: Amount) {
+        self.cash = Amount(self.cash.0 + amount.0);
+    }
+
+    /// Sets the mark price of one instrument.
+    pub fn set_mark(&mut self, instrument: &InstrumentId, px: Px) {
+        self.marks.insert(instrument.clone(), px);
+    }
+
+    /// Charges funding on one instrument: `rate_ppm` millionths of the
+    /// position's value at the mark. A positive rate is paid by a long
+    /// position and received by a short one. Returns the amount charged.
+    pub fn charge_funding(&mut self, instrument: &InstrumentId, rate_ppm: i64) -> Amount {
+        let charge = Amount((i128::from(self.signed_value(instrument)) * i128::from(rate_ppm) / 1_000_000) as i64);
+        self.deposit(Amount(-charge.0));
+        charge
+    }
+
+    /// The mark price of one instrument, zero while it has none.
+    pub fn mark(&self, instrument: &InstrumentId) -> Px {
+        self.marks.get(instrument).copied().unwrap_or(Px(0))
+    }
+
+    /// Position times mark, signed like the position.
+    fn signed_value(&self, instrument: &InstrumentId) -> i64 {
+        let value = i128::from(self.position(instrument)) * i128::from(self.mark(instrument).0) / i128::from(oms_core::num::SCALE);
+        value as i64
+    }
+
+    /// What the account is worth now, as a margin report states it.
+    pub fn account_value(&self) -> Amount {
+        Amount(self.cash.0 + self.positions.keys().map(|i| self.signed_value(i)).sum::<i64>())
+    }
+
+    /// Books a trade into the margin model: the cash pays for a buy and
+    /// receives for a sell, and pays the fee.
+    fn settle(&mut self, instrument: &InstrumentId, side: Side, notional: i64, px: Px, fee: Amount) {
+        let paid = match side {
+            Side::Buy => notional,
+            Side::Sell => -notional,
+        };
+        self.cash = Amount(self.cash.0 - paid - fee.0);
+        self.marks.entry(instrument.clone()).or_insert(px);
+    }
+
+    /// Margin mode and leverage of one instrument, as the venue states them.
+    pub fn setting(&self, instrument: &InstrumentId) -> (LeverageType, u32) {
+        self.settings.get(instrument).copied().unwrap_or((LeverageType::Isolated, 2))
+    }
+
+    /// The positions of a margin report. Position value is size x mark. The
+    /// margin of a position is its value divided by the instrument's
+    /// leverage, unless the driver set another number: the model keeps no
+    /// entry price, so a loss does not eat into the stated margin by itself.
+    pub fn margin_positions(&self) -> Vec<MarginPosition> {
+        self.positions
+            .iter()
+            .filter(|(_, q)| **q != 0)
+            .map(|(i, q)| {
+                let (leverage_type, leverage_value) = self.setting(i);
+                let position_value = Amount(self.signed_value(i).abs());
+                let margin_used = self
+                    .margin_used_override
+                    .get(i)
+                    .copied()
+                    .unwrap_or(Amount(position_value.0 / i64::from(leverage_value.max(1))));
+                MarginPosition {
+                    instrument: i.clone(),
+                    qty: SQty(*q),
+                    position_value,
+                    margin_used,
+                    leverage_type,
+                    leverage_value,
+                    max_leverage: self.max_leverage,
+                }
+            })
+            .collect()
+    }
+
+    /// Control knob: moves the cash so that the account is worth `value`
+    /// now. Fills, price, fees and funding move it on from there.
+    pub fn set_account_value(&mut self, value: Amount) {
+        let now = self.account_value();
+        self.deposit(Amount(value.0 - now.0));
     }
 
     fn emit_order(&mut self, oid: u64, now: Ts) {
@@ -144,6 +261,9 @@ impl SimVenue {
             // and records it.
             self.duplicate_placements.push(key);
         }
+        if req.reduce_only && req.qty > self.reducible(&req.instrument, req.side) {
+            return PlaceResp::Rejected { reason: "reduce only order would increase position".into() };
+        }
         let immediate = immediate.min(req.qty);
         match req.tif {
             Tif::Ioc if immediate.is_zero() => {
@@ -166,6 +286,7 @@ impl SimVenue {
             filled: Qty::ZERO,
             status: SimStatus::Open,
             updated_at: now,
+            reduce_only: req.reduce_only,
         });
         self.by_client.insert(key, oid);
         self.emit_order(oid, now);
@@ -182,12 +303,25 @@ impl SimVenue {
     /// Trades `qty` of an open order at its limit price. Returns the fill, or
     /// `None` if the order is not open.
     pub fn fill(&mut self, now: Ts, oid: u64, qty: Qty) -> Option<SimFill> {
+        let (reduce_only, instrument, side) = {
+            let o = self.orders.get(&oid)?;
+            (o.reduce_only, o.instrument.clone(), o.side)
+        };
+        // A resting reduce-only order trades only what still shrinks the
+        // position; the venue cancels what is left of it once nothing does.
+        let reducible = reduce_only.then(|| self.reducible(&instrument, side));
         let o = self.orders.get_mut(&oid)?;
         if o.status != SimStatus::Open || qty.0 <= 0 {
             return None;
         }
-        let qty = qty.min(o.remaining());
+        let mut qty = qty.min(o.remaining());
+        if let Some(reducible) = reducible {
+            qty = qty.min(reducible);
+        }
         if qty.is_zero() {
+            if reduce_only {
+                self.cancel_oid(now, oid, "reduce only order would increase position");
+            }
             return None;
         }
         o.filled = Qty(o.filled.0 + qty.0);
@@ -209,10 +343,24 @@ impl SimVenue {
             o.status = SimStatus::Filled;
         }
         *self.positions.entry(fill.instrument.clone()).or_default() += qty.signed(fill.side).0;
+        self.settle(&fill.instrument, fill.side, notional, fill.px, fill.fee);
         self.fills.push(fill.clone());
         self.stream.push(StreamEvent::Fill(fill.clone()));
         self.emit_order(oid, now);
+        if reducible == Some(qty) {
+            self.cancel_oid(now, oid, "reduce only order would increase position");
+        }
         Some(fill)
+    }
+
+    /// How much an order on `side` can trade before it stops shrinking the
+    /// position: the size of the opposite position, zero when there is none.
+    fn reducible(&self, instrument: &InstrumentId, side: Side) -> Qty {
+        let pos = self.position(instrument);
+        match side {
+            Side::Sell => Qty(pos.max(0)),
+            Side::Buy => Qty((-pos).max(0)),
+        }
     }
 
     fn cancel_oid(&mut self, now: Ts, oid: u64, reason: &str) -> bool {
@@ -258,6 +406,7 @@ impl SimVenue {
         let signed = qty.signed(side).0;
         *self.positions.entry(instrument.clone()).or_default() += signed;
         *self.external_positions.entry(instrument.clone()).or_default() += signed;
+        self.settle(instrument, side, num_notional(px, qty), px, Amount::ZERO);
         self.fills.push(fill.clone());
         self.stream.push(StreamEvent::Fill(fill.clone()));
         fill

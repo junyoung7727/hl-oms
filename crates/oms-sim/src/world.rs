@@ -54,6 +54,49 @@ pub struct Profile {
     pub absence_margin_us: u64,
     pub closed_retention_us: u64,
     pub dedup_grace_us: u64,
+    /// Runs the core with a margin policy (C-MARGIN) and the venue with its
+    /// margin model. Off in every profile that existed before the margin
+    /// rules: such a run draws the same random numbers and writes the same
+    /// journal as before.
+    pub margin: bool,
+    /// Share of new orders that carry the reduce-only flag (margin only).
+    pub p_reduce_only: u32,
+    // actions per step of the venue's margin model and of the operator
+    pub p_price: u32,
+    pub p_funding: u32,
+    pub p_clear: u32,
+    /// The venue leaves margin queries unanswered for a while.
+    pub p_margin_outage: u32,
+    /// The venue states no margin at all for the position for a while, so
+    /// that the MM buffer trips.
+    pub p_mm_squeeze: u32,
+    /// The operator's account moves and base resets: a withdrawal or a
+    /// deposit at the venue, and `rebase-day`.
+    pub p_transfer: u32,
+    pub p_rebase: u32,
+    /// Virtual time at the start of the run.
+    pub start_at: Ts,
+    // the margin clock (C-MARGIN: poll, freshness limit, stale-cancel limit)
+    pub margin_poll_us: u64,
+    pub margin_max_age_us: u64,
+    pub stale_cancel_us: u64,
+    /// How long the venue leaves margin queries unanswered, in polls.
+    pub outage_polls: (u64, u64),
+    /// Share of UTC midnights over which the venue leaves margin queries
+    /// unanswered: from some time in the hour before it to some time in the
+    /// ten minutes after it. The first report of the new day is then the
+    /// first to show what the account lost meanwhile (S12).
+    pub p_night_outage: u32,
+    /// Share of margin answers that the network delivers a second time.
+    pub p_report_dup: u32,
+    pub reconcile_every_us: u64,
+    /// Share of steps before which nothing acts for a while: only the
+    /// timers run (margin poll, reconcile, tick).
+    pub p_idle: u32,
+    /// Length of one such pause.
+    pub idle_us: (u64, u64),
+    /// The run goes on past `steps` until this much virtual time has passed.
+    pub run_us: u64,
 }
 
 impl Profile {
@@ -87,6 +130,29 @@ impl Profile {
             absence_margin_us: 2_000_000,
             closed_retention_us: 3_600_000_000,
             dedup_grace_us: 60_000_000,
+            margin: false,
+            p_reduce_only: 0,
+            p_price: 0,
+            p_funding: 0,
+            p_clear: 0,
+            p_margin_outage: 0,
+            p_mm_squeeze: 0,
+            p_transfer: 0,
+            p_rebase: 0,
+            start_at: 1_700_000_000_000_000,
+            // Fifty times faster than the contract's defaults (poll 5 s,
+            // fresh 30 s, stale cancel 60 s), because a run of 1500 steps
+            // lasts about 25 virtual seconds. The proportions are kept.
+            margin_poll_us: 100_000,
+            margin_max_age_us: 600_000,
+            stale_cancel_us: 1_200_000,
+            outage_polls: (5, 25),
+            p_night_outage: 0,
+            p_report_dup: 0,
+            reconcile_every_us: 300_000,
+            p_idle: 0,
+            idle_us: (0, 0),
+            run_us: 0,
         }
     }
 
@@ -159,6 +225,93 @@ impl Profile {
         }
     }
 
+    /// `calm` with the margin rules on: the venue's account value follows
+    /// fills, price moves, fees and funding, some orders are reduce-only,
+    /// and an operator clears REDUCING now and then. No fault is injected.
+    pub fn margin_calm() -> Profile {
+        Profile {
+            name: "margin_calm",
+            margin: true,
+            p_reduce_only: 150,
+            p_price: 100,
+            p_funding: 10,
+            p_clear: 5,
+            // Twelve seconds before a UTC midnight (day 19676), so that a
+            // run of about 25 s crosses it.
+            start_at: 19_676 * DAY_US - 12_000_000,
+            ..Profile::calm()
+        }
+    }
+
+    /// `margin_calm` with a lossy network, link drops, process restarts,
+    /// margin queries that go unanswered for a while or are answered late,
+    /// and a venue that at times states too little margin for the position.
+    pub fn margin_lossy() -> Profile {
+        let calm = Profile::margin_calm();
+        Profile {
+            name: "margin_lossy",
+            margin: true,
+            // Orders rest longer than in `lossy` (fewer fills and strategy
+            // cancels), so that a stale cancel finds orders to cancel.
+            p_new: 230,
+            p_cancel: 40,
+            p_fill: 150,
+            p_tick: 150,
+            // Fewer link drops and restarts than `crashy`: each one costs
+            // the margin rules a fresh report, and a run that is blind most
+            // of the time accepts too few plain orders to say anything.
+            p_link_drop: 3,
+            p_crash: 2,
+            p_operator: 2,
+            p_commit: 500,
+            p_reduce_only: calm.p_reduce_only,
+            p_price: calm.p_price,
+            p_funding: calm.p_funding,
+            p_clear: 12,
+            p_margin_outage: 2,
+            p_mm_squeeze: 1,
+            start_at: calm.start_at,
+            ..Profile::lossy()
+        }
+    }
+
+    /// The margin rules over several UTC days (G8), on the contract's own
+    /// clock: poll 5 s, fresh 30 s, stale cancel 60 s. The run starts one
+    /// hour before a UTC midnight and lasts 50 hours, so it crosses three
+    /// midnights. Activity comes in bursts with pauses of up to ten minutes
+    /// in between, during which only the timers run. On top of the faults
+    /// of `margin_lossy` (rarer per step, the run has about ten times the
+    /// steps): margin queries unanswered for up to an hour, and over every
+    /// second midnight; margin answers delivered twice; withdrawals and
+    /// deposits; the operator's `rebase-day`.
+    pub fn margin_days() -> Profile {
+        let policy = MarginPolicy::default();
+        Profile {
+            name: "margin_days",
+            steps: 0,
+            run_us: 50 * 3_600_000_000,
+            start_at: 19_676 * DAY_US - 3_600_000_000,
+            margin_poll_us: 5_000_000,
+            margin_max_age_us: policy.margin_max_age_us,
+            stale_cancel_us: policy.stale_cancel_us,
+            outage_polls: (12, 720),
+            p_night_outage: 500,
+            p_report_dup: 50,
+            reconcile_every_us: 2_000_000,
+            p_idle: 40,
+            idle_us: (5_000_000, 600_000_000),
+            p_link_drop: 2,
+            p_crash: 1,
+            p_clear: 4,
+            p_margin_outage: 1,
+            p_transfer: 3,
+            p_rebase: 2,
+            ..Profile::margin_lossy()
+        }
+    }
+
+    /// The profiles that existed before the margin rules. None of them sets
+    /// a margin policy.
     pub fn all() -> Vec<Profile> {
         vec![
             Profile::calm(),
@@ -197,6 +350,56 @@ pub struct SimStats {
     pub final_digest: u64,
     pub trace_hash: u64,
     pub sim_seconds: u64,
+    // margin profiles
+    /// Accepted plain orders that the `leverage-gate` check judged.
+    pub leverage_checked: u64,
+    /// Requests refused with `AccountLeverage`.
+    pub leverage_rejects: u64,
+    /// Times the account entered REDUCING.
+    pub reducing_entries: u64,
+    /// Plain orders that were open at an entry and had their cancel request.
+    pub reducing_entry_cancels: u64,
+    /// Plain requests refused with `Hold(Reducing)`.
+    pub reducing_plain_rejects: u64,
+    /// Reduce-only requests accepted while REDUCING.
+    pub reducing_reduce_only_accepts: u64,
+    /// Times the operator's clear ended REDUCING.
+    pub reducing_clears: u64,
+    /// Times the operator's clear was refused.
+    pub clear_refusals: u64,
+    /// Reports that rolled the day base to a new UTC day while REDUCING.
+    pub reducing_day_rolls: u64,
+    /// Reports recorded while REDUCING whose account value was back within
+    /// the daily-loss limit of the day base.
+    pub reducing_recoveries: u64,
+    /// Restarts while the journal said REDUCING.
+    pub reducing_restarts: u64,
+    /// Plain requests refused with `MarginUnavailable`.
+    pub margin_unavailable_rejects: u64,
+    /// Margin reports the core did not record (late, or of an old session).
+    pub reports_dropped: u64,
+    /// Ticks at which the stale-cancel condition held and a plain order
+    /// was open.
+    pub stale_cancel_ticks: u64,
+    /// Cancel requests made by the rule `MarginStale`.
+    pub stale_rule_cancels: u64,
+    /// Times the account entered REDUCING by the MM buffer.
+    pub mm_entries: u64,
+    /// Durable `day_base_set` records by a report that replaced the base of
+    /// an earlier UTC day: the midnights the day base crossed.
+    pub day_rolls: u64,
+    /// Reports that rolled the day base and whose account value was more
+    /// than the daily-loss limit below the old base, the account not being
+    /// REDUCING before: a loss first seen across a midnight.
+    pub roll_losses: u64,
+    /// Margin queries the world made (one per poll of a link session).
+    pub margin_polls: u64,
+    /// Durable journal records whose input is a margin report.
+    pub margin_records: u64,
+    /// Polls (link session and query number) that those records answer.
+    pub margin_polls_recorded: u64,
+    /// Margin answers that the network delivered a second time.
+    pub report_dups: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -224,6 +427,9 @@ enum Query {
     Fills(Ts),
     OpenOrders,
     Positions,
+    Margin { seq: u64 },
+    VenueSetting,
+    AccountMode,
 }
 
 #[derive(Clone, Debug)]
@@ -237,6 +443,24 @@ enum Net {
     Reconcile { epoch: u32, n: u32 },
     QueryArrive { epoch: u32, session: u64, queried_at: Ts, q: Query },
     QueryResp { epoch: u32, inputs: Vec<VenueInput> },
+    /// The margin poll of one link session (margin profiles only).
+    MarginPoll { epoch: u32, session: u64 },
+    /// A reference price on the stream (margin profiles only).
+    RefPrice { epoch: u32, session: u64, px: Px, ts: Ts },
+}
+
+impl Net {
+    /// Traffic that never ends: the reconcile timer and, in a margin
+    /// profile, the margin poll with its query, its answer and the
+    /// reference price.
+    fn is_periodic(&self) -> bool {
+        match self {
+            Net::Reconcile { .. } | Net::MarginPoll { .. } | Net::RefPrice { .. } => true,
+            Net::QueryArrive { q, .. } => matches!(q, Query::Margin { .. }),
+            Net::QueryResp { inputs, .. } => inputs.iter().all(|i| matches!(i, VenueInput::MarginReport(_))),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -245,9 +469,17 @@ enum Inflight {
     Cancel(OrderId, u32),
 }
 
+/// What the world notes before an input, to judge the core's answer to it.
+struct MarginBefore {
+    exposure: Option<i128>,
+    reducing: bool,
+    day_base: Option<Amount>,
+}
+
 pub const INSTANCE: u64 = 0x51_4d_55_4c;
 const GW_TIMEOUT_US: u64 = 2_000_000;
-const RECONCILE_EVERY_US: u64 = 300_000;
+/// What the account holds at the start of a margin run: the owner's 100.
+const START_CAPITAL: i64 = 100 * oms_core::num::SCALE;
 
 pub struct World {
     pub p: Profile,
@@ -273,6 +505,21 @@ pub struct World {
     released_keys: BTreeSet<(StrategyId, ClientOrderId)>,
     accepted_keys: BTreeMap<(StrategyId, ClientOrderId), OrderId>,
     external_seen: bool,
+    /// Number of the last margin query. It rises for the life of the
+    /// process, as the node's does.
+    margin_seq: u64,
+    /// The venue answers no margin query before this time.
+    margin_out_until: Ts,
+    /// The venue answers no margin query from the first time to the second
+    /// (an outage over a midnight), and the midnight that was drawn for.
+    night_out: (Ts, Ts),
+    night_drawn_for: Ts,
+    /// The venue states no margin for the position before this time.
+    mm_squeeze_until: Ts,
+    /// When the current link session came up, by the world's own clock.
+    link_up_at: Option<Ts>,
+    /// The durable journal holds a `day_base_set`.
+    base_in_journal: bool,
     pub stats: SimStats,
 }
 
@@ -321,6 +568,16 @@ pub fn sim_config(p: &Profile) -> CoreConfig {
         fill_dedup_retention_us: p.closed_retention_us,
         ..Policy::default()
     };
+    let mut policy = policy;
+    if p.margin {
+        policy.ref_price_max_age_us = p.margin_max_age_us;
+        policy.margin = Some(MarginPolicy {
+            margin_max_age_us: p.margin_max_age_us,
+            stale_cancel_us: p.stale_cancel_us,
+            account_modes_allowed: vec!["standard".into()],
+            ..MarginPolicy::default()
+        });
+    }
     CoreConfig { version: 1, instruments, strategies, policy }
 }
 
@@ -338,7 +595,7 @@ impl World {
         let mut w = World {
             seed,
             rng: Rng::new(seed),
-            now: 1_700_000_000_000_000,
+            now: p.start_at,
             step: 0,
             core: Core::new(INSTANCE),
             durable: Vec::new(),
@@ -358,10 +615,21 @@ impl World {
             released_keys: BTreeSet::new(),
             accepted_keys: BTreeMap::new(),
             external_seen: false,
+            margin_seq: 0,
+            margin_out_until: 0,
+            night_out: (0, 0),
+            night_drawn_for: 0,
+            mm_squeeze_until: 0,
+            link_up_at: None,
+            base_in_journal: false,
             stats: SimStats { trace_hash: 0xcbf2_9ce4_8422_2325, ..SimStats::default() },
             p,
         };
         w.stats.steps = w.p.steps;
+        if w.p.margin {
+            w.venue.deposit(Amount(START_CAPITAL));
+            w.venue.set_mark(&inst(), Px(100 * PX_TICK));
+        }
         w
     }
 
@@ -390,6 +658,7 @@ impl World {
 
     fn feed(&mut self, input: Input) -> Result<(), Violation> {
         self.stats.inputs += 1;
+        let before = self.p.margin.then(|| self.margin_before());
         let out = self
             .core
             .handle(self.now, &input)
@@ -397,6 +666,9 @@ impl World {
         self.core
             .check_invariants()
             .map_err(|e| self.violation("structural-invariant", format!("{e} after {input:?}")))?;
+        if let Some(before) = before {
+            self.check_margin_rules(&input, &out, &before)?;
+        }
         let rec = (!out.events.is_empty()).then(|| {
             let pending_records = self.pending.iter().filter(|(r, _)| r.is_some()).count();
             Record {
@@ -428,6 +700,7 @@ impl World {
                 let bytes = serde_json::to_vec(&rec).unwrap_or_default();
                 self.stats.trace_hash = fnv(self.stats.trace_hash, &bytes);
                 self.stats.records += 1;
+                self.stats.margin_records += u64::from(matches!(rec.input, Input::Venue(VenueInput::MarginReport(_))));
                 self.note_events(&rec.events);
                 self.durable.push(rec);
             }
@@ -452,6 +725,11 @@ impl World {
                 Event::FillParked { .. } => self.stats.parked_seen += 1,
                 Event::Purged { order_ids, .. } => self.stats.purged += order_ids.len() as u64,
                 Event::MismatchRaised { .. } => self.stats.mismatches += 1,
+                Event::DayBaseSet { set_by, .. } => {
+                    let by_report = matches!(set_by, BaseSetBy::Report);
+                    self.stats.day_rolls += u64::from(by_report && self.base_in_journal);
+                    self.base_in_journal = true;
+                }
                 _ => {}
             }
         }
@@ -489,7 +767,7 @@ impl World {
 
     fn gateway_send(&mut self, cmd: VenueCommand) -> Result<(), Violation> {
         match cmd {
-            VenueCommand::SendOrder { order_id, instance_id, instrument, side, qty, px, tif, expires_at, .. } => {
+            VenueCommand::SendOrder { order_id, instance_id, instrument, side, qty, px, tif, reduce_only, expires_at } => {
                 self.stats.sends += 1;
                 let n = {
                     let n = self.released_sends.entry(order_id).or_default();
@@ -542,7 +820,7 @@ impl World {
                         }
                     }
                 };
-                let place = PlaceReq { client, instrument, side, qty, px, tif, expires_at };
+                let place = PlaceReq { client, instrument, side, qty, px, tif, expires_at, reduce_only };
                 self.schedule(d, Net::PlaceArrive { req, epoch: self.epoch, place, order_id, immediate });
             }
             VenueCommand::SendCancel { order_id, instance_id, attempt, .. } => {
@@ -669,9 +947,25 @@ impl World {
                 if epoch == self.epoch && !self.link_up {
                     self.session += 1;
                     self.link_up = true;
+                    self.link_up_at = Some(self.now);
                     let session = self.session;
                     self.feed(Input::Venue(VenueInput::Link { up: true, session, reason: "connected".into() }))?;
                     self.schedule(1_000, Net::Reconcile { epoch, n: 0 });
+                    if self.p.margin {
+                        self.schedule(1_000, Net::MarginPoll { epoch, session });
+                    }
+                }
+            }
+            Net::MarginPoll { epoch, session } => {
+                // One poll chain per link session; it ends with the session.
+                if epoch == self.epoch && self.link_up && session == self.session {
+                    self.issue_margin_queries();
+                    self.schedule(self.p.margin_poll_us, Net::MarginPoll { epoch, session });
+                }
+            }
+            Net::RefPrice { epoch, session, px, ts } => {
+                if epoch == self.epoch && self.link_up && session == self.session {
+                    self.feed(Input::Venue(VenueInput::RefPrice { instrument: inst(), px, venue_ts: ts }))?;
                 }
             }
             Net::Reconcile { epoch, n } => {
@@ -682,15 +976,28 @@ impl World {
                         self.commit()?;
                         self.issue_queries(n);
                     }
-                    self.schedule(RECONCILE_EVERY_US, Net::Reconcile { epoch, n: n + 1 });
+                    self.schedule(self.p.reconcile_every_us, Net::Reconcile { epoch, n: n + 1 });
                 }
             }
             Net::QueryArrive { epoch, session, queried_at, q } => {
                 if epoch != self.epoch || self.chance(self.p.p_query_lost) {
                     return Ok(());
                 }
+                let is_margin = matches!(q, Query::Margin { .. });
+                let late = self.p.margin && is_margin && self.chance(self.p.p_req_slow);
                 let inputs = self.answer(session, queried_at, q);
-                let d = self.net_delay();
+                let mut d = self.net_delay();
+                if late {
+                    // An answer that is old when it arrives, and that a
+                    // later query's answer can overtake.
+                    d += self.rng.range(2 * self.p.margin_poll_us, 15 * self.p.margin_poll_us);
+                }
+                if is_margin && !inputs.is_empty() && self.p.p_report_dup > 0 && self.chance(self.p.p_report_dup) {
+                    // The same answer once more, a little later.
+                    self.stats.report_dups += 1;
+                    let again = d + self.rng.range(1_000, self.p.margin_poll_us);
+                    self.schedule(again, Net::QueryResp { epoch, inputs: inputs.clone() });
+                }
                 self.schedule(d, Net::QueryResp { epoch, inputs });
             }
             Net::QueryResp { epoch, inputs } => {
@@ -727,8 +1034,45 @@ impl World {
         }
     }
 
+    /// What the node's reconciler does for the margin rules: the margin
+    /// query on its timer, and the venue setting and the account mode while
+    /// the core does not know them in this link session. The venue also
+    /// publishes its mark as the reference price.
+    fn issue_margin_queries(&mut self) {
+        self.margin_seq += 1;
+        self.stats.margin_polls += 1;
+        let mut queries = vec![Query::Margin { seq: self.margin_seq }];
+        if !self.core.margin.venue_settings.contains_key(&inst()) {
+            queries.push(Query::VenueSetting);
+        }
+        if self.core.margin.account_mode.is_none() {
+            queries.push(Query::AccountMode);
+        }
+        for q in queries {
+            let d = self.net_delay();
+            self.schedule(d, Net::QueryArrive { epoch: self.epoch, session: self.session, queried_at: self.now, q });
+        }
+        let d = self.net_delay();
+        let (px, ts) = (self.venue.mark(&inst()), self.venue_now());
+        self.schedule(d, Net::RefPrice { epoch: self.epoch, session: self.session, px, ts });
+    }
+
     fn answer(&self, session: u64, queried_at: Ts, q: Query) -> Vec<VenueInput> {
         match q {
+            Query::Margin { .. } if self.now < self.margin_out_until => Vec::new(),
+            Query::Margin { .. } if self.night_out.0 <= self.now && self.now < self.night_out.1 => Vec::new(),
+            Query::Margin { seq } => vec![VenueInput::MarginReport(MarginReport {
+                session,
+                seq,
+                queried_at,
+                account_value: self.venue.account_value(),
+                positions: self.venue.margin_positions(),
+            })],
+            Query::VenueSetting => {
+                let (mode, leverage) = self.venue.setting(&inst());
+                vec![VenueInput::VenueSetting { session, instrument: inst(), isolated: mode == LeverageType::Isolated, leverage }]
+            }
+            Query::AccountMode => vec![VenueInput::AccountMode { session, mode: self.venue.account_mode.clone() }],
             Query::Status(order_id) => {
                 let client = VenueClientId { instance_id: INSTANCE, order_id };
                 match self.venue.status(client) {
@@ -783,6 +1127,244 @@ impl World {
         }
     }
 
+    // ---- margin rules: what the world checks after every input ------------
+
+    fn margin_before(&self) -> MarginBefore {
+        MarginBefore {
+            exposure: self.oracle_exposure(),
+            reducing: self.core.margin.reducing.is_some(),
+            day_base: self.core.margin.day_base.as_ref().map(|b| b.value),
+        }
+    }
+
+    /// Whether the durable journal says the account is REDUCING. Fails when
+    /// a `reducing_cleared` stands under an input that is not the
+    /// operator's clear (S14).
+    fn journal_reducing(&self) -> Result<bool, Violation> {
+        let mut reducing = false;
+        for rec in &self.durable {
+            for e in &rec.events {
+                match e {
+                    Event::ReducingEntered { .. } => reducing = true,
+                    Event::ReducingCleared { .. } => {
+                        if !matches!(rec.input, Input::Operator(OperatorCmd::ClearReduce { .. })) {
+                            return Err(self.violation(
+                                "reducing-release",
+                                format!("record {} clears REDUCING and its input is not the operator's clear", rec.seq),
+                            ));
+                        }
+                        reducing = false;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(reducing)
+    }
+
+    /// S14: REDUCING ends only by the operator's clear.
+    fn check_release(&mut self, input: &Input, out: &Output, before: &MarginBefore) -> Result<(), Violation> {
+        let is_clear = matches!(input, Input::Operator(OperatorCmd::ClearReduce { .. }));
+        if is_clear && matches!(out.reply, Some(Reply::Operator(Err(_)))) {
+            self.stats.clear_refusals += 1;
+        }
+        if !before.reducing {
+            return Ok(());
+        }
+        if self.core.margin.reducing.is_none() {
+            if !is_clear || !out.events.iter().any(|e| matches!(e, Event::ReducingCleared { .. })) {
+                return Err(self.violation("reducing-release", format!("REDUCING ended by {input:?} with events {:?}", out.events)));
+            }
+            self.stats.reducing_clears += 1;
+            return Ok(());
+        }
+        // Still REDUCING. Note the things that must not end it.
+        for e in &out.events {
+            match e {
+                Event::DayBaseSet { set_by: BaseSetBy::Report, .. } => self.stats.reducing_day_rolls += 1,
+                Event::MarginReported { .. } => {
+                    let value = self.core.margin.report.as_ref().map(|r| i128::from(r.account_value.0));
+                    if let (Some(value), Some(base)) = (value, before.day_base.map(|b| i128::from(b.0))) {
+                        // Not more than 5 % below the base any more.
+                        if (base - value) * 10_000 <= 500 * base {
+                            self.stats.reducing_recoveries += 1;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Account exposure worked out by the world from the core's books: the
+    /// position and every open order's reserved quantity, an order valued
+    /// at the higher of its limit and the reference price. Units of 1e-16
+    /// quote. `None` while there is no reference price. The world has one
+    /// instrument.
+    fn oracle_exposure(&self) -> Option<i128> {
+        let reference = i128::from(self.core.ref_px.get(&inst())?.px.0);
+        let position = i128::from(self.core.account_book(&inst()).pos.0) * reference;
+        let (mut buys, mut sells) = (0i128, 0i128);
+        for o in self.core.open.iter().filter_map(|id| self.core.order(*id)) {
+            let value = i128::from(o.reserved.0) * i128::from(o.px.0).max(reference);
+            match o.side {
+                Side::Buy => buys += value,
+                Side::Sell => sells += value,
+            }
+        }
+        Some((position + buys).max(sells - position).max(0))
+    }
+
+    /// S23: once the link has been up, without a recorded margin report,
+    /// for longer than the stale-cancel limit, a tick leaves no open plain
+    /// order without a cancel request. The link-up time is the world's own.
+    fn check_stale_cancel(&mut self) -> Result<(), Violation> {
+        let Some(up_at) = self.link_up_at.filter(|_| self.link_up) else { return Ok(()) };
+        let reported_at = self.core.margin.report.as_ref().map_or(0, |r| r.queried_at);
+        if self.now.saturating_sub(reported_at.max(up_at)) <= self.p.stale_cancel_us {
+            return Ok(());
+        }
+        let mut open_plain = false;
+        for o in self.core.open.iter().filter_map(|id| self.core.order(*id)).filter(|o| !o.reduce_only) {
+            if o.cancel.is_none() {
+                return Err(self.violation(
+                    "stale-cancel",
+                    format!("plain order {} has no cancel request after a tick past the stale-cancel limit", o.id),
+                ));
+            }
+            open_plain = true;
+        }
+        self.stats.stale_cancel_ticks += u64::from(open_plain);
+        Ok(())
+    }
+
+    /// S12, for a report the core recorded: it is judged against the day
+    /// base that stood before it. A report more than 5 % below that base
+    /// leaves the account REDUCING, also when the same report starts a new
+    /// UTC day.
+    fn check_day_base(&mut self, report: &MarginReport, out: &Output, before: &MarginBefore) -> Result<(), Violation> {
+        let value = i128::from(report.account_value.0);
+        let rolled = out.events.iter().any(|e| matches!(e, Event::DayBaseSet { set_by: BaseSetBy::Report, .. }));
+        let Some(base) = before.day_base.map(|b| i128::from(b.0)) else { return Ok(()) };
+        let lost_too_much = (base - value) * 10_000 > 500 * base;
+        if lost_too_much && self.core.margin.reducing.is_none() {
+            return Err(self.violation(
+                "daily-loss",
+                format!(
+                    "a report of account value {} is more than 5 % below the day base {} and the account is not REDUCING (the report set a new base: {rolled})",
+                    report.account_value,
+                    Amount(base as i64)
+                ),
+            ));
+        }
+        self.stats.roll_losses += u64::from(lost_too_much && rolled && !before.reducing);
+        Ok(())
+    }
+
+    fn check_margin_rules(&mut self, input: &Input, out: &Output, before: &MarginBefore) -> Result<(), Violation> {
+        self.check_release(input, out, before)?;
+        let recorded = out.events.iter().find_map(|e| match e {
+            Event::MarginReported { report } => Some(report),
+            _ => None,
+        });
+        if let Some(report) = recorded {
+            self.check_day_base(report, out, before)?;
+        }
+        let is_report = matches!(input, Input::Venue(VenueInput::MarginReport(_)));
+        if is_report && out.events.is_empty() {
+            self.stats.reports_dropped += 1;
+        }
+        for e in &out.events {
+            match e {
+                Event::CancelRequested { by: Actor::Rule(RuleId::MarginStale), .. } => self.stats.stale_rule_cancels += 1,
+                Event::ReducingEntered { rule, .. } => {
+                    // Only a margin report latches; staleness never does.
+                    if !is_report {
+                        return Err(self.violation("reducing-entry", format!("REDUCING entered by {input:?}")));
+                    }
+                    self.stats.mm_entries += u64::from(*rule == RuleId::MmBuffer);
+                }
+                _ => {}
+            }
+        }
+        if matches!(input, Input::Tick) {
+            self.check_stale_cancel()?;
+        }
+        if out.events.iter().any(|e| matches!(e, Event::ReducingEntered { .. })) {
+            // S8: every plain order that is open at the entry has a cancel
+            // request when the input that entered is done.
+            self.stats.reducing_entries += 1;
+            for o in self.core.open.iter().filter_map(|id| self.core.order(*id)) {
+                if o.reduce_only {
+                    continue;
+                }
+                if o.cancel.is_none() {
+                    return Err(self.violation(
+                        "reducing-cancel",
+                        format!("plain order {} is open at the entry into REDUCING and has no cancel request", o.id),
+                    ));
+                }
+                self.stats.reducing_entry_cancels += 1;
+            }
+        }
+        let Input::NewOrder(req) = input else { return Ok(()) };
+        match &out.reply {
+            Some(Reply::NewOrder(NewOrderReply::Rejected { reasons })) => {
+                if reasons.contains(&RejectReason::AccountLeverage) {
+                    self.stats.leverage_rejects += 1;
+                }
+                if !req.reduce_only && reasons.contains(&RejectReason::Hold(HoldReason::Reducing)) {
+                    self.stats.reducing_plain_rejects += 1;
+                }
+                if !req.reduce_only && reasons.contains(&RejectReason::MarginUnavailable) {
+                    self.stats.margin_unavailable_rejects += 1;
+                }
+            }
+            Some(Reply::NewOrder(NewOrderReply::Accepted { order_id })) if before.reducing && !req.reduce_only => {
+                // S8: while REDUCING no plain order is accepted.
+                return Err(self.violation("reducing-accept", format!("plain order {order_id} accepted while REDUCING")));
+            }
+            Some(Reply::NewOrder(NewOrderReply::Accepted { .. })) if req.reduce_only => {
+                if before.reducing {
+                    self.stats.reducing_reduce_only_accepts += 1;
+                }
+            }
+            Some(Reply::NewOrder(NewOrderReply::Accepted { order_id })) => {
+                // S5: at acceptance the exposure is within twice the
+                // account value, or the order did not raise it.
+                self.stats.leverage_checked += 1;
+                // S11: the numbers it was judged with are fresh.
+                let age = self.core.margin.report.as_ref().and_then(|r| self.now.checked_sub(r.queried_at));
+                if age.is_none_or(|age| age > self.p.margin_max_age_us) {
+                    return Err(self.violation(
+                        "margin-fresh",
+                        format!("plain order {order_id} accepted with a margin report of age {age:?} us"),
+                    ));
+                }
+                let value = self.core.margin.report.as_ref().map(|r| r.account_value.0);
+                let (Some(value), Some(was), Some(is)) = (value, before.exposure, self.oracle_exposure()) else {
+                    return Err(self.violation(
+                        "leverage-gate",
+                        format!("plain order {order_id} accepted without an account value or a reference price"),
+                    ));
+                };
+                let limit = 2 * i128::from(oms_core::num::SCALE) * i128::from(value);
+                if value <= 0 || (is > limit && is > was) {
+                    return Err(self.violation(
+                        "leverage-gate",
+                        format!(
+                            "plain order {order_id} accepted: exposure {was} -> {is} (1e-16), limit {limit}, account value {}",
+                            Amount(value)
+                        ),
+                    ));
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     // ---- faults -----------------------------------------------------------
 
     /// Rebuilds a core from the durable records alone.
@@ -800,12 +1382,24 @@ impl World {
         // were waiting for them: nothing of them was ever released.
         self.pending.clear();
         self.core = self.rebuild()?;
+        if self.p.margin {
+            // S14: a restart neither ends REDUCING nor starts it.
+            let said = self.journal_reducing()?;
+            if self.core.margin.reducing.is_some() != said {
+                return Err(self.violation(
+                    "reducing-release",
+                    format!("after a restart REDUCING is {} and the journal says {said}", self.core.margin.reducing.is_some()),
+                ));
+            }
+            self.stats.reducing_restarts += u64::from(said);
+        }
         self.core
             .check_invariants()
             .map_err(|e| self.violation("structural-invariant", format!("{e} after recovery")))?;
         self.epoch += 1;
         self.inflight.clear();
         self.link_up = false;
+        self.link_up_at = None;
         self.feed(Input::Boot { binary: "sim".into() })?;
         self.commit()?;
         let d = self.rng.range(100_000, 3_000_000);
@@ -819,6 +1413,7 @@ impl World {
         }
         self.stats.link_drops += 1;
         self.link_up = false;
+        self.link_up_at = None;
         let inflight = std::mem::take(&mut self.inflight);
         for (_, kind) in inflight {
             self.feed(Input::Venue(unknown_result(kind, "connection lost before a response")))?;
@@ -842,15 +1437,23 @@ impl World {
             2 => Tif::Alo,
             _ => Tif::Gtc,
         };
+        let px = if self.p.margin {
+            // Near the venue's mark, so that a fill is not itself a large
+            // gain or loss.
+            Px(self.venue.mark(&inst()).0 + (self.rng.range(0, 5) as i64 - 2) * PX_TICK)
+        } else {
+            Px(self.rng.range(90, 110) as i64 * PX_TICK)
+        };
+        let reduce_only = self.p.margin && self.rng.chance(self.p.p_reduce_only);
         let req = NewOrderReq {
             strategy,
             client_order_id: ClientOrderId::new(format!("k{}", self.key_counter)).expect("valid id"),
             instrument: inst(),
             side,
             qty: Qty(lots as i64 * QTY_STEP),
-            px: Px(self.rng.range(90, 110) as i64 * PX_TICK),
+            px,
             tif,
-            reduce_only: false,
+            reduce_only,
             expires_at: self.now + self.rng.range(800_000, 5_000_000),
         };
         self.stats.requests += 1;
@@ -935,6 +1538,106 @@ impl World {
         self.feed(Input::Operator(cmd))
     }
 
+    /// The venue's mark moves by one tick, inside 80..=120.
+    fn act_price(&mut self) {
+        let step = if self.rng.chance(500) { PX_TICK } else { -PX_TICK };
+        let px = (self.venue.mark(&inst()).0 + step).clamp(80 * PX_TICK, 120 * PX_TICK);
+        self.venue.set_mark(&inst(), Px(px));
+    }
+
+    /// The venue charges (or pays) funding of 0.01 % to 0.3 % of the
+    /// position value.
+    fn act_funding(&mut self) {
+        let rate = self.rng.range(100, 3_000) as i64;
+        let rate = if self.rng.chance(500) { rate } else { -rate };
+        self.venue.charge_funding(&inst(), rate);
+    }
+
+    /// The venue leaves margin queries unanswered for a while (0.5 to
+    /// 2.5 s on the fast margin clock).
+    fn act_margin_outage(&mut self) {
+        let (lo, hi) = self.p.outage_polls;
+        self.margin_out_until = self.now + self.rng.range(lo * self.p.margin_poll_us, hi * self.p.margin_poll_us);
+    }
+
+    /// Decides, within the hour before a UTC midnight, whether the venue
+    /// leaves margin queries unanswered over that midnight, and from when
+    /// to when.
+    fn draw_night_outage(&mut self) {
+        let midnight = (self.now / DAY_US + 1) * DAY_US;
+        let left = midnight - self.now;
+        if self.night_drawn_for == midnight || left > 3_600_000_000 {
+            return;
+        }
+        self.night_drawn_for = midnight;
+        if self.rng.chance(self.p.p_night_outage) {
+            let from = midnight - self.rng.range(0, left);
+            self.night_out = (from, midnight + self.rng.range(self.p.margin_poll_us, 600_000_000));
+        }
+    }
+
+    /// The venue states a margin of zero for the position for two to ten
+    /// polls (0.2 to 1 s on the fast margin clock).
+    fn act_mm_squeeze(&mut self) {
+        self.mm_squeeze_until = self.now + self.rng.range(2 * self.p.margin_poll_us, 10 * self.p.margin_poll_us);
+        self.venue.margin_used_override.insert(inst(), Amount::ZERO);
+    }
+
+    fn end_mm_squeeze(&mut self) {
+        self.mm_squeeze_until = 0;
+        self.venue.margin_used_override.remove(&inst());
+    }
+
+    /// The operator asks to end REDUCING. The core may refuse.
+    fn act_clear(&mut self) -> Result<(), Violation> {
+        if self.core.margin.reducing.is_none() {
+            return Ok(());
+        }
+        self.feed(Input::Operator(OperatorCmd::ClearReduce { note: "sim".into() }))
+    }
+
+    /// A withdrawal or a deposit of 0.5 % to 8 % of the start capital. An
+    /// account under 70 % of the start capital gets a deposit, one above
+    /// 130 % a withdrawal, so that the account value stays positive.
+    fn act_transfer(&mut self) {
+        let amount = START_CAPITAL / 1000 * self.rng.range(5, 81) as i64;
+        let value = self.venue.account_value().0;
+        let coin = self.rng.chance(500);
+        let deposit = value < START_CAPITAL / 10 * 7 || (value <= START_CAPITAL / 10 * 13 && coin);
+        self.venue.deposit(Amount(if deposit { amount } else { -amount }));
+    }
+
+    /// The operator resets the day base. The core may refuse.
+    fn act_rebase(&mut self) -> Result<(), Violation> {
+        self.feed(Input::Operator(OperatorCmd::RebaseDay { note: "sim".into() }))
+    }
+
+    /// Nothing acts for `us`: no strategy, no venue activity, no fault. The
+    /// timers run on, each message at its own time, and the core gets one
+    /// tick per margin poll interval.
+    fn idle(&mut self, us: u64) -> Result<(), Violation> {
+        let end = self.now + us;
+        while self.now < end {
+            let tick_at = (self.now + self.p.margin_poll_us).min(end);
+            while let Some((&(t, n), _)) = self.queue.iter().next() {
+                if t > tick_at {
+                    break;
+                }
+                self.now = self.now.max(t);
+                if self.mm_squeeze_until != 0 && self.now >= self.mm_squeeze_until {
+                    self.end_mm_squeeze();
+                }
+                if let Some(ev) = self.queue.remove(&(t, n)) {
+                    self.deliver(ev)?;
+                }
+            }
+            self.now = tick_at;
+            self.feed(Input::Tick)?;
+            self.check_always()?;
+        }
+        Ok(())
+    }
+
     // ---- checks -----------------------------------------------------------
 
     /// Properties that must hold at every instant, faults included.
@@ -980,6 +1683,18 @@ impl World {
         if rebuilt != self.core {
             return Err(self.violation("replay-equivalence", "state rebuilt from the journal differs from the live state".into()));
         }
+        if self.p.margin {
+            self.journal_reducing()?;
+            let answered: BTreeSet<(u64, u64)> = self
+                .durable
+                .iter()
+                .filter_map(|r| match &r.input {
+                    Input::Venue(VenueInput::MarginReport(m)) => Some((m.session, m.seq)),
+                    _ => None,
+                })
+                .collect();
+            self.stats.margin_polls_recorded = answered.len() as u64;
+        }
         // Re-deciding every recorded input reproduces the recorded events.
         let mut redo = Core::new(INSTANCE);
         for rec in &self.durable {
@@ -1014,14 +1729,22 @@ impl World {
         }
 
         // Every venue order of ours is known with the right fills and state.
+        let purged: BTreeSet<OrderId> = self
+            .durable
+            .iter()
+            .flat_map(|r| &r.events)
+            .filter_map(|e| match e {
+                Event::Purged { order_ids, .. } => Some(order_ids),
+                _ => None,
+            })
+            .flatten()
+            .copied()
+            .collect();
         for vo in self.venue.orders.values() {
             let Some(c) = vo.client else { continue };
             let known = self.core.order(c.order_id);
-            let purged = self.durable.iter().any(|r| {
-                r.events.iter().any(|e| matches!(e, Event::Purged { order_ids, .. } if order_ids.contains(&c.order_id)))
-            });
             let Some(o) = known else {
-                if purged {
+                if purged.contains(&c.order_id) {
                     continue;
                 }
                 return Err(self.violation("final-orders", format!("venue order {} unknown to the core", vo.oid)));
@@ -1084,7 +1807,17 @@ impl World {
     }
 
     fn one_step(&mut self) -> Result<(), Violation> {
+        if self.p.p_night_outage > 0 {
+            self.draw_night_outage();
+        }
+        if self.p.p_idle > 0 && self.rng.chance(self.p.p_idle) {
+            let us = self.rng.range(self.p.idle_us.0, self.p.idle_us.1);
+            self.idle(us)?;
+        }
         self.now += self.rng.range(1_000, 30_000);
+        if self.mm_squeeze_until != 0 && self.now >= self.mm_squeeze_until {
+            self.end_mm_squeeze();
+        }
         self.drain_due()?;
         let p = self.p.clone();
         let roll = self.rng.below(1000) as u32;
@@ -1113,6 +1846,20 @@ impl World {
             self.act_external_fill();
         } else if pick(p.p_operator) {
             self.act_operator()?;
+        } else if pick(p.p_price) {
+            self.act_price();
+        } else if pick(p.p_funding) {
+            self.act_funding();
+        } else if pick(p.p_clear) {
+            self.act_clear()?;
+        } else if pick(p.p_margin_outage) {
+            self.act_margin_outage();
+        } else if pick(p.p_mm_squeeze) {
+            self.act_mm_squeeze();
+        } else if pick(p.p_transfer) {
+            self.act_transfer();
+        } else if pick(p.p_rebase) {
+            self.act_rebase()?;
         }
         self.check_always()
     }
@@ -1120,6 +1867,9 @@ impl World {
     /// Stops injecting faults and lets the system settle.
     fn quiesce(&mut self) -> Result<(), Violation> {
         self.calm = true;
+        self.margin_out_until = 0;
+        self.night_out = (0, 0);
+        self.end_mm_squeeze();
         if self.core.halt_account.is_some() {
             self.act_operator()?;
         }
@@ -1130,6 +1880,8 @@ impl World {
             self.now += 100_000;
             self.drain_due()?;
             self.feed(Input::Tick)?;
+            // The operator ends REDUCING once the numbers are fresh.
+            self.act_clear()?;
             self.commit()?;
             self.check_always()?;
             if self.external_seen {
@@ -1145,7 +1897,8 @@ impl World {
                 && self.core.needs().is_empty()
                 && !self.core.has_in_doubt()
                 && self.core.parked_fills.is_empty()
-                && self.queue.values().all(|e| matches!(e, Net::Reconcile { .. }));
+                && self.core.margin.reducing.is_none()
+                && self.queue.values().all(|e| e.is_periodic());
             settled_for = if quiet { settled_for + 1 } else { 0 };
             // Several quiet reconcile rounds in a row, so periodic sweeps ran.
             if settled_for >= 40 {
@@ -1153,6 +1906,67 @@ impl World {
             }
         }
         Ok(())
+    }
+
+    // ---- scripted runs ----------------------------------------------------
+    //
+    // A test that needs one exact sequence drives the world itself with the
+    // calls below and with `venue`, and reads `core`, `durable` and
+    // `stats`. Random actions are those of `run` only.
+
+    /// Boots the core, activates the configuration and lets the link come up.
+    pub fn start(&mut self) -> Result<(), Violation> {
+        self.feed(Input::Boot { binary: "sim".into() })?;
+        self.feed(Input::Config(Box::new(sim_config(&self.p))))?;
+        self.commit()?;
+        self.schedule(10_000, Net::LinkUp { epoch: self.epoch });
+        Ok(())
+    }
+
+    /// Lets `us` of virtual time pass in steps of 10 ms: messages that are
+    /// due are delivered, what the venue did is put on the stream, and the
+    /// always-properties are checked. Everything is durable at the end.
+    pub fn advance(&mut self, us: u64) -> Result<(), Violation> {
+        let end = self.now + us;
+        while self.now < end {
+            self.now += 10_000;
+            self.pump_stream();
+            self.drain_due()?;
+            self.check_always()?;
+        }
+        self.commit()
+    }
+
+    /// Lets `us` of virtual time pass with nothing acting: the timers run,
+    /// each message at its own time, and the core gets one tick per margin
+    /// poll interval. For spans too long for `advance`. Everything is
+    /// durable at the end.
+    pub fn sleep(&mut self, us: u64) -> Result<(), Violation> {
+        self.idle(us)?;
+        self.commit()
+    }
+
+    /// The venue answers no margin query for the next `us`.
+    pub fn margin_outage(&mut self, us: u64) {
+        self.margin_out_until = self.now + us;
+    }
+
+    /// One operator command.
+    pub fn operator(&mut self, cmd: OperatorCmd) -> Result<(), Violation> {
+        self.feed(Input::Operator(cmd))?;
+        self.commit()
+    }
+
+    /// Kills the process and starts it again from the journal.
+    pub fn restart(&mut self) -> Result<(), Violation> {
+        self.crash()
+    }
+
+    /// One new-order request of a strategy.
+    pub fn submit(&mut self, req: NewOrderReq) -> Result<(), Violation> {
+        self.stats.requests += 1;
+        self.feed(Input::NewOrder(req))?;
+        self.commit()
     }
 
     pub fn run(mut self) -> Result<SimStats, Violation> {
@@ -1176,11 +1990,14 @@ impl World {
         self.commit()?;
         self.schedule(10_000, Net::LinkUp { epoch: self.epoch });
         let start = self.now;
-        for step in 0..self.p.steps {
+        let mut step = 0;
+        while step < self.p.steps || self.now < start + self.p.run_us {
             self.step = step;
             self.one_step()?;
+            step += 1;
         }
-        self.step = self.p.steps;
+        self.step = step;
+        self.stats.steps = step;
         self.quiesce()?;
         self.check_final()?;
         self.stats.sim_seconds = (self.now - start) / 1_000_000;

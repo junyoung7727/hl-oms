@@ -26,6 +26,12 @@ struct State {
     auto_fill: AutoFill,
     refuse_streams: bool,
     requests: u64,
+    // The account value, the margin of a position, the venue settings and
+    // the account mode live in `venue`, the model. Here are only counters
+    // of the three margin queries.
+    margin_queries: u64,
+    venue_setting_queries: u64,
+    account_mode_queries: u64,
 }
 
 fn now_us() -> Ts {
@@ -120,6 +126,9 @@ impl State {
                     px,
                     tif,
                     expires_at,
+                    // The wire of this process does not carry the flag: the
+                    // venue process treats every order as a plain one.
+                    reduce_only: false,
                 };
                 let result = match self.venue.place(now, &req, immediate) {
                     PlaceResp::Placed { oid, .. } => PlaceResult::Placed(wire_order(&self.venue.orders[&oid])),
@@ -161,6 +170,28 @@ impl State {
                     })
                     .collect();
                 Ok(json(&v))
+            }
+            SimOp::Margin => {
+                self.margin_queries += 1;
+                Ok(json(&MarginResult {
+                    account_value: self.venue.account_value(),
+                    positions: self.venue.margin_positions(),
+                }))
+            }
+            SimOp::VenueSetting { instrument } => {
+                self.venue_setting_queries += 1;
+                let (mode, leverage) = self.venue.setting(&instrument);
+                let setting = VenueSettingResult {
+                    isolated: mode == LeverageType::Isolated,
+                    leverage,
+                };
+                Ok(json(&setting))
+            }
+            SimOp::AccountMode => {
+                self.account_mode_queries += 1;
+                Ok(json(&AccountModeResult {
+                    mode: self.venue.account_mode.clone(),
+                }))
             }
             SimOp::Subscribe => Err("subscribe is handled by the connection".into()),
             SimOp::Ctl { action } => self.ctl(action, now),
@@ -220,9 +251,33 @@ impl State {
                 Ok(serde_json::Value::Null)
             }
             Ctl::RefPrice { instrument, px } => {
+                // The price the venue publishes is also the mark of its
+                // margin model.
+                self.venue.set_mark(&instrument, px);
                 self.broadcast(&StreamLine {
                     stream: StreamMsg::RefPrice { instrument, px, ts: now },
                 });
+                Ok(serde_json::Value::Null)
+            }
+            Ctl::AccountValue { value } => {
+                self.venue.set_account_value(value);
+                Ok(serde_json::Value::Null)
+            }
+            Ctl::MarginUsed { instrument, value } => {
+                self.venue.margin_used_override.insert(instrument, value);
+                Ok(serde_json::Value::Null)
+            }
+            Ctl::VenueSetting {
+                instrument,
+                isolated,
+                leverage,
+            } => {
+                let mode = if isolated { LeverageType::Isolated } else { LeverageType::Cross };
+                self.venue.settings.insert(instrument, (mode, leverage));
+                Ok(serde_json::Value::Null)
+            }
+            Ctl::AccountMode { mode } => {
+                self.venue.account_mode = mode;
                 Ok(serde_json::Value::Null)
             }
             Ctl::Dump => Ok(serde_json::json!({
@@ -233,6 +288,9 @@ impl State {
                 "repeated_place_requests": self.venue.place_requests.values().filter(|n| **n > 1).count(),
                 "duplicate_placements": self.venue.duplicate_placements.len(),
                 "requests": self.requests,
+                "margin_queries": self.margin_queries,
+                "venue_setting_queries": self.venue_setting_queries,
+                "account_mode_queries": self.account_mode_queries,
                 "streams": self.streams.len(),
             })),
         }
@@ -364,6 +422,9 @@ async fn main() {
         auto_fill: AutoFill::None,
         refuse_streams: false,
         requests: 0,
+        margin_queries: 0,
+        venue_setting_queries: 0,
+        account_mode_queries: 0,
     }));
     eprintln!("simvenue listening on {path}");
     loop {

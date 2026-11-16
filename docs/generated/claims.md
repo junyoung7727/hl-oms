@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `4f6788394bb348d6`, 검증 결과의 다이제스트 `4f6788394bb348d6`.
+> 소스 다이제스트 `762a4acf55af90fb`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
-주장 56건: 통과 49, 실패 0, 미실행 1, 이전 버전 결과 6.
+주장 68건: 통과 67, 실패 0, 미실행 1, 이전 버전 결과 0.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -36,7 +36,7 @@
 | V-JRN-4 | 스냅샷은 완전한 파일로만 나타나고, 손상된 스냅샷은 건너뛰며, 정상 종료 뒤 재시작은 스냅샷에서 같은 상태로 돌아온다 | 프로세스 | 통과 | `cargo test -p oms-journal --lib snapshot` |
 | V-JRN-5 | 기록 스키마가 다른 빌드는 옛 세그먼트를 읽고 새 세그먼트를 시작하며, 읽을 수 없는 스키마를 만난 빌드는 시작을 거부한다 | 단위 | 통과 | `cargo test -p oms-journal a_schema_change` |
 | V-BOOT-1 | 재시작은 결과 기록이 없는 전송을 불명으로 표시하고, 신규 주문을 다시 보내지 않으며, 요청돼 있던 취소만 다시 보낸다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e a_kill_during_send` |
-| V-CFG-1 | 설정은 버전이 커야 활성화되고, 같은 버전에 다른 내용이면 시작을 거부한다. 노출이 남은 종목·전략은 제거할 수 없다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e configuration_changes` |
+| V-CFG-1 | 설정은 버전이 커야 활성화되고, 같은 버전에 다른 내용이면 시작을 거부한다. 노출이 남은 종목·전략은 제거할 수 없다. mainnet은 증거금 정책(policy.margin) 없이는 시작하지 않고, 정책의 값이 C-MARGIN 설정 표의 범위를 벗어나면 어느 거래소 설정에서도 시작하지 않는다. 저장소의 Hyperliquid 예제 설정은 증거금 정책(소유자가 정한 값)을 담고 검사를 통과한다. Hyperliquid 설정에 증거금 정책이 있으면 설정에서 계산한 분당 조회 weight(216 + 종목마다 20, 기본 간격)가 600을 넘을 때 시작하지 않는다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e configuration_changes && cargo test -p oms-node --lib config::tests` |
 | V-OVL-1 | 입력 큐는 상한을 넘지 않고, 가득 찬 큐는 다른 큐에 영향을 주지 않으며, 배치마다 세 큐가 지분을 받는다 | 단위 | 통과 | `cargo test -p oms-node --lib queues` |
 | V-OVL-2 | 큐보다 빠르게 온 요청은 즉시 거절되고 기록을 남기지 않으며, 그 직후에도 취소는 수용된다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e overload -- --nocapture` |
 | V-OVL-3 | 저장 공간이 부족하면 신규 주문만 거절하고 체결과 취소는 계속 처리한다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios storage_low` |
@@ -48,21 +48,33 @@
 | V-HL-2 | 문서에 실린 응답 예를 올바르게 해석한다. 문서에 없는 주문 응답 형태와 최상위 오류는 결과 불명으로 두고, 문서의 표에 없는 상태 이름에서는 아무 결론도 내지 않으며, 종결 상태에서 최종 수량을 추정하지 않는다. 체결 조회는 마지막 쪽임이 확실할 때만 완료를 선언한다 | 단위 | 통과 | `cargo test -p oms-node --lib hyperliquid` |
 | V-HL-3 | 실제 testnet에 대해 게이트웨이가 메타를 읽어 종목 규칙을 통과시키고, 사용자 스트림을 구독해 링크를 올리고, 주문 조회(없음)·열린 주문·포지션·체결 조회·참조 가격을 해석한다 | 실제 거래소(읽기 전용) | 미실행 | `OMS_LIVE_TESTNET=1 cargo test -p oms-node --test hl_live -- --nocapture` |
 | V-PURE-1 | 도메인 코어의 소스에 시계·파일·네트워크·스레드·난수·해시 컬렉션·부동소수점·unsafe가 없고 의존성은 serde와 serde_json뿐이다 | 소스 검사 | 통과 | `cargo run -p xtask -- verify --quick` |
-| V-PERF-1 | 초당 200건의 open-loop 부하에서 로컬 응답 지연 p99가 20 ms 이하이고 오류와 미응답이 없다 | 측정 | 이전 버전 결과 | `cargo run --release -p xtask -- perf --dir <NVMe 디렉터리> --rates 20,200,2000 --seconds 60 --label nvme-final` |
-| V-PERF-2 | 초당 2000건의 부하에서 (가) 수용 한도를 푼 설정에서는 큐가 상한 안에 머물고 미응답이 없으며, (나) 기본 한도에서는 초과분이 overloaded로 즉시 거절되고 저널에 기록을 남기지 않는다 | 측정 | 이전 버전 결과 | `xtask perf --label nvme-final --rates 20,200,2000 --seconds 60  /  xtask perf --label nvme-default-limits --rates 2000 --seconds 60 --default-limits` |
-| V-PERF-3 | 스냅샷 이후 기록 5만 건의 재생이 5초 이내에 끝난다 | 측정 | 이전 버전 결과 | `cargo run --release -p xtask -- recovery-time --dir <디렉터리>` |
-| V-MUT-1 | 핵심 보호 로직을 일부러 깨뜨리면 관련 시험이 실패한다 | 변이 | 이전 버전 결과 | `cargo run -p xtask -- mutants` |
+| V-PERF-1 | 초당 200건의 open-loop 부하에서 로컬 응답 지연 p99가 20 ms 이하이고 오류와 미응답이 없다 | 측정 | 통과 | `cargo run --release -p xtask -- perf --dir <NVMe 디렉터리> --rates 20,200,2000 --seconds 60 --label nvme-final` |
+| V-PERF-2 | 초당 2000건의 부하에서 (가) 수용 한도를 푼 설정에서는 큐가 상한 안에 머물고 미응답이 없으며, (나) 기본 한도에서는 초과분이 overloaded로 즉시 거절되고 저널에 기록을 남기지 않는다 | 측정 | 통과 | `xtask perf --label nvme-final --rates 20,200,2000 --seconds 60  /  xtask perf --label nvme-default-limits --rates 2000 --seconds 60 --default-limits` |
+| V-PERF-3 | 스냅샷 이후 기록 5만 건의 재생이 5초 이내에 끝난다 | 측정 | 통과 | `cargo run --release -p xtask -- recovery-time --dir <디렉터리>` |
+| V-MUT-1 | 핵심 보호 로직을 일부러 깨뜨리면 관련 시험이 실패한다 | 변이 | 통과 | `cargo run -p xtask -- mutants` |
 | V-HIST-1 | 단계 지연 히스토그램이 보고하는 백분위는 실제 값 이상이고 12.5% 이내로 크다 | 단위 | 통과 | `cargo test -p oms-node --lib util` |
 | V-COMMIT-4 | 커밋 순서의 경계마다 프로세스를 멈추면 결과가 경계별 장애 표와 같다: 쓰기 전에 멈추면 요청이 없었던 것이 되고, 쓴 뒤·flush 뒤·응답 뒤에 멈추면 주문은 남되 한 번도 전송되지 않고 결과 불명을 거쳐 "놓이지 않음"으로 닫히며, 같은 요청을 다시 보내면 같은 주문으로 답한다 | 프로세스 | 통과 | `cargo test -p oms-node --features failpoints --test crash_points` |
 | V-COMMIT-5 | 실제 디스크에 둔 저널로 강제 종료를 60회 반복해도 V-COMMIT-2의 성질이 유지된다 | 프로세스 | 통과 | `cargo run --release -p xtask -- verify --extended <실제 디스크의 디렉터리>` |
 | V-BOOT-2 | 저널이 여러 세그먼트에 걸쳐 있어도 강제 종료 뒤 스냅샷과 저널로 같은 상태로 돌아오고, `verify --re-decide`는 입력과 맞지 않는 기록을 잡아내며, 종료 중의 저널 실패는 정상 종료로 보고되지 않는다 | 프로세스 | 통과 | `cargo test -p oms-node --test review_node` |
 | V-API-3 | 거래 소켓의 연결이 아무리 많아도 운영 소켓은 열리고, 끊긴 구독자는 연결 자리를 돌려주며, 한 연결은 구독을 하나만 가진다 | 프로세스 | 통과 | `cargo test -p oms-node --test review_node` |
 | V-DASH-1 | 대시보드의 문서 열람 경로는 docs/, crates/, registry/ 아래의 .md, .rs, .toml만 읽는다 | 단위 | 통과 | `cargo test -p oms-node --lib http` |
-| V-PERF-4 | 커밋 스레드 구성과 인라인 구성을 같은 조건에서 잰 결과가 보관돼 있다(ADR-012의 비교) | 측정 | 이전 버전 결과 | `xtask perf --label nvme-compare-thread --rates 200,2000,8000 --seconds 10  /  같은 명령에 --inline --label nvme-compare-inline` |
-| V-PERF-5 | 저장 장치의 동기 쓰기 시간과 코어의 판단 시간을 잰 결과가 보관돼 있다 | 측정 | 이전 버전 결과 | `xtask fsync-probe --dir <디렉터리> --label nvme  /  xtask core-bench` |
+| V-PERF-4 | 커밋 스레드 구성과 인라인 구성을 같은 조건에서 잰 결과가 보관돼 있다(ADR-012의 비교) | 측정 | 통과 | `xtask perf --label nvme-compare-thread --rates 200,2000,8000 --seconds 10  /  같은 명령에 --inline --label nvme-compare-inline` |
+| V-PERF-5 | 저장 장치의 동기 쓰기 시간과 코어의 판단 시간을 잰 결과가 보관돼 있다 | 측정 | 통과 | `xtask fsync-probe --dir <디렉터리> --label nvme  /  xtask core-bench` |
 | V-SIM-4 | 프로파일마다 seed 3000개로 V-SIM-1, V-SIM-2, V-EXT-1의 성질이 유지된다 | 시뮬레이션 | 통과 | `cargo run --release -p xtask -- verify --extended <실제 디스크의 디렉터리>` |
 | V-FUZZ-1 | 가정을 지키지 않는 임의의 거래소 입력(순서 역전, 중복, 낡은 상태, 식별자 없는 체결, 부재 응답, 링크 변동, 재시작)에서도 코어는 결함으로 멈추지 않고, 불변조건과 재생 일치가 유지되고, 주문당 전송은 한 번이며, 차단 중 수용이 없고, 새 체결은 반드시 기장되거나 대기하고, 정직하게 정리된 뒤에는 차단이 남지 않는다 | 속성 | 통과 | `cargo test --release -p oms-core --test review_core examined_fuzz` |
 | V-MIS-1 | 불일치 14종 각각을 일으키는 시험이 있고, 같은 대상의 반복은 확인되기 전까지 한 건으로 남는다 | 단위 | 통과 | `cargo test -p oms-core` |
+| V-MARGIN-1 | 증거금 정책이 있으면 감소 전용 주문은 재확인, 결과 불명, 불일치 차단을 통과하고, 일반 주문은 모든 차단에서 거절된다. 정책 구역은 선택이고, 없으면 저널 기록에 바이트를 더하지 않는다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios reduce_only && cargo test -p oms-core --test margin` |
+| V-MARGIN-2 | 증거금 정책이 있으면 현재 링크 세션의 증거금 보고가 마지막 보고로 기록된다. 다른 세션의 보고, 링크가 내려간 동안의 보고, 순번이 크지 않은 보고는 버린다. 읽지 못한 보고와 최대 레버리지가 0인 보고는 사유와 함께 거부로 기록되고 마지막 보고를 바꾸지 않는다. 나이가 0 이상 30초 이하인 보고가 없으면 일반 주문은 MarginUnavailable로 거절된다. 감소 전용 주문은 보고가 없어도 받는다. 정책이 없으면 증거금 입력은 상태를 바꾸지 않고 기록되지 않는다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-3 | 증거금 정책이 있으면 일반 주문은 받은 뒤의 계좌 노출이 한도 × 계좌 가치를 넘고 받기 전보다 커질 때 AccountLeverage로 거절된다. 정확히 한도와 같으면 받는다. 계좌 가치가 0 이하면 일반 주문을 모두 거절한다. 노출은 포지션과 모든 미체결 주문(감소 전용 포함)을 지정가와 참조 가격 중 높은 값으로 센 종목별 값의 합이다. 미체결 주문은 종결 증거가 올 때까지 노출에 남고 OMS는 그 주문을 고치거나 만료시키지 않는다. 가격이 움직여 한도를 넘어도 래치는 없다. 감소 전용 주문은 검사를 건너뛰지만 합에는 들어간다. 신선한 증거금 보고가 없으면 검사는 오래된 계좌 가치로 판정하지 않고 주문은 MarginUnavailable 하나로 거절된다. 노출이 있는 종목에 신선한 참조 가격이 없으면 일반 주문은 MarginUnavailable로 거절된다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-11 | 증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이, 계좌 노출을 보여 준다. 링크가 올라오면 종목마다 거래소 설정을, 그리고 계좌 모드를 묻고, 포지션이 없는 종목의 설정은 정해진 간격으로 다시 묻는다. status는 종목별 거래소 설정과 계좌 모드, 그것이 정책과 맞는지를 보여 준다. 정책이 없으면 묻지 않는다. 조회한 계좌 가치가 기준 금액보다 5 %를 넘게 낮아지면 status가 감소 전용 상태와 그 규칙, 기준 금액을 보여 주고 일반 주문이 Hold(Reducing)으로 거절된다. 해제(clear-reduce)와 기준 재설정(rebase-day)은 전략 소켓에서 forbidden으로 거절되고 코어에 닿지 않는다. 운영자 도구(omsctl)의 clear-reduce --note와 rebase-day --note는 운영자 소켓으로 실행 중인 노드의 코어에 닿고, 응답과 status(상태, 규칙, 기준 금액)가 그 결과를 보여 준다. 감소 전용 상태에서 노드 프로세스를 강제 종료(SIGKILL)하고 다시 띄우면 status가 같은 상태(규칙, 내용, 진입 시각)와 같은 기준 금액을 보여 주고, 해제한 뒤의 강제 종료도 해제와 운영자의 기준을 그대로 남긴다. 가상 거래소에 일반 주문 300건과 감소 전용 주문 3건이 걸린 채로 감소 전용 상태에 들어가면 일반 주문은 모두 거래소에서 취소되고 감소 전용 주문 3건은 열린 채로 남으며, 그 뒤에도 증거금 조회가 이어진다. 감소 전용 상태를 결정한 기록이 쓰이기 전에 노드가 멈추면 재시작 뒤에 상태도 취소 요청도 그 기록도 없고 기준 금액은 그대로이며, 다음에 한도를 넘는 보고가 한 번 다시 결정한다. 그 기록이 파일에 닿은 뒤(쓰기 뒤, 내구화 뒤, 읽기 모델 반영 뒤)에 취소가 나가기 전에 멈추면 재시작 뒤에 상태와 취소 요청이 저널에서 복원되고, 보내지 못한 취소가 거래소로 나가며, 감소 전용 주문은 남는다. 기준 금액을 정하는 기록의 각 경계에서 멈춰도 저널의 day_base_set은 정확히 하나이고, 그 날짜와 값은 같은 기록의 보고의 것이다(쓰기 전에 멈추면 다음 보고가 정한다). 가상 거래소 프로세스의 증거금 보고는 포지션(수량, 가치, 증거금, 증거금 방식, 레버리지, 최대 레버리지)을 담고 status가 그대로 보여 주며, 포지션이 있는 종목의 거래소 설정이 바뀌면 보고로 코어에 닿아 그 종목이 막힌다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e node_polls_margin && cargo test -p oms-node --test e2e status_shows_account_exposure && cargo test -p oms-node --test e2e status_shows_reducing && cargo test -p oms-node --test e2e node_reads_venue_setting && cargo test -p oms-node --test e2e -- strategy_socket_cannot omsctl_clear reducing_ && cargo test -p oms-node --test e2e margin_report_of_the_venue && cargo test -p oms-node --features failpoints --test crash_points -- reducing day_base` |
+| V-MARGIN-5 | 증거금 정책이 있으면 첫 증거금 보고가 그 계좌 가치를 조회 시각의 UTC 날짜와 함께 기준 금액으로 정한다. 같은 날의 뒤 보고는 기준을 바꾸지 않는다. 받은 보고의 계좌 가치가 기준 금액보다 5 %를 넘게 낮으면 계좌가 감소 전용 상태로 들어간다(기준 100에서 95.00은 아니고 94.99는 들어간다). 뒤 UTC 날짜의 첫 보고는 옛 기준으로 먼저 판정된 뒤에 새 기준이 되고, 여러 날의 공백 뒤에도 기준은 한 번만 넘어간다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-4 | 감소 전용 상태로 들어가는 입력 안에서, 감소 전용 표시가 없고 취소 요청이 없거나 취소 시도가 다 된 모든 열린 주문에 규칙 이름으로 취소 요청이 나간다. 표시 없는 익절 주문도 취소된다. 감소 전용 표시가 있는 주문은 그대로 둔다. 감소 전용 상태에서 일반 주문은 포지션을 줄이는 방향이어도 Hold(Reducing)으로 거절되고, 감소 전용 주문은 받는다. 유지증거금 여유 규칙으로 들어갈 때도 같다(취소의 이름은 Rule(MmBuffer)) | 단위 | 통과 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-9 | 증거금 정책이 있으면, 종목의 거래소 설정(증거금 방식과 레버리지)을 이번 링크 세션에서 받지 못한 동안 그 종목의 일반 주문은 VenueSetting(종목) 차단으로 거절된다. 옛 세션의 응답은 버린다. 받은 설정의 증거금 방식이나 레버리지가 정책과 다르면 그 종목만 같은 차단에 걸리고 다른 종목은 걸리지 않는다. 맞는 설정을 받으면 바로 풀리고, 링크가 바뀌면 다시 모르는 것이 된다. 증거금 보고의 포지션에 적힌 방식과 레버리지도 설정의 출처다. 차단 조회는 걸린 종목마다 그 종목 이름과 함께 차단을 보여 준다. 계좌 모드가 unifiedAccount나 portfolioMargin이면 허용 목록에 적혀 있어도 계좌의 모든 종목의 일반 주문이 AccountMode 차단으로 거절된다. 허용 목록에 없는 모드, 빈 응답, 이번 링크 세션에서 받지 못한 모드도 같다. 기본 허용 목록은 비어 있어서 운영자가 모드를 적기 전에는 일반 주문이 나가지 않는다. 감소 전용 주문은 두 차단을 모두 통과한다. OMS는 설정을 읽기만 하고 거래소로 아무것도 보내지 않는다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-6 | 운영자의 해제(clear-reduce)는 계좌가 감소 전용 상태가 아니면 NotReducing으로, 증거금 보고가 30초보다 오래됐으면 MarginUnavailable로, 사유가 비었으면 NoteRequired로 거절되고, 거절은 아무것도 기록하지 않는다. 받아들인 해제는 한 입력 안에서 마지막 보고의 계좌 가치를 새 기준 금액으로 정하고(day_base_set, set_by: operator) 감소 전용 상태를 끝낸다(reducing_cleared). 정확히 30초 된 보고는 신선하다. 그 뒤 새 기준 94에서 94와 89.30은 걸리지 않고 89.29는 다시 걸린다. 두 번째 해제는 NotReducing이다. 기준 재설정(rebase-day)은 신선한 보고와 사유가 있을 때 마지막 보고의 계좌 가치와 그 날짜(기준보다 앞선 날짜라도)를 기준 금액으로 정하고, 감소 전용 상태는 건드리지 않는다. 기준 재설정 없이 출금하면 그만큼이 손실로 읽힌다(100에서 6을 출금하면 걸린다). 마지막 보고에서 유지증거금 여유 조건이 참이면(어느 규칙으로 들어왔든) 해제는 MmBufferActive로 거절되고, 이 조건은 사유보다 먼저 본다. 포지션이 선 위로 돌아온 보고(가치 200, 최대 레버리지 40에서 3.00) 뒤에는 해제된다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-7 | 증거금 정책이 있고 링크가 올라와 있을 때, 마지막으로 받은 증거금 보고의 조회 시각에서 60초가 넘게 지나면 틱이 감소 전용 표시가 없고 취소 요청이 없는 모든 열린 주문에 Rule(MarginStale) 이름으로 취소 요청을 한 번 낸다. 정확히 60초에는 내지 않는다. 감소 전용 표시가 있는 주문은 그대로 둔다. 아무 상태도 걸리지 않는다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-8 | 증거금 정책이 있으면, 받은 증거금 보고의 포지션 가운데 포지션 가치가 0보다 큰 것의 격리 증거금이 (유지증거금률 + 0.25 %p) × 포지션 가치보다 작으면 계좌가 감소 전용 상태로 들어가고 규칙은 MmBuffer로 남는다. 최대 레버리지 40, 포지션 가치 200에서 3.00은 걸리지 않고 2.99는 걸린다. 유지증거금률은 그 포지션의 최대 레버리지(같은 보고의 값)로 1 / (2 × 최대 레버리지)이다: 최대 레버리지 25, 가치 200에서 4.50은 걸리지 않고 4.49는 걸리며, 최대 레버리지 50에서는 2.50이 걸리지 않는다. 한 종목의 포지션이 걸려도 래치는 계좌 전체에 하나다: 다른 종목에 걸려 있는 일반 주문이 Rule(MmBuffer) 이름으로 취소되고, 모든 종목의 새 일반 주문이 Hold(Reducing)으로 거절되며, 감소 전용 주문은 받는다. 교차 증거금 포지션은 판정하지 않는다(그 종목은 VenueSetting 차단에 걸린다). 래치에는 먼저 건 규칙이 남는다: 일 손실로 들어간 뒤의 유지증거금 여유 판정도, 그 반대도 아무것도 내지 않고 바꾸지 않는다. 한 보고가 둘 다 걸면 유지증거금 여유를 먼저 판정하므로 MmBuffer가 남는다. 받은 보고는 도착했을 때 이미 30초보다 오래됐어도 판정한다(조회 뒤 40초에 기록된 보고의 2.99도 건다). 비교는 나눗셈 없는 정확한 곱으로 한다: 가장 큰 금액·최대 레버리지·여유에서도 넘침이 결과를 뒤집지 않고(곱이 i128에 들어가지 않으면 선 아래로 본다), 선 바로 옆에서 반올림이 결과를 뒤집지 않는다. 포지션 가치가 0 이하인 포지션은 판정하지 않는다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-12 | 시뮬레이션의 가상 거래소는 계좌 가치를 자기 모형으로 계산한다: 현금 + 포지션 × 기준 가격. 체결은 낸 값과 수수료만큼, 펀딩은 그 금액만큼 현금을 줄이고, 가격 변화는 포지션 가치를 바꾼다. 손으로 푼 예(입금 100, 100에 0.5 매수와 수수료 0.01, 가격 104, 펀딩 0.1 %)에서 계좌 가치는 99.99, 101.99, 101.938이다. 가격이 움직이지 않아도 수수료와 펀딩만으로 계좌가 기준 금액보다 5 %를 넘게 내려가면 감소 전용 상태로 들어간다(100에서 95.00은 아니고 94.99는 들어간다). 가상 거래소는 포지션을 키우거나 반대쪽으로 넘기는 감소 전용 주문을 거절하고, 걸려 있는 감소 전용 주문은 남은 포지션만큼만 체결한 뒤 나머지를 취소한다. 증거금 정책을 켠 임의 순서의 실행(체결, 가격 변화, 펀딩, 운영자 해제, 그리고 margin_lossy에서는 보고 유실·지연·무응답, 링크 단절, 재시작)의 매 입력 뒤에: 받아들인 일반 주문은 신선한 보고가 있었고 노출이 계좌 가치의 2배 이내이거나 노출을 올리지 않았다. 감소 전용 상태에 들어가면 열려 있는 일반 주문마다 취소 요청이 있고, 그 상태인 동안 일반 주문은 받아들여지지 않는다. 감소 전용 상태는 증거금 보고로만 들어가고 운영자의 해제로만 끝난다(재시작, 새 UTC 날, 회복된 계좌 가치는 끝내지 않는다). 보고가 한도보다 오래 끊긴 뒤의 틱이 끝나면 열려 있는 일반 주문마다 취소 요청이 있다. 증거금 정책이 없는 기존 프로파일 일곱 개는 seed 다섯 개씩 main(84db0f9)에서 기록한 것과 같은 저널을 쓴다. 가상 시간 50시간짜리 실행(margin_days: UTC 자정 1시간 전에 시작해 자정을 세 번 넘고, 그 사이에 재시작, 링크 단절, 손실, 출금과 입금, 운영자의 해제와 기준 재설정이 섞인다)에서도 위 검사가 매 입력 뒤에 성립하고, 기록된 보고가 그 전의 기준 금액보다 5 %를 넘게 낮으면 그 보고가 새 날의 기준을 정하는 보고여도 계좌는 감소 전용 상태가 되고, 저널의 기준 금액은 실행마다 자정을 정확히 세 번 넘고, 재시작과 새 날은 감소 전용 상태를 끝내지 않는다. 정해진 순서 하나(자정을 넘는 20초의 조회 끊김 동안 100에서 6 출금, 재시작, 자정 두 번 더)에서 새 날의 첫 보고 94는 상태를 걸고 나서 기준이 되고, 저널에는 날마다 기준이 하나다(100, 94, 100, 99). 저널의 증거금 기록(입력이 증거금 보고인 기록)은 조회 한 번에 하나를 넘지 않는다: 조용한 하루는 조회 17 280번에 기록 17 280건이고, 50시간 실행에서 기록 수는 조회 수 이하이고 같은 조회의 답은 두 번 기록되지 않는다 | 시뮬레이션 | 통과 | `cargo test -p oms-sim --test sim -- world_ a_loss_made profile_margin margin_journal existing_profiles --nocapture   (실패 시: OMS_SIM_PROFILE=<이름> OMS_SIM_SEED=<n>)` |
+| V-MARGIN-10 | Hyperliquid 게이트웨이는 문서의 clearinghouseState 응답 예를 증거금 보고 입력으로 옮긴다: 계좌 가치는 marginSummary.accountValue, 포지션마다 종목, 부호 있는 수량, 포지션 가치, 사용 증거금, 증거금 방식, 레버리지, 최대 레버리지. 어느 포지션이든 maxLeverage가 없거나 0이거나 정수가 아니면 보고 전체를 사유와 함께 거부 입력(MarginReportInvalid)으로 바꾸고, 멀쩡한 다른 포지션도 보고하지 않는다. 계좌 가치, 수량, 포지션 가치, 사용 증거금, 레버리지 가운데 하나라도 없거나 읽을 수 없을 때, 증거금 방식이 isolated도 cross도 아닐 때, 포지션 목록이 없을 때도 같다. 어떤 값도 0이나 기본값으로 채우지 않고 어떤 포지션도 건너뛰지 않는다. 설정에 없는 종목의 포지션도 보고에 남는다(번역 함수는 설정된 종목을 받지 않는다). activeAssetData 응답 예는 그 종목의 거래소 설정 입력(증거금 방식, 레버리지)이 된다. 방식이 isolated도 cross도 아니거나, 레버리지가 정수가 아니거나, 응답이 다른 종목의 것이면 입력을 만들지 않는다(설정은 모름으로 남아 그 종목이 막힌다). userAbstraction 응답(문자열 하나)은 글자 그대로 계좌 모드 입력이 된다. 문서에 없는 문자열을 문서에 있는 값으로 바꾸지 않고, 문자열이 아니거나 64자를 넘으면 입력을 만들지 않는다. 세 조회의 요청 본문은 문서의 것과 같다(clearinghouseState, activeAssetData, userAbstraction). 게이트웨이의 요청 예산은 취소를 막지 않으므로 취소 500건 뒤에는 조회가 기다린다: 가득 찬 예산(1200)에서는 700이 남아 증거금 조회가 바로 나가고, 시작 직후(600)에는 100이 남아 10.1초, 빈 예산에서는 15.1초를 기다린다 | 단위 | 통과 | `cargo test -p oms-node --lib venue::hyperliquid` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -448,13 +460,15 @@
 | `sim/profile_crashy` | 통과 |  |
 | `e2e/vertical_slice_new_partial_fill_cancel_restart` | 통과 |  |
 | `e2e/random_kills_under_load_keep_books_consistent` | 통과 |  |
+| `core/margin_events_replay_to_the_same_state` | 통과 |  |
+| `core/latch_and_day_base_replay_to_the_same_state` | 통과 |  |
 
 ## V-SIM-1 — 네트워크 장애, 통보 중복·지연, 링크 단절, 프로세스 재시작, 키 삭제가 임의로 섞인 실행의 매 단계에서: 구조 불변조건이 성립하고, 거래소의 실제 포지션이 OMS가 설명하는 범위 안에 있고, 한도를 넘지 않고, 같은 주문이 두 번 전송되지 않는다
 
 - 상태: **통과**
 - 왜 중요한가: 예제 시험이 생각하지 못한 순서를 찾는다. 실제로 결함 넷을 찾아 고쳤다
 - 수준: 시뮬레이션
-- 전제와 범위: 프로파일 6개(calm, lossy, crashy, weak_evidence, purge, skewed). 실행당 1500단계. seed 수는 결과의 notes에 있다. 한 종목, 두 전략, 가상 시계
+- 전제와 범위: 프로파일 6개(calm, lossy, crashy, weak_evidence, purge, skewed)와 증거금 정책을 켠 3개(margin_calm, margin_lossy, margin_days: 증거금 검사는 V-MARGIN-12). 실행당 1500단계(margin_days는 가상 시간 50시간, 약 15 000단계이고 seed는 10분의 1). seed 수는 결과의 notes에 있다. 한 종목, 두 전략, 가상 시계
 - 실제 구성요소: oms-core의 판단과 상태
 - 모의·시뮬레이션: 저널과 커밋 게이트(내구 접두부 모델), 게이트웨이, 네트워크, 거래소, 전략, 시계
 - 주입한 장애: 요청 유실 4%, 요청 지연 6%(만료를 넘기기도), 응답 유실 8%, 미전송 3%, 스트림 중복 15%·지연 20%, 조회 유실 10%, 링크 단절, 재시작 1.2%/단계, 거래소 시계 1초 지연
@@ -471,6 +485,9 @@
 | `sim/profile_weak_evidence` | 통과 |  |
 | `sim/profile_purge` | 통과 |  |
 | `sim/profile_skewed` | 통과 |  |
+| `sim/profile_margin_calm` | 통과 |  |
+| `sim/profile_margin_lossy` | 통과 |  |
+| `sim/profile_margin_days_crosses_three_utc_days_with_restarts` | 통과 |  |
 
 ## V-SIM-2 — 장애가 멈추면 장부가 가상 거래소와 일치한다: 주문별 체결량과 상태, 포지션, 수수료 합. 차단 사유와 거짓 불일치가 남지 않는다
 
@@ -706,25 +723,28 @@
 | `core/restart_puts_outstanding_sends_in_doubt_and_never_resends` | 통과 |  |
 | `e2e/a_kill_during_send_does_not_duplicate_the_order` | 통과 |  |
 
-## V-CFG-1 — 설정은 버전이 커야 활성화되고, 같은 버전에 다른 내용이면 시작을 거부한다. 노출이 남은 종목·전략은 제거할 수 없다
+## V-CFG-1 — 설정은 버전이 커야 활성화되고, 같은 버전에 다른 내용이면 시작을 거부한다. 노출이 남은 종목·전략은 제거할 수 없다. mainnet은 증거금 정책(policy.margin) 없이는 시작하지 않고, 정책의 값이 C-MARGIN 설정 표의 범위를 벗어나면 어느 거래소 설정에서도 시작하지 않는다. 저장소의 Hyperliquid 예제 설정은 증거금 정책(소유자가 정한 값)을 담고 검사를 통과한다. Hyperliquid 설정에 증거금 정책이 있으면 설정에서 계산한 분당 조회 weight(216 + 종목마다 20, 기본 간격)가 600을 넘을 때 시작하지 않는다
 
 - 상태: **통과**
 - 왜 중요한가: 설정 변경이 추적되지 않으면 사고 분석이 불가능하다
 - 수준: 프로세스
-- 전제와 범위: 코어 예제, 실제 노드 1회
+- 전제와 범위: 코어 예제, 실제 노드 1회, 노드 설정 검사의 단위 시험(증거금 정책)
 - 실제 구성요소: oms-core, oms-node
 - 모의·시뮬레이션: 없음
-- 주입한 장애: 버전을 올리지 않은 변경
+- 주입한 장애: 버전을 올리지 않은 변경. 정책 없는 mainnet 설정, 0인 한도, 신선도 한도보다 크지 않은 보고 끊김 취소 한도, 종목 20개, 짧은 조회 간격
 - 판정 기준과 근거: 종료 코드 3과 오류 문구
-- 재현: `cargo test -p oms-node --test e2e configuration_changes`
+- 재현: `cargo test -p oms-node --test e2e configuration_changes && cargo test -p oms-node --lib config::tests`
 - 뒷받침하는 것: 요구 R13, C-BOOT
-- 확인하지 않은 범위: 설정 파일의 그 밖의 검증 규칙
+- 확인하지 않은 범위: 설정 파일의 그 밖의 검증 규칙. 조회 weight는 문서의 weight 표로 계산한 값이고 거래소가 실제로 세는 값과 대조하지 않았다. 정상 상태가 아닌 조회(답을 받지 못한 동안 간격마다 되묻는 계좌 모드 조회, 링크 세션이 시작할 때 포지션 있는 종목의 설정 조회, 주문 상태 조회)와 주문·취소는 예산 계산에 없다. 답이 없는 거래소 설정 조회는 종목마다 간격에 한 번이라 계산 안에 있다(V-MARGIN-11의 대조기 시험). 증거금 정책이 없는 설정에는 예산 검사를 하지 않는다. account_modes_allowed의 내용(목록에 무엇을 적든 설정은 읽힌다. 허용 여부는 코어가 판정한다: V-MARGIN-9)
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
 | `core/configuration_changes_are_validated_against_existing_exposure` | 통과 |  |
 | `e2e/configuration_changes_need_a_new_version` | 통과 |  |
 | `core/f10_config_validation_enforces_the_parked_fill_wait_rule` | 통과 |  |
+| `node-unit/config::tests::mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused` | 통과 |  |
+| `node-unit/config::tests::example_config_with_a_margin_policy_loads` | 통과 |  |
+| `node-unit/config::tests::steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused` | 통과 |  |
 
 ## V-OVL-1 — 입력 큐는 상한을 넘지 않고, 가득 찬 큐는 다른 큐에 영향을 주지 않으며, 배치마다 세 큐가 지분을 받는다
 
@@ -946,7 +966,7 @@
 
 ## V-PERF-1 — 초당 200건의 open-loop 부하에서 로컬 응답 지연 p99가 20 ms 이하이고 오류와 미응답이 없다
 
-- 상태: **이전 버전 결과**
+- 상태: **통과**
 - 왜 중요한가: 수용 기준 A-LAT-1, A-LAT-2
 - 수준: 측정
 - 전제와 범위: docs/performance/README.md의 조건. 한 호스트, 한 장치, 가상 거래소
@@ -960,11 +980,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `perf/nvme-final` | 이전 버전 결과 | 20/s: p99 4.06 ms, unanswered 0, error kinds 0; 200/s: p99 9.06 ms, unanswered 0, error kinds 0 |
+| `perf/nvme-final` | 통과 | 20/s: p99 5.91 ms, unanswered 0, error kinds 0; 200/s: p99 8.65 ms, unanswered 0, error kinds 0 |
 
 ## V-PERF-2 — 초당 2000건의 부하에서 (가) 수용 한도를 푼 설정에서는 큐가 상한 안에 머물고 미응답이 없으며, (나) 기본 한도에서는 초과분이 overloaded로 즉시 거절되고 저널에 기록을 남기지 않는다
 
-- 상태: **이전 버전 결과**
+- 상태: **통과**
 - 왜 중요한가: 수용 기준 A-CAP-1
 - 수준: 측정
 - 전제와 범위: 초당 2000건, 60초. 설정 둘: 한도를 푼 것(nvme-final)과 기본 한도(nvme-default-limits). 결과 파일에 노드 설정 전문이 들어 있다
@@ -978,12 +998,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `perf/nvme-final` | 이전 버전 결과 | 2000/s [commit_thread, limits lifted]: p99 19.61 ms, unanswered 0, queues within capacity: true, error kinds 0 |
-| `perf/nvme-default-limits` | 이전 버전 결과 | 2000/s with shipped limits: 116901 refused as overloaded, 3099 decided by the core, 3099 decisions in the journal, unanswered 0, queues within capacity: true |
+| `perf/nvme-final` | 통과 | 2000/s [commit_thread, limits lifted]: p99 18.00 ms, unanswered 0, queues within capacity: true, error kinds 0 |
+| `perf/nvme-default-limits` | 통과 | 2000/s with shipped limits: 116901 refused as overloaded, 3099 decided by the core, 3099 decisions in the journal, unanswered 0, queues within capacity: true |
 
 ## V-PERF-3 — 스냅샷 이후 기록 5만 건의 재생이 5초 이내에 끝난다
 
-- 상태: **이전 버전 결과**
+- 상태: **통과**
 - 왜 중요한가: 수용 기준 A-REC-2
 - 수준: 측정
 - 전제와 범위: 성능 측정으로 만든 저널을 스냅샷 없이 재시작
@@ -997,11 +1017,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `perf/recovery` | 이전 버전 결과 | 54023 records replayed in 135 ms |
+| `perf/recovery` | 통과 | 54023 records replayed in 154 ms |
 
 ## V-MUT-1 — 핵심 보호 로직을 일부러 깨뜨리면 관련 시험이 실패한다
 
-- 상태: **이전 버전 결과**
+- 상태: **통과**
 - 왜 중요한가: 시험이 실제로 그 로직을 지키고 있는지
 - 수준: 변이
 - 전제와 범위: 선별한 변이 목록(docs/verification/README.md). 각 변이는 소스의 한 곳을 바꾼다
@@ -1015,7 +1035,7 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `mutants/all` | 이전 버전 결과 | 20 mutants, survived: [] |
+| `mutants/all` | 통과 | 122 mutants, survived: [] |
 
 ## V-HIST-1 — 단계 지연 히스토그램이 보고하는 백분위는 실제 값 이상이고 12.5% 이내로 크다
 
@@ -1136,7 +1156,7 @@
 
 ## V-PERF-4 — 커밋 스레드 구성과 인라인 구성을 같은 조건에서 잰 결과가 보관돼 있다(ADR-012의 비교)
 
-- 상태: **이전 버전 결과**
+- 상태: **통과**
 - 왜 중요한가: 구성 선택의 근거가 측정이라는 것을 결과 파일로 남긴다
 - 수준: 측정
 - 전제와 범위: 초당 200, 2000, 8000건을 10초씩. 수용 한도를 푼 설정
@@ -1150,12 +1170,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `perf/nvme-compare-thread` | 이전 버전 결과 | 200/s [commit_thread]: p99 8.60 ms, unanswered 0, error kinds 0; 2000/s [commit_thread]: p99 15.05 ms, unanswered 0, error kinds 0; 8000/s [commit_thread]: p99 16.88 ms, unanswered 0, error kinds 0 |
-| `perf/nvme-compare-inline` | 이전 버전 결과 | 200/s [inline]: p99 8.44 ms, unanswered 0, error kinds 0; 2000/s [inline]: p99 11.29 ms, unanswered 0, error kinds 0; 8000/s [inline]: p99 1045.90 ms, unanswered 0, error kinds 1 |
+| `perf/nvme-compare-thread` | 통과 | 200/s [commit_thread]: p99 9.30 ms, unanswered 0, error kinds 0; 2000/s [commit_thread]: p99 15.88 ms, unanswered 0, error kinds 0; 8000/s [commit_thread]: p99 16.37 ms, unanswered 0, error kinds 0 |
+| `perf/nvme-compare-inline` | 통과 | 200/s [inline]: p99 8.71 ms, unanswered 0, error kinds 0; 2000/s [inline]: p99 12.09 ms, unanswered 0, error kinds 0; 8000/s [inline]: p99 882.20 ms, unanswered 0, error kinds 1 |
 
 ## V-PERF-5 — 저장 장치의 동기 쓰기 시간과 코어의 판단 시간을 잰 결과가 보관돼 있다
 
-- 상태: **이전 버전 결과**
+- 상태: **통과**
 - 왜 중요한가: 응답 지연의 하한(장치)과 코어의 몫을 구분하는 근거
 - 수준: 측정
 - 전제와 범위: 300바이트 append + fdatasync 300회. 주문 20만 건의 수명을 메모리에서 처리
@@ -1169,8 +1189,8 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `perf/fsync-nvme` | 이전 버전 결과 | write+fdatasync: p50 2505 p99 2897 us; fdatasync: p50 2494 p99 2877 us |
-| `perf/core-bench` | 이전 버전 결과 | handle(new_order): p50 22557 p99 30614 ns; handle(send_result placed): p50 864 p99 1138 ns; handle(fill closing the order): p50 1251 p99 1640 ns; encode record (serde_json): p50 527 p99 1635 ns; record size: p50 467 p99 550 bytes |
+| `perf/fsync-nvme` | 통과 | write+fdatasync: p50 2406 p99 2875 us; fdatasync: p50 2404 p99 2874 us |
+| `perf/core-bench` | 통과 | handle(new_order): p50 27356 p99 33446 ns; handle(send_result placed): p50 920 p99 1240 ns; handle(fill closing the order): p50 1310 p99 1809 ns; encode record (serde_json): p50 539 p99 1750 ns; record size: p50 467 p99 550 bytes; handle(new_order), margin policy on: p50 65857 p99 89769 ns; handle(send_result placed), margin policy on: p50 1007 p99 1472 ns; handle(fill closing the order), margin policy on: p50 1424 p99 2313 ns |
 
 ## V-SIM-4 — 프로파일마다 seed 3000개로 V-SIM-1, V-SIM-2, V-EXT-1의 성질이 유지된다
 
@@ -1246,4 +1266,323 @@
 | `core/cancel_is_retried_with_backoff_and_then_flagged` | 통과 |  |
 | `core/too_many_unidentified_fills_are_booked_as_external_instead_of_waiting` | 통과 |  |
 | `core/f7_external_fills_do_not_grow_the_mismatch_list_without_bound` | 통과 |  |
+
+## V-MARGIN-1 — 증거금 정책이 있으면 감소 전용 주문은 재확인, 결과 불명, 불일치 차단을 통과하고, 일반 주문은 모든 차단에서 거절된다. 정책 구역은 선택이고, 없으면 저널 기록에 바이트를 더하지 않는다
+
+- 상태: **통과**
+- 왜 중요한가: 모든 차단이 줄이는 주문까지 막으면 '줄이기만 허용'하는 상태를 만들 수 없다. 정책이 없는 실행의 저널은 바뀌면 안 된다
+- 수준: 단위
+- 전제와 범위: 차단 표(ADR-008 §7 개정)의 사유별 시험, 정책 구역의 직렬화와 기본값
+- 실제 구성요소: oms-core
+- 모의·시뮬레이션: 통보는 시험이 입력
+- 주입한 장애: 링크 단절 뒤 재접속
+- 판정 기준과 근거: C-MARGIN의 차단 표와 설정 표. 기대값은 손으로 적었다
+- 재현: `cargo test -p oms-core --test scenarios reduce_only && cargo test -p oms-core --test margin`
+- 뒷받침하는 것: C-MARGIN, ADR-018 §7의 8
+- 확인하지 않은 범위: 거래소가 감소 전용 주문의 포지션 확대를 실제로 막는지(T5). `Reducing` 차단은 뒤 티켓에서 생긴다(`VenueSetting`, `AccountMode` 차단의 통과는 V-MARGIN-9)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/absent_margin_policy_adds_no_bytes_to_a_journal_record` | 통과 |  |
+| `core/empty_margin_section_takes_the_contract_defaults` | 통과 |  |
+| `core/reduce_only_order_is_accepted_during_resync` | 통과 |  |
+| `core/reduce_only_order_is_accepted_while_another_order_is_in_doubt` | 통과 |  |
+| `core/reduce_only_order_is_accepted_under_an_unacknowledged_mismatch` | 통과 |  |
+| `core/reduce_only_order_is_rejected_by_every_block_all_hold` | 통과 |  |
+| `core/reduce_only_order_is_still_bound_by_the_strategy_position_limit` | 통과 |  |
+| `core/without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order` | 통과 |  |
+
+## V-MARGIN-2 — 증거금 정책이 있으면 현재 링크 세션의 증거금 보고가 마지막 보고로 기록된다. 다른 세션의 보고, 링크가 내려간 동안의 보고, 순번이 크지 않은 보고는 버린다. 읽지 못한 보고와 최대 레버리지가 0인 보고는 사유와 함께 거부로 기록되고 마지막 보고를 바꾸지 않는다. 나이가 0 이상 30초 이하인 보고가 없으면 일반 주문은 MarginUnavailable로 거절된다. 감소 전용 주문은 보고가 없어도 받는다. 정책이 없으면 증거금 입력은 상태를 바꾸지 않고 기록되지 않는다
+
+- 상태: **통과**
+- 왜 중요한가: 규칙이 읽는 계좌 가치는 거래소 보고에서만 온다. 늦거나 다른 세션의 보고, 읽지 못한 보고가 마지막 보고가 되면 규칙이 틀린 값으로 판정한다
+- 수준: 단위
+- 전제와 범위: 증거금 보고 입력 둘(MarginReport, MarginReportInvalid)과 이벤트 둘(margin_reported, margin_report_rejected)
+- 실제 구성요소: oms-core
+- 모의·시뮬레이션: 보고는 시험이 입력
+- 주입한 장애: 링크 재접속, 늦게 온 응답, 중복 응답, 읽지 못한 응답, 최대 레버리지 0
+- 판정 기준과 근거: C-MARGIN의 '입력, 상태, 이벤트'. 기대값은 손으로 적었다
+- 재현: `cargo test -p oms-core --test margin`
+- 뒷받침하는 것: C-MARGIN
+- 확인하지 않은 범위: 실제 거래소 응답의 모양과 값의 뜻(T1, T2). 새 보고를 받지 못하는 동안에는 규칙을 판정하지 않는다
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/margin_report_of_the_current_session_is_recorded` | 통과 |  |
+| `core/margin_report_of_an_old_session_or_with_the_link_down_is_ignored` | 통과 |  |
+| `core/late_margin_report_with_a_lower_sequence_is_ignored` | 통과 |  |
+| `core/invalid_margin_report_is_journaled_and_never_becomes_fresh` | 통과 |  |
+| `core/plain_order_is_rejected_margin_unavailable_without_a_fresh_report` | 통과 |  |
+| `core/margin_report_dated_after_the_record_time_is_not_fresh` | 통과 |  |
+| `core/reduce_only_order_needs_no_fresh_report` | 통과 |  |
+| `core/without_a_margin_policy_no_margin_check_runs` | 통과 |  |
+| `core/margin_events_replay_to_the_same_state` | 통과 |  |
+| `core/a_recorded_report_ends_the_last_rejection` | 통과 |  |
+| `node-unit/venue::simproto::tests::a_margin_answer_without_its_position_list_is_not_read` | 통과 |  |
+
+## V-MARGIN-3 — 증거금 정책이 있으면 일반 주문은 받은 뒤의 계좌 노출이 한도 × 계좌 가치를 넘고 받기 전보다 커질 때 AccountLeverage로 거절된다. 정확히 한도와 같으면 받는다. 계좌 가치가 0 이하면 일반 주문을 모두 거절한다. 노출은 포지션과 모든 미체결 주문(감소 전용 포함)을 지정가와 참조 가격 중 높은 값으로 센 종목별 값의 합이다. 미체결 주문은 종결 증거가 올 때까지 노출에 남고 OMS는 그 주문을 고치거나 만료시키지 않는다. 가격이 움직여 한도를 넘어도 래치는 없다. 감소 전용 주문은 검사를 건너뛰지만 합에는 들어간다. 신선한 증거금 보고가 없으면 검사는 오래된 계좌 가치로 판정하지 않고 주문은 MarginUnavailable 하나로 거절된다. 노출이 있는 종목에 신선한 참조 가격이 없으면 일반 주문은 MarginUnavailable로 거절된다
+
+- 상태: **통과**
+- 왜 중요한가: 수량 한도만으로는 계좌 가치의 몇 배가 되는 포지션을 막지 못한다. 아직 체결되지 않은 주문도 나중에 체결되면 한도를 넘길 수 있다
+- 수준: 단위
+- 전제와 범위: 신규 주문 검사 안의 레버리지 검사. 계좌 가치 100, 한도 2.0, 참조 가격 100의 손 계산 값. 성질 시험 셋(proptest 256건씩): 주문을 더하면 노출이 줄지 않는다, 롱과 숏을 뒤집어도 같다, 가장 큰 가격과 수량에서 정확하다
+- 실제 구성요소: oms-core
+- 모의·시뮬레이션: 증거금 보고와 참조 가격은 시험이 입력
+- 주입한 장애: 취소 요청, 거래소의 주문 거절, 가격 이동으로 한도 초과, 오래된 참조 가격, 계좌 가치 0 이하, i128에 들어가지 않는 합
+- 판정 기준과 근거: C-MARGIN의 '계좌 레버리지 검사'와 '신선도'의 참조 가격 조건. 기대값은 손으로 적었다. 극단값 성질 시험의 경계는 시험이 따로 계산한 i128 곱에서 나온다
+- 재현: `cargo test -p oms-core --test margin`
+- 뒷받침하는 것: C-MARGIN
+- 확인하지 않은 범위: 주문 사이에 가격이 움직인 뒤의 노출은 지켜보지 않는다. 참조 가격(mid)은 mark가 아니다. 검사가 받은 주문을 거래소가 거절할 수 있다(경계의 수수료). 계좌 가치가 격리 포지션의 자산을 포함하는지(T2)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/order_past_twice_the_account_value_is_rejected_account_leverage` | 통과 |  |
+| `core/order_exactly_at_the_limit_is_accepted` | 통과 |  |
+| `core/without_a_fresh_report_an_order_past_the_limit_is_rejected_margin_unavailable_only` | 통과 |  |
+| `core/an_unfilled_resting_order_keeps_its_exposure_and_is_never_repriced_or_expired_by_the_oms` | 통과 |  |
+| `core/resting_order_counts_at_the_higher_of_limit_and_reference` | 통과 |  |
+| `core/reduce_only_and_plain_buy_on_a_short_count_at_full_reach` | 통과 |  |
+| `core/exposure_is_the_sum_over_instruments` | 통과 |  |
+| `core/partial_fill_then_cancel_frees_exposure_only_on_terminal_evidence` | 통과 |  |
+| `core/a_venue_rejection_of_an_accepted_order_frees_its_exposure` | 통과 |  |
+| `core/after_a_passive_breach_a_plain_reducing_order_passes_and_an_increasing_one_does_not` | 통과 |  |
+| `core/reduce_only_order_skips_the_leverage_gate` | 통과 |  |
+| `core/plain_order_is_rejected_when_an_exposed_instrument_has_no_fresh_reference_price` | 통과 |  |
+| `core/account_value_zero_or_negative_rejects` | 통과 |  |
+| `core/adding_an_order_never_lowers_exposure` | 통과 |  |
+| `core/mirrored_books_have_equal_exposure_and_equal_decisions` | 통과 |  |
+| `core/exposure_is_exact_at_extreme_price_and_quantity` | 통과 |  |
+
+## V-MARGIN-11 — 증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이, 계좌 노출을 보여 준다. 링크가 올라오면 종목마다 거래소 설정을, 그리고 계좌 모드를 묻고, 포지션이 없는 종목의 설정은 정해진 간격으로 다시 묻는다. status는 종목별 거래소 설정과 계좌 모드, 그것이 정책과 맞는지를 보여 준다. 정책이 없으면 묻지 않는다. 조회한 계좌 가치가 기준 금액보다 5 %를 넘게 낮아지면 status가 감소 전용 상태와 그 규칙, 기준 금액을 보여 주고 일반 주문이 Hold(Reducing)으로 거절된다. 해제(clear-reduce)와 기준 재설정(rebase-day)은 전략 소켓에서 forbidden으로 거절되고 코어에 닿지 않는다. 운영자 도구(omsctl)의 clear-reduce --note와 rebase-day --note는 운영자 소켓으로 실행 중인 노드의 코어에 닿고, 응답과 status(상태, 규칙, 기준 금액)가 그 결과를 보여 준다. 감소 전용 상태에서 노드 프로세스를 강제 종료(SIGKILL)하고 다시 띄우면 status가 같은 상태(규칙, 내용, 진입 시각)와 같은 기준 금액을 보여 주고, 해제한 뒤의 강제 종료도 해제와 운영자의 기준을 그대로 남긴다. 가상 거래소에 일반 주문 300건과 감소 전용 주문 3건이 걸린 채로 감소 전용 상태에 들어가면 일반 주문은 모두 거래소에서 취소되고 감소 전용 주문 3건은 열린 채로 남으며, 그 뒤에도 증거금 조회가 이어진다. 감소 전용 상태를 결정한 기록이 쓰이기 전에 노드가 멈추면 재시작 뒤에 상태도 취소 요청도 그 기록도 없고 기준 금액은 그대로이며, 다음에 한도를 넘는 보고가 한 번 다시 결정한다. 그 기록이 파일에 닿은 뒤(쓰기 뒤, 내구화 뒤, 읽기 모델 반영 뒤)에 취소가 나가기 전에 멈추면 재시작 뒤에 상태와 취소 요청이 저널에서 복원되고, 보내지 못한 취소가 거래소로 나가며, 감소 전용 주문은 남는다. 기준 금액을 정하는 기록의 각 경계에서 멈춰도 저널의 day_base_set은 정확히 하나이고, 그 날짜와 값은 같은 기록의 보고의 것이다(쓰기 전에 멈추면 다음 보고가 정한다). 가상 거래소 프로세스의 증거금 보고는 포지션(수량, 가치, 증거금, 증거금 방식, 레버리지, 최대 레버리지)을 담고 status가 그대로 보여 주며, 포지션이 있는 종목의 거래소 설정이 바뀌면 보고로 코어에 닿아 그 종목이 막힌다
+
+- 상태: **통과**
+- 왜 중요한가: 코어의 규칙이 옳아도 조회가 연결되지 않으면 보고가 없어 모든 일반 주문이 거절되거나, 운영자가 왜 거절되는지 볼 수 없다
+- 수준: 프로세스
+- 전제와 범위: 실제 oms-node와 simvenue 프로세스. 조회 간격 100 ms(거래소 설정은 200 ms)로 줄인 설정 3회(계좌 가치 따라가기, 일 손실 진입, 거래소 설정과 계좌 모드), 정책 없는 설정 2회. 티켓 05: 운영자 명령, 강제 종료 2회, 주문 303건의 감소 전용 상태 진입. 중단 지점 시험은 failpoints 기능으로 빌드한 노드. 코드 검토 뒤(2026-11-16): simvenue의 제어 명령 margin_used로 증거금을 정해 유지증거금 여유 규칙으로 들어가는 실행 1회, 그리고 프로세스 없이 대조기 태스크의 두 포트(공개된 상태, 조회 채널)에서 조회 간격을 보는 시험 2건(간격 10초에서 2.5초 동안 설정 조회와 모드 조회가 한 번씩, 큐에 자리가 없던 증거금 조회가 다음 바퀴에 순번 1로 나간다)
+- 실제 구성요소: oms-node(재조정 태스크의 타이머, 게이트웨이, 입력 큐, 저널, status), 소켓
+- 모의·시뮬레이션: 거래소(simvenue). 계좌 가치, 종목의 거래소 설정, 계좌 모드는 시험이 정한다
+- 주입한 장애: 거래소에서 바뀐 종목 설정(교차, 레버리지 3), 바뀐 계좌 모드(unifiedAccount), 스트림 끊김으로 생긴 새 링크 세션. SIGKILL. 감소 전용 상태 진입 기록과 기준 금액 기록의 커밋 경계(before_write, after_write, after_sync, after_reply)에서 abort
+- 판정 기준과 근거: status의 core.margin(account_value, age_us, seq, fresh, account_exposure, reducing, day_base, venue_settings, account_mode), core.holds, simvenue가 센 조회 수와 simvenue의 열린 주문 목록, 운영 명령의 응답, 저널의 이벤트 수
+- 재현: `cargo test -p oms-node --test e2e node_polls_margin && cargo test -p oms-node --test e2e status_shows_account_exposure && cargo test -p oms-node --test e2e status_shows_reducing && cargo test -p oms-node --test e2e node_reads_venue_setting && cargo test -p oms-node --test e2e -- strategy_socket_cannot omsctl_clear reducing_ && cargo test -p oms-node --test e2e margin_report_of_the_venue && cargo test -p oms-node --features failpoints --test crash_points -- reducing day_base`
+- 뒷받침하는 것: C-MARGIN
+- 확인하지 않은 범위: 기본 간격 5초(거래소 설정은 60초) 그대로의 실행. Hyperliquid 게이트웨이가 조회를 보내는 경로(응답의 번역만 V-MARGIN-10이 본다). Hyperliquid 게이트웨이의 요청 예산이 실제 거래소 한도와 맞는지(예산의 산술은 V-MARGIN-10). 디스크 유실과 전원 장애(중단은 프로세스 abort와 SIGKILL이다). omsctl 실행 파일의 main. 정확한 시간
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `e2e/node_polls_margin_and_status_shows_value_and_age` | 통과 |  |
+| `e2e/status_shows_account_exposure` | 통과 |  |
+| `e2e/status_shows_reducing_its_rule_and_the_day_base` | 통과 |  |
+| `e2e/node_reads_venue_setting_and_account_mode_and_status_shows_them` | 통과 |  |
+| `e2e/strategy_socket_cannot_clear_reducing_or_rebase` | 통과 |  |
+| `e2e/omsctl_clear_reduce_and_rebase_day_work_end_to_end` | 통과 |  |
+| `e2e/reducing_and_day_base_survive_a_node_kill` | 통과 |  |
+| `e2e/reducing_cancels_every_resting_plain_order_through_the_node` | 통과 |  |
+| `pipeline/stopped_before_the_write_of_a_reducing_decision_the_next_report_decides_again` | 통과 |  |
+| `pipeline/stopped_after_the_reducing_decision_is_durable_the_cancels_are_sent_after_restart` | 통과 |  |
+| `pipeline/stopped_around_a_day_base_set_the_base_is_set_exactly_once` | 통과 |  |
+| `e2e/margin_report_of_the_venue_process_carries_its_positions` | 통과 |  |
+| `e2e/venue_process_states_the_margin_a_control_sets_and_the_mm_rule_latches_on_it` | 통과 |  |
+| `node-unit/a_margin_query_the_gateway_had_no_room_for_goes_out_on_the_next_round` | 통과 |  |
+| `node-unit/an_unanswered_setting_or_mode_query_is_repeated_at_the_setting_period_only` | 통과 |  |
+
+## V-MARGIN-5 — 증거금 정책이 있으면 첫 증거금 보고가 그 계좌 가치를 조회 시각의 UTC 날짜와 함께 기준 금액으로 정한다. 같은 날의 뒤 보고는 기준을 바꾸지 않는다. 받은 보고의 계좌 가치가 기준 금액보다 5 %를 넘게 낮으면 계좌가 감소 전용 상태로 들어간다(기준 100에서 95.00은 아니고 94.99는 들어간다). 뒤 UTC 날짜의 첫 보고는 옛 기준으로 먼저 판정된 뒤에 새 기준이 되고, 여러 날의 공백 뒤에도 기준은 한 번만 넘어간다
+
+- 상태: **통과**
+- 왜 중요한가: 일 손실은 기준 금액에 대해 잰다. 기준이 저널 상태가 아니면 재시작이 손실을 지운다
+- 수준: 단위
+- 전제와 범위: 이벤트 day_base_set, reducing_entered와 상태 day_base, reducing
+- 실제 구성요소: oms-core
+- 모의·시뮬레이션: 보고는 시험이 입력
+- 주입한 장애: 없음
+- 판정 기준과 근거: C-MARGIN의 '일 손실과 기준 금액'. 기대값은 손으로 적었다
+- 재현: `cargo test -p oms-core --test margin`
+- 뒷받침하는 것: C-MARGIN
+- 확인하지 않은 범위: 실제 거래소의 계좌 가치가 뜻하는 것(T2). 입금과 출금(운영자의 기준 재설정은 티켓 05)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/first_report_sets_the_day_base` | 통과 |  |
+| `core/loss_greater_than_five_percent_of_the_base_enters_reducing` | 통과 |  |
+| `core/first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day` | 통과 |  |
+| `core/a_report_of_an_earlier_day_does_not_change_the_day_base` | 통과 |  |
+| `core/a_loss_between_two_reports_enters_reducing_on_the_next_report` | 통과 |  |
+| `core/a_report_older_than_the_freshness_limit_on_arrival_is_still_judged` | 통과 |  |
+| `core/latch_and_day_base_replay_to_the_same_state` | 통과 |  |
+
+## V-MARGIN-4 — 감소 전용 상태로 들어가는 입력 안에서, 감소 전용 표시가 없고 취소 요청이 없거나 취소 시도가 다 된 모든 열린 주문에 규칙 이름으로 취소 요청이 나간다. 표시 없는 익절 주문도 취소된다. 감소 전용 표시가 있는 주문은 그대로 둔다. 감소 전용 상태에서 일반 주문은 포지션을 줄이는 방향이어도 Hold(Reducing)으로 거절되고, 감소 전용 주문은 받는다. 유지증거금 여유 규칙으로 들어갈 때도 같다(취소의 이름은 Rule(MmBuffer))
+
+- 상태: **통과**
+- 왜 중요한가: 손실 한도를 넘은 계좌에 걸려 있는 일반 주문이 체결되면 위험이 더 는다. 줄이는 주문까지 취소하면 포지션을 줄일 길이 없다
+- 수준: 단위
+- 전제와 범위: 이벤트 reducing_entered와 그 입력 안의 cancel_requested(by: Rule(DailyLoss) 또는 Rule(MmBuffer)), cancel_sent
+- 실제 구성요소: oms-core
+- 모의·시뮬레이션: 보고와 거래소 통보는 시험이 입력
+- 주입한 장애: 취소 시도가 다 된 주문
+- 판정 기준과 근거: C-MARGIN의 '감소 전용 상태'. 기대값은 손으로 적었다
+- 재현: `cargo test -p oms-core --test margin`
+- 뒷받침하는 것: C-MARGIN
+- 확인하지 않은 범위: 취소가 체결보다 먼저 닿는다는 것. 포지션이 닫힌다는 것(OMS는 닫지 않는다). 링크가 내려가 있는 동안의 동작
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones` | 통과 |  |
+| `core/under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted` | 통과 |  |
+| `core/an_order_pending_send_at_entry_is_cancelled_once_acknowledged` | 통과 |  |
+| `core/a_rule_cancel_that_races_a_fill_books_the_fill` | 통과 |  |
+| `core/a_stuck_rule_cancel_does_not_block_reduce_only_orders` | 통과 |  |
+| `core/reducing_is_entered_once` | 통과 |  |
+| `core/a_new_day_does_not_clear_reducing` | 통과 |  |
+| `core/an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing` | 통과 |  |
+| `core/latch_and_day_base_replay_to_the_same_state` | 통과 |  |
+| `core/a_trigger_on_one_instrument_blocks_plain_orders_on_all` | 통과 |  |
+| `core/reducing_records_the_rule_that_tripped_first` | 통과 |  |
+| `core/without_a_margin_policy_the_reducing_latch_refuses_no_order_and_returns_with_the_policy` | 통과 |  |
+
+## V-MARGIN-9 — 증거금 정책이 있으면, 종목의 거래소 설정(증거금 방식과 레버리지)을 이번 링크 세션에서 받지 못한 동안 그 종목의 일반 주문은 VenueSetting(종목) 차단으로 거절된다. 옛 세션의 응답은 버린다. 받은 설정의 증거금 방식이나 레버리지가 정책과 다르면 그 종목만 같은 차단에 걸리고 다른 종목은 걸리지 않는다. 맞는 설정을 받으면 바로 풀리고, 링크가 바뀌면 다시 모르는 것이 된다. 증거금 보고의 포지션에 적힌 방식과 레버리지도 설정의 출처다. 차단 조회는 걸린 종목마다 그 종목 이름과 함께 차단을 보여 준다. 계좌 모드가 unifiedAccount나 portfolioMargin이면 허용 목록에 적혀 있어도 계좌의 모든 종목의 일반 주문이 AccountMode 차단으로 거절된다. 허용 목록에 없는 모드, 빈 응답, 이번 링크 세션에서 받지 못한 모드도 같다. 기본 허용 목록은 비어 있어서 운영자가 모드를 적기 전에는 일반 주문이 나가지 않는다. 감소 전용 주문은 두 차단을 모두 통과한다. OMS는 설정을 읽기만 하고 거래소로 아무것도 보내지 않는다
+
+- 상태: **통과**
+- 왜 중요한가: 거래소의 레버리지나 증거금 방식이 계획과 다르면 주문이 계획하지 않은 증거금을 쓴다. 확인하지 못한 설정을 맞다고 가정하면 그 차이를 아무도 모른다
+- 수준: 단위
+- 전제와 범위: 코어의 차단 계산과 신규 주문 검사. 정책 기본값(격리, 레버리지 2), 종목 하나 또는 둘
+- 실제 구성요소: oms-core
+- 모의·시뮬레이션: 거래소 설정 응답과 증거금 보고는 시험이 입력
+- 주입한 장애: 설정을 받지 못한 링크 세션, 옛 세션의 늦은 응답, 교차 증거금, 레버리지 3과 1, 허용 목록에 잘못 적힌 통합 계좌와 포트폴리오 증거금
+- 판정 기준과 근거: C-MARGIN의 '거래소 설정과 계좌 모드'. 기대값은 손으로 적었다. 변이 M43~M50
+- 재현: `cargo test -p oms-core --test margin`
+- 뒷받침하는 것: C-MARGIN
+- 확인하지 않은 범위: 어느 문자열이 표준 모드인지(T10): 시험의 standard는 임의의 이름이다. 포지션이 없을 때 거래소가 설정을 알려 주는지(T11). 거래소가 걸려 있는 주문에 레버리지를 적용하는지(T8)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/instrument_with_unknown_venue_setting_holds_plain_orders` | 통과 |  |
+| `core/a_setting_that_differs_from_config_holds_only_that_instrument` | 통과 |  |
+| `core/a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again` | 통과 |  |
+| `core/a_cross_position_in_a_margin_report_raises_the_hold` | 통과 |  |
+| `core/venue_setting_hold_names_its_instrument_in_holds` | 통과 |  |
+| `core/unified_or_portfolio_account_mode_holds_the_account` | 통과 |  |
+| `core/an_account_mode_off_the_allow_list_or_unknown_holds_the_account` | 통과 |  |
+| `core/reduce_only_order_passes_the_venue_setting_and_account_mode_holds` | 통과 |  |
+| `core/a_report_position_on_an_unconfigured_instrument_leaves_no_venue_setting` | 통과 |  |
+
+## V-MARGIN-6 — 운영자의 해제(clear-reduce)는 계좌가 감소 전용 상태가 아니면 NotReducing으로, 증거금 보고가 30초보다 오래됐으면 MarginUnavailable로, 사유가 비었으면 NoteRequired로 거절되고, 거절은 아무것도 기록하지 않는다. 받아들인 해제는 한 입력 안에서 마지막 보고의 계좌 가치를 새 기준 금액으로 정하고(day_base_set, set_by: operator) 감소 전용 상태를 끝낸다(reducing_cleared). 정확히 30초 된 보고는 신선하다. 그 뒤 새 기준 94에서 94와 89.30은 걸리지 않고 89.29는 다시 걸린다. 두 번째 해제는 NotReducing이다. 기준 재설정(rebase-day)은 신선한 보고와 사유가 있을 때 마지막 보고의 계좌 가치와 그 날짜(기준보다 앞선 날짜라도)를 기준 금액으로 정하고, 감소 전용 상태는 건드리지 않는다. 기준 재설정 없이 출금하면 그만큼이 손실로 읽힌다(100에서 6을 출금하면 걸린다). 마지막 보고에서 유지증거금 여유 조건이 참이면(어느 규칙으로 들어왔든) 해제는 MmBufferActive로 거절되고, 이 조건은 사유보다 먼저 본다. 포지션이 선 위로 돌아온 보고(가치 200, 최대 레버리지 40에서 3.00) 뒤에는 해제된다
+
+- 상태: **통과**
+- 왜 중요한가: 해제는 위험을 다시 여는 유일한 길이다. 오래된 숫자로, 또는 사유 없이 풀리면 손실 한도가 뜻을 잃는다
+- 수준: 단위
+- 전제와 범위: 운영자 입력 ClearReduce와 RebaseDay, 그 거절 사유, 이벤트 day_base_set(운영자)과 reducing_cleared
+- 실제 구성요소: oms-core
+- 모의·시뮬레이션: 보고는 시험이 입력
+- 주입한 장애: 없음
+- 판정 기준과 근거: C-MARGIN의 '해제와 기준 재설정'. 기대값은 손으로 적었다
+- 재현: `cargo test -p oms-core --test margin`
+- 뒷받침하는 것: C-MARGIN
+- 확인하지 않은 범위: 운영자의 판단이 옳은 것. 입금이 가린 손실(100, 입금 10, 손실 14는 걸리지 않는다: 시험이 그대로 보여 준다). 잘못 걸린 유지증거금 여유 래치에서 나가는 길(없다: 조건이 참으로 읽히는 동안에는 해제할 수 없고 강제 옵션이 없다)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing` | 통과 |  |
+| `core/clear_reduce_rebases_the_day_and_a_further_loss_latches_again` | 통과 |  |
+| `core/rebase_day_sets_the_base_and_leaves_the_latch_alone` | 통과 |  |
+| `core/a_withdrawal_without_rebase_reads_as_a_loss` | 통과 |  |
+| `core/clear_reduce_is_refused_while_the_mm_condition_holds` | 통과 |  |
+
+## V-MARGIN-7 — 증거금 정책이 있고 링크가 올라와 있을 때, 마지막으로 받은 증거금 보고의 조회 시각에서 60초가 넘게 지나면 틱이 감소 전용 표시가 없고 취소 요청이 없는 모든 열린 주문에 Rule(MarginStale) 이름으로 취소 요청을 한 번 낸다. 정확히 60초에는 내지 않는다. 감소 전용 표시가 있는 주문은 그대로 둔다. 아무 상태도 걸리지 않는다
+
+- 상태: **통과**
+- 왜 중요한가: 증거금 보고를 못 받는 동안에는 일 손실도 유지증거금 여유도 판정하지 못한다. 그동안 걸려 있는 일반 주문이 체결되면 보지 못하는 채로 위험이 는다
+- 수준: 단위
+- 전제와 범위: 틱 안의 cancel_requested(by: Rule(MarginStale)), cancel_sent
+- 실제 구성요소: oms-core
+- 모의·시뮬레이션: 보고와 거래소 통보, 시각은 시험이 입력
+- 주입한 장애: 보고가 끊긴 링크
+- 판정 기준과 근거: C-MARGIN의 '보고 끊김 취소'. 기대값은 손으로 적었다
+- 재현: `cargo test -p oms-core --test margin`
+- 뒷받침하는 것: C-MARGIN
+- 확인하지 않은 범위: 포지션(그대로 남는다). 감소 전용 주문. 링크가 내려가 있는 동안(아무것도 취소하지 않는다). 취소가 체결보다 먼저 닿는다는 것
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/report_stale_past_the_cancel_limit_cancels_each_plain_order_once` | 통과 |  |
+| `core/stale_age_starts_at_link_up_when_no_report_has_arrived` | 통과 |  |
+| `core/stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off` | 통과 |  |
+| `core/stale_cancel_does_not_reissue_an_exhausted_cancel` | 통과 |  |
+| `core/a_fresh_report_after_a_stale_episode_restores_acceptance_without_a_latch` | 통과 |  |
+| `core/a_forward_clock_jump_reads_the_report_as_stale_and_cancels` | 통과 |  |
+| `core/stale_age_starts_at_policy_activation_when_the_link_is_already_up` | 통과 |  |
+
+## V-MARGIN-8 — 증거금 정책이 있으면, 받은 증거금 보고의 포지션 가운데 포지션 가치가 0보다 큰 것의 격리 증거금이 (유지증거금률 + 0.25 %p) × 포지션 가치보다 작으면 계좌가 감소 전용 상태로 들어가고 규칙은 MmBuffer로 남는다. 최대 레버리지 40, 포지션 가치 200에서 3.00은 걸리지 않고 2.99는 걸린다. 유지증거금률은 그 포지션의 최대 레버리지(같은 보고의 값)로 1 / (2 × 최대 레버리지)이다: 최대 레버리지 25, 가치 200에서 4.50은 걸리지 않고 4.49는 걸리며, 최대 레버리지 50에서는 2.50이 걸리지 않는다. 한 종목의 포지션이 걸려도 래치는 계좌 전체에 하나다: 다른 종목에 걸려 있는 일반 주문이 Rule(MmBuffer) 이름으로 취소되고, 모든 종목의 새 일반 주문이 Hold(Reducing)으로 거절되며, 감소 전용 주문은 받는다. 교차 증거금 포지션은 판정하지 않는다(그 종목은 VenueSetting 차단에 걸린다). 래치에는 먼저 건 규칙이 남는다: 일 손실로 들어간 뒤의 유지증거금 여유 판정도, 그 반대도 아무것도 내지 않고 바꾸지 않는다. 한 보고가 둘 다 걸면 유지증거금 여유를 먼저 판정하므로 MmBuffer가 남는다. 받은 보고는 도착했을 때 이미 30초보다 오래됐어도 판정한다(조회 뒤 40초에 기록된 보고의 2.99도 건다). 비교는 나눗셈 없는 정확한 곱으로 한다: 가장 큰 금액·최대 레버리지·여유에서도 넘침이 결과를 뒤집지 않고(곱이 i128에 들어가지 않으면 선 아래로 본다), 선 바로 옆에서 반올림이 결과를 뒤집지 않는다. 포지션 가치가 0 이하인 포지션은 판정하지 않는다
+
+- 상태: **통과**
+- 왜 중요한가: 격리 포지션이 청산에 가까운 계좌에 일반 주문을 더 받으면 위험이 는다. 판정은 거래소가 준 보고만 읽으므로 OMS 장부의 오류가 이 규칙을 끄지 못한다
+- 수준: 단위
+- 전제와 범위: 이벤트 reducing_entered(rule: mm_buffer)와 상태 reducing
+- 실제 구성요소: oms-core
+- 모의·시뮬레이션: 보고는 시험이 입력
+- 주입한 장애: 없음
+- 판정 기준과 근거: C-MARGIN의 '유지증거금 여유'. 기대값은 손으로 적었다
+- 재현: `cargo test -p oms-core --test margin`
+- 뒷받침하는 것: C-MARGIN
+- 확인하지 않은 범위: 거래소의 격리 포지션 marginUsed가 그 포지션의 자산이라는 것(T1. 틀리면 규칙이 양쪽으로 틀릴 수 있다). 증거금 구간(T9: 유지증거금률은 보고의 최대 레버리지 하나로만 계산한다). 규칙은 청산 가격의 0.13~0.37 % 앞에서 걸리고(BTC, 거래소 2배) 5초 간격의 조회가 그 사이를 건너뛸 수 있다. 새 보고를 받지 못하는 동안에는 판정하지 않는다
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/isolated_margin_below_mmr_plus_buffer_enters_reducing` | 통과 |  |
+| `core/mmr_follows_the_max_leverage_of_each_position` | 통과 |  |
+| `core/a_trigger_on_one_instrument_blocks_plain_orders_on_all` | 통과 |  |
+| `core/a_cross_position_is_not_judged_by_the_mm_rule` | 통과 |  |
+| `core/reducing_records_the_rule_that_tripped_first` | 통과 |  |
+| `core/an_old_report_on_arrival_is_still_judged_by_the_mm_rule` | 통과 |  |
+| `core/mm_comparison_is_exact_at_extreme_values` | 통과 |  |
+
+## V-MARGIN-12 — 시뮬레이션의 가상 거래소는 계좌 가치를 자기 모형으로 계산한다: 현금 + 포지션 × 기준 가격. 체결은 낸 값과 수수료만큼, 펀딩은 그 금액만큼 현금을 줄이고, 가격 변화는 포지션 가치를 바꾼다. 손으로 푼 예(입금 100, 100에 0.5 매수와 수수료 0.01, 가격 104, 펀딩 0.1 %)에서 계좌 가치는 99.99, 101.99, 101.938이다. 가격이 움직이지 않아도 수수료와 펀딩만으로 계좌가 기준 금액보다 5 %를 넘게 내려가면 감소 전용 상태로 들어간다(100에서 95.00은 아니고 94.99는 들어간다). 가상 거래소는 포지션을 키우거나 반대쪽으로 넘기는 감소 전용 주문을 거절하고, 걸려 있는 감소 전용 주문은 남은 포지션만큼만 체결한 뒤 나머지를 취소한다. 증거금 정책을 켠 임의 순서의 실행(체결, 가격 변화, 펀딩, 운영자 해제, 그리고 margin_lossy에서는 보고 유실·지연·무응답, 링크 단절, 재시작)의 매 입력 뒤에: 받아들인 일반 주문은 신선한 보고가 있었고 노출이 계좌 가치의 2배 이내이거나 노출을 올리지 않았다. 감소 전용 상태에 들어가면 열려 있는 일반 주문마다 취소 요청이 있고, 그 상태인 동안 일반 주문은 받아들여지지 않는다. 감소 전용 상태는 증거금 보고로만 들어가고 운영자의 해제로만 끝난다(재시작, 새 UTC 날, 회복된 계좌 가치는 끝내지 않는다). 보고가 한도보다 오래 끊긴 뒤의 틱이 끝나면 열려 있는 일반 주문마다 취소 요청이 있다. 증거금 정책이 없는 기존 프로파일 일곱 개는 seed 다섯 개씩 main(84db0f9)에서 기록한 것과 같은 저널을 쓴다. 가상 시간 50시간짜리 실행(margin_days: UTC 자정 1시간 전에 시작해 자정을 세 번 넘고, 그 사이에 재시작, 링크 단절, 손실, 출금과 입금, 운영자의 해제와 기준 재설정이 섞인다)에서도 위 검사가 매 입력 뒤에 성립하고, 기록된 보고가 그 전의 기준 금액보다 5 %를 넘게 낮으면 그 보고가 새 날의 기준을 정하는 보고여도 계좌는 감소 전용 상태가 되고, 저널의 기준 금액은 실행마다 자정을 정확히 세 번 넘고, 재시작과 새 날은 감소 전용 상태를 끝내지 않는다. 정해진 순서 하나(자정을 넘는 20초의 조회 끊김 동안 100에서 6 출금, 재시작, 자정 두 번 더)에서 새 날의 첫 보고 94는 상태를 걸고 나서 기준이 되고, 저널에는 날마다 기준이 하나다(100, 94, 100, 99). 저널의 증거금 기록(입력이 증거금 보고인 기록)은 조회 한 번에 하나를 넘지 않는다: 조용한 하루는 조회 17 280번에 기록 17 280건이고, 50시간 실행에서 기록 수는 조회 수 이하이고 같은 조회의 답은 두 번 기록되지 않는다
+
+- 상태: **통과**
+- 왜 중요한가: 일 손실 규칙은 거래소가 말한 계좌 가치만 읽는다. 시뮬레이션이 그 값을 체결·가격·수수료·펀딩에서 스스로 만들어야 규칙을 임의 순서의 실행에서 볼 수 있다. 예제 시험이 생각하지 못한 순서(취소 중의 진입, 재시작 직후의 보고, 앞지른 늦은 보고)는 여기서만 나온다
+- 수준: 시뮬레이션
+- 전제와 범위: 가상 거래소의 증거금 모형(단위 3건). 프로파일 margin_calm, margin_lossy: 실행당 1500단계, 한 종목, 두 전략, 계좌 100, 증거금 시계는 계약 기본값의 50분의 1(조회 100 ms, 신선도 600 ms, 끊김 취소 1.2초), UTC 자정을 한 번 넘는다. 프로파일 margin_days: 가상 시간 50시간, 증거금 시계는 계약 기본값(조회 5초, 신선도 30초, 끊김 취소 60초), UTC 자정을 세 번 넘는다. 활동은 묶음으로 오고 그 사이 5초~10분은 타이머만 돈다. seed는 표준 실행의 10분의 1(최소 2개). 기존 프로파일 7개 × seed 5개의 저널 해시
+- 실제 구성요소: oms-core의 판단과 상태
+- 모의·시뮬레이션: 거래소와 그 증거금 모형(우리 모형이고 거래소의 문서화된 산술이 아니다), 저널과 커밋 게이트, 게이트웨이, 네트워크, 전략, 운영자, 시계
+- 주입한 장애: margin_calm: 없음. margin_lossy: lossy의 네트워크 장애, 링크 단절 0.3 %/단계, 재시작 0.2 %/단계, 증거금 조회 무응답 0.5~2.5초, 늦은 응답, 포지션 증거금을 0으로 말하는 거래소. margin_days: margin_lossy의 장애(링크 단절 0.2 %/단계, 재시작 0.1 %/단계, 실행당 약 15 000단계), 증거금 조회 무응답 1분~1시간과 자정 둘 중 하나를 넘는 무응답, 두 번 도착하는 증거금 응답 5 %, 출금과 입금, 운영자의 기준 재설정
+- 판정 기준과 근거: 모형은 손으로 푼 예의 값. 실행은 검사 leverage-gate, margin-fresh, reducing-cancel, reducing-accept, reducing-entry, reducing-release, stale-cancel, daily-loss(노출과 손실은 세계가 코어의 장부와 보고에서 따로 계산한다)와 V-SIM-1, V-SIM-2의 검사. 프로파일이 각 규칙에 닿았는지는 seed 40개부터 확인한다(margin_days는 흔한 것은 4개부터, 자정에 관한 것은 40개부터). 저널 해시는 main에서 기록한 상수와 비교한다. 여러 날 실행의 기대값(기준 금액, 17 280)은 손으로 적었다. 변이 M89~M100
+- 재현: `cargo test -p oms-sim --test sim -- world_ a_loss_made profile_margin margin_journal existing_profiles --nocapture   (실패 시: OMS_SIM_PROFILE=<이름> OMS_SIM_SEED=<n>)`
+- 뒷받침하는 것: C-MARGIN
+- 확인하지 않은 범위: 실제 거래소에 관한 것 전부: 계좌 가치와 증거금의 계산(T1, T2), 수수료와 펀딩이 어느 잔고에서 나가는지(T3), 감소 전용 주문의 처리(T5, 문서 인용을 가정으로 적었다). 취소가 체결보다 먼저 닿는 것. 주문을 받은 뒤 가격이 움직여 넘은 노출. 청산(모형에 없다). 증거금 구간. 여러 종목. 노드 프로세스를 실제로 며칠 돌리는 것(여러 날 실행은 가상 시간이다). 저널의 디스크 바이트(건수만 센다. 저널은 지워지지 않는다, U-04)와 증거금 기록이 아닌 기록의 수. margin_days의 seed는 표준 실행의 10분의 1이다
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `sim/world_account_value_follows_fills_price_fees_and_funding` | 통과 |  |
+| `sim/a_loss_made_only_of_fees_and_funding_enters_reducing` | 통과 |  |
+| `sim/world_refuses_a_reduce_only_order_that_would_grow_the_position` | 통과 |  |
+| `sim/profile_margin_calm` | 통과 |  |
+| `sim/profile_margin_calm_reducing_invariant` | 통과 |  |
+| `sim/profile_margin_calm_release_invariant` | 통과 |  |
+| `sim/profile_margin_lossy` | 통과 |  |
+| `sim/existing_profiles_give_the_same_run_with_margin_off` | 통과 |  |
+| `sim/profile_margin_days_crosses_three_utc_days_with_restarts` | 통과 |  |
+| `sim/margin_journal_records_stay_within_one_per_poll` | 통과 |  |
+
+## V-MARGIN-10 — Hyperliquid 게이트웨이는 문서의 clearinghouseState 응답 예를 증거금 보고 입력으로 옮긴다: 계좌 가치는 marginSummary.accountValue, 포지션마다 종목, 부호 있는 수량, 포지션 가치, 사용 증거금, 증거금 방식, 레버리지, 최대 레버리지. 어느 포지션이든 maxLeverage가 없거나 0이거나 정수가 아니면 보고 전체를 사유와 함께 거부 입력(MarginReportInvalid)으로 바꾸고, 멀쩡한 다른 포지션도 보고하지 않는다. 계좌 가치, 수량, 포지션 가치, 사용 증거금, 레버리지 가운데 하나라도 없거나 읽을 수 없을 때, 증거금 방식이 isolated도 cross도 아닐 때, 포지션 목록이 없을 때도 같다. 어떤 값도 0이나 기본값으로 채우지 않고 어떤 포지션도 건너뛰지 않는다. 설정에 없는 종목의 포지션도 보고에 남는다(번역 함수는 설정된 종목을 받지 않는다). activeAssetData 응답 예는 그 종목의 거래소 설정 입력(증거금 방식, 레버리지)이 된다. 방식이 isolated도 cross도 아니거나, 레버리지가 정수가 아니거나, 응답이 다른 종목의 것이면 입력을 만들지 않는다(설정은 모름으로 남아 그 종목이 막힌다). userAbstraction 응답(문자열 하나)은 글자 그대로 계좌 모드 입력이 된다. 문서에 없는 문자열을 문서에 있는 값으로 바꾸지 않고, 문자열이 아니거나 64자를 넘으면 입력을 만들지 않는다. 세 조회의 요청 본문은 문서의 것과 같다(clearinghouseState, activeAssetData, userAbstraction). 게이트웨이의 요청 예산은 취소를 막지 않으므로 취소 500건 뒤에는 조회가 기다린다: 가득 찬 예산(1200)에서는 700이 남아 증거금 조회가 바로 나가고, 시작 직후(600)에는 100이 남아 10.1초, 빈 예산에서는 15.1초를 기다린다
+
+- 상태: **통과**
+- 왜 중요한가: 증거금 규칙이 읽는 숫자는 모두 이 번역을 거친다. 필드를 하나 잘못 옮기면 규칙이 틀린 값으로 판정한다
+- 수준: 단위
+- 전제와 범위: 게이트웨이의 순수 번역 함수(JSON 응답 → 코어 입력)와 요청 본문 함수. 문서의 응답 예가 입력. 요청 예산은 시각을 시험이 주는 단위 시험
+- 실제 구성요소: oms-node(venue/hyperliquid/wire.rs, venue/hyperliquid/mod.rs의 Budget)
+- 모의·시뮬레이션: 응답은 시험이 입력. 거래소에 묻지 않는다
+- 주입한 장애: maxLeverage 없음, 0, 문자열, null, 음수, 소수, u32 초과, 배열. 소수 필드 없음, 숫자가 아닌 문자열, 빈 문자열, JSON 숫자, null, 지수 표기, NaN, 소수 9자리. 모르는 증거금 방식. 종목 이름 없음. 포지션 목록 없음
+- 판정 기준과 근거: C-MARGIN의 'Hyperliquid 조회'. 기대값은 문서 예의 소수를 손으로 1e-8 단위 정수로 적었다. 변이 M67~M76, M79
+- 재현: `cargo test -p oms-node --lib venue::hyperliquid`
+- 뒷받침하는 것: C-MARGIN
+- 확인하지 않은 범위: 실제 응답이 문서의 예와 같은지, 필드의 뜻이 유도한 것과 같은지(T1, T2). 어느 userAbstraction 값이 표준 모드인지(T10), 포지션이 없을 때 activeAssetData가 레버리지를 주는지(T11). activeAssetData의 응답 예는 저장소의 조사 문서에 없고 문서와 다시 대조하지 않았다. 게이트웨이가 조회를 실제로 보내는 경로(HTTP)는 시험하지 않는다. HTTP 429일 때의 동작. 거래소가 실제로 세는 weight. 요청 예산을 여러 조회가 다투는 순서와 조회 간격만큼 더 길어지는 대기
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `node-unit/venue::hyperliquid::wire::tests::documented_clearinghouse_state_parses_to_a_margin_report` | 통과 |  |
+| `node-unit/venue::hyperliquid::wire::tests::missing_zero_or_unparseable_max_leverage_rejects_the_whole_report` | 통과 |  |
+| `node-unit/venue::hyperliquid::wire::tests::any_unparseable_number_rejects_the_whole_report` | 통과 |  |
+| `node-unit/venue::hyperliquid::wire::tests::a_position_on_an_unconfigured_coin_is_kept` | 통과 |  |
+| `node-unit/venue::hyperliquid::wire::tests::documented_active_asset_data_parses_leverage_and_mode` | 통과 |  |
+| `node-unit/venue::hyperliquid::wire::tests::user_abstraction_values_parse_and_an_unknown_value_stays_unknown` | 통과 |  |
+| `node-unit/venue::hyperliquid::wire::tests::margin_and_setting_request_json` | 통과 |  |
+| `node-unit/venue::hyperliquid::tests::a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time` | 통과 |  |
 

@@ -68,6 +68,10 @@ pub struct Core {
     pub last_fill_at: Ts,
     pub last_purge_at: Ts,
     pub stats: Stats,
+    /// Margin reports (C-MARGIN). Not serialised while empty, so the state
+    /// of a run without a margin policy keeps its bytes and its digest.
+    #[serde(default, skip_serializing_if = "MarginState::is_empty")]
+    pub margin: MarginState,
 }
 
 impl Core {
@@ -99,6 +103,7 @@ impl Core {
             last_fill_at: 0,
             last_purge_at: 0,
             stats: Stats::default(),
+            margin: MarginState::default(),
         }
     }
 
@@ -183,7 +188,70 @@ impl Core {
         if self.storage_low {
             v.push(HoldReason::StorageLow);
         }
+        // The holds of C-MARGIN exist only with a margin policy. The
+        // REDUCING latch itself stays in the state without one, and holds
+        // again when a policy is activated.
+        let margin_rules_on = self.config.policy.margin.is_some();
+        if margin_rules_on && self.margin.reducing.is_some() {
+            v.push(HoldReason::Reducing);
+        }
+        if margin_rules_on {
+            for instrument in self.config.instruments.keys() {
+                if !self.venue_setting_is_as_configured(instrument) {
+                    v.push(HoldReason::VenueSetting(instrument.clone()));
+                }
+            }
+            if !self.account_mode_is_allowed() {
+                v.push(HoldReason::AccountMode);
+            }
+        }
         v
+    }
+
+    /// Whether the venue told, in the current link session, that
+    /// `instrument` has the margin mode and the leverage the margin policy
+    /// asks for (C-MARGIN, 거래소 설정과 계좌 모드). False without a margin
+    /// policy.
+    pub fn venue_setting_is_as_configured(&self, instrument: &InstrumentId) -> bool {
+        let Some(policy) = &self.config.policy.margin else {
+            return false;
+        };
+        let Some(seen) = self.margin.venue_settings.get(instrument) else {
+            return false;
+        };
+        let mode_matches = seen.isolated == policy.isolated;
+        let leverage_matches = seen.leverage == policy.venue_leverage;
+        mode_matches && leverage_matches
+    }
+
+    /// Whether the venue told, in the current link session, an account mode
+    /// that lets the margin rules run (C-MARGIN, 거래소 설정과 계좌 모드).
+    /// False without a margin policy.
+    pub fn account_mode_is_allowed(&self) -> bool {
+        let Some(policy) = &self.config.policy.margin else {
+            return false;
+        };
+        // Not told in this link session: unknown.
+        let Some(mode) = &self.margin.account_mode else {
+            return false;
+        };
+        let never_allowed = ACCOUNT_MODES_NEVER_ALLOWED.contains(&mode.as_str());
+        let listed = policy.account_modes_allowed.iter().any(|allowed| allowed == mode);
+        listed && !never_allowed
+    }
+
+    /// Whether a margin report exists that is fresh at record time `at`
+    /// (C-MARGIN, 신선도). False without a margin policy.
+    pub fn margin_report_is_fresh(&self, at: Ts) -> bool {
+        let (Some(policy), Some(report)) = (&self.config.policy.margin, &self.margin.report) else {
+            return false;
+        };
+        // Age = record time − query time, both node clock values. A query
+        // time after the record time means the clock stepped backwards: the
+        // age is negative and the report does not count until it is not.
+        let not_from_the_future = report.queried_at <= at;
+        let young_enough = at.saturating_sub(report.queried_at) <= policy.margin_max_age_us;
+        not_from_the_future && young_enough
     }
 
     /// The gateway command an event calls for, if any. Used only by live
@@ -294,7 +362,14 @@ impl Core {
     pub fn apply(&mut self, at: Ts, ev: &Event) -> Result<(), CoreFault> {
         match ev {
             Event::ConfigActivated { config } => {
+                let policy_comes_on = self.config.policy.margin.is_none() && config.policy.margin.is_some();
                 self.config = (**config).clone();
+                // A policy that comes on while the link is up has no
+                // link-up moment of its own: the stale cancel measures
+                // from here.
+                if policy_comes_on && self.link.up {
+                    self.margin.link_up_at = Some(at);
+                }
             }
             Event::Booted { boot, fill_floor, .. } => {
                 self.boot = *boot;
@@ -304,6 +379,15 @@ impl Core {
             Event::LinkChanged { up, session, .. } => {
                 self.link.up = *up;
                 self.link.session = *session;
+                if *up && self.config.policy.margin.is_some() {
+                    self.margin.link_up_at = Some(at);
+                }
+                // What the venue told in one link session says nothing
+                // about the next (C-MARGIN): the venue settings and the
+                // account mode are unknown again. The last margin report
+                // stays.
+                self.margin.venue_settings.clear();
+                self.margin.account_mode = None;
             }
             Event::RequestRejected { .. } => {
                 self.stats.rejected += 1;
@@ -741,6 +825,69 @@ impl Core {
                 self.mismatches
                     .retain(|_, m| m.acked.as_ref().is_none_or(|a| a.at >= *cutoff));
                 self.last_purge_at = at;
+            }
+            Event::MarginReported { report } => {
+                self.margin.report = Some(report.clone());
+                // The venue answers readably again: the reason an earlier
+                // answer was refused is no longer the state of things.
+                self.margin.last_rejection = None;
+                // Every position states the margin mode and the leverage of
+                // its instrument: a report is a source of venue settings.
+                // Only for configured instruments, as with the
+                // `VenueSetting` input: nothing reads another setting, and
+                // the venue decides how many positions a report lists.
+                let configured = &self.config.instruments;
+                for p in report.positions.iter().filter(|p| configured.contains_key(&p.instrument)) {
+                    self.margin.venue_settings.insert(
+                        p.instrument.clone(),
+                        VenueSettingSeen {
+                            isolated: p.leverage_type == crate::input::LeverageType::Isolated,
+                            leverage: p.leverage_value,
+                        },
+                    );
+                }
+            }
+            Event::MarginReportRejected { seq, queried_at, reason, .. } => {
+                self.margin.last_rejection = Some(MarginRejection {
+                    seq: *seq,
+                    queried_at: *queried_at,
+                    reason: reason.clone(),
+                    at,
+                });
+            }
+            Event::DayBaseSet { day, value, set_by } => {
+                self.margin.day_base = Some(DayBase {
+                    day: *day,
+                    value: *value,
+                    set_by: *set_by,
+                });
+            }
+            Event::ReducingEntered { rule, detail } => {
+                self.margin.reducing = Some(Reducing {
+                    rule: *rule,
+                    detail: detail.clone(),
+                    since: at,
+                });
+            }
+            Event::VenueSettingNoted {
+                instrument,
+                isolated,
+                leverage,
+                ..
+            } => {
+                self.margin.venue_settings.insert(
+                    instrument.clone(),
+                    VenueSettingSeen {
+                        isolated: *isolated,
+                        leverage: *leverage,
+                    },
+                );
+            }
+            Event::AccountModeNoted { mode, .. } => {
+                self.margin.account_mode = Some(mode.clone());
+            }
+            Event::ReducingCleared { .. } => {
+                self.margin.reducing = None;
             }
         }
         Ok(())

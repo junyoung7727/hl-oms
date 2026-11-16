@@ -7,6 +7,7 @@
 use crate::ids::*;
 use crate::num::*;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -111,6 +112,9 @@ pub struct Close {
 pub enum Actor {
     Strategy(StrategyId),
     Operator,
+    /// A margin rule of the core itself (C-MARGIN). The API builds only the
+    /// two actors above; a request from outside cannot carry this one.
+    Rule(RuleId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -276,6 +280,32 @@ pub enum HoldReason {
     OperatorStrategy,
     /// Journal storage is running low.
     StorageLow,
+    /// The account is REDUCING: a margin rule tripped and only the operator
+    /// clears it (C-MARGIN).
+    Reducing,
+    /// The venue's margin mode or leverage of this instrument is not known
+    /// in the current link session, or differs from the margin policy
+    /// (C-MARGIN). Refuses plain orders on this instrument only.
+    VenueSetting(InstrumentId),
+    /// The venue's account mode is not known in the current link session,
+    /// is unified account or portfolio margin, or is not on the allow-list
+    /// of the margin policy (C-MARGIN). Refuses plain orders on the account.
+    AccountMode,
+}
+
+impl HoldReason {
+    /// The hold table of ADR-008 §7. False: the hold refuses every new
+    /// order. True: it refuses only plain orders, and an order with the
+    /// venue's reduce-only flag passes it. The table is used only when a
+    /// margin policy is set; the new-order check decides that.
+    pub fn refuses_only_plain_orders(&self) -> bool {
+        match self {
+            HoldReason::NoConfig | HoldReason::LinkDown | HoldReason::OperatorAccount | HoldReason::OperatorStrategy | HoldReason::StorageLow => false,
+            HoldReason::Reducing => true,
+            HoldReason::Resync | HoldReason::InDoubt | HoldReason::Mismatch => true,
+            HoldReason::VenueSetting(_) | HoldReason::AccountMode => true,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -348,6 +378,135 @@ pub struct SyncState {
     pub fills_up_to: Ts,
     pub open_orders_session: u64,
     pub positions_session: u64,
+}
+
+/// What the core knows from margin reports (C-MARGIN). Empty in a run that
+/// never had a margin policy. A configuration that takes the policy away
+/// leaves what is here in place: no rule and no hold reads it until a
+/// policy is activated again.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarginState {
+    /// The newest report recorded. It stays, and ages, across link changes.
+    pub report: Option<crate::input::MarginReport>,
+    /// Why the most recent refused report was refused, until a later report
+    /// is recorded. Shown to the operator; no rule reads it.
+    pub last_rejection: Option<MarginRejection>,
+    /// The account value the daily loss is measured against. Changed only by
+    /// `day_base_set`; a restart and a link change keep it.
+    #[serde(default)]
+    pub day_base: Option<DayBase>,
+    /// Set while the account is REDUCING. One latch for the whole account.
+    #[serde(default)]
+    pub reducing: Option<Reducing>,
+    /// Record time at which the current link session came up. The stale
+    /// cancel measures from it while the session has no report. Set by the
+    /// link-up event, and only with a margin policy; a policy that is
+    /// activated while the link is up sets it to the activation time.
+    #[serde(default)]
+    pub link_up_at: Option<Ts>,
+    /// The venue setting of each configured instrument as the venue told it
+    /// in the current link session. An instrument that is not listed is
+    /// unknown. Emptied when the link changes.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub venue_settings: BTreeMap<InstrumentId, VenueSettingSeen>,
+    /// The account mode as the venue told it in the current link session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_mode: Option<String>,
+}
+
+/// Account modes in which the margin rules must not run, whatever the
+/// allow-list says: the numbers of a margin report mean something else
+/// there.
+pub const ACCOUNT_MODES_NEVER_ALLOWED: [&str; 2] = ["unifiedAccount", "portfolioMargin"];
+
+/// Margin mode and leverage of one instrument at the venue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VenueSettingSeen {
+    pub isolated: bool,
+    pub leverage: u32,
+}
+
+/// A margin rule that acts on its own: it latches REDUCING or cancels
+/// orders.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleId {
+    /// The account value fell more than `daily_loss_bps` below the day base.
+    DailyLoss,
+    /// The isolated margin of a position is below its maintenance margin
+    /// plus `mm_buffer_bps` of the position value.
+    MmBuffer,
+    /// No margin report was accepted for longer than `stale_cancel_us`
+    /// while the link was up. It cancels and latches nothing.
+    MarginStale,
+}
+
+/// The REDUCING latch (C-MARGIN, 감소 전용 상태).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Reducing {
+    /// The rule that tripped first. A later trigger does not replace it.
+    pub rule: RuleId,
+    /// The numbers the rule saw, for the operator.
+    pub detail: String,
+    pub since: Ts,
+}
+
+/// The day base of the daily-loss rule (C-MARGIN, 일 손실과 기준 금액).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DayBase {
+    /// UTC day number (days since 1970-01-01) of the query time of the
+    /// report the value was taken from.
+    pub day: u64,
+    pub value: Amount,
+    pub set_by: BaseSetBy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BaseSetBy {
+    /// The first report, or the first report of a later UTC day.
+    Report,
+    /// The operator's `clear-reduce` or `rebase-day`.
+    Operator,
+}
+
+/// Why an operator's `clear-reduce` or `rebase-day` was refused (C-MARGIN,
+/// 해제와 기준 재설정). The reply text starts with the code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MarginRefusal {
+    NotReducing,
+    MarginUnavailable,
+    MmBufferActive,
+    NoteRequired,
+}
+
+impl MarginRefusal {
+    /// The stable code and one sentence for the operator.
+    pub fn text(self) -> &'static str {
+        match self {
+            MarginRefusal::NotReducing => "not_reducing: the account is not REDUCING",
+            MarginRefusal::MarginUnavailable => "margin_unavailable: no fresh margin report",
+            MarginRefusal::MmBufferActive => "mm_buffer_active: a position is below its maintenance margin plus the buffer on the last margin report",
+            MarginRefusal::NoteRequired => "note_required: the command needs a note",
+        }
+    }
+}
+
+/// Microseconds in one UTC day.
+pub const DAY_US: u64 = 86_400_000_000;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarginRejection {
+    pub seq: u64,
+    pub queried_at: Ts,
+    pub reason: String,
+    pub at: Ts,
+}
+
+impl MarginState {
+    pub fn is_empty(&self) -> bool {
+        *self == MarginState::default()
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

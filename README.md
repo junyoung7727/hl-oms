@@ -6,11 +6,14 @@ LMAX의 원칙 가운데 **단일 writer의 결정적 코어 + 입력 저널**�
 ## 지금 상태를 한 문단으로
 
 가상 거래소에 대해서는 접수·위험 예약·전송·체결·취소·종결·재시작 복구·대조·과부하 처리가 구현돼 있다. 무엇이 어떤 시험으로 확인됐는지는 주장별로 [generated/claims.md](docs/generated/claims.md)에 있고, 그 통과 여부는 보관된 결과 파일에서 계산한다.
+**증거금 규칙이 구현돼 있다**(2026-11-16, [ADR-018](docs/adr/ADR-018-margin-rules.md), [계약 C-MARGIN](docs/contracts/margin.md)). 증거금 정책(`policy.margin`)을 설정하면: 일반 주문이 계좌 노출(포지션과 모든 미체결 주문)을 계좌 가치의 2배 위로 올리면 거절한다. 일 손실이 5 %를 넘거나 격리 포지션이 청산에 가까워지면 계좌가 감소 전용 상태가 되어 일반 주문을 거절하고 걸린 일반 주문을 취소하며, 이 상태는 운영자만 푼다. 증거금 보고가 끊기면 일반 주문을 거절하고(30초), 걸린 일반 주문을 취소한다(60초). 정책이 없으면 전과 같고, mainnet은 정책 없이 시작하지 않는다. OMS는 포지션을 스스로 닫지 않고, 손실이 5 %에서 멈춘다고 보장하지 않는다.
+**증거금 규칙은 실제 거래소에서 한 번도 실행하지 않았다.** 가상 거래소와 시뮬레이션으로만 시험했다. 규칙이 읽는 거래소 숫자의 뜻은 문서에서 읽은 가정 열한 가지(T1~T11)이고 하나도 확인하지 않았다. testnet 예행(실주문으로 감소 전용 상태·보고 끊김 취소·강제 종료 훈련)과 T1~T11의 확인이 mainnet 전에 필요하고, 사용자의 승인이 필요하다(U-01, U-09). 스펙과 다르게 한 것과 보장하지 않는 것은 [검증 문서 §11](docs/verification/README.md)에 있다. 코드 검토(2026-11-16)에서 나온 것은 고쳤고(대조기가 모르는 거래소 설정을 1초마다 되묻던 것 포함), 미해결 사항은 지금 없다.
 구현과 분리된 검토에서 결함 20건이 나와 고쳤다([gap-review](docs/verification/gap-review.md)). 사람의 검토는 받지 않았다.
-**실제 거래소에는 주문을 한 번도 보내지 않았다.** Hyperliquid 게이트웨이는 서명을 SDK 시험 벡터와 대조했고 testnet에 읽기 전용 조회만 했다.
-**전원 장애는 시험하지 않았다.** 금액·증거금 한도, 누적 체결량 한도, 알림은 없다.
-현재 소스(`4f6788394bb348d6`)의 수용 시험은 testnet 조회 묶음(`hl-live`)을 빼고 실행했고, 실행한 201건은 모두 통과했다. 주장 56건 가운데 통과 49건, 미실행 1건(V-HL-3: testnet에 접속하지 않았다), 이전 버전 결과 6건(V-PERF-1~5, V-MUT-1: 성능 측정과 변이 점검은 다시 실행하지 않았고 결과는 소스 `c2addecd59bc4a5a`의 것이다)이다. 그 이전 소스에서는 주장 56건이 모두 통과였고 변이 20건을 모두 잡았다([검증 문서](docs/verification/README.md)).
-지연 수용 기준은 저널 장치에 달려 있다: 970 EVO Plus 2TB에서 만족했고(초당 200건 p99 9.1 ms), 거의 찬 500GB SSD에서는 넘었다([성능 문서](docs/performance/README.md)).
+**실제 거래소에는 주문을 한 번도 보내지 않았다.** Hyperliquid 게이트웨이는 서명을 SDK 시험 벡터와 대조했고, 2026-10-02에 testnet에 읽기 전용 조회만 했다(증거금 조회는 그때 없었고 그 뒤로도 보내지 않았다).
+**전원 장애는 시험하지 않았다.** 누적 체결량 한도와 알림은 없다.
+현재 소스(`762a4acf55af90fb`)의 수용 시험은 testnet 조회 묶음(`hl-live`)을 빼고 실행했고, 실행한 326건은 모두 통과했다. 같은 소스에서 변이 점검 122건을 시험이 모두 잡았고, 성능을 다시 쟀다. 주장 68건 가운데 통과 67건, 미실행 1건이다([검증 문서](docs/verification/README.md)).
+주장 V-HL-3(testnet 읽기 전용 조회)은 "미실행"이다: 증거금 규칙의 작업은 실제 거래소에 어떤 요청도 보내지 않기로 했기 때문이다. 실패도 통과도 아니다.
+지연 수용 기준은 저널 장치에 달려 있다: 970 EVO Plus 2TB에서 만족했고(초당 200건 p99 8.7 ms, 2026-11-16), 거의 찬 500GB SSD에서는 넘었다([성능 문서](docs/performance/README.md)). 이 부하 측정의 설정에는 증거금 정책이 없다. 정책을 켠 신규 주문 한 건의 판단 시간은 열린 주문 약 500건에서 중앙값 66 µs, p99 90 µs다(정책 없음 27 µs, 33 µs).
 
 ## 어디서부터 읽나
 
@@ -62,6 +65,7 @@ Hyperliquid testnet 설정 예: [config/hyperliquid-testnet.example.toml](config
 cargo run --release -p xtask -- verify      # 전체 시험 묶음. 결과: evidence/latest/  (--extended <디렉터리>, --live-testnet)
 cargo run --release -p xtask -- mutants     # 고의로 고장 낸 코드를 시험이 잡는지
 cargo run --release -p xtask -- perf --label nvme-final --seconds 60 --dir <실제 디스크의 디렉터리>
+cargo run --release -p xtask -- core-bench   # 코어의 판단 시간. 증거금 정책이 없는 경우와 있는 경우
 cargo run --release -p xtask -- recovery-time --dir <실제 디스크의 디렉터리>
 cargo run --release -p xtask -- docs        # 결과를 주장과 묶어 docs/generated/ 와 dashboard/data/ 를 다시 만든다
 ```

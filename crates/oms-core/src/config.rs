@@ -89,6 +89,53 @@ pub struct Policy {
     /// How far behind the fill-sync watermark fill keys are remembered. A
     /// fill older than that is treated as a re-delivery.
     pub fill_dedup_retention_us: u64,
+    /// Margin rules (ADR-018, C-MARGIN). Absent means the rules are off and
+    /// every hold refuses every new order, as before the rules existed. An
+    /// absent section is not serialised, so a journal of a run without the
+    /// rules keeps the bytes it had before the section existed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub margin: Option<MarginPolicy>,
+}
+
+/// Values of the margin rules. The section is optional; see `Policy::margin`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MarginPolicy {
+    /// Account exposure may not exceed this many times the account value.
+    pub max_account_leverage: Ratio,
+    /// Loss against the day base, in basis points of the base, beyond which
+    /// the account only reduces.
+    pub daily_loss_bps: u32,
+    /// Distance kept above the maintenance margin rate, in basis points of
+    /// the position value.
+    pub mm_buffer_bps: u32,
+    /// A margin report older than this is not fresh.
+    pub margin_max_age_us: u64,
+    /// Without an accepted margin report for longer than this, resting plain
+    /// orders are cancelled.
+    pub stale_cancel_us: u64,
+    /// Leverage every instrument must have at the venue.
+    pub venue_leverage: u32,
+    /// Margin mode every instrument must have at the venue.
+    pub isolated: bool,
+    /// Account modes accepted besides none. `unifiedAccount` and
+    /// `portfolioMargin` are never accepted, also when listed.
+    pub account_modes_allowed: Vec<String>,
+}
+
+impl Default for MarginPolicy {
+    fn default() -> Self {
+        MarginPolicy {
+            max_account_leverage: Ratio(2 * SCALE),
+            daily_loss_bps: 500,
+            mm_buffer_bps: 25,
+            margin_max_age_us: 30_000_000,
+            stale_cancel_us: 60_000_000,
+            venue_leverage: 2,
+            isolated: true,
+            account_modes_allowed: Vec::new(),
+        }
+    }
 }
 
 impl Default for Policy {
@@ -110,6 +157,7 @@ impl Default for Policy {
             max_parked_fills: 1024,
             purge_interval_us: 60_000_000,
             fill_dedup_retention_us: 86_400_000_000,
+            margin: None,
         }
     }
 }
@@ -203,6 +251,24 @@ impl CoreConfig {
         // book our own fill as external.
         if p.unmatched_fill_wait_us <= p.max_expiry_horizon_us.saturating_add(p.absence_margin_us) {
             errs.push("policy: unmatched_fill_wait_us must exceed max_expiry_horizon_us + absence_margin_us".to_string());
+        }
+        if let Some(m) = &p.margin {
+            // The 설정 table of C-MARGIN.
+            if m.max_account_leverage.0 <= 0 {
+                errs.push("policy.margin: max_account_leverage must be greater than 0".to_string());
+            }
+            if m.daily_loss_bps == 0 {
+                errs.push("policy.margin: daily_loss_bps must be greater than 0".to_string());
+            }
+            if m.margin_max_age_us == 0 {
+                errs.push("policy.margin: margin_max_age_us must be greater than 0".to_string());
+            }
+            if m.stale_cancel_us <= m.margin_max_age_us {
+                errs.push("policy.margin: stale_cancel_us must be greater than margin_max_age_us".to_string());
+            }
+            if m.venue_leverage == 0 {
+                errs.push("policy.margin: venue_leverage must be at least 1".to_string());
+            }
         }
         if errs.is_empty() { Ok(()) } else { Err(errs) }
     }

@@ -61,7 +61,7 @@
       "killed": true,
       "note": "",
       "test": "cargo test -p oms-core --test scenarios unknown_send_outcome",
-      "what": "hold reasons no longer cause a rejection"
+      "what": "hold reasons no longer cause a rejection, in either column of the hold table"
     },
     {
       "file": "crates/oms-core/src/decide.rs",
@@ -179,8 +179,926 @@
       "note": "",
       "test": "cargo test -p oms-node --test review_node idle_trading_connections",
       "what": "the admin socket shares its connection pool with the trading socket"
+    },
+    {
+      "file": "crates/oms-core/src/model.rs",
+      "guards": "C-MARGIN / hold table",
+      "id": "M21-partial-hold-refuses-reduce-only",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test scenarios reduce_only_order_is_accepted",
+      "what": "a hold that refuses only plain orders also refuses a reduce-only order"
+    },
+    {
+      "file": "crates/oms-core/src/model.rs",
+      "guards": "C-MARGIN / hold table",
+      "id": "M22-block-all-hold-passes-reduce-only",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test scenarios reduce_only_order_is_rejected_by_every_block_all_hold",
+      "what": "a hold that refuses every new order lets a reduce-only order pass"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / hold table",
+      "id": "M23-hold-table-without-margin-policy",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test scenarios without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order",
+      "what": "the hold table applies although no margin policy is set"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / report intake",
+      "id": "M24-margin-report-of-another-session-taken",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin margin_report_of_an_old_session_or_with_the_link_down_is_ignored",
+      "what": "a margin report is taken although it belongs to another link session"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / report intake",
+      "id": "M25-margin-report-taken-with-link-down",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin margin_report_of_an_old_session_or_with_the_link_down_is_ignored",
+      "what": "a margin report is taken while the link is down"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / report intake",
+      "id": "M26-no-margin-sequence-guard",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin late_margin_report_with_a_lower_sequence_is_ignored",
+      "what": "a margin report with a lower number replaces a newer one"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / report intake",
+      "id": "M27-margin-sequence-guard-lets-equal-pass",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin late_margin_report_with_a_lower_sequence_is_ignored",
+      "what": "a margin report with the same number as the last one is taken again"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / freshness",
+      "id": "M28-old-margin-report-is-fresh",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin plain_order_is_rejected_margin_unavailable_without_a_fresh_report",
+      "what": "a margin report of any age counts as fresh"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / freshness",
+      "id": "M29-margin-report-at-the-age-limit-is-stale",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin plain_order_is_rejected_margin_unavailable_without_a_fresh_report",
+      "what": "a margin report exactly as old as the limit does not count as fresh"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / freshness",
+      "id": "M30-future-margin-report-is-fresh",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin margin_report_dated_after_the_record_time_is_not_fresh",
+      "what": "a margin report dated after the record time counts as fresh"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / freshness",
+      "id": "M31-margin-report-of-age-zero-is-stale",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin margin_report_dated_after_the_record_time_is_not_fresh",
+      "what": "a margin report asked for at the record time itself does not count as fresh"
+    },
+    {
+      "file": "crates/oms-core/src/exposure.rs",
+      "guards": "C-MARGIN / leverage gate",
+      "id": "M32-leverage-gate-refuses-at-the-limit",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin order_exactly_at_the_limit_is_accepted",
+      "what": "the leverage gate refuses an order that lands exactly on the limit"
+    },
+    {
+      "file": "crates/oms-core/src/exposure.rs",
+      "guards": "C-MARGIN / leverage gate",
+      "id": "M33-leverage-gate-ignores-exposure-before",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin after_a_passive_breach_a_plain_reducing_order_passes_and_an_increasing_one_does_not",
+      "what": "the leverage gate refuses every plain order while exposure is above the limit, also one that does not raise it"
+    },
+    {
+      "file": "crates/oms-core/src/exposure.rs",
+      "guards": "C-MARGIN / leverage gate",
+      "id": "M34-order-valued-at-the-lower-price",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin resting_order_counts_at_the_higher_of_limit_and_reference",
+      "what": "an order counts at the lower of its limit price and the reference price, not the higher"
+    },
+    {
+      "file": "crates/oms-core/src/exposure.rs",
+      "guards": "C-MARGIN / leverage gate",
+      "id": "M35-order-valued-at-its-limit-price-only",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin resting_order_counts_at_the_higher_of_limit_and_reference",
+      "what": "an order far below the reference price counts at its limit price, not at the reference price"
+    },
+    {
+      "file": "crates/oms-core/src/exposure.rs",
+      "guards": "C-MARGIN / leverage gate",
+      "id": "M36-exposure-is-the-largest-instrument",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin exposure_is_the_sum_over_instruments",
+      "what": "account exposure is the largest instrument exposure, not the sum over instruments"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / daily loss",
+      "id": "M37-daily-loss-judged-only-on-a-fresh-report",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin a_report_older_than_the_freshness_limit_on_arrival_is_still_judged",
+      "what": "a report that is older than the freshness limit when it arrives is recorded but not judged for the daily loss"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / daily loss",
+      "id": "M38-daily-loss-trips-at-exactly-the-limit",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin loss_greater_than_five_percent_of_the_base_enters_reducing",
+      "what": "a loss of exactly the daily-loss limit enters REDUCING"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / daily loss",
+      "id": "M39-day-rolls-before-the-report-is-judged",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day",
+      "what": "the first report of a new day becomes the day base before it is judged, so a loss across midnight is absorbed"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / REDUCING",
+      "id": "M40-entering-reducing-cancels-reduce-only-orders",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones",
+      "what": "entering REDUCING also cancels orders with the reduce-only flag"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / REDUCING",
+      "id": "M41-reducing-entered-again",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin reducing_is_entered_once",
+      "what": "a trigger while the account is already REDUCING enters it again and asks for cancels again"
+    },
+    {
+      "file": "crates/oms-core/src/model.rs",
+      "guards": "C-MARGIN / hold table (ADR-008 §7)",
+      "id": "M42-reducing-refuses-reduce-only-orders",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted",
+      "what": "the hold Reducing refuses every new order, reduce-only included"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / venue setting and account mode",
+      "id": "M43-venue-margin-mode-not-compared",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin a_setting_that_differs_from_config_holds_only_that_instrument",
+      "what": "an instrument on cross margin passes although the policy asks for isolated"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / venue setting and account mode",
+      "id": "M44-venue-leverage-not-compared",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin a_setting_that_differs_from_config_holds_only_that_instrument",
+      "what": "an instrument at another venue leverage passes"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / venue setting and account mode",
+      "id": "M45-venue-settings-survive-a-link-change",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again",
+      "what": "a venue setting told in an earlier link session still counts"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / venue setting and account mode",
+      "id": "M46-account-mode-survives-a-link-change",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin an_account_mode_off_the_allow_list_or_unknown_holds_the_account",
+      "what": "an account mode told in an earlier link session still counts"
+    },
+    {
+      "file": "crates/oms-core/src/model.rs",
+      "guards": "C-MARGIN / venue setting and account mode",
+      "id": "M47-unified-account-passes-when-listed",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin unified_or_portfolio_account_mode_holds_the_account",
+      "what": "the unified account mode passes when the allow-list names it"
+    },
+    {
+      "file": "crates/oms-core/src/model.rs",
+      "guards": "C-MARGIN / venue setting and account mode",
+      "id": "M48-portfolio-margin-passes-when-listed",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin unified_or_portfolio_account_mode_holds_the_account",
+      "what": "the portfolio margin mode passes when the allow-list names it"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / venue setting and account mode",
+      "id": "M49-account-mode-allow-list-not-read",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin an_account_mode_off_the_allow_list_or_unknown_holds_the_account",
+      "what": "an account mode that the allow-list does not name passes"
+    },
+    {
+      "file": "crates/oms-core/src/model.rs",
+      "guards": "C-MARGIN / hold table",
+      "id": "M50-setting-and-mode-holds-refuse-reduce-only",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin reduce_only_order_passes_the_venue_setting_and_account_mode_holds",
+      "what": "the venue-setting and account-mode holds also refuse a reduce-only order"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / clear and rebase",
+      "id": "M51-clear-reduce-when-not-reducing",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing",
+      "what": "clear-reduce is accepted, and re-bases the day, when the account is not REDUCING"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / clear and rebase",
+      "id": "M52-clear-reduce-on-a-stale-report",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing",
+      "what": "clear-reduce is accepted on a margin report that is not fresh"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / clear and rebase",
+      "id": "M53-clear-reduce-without-a-note",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing",
+      "what": "clear-reduce is accepted with an empty note"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / clear and rebase",
+      "id": "M54-clear-reduce-keeps-the-old-day-base",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin clear_reduce_rebases_the_day_and_a_further_loss_latches_again",
+      "what": "clear-reduce ends REDUCING without taking the current account value as the day base"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / clear and rebase",
+      "id": "M55-rebase-day-on-a-stale-report",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin rebase_day_sets_the_base_and_leaves_the_latch_alone",
+      "what": "rebase-day is accepted on a margin report that is not fresh"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / clear and rebase",
+      "id": "M56-rebase-day-without-a-note",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin rebase_day_sets_the_base_and_leaves_the_latch_alone",
+      "what": "rebase-day is accepted with an empty note"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / clear and rebase",
+      "id": "M57-rebase-day-clears-reducing",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin rebase_day_sets_the_base_and_leaves_the_latch_alone",
+      "what": "rebase-day also ends REDUCING"
+    },
+    {
+      "file": "crates/oms-node/src/server.rs",
+      "guards": "C-MARGIN / clear and rebase (operator socket only)",
+      "id": "M58-clear-reduce-from-the-strategy-socket",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --test e2e strategy_socket_cannot_clear_reducing_or_rebase",
+      "what": "clear-reduce is taken from a strategy connection"
+    },
+    {
+      "file": "crates/oms-node/src/server.rs",
+      "guards": "C-MARGIN / clear and rebase (operator socket only)",
+      "id": "M59-rebase-day-from-the-strategy-socket",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --test e2e strategy_socket_cannot_clear_reducing_or_rebase",
+      "what": "rebase-day is taken from a strategy connection"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / stale cancel",
+      "id": "M60-stale-cancel-at-exactly-the-limit",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin report_stale_past_the_cancel_limit_cancels_each_plain_order_once",
+      "what": "the stale cancel fires when the report is exactly stale_cancel_us old"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / stale cancel",
+      "id": "M61-stale-age-ignores-link-up",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin stale_age_starts_at_link_up_when_no_report_has_arrived",
+      "what": "the stale age is measured from the last report only, never from the moment the link session came up"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / stale cancel",
+      "id": "M62-stale-cancel-asks-again",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin stale_cancel_does_not_reissue_an_exhausted_cancel",
+      "what": "the stale cancel also asks for an order that already has a cancel request"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / stale cancel",
+      "id": "M63-stale-cancel-takes-reduce-only-orders",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin report_stale_past_the_cancel_limit_cancels_each_plain_order_once",
+      "what": "the stale cancel also cancels orders with the reduce-only flag"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / stale cancel",
+      "id": "M64-stale-cancel-with-the-link-down",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off",
+      "what": "the stale cancel asks for cancels while the link is down"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / stale cancel",
+      "id": "M65-policy-activation-sets-no-stale-baseline",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin stale_age_starts_at_policy_activation_when_the_link_is_already_up",
+      "what": "a margin policy activated while the link is up gets no moment to measure the stale age from"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / stale cancel",
+      "id": "M66-link-up-time-kept-without-a-policy",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off",
+      "what": "the link-up time is stored in the margin state also without a margin policy"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M67-zero-max-leverage-reported",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib missing_zero_or_unparseable_max_leverage_rejects_the_whole_report",
+      "what": "a position with maxLeverage 0 is reported instead of refusing the whole answer"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M68-missing-max-leverage-defaulted",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib missing_zero_or_unparseable_max_leverage_rejects_the_whole_report",
+      "what": "a missing or unreadable maxLeverage is read as 1"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M69-unreadable-position-skipped",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib any_unparseable_number_rejects_the_whole_report",
+      "what": "a position whose size cannot be read is left out and the rest is reported"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M70-unreadable-margin-read-as-zero",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib any_unparseable_number_rejects_the_whole_report",
+      "what": "an unreadable marginUsed is reported as zero"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M71-unreadable-account-value-read-as-zero",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib any_unparseable_number_rejects_the_whole_report",
+      "what": "an unreadable account value is reported as zero"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M72-cross-only-account-value",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib documented_clearinghouse_state_parses_to_a_margin_report",
+      "what": "the account value is taken from crossMarginSummary, which leaves isolated margin out"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M73-unknown-position-mode-read-as-cross",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib any_unparseable_number_rejects_the_whole_report",
+      "what": "a position whose margin mode is not documented is reported as cross"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M74-unknown-setting-mode-read-as-isolated",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib documented_active_asset_data_parses_leverage_and_mode",
+      "what": "a venue setting whose margin mode is not documented is read as isolated"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M75-setting-of-another-coin-accepted",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib documented_active_asset_data_parses_leverage_and_mode",
+      "what": "the venue setting of another coin is taken as the setting of the instrument asked about"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/wire.rs",
+      "guards": "C-MARGIN / Hyperliquid queries",
+      "id": "M76-unknown-account-mode-read-as-default",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib user_abstraction_values_parse_and_an_unknown_value_stays_unknown",
+      "what": "an account mode that is not unifiedAccount or portfolioMargin is passed on as default"
+    },
+    {
+      "file": "crates/oms-node/src/config.rs",
+      "guards": "C-MARGIN / query weight budget",
+      "id": "M77-query-weight-above-budget-loads",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused",
+      "what": "a configuration whose query weight is above 600 per minute loads"
+    },
+    {
+      "file": "crates/oms-node/src/config.rs",
+      "guards": "C-MARGIN / query weight budget",
+      "id": "M78-venue-setting-queries-not-counted",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused",
+      "what": "the venue-setting queries are left out of the query weight"
+    },
+    {
+      "file": "crates/oms-node/src/venue/hyperliquid/mod.rs",
+      "guards": "C-MARGIN / query weight budget",
+      "id": "M79-queries-use-the-reserve",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time",
+      "what": "an info query may use the budget reserved for orders and cancels"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / MM buffer",
+      "id": "M80-mm-buffer-judged-only-on-a-fresh-report",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin an_old_report_on_arrival_is_still_judged_by_the_mm_rule",
+      "what": "the MM-buffer rule judges a recorded report only while it is fresh"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / MM buffer",
+      "id": "M81-mm-comparison-direction",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin isolated_margin_below_mmr_plus_buffer_enters_reducing",
+      "what": "the MM-buffer rule trips when the margin is above the line, not below it"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / MM buffer",
+      "id": "M82-mm-comparison-includes-the-line",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin isolated_margin_below_mmr_plus_buffer_enters_reducing",
+      "what": "a margin exactly on the line trips the MM-buffer rule"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / MM buffer",
+      "id": "M83-mm-buffer-term-dropped",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin isolated_margin_below_mmr_plus_buffer_enters_reducing",
+      "what": "the line is the maintenance margin alone, without the buffer"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / MM buffer",
+      "id": "M84-mmr-without-the-factor-two",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin mmr_follows_the_max_leverage_of_each_position",
+      "what": "the maintenance margin rate is 1 / maximum leverage, not 1 / (2 x maximum leverage)"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / MM buffer",
+      "id": "M85-mm-rule-judges-a-cross-position",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin a_cross_position_is_not_judged_by_the_mm_rule",
+      "what": "a cross-margin position is judged by the MM-buffer rule"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / MM buffer",
+      "id": "M86-mm-line-overflow-reads-as-above",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin mm_comparison_is_exact_at_extreme_values",
+      "what": "a line whose scaled product does not fit reads as 'margin is enough'"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / clear and rebase",
+      "id": "M87-clear-reduce-while-the-mm-condition-holds",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin clear_reduce_is_refused_while_the_mm_condition_holds",
+      "what": "clear-reduce is accepted while a position is under its MM-buffer line"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / REDUCING",
+      "id": "M88-daily-loss-judged-before-the-mm-buffer",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin reducing_records_the_rule_that_tripped_first",
+      "what": "a report that trips both rules records the daily loss, not the MM buffer"
+    },
+    {
+      "file": "crates/oms-sim/src/venue.rs",
+      "guards": "C-MARGIN / simulation model",
+      "id": "M89-sim-venue-fee-not-charged",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim world_account_value_follows_fills_price_fees_and_funding",
+      "what": "the simulated venue's margin model does not take the fee of a fill from the cash"
+    },
+    {
+      "file": "crates/oms-sim/src/venue.rs",
+      "guards": "C-MARGIN / simulation model",
+      "id": "M90-sim-venue-funding-not-charged",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim a_loss_made_only_of_fees_and_funding_enters_reducing",
+      "what": "the simulated venue's margin model does not take funding from the cash"
+    },
+    {
+      "file": "crates/oms-sim/src/venue.rs",
+      "guards": "C-MARGIN / simulation model",
+      "id": "M91-sim-venue-places-growing-reduce-only",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim world_refuses_a_reduce_only_order_that_would_grow_the_position",
+      "what": "the simulated venue places a reduce-only order that would grow the position"
+    },
+    {
+      "file": "crates/oms-sim/src/venue.rs",
+      "guards": "C-MARGIN / simulation model",
+      "id": "M92-sim-venue-fills-reduce-only-through-zero",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim world_refuses_a_reduce_only_order_that_would_grow_the_position",
+      "what": "a resting reduce-only order at the simulated venue trades more than the position that is left"
+    },
+    {
+      "file": "crates/oms-sim/src/world.rs",
+      "guards": "C-MARGIN / no policy, same run",
+      "id": "M93-sim-world-draws-without-margin",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim existing_profiles_give_the_same_run_with_margin_off",
+      "what": "a simulation run without a margin policy draws one more random number per query answer"
+    },
+    {
+      "file": "crates/oms-core/src/exposure.rs",
+      "guards": "C-MARGIN / leverage gate, simulation",
+      "id": "M94-sim-leverage-gate-loose",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim profile_margin_calm",
+      "what": "the leverage gate lets exposure reach 1.25 times the limit (seen by the simulation check)"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / stale cancel, simulation",
+      "id": "M95-sim-stale-cancel-late",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim profile_margin_lossy",
+      "what": "the stale cancel waits for 100 times its limit (seen by the simulation check)"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / REDUCING release, simulation",
+      "id": "M96-sim-day-roll-ends-reducing",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim profile_margin_calm_release_invariant",
+      "what": "a day base set by a report ends REDUCING without an event (seen by the simulation check)"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / day base, simulation over days",
+      "id": "M97-sim-day-roll-absorbs-loss",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim profile_margin_days_crosses_three_utc_days_with_restarts",
+      "what": "a report sets the new day's base before it is judged against the old one (seen by the simulation over days)"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / day base, simulation over days",
+      "id": "M98-sim-base-reset-within-day",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim profile_margin_days_crosses_three_utc_days_with_restarts",
+      "what": "every report of the same UTC day sets the day base again (seen by the simulation over days)"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / day base across a restart, simulation over days",
+      "id": "M99-sim-boot-forgets-day-base",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim profile_margin_days_crosses_three_utc_days_with_restarts",
+      "what": "a restart forgets the day base, so the next report sets it again (seen by the simulation over days)"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / journal growth, simulation over days",
+      "id": "M100-sim-repeated-poll-recorded",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-sim --test sim margin_journal_records_stay_within_one_per_poll",
+      "what": "a margin answer that arrives twice is journalled twice (seen by the record count of the simulation over days)"
+    },
+    {
+      "file": "crates/oms-core/src/exposure.rs",
+      "guards": "C-MARGIN / leverage gate",
+      "id": "M101-leverage-gate-accepts-with-no-account-value",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin account_value_zero_or_negative_rejects",
+      "what": "the leverage gate judges an account value of zero or below like any other, so a plain order that does not raise exposure passes"
+    },
+    {
+      "file": "crates/oms-core/src/exposure.rs",
+      "guards": "C-MARGIN / leverage gate",
+      "id": "M102-leverage-gate-reads-a-stale-reference-price",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin plain_order_is_rejected_when_an_exposed_instrument_has_no_fresh_reference_price",
+      "what": "the leverage gate values exposure with a reference price of any age"
+    },
+    {
+      "file": "crates/oms-core/src/exposure.rs",
+      "guards": "C-MARGIN / leverage gate",
+      "id": "M103-exposure-leaves-the-position-out",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin after_a_passive_breach_a_plain_reducing_order_passes_and_an_increasing_one_does_not",
+      "what": "account exposure counts the resting orders only, not the position"
+    },
+    {
+      "file": "crates/oms-core/src/exposure.rs",
+      "guards": "C-MARGIN / leverage gate",
+      "id": "M104-cancel-request-frees-exposure",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin partial_fill_then_cancel_frees_exposure_only_on_terminal_evidence",
+      "what": "an order with a cancel request no longer counts in account exposure, before terminal evidence"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / freshness",
+      "id": "M105-reduce-only-order-needs-a-fresh-report",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin reduce_only_order_needs_no_fresh_report",
+      "what": "a reduce-only order is refused with MarginUnavailable when no margin report is fresh"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / leverage gate",
+      "id": "M106-reduce-only-order-judged-by-the-gate",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin reduce_only_order_skips_the_leverage_gate",
+      "what": "a reduce-only order is judged by the leverage gate"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / REDUCING entry",
+      "id": "M107-entry-skips-an-exhausted-cancel",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones",
+      "what": "entering REDUCING does not ask again for a plain order whose earlier cancel is exhausted"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / day base",
+      "id": "M108-earlier-day-report-moves-the-base",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin a_report_of_an_earlier_day_does_not_change_the_day_base",
+      "what": "a report of an earlier UTC day than the day base sets the base"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / MM buffer",
+      "id": "M109-mm-rule-judges-a-position-of-no-value",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin mm_comparison_is_exact_at_extreme_values",
+      "what": "the MM-buffer rule judges a position whose value is zero"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / report intake",
+      "id": "M110-core-records-a-zero-max-leverage",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin invalid_margin_report_is_journaled_and_never_becomes_fresh",
+      "what": "the core records a margin report that has a position with a maximum leverage of zero"
+    },
+    {
+      "file": "crates/oms-core/src/decide.rs",
+      "guards": "C-MARGIN / policy off",
+      "id": "M111-margin-input-taken-without-a-policy",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin without_a_margin_policy_no_margin_check_runs",
+      "what": "margin inputs are recorded although no margin policy is set"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / venue setting",
+      "id": "M112-unknown-venue-setting-passes",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin instrument_with_unknown_venue_setting_holds_plain_orders",
+      "what": "an instrument whose venue setting was not told in this link session is not held"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / account mode",
+      "id": "M113-unknown-account-mode-passes",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin an_account_mode_off_the_allow_list_or_unknown_holds_the_account",
+      "what": "an account whose mode was not told in this link session is not held"
+    },
+    {
+      "file": "crates/oms-core/src/exposure.rs",
+      "guards": "C-MARGIN / leverage gate",
+      "id": "M114-exposure-overflow-accepts",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin exposure_is_exact_at_extreme_price_and_quantity",
+      "what": "a plain order whose exposure sum does not fit in an i128 is not refused by the gate"
+    },
+    {
+      "file": "crates/oms-core/src/exposure.rs",
+      "guards": "C-MARGIN / leverage gate",
+      "id": "M115-leverage-gate-judges-a-stale-report",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin without_a_fresh_report_an_order_past_the_limit_is_rejected_margin_unavailable_only",
+      "what": "the leverage gate judges an order with the account value of a report that is no longer fresh"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / policy section",
+      "id": "M116-reducing-holds-without-a-margin-policy",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin without_a_margin_policy_the_reducing_latch_refuses_no_order_and_returns_with_the_policy",
+      "what": "the REDUCING latch refuses orders although no margin policy is set"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / report intake",
+      "id": "M117-rejection-outlives-a-recorded-report",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin a_recorded_report_ends_the_last_rejection",
+      "what": "the last rejection of a margin report stays after a later report was recorded"
+    },
+    {
+      "file": "crates/oms-core/src/core.rs",
+      "guards": "C-MARGIN / venue setting",
+      "id": "M118-report-sets-a-setting-for-any-instrument",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-core --test margin a_report_position_on_an_unconfigured_instrument_leaves_no_venue_setting",
+      "what": "a report position on an instrument that is not configured is stored as a venue setting"
+    },
+    {
+      "file": "crates/oms-node/src/venue/simproto.rs",
+      "guards": "C-MARGIN / report intake",
+      "id": "M119-margin-answer-without-positions-reads-as-empty",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --lib a_margin_answer_without_its_position_list_is_not_read",
+      "what": "a margin answer of the venue process without its position list is read as an account without positions"
+    },
+    {
+      "file": "crates/oms-node/src/venue/reconciler.rs",
+      "guards": "C-MARGIN / margin poll",
+      "id": "M120-margin-timer-moves-without-a-query",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --test reconciler a_margin_query_the_gateway_had_no_room_for_goes_out_on_the_next_round",
+      "what": "the margin timer moves although the gateway had no room for the query"
+    },
+    {
+      "file": "crates/oms-node/src/venue/reconciler.rs",
+      "guards": "C-MARGIN / query weight budget",
+      "id": "M121-unknown-setting-asked-every-second",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --test reconciler an_unanswered_setting_or_mode_query_is_repeated_at_the_setting_period_only",
+      "what": "a venue setting that stays unanswered is asked for again every second"
+    },
+    {
+      "file": "crates/oms-node/src/venue/reconciler.rs",
+      "guards": "C-MARGIN / query weight budget",
+      "id": "M122-unknown-mode-asked-every-second",
+      "killed": true,
+      "note": "",
+      "test": "cargo test -p oms-node --test reconciler an_unanswered_setting_or_mode_query_is_repeated_at_the_setting_period_only",
+      "what": "an account mode that stays unanswered is asked for again every second"
     }
   ],
-  "source_digest": "c2addecd59bc4a5a",
-  "taken_at_us": 1791165791773894
+  "source_digest": "762a4acf55af90fb",
+  "taken_at_us": 1794838912893206
 }
