@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `9ec48fa6fa891b4f`, 검증 결과의 다이제스트 `84bbfc41882f370d`.
+> 소스 다이제스트 `c0d77e52c7378187`, 검증 결과의 다이제스트 `84bbfc41882f370d`.
 
 주장 58건: 통과 0, 실패 0, 미실행 2, 이전 버전 결과 56.
 
@@ -1291,4 +1291,5 @@
 | 시험 | 결과 | 비고 |
 |---|---|---|
 | `core/margin_report_of_the_current_session_is_recorded` | 미실행 |  |
+| `core/margin_report_of_an_old_session_or_with_the_link_down_is_ignored` | 미실행 |  |
 

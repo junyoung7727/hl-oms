@@ -7,7 +7,7 @@
 **Status:** claimed
 
 - [x] Test `margin_report_of_the_current_session_is_recorded` (seam A): fails when a report of the current link session produces no `margin_reported` event.
-- [ ] Test `margin_report_of_an_old_session_or_with_the_link_down_is_ignored` (seam A): fails when such a report is stored or judged.
+- [x] Test `margin_report_of_an_old_session_or_with_the_link_down_is_ignored` (seam A): fails when such a report is stored or judged.
 - [ ] Test `late_margin_report_with_a_lower_sequence_is_ignored` (seam A, G6): fails when a report whose sequence number is not greater than the last accepted one replaces it or is judged.
 - [ ] Test `invalid_margin_report_is_journaled_and_never_becomes_fresh` (seam A, S25): fails when an invalid report refreshes the age or is judged, or a zero maximum leverage reaches a rule, or no `margin_report_rejected` event carries the reason.
 - [ ] Test `plain_order_is_rejected_margin_unavailable_without_a_fresh_report` (seam A, S11): fails when a plain order is accepted with no report or with one older than 30 s; exactly 30 s is fresh.

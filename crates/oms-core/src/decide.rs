@@ -604,6 +604,12 @@ impl Tx<'_> {
     // ---- margin reports (C-MARGIN) ----------------------------------------
 
     fn on_margin_report(&mut self, r: &MarginReportIn) -> Result<(), CoreFault> {
+        // An answer to a query of another link session, or one that arrives
+        // while the link is down, is dropped: not stored and not judged.
+        let of_this_session = self.core.link.up && r.session == self.core.link.session;
+        if !of_this_session {
+            return Ok(());
+        }
         self.emit(Event::MarginReported { report: r.clone() })
     }
 

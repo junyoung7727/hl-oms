@@ -104,3 +104,55 @@ fn margin_report_of_the_current_session_is_recorded() {
     // Nothing is sent to the venue because of a report.
     assert_eq!(out.commands, vec![]);
 }
+
+fn link_down(h: &mut H) {
+    h.venue(VenueInput::Link {
+        up: false,
+        session: h.session,
+        reason: "ws closed".into(),
+    });
+}
+
+/// The account value of the newest recorded report, with its number.
+fn recorded(h: &H) -> Option<(u64, u64, Amount)> {
+    h.core
+        .margin
+        .report
+        .as_ref()
+        .map(|r| (r.session, r.seq, r.account_value))
+}
+
+/// An answer that belongs to an earlier link session, or that arrives while
+/// the link is down, is dropped: no event, nothing stored.
+#[test]
+fn margin_report_of_an_old_session_or_with_the_link_down_is_ignored() {
+    let mut h = H::ready_with(config_with_margin());
+    let old = h.session;
+    link_down(&mut h);
+    h.link_up_and_sync();
+    assert_eq!((old, h.session), (1, 2));
+
+    // The answer to a query of session 1 arrives in session 2.
+    let out = h.margin_report(old, 9, h.now, "50");
+    assert_eq!(names(&out), Vec::<&str>::new());
+    assert_eq!(recorded(&h), None);
+
+    // A report of session 2 is recorded.
+    let out = h.margin_report(2, 1, h.now, "100");
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(recorded(&h), Some((2, 1, amt("100"))));
+
+    // The link goes down. The answer to a query of session 2 arrives late.
+    link_down(&mut h);
+    let out = h.margin_report(2, 2, h.now, "50");
+    assert_eq!(names(&out), Vec::<&str>::new());
+    // The last report stays as it was.
+    assert_eq!(recorded(&h), Some((2, 1, amt("100"))));
+    // Nothing of the dropped reports reached the journal.
+    let journaled = h
+        .log
+        .iter()
+        .filter(|rec| matches!(rec.input, Input::Venue(VenueInput::MarginReport(_))))
+        .count();
+    assert_eq!(journaled, 1);
+}
