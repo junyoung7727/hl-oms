@@ -749,6 +749,33 @@ fn margin_report_of_the_venue_process_carries_its_positions() {
     assert_eq!(env.status()["core"]["holds"], json!([{"venue_setting": "X"}]));
 }
 
+/// C-MARGIN: the venue process has a control for the margin it states for
+/// a position, so the MM-buffer rule can be reached through the node
+/// process. Hand-worked, position value 100, maximum leverage 40, buffer
+/// 25 bps: the line is 100 x (1/80 + 0.0025) = 1.5. A stated margin of 1.5
+/// is on the line and does not trip; 1.49 enters REDUCING by `mm_buffer`.
+#[test]
+fn venue_process_states_the_margin_a_control_sets_and_the_mm_rule_latches_on_it() {
+    let mut env = margin_node("margin-used-knob", "100");
+    let mut c = env.client("a");
+    let id = rest(&mut env, &mut c, "p", Side::Buy, "100", false);
+    assert!(env.wait(Duration::from_secs(5), || phase_of(&mut c, id) == Phase::Working));
+    let cloid = env.cloid(id);
+    env.ctl(json!({"fill": {"client": cloid}}));
+    // The model's own figure: value 100 at leverage 2.
+    wait_margin(&env, "the position", |m| m["positions"][0]["margin_used"] == "50");
+
+    env.ctl(json!({"margin_used": {"instrument": "X", "value": "1.5"}}));
+    wait_margin(&env, "the stated margin", |m| m["positions"][0]["margin_used"] == "1.5");
+    assert_eq!(env.status()["core"]["margin"]["reducing"], serde_json::Value::Null);
+
+    env.ctl(json!({"margin_used": {"instrument": "X", "value": "1.49"}}));
+    wait_margin(&env, "REDUCING by the MM buffer", |m| {
+        m["positions"][0]["margin_used"] == "1.49" && m["reducing"]["rule"] == "mm_buffer"
+    });
+    assert_eq!(env.status()["core"]["holds"], json!(["reducing"]));
+}
+
 /// C-MARGIN: the operator sees the daily-loss rule in `status`. The first
 /// report the node polls becomes the day base. When the venue's account
 /// value falls more than 5 % below it, status shows REDUCING with the rule,

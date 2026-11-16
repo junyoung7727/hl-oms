@@ -263,6 +263,10 @@ impl State {
                 self.venue.set_account_value(value);
                 Ok(serde_json::Value::Null)
             }
+            Ctl::MarginUsed { instrument, value } => {
+                self.venue.margin_used_override.insert(instrument, value);
+                Ok(serde_json::Value::Null)
+            }
             Ctl::VenueSetting {
                 instrument,
                 isolated,

@@ -80,6 +80,9 @@ pub enum Ctl {
     RefPrice { instrument: InstrumentId, px: Px },
     /// Sets the account value the venue states in its margin reports.
     AccountValue { value: Amount },
+    /// Sets the margin the venue states for the position on one instrument,
+    /// in place of its model's figure (position value / leverage).
+    MarginUsed { instrument: InstrumentId, value: Amount },
     /// Sets the margin mode and the leverage the venue states for one
     /// instrument. Stands for the operator changing it at the venue.
     VenueSetting { instrument: InstrumentId, isolated: bool, leverage: u32 },
