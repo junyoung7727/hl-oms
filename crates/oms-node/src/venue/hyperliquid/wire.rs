@@ -367,52 +367,70 @@ pub fn margin_input(body: &serde_json::Value, session: u64, seq: u64, queried_at
 }
 
 /// The account value and every position of a `clearinghouseState` answer,
-/// or the first thing in it that cannot be read.
+/// or the first thing in it that cannot be read. Nothing is defaulted and
+/// no position is skipped: a rule must never judge half an answer.
 fn margin_report(body: &serde_json::Value) -> Result<(Amount, Vec<MarginPosition>), String> {
-    let amount = |v: Option<&serde_json::Value>| {
-        v.and_then(|v| v.as_str())
-            .and_then(|s| Amount::parse(s).ok())
-            .unwrap_or(Amount::ZERO)
-    };
-    let whole = |v: Option<&serde_json::Value>| {
-        v.and_then(|v| v.as_u64())
-            .and_then(|n| u32::try_from(n).ok())
-            .unwrap_or(0)
-    };
-    let list = body.get("assetPositions").and_then(|a| a.as_array());
-    let mut positions = Vec::new();
-    for (i, p) in list.into_iter().flatten().enumerate() {
-        let Some(pos) = p.get("position") else { continue };
-        let Some(coin) = pos.get("coin").and_then(|c| c.as_str()) else { continue };
-        let Some(instrument) = instrument_id(coin) else { continue };
-        let Some(szi) = pos.get("szi").and_then(|s| s.as_str()).and_then(|s| SQty::parse(s).ok()) else {
-            continue;
+    // `marginSummary` covers cross and isolated margin together.
+    let account_value = decimal(body.pointer("/marginSummary/accountValue"), "marginSummary.accountValue", Amount::parse)?;
+    let list = body
+        .get("assetPositions")
+        .and_then(|a| a.as_array())
+        .ok_or("assetPositions is missing or not a list")?;
+    let mut positions = Vec::with_capacity(list.len());
+    for (i, p) in list.iter().enumerate() {
+        let pos = p.get("position").ok_or(format!("assetPositions[{i}]: position is missing"))?;
+        // A coin that is not configured here is reported like any other.
+        let coin = pos.get("coin").and_then(|c| c.as_str());
+        let (Some(coin), Some(instrument)) = (coin, coin.and_then(instrument_id)) else {
+            return Err(format!("assetPositions[{i}]: coin is missing or unusable"));
         };
-        let at = format!("assetPositions[{i}] ({coin})");
-        // The maintenance margin rate is 1 / (2 x maxLeverage): a report
-        // without it cannot be judged, and zero would divide by nothing.
-        let max_leverage = match pos.get("maxLeverage") {
-            None => return Err(format!("{at}: maxLeverage is missing")),
-            Some(v) => match v.as_u64().and_then(|n| u32::try_from(n).ok()) {
-                None => return Err(format!("{at}: maxLeverage is not a whole number: {v}")),
-                Some(0) => return Err(format!("{at}: maxLeverage is zero")),
-                Some(n) => n,
+        let at = |e: String| format!("assetPositions[{i}] ({coin}): {e}");
+        let szi = decimal(pos.get("szi"), "szi", SQty::parse).map_err(at)?;
+        let position_value = decimal(pos.get("positionValue"), "positionValue", Amount::parse).map_err(at)?;
+        let margin_used = decimal(pos.get("marginUsed"), "marginUsed", Amount::parse).map_err(at)?;
+        let leverage_type = match pos.pointer("/leverage/type") {
+            None => return Err(at("leverage.type is missing".into())),
+            Some(v) => match v.as_str() {
+                Some("isolated") => LeverageType::Isolated,
+                Some("cross") => LeverageType::Cross,
+                _ => return Err(at(format!("leverage.type is neither isolated nor cross: {v}"))),
             },
         };
+        let leverage_value = whole(pos.pointer("/leverage/value"), "leverage.value").map_err(at)?;
+        // The maintenance margin rate is 1 / (2 x maxLeverage): a report
+        // without it cannot be judged, and zero would divide by nothing.
+        let max_leverage = whole(pos.get("maxLeverage"), "maxLeverage").map_err(at)?;
+        if max_leverage == 0 {
+            return Err(at("maxLeverage is zero".into()));
+        }
         positions.push(MarginPosition {
             instrument,
             szi,
-            position_value: amount(pos.get("positionValue")),
-            margin_used: amount(pos.get("marginUsed")),
-            leverage_type: match pos.pointer("/leverage/type").and_then(|t| t.as_str()) {
-                Some("isolated") => LeverageType::Isolated,
-                _ => LeverageType::Cross,
-            },
-            leverage_value: whole(pos.pointer("/leverage/value")),
+            position_value,
+            margin_used,
+            leverage_type,
+            leverage_value,
             max_leverage,
         });
     }
-    Ok((amount(body.pointer("/marginSummary/accountValue")), positions))
+    Ok((account_value, positions))
+}
+
+/// A decimal the venue sends as a string. A JSON number is not accepted in
+/// its place: it may already have lost digits.
+fn decimal<T, E>(v: Option<&serde_json::Value>, name: &str, parse: fn(&str) -> Result<T, E>) -> Result<T, String> {
+    let v = v.ok_or(format!("{name} is missing"))?;
+    v.as_str()
+        .and_then(|s| parse(s).ok())
+        .ok_or(format!("{name} is not a decimal string: {v}"))
+}
+
+/// A whole number the venue sends as a JSON integer.
+fn whole(v: Option<&serde_json::Value>, name: &str) -> Result<u32, String> {
+    let v = v.ok_or(format!("{name} is missing"))?;
+    v.as_u64()
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or(format!("{name} is not a whole number: {v}"))
 }
 
 #[cfg(test)]
@@ -537,6 +555,109 @@ mod tests {
             margin_input(&state_with(|_| {}), 7, 3, 1),
             VenueInput::MarginReport(r) if r.positions.len() == 2
         ));
+    }
+
+    /// S25. No number of the answer is ever replaced by a default: a bad
+    /// account value, size, position value, margin or leverage, a margin
+    /// mode that is not one of the two documented ones, or a list that
+    /// cannot be walked, refuses the whole report and names what was wrong.
+    #[test]
+    fn any_unparseable_number_rejects_the_whole_report() {
+        // Decimal fields of a position. The venue sends decimals as strings;
+        // a JSON number, an exponent or more than 8 decimals is not read.
+        for field in ["szi", "positionValue", "marginUsed"] {
+            let gone = state_with(|p| {
+                p.as_object_mut().unwrap().remove(field);
+            });
+            assert_eq!(refusal(&gone), format!("assetPositions[1] (ETH): {field} is missing"));
+            for bad in [json!("abc"), json!(""), json!(4.967826), json!(null), json!("1e3"), json!("NaN"), json!("0.123456789")] {
+                let body = state_with(|p| p[field] = bad.clone());
+                assert_eq!(
+                    refusal(&body),
+                    format!("assetPositions[1] (ETH): {field} is not a decimal string: {bad}")
+                );
+            }
+        }
+        // The account value.
+        let mut body = doc_state();
+        body["marginSummary"].as_object_mut().unwrap().remove("accountValue");
+        assert_eq!(refusal(&body), "marginSummary.accountValue is missing");
+        let mut body = doc_state();
+        body.as_object_mut().unwrap().remove("marginSummary");
+        assert_eq!(refusal(&body), "marginSummary.accountValue is missing");
+        for bad in [json!("abc"), json!(13109.482328), json!(null)] {
+            let mut body = doc_state();
+            body["marginSummary"]["accountValue"] = bad.clone();
+            assert_eq!(refusal(&body), format!("marginSummary.accountValue is not a decimal string: {bad}"));
+        }
+        // The leverage of a position and its margin mode.
+        let gone = state_with(|p| {
+            p["leverage"].as_object_mut().unwrap().remove("value");
+        });
+        assert_eq!(refusal(&gone), "assetPositions[1] (ETH): leverage.value is missing");
+        for bad in [json!("20"), json!(2.5), json!(-2), json!(null)] {
+            let body = state_with(|p| p["leverage"]["value"] = bad.clone());
+            assert_eq!(
+                refusal(&body),
+                format!("assetPositions[1] (ETH): leverage.value is not a whole number: {bad}")
+            );
+        }
+        let gone = state_with(|p| {
+            p.as_object_mut().unwrap().remove("leverage");
+        });
+        assert_eq!(refusal(&gone), "assetPositions[1] (ETH): leverage.type is missing");
+        for bad in [json!("hedged"), json!("Isolated"), json!(""), json!(1)] {
+            let body = state_with(|p| p["leverage"]["type"] = bad.clone());
+            assert_eq!(
+                refusal(&body),
+                format!("assetPositions[1] (ETH): leverage.type is neither isolated nor cross: {bad}")
+            );
+        }
+        // A position that cannot be identified is not skipped.
+        let no_coin = state_with(|p| {
+            p.as_object_mut().unwrap().remove("coin");
+        });
+        assert_eq!(refusal(&no_coin), "assetPositions[1]: coin is missing or unusable");
+        let empty_coin = state_with(|p| p["coin"] = json!(""));
+        assert_eq!(refusal(&empty_coin), "assetPositions[1]: coin is missing or unusable");
+        let mut no_position = state_with(|_| {});
+        no_position["assetPositions"][1] = json!({"type": "oneWay"});
+        assert_eq!(refusal(&no_position), "assetPositions[1]: position is missing");
+        // No list of positions is not the same as an empty list.
+        let mut body = doc_state();
+        body.as_object_mut().unwrap().remove("assetPositions");
+        assert_eq!(refusal(&body), "assetPositions is missing or not a list");
+        let mut body = doc_state();
+        body["assetPositions"] = json!({});
+        assert_eq!(refusal(&body), "assetPositions is missing or not a list");
+        for not_an_answer in [json!(null), json!([]), json!("error"), json!({})] {
+            refusal(&not_an_answer);
+        }
+        // An account without a position is a whole report.
+        let mut flat = doc_state();
+        flat["assetPositions"] = json!([]);
+        assert_eq!(
+            margin_input(&flat, 7, 3, 9),
+            VenueInput::MarginReport(MarginReportIn {
+                session: 7,
+                seq: 3,
+                queried_at: 9,
+                account_value: Amount(1_310_948_232_800),
+                positions: vec![],
+            })
+        );
+        // A cross position and a short one are read as they are.
+        let cross_short = state_with(|p| {
+            p["leverage"] = json!({"type": "cross", "value": 3});
+            p["szi"] = json!("-0.0335");
+        });
+        let VenueInput::MarginReport(r) = margin_input(&cross_short, 7, 3, 9) else {
+            panic!("refused");
+        };
+        assert_eq!(
+            (r.positions[1].leverage_type, r.positions[1].leverage_value, r.positions[1].szi),
+            (LeverageType::Cross, 3, SQty(-3_350_000))
+        );
     }
 
     /// Response examples from the Exchange endpoint documentation.
