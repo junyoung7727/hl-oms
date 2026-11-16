@@ -950,7 +950,7 @@ not_covered = "어느 문자열이 표준 모드인지(T10): 시험의 standard�
 
 [[claim]]
 id = "V-MARGIN-10"
-statement = "Hyperliquid 게이트웨이는 문서의 clearinghouseState 응답 예를 증거금 보고 입력으로 옮긴다: 계좌 가치는 marginSummary.accountValue, 포지션마다 종목, 부호 있는 수량, 포지션 가치, 사용 증거금, 증거금 방식, 레버리지, 최대 레버리지. 어느 포지션이든 maxLeverage가 없거나 0이거나 정수가 아니면 보고 전체를 사유와 함께 거부 입력(MarginReportInvalid)으로 바꾸고, 멀쩡한 다른 포지션도 보고하지 않는다. 계좌 가치, 수량, 포지션 가치, 사용 증거금, 레버리지 가운데 하나라도 없거나 읽을 수 없을 때, 증거금 방식이 isolated도 cross도 아닐 때, 포지션 목록이 없을 때도 같다. 어떤 값도 0이나 기본값으로 채우지 않고 어떤 포지션도 건너뛰지 않는다. 설정에 없는 종목의 포지션도 보고에 남는다(번역 함수는 설정된 종목을 받지 않는다)"
+statement = "Hyperliquid 게이트웨이는 문서의 clearinghouseState 응답 예를 증거금 보고 입력으로 옮긴다: 계좌 가치는 marginSummary.accountValue, 포지션마다 종목, 부호 있는 수량, 포지션 가치, 사용 증거금, 증거금 방식, 레버리지, 최대 레버리지. 어느 포지션이든 maxLeverage가 없거나 0이거나 정수가 아니면 보고 전체를 사유와 함께 거부 입력(MarginReportInvalid)으로 바꾸고, 멀쩡한 다른 포지션도 보고하지 않는다. 계좌 가치, 수량, 포지션 가치, 사용 증거금, 레버리지 가운데 하나라도 없거나 읽을 수 없을 때, 증거금 방식이 isolated도 cross도 아닐 때, 포지션 목록이 없을 때도 같다. 어떤 값도 0이나 기본값으로 채우지 않고 어떤 포지션도 건너뛰지 않는다. 설정에 없는 종목의 포지션도 보고에 남는다(번역 함수는 설정된 종목을 받지 않는다). activeAssetData 응답 예는 그 종목의 거래소 설정 입력(증거금 방식, 레버리지)이 된다. 방식이 isolated도 cross도 아니거나, 레버리지가 정수가 아니거나, 응답이 다른 종목의 것이면 입력을 만들지 않는다(설정은 모름으로 남아 그 종목이 막힌다)"
 why = "증거금 규칙이 읽는 숫자는 모두 이 번역을 거친다. 필드를 하나 잘못 옮기면 규칙이 틀린 값으로 판정한다"
 level = "단위"
 scope = "게이트웨이의 순수 번역 함수(JSON 응답 → 코어 입력). 문서의 응답 예가 입력"
@@ -958,7 +958,7 @@ real = "oms-node(venue/hyperliquid/wire.rs)"
 simulated = "응답은 시험이 입력. 거래소에 묻지 않는다"
 faults = "maxLeverage 없음, 0, 문자열, null, 음수, 소수, u32 초과, 배열. 소수 필드 없음, 숫자가 아닌 문자열, 빈 문자열, JSON 숫자, null, 지수 표기, NaN, 소수 9자리. 모르는 증거금 방식. 종목 이름 없음. 포지션 목록 없음"
 criterion = "C-MARGIN의 'Hyperliquid 조회'. 기대값은 문서 예의 소수를 손으로 1e-8 단위 정수로 적었다"
-tests = ["node-unit/venue::hyperliquid::wire::tests::documented_clearinghouse_state_parses_to_a_margin_report", "node-unit/venue::hyperliquid::wire::tests::missing_zero_or_unparseable_max_leverage_rejects_the_whole_report", "node-unit/venue::hyperliquid::wire::tests::any_unparseable_number_rejects_the_whole_report", "node-unit/venue::hyperliquid::wire::tests::a_position_on_an_unconfigured_coin_is_kept"]
+tests = ["node-unit/venue::hyperliquid::wire::tests::documented_clearinghouse_state_parses_to_a_margin_report", "node-unit/venue::hyperliquid::wire::tests::missing_zero_or_unparseable_max_leverage_rejects_the_whole_report", "node-unit/venue::hyperliquid::wire::tests::any_unparseable_number_rejects_the_whole_report", "node-unit/venue::hyperliquid::wire::tests::a_position_on_an_unconfigured_coin_is_kept", "node-unit/venue::hyperliquid::wire::tests::documented_active_asset_data_parses_leverage_and_mode"]
 repro = "cargo test -p oms-node --lib venue::hyperliquid::wire"
 supports = "C-MARGIN"
 not_covered = "실제 응답이 문서의 예와 같은지, 필드의 뜻이 유도한 것과 같은지(T1, T2). 게이트웨이가 조회를 실제로 보내는 경로(HTTP)는 시험하지 않는다. HTTP 429일 때의 동작"

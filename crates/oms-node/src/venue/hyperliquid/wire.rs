@@ -433,6 +433,29 @@ fn whole(v: Option<&serde_json::Value>, name: &str) -> Result<u32, String> {
         .ok_or(format!("{name} is not a whole number: {v}"))
 }
 
+/// Turns the answer to an `activeAssetData` query about `instrument` into
+/// the core's input, or into nothing: a setting that cannot be read stays
+/// unknown, and an unknown setting holds the instrument.
+pub fn venue_setting_input(body: &serde_json::Value, session: u64, instrument: &InstrumentId) -> Option<VenueInput> {
+    // The answer names the coin it is about. One that names another coin,
+    // or none, is not taken as this instrument's setting.
+    if body.get("coin").and_then(|c| c.as_str()) != Some(instrument.as_str()) {
+        return None;
+    }
+    let isolated = match body.pointer("/leverage/type").and_then(|t| t.as_str()) {
+        Some("isolated") => true,
+        Some("cross") => false,
+        _ => return None,
+    };
+    let leverage = whole(body.pointer("/leverage/value"), "leverage.value").ok()?;
+    Some(VenueInput::VenueSetting {
+        session,
+        instrument: instrument.clone(),
+        isolated,
+        leverage,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -681,6 +704,72 @@ mod tests {
         let coins: Vec<&str> = r.positions.iter().map(|p| p.instrument.as_str()).collect();
         assert_eq!(coins, ["BTC", "kPEPE", "xyz:XYZ100", "PURR_USDC"]);
         assert_eq!(r.positions[2].margin_used, Amount(150_000_000));
+    }
+
+    /// The example answer of the Info endpoint documentation (Perpetuals,
+    /// `activeAssetData`). The account of the example is replaced by a
+    /// placeholder.
+    const DOC_ACTIVE_ASSET_DATA: &str = r#"{
+      "user": "0xUSER",
+      "coin": "APT",
+      "leverage": {"type": "cross", "value": 3},
+      "maxTradeSzs": ["24836370.4400000013", "24836370.4400000013"],
+      "availableToTrade": ["37019438.0284740031", "37019438.0284740031"],
+      "markPx": "4.4716"
+    }"#;
+
+    /// S17. The margin mode and the leverage of the documented example,
+    /// and of the same answer for an isolated instrument (the `leverage`
+    /// object has the shape it has in `clearinghouseState`). An answer
+    /// that does not state both, or that is about another coin, is no
+    /// setting at all.
+    #[test]
+    fn documented_active_asset_data_parses_leverage_and_mode() {
+        let apt = InstrumentId::new("APT").unwrap();
+        let doc: serde_json::Value = serde_json::from_str(DOC_ACTIVE_ASSET_DATA).unwrap();
+        assert_eq!(
+            venue_setting_input(&doc, 7, &apt),
+            Some(VenueInput::VenueSetting {
+                session: 7,
+                instrument: apt.clone(),
+                isolated: false,
+                leverage: 3,
+            })
+        );
+        let mut isolated = doc.clone();
+        isolated["leverage"] = json!({"type": "isolated", "value": 2, "rawUsd": "0.0"});
+        assert_eq!(
+            venue_setting_input(&isolated, 8, &apt),
+            Some(VenueInput::VenueSetting {
+                session: 8,
+                instrument: apt.clone(),
+                isolated: true,
+                leverage: 2,
+            })
+        );
+
+        let with = |change: &dyn Fn(&mut serde_json::Value)| {
+            let mut body = isolated.clone();
+            change(&mut body);
+            venue_setting_input(&body, 8, &apt)
+        };
+        // A mode that is not one of the two documented ones is not read as
+        // either.
+        for mode in [json!("hedged"), json!("Isolated"), json!(""), json!(null), json!(true)] {
+            assert_eq!(with(&|b| b["leverage"]["type"] = mode.clone()), None, "{mode}");
+        }
+        assert_eq!(with(&|b| { b["leverage"].as_object_mut().unwrap().remove("type"); }), None);
+        // The leverage is a whole number or nothing.
+        for value in [json!("2"), json!(2.5), json!(-2), json!(null), json!(4294967296u64)] {
+            assert_eq!(with(&|b| b["leverage"]["value"] = value.clone()), None, "{value}");
+        }
+        assert_eq!(with(&|b| { b["leverage"].as_object_mut().unwrap().remove("value"); }), None);
+        assert_eq!(with(&|b| { b.as_object_mut().unwrap().remove("leverage"); }), None);
+        // An answer about another coin, or one that names none, says
+        // nothing about this instrument.
+        assert_eq!(with(&|b| b["coin"] = json!("BTC")), None);
+        assert_eq!(with(&|b| { b.as_object_mut().unwrap().remove("coin"); }), None);
+        assert_eq!(venue_setting_input(&json!(null), 8, &apt), None);
     }
 
     /// Response examples from the Exchange endpoint documentation.
