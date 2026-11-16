@@ -388,14 +388,7 @@ fn margin_report(body: &serde_json::Value) -> Result<(Amount, Vec<MarginPosition
         let qty = decimal(pos.get("szi"), "szi", SQty::parse).map_err(at)?;
         let position_value = decimal(pos.get("positionValue"), "positionValue", Amount::parse).map_err(at)?;
         let margin_used = decimal(pos.get("marginUsed"), "marginUsed", Amount::parse).map_err(at)?;
-        let leverage_type = match pos.pointer("/leverage/type") {
-            None => return Err(at("leverage.type is missing".into())),
-            Some(v) => match v.as_str() {
-                Some("isolated") => LeverageType::Isolated,
-                Some("cross") => LeverageType::Cross,
-                _ => return Err(at(format!("leverage.type is neither isolated nor cross: {v}"))),
-            },
-        };
+        let leverage_type = leverage_type(pos.pointer("/leverage/type")).map_err(at)?;
         let leverage_value = whole(pos.pointer("/leverage/value"), "leverage.value").map_err(at)?;
         // The maintenance margin rate is 1 / (2 x maxLeverage): a report
         // without it cannot be judged, and zero would divide by nothing.
@@ -414,6 +407,17 @@ fn margin_report(body: &serde_json::Value) -> Result<(Amount, Vec<MarginPosition
         });
     }
     Ok((account_value, positions))
+}
+
+/// The margin mode in a `leverage` object of the venue: the string
+/// `isolated` or `cross`, exactly. Anything else is not read as either.
+fn leverage_type(v: Option<&serde_json::Value>) -> Result<LeverageType, String> {
+    let v = v.ok_or("leverage.type is missing")?;
+    match v.as_str() {
+        Some("isolated") => Ok(LeverageType::Isolated),
+        Some("cross") => Ok(LeverageType::Cross),
+        _ => Err(format!("leverage.type is neither isolated nor cross: {v}")),
+    }
 }
 
 /// A decimal the venue sends as a string. A JSON number is not accepted in
@@ -442,11 +446,7 @@ pub fn venue_setting_input(body: &serde_json::Value, session: u64, instrument: &
     if body.get("coin").and_then(|c| c.as_str()) != Some(instrument.as_str()) {
         return None;
     }
-    let isolated = match body.pointer("/leverage/type").and_then(|t| t.as_str()) {
-        Some("isolated") => true,
-        Some("cross") => false,
-        _ => return None,
-    };
+    let isolated = leverage_type(body.pointer("/leverage/type")).ok()? == LeverageType::Isolated;
     let leverage = whole(body.pointer("/leverage/value"), "leverage.value").ok()?;
     Some(VenueInput::VenueSetting {
         session,
