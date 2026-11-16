@@ -13,7 +13,7 @@
 - [x] Test `an_order_pending_send_at_entry_is_cancelled_once_acknowledged` (seam A, S9): fails when the cancel is lost, or is sent before the acknowledgement.
 - [x] Test `a_rule_cancel_that_races_a_fill_books_the_fill` (seam A, S4): fails when a fill that arrives after the rule cancel is not booked, or the final status does not decide.
 - [x] The existing test `cancel_race_final_status_decides` (S4) stays green: for a strategy cancel that races a fill, the final status still decides.
-- [ ] Test `a_stuck_rule_cancel_does_not_block_reduce_only_orders` (seam A, S10): fails when a stuck cancel after a rule cancel rejects a reduce-only order.
+- [x] Test `a_stuck_rule_cancel_does_not_block_reduce_only_orders` (seam A, S10): fails when a stuck cancel after a rule cancel rejects a reduce-only order.
 - [ ] Test `reducing_is_entered_once` (seam A, S8): fails when a second breaching report emits a second entry event or new cancels.
 - [ ] Test `first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day` (seam A, S12): fails when a loss taken across midnight is absorbed into the new base; also for a gap of three days, which rolls once.
 - [ ] Test `a_new_day_does_not_clear_reducing` (seam A, S12): fails when the latch is gone after the roll.

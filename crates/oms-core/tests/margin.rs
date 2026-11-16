@@ -876,3 +876,37 @@ fn a_rule_cancel_that_races_a_fill_books_the_fill() {
     assert_eq!(h.acct().buy_open, q("0"));
     assert_eq!(h.unacked_mismatches(), vec![]);
 }
+
+/// S10. The rule's cancel gets no answer from the venue and its attempts
+/// run out: the core raises `CancelStuck`. The mismatch and REDUCING both
+/// refuse plain orders. Neither refuses a reduce-only order, so the stuck
+/// cancel of the rule does not trap the position.
+#[test]
+fn a_stuck_rule_cancel_does_not_block_reduce_only_orders() {
+    let mut h = at_base_100();
+    h.long("a", "k1", "1");
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    h.report_margin("94.99");
+    assert_eq!(h.cancels(), vec![(bid, 1)]);
+    exhaust_cancel(&mut h, bid);
+    assert_eq!(h.cancels().len(), 5);
+    assert_eq!(h.order(bid).phase, Phase::Working);
+    assert_eq!(
+        h.core.holds(None),
+        vec![HoldReason::Mismatch, HoldReason::Reducing]
+    );
+
+    assert_eq!(
+        h.reject("a", "k2", Side::Sell, "0.5", "100"),
+        vec![
+            RejectReason::Hold(HoldReason::Mismatch),
+            RejectReason::Hold(HoldReason::Reducing)
+        ]
+    );
+    let r = h.reduce_only_req("a", "k3", Side::Sell, "0.5", "100");
+    let order_id = match h.new_order(r) {
+        NewOrderReply::Accepted { order_id } => order_id,
+        other => panic!("a stuck rule cancel refused a reduce-only order: {other:?}"),
+    };
+    assert_eq!(h.sends().last(), Some(&order_id));
+}
