@@ -17,6 +17,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
 pub mod client;
+pub mod ctl;
 
 use oms_core::*;
 use serde::{Deserialize, Serialize};
