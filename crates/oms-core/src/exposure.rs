@@ -115,6 +115,10 @@ impl Core {
         // Without a fresh report the order is already refused, and there is
         // no account value to judge it with.
         let report = self.margin.report.as_ref().filter(|_| self.margin_report_is_fresh(at))?;
+        // An account worth nothing carries nothing, whatever the order.
+        if report.account_value.0 <= 0 {
+            return Some(RejectReason::AccountLeverage);
+        }
         let (Ok(before), Ok(after)) = (self.exposure_with(None, Some(at)), self.exposure_with(Some(r), Some(at))) else {
             return Some(RejectReason::MarginUnavailable);
         };

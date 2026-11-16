@@ -891,6 +891,43 @@ fn plain_order_is_rejected_when_an_exposed_instrument_has_no_fresh_reference_pri
     accepted(h.new_order(r));
 }
 
+/// An account value of zero or below carries no exposure at all: every
+/// plain order is refused, also one that would not raise exposure. A
+/// reduce-only order is still accepted, and nothing latches.
+#[test]
+fn account_value_zero_or_negative_rejects() {
+    for value in ["0", "-0.00000001", "-5"] {
+        let mut h = gate();
+        h.long("a", "k1", "2");
+        h.report_margin(value);
+        assert_eq!(
+            h.reject("a", "k2", Side::Buy, "0.1", "100"),
+            vec![RejectReason::AccountLeverage],
+            "account value {value}"
+        );
+        // A plain sell against the long does not raise exposure. It is
+        // refused all the same.
+        assert_eq!(
+            h.reject("a", "k3", Side::Sell, "1", "100"),
+            vec![RejectReason::AccountLeverage],
+            "account value {value}"
+        );
+        let r = h.reduce_only_req("a", "k4", Side::Sell, "1", "100");
+        accepted(h.new_order(r));
+
+        // The next report is positive again: the plain sell is accepted.
+        assert_eq!(h.core.holds(None), vec![]);
+        h.report_margin("100");
+        h.accept("a", "k5", Side::Sell, "1", "100");
+    }
+    // The smallest positive value is not "zero or below": an order that
+    // does not raise exposure passes.
+    let mut h = gate();
+    h.long("a", "k1", "2");
+    h.report_margin("0.00000001");
+    h.accept("a", "k2", Side::Sell, "1", "100");
+}
+
 // ---- C-MARGIN: replay ---------------------------------------------------------
 
 /// S13. Margin state comes only from journal events. A core rebuilt from the
