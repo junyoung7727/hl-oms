@@ -271,3 +271,44 @@ fn invalid_margin_report_is_journaled_and_never_becomes_fresh() {
     assert_eq!(names(&out), vec!["margin_reported"]);
     assert_eq!(recorded(&h), Some((1, 4, amt("99"))));
 }
+
+// ---- C-MARGIN: freshness ----------------------------------------------------
+
+/// Moves the harness clock so that the next input is recorded at `at`.
+fn next_input_at(h: &mut H, at: Ts) {
+    assert!(at >= h.now + 1_000, "the record time cannot go backwards");
+    h.now = at - 1_000;
+}
+
+/// S11. With a margin policy a plain order needs a margin report whose age
+/// (record time minus query time) is at most 30 s. Exactly 30 s is fresh;
+/// one microsecond more is not.
+#[test]
+fn plain_order_is_rejected_margin_unavailable_without_a_fresh_report() {
+    let mut h = H::ready_with(config_with_margin());
+
+    // No report was ever recorded.
+    assert_eq!(h.reject("a", "k1", Side::Buy, "1", "100"), vec![RejectReason::MarginUnavailable]);
+
+    // A report asked for at t0. An order recorded exactly 30 s later is
+    // accepted.
+    let t0 = h.now;
+    h.margin_report(1, 1, t0, "1000");
+    next_input_at(&mut h, t0 + 30 * SEC);
+    let id = h.accept("a", "k2", Side::Buy, "1", "100");
+    assert_eq!(h.order(id).accepted_at, t0 + 30_000_000);
+
+    // A second report asked for at t1. An order recorded 30 s and one
+    // microsecond later is rejected, and the reason is the only one.
+    let t1 = h.now;
+    h.margin_report(1, 2, t1, "1000");
+    next_input_at(&mut h, t1 + 30 * SEC + 1);
+    assert_eq!(h.now + 1_000, t1 + 30_000_001);
+    assert_eq!(h.reject("a", "k3", Side::Buy, "1", "100"), vec![RejectReason::MarginUnavailable]);
+    // The refusal is not a hold: it latches nothing.
+    assert_eq!(h.core.holds(None), vec![]);
+
+    // A new report makes plain orders acceptable again.
+    h.margin_report(1, 3, h.now, "1000");
+    h.accept("a", "k4", Side::Buy, "1", "100");
+}

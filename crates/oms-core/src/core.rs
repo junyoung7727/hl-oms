@@ -191,6 +191,15 @@ impl Core {
         v
     }
 
+    /// Whether a margin report exists that is fresh at record time `at`
+    /// (C-MARGIN, 신선도). False without a margin policy.
+    pub fn margin_report_is_fresh(&self, at: Ts) -> bool {
+        let (Some(policy), Some(report)) = (&self.config.policy.margin, &self.margin.report) else {
+            return false;
+        };
+        at.saturating_sub(report.queried_at) <= policy.margin_max_age_us
+    }
+
     /// The gateway command an event calls for, if any. Used only by live
     /// processing; recovery never calls this.
     pub fn command_for(&self, ev: &Event) -> Option<VenueCommand> {

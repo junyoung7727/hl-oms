@@ -230,6 +230,10 @@ pub enum RejectReason {
     ExpiryTooFar,
     Overflow,
     Hold(HoldReason),
+    /// A plain order needs a fresh margin report and there is none
+    /// (C-MARGIN). Not a hold: it depends on the time, and holds are derived
+    /// from state alone.
+    MarginUnavailable,
 }
 
 /// What the gateway must do. Commands are produced only by live processing,
