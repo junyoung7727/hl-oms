@@ -789,6 +789,9 @@ impl Core {
                     since: at,
                 });
             }
+            Event::ReducingCleared { .. } => {
+                self.margin.reducing = None;
+            }
         }
         Ok(())
     }

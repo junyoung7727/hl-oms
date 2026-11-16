@@ -422,6 +422,8 @@ pub struct DayBase {
 pub enum BaseSetBy {
     /// The first report, or the first report of a later UTC day.
     Report,
+    /// The operator's `clear-reduce` or `rebase-day`.
+    Operator,
 }
 
 /// Why an operator's `clear-reduce` or `rebase-day` was refused (C-MARGIN,

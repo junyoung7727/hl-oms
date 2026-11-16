@@ -7,7 +7,7 @@
 **Status:** claimed
 
 - [x] Test `clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing` (seam A, S14): fails when any of the three is accepted, or the refusal reason is not `MarginUnavailable`, `NoteRequired`, `NotReducing`.
-- [ ] Test `clear_reduce_rebases_the_day_and_a_further_loss_latches_again` (seam A, S14): fails when after a clear at 94 a report at 94 or at 89.30 re-latches, or one at 89.29 does not.
+- [x] Test `clear_reduce_rebases_the_day_and_a_further_loss_latches_again` (seam A, S14): fails when after a clear at 94 a report at 94 or at 89.30 re-latches, or one at 89.29 does not.
 - [ ] Test `rebase_day_sets_the_base_and_leaves_the_latch_alone` (seam A, S15): fails when the base does not move, or the latch changes.
 - [ ] Test `a_withdrawal_without_rebase_reads_as_a_loss` (seam A, S15): fails when a drop in account value caused by a withdrawal stops latching. The unsafe side (a deposit hides a loss) is a stated non-guarantee.
 - [ ] Test `strategy_socket_cannot_clear_reducing_or_rebase` (seam C, S14): fails when either command works from the strategy socket.

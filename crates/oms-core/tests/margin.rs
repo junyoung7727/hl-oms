@@ -2227,3 +2227,85 @@ fn clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing() {
         Some(amt("100"))
     );
 }
+
+fn operator_base_set(day: u64, value: &str) -> Event {
+    Event::DayBaseSet {
+        day,
+        value: amt(value),
+        set_by: BaseSetBy::Operator,
+    }
+}
+
+/// S14. A clear takes the account value of the newest report as the new day
+/// base and ends REDUCING, in that order, in one input. A report that is
+/// exactly 30 s old is fresh enough. Plain orders are accepted again. The
+/// release is not a licence: against the new base of 94 a report of 94 or of
+/// 89.30 (a loss of exactly 5 %) does not trip, and 89.29 trips again. A
+/// second clear with nothing to clear is refused.
+#[test]
+fn clear_reduce_rebases_the_day_and_a_further_loss_latches_again() {
+    let mut h = at_base_100();
+    h.advance(5 * SEC);
+    h.report_margin("94");
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+    let queried_at = h.core.margin.report.as_ref().map(|r| r.queried_at).unwrap();
+
+    next_input_at(&mut h, queried_at + 30 * SEC);
+    let out = clear_reduce(&mut h, "loss understood, strategy b switched off");
+    assert_eq!(out.reply, Some(Reply::Operator(Ok("cleared".into()))));
+    assert_eq!(
+        out.events,
+        vec![
+            operator_base_set(20_000, "94"),
+            Event::ReducingCleared {
+                note: "loss understood, strategy b switched off".into(),
+                old_base: Some(amt("100")),
+                new_base: amt("94"),
+            },
+        ]
+    );
+    assert_eq!(out.commands, vec![]);
+    assert_eq!(h.core.margin.reducing, None);
+    assert_eq!(h.core.holds(None), vec![]);
+    assert_eq!(
+        h.core.margin.day_base,
+        Some(DayBase {
+            day: 20_000,
+            value: amt("94"),
+            set_by: BaseSetBy::Operator,
+        })
+    );
+
+    // The same value again, and a loss of exactly 5 % of 94 (4.70): neither
+    // trips, and the base is not touched by a report of the same day.
+    for value in ["94", "89.3"] {
+        h.advance(5 * SEC);
+        let out = h.report_margin(value);
+        assert_eq!(names(&out), vec!["margin_reported"], "at {value}");
+        assert_eq!(h.core.holds(None), vec![], "at {value}");
+    }
+    h.ref_price("X", "100");
+    h.accept("a", "k1", Side::Buy, "0.1", "100");
+
+    // One cent more is past the limit: REDUCING again, judged against 94.
+    h.advance(5 * SEC);
+    let out = h.report_margin("89.29");
+    assert_eq!(
+        out.events[1],
+        Event::ReducingEntered {
+            rule: RuleId::DailyLoss,
+            detail: "account value 89.29 is more than 500 bps below the day base 94".into(),
+        }
+    );
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+
+    // A clear, and then a second one: the second finds nothing to clear.
+    let out = clear_reduce(&mut h, "second release");
+    assert_eq!(out.reply, Some(Reply::Operator(Ok("cleared".into()))));
+    let out = clear_reduce(&mut h, "second release, sent twice");
+    assert_eq!(refused(&out), "not_reducing: the account is not REDUCING");
+    assert_eq!(
+        h.core.margin.day_base.as_ref().map(|b| b.value),
+        Some(amt("89.29"))
+    );
+}

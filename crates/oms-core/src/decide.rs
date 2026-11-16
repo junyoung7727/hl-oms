@@ -566,7 +566,10 @@ impl Tx<'_> {
             }
             OperatorCmd::ClearReduce { note } => match self.clear_reduce_refusal(note) {
                 Some(refusal) => Err(refusal.text().into()),
-                None => Err("not implemented".into()),
+                None => {
+                    self.clear_reduce(note)?;
+                    Ok("cleared".into())
+                }
             },
         };
         self.out.reply = Some(Reply::Operator(reply));
@@ -587,6 +590,37 @@ impl Tx<'_> {
             return Some(MarginRefusal::NoteRequired);
         }
         None
+    }
+
+    /// Ends REDUCING on the newest report: its account value becomes the day
+    /// base first, so that the loss that tripped the rule does not trip it
+    /// again on the next report, and a further loss is measured from here.
+    fn clear_reduce(&mut self, note: &str) -> Result<(), CoreFault> {
+        let old_base = self.core.margin.day_base.as_ref().map(|base| base.value);
+        let Some(new_base) = self.rebase_on_the_report()? else {
+            return Ok(());
+        };
+        self.emit(Event::ReducingCleared {
+            note: note.to_string(),
+            old_base,
+            new_base,
+        })
+    }
+
+    /// Sets the day base to the account value and the UTC day of the newest
+    /// report, by the operator. The day is the report's, also when it is
+    /// earlier than the base's. Returns the new base value.
+    fn rebase_on_the_report(&mut self) -> Result<Option<Amount>, CoreFault> {
+        let Some(report) = &self.core.margin.report else {
+            return Ok(None);
+        };
+        let (day, value) = (report.queried_at / DAY_US, report.account_value);
+        self.emit(Event::DayBaseSet {
+            day,
+            value,
+            set_by: BaseSetBy::Operator,
+        })?;
+        Ok(Some(value))
     }
 
     // ---- venue ------------------------------------------------------------

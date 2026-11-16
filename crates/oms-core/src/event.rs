@@ -212,6 +212,14 @@ pub enum Event {
         rule: RuleId,
         detail: String,
     },
+    /// The operator ended REDUCING (C-MARGIN, 해제). The `DayBaseSet` that
+    /// made `new_base` the day base is the event before this one.
+    ReducingCleared {
+        note: String,
+        /// The day base the tripped rule was judged against, if any.
+        old_base: Option<Amount>,
+        new_base: Amount,
+    },
 }
 
 /// Stable reason codes for a refused new-order request.
@@ -384,6 +392,7 @@ impl Event {
             Event::MarginReportRejected { .. } => "margin_report_rejected",
             Event::DayBaseSet { .. } => "day_base_set",
             Event::ReducingEntered { .. } => "reducing_entered",
+            Event::ReducingCleared { .. } => "reducing_cleared",
         }
     }
 }
