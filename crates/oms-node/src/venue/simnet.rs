@@ -386,6 +386,27 @@ impl Gateway {
                 };
                 self.input.send(input).await;
             }
+            QueryReq::VenueSetting { instrument } => {
+                // No answer, or one that cannot be read: no input. The
+                // setting stays unknown and the instrument stays held.
+                let op = SimOp::VenueSetting {
+                    instrument: instrument.clone(),
+                };
+                let Ok(resp) = self.requests.call(op).await else {
+                    return;
+                };
+                let Ok(r) = serde_json::from_value::<VenueSettingResult>(resp.result) else {
+                    return;
+                };
+                self.input
+                    .send(VenueInput::VenueSetting {
+                        session,
+                        instrument,
+                        isolated: r.isolated,
+                        leverage: r.leverage,
+                    })
+                    .await;
+            }
         }
     }
 

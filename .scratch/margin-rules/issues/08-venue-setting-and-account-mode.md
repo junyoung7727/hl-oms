@@ -6,7 +6,7 @@
 
 **Status:** claimed
 
-- [ ] Test `instrument_with_unknown_venue_setting_holds_plain_orders` (seam A, S17): fails when a plain order is accepted before the setting is known in this link session.
+- [x] Test `instrument_with_unknown_venue_setting_holds_plain_orders` (seam A, S17): fails when a plain order is accepted before the setting is known in this link session.
 - [ ] Test `a_setting_that_differs_from_config_holds_only_that_instrument` (seam A, S17): fails when cross mode or leverage 3 passes, or another instrument is held too.
 - [ ] Test `a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again` (seam A, S17): fails when the hold stays after a match, or the setting counts as known in a new session.
 - [ ] Test `a_cross_position_in_a_margin_report_raises_the_hold` (seam A, S17): fails when the position's mode in a margin report is not used as a source.

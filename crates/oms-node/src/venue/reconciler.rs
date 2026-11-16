@@ -42,13 +42,28 @@ pub async fn run(published: Arc<Published>, queries: mpsc::Sender<QueryReq>, eve
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tick.tick().await;
-        let (needs, link_up, fills_since, margin_rules) = {
+        let (needs, link_up, fills_since, margin_rules, settings_unknown) = {
             let p = published.read();
+            let margin_rules = p.core.config.policy.margin.is_some();
+            // Instruments whose venue setting the core has not been told in
+            // this link session.
+            let settings_unknown: Vec<InstrumentId> = if margin_rules {
+                p.core
+                    .config
+                    .instruments
+                    .keys()
+                    .filter(|i| !p.core.margin.venue_settings.contains_key(*i))
+                    .cloned()
+                    .collect()
+            } else {
+                Vec::new()
+            };
             (
                 p.core.needs(),
                 p.core.link.up,
                 p.core.sync.fills_up_to.max(p.core.fill_floor),
-                p.core.config.policy.margin.is_some(),
+                margin_rules,
+                settings_unknown,
             )
         };
         if !link_up {
@@ -97,6 +112,13 @@ pub async fn run(published: Arc<Published>, queries: mpsc::Sender<QueryReq>, eve
             last_margin = Some(now);
             margin_seq += 1;
             wanted.push(QueryReq::Margin { seq: margin_seq });
+        }
+        // A venue setting that is not known yet is asked for at once and
+        // then once per second until the answer is recorded.
+        if !settings_unknown.is_empty() && due(&mut last_account, "venue_settings", now) {
+            for instrument in settings_unknown {
+                wanted.push(QueryReq::VenueSetting { instrument });
+            }
         }
         for q in wanted {
             // If the gateway is busy the query is simply not issued this

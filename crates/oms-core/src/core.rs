@@ -188,7 +188,25 @@ impl Core {
         if self.storage_low {
             v.push(HoldReason::StorageLow);
         }
+        if self.config.policy.margin.is_some() {
+            for instrument in self.config.instruments.keys() {
+                if !self.venue_setting_is_as_configured(instrument) {
+                    v.push(HoldReason::VenueSetting(instrument.clone()));
+                }
+            }
+        }
         v
+    }
+
+    /// Whether the venue told, in the current link session, that
+    /// `instrument` has the margin mode and the leverage the margin policy
+    /// asks for (C-MARGIN, 거래소 설정과 계좌 모드). False without a margin
+    /// policy.
+    pub fn venue_setting_is_as_configured(&self, instrument: &InstrumentId) -> bool {
+        if self.config.policy.margin.is_none() {
+            return false;
+        }
+        self.margin.venue_settings.contains_key(instrument)
     }
 
     /// Whether a margin report exists that is fresh at record time `at`
@@ -771,6 +789,20 @@ impl Core {
                     reason: reason.clone(),
                     at,
                 });
+            }
+            Event::VenueSettingNoted {
+                instrument,
+                isolated,
+                leverage,
+                ..
+            } => {
+                self.margin.venue_settings.insert(
+                    instrument.clone(),
+                    VenueSettingSeen {
+                        isolated: *isolated,
+                        leverage: *leverage,
+                    },
+                );
             }
         }
         Ok(())

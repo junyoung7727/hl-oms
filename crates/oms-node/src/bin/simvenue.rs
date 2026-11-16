@@ -169,6 +169,12 @@ impl State {
                     account_value: self.venue.account_value,
                 }))
             }
+            // The simulated account has every instrument on isolated margin
+            // at leverage 2.
+            SimOp::VenueSetting { .. } => Ok(json(&VenueSettingResult {
+                isolated: true,
+                leverage: 2,
+            })),
             SimOp::Subscribe => Err("subscribe is handled by the connection".into()),
             SimOp::Ctl { action } => self.ctl(action, now),
         }

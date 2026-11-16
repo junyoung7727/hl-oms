@@ -123,16 +123,31 @@ impl H {
     }
 
     pub fn ready_with(cfg: CoreConfig) -> H {
-        let mut h = H::new();
-        h.inp(Input::Boot { binary: "test".into() });
-        let out = h.inp(Input::Config(Box::new(cfg)));
-        assert!(matches!(out.reply, Some(Reply::Config(Ok(_)))), "{:?}", out.reply);
+        let mut h = H::configured(cfg);
         h.link_up_and_sync();
         assert_eq!(h.core.holds(None), vec![]);
         h
     }
 
+    /// Booted and configured. The link has never been up.
+    pub fn configured(cfg: CoreConfig) -> H {
+        let mut h = H::new();
+        h.inp(Input::Boot { binary: "test".into() });
+        let out = h.inp(Input::Config(Box::new(cfg)));
+        assert!(matches!(out.reply, Some(Reply::Config(Ok(_)))), "{:?}", out.reply);
+        h
+    }
+
+    /// A new link session, fully synced. With a margin policy the venue
+    /// also tells what the policy asks for: see `venue_matches_policy`.
     pub fn link_up_and_sync(&mut self) {
+        self.link_up_and_sync_only();
+        self.venue_matches_policy();
+    }
+
+    /// A new link session with the three account-level sweeps and nothing
+    /// else: the venue has not told any venue setting in it.
+    pub fn link_up_and_sync_only(&mut self) {
         self.session += 1;
         let session = self.session;
         self.venue(VenueInput::Link {
@@ -141,6 +156,35 @@ impl H {
             reason: "test".into(),
         });
         self.sync();
+    }
+
+    /// With a margin policy: the venue tells, for every configured
+    /// instrument, the margin mode and the leverage the policy asks for.
+    /// Without a margin policy: nothing.
+    pub fn venue_matches_policy(&mut self) {
+        let Some(policy) = self.core.config.policy.margin.clone() else {
+            return;
+        };
+        let instruments: Vec<InstrumentId> = self.core.config.instruments.keys().cloned().collect();
+        for instrument in instruments {
+            self.venue(VenueInput::VenueSetting {
+                session: self.session,
+                instrument,
+                isolated: policy.isolated,
+                leverage: policy.venue_leverage,
+            });
+        }
+    }
+
+    /// The venue's answer, in the current link session, to the venue-setting
+    /// query for `instrument`.
+    pub fn venue_setting(&mut self, instrument: &str, isolated: bool, leverage: u32) -> Output {
+        self.venue(VenueInput::VenueSetting {
+            session: self.session,
+            instrument: iid(instrument),
+            isolated,
+            leverage,
+        })
     }
 
     /// Delivers the three account-level sweeps with nothing to report.

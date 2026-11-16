@@ -1418,3 +1418,53 @@ fn margin_events_replay_to_the_same_state() {
     let recs: Vec<Record> = serde_json::from_str(&serde_json::to_string(&h.log).unwrap()).unwrap();
     assert_eq!(recs, h.log);
 }
+
+// ---- C-MARGIN: venue setting and account mode -------------------------------
+
+/// S17. With a margin policy the OMS must know, in the current link session,
+/// that the instrument has the margin mode and the leverage the policy asks
+/// for (isolated, 2). Until the venue has told it, a plain order on that
+/// instrument is refused. An answer to a query of an earlier link session
+/// tells nothing about this one.
+#[test]
+fn instrument_with_unknown_venue_setting_holds_plain_orders() {
+    let mut h = H::configured(config_with_margin());
+    h.link_up_and_sync_only();
+    h.report_margin("1000");
+    h.ref_price("X", "100");
+
+    // Everything else is in order: the setting is the only reason.
+    assert_eq!(
+        h.reject("a", "k1", Side::Buy, "1", "100"),
+        vec![RejectReason::Hold(HoldReason::VenueSetting(iid("X")))]
+    );
+
+    // A late answer that belongs to link session 0 is dropped.
+    let out = h.venue(VenueInput::VenueSetting {
+        session: 0,
+        instrument: iid("X"),
+        isolated: true,
+        leverage: 2,
+    });
+    assert_eq!(names(&out), Vec::<&str>::new());
+    assert_eq!(
+        h.reject("a", "k1", Side::Buy, "1", "100"),
+        vec![RejectReason::Hold(HoldReason::VenueSetting(iid("X")))]
+    );
+
+    // The answer of this session is recorded as it came. The OMS only
+    // reads the setting: nothing is sent to the venue.
+    let out = h.venue_setting("X", true, 2);
+    assert_eq!(
+        out.events,
+        vec![Event::VenueSettingNoted {
+            session: 1,
+            instrument: iid("X"),
+            isolated: true,
+            leverage: 2,
+        }]
+    );
+    assert_eq!(out.commands, vec![]);
+    h.accept("a", "k1", Side::Buy, "1", "100");
+    assert_eq!(h.commands.len(), 1, "only the order itself went to the venue");
+}

@@ -902,3 +902,18 @@ tests = ["e2e/node_polls_margin_and_status_shows_value_and_age", "e2e/status_sho
 repro = "cargo test -p oms-node --test e2e node_polls_margin && cargo test -p oms-node --test e2e status_shows_account_exposure"
 supports = "C-MARGIN"
 not_covered = "기본 간격 5초 그대로의 실행. Hyperliquid 게이트웨이(아직 이 조회에 답하지 않는다: 티켓 09). 운영자 명령과 재시작(뒤 티켓). 정확한 시간"
+
+[[claim]]
+id = "V-MARGIN-9"
+statement = "증거금 정책이 있으면, 종목의 거래소 설정(증거금 방식과 레버리지)을 이번 링크 세션에서 받지 못한 동안 그 종목의 일반 주문은 VenueSetting(종목) 차단으로 거절된다. 옛 세션의 응답은 버린다. OMS는 설정을 읽기만 하고 거래소로 아무것도 보내지 않는다"
+why = "거래소의 레버리지나 증거금 방식이 계획과 다르면 주문이 계획하지 않은 증거금을 쓴다. 확인하지 못한 설정을 맞다고 가정하면 그 차이를 아무도 모른다"
+level = "단위"
+scope = "코어의 차단 계산과 신규 주문 검사. 정책 기본값(격리, 레버리지 2), 종목 하나"
+real = "oms-core"
+simulated = "거래소 설정 응답은 시험이 입력"
+faults = "설정을 받지 못한 링크 세션, 옛 세션의 늦은 응답"
+criterion = "C-MARGIN의 '거래소 설정과 계좌 모드'. 기대값은 손으로 적었다"
+tests = ["core/instrument_with_unknown_venue_setting_holds_plain_orders"]
+repro = "cargo test -p oms-core --test margin"
+supports = "C-MARGIN"
+not_covered = "포지션이 없을 때 거래소가 설정을 알려 주는지(T11). 거래소가 걸려 있는 주문에 레버리지를 적용하는지(T8)"

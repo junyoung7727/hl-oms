@@ -42,6 +42,11 @@ pub enum SimOp {
     Positions,
     /// The account's margin report. Answered with a `MarginResult`.
     Margin,
+    /// Margin mode and leverage of one instrument. Answered with a
+    /// `VenueSettingResult`.
+    VenueSetting {
+        instrument: InstrumentId,
+    },
     /// Turns this connection into an event stream.
     Subscribe,
     Ctl {
@@ -164,6 +169,13 @@ pub struct WirePosition {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MarginResult {
     pub account_value: Amount,
+}
+
+/// Answer to `SimOp::VenueSetting`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VenueSettingResult {
+    pub isolated: bool,
+    pub leverage: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

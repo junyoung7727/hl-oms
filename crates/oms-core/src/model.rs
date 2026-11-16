@@ -7,6 +7,7 @@
 use crate::ids::*;
 use crate::num::*;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -276,6 +277,10 @@ pub enum HoldReason {
     OperatorStrategy,
     /// Journal storage is running low.
     StorageLow,
+    /// The venue's margin mode or leverage of this instrument is not known
+    /// in the current link session, or differs from the margin policy
+    /// (C-MARGIN). Refuses plain orders on this instrument only.
+    VenueSetting(InstrumentId),
 }
 
 impl HoldReason {
@@ -286,7 +291,7 @@ impl HoldReason {
     pub fn refuses_only_plain_orders(&self) -> bool {
         match self {
             HoldReason::NoConfig | HoldReason::LinkDown | HoldReason::OperatorAccount | HoldReason::OperatorStrategy | HoldReason::StorageLow => false,
-            HoldReason::Resync | HoldReason::InDoubt | HoldReason::Mismatch => true,
+            HoldReason::Resync | HoldReason::InDoubt | HoldReason::Mismatch | HoldReason::VenueSetting(_) => true,
         }
     }
 }
@@ -372,6 +377,18 @@ pub struct MarginState {
     /// Why the most recent refused report was refused. Shown to the operator;
     /// no rule reads it.
     pub last_rejection: Option<MarginRejection>,
+    /// The venue setting of each configured instrument as the venue told it
+    /// in the current link session. An instrument that is not listed is
+    /// unknown. Emptied when the link changes.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub venue_settings: BTreeMap<InstrumentId, VenueSettingSeen>,
+}
+
+/// Margin mode and leverage of one instrument at the venue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VenueSettingSeen {
+    pub isolated: bool,
+    pub leverage: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

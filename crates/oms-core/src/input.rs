@@ -136,6 +136,14 @@ pub enum VenueInput {
         queried_at: Ts,
         reason: String,
     },
+    /// The venue's answer to one venue-setting query: the margin mode and
+    /// the leverage of one instrument (C-MARGIN). The OMS only reads them.
+    VenueSetting {
+        session: u64,
+        instrument: InstrumentId,
+        isolated: bool,
+        leverage: u32,
+    },
 }
 
 /// What the venue said about the account's margin at one moment. The whole
