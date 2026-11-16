@@ -326,6 +326,9 @@ impl Core {
             Event::LinkChanged { up, session, .. } => {
                 self.link.up = *up;
                 self.link.session = *session;
+                if *up && self.config.policy.margin.is_some() {
+                    self.margin.link_up_at = Some(at);
+                }
             }
             Event::RequestRejected { .. } => {
                 self.stats.rejected += 1;

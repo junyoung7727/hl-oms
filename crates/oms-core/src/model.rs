@@ -386,6 +386,11 @@ pub struct MarginState {
     /// Set while the account is REDUCING. One latch for the whole account.
     #[serde(default)]
     pub reducing: Option<Reducing>,
+    /// Record time at which the current link session came up. The stale
+    /// cancel measures from it while the session has no report. Set by the
+    /// link-up event, and only with a margin policy.
+    #[serde(default)]
+    pub link_up_at: Option<Ts>,
 }
 
 /// A margin rule that acts on its own: it latches REDUCING or cancels

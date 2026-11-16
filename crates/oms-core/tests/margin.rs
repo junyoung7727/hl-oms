@@ -2251,3 +2251,54 @@ fn report_stale_past_the_cancel_limit_cancels_each_plain_order_once() {
     assert_eq!(h.core.holds(None), vec![]);
     assert_eq!(h.core.margin.reducing, None);
 }
+
+/// S23. Without a report in the current link session the age is measured
+/// from the moment that session came up. Scene 1: a node that never got a
+/// report at all still cancels, 60 s after link-up. Scene 2: a report of an
+/// earlier session is older than 60 s when the link comes back; the orders
+/// are not cancelled at once, the new session gets its own 60 s.
+#[test]
+fn stale_age_starts_at_link_up_when_no_report_has_arrived() {
+    // Scene 1. The order rests from before the margin policy was set, so
+    // that it exists although no report ever arrived.
+    let mut h = H::ready();
+    let bid = h.accept("a", "bid", Side::Buy, "0.2", "90");
+    h.placed_open(bid, "bid");
+    let out = h.inp(Input::Config(Box::new(CoreConfig {
+        version: 2,
+        ..config_with_margin()
+    })));
+    assert!(matches!(out.reply, Some(Reply::Config(Ok(2)))));
+    link_down(&mut h);
+    let up_at = h.now + 1_000;
+    h.link_up_and_sync();
+    assert_eq!(h.core.margin.report, None);
+    h.commands.clear();
+
+    next_input_at(&mut h, up_at + 60 * SEC);
+    assert_eq!(decided(&h.tick()), vec![], "a cancel at exactly 60 s");
+    next_input_at(&mut h, up_at + 60 * SEC + 1_000);
+    assert_eq!(
+        decided(&h.tick()),
+        vec![stale_cancel(bid), cancel_sent(bid, 1)],
+        "a node that never got a report never cancels"
+    );
+
+    // Scene 2.
+    let mut h = at_base_100();
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    link_down(&mut h);
+    h.advance(300 * SEC);
+    let up_at = h.now + 1_000;
+    h.link_up_and_sync();
+    h.commands.clear();
+
+    assert_eq!(decided(&h.tick()), vec![], "cancelled on the old report");
+    next_input_at(&mut h, up_at + 60 * SEC);
+    assert_eq!(decided(&h.tick()), vec![]);
+    next_input_at(&mut h, up_at + 60 * SEC + 1_000);
+    assert_eq!(
+        decided(&h.tick()),
+        vec![stale_cancel(bid), cancel_sent(bid, 1)]
+    );
+}

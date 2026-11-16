@@ -1437,10 +1437,17 @@ impl Tx<'_> {
     /// request gets one, once. Nothing latches: the next recorded report
     /// ends it.
     fn stale_cancel(&mut self) -> Result<(), CoreFault> {
-        let (Some(policy), Some(report)) = (&self.core.config.policy.margin, &self.core.margin.report) else {
+        let Some(policy) = &self.core.config.policy.margin else {
             return Ok(());
         };
-        let blind_for = self.at.saturating_sub(report.queried_at);
+        // Measured from the query time of the last recorded report, or from
+        // the moment the current link session came up when that is later.
+        let margin = &self.core.margin;
+        let last_report_at = margin.report.as_ref().map(|r| r.queried_at);
+        let Some(blind_since) = last_report_at.max(margin.link_up_at) else {
+            return Ok(());
+        };
+        let blind_for = self.at.saturating_sub(blind_since);
         if blind_for <= policy.stale_cancel_us {
             return Ok(());
         }
