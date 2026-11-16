@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Test `margin_report_of_the_current_session_is_recorded` (seam A): fails when a report of the current link session produces no `margin_reported` event.
 - [ ] Test `margin_report_of_an_old_session_or_with_the_link_down_is_ignored` (seam A): fails when such a report is stored or judged.
