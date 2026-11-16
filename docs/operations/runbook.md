@@ -275,7 +275,8 @@ kill -TERM <pid>
 
 1. testnet 계정에 agent 지갑을 만들고 그 키만 환경 변수로 준다.
 2. `config/hyperliquid-testnet.example.toml`을 복사해 계좌 주소를 넣는다. 한도는 예제의 작은 값 그대로 둔다.
-3. 띄우고 화면에서 확인한다: 실행 종류가 "실제 시스템 · hyperliquid:testnet", 링크 연결, 차단 사유 없음, 참조 가격 수신.
+   예제에는 증거금 정책(`[core.policy.margin]`)이 있다. OMS는 거래소의 레버리지와 증거금 방식을 바꾸지 않으므로, 거래소에서 종목을 격리·레버리지 2로 직접 맞춘다. 다르면 그 종목의 일반 주문이 `VenueSetting`으로 막힌다. `account_modes_allowed`는 비어 있어서 처음에는 일반 주문이 모두 `AccountMode`로 막힌다. `status`의 `core.margin.account_mode`에 보이는 값을 확인하고(가정 T10) 그 문자열을 적은 뒤 `version`을 올려 다시 띄운다.
+3. 띄우고 화면에서 확인한다: 실행 종류가 "실제 시스템 · hyperliquid:testnet", 링크 연결, 차단 사유 없음, 참조 가격 수신. 증거금 정책이 있으면 `status`의 `core.margin`에서 계좌 가치와 그 나이, 종목별 거래소 설정, 계좌 모드도 확인한다. 보고가 거부되면 사유가 거기에 보인다.
 4. 시장에서 먼 가격의 최소 금액 지정가(ALO) 한 건 → 화면의 주문 추적에서 `order_accepted → order_acked` 확인 → 취소 → `order_closed`.
 5. 체결되는 IOC 한 건 → `fill_booked`, 포지션 대조 통과 확인.
 6. [조사 문서 §4](../research/hyperliquid-protocol.md)의 실험 목록을 차례로 한다. 설계가 기대는 것부터: 만료 시각이 지난 요청의 거부, 체결 시각이 스트림과 조회에서 같은지, 체결 조회의 쪽 크기, IOC 부분 체결의 응답, 열린 주문·체결에 cloid가 있는지.

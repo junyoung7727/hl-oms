@@ -15,7 +15,7 @@
 - [x] Test `margin_and_setting_request_json` (seam B): fails when a request body differs from the documented one.
 - [x] Test `example_config_with_a_margin_policy_loads` (seam node unit, S21): fails when the shipped example configuration fails validation.
 - [x] Test `steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused` (seam node unit, G7): fails when the weight for the shipped configuration is not the hand-worked literal (216 + 20 per instrument), or a configuration above 600 loads.
-- [ ] Test `a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time` (seam node unit, G7): fails when the local request budget after 500 cancels, or the wait until the next margin query may go, differs from the hand-worked literals. The numbers go into the contract.
+- [x] Test `a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time` (seam node unit, G7): fails when the local request budget after 500 cancels, or the wait until the next margin query may go, differs from the hand-worked literals. The numbers go into the contract.
 - [ ] Mutants: the whole-report rejection and the mode mapping are each caught by a named test.
 - [ ] Stated and not proven here: everything about the live venue (T1, T2, T10, T11); behaviour on HTTP 429.
 - [ ] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
