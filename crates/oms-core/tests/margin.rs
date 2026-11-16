@@ -1715,6 +1715,56 @@ fn under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted() 
     assert_eq!(h.order(order_id).cancel, None);
 }
 
+/// Without a margin policy no order is refused for a reason of C-MARGIN
+/// (contract, 설정): a configuration without the policy, activated while the
+/// account is REDUCING, takes the hold `Reducing` away with every other
+/// margin hold, and plain orders are accepted as before these rules. The
+/// latch itself is journal state and is not cleared by a configuration:
+/// the policy that comes back finds the account REDUCING, and only the
+/// operator's clear ends it.
+#[test]
+fn without_a_margin_policy_the_reducing_latch_refuses_no_order_and_returns_with_the_policy() {
+    let mut h = at_base_100();
+    h.long("a", "k1", "1");
+    h.report_margin("94.99");
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+    let latch = h.core.margin.reducing.clone();
+    assert_eq!(latch.as_ref().map(|r| r.rule), Some(RuleId::DailyLoss));
+
+    // The policy is taken out of the configuration.
+    let out = h.inp(Input::Config(Box::new(CoreConfig {
+        version: 2,
+        ..config()
+    })));
+    assert!(matches!(out.reply, Some(Reply::Config(Ok(2)))));
+    assert_eq!(h.core.holds(None), vec![]);
+    assert_eq!(h.core.holds(Some(&sid("a"))), vec![]);
+    // A plain order and a reduce-only order are both accepted.
+    h.accept("a", "k2", Side::Buy, "0.1", "100");
+    let r = h.reduce_only_req("a", "k3", Side::Sell, "0.5", "100");
+    assert!(matches!(h.new_order(r), NewOrderReply::Accepted { .. }));
+
+    // The policy comes back: the account is REDUCING as it was, by the
+    // same rule and since the same time.
+    let out = h.inp(Input::Config(Box::new(CoreConfig {
+        version: 3,
+        ..config_with_margin()
+    })));
+    assert!(matches!(out.reply, Some(Reply::Config(Ok(3)))));
+    assert_eq!(h.core.margin.reducing, latch);
+    assert_eq!(h.core.holds(None), vec![HoldReason::Reducing]);
+    assert_eq!(
+        h.reject("a", "k4", Side::Buy, "0.1", "100"),
+        vec![RejectReason::Hold(HoldReason::Reducing)]
+    );
+    assert_eq!(h.rebuilt().margin, h.core.margin);
+
+    // And the operator can clear it on the fresh report.
+    let out = clear_reduce(&mut h, "policy restored, account checked");
+    assert!(matches!(out.reply, Some(Reply::Operator(Ok(_)))), "{:?}", out.reply);
+    assert_eq!(h.core.holds(None), vec![]);
+}
+
 /// S9. An order that is still waiting for its send result when the account
 /// enters REDUCING gets the rule's cancel request at once, but no cancel is
 /// sent: the venue may not have the order yet. The cancel goes out in the

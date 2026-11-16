@@ -188,10 +188,13 @@ impl Core {
         if self.storage_low {
             v.push(HoldReason::StorageLow);
         }
-        if self.margin.reducing.is_some() {
-            v.push(HoldReason::Reducing);
-        }
+        // The holds of C-MARGIN exist only with a margin policy. The
+        // REDUCING latch itself stays in the state without one, and holds
+        // again when a policy is activated.
         if self.config.policy.margin.is_some() {
+            if self.margin.reducing.is_some() {
+                v.push(HoldReason::Reducing);
+            }
             for instrument in self.config.instruments.keys() {
                 if !self.venue_setting_is_as_configured(instrument) {
                     v.push(HoldReason::VenueSetting(instrument.clone()));

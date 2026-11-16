@@ -380,8 +380,10 @@ pub struct SyncState {
     pub positions_session: u64,
 }
 
-/// What the core knows from margin reports (C-MARGIN). Empty until the first
-/// report is recorded, and always empty without a margin policy.
+/// What the core knows from margin reports (C-MARGIN). Empty in a run that
+/// never had a margin policy. A configuration that takes the policy away
+/// leaves what is here in place: no rule and no hold reads it until a
+/// policy is activated again.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MarginState {
     /// The newest report recorded. It stays, and ages, across link changes.
