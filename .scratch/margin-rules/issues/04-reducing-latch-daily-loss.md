@@ -4,7 +4,7 @@
 
 **Blocked by:** 01, 02
 
-**Status:** ready-for-merge
+**Status:** done
 
 - [x] Test `first_report_sets_the_day_base` (seam A): fails when the first report emits no `day_base_set`.
 - [x] Test `loss_greater_than_five_percent_of_the_base_enters_reducing` (seam A, S8): fails when 94.99 does not latch, or 95.00 does.
@@ -28,7 +28,7 @@
 - [x] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
 - [x] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
 - [x] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
-- [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
+- [x] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
 
 ## Comments
 
@@ -61,3 +61,4 @@
   - The fifteen seam A tests of this ticket needed no change: their exposure stays below the 2x limit, as the implementer's note above said.
   - Conflicts in text only: the contract's "지금 코드에 있는 것" list and its verification table, `registry/claims.toml` (V-MARGIN-11 now names the three seam C tests and both status additions), `registry/contracts.toml` (C-MARGIN lists `exposure.rs` and `model.rs`, the four events, V-MARGIN-3, -4, -5), `docs/verification/README.md` §4. `docs/generated` was generated again.
   - Not guaranteed, seen at the merge: with the default policy an account value of zero or below after a positive base is answered by both rules, and the account stays REDUCING (no clear until ticket 05). No test asserts that combined list.
+- Merged 2026-11-16 (merger claude-fable-5-2): merge commit 70982af into `margin-rules` (the branch first took `margin-rules` in f852915, see the comment above). Workspace tests 233 passed, 0 failed, 0 ignored. Clippy clean, generated documents in step, secret scan, selftest and rustfmt-added pass. `verify --extended` without live-testnet: 252 tests in 9 suites passed; `mutants`: 42 of 42 killed (M37 to M42 included); both recorded for source `44860df661c2396d` in commit cb7a1c4. Performance was not measured again, so V-PERF-1..5 stay "previous version result". Fixed during the merge: the setup of two tests (comment above); no code defect. M37 to M42 are now taken on `margin-rules`; the next ticket numbers its mutants from M43.
