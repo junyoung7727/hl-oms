@@ -12,4 +12,6 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
+`done` is not a triage label. It is the local closing state of a ticket file: a merged ticket gets `Status: done` (see `issue-tracker.md`). The five role strings above are the only triage states.
+
 Edit the "Label in our tracker" column to match whatever vocabulary you actually use.

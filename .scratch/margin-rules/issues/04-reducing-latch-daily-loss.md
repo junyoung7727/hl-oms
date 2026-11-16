@@ -1,6 +1,6 @@
 # 04: Daily loss enters REDUCING and cancels resting plain orders
 
-**What to build:** When a margin report shows the account more than 5 % below the day base, the account enters REDUCING: every resting plain order gets a rule cancel, new plain orders are rejected with `Hold(Reducing)`, reduce-only orders are accepted and kept. The day base is journal state: the first report sets it, a later UTC day rolls it after the report was judged against the old base, a restart keeps it. A new day does not clear REDUCING. The status shows the state, the rule and the day base. Rule cancels carry the actor `Rule(DailyLoss)`. Scenario rows: S4, S8, S9, S10, S12, S13, S19, S24. Claims: V-MARGIN-4, V-MARGIN-5, V-REPLAY-1. Worked numbers: base 100; 95.00 does not trip, 94.99 does.
+**What to build:** When a margin report shows the account more than 5 % below the day base, the account enters REDUCING: every resting plain order gets a rule cancel, new plain orders are rejected with `Hold(Reducing)`, reduce-only orders are accepted and kept. The day base is journal state: the first report sets it, a later UTC day rolls it after the report was judged against the old base, a restart keeps it. A new day does not clear REDUCING. The status shows the state, the rule and the day base. Rule cancels carry the actor `Rule(DailyLoss)`. Scenario rows: S4, S8, S9, S10, S11, S12, S13, S19, S24. Claims: V-MARGIN-4, V-MARGIN-5, V-REPLAY-1. Worked numbers: base 100; 95.00 does not trip, 94.99 does.
 
 **Blocked by:** 01, 02
 
@@ -18,11 +18,17 @@
 - [ ] Test `a_new_day_does_not_clear_reducing` (seam A, S12): fails when the latch is gone after the roll.
 - [ ] Test `a_report_of_an_earlier_day_does_not_change_the_day_base` (seam A, G5): fails when a report dated a day before the base re-bases.
 - [ ] Test `a_loss_between_two_reports_enters_reducing_on_the_next_report` (seam A, G9): fails when reports at 100 and then 88 do not latch on the second report. It documents that 12 % was already lost.
+- [ ] Test `a_report_older_than_the_freshness_limit_on_arrival_is_still_judged` (seam A, S11): an accepted report whose query time is 40 s before the record time shows 94.99 on base 100. Fails when the account does not enter REDUCING with `Rule(DailyLoss)` on that report.
 - [ ] Test `an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing` (seam A, S19): fails when after an external fill and a loss report the account is not REDUCING with a mismatch open, or a reduce-only order is then refused.
 - [ ] Test `latch_and_day_base_replay_to_the_same_state` (seam A, S13): fails when replay loses the latch or re-bases the day.
-- [ ] Mutants: the loss comparison, the order "judge, then roll", the entry cancel filter (reduce-only kept), the single-entry guard and the `Reducing` row of the hold table are each caught by a named test.
-- [ ] Stated and not proven here: a rule cancel can lose the race to a fill; losses between two reports and losses while reports are missing are not stopped; the shape of a real liquidation fill (T6).
+- [ ] Mutants: a daily-loss judgement that runs only on a fresh report, the loss comparison, the order "judge, then roll", the entry cancel filter (reduce-only kept), the single-entry guard and the `Reducing` row of the hold table are each caught by a named test.
+- [ ] Stated and not proven here: a rule cancel can lose the race to a fill; losses between two reports and losses while no new report is accepted are not stopped; the shape of a real liquidation fill (T6).
 - [ ] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
 - [ ] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
 - [ ] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
 - [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
+
+## Comments
+
+- Spec review r1 (reviewer claude-opus-5-5, head 37c6330), 2026-11-16. Finding 2 (blocking, correct): the documents disagreed on whether a report that is already older than 30 s on arrival is judged. Resolution: it is judged (contract rule kept). The non-guarantee is reworded to "while no new report is accepted" in ADR-018 §8, spec.md, spec-ko.md (S11, §10) and tickets 02 and 04. spec.md Further Notes records this as a change to agreement nodes D1.5 and D1.7. This ticket gains the test `a_report_older_than_the_freshness_limit_on_arrival_is_still_judged`, one mutant and scenario row S11.
+- Spec review r1 (reviewer claude-opus-5-5, head 37c6330), 2026-11-16. Finding 5 (nit, correct): spec-ko.md left out the entry filter "cancel absent or exhausted". Resolution: copied.

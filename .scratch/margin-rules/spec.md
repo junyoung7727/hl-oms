@@ -25,7 +25,7 @@ When a margin policy is configured, the OMS reads a margin report from the venue
 4. **REDUCING.** Plain orders are refused, resting plain orders are cancelled, reduce-only orders are accepted and kept. The OMS never closes a position. Only the operator clears REDUCING; the clear takes the current account value as the new day base.
 5. **Stale data.** With no fresh margin report (older than 30 s) plain orders are refused. With no accepted report for more than 60 s, resting plain orders are cancelled. Nothing latches.
 6. **Venue setting and account mode.** The OMS reads them and never writes them. A wrong or unknown venue setting holds plain orders on that instrument. A wrong or unknown account mode holds plain orders on the account.
-7. **Hold table.** Holds for resync, in-doubt orders, mismatches, REDUCING, venue setting and account mode refuse only plain orders. Reduce-only orders pass them.
+7. **Hold table.** Holds for resync, in-doubt orders, mismatches, REDUCING, venue setting and account mode refuse only plain orders. Reduce-only orders pass them. This also applies only when a margin policy is set; without one every hold refuses every new order, as today.
 8. **Unfilled orders.** The strategy decides when to cancel or re-send. The OMS tracks a resting order, counts it in the leverage gate, and cancels it on REDUCING or on a stale cancel if it is a plain order.
 
 The owner gets, before development, a list of 25 scenarios (S1–S25). Each has the expected behaviour, the planned test that proves it, what that test guarantees and what it does not.
@@ -180,7 +180,7 @@ Source of every decision: the closed design agreement between Fable 5.2 and Clau
 - State: day base = (UTC day number of the query time, value, who set it), or none. It changes only by `day_base_set`.
 - On every accepted report, in this order: (1) if a base exists and `(base − account value) × 10 000 > daily_loss_bps × base`, enter REDUCING with rule `DailyLoss`; (2) if no base exists or the report's UTC day is later than the base's day, set the base to this report's account value.
 - Base 100: 95.00 does not trip, 94.99 does.
-- A report whose UTC day is earlier than the base's day never changes the base.
+- A report whose UTC day is earlier than the base's day never changes the base: a report-driven roll never moves the day backwards. Only the operator's `rebase-day` or `clear-reduce` can set an earlier day (see Clear and rebase).
 - No rebase at boot. A new day does not clear REDUCING.
 - Fees and funding are inside account value, so they count as loss. A withdrawal reads as a loss. A deposit hides a loss of its size until a rebase or the next UTC day.
 
@@ -203,7 +203,7 @@ Source of every decision: the closed design agreement between Fable 5.2 and Clau
 ### Clear and rebase
 
 - `clear-reduce --note` is accepted only when: the account is REDUCING, the report is fresh, the MM-buffer condition is false on it, and the note is not empty. Refusals: `NotReducing`, `MarginUnavailable`, `MmBufferActive`, `NoteRequired`.
-- On success: `day_base_set` by the operator with the current account value, then `reducing_cleared` with the note, the old base and the new base. After a clear at 94, a report at 89.30 does not trip and 89.29 does.
+- On success: `day_base_set` by the operator with the current account value and the report's UTC day (also when that day is earlier), then `reducing_cleared` with the note, the old base and the new base. After a clear at 94, a report at 89.30 does not trip and 89.29 does.
 - `rebase-day --note` needs a fresh report and a note, sets the base to the current account value and the report's UTC day (also when that day is earlier), and leaves REDUCING alone.
 - There is no force option.
 
@@ -220,6 +220,7 @@ Source of every decision: the closed design agreement between Fable 5.2 and Clau
 |---|---|
 | `NoConfig`, `LinkDown`, `OperatorAccount`, `OperatorStrategy`, `StorageLow` | `Resync`, `InDoubt`, `Mismatch`, `Reducing`, `VenueSetting(instrument)`, `AccountMode` |
 
+- The table applies only when a margin policy is set. Without one, every hold refuses every new order, reduce-only included, exactly as before this work. So a journal recorded without a margin policy gives the same result when it is re-decided (`verify --re-decide`). A planned test in ticket 01 pins this.
 - "Reduce-only" means the venue flag on the order, not a direction computed by the OMS.
 - A reduce-only order skips only the right-hand holds and the leverage gate. It passes every other existing check, including the strategy position limit and the price band.
 - This amends ADR-008 §7. The amendment text is in ADR-018 and is applied to ADR-008 by the ticket that implements the table.
@@ -245,7 +246,7 @@ Source of every decision: the closed design agreement between Fable 5.2 and Clau
 ### Registry and documents
 
 - The contract row C-MARGIN exists from this stage with empty event and claim lists. Each ticket adds its events, claims (V-MARGIN-1 to V-MARGIN-12) and tests in the same change, because the document check refuses a claim without an existing test and an event without a contract.
-- Claims: V-MARGIN-1 hold table; -2 report intake; -3 leverage gate; -4 REDUCING; -5 daily loss; -6 clear and rebase; -7 stale cancel; -8 MM buffer; -9 venue setting and account mode; -10 Hyperliquid parsing; -11 operator commands and restart at process level; -12 simulation invariants. Existing claims V-REPLAY-1, V-SIM-1, V-CFG-1, V-PERF-1..5 and V-MUT-1 gain tests or are rerun.
+- Claims: V-MARGIN-1 hold table; -2 report intake; -3 leverage gate; -4 REDUCING; -5 daily loss; -6 clear and rebase; -7 stale cancel; -8 MM buffer; -9 venue setting and account mode; -10 Hyperliquid parsing; -11 the node process level (seam C): poll wiring and status, operator commands, restart; -12 simulation invariants. Existing claims V-REPLAY-1, V-SIM-1, V-CFG-1, V-PERF-1..5 and V-MUT-1 gain tests or are rerun.
 - Every change that touches Rust source regenerates the generated documents and commits new evidence from the extended verification run without the live-testnet suite. The live-testnet suite is not run; claim V-HL-3 stays "not run" with that reason.
 
 ## Testing Decisions
@@ -308,7 +309,7 @@ Every scenario S1–S25 has at least one planned test in a ticket. The ticket fi
 | Tests | Guarantee | Do not guarantee |
 |---|---|---|
 | Leverage gate (seam A, properties) | With the numbers the OMS holds, no plain order is accepted that takes account exposure above the limit at acceptance, at the boundary and at extreme values | Exposure after a price move; that mid equals mark; that the venue accepts the order; that account value includes isolated equity (T2) |
-| Daily loss (seam A) | A report more than 5 % below the base enters REDUCING; the base survives replay; a gap across midnight is judged against the old base | Losses between two reports; losses while reports are stale; a deposit hiding a loss |
+| Daily loss (seam A) | A report more than 5 % below the base enters REDUCING; the base survives replay; a gap across midnight is judged against the old base | Losses between two reports; losses while no new report is accepted; a deposit hiding a loss |
 | REDUCING entry (seam A, D) | Every resting plain order gets a cancel request in the same input; plain orders are refused; reduce-only orders pass | That a cancel beats a fill; that the position is closed; behaviour while the link is down |
 | MM buffer (seam A, property) | The comparison is exact at the boundary and at extreme values | That `marginUsed` is the isolated equity (T1). If T1 is wrong the rule can be wrong in both directions |
 | Clear and rebase (seam A, C) | A clear is refused when stale, without a note, when not REDUCING, or while the MM condition holds; a strategy cannot clear | That the operator judged well; a way out of a false MM latch |
@@ -328,7 +329,11 @@ Every scenario S1–S25 has at least one planned test in a ticket. The ticket fi
 
 ## Further Notes
 
-- **Deviation kept in the next stage (implement-spec).** implement-spec asks for maximum concurrency. Here at most two implementer subagents run at a time, and tickets merge into the integration branch one at a time: each merge must pass the full local gate (tests, clippy, generated documents, extended verification with committed evidence, secret scan) before the next merge starts. Reason: one shared machine, and the evidence files are keyed by a digest of the whole source tree, so two merges cannot produce them in parallel. After the last ticket an adversarial reviewer that did not write the code approves a named commit before the integration branch is merged to main.
+- **Deviation kept in the next stage (implement-spec).** implement-spec asks for maximum concurrency. Here at most two implementer subagents run at a time, and tickets merge into the integration branch one at a time: each merge must pass the full local gate (tests, clippy, generated documents, extended verification with committed evidence, secret scan) before the next merge starts. Reason: one shared machine, and the evidence files are keyed by a digest of the whole source tree, so two merges cannot produce them in parallel. After the last ticket an adversarial reviewer that did not write the code approves a named commit before the integration branch is merged to main. That reviewer breaks each claimed rule in its own checkout and sees the named test go red.
+- **Decisions in this stage that change the design agreement.**
+  - D1.5 and D1.7 (rules judged "in a fresh snapshot"; "while the snapshot is stale, daily loss and MM buffer are not evaluated"): changed. Every accepted report is judged once, also one that is already older than 30 s when it arrives. Reason: its values were computed by the venue and are the newest the OMS has, and entering REDUCING is the safe side. Freshness gates only what releases risk: accepting a plain order, `clear-reduce` and `rebase-day`. The non-guarantee is now "no rule is judged while no new report is accepted". Planned tests in tickets 04 and 07 pin this.
+  - D3.1 (hold table) against D1.8 (no margin policy = behaviour unchanged): D3.1 is narrowed. The table applies only when a margin policy is set, so D1.8 holds with no exception. Ticket 01 therefore waits for ticket 02, which adds the policy section. Alternative refused: the table always applies (it would change the result of re-deciding journals recorded before this work).
+  - D9.1 (a fresh adversarial reviewer with mutation checks on every PR): changed. The work is one integration branch with one pull request, not one pull request per slice. A ticket merge does not get its own adversarial reviewer. It gets the full local gate, and its acceptance criteria name the mutants that its tests must catch. The adversarial reviewer with mutation checks runs at two points: on this spec stage, and on the whole integration branch after the last ticket and the code-review skill. Its approval names a commit; a push after it voids it; the merge to main is a merge commit. Reason: the owner chose the to-spec, to-tickets, implement-spec flow with local tickets (2026-11-16).
 - **Delegated decisions.** The owner delegated every "confirm with the user" point of the skills to the Fable·Claude grill (2026-11-16). Recorded here with the alternative:
   - Tracker: local markdown (alternative: GitHub Issues; refused by the owner's instruction "티켓은 md에만 기록").
   - Agent instructions file: neither `CLAUDE.md` nor `AGENTS.md` existed; `AGENTS.md` was created (alternative: `CLAUDE.md`).

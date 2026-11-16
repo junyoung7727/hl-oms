@@ -13,3 +13,8 @@
 - [ ] The contract's verification section lists the real tests per rule and repeats what is not verified (T1–T11).
 - [ ] The README status paragraph, the scope document, the verification overview and the runbook state: margin rules implemented; not run against any real venue; the testnet rehearsal and T1–T11 are required before mainnet and need the owner's approval; claim V-HL-3 is not run and why.
 - [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
+
+## Comments
+
+- Spec review r1 (reviewer claude-opus-5-5, head 37c6330), 2026-11-16. Finding 4 (nit, correct): spec-ko.md used terms before defining them. Resolution: 15 rows added to the 먼저 알아둘 말 table (롱·숏, 지정가, 익절 주문, 예약, 종결 증거, 재확인 중, 결과 불명 주문, 불일치, 저널, testnet·mainnet, 등록부, 주장, 속성 테스트, 변이 점검, clippy).
+- Spec review r1 (reviewer claude-opus-5-5, head 37c6330), 2026-11-16. Finding 6 (nit, correct): the spec changed agreement node D9.1 (an adversarial reviewer with mutation checks on every PR) without saying so. Resolution: spec.md and spec-ko.md Further Notes record the change: no reviewer per ticket merge; full local gate and named mutants per ticket; the adversarial reviewer with mutation checks runs on the spec stage and on the whole integration branch before the merge to main.

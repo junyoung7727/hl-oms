@@ -9,7 +9,7 @@ Issues and specs for this repo live as markdown files in `.scratch/`. The files 
 - Implementation issues are one file per ticket at `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`, never a single combined tickets file
 - Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading
-- A finished ticket gets `Status: done` and a `## Comments` line with the merge commit. The file is kept, not deleted
+- A finished ticket gets `Status: done` and a `## Comments` line with the merge commit. The file is kept, not deleted. `done` is a closing state of this local tracker, not a sixth triage role (see `triage-labels.md`)
 
 ## When a skill says "publish to the issue tracker"
 

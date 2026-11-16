@@ -24,3 +24,7 @@
 - [ ] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
 - [ ] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
 - [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
+
+## Comments
+
+- Spec review r1 (reviewer claude-opus-5-5, head 37c6330), 2026-11-16. Finding 5 (nit, correct): copies of the rules differed. Resolution: ADR-018 §7 item 7 now names the NotReducing precondition. spec-ko.md says that `rebase-day` and `clear-reduce` take the report's day, also an earlier one. The contract's "the day never goes backwards" is narrowed to the report-driven roll, in the contract, spec.md and spec-ko.md.

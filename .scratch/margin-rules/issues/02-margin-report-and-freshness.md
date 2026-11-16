@@ -17,9 +17,17 @@
 - [ ] Test `margin_events_replay_to_the_same_state` (seam A, S13): fails when the state rebuilt from the journal differs in digest.
 - [ ] Test `mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused` (seam node unit, S21): fails when mainnet loads with no margin policy, or a zero limit, or a stale-cancel limit not greater than the freshness limit, loads.
 - [ ] Test `node_polls_margin_and_status_shows_value_and_age` (seam C, S11): fails when the 5 s timer, the simulated venue answer, the sequence number, the core input or the status fields are not wired.
+- [ ] An absent margin policy adds no bytes to a journal record (it is serialised as absent, not as an empty value), so journals of runs without a policy keep the bytes they have on main. Ticket 10 checks this against literals recorded on main.
 - [ ] Mutants: the session guard, the sequence guard and the freshness comparison (both ends) are each caught by a named test.
-- [ ] Stated in the contract and not proven here: rules are not judged while reports are missing; whether the venue's account value includes isolated equity (T2).
+- [ ] Stated in the contract and not proven here: rules are not judged while no new report is accepted; whether the venue's account value includes isolated equity (T2).
 - [ ] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
 - [ ] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
 - [ ] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
 - [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
+
+## Comments
+
+- Spec review r1 (reviewer claude-opus-5-5, head 37c6330), 2026-11-16. Finding 1: ticket 01 now depends on this ticket for the policy section. No change to the scope here.
+- Spec review r1 (reviewer claude-opus-5-5, head 37c6330), 2026-11-16. Finding 3 (blocking, correct): spec-ko.md defined a fresh report as under 30 s. Resolution: the definition now says 30 s or less, exactly 30 s included, as in the contract and this ticket's test.
+- Spec review r1 (reviewer claude-opus-5-5, head 37c6330), 2026-11-16. Finding 8: a criterion was added here that an absent margin policy adds no bytes to a journal record, so the literal comparison of ticket 10 can hold.
+- Spec review r1 (reviewer claude-opus-5-5, head 37c6330), 2026-11-16. Finding 9 (nit, correct): V-MARGIN-11 was defined as operator commands and restart only, but this ticket claims it for the poll-wiring test at seam C. Resolution: spec.md now defines V-MARGIN-11 as the node process level (poll wiring and status, operator commands, restart). `Status: done` is documented as a local closing state, not a triage role, in docs/agents/triage-labels.md and issue-tracker.md.

@@ -8,7 +8,7 @@
 
 - [ ] Test `order_past_twice_the_account_value_is_rejected_account_leverage` (seam A, S5): fails when a buy of 2.01 at 100 is accepted.
 - [ ] Test `order_exactly_at_the_limit_is_accepted` (seam A, S5): fails when a buy of 2.00 at 100 is rejected.
-- [ ] Test `an_unfilled_resting_order_keeps_its_exposure_and_is_never_repriced_or_expired_by_the_oms` (seam A, S1): fails when after hours of ticks the order has a cancel, a new price, or no longer counts in the gate.
+- [ ] Test `an_unfilled_resting_order_keeps_its_exposure_and_is_never_repriced_or_expired_by_the_oms` (seam A, S1): the test feeds a fresh margin report and a fresh reference price at every poll interval over hours of ticks (so the stale cancel of ticket 06 does not apply), and fails when the order then has a cancel, a new price, or no longer counts in the gate.
 - [ ] Test `resting_order_counts_at_the_higher_of_limit_and_reference` (seam A, S1): fails when a sell at 150 counts at 100, or a buy at 50 counts at 50.
 - [ ] Test `reduce_only_and_plain_buy_on_a_short_count_at_full_reach` (seam A, S6): fails when short 5 with a reduce-only buy 5 and a plain buy 8 counts as 5 and not 8.
 - [ ] Test `exposure_is_the_sum_over_instruments` (seam A, S5): fails when two instruments at 1.5x each pass a 2x limit.
@@ -28,3 +28,7 @@
 - [ ] The events and claims this ticket adds are listed under C-MARGIN in the registry; the contract's verification section names the real tests; a renamed test is also renamed in this file and in the scenario table of `spec-ko.md`.
 - [ ] The existing tests are green and unchanged in meaning; with no margin policy the behaviour is the same as before this ticket.
 - [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
+
+## Comments
+
+- Spec review r1 (reviewer claude-opus-5-5, head 37c6330), 2026-11-16. Finding 7 (nit, correct): the S1 test ran hours of ticks without saying that reports keep arriving, so the stale cancel of ticket 06 would cancel the order. Resolution: the test feeds a fresh margin report and reference price at every poll interval. The S1 row of spec-ko.md is qualified the same way and points to S23.
