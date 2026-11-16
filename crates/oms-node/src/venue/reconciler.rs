@@ -36,14 +36,73 @@ fn backoff(attempts: u32) -> Duration {
     }
 }
 
-pub async fn run(
-    published: Arc<Published>,
-    queries: mpsc::Sender<QueryReq>,
-    every: Duration,
-    sweep: Duration,
-    margin_poll: Duration,
-    venue_setting_poll: Duration,
-) {
+/// How often the reconciler does each of its things.
+#[derive(Clone, Copy, Debug)]
+pub struct Pace {
+    /// One round: read the published state and issue what is due.
+    pub round: Duration,
+    /// The sweep of fills, open orders and positions.
+    pub sweep: Duration,
+    /// The margin query (`runtime.margin_poll_ms`).
+    pub margin_poll: Duration,
+    /// The venue-setting query of one instrument, and the account-mode
+    /// query while it has no answer (`runtime.venue_setting_poll_ms`).
+    pub venue_setting_poll: Duration,
+}
+
+/// What one round reads from the published state.
+struct Seen {
+    needs: Vec<Need>,
+    link_up: bool,
+    session: u64,
+    /// Fills are complete up to here: the sweep asks from here on.
+    fills_since: Ts,
+    /// A margin policy is configured.
+    margin_rules: bool,
+    /// Instruments whose venue setting is asked for: the core has not
+    /// been told it in this link session, or the instrument has no
+    /// position (a position states its setting in every margin report; an
+    /// instrument without one has to be asked about). Empty without a
+    /// margin policy.
+    settings_to_ask: Vec<InstrumentId>,
+    /// The core has not been told the account mode in this link session.
+    /// False without a margin policy.
+    mode_unknown: bool,
+}
+
+impl Seen {
+    fn read(published: &Published) -> Seen {
+        let p = published.read();
+        let core = &p.core;
+        let margin_rules = core.config.policy.margin.is_some();
+        let setting_unknown = |i: &InstrumentId| !core.margin.venue_settings.contains_key(i);
+        let flat = |i: &InstrumentId| core.account.get(i).is_none_or(|b| b.pos.0 == 0);
+        let settings_to_ask = core
+            .config
+            .instruments
+            .keys()
+            .filter(|i| margin_rules && (setting_unknown(i) || flat(i)))
+            .cloned()
+            .collect();
+        Seen {
+            needs: core.needs(),
+            link_up: core.link.up,
+            session: core.link.session,
+            fills_since: core.sync.fills_up_to.max(core.fill_floor),
+            margin_rules,
+            settings_to_ask,
+            mode_unknown: margin_rules && core.margin.account_mode.is_none(),
+        }
+    }
+}
+
+pub async fn run(published: Arc<Published>, queries: mpsc::Sender<QueryReq>, pace: Pace) {
+    let Pace {
+        round,
+        sweep,
+        margin_poll,
+        venue_setting_poll,
+    } = pace;
     let mut session_seen: u64 = 0;
     let mut setting_asked: HashMap<InstrumentId, Instant> = HashMap::new();
     let mut mode_asked: Option<Instant> = None;
@@ -52,46 +111,19 @@ pub async fn run(
     let mut asked: HashMap<OrderId, (u32, Instant)> = HashMap::new();
     let mut last_sweep = Instant::now();
     let mut last_account: HashMap<&'static str, Instant> = HashMap::new();
-    let mut tick = tokio::time::interval(every);
+    let mut tick = tokio::time::interval(round);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tick.tick().await;
-        let (needs, link_up, session, fills_since, margin_rules, settings_unknown, mode_unknown, flat) = {
-            let p = published.read();
-            let margin_rules = p.core.config.policy.margin.is_some();
-            // Instruments whose venue setting the core has not been told in
-            // this link session.
-            let settings_unknown: Vec<InstrumentId> = if margin_rules {
-                p.core
-                    .config
-                    .instruments
-                    .keys()
-                    .filter(|i| !p.core.margin.venue_settings.contains_key(*i))
-                    .cloned()
-                    .collect()
-            } else {
-                Vec::new()
-            };
-            (
-                p.core.needs(),
-                p.core.link.up,
-                p.core.link.session,
-                p.core.sync.fills_up_to.max(p.core.fill_floor),
-                margin_rules,
-                settings_unknown,
-                margin_rules && p.core.margin.account_mode.is_none(),
-                // Configured instruments without a position. A position
-                // states its setting in every margin report; an instrument
-                // without one has to be asked about.
-                p.core
-                    .config
-                    .instruments
-                    .keys()
-                    .filter(|i| p.core.account.get(*i).is_none_or(|b| b.pos.0 == 0))
-                    .cloned()
-                    .collect::<Vec<InstrumentId>>(),
-            )
-        };
+        let Seen {
+            needs,
+            link_up,
+            session,
+            fills_since,
+            margin_rules,
+            settings_to_ask,
+            mode_unknown,
+        } = Seen::read(&published);
         if !link_up {
             asked.clear();
             continue;
@@ -154,15 +186,12 @@ pub async fn run(
             setting_asked.clear();
             mode_asked = None;
         }
-        // A venue setting is asked for when the core does not know it in
-        // this link session (at once when the session starts), and when
-        // the instrument has no position (a known setting can be changed
-        // at the venue at any time, and no margin report states it). Each
-        // instrument is asked about at most once per `venue_setting_poll`,
-        // answered or not: the request budget counts exactly that. The
-        // timer moves only when the gateway took the query.
-        let asked_about = settings_unknown.iter().chain(flat.iter().filter(|i| !settings_unknown.contains(i)));
-        for instrument in asked_about.filter(|_| margin_rules) {
+        // A venue setting is asked for at once when the link session
+        // starts and its timer is new. Each instrument is asked about at
+        // most once per `venue_setting_poll`, answered or not: the request
+        // budget counts exactly that. The timer moves only when the
+        // gateway took the query.
+        for instrument in &settings_to_ask {
             let waited = setting_asked.get(instrument).is_none_or(|t| now.duration_since(*t) >= venue_setting_poll);
             if !waited {
                 continue;

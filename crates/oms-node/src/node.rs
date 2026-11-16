@@ -169,14 +169,13 @@ pub fn run(cfg: NodeConfig) -> i32 {
                 }
             }
         };
-        tokio::spawn(venue::reconciler::run(
-            published.clone(),
-            query_tx,
-            Duration::from_millis(cfg.runtime.reconcile_ms),
-            Duration::from_millis(cfg.runtime.sweep_ms),
-            Duration::from_millis(cfg.runtime.margin_poll_ms),
-            Duration::from_millis(cfg.runtime.venue_setting_poll_ms),
-        ));
+        let pace = venue::reconciler::Pace {
+            round: Duration::from_millis(cfg.runtime.reconcile_ms),
+            sweep: Duration::from_millis(cfg.runtime.sweep_ms),
+            margin_poll: Duration::from_millis(cfg.runtime.margin_poll_ms),
+            venue_setting_poll: Duration::from_millis(cfg.runtime.venue_setting_poll_ms),
+        };
+        tokio::spawn(venue::reconciler::run(published.clone(), query_tx, pace));
         let tick_queues = queues.clone();
         let tick_ms = cfg.runtime.tick_ms.max(10);
         tokio::spawn(async move {

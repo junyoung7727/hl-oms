@@ -8,7 +8,7 @@
 use oms_core::*;
 use oms_node::published::Published;
 use oms_node::venue::QueryReq;
-use oms_node::venue::reconciler;
+use oms_node::venue::reconciler::{self, Pace};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -128,7 +128,13 @@ fn core_that_knows_setting_and_mode() -> Core {
     core
 }
 
-const HOUR: Duration = Duration::from_secs(3600);
+/// A round every 10 ms, and nothing else within the time of a test.
+const NEVER: Pace = Pace {
+    round: Duration::from_millis(10),
+    sweep: Duration::from_secs(3600),
+    margin_poll: Duration::from_secs(3600),
+    venue_setting_poll: Duration::from_secs(3600),
+};
 
 /// The gateway's queue was full when the margin query was due, so the
 /// query was not issued. It goes out on the next round with room, not one
@@ -140,16 +146,11 @@ async fn a_margin_query_the_gateway_had_no_room_for_goes_out_on_the_next_round()
     let (queries, mut issued) = mpsc::channel::<QueryReq>(1);
     // The queue holds one query and it is taken.
     queries.try_send(QueryReq::OpenOrders).unwrap();
-    let round = Duration::from_millis(10);
-    let margin_period = Duration::from_secs(5);
-    tokio::spawn(reconciler::run(
-        published,
-        queries,
-        round,
-        HOUR,
-        margin_period,
-        HOUR,
-    ));
+    let pace = Pace {
+        margin_poll: Duration::from_secs(5),
+        ..NEVER
+    };
+    tokio::spawn(reconciler::run(published, queries, pace));
 
     // Several rounds pass with no room.
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -171,16 +172,11 @@ async fn a_margin_query_the_gateway_had_no_room_for_goes_out_on_the_next_round()
 async fn an_unanswered_setting_or_mode_query_is_repeated_at_the_setting_period_only() {
     let published = Arc::new(Published::new(synced_core(), 0));
     let (queries, mut issued) = mpsc::channel::<QueryReq>(64);
-    let round = Duration::from_millis(10);
-    let setting_period = Duration::from_secs(10);
-    tokio::spawn(reconciler::run(
-        published,
-        queries,
-        round,
-        HOUR,
-        HOUR,
-        setting_period,
-    ));
+    let pace = Pace {
+        venue_setting_poll: Duration::from_secs(10),
+        ..NEVER
+    };
+    tokio::spawn(reconciler::run(published, queries, pace));
 
     tokio::time::sleep(Duration::from_millis(2_500)).await;
     let (mut settings, mut modes) = (0, 0);
