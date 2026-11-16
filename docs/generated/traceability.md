@@ -1,7 +1,7 @@
 # 계약 추적표
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `a70ef17ab11fcf2d`, 검증 결과의 다이제스트 `444207d7cf4d7911`.
+> 소스 다이제스트 `a009474b155bc71f`, 검증 결과의 다이제스트 `444207d7cf4d7911`.
 
 | 계약 | 제목 | 상태 전이(이벤트) | 설계 결정 | 코드 | 주장 |
 |---|---|---|---|---|---|
@@ -15,7 +15,7 @@
 | [C-TERM](../../docs/contracts/order-lifecycle.md) | 종결 | `venue_terminal` `order_closed` `missing_fills_flagged` `status_noted` `order_recheck` | ADR-007 | `crates/oms-core/src/decide.rs` | V-TERM-1(이전 버전 결과) |
 | [C-JOURNAL](../../docs/contracts/recovery.md) | 저널에서 상태 복원 |  | ADR-003, ADR-011, ADR-013 | `crates/oms-node/src/recovery.rs`<br>`crates/oms-journal/src/segment.rs` | V-JRN-1(이전 버전 결과), V-JRN-2(이전 버전 결과), V-JRN-3(이전 버전 결과), V-JRN-5(이전 버전 결과), V-REPLAY-1(이전 버전 결과), V-BOOT-2(이전 버전 결과) |
 | [C-SNAP](../../docs/contracts/recovery.md) | 스냅샷 |  | ADR-011 | `crates/oms-journal/src/snapshot.rs`<br>`crates/oms-node/src/pipeline.rs` | V-JRN-4(이전 버전 결과), V-PERF-3(이전 버전 결과) |
-| [C-BOOT](../../docs/contracts/recovery.md) | 재시작 | `booted` `config_activated` | ADR-005, ADR-002 | `crates/oms-core/src/decide.rs`<br>`crates/oms-node/src/node.rs` | V-BOOT-1(이전 버전 결과), V-CFG-1(이전 버전 결과), V-BOOT-2(이전 버전 결과), V-COMMIT-4(이전 버전 결과) |
+| [C-BOOT](../../docs/contracts/recovery.md) | 재시작 | `booted` `config_activated` | ADR-005, ADR-002 | `crates/oms-core/src/decide.rs`<br>`crates/oms-node/src/node.rs` | V-BOOT-1(이전 버전 결과), V-CFG-1(미실행), V-BOOT-2(이전 버전 결과), V-COMMIT-4(이전 버전 결과) |
 | [C-LINK](../../docs/contracts/reconciliation.md) | 링크 상태 | `link_changed` | ADR-014 | `crates/oms-core/src/decide.rs` | V-RECON-1(이전 버전 결과), V-LINK-1(이전 버전 결과) |
 | [C-RECON](../../docs/contracts/reconciliation.md) | 재확인과 대조 | `fills_synced` `open_orders_swept` `positions_verified` `status_noted` `order_recheck` | ADR-014 | `crates/oms-core/src/decide.rs`<br>`crates/oms-core/src/needs.rs`<br>`crates/oms-node/src/venue/reconciler.rs` | V-RECON-1(이전 버전 결과), V-RECON-2(이전 버전 결과) |
 | [C-MISMATCH](../../docs/contracts/reconciliation.md) | 불일치와 조정 | `mismatch_raised` `mismatch_acked` `position_adjusted` | ADR-014 | `crates/oms-core/src/decide.rs` | V-RECON-1(이전 버전 결과), V-EXT-1(이전 버전 결과), V-MIS-1(이전 버전 결과) |

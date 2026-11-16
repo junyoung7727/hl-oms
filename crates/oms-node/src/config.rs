@@ -339,6 +339,38 @@ max = "10"
         }
     }
 
+    fn shipped(name: &str) -> Result<NodeConfig, String> {
+        NodeConfig::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config").join(name))
+    }
+
+    /// S21. The shipped Hyperliquid example passes every check of
+    /// `validate` and carries a margin policy with the owner's values
+    /// written out: limit 2.0, daily loss 5 %, MM buffer 0.25 %p, 30 s and
+    /// 60 s, venue leverage 2 isolated. Its allow-list is empty on purpose
+    /// (T10). The simulated-venue example keeps loading without a policy.
+    #[test]
+    fn example_config_with_a_margin_policy_loads() {
+        let cfg = shipped("hyperliquid-testnet.example.toml").expect("the shipped example must load");
+        assert_eq!(
+            cfg.core.policy.margin,
+            Some(oms_core::MarginPolicy {
+                max_account_leverage: oms_core::Ratio(200_000_000),
+                daily_loss_bps: 500,
+                mm_buffer_bps: 25,
+                margin_max_age_us: 30_000_000,
+                stale_cancel_us: 60_000_000,
+                venue_leverage: 2,
+                isolated: true,
+                account_modes_allowed: vec![],
+            })
+        );
+        assert_eq!((cfg.runtime.margin_poll_ms, cfg.runtime.venue_setting_poll_ms), (5_000, 60_000));
+        assert!(matches!(&cfg.venue, VenueConfig::Hyperliquid(h) if h.network == "testnet"));
+
+        let sim = shipped("sim.toml").expect("the shipped simulated-venue example must load");
+        assert_eq!(sim.core.policy.margin, None);
+    }
+
     /// S21. Mainnet does not start without a margin policy, and a margin
     /// policy with a value outside the contract's 설정 table does not load
     /// on any venue.
