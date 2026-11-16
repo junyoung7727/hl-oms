@@ -12,6 +12,7 @@
 - [ ] Every row S1–S25 of the scenario table in `spec-ko.md` names a test that exists under that exact name, and the marker "planned" is removed from rows whose test exists.
 - [ ] The contract's verification section lists the real tests per rule and repeats what is not verified (T1–T11).
 - [ ] The README status paragraph, the scope document, the verification overview and the runbook state: margin rules implemented; not run against any real venue; the testnet rehearsal and T1–T11 are required before mainnet and need the owner's approval; claim V-HL-3 is not run and why.
+- [ ] The considerations registry row D-RISK-04 and its line in the review-criteria document (`docs/02-review-criteria.md`) state the implemented state: the code, the claims and the verification status of the margin rules; U-03 stays open.
 - [ ] Full local gate passes: workspace tests, clippy with warnings denied, generated documents in step, extended verification run without the live-testnet suite with evidence committed, secret scan.
 
 ## Comments
