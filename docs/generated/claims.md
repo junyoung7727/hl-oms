@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `d6ec4e39b283185d`, 검증 결과의 다이제스트 `84bbfc41882f370d`.
+> 소스 다이제스트 `c3f2513ec299a816`, 검증 결과의 다이제스트 `84bbfc41882f370d`.
 
-주장 58건: 통과 0, 실패 0, 미실행 2, 이전 버전 결과 56.
+주장 58건: 통과 0, 실패 0, 미실행 3, 이전 버전 결과 55.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -23,7 +23,7 @@
 | V-RECON-1 | 링크가 돌아오면 미종결 주문의 증거, 체결, 열린 주문, 포지션을 현재 세션에서 다시 확인할 때까지 신규 주문을 막는다. 포지션은 예약으로 설명되는 범위로 검사하고, 오래된 스냅샷은 판정하지 않는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios` |
 | V-RECON-2 | 노드가 죽어 있는 동안 거래소에서 일어난 체결, 거래소 주도 취소, 부분 체결을 재시작 뒤 거래소 조회로 모두 반영한다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e events_missed` |
 | V-EXT-1 | OMS가 내지 않은 체결은 기장되고 불일치로 표시되어 신규 주문을 막으며, 운영자가 확인해야 풀린다 | 시뮬레이션 | 이전 버전 결과 | `cargo test --release -p oms-sim --test sim profile_external` |
-| V-REPLAY-1 | 기록된 이벤트만 적용해 만든 상태는 살아 있는 상태와 같고, 기록된 입력을 다시 판단하면 기록된 이벤트가 나온다 | 단위 | 이전 버전 결과 | `cargo test -p oms-core --test scenarios && oms-node verify --data-dir <dir> --re-decide` |
+| V-REPLAY-1 | 기록된 이벤트만 적용해 만든 상태는 살아 있는 상태와 같고, 기록된 입력을 다시 판단하면 기록된 이벤트가 나온다 | 단위 | 미실행 | `cargo test -p oms-core --test scenarios && oms-node verify --data-dir <dir> --re-decide` |
 | V-SIM-1 | 네트워크 장애, 통보 중복·지연, 링크 단절, 프로세스 재시작, 키 삭제가 임의로 섞인 실행의 매 단계에서: 구조 불변조건이 성립하고, 거래소의 실제 포지션이 OMS가 설명하는 범위 안에 있고, 한도를 넘지 않고, 같은 주문이 두 번 전송되지 않는다 | 시뮬레이션 | 이전 버전 결과 | `OMS_SIM_SEEDS=400 cargo test --release -p oms-sim --test sim -- --nocapture   (실패 시: OMS_SIM_PROFILE=<이름> OMS_SIM_SEED=<n>)` |
 | V-SIM-2 | 장애가 멈추면 장부가 가상 거래소와 일치한다: 주문별 체결량과 상태, 포지션, 수수료 합. 차단 사유와 거짓 불일치가 남지 않는다 | 시뮬레이션 | 이전 버전 결과 | `V-SIM-1과 같다` |
 | V-SIM-3 | 같은 seed는 바이트 단위로 같은 저널을 만든다 | 시뮬레이션 | 이전 버전 결과 | `cargo test --release -p oms-sim` |
@@ -431,7 +431,7 @@
 
 ## V-REPLAY-1 — 기록된 이벤트만 적용해 만든 상태는 살아 있는 상태와 같고, 기록된 입력을 다시 판단하면 기록된 이벤트가 나온다
 
-- 상태: **이전 버전 결과**
+- 상태: **미실행**
 - 왜 중요한가: 복구의 정확성과 판단의 재현성
 - 수준: 단위
 - 전제와 범위: 시나리오 시험 전부(매 입력 뒤 그림자 상태 비교), 시뮬레이션의 최종 검사, 실제 저널에 대한 verify --re-decide
@@ -450,6 +450,7 @@
 | `sim/profile_crashy` | 이전 버전 결과 | last result: passed |
 | `e2e/vertical_slice_new_partial_fill_cancel_restart` | 이전 버전 결과 | last result: passed |
 | `e2e/random_kills_under_load_keep_books_consistent` | 이전 버전 결과 | last result: passed |
+| `core/margin_events_replay_to_the_same_state` | 미실행 |  |
 
 ## V-SIM-1 — 네트워크 장애, 통보 중복·지연, 링크 단절, 프로세스 재시작, 키 삭제가 임의로 섞인 실행의 매 단계에서: 구조 불변조건이 성립하고, 거래소의 실제 포지션이 OMS가 설명하는 범위 안에 있고, 한도를 넘지 않고, 같은 주문이 두 번 전송되지 않는다
 
@@ -1298,4 +1299,5 @@
 | `core/margin_report_dated_after_the_record_time_is_not_fresh` | 미실행 |  |
 | `core/reduce_only_order_needs_no_fresh_report` | 미실행 |  |
 | `core/without_a_margin_policy_no_margin_check_runs` | 미실행 |  |
+| `core/margin_events_replay_to_the_same_state` | 미실행 |  |
 

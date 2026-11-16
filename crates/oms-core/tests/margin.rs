@@ -397,3 +397,63 @@ fn without_a_margin_policy_no_margin_check_runs() {
     h.advance(120 * SEC);
     h.accept("a", "k1", Side::Buy, "1", "100");
 }
+
+// ---- C-MARGIN: replay ---------------------------------------------------------
+
+/// S13. Margin state comes only from journal events. A core rebuilt from the
+/// journal, a core that re-decides the recorded inputs, and a core read back
+/// from its serialised form all equal the live one, digest included.
+#[test]
+fn margin_events_replay_to_the_same_state() {
+    let mut h = H::ready_with(config_with_margin());
+    h.margin_report(1, 1, h.now, "100");
+    h.accept("a", "k1", Side::Buy, "1", "100");
+    h.venue(VenueInput::MarginReportInvalid {
+        session: 1,
+        seq: 2,
+        queried_at: h.now,
+        reason: "unreadable".into(),
+    });
+    h.margin_report(1, 3, h.now, "97.5");
+    h.margin_report(1, 2, h.now, "50"); // late: dropped, not journaled
+    link_down(&mut h);
+    h.link_up_and_sync();
+    let last_at = h.now;
+    h.venue(VenueInput::MarginReport(MarginReportIn {
+        session: 2,
+        seq: 1,
+        queried_at: last_at,
+        account_value: amt("96"),
+        positions: vec![position("X", 40)],
+    }));
+    h.advance(31 * SEC);
+    h.reject("a", "k2", Side::Buy, "1", "100");
+
+    // Rebuilt from the events alone, as recovery does.
+    let rebuilt = h.rebuilt();
+    assert_eq!(rebuilt.digest(), h.core.digest());
+    assert_eq!(rebuilt, h.core);
+    // The comparison is about something: the rebuilt state holds the last
+    // report and the last refusal.
+    let report = rebuilt.margin.report.as_ref().unwrap();
+    assert_eq!((report.session, report.seq, report.queried_at, report.account_value), (2, 1, last_at, amt("96")));
+    assert_eq!(report.positions, vec![position("X", 40)]);
+    assert_eq!(rebuilt.margin.last_rejection.as_ref().map(|r| (r.seq, r.reason.as_str())), Some((2, "unreadable")));
+    // The rebuilt core judges freshness as the live one does.
+    assert!(rebuilt.margin_report_is_fresh(last_at + 30 * SEC));
+    assert!(!rebuilt.margin_report_is_fresh(last_at + 30 * SEC + 1));
+
+    // Re-deciding every recorded input gives the recorded events.
+    let mut c = Core::new(7);
+    for rec in &h.log {
+        let out = c.handle(rec.at, &rec.input).unwrap();
+        assert_eq!(out.events, rec.events, "record {} re-decided differently", rec.seq);
+    }
+    assert_eq!(c.digest(), h.core.digest());
+
+    // The serialised forms (snapshot, journal) read back unchanged.
+    let back: Core = serde_json::from_str(&serde_json::to_string(&h.core).unwrap()).unwrap();
+    assert_eq!(back, h.core);
+    let recs: Vec<Record> = serde_json::from_str(&serde_json::to_string(&h.log).unwrap()).unwrap();
+    assert_eq!(recs, h.log);
+}
