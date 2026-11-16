@@ -396,6 +396,12 @@ pub struct MarginState {
     /// Set while the account is REDUCING. One latch for the whole account.
     #[serde(default)]
     pub reducing: Option<Reducing>,
+    /// Record time at which the current link session came up. The stale
+    /// cancel measures from it while the session has no report. Set by the
+    /// link-up event, and only with a margin policy; a policy that is
+    /// activated while the link is up sets it to the activation time.
+    #[serde(default)]
+    pub link_up_at: Option<Ts>,
     /// The venue setting of each configured instrument as the venue told it
     /// in the current link session. An instrument that is not listed is
     /// unknown. Emptied when the link changes.
@@ -428,6 +434,9 @@ pub enum RuleId {
     /// The isolated margin of a position is below its maintenance margin
     /// plus `mm_buffer_bps` of the position value.
     MmBuffer,
+    /// No margin report was accepted for longer than `stale_cancel_us`
+    /// while the link was up. It cancels and latches nothing.
+    MarginStale,
 }
 
 /// The REDUCING latch (C-MARGIN, 감소 전용 상태).
