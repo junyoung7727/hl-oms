@@ -1,7 +1,7 @@
 # 검토 항목 대응표
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `2cf32bd373ac7282`, 검증 결과의 다이제스트 `2cf32bd373ac7282`.
+> 소스 다이제스트 `35f0bab46107588e`, 검증 결과의 다이제스트 `2cf32bd373ac7282`.
 
 항목 103건(일반 40, Rust·LMAX·OMS 40, 프로젝트 23).
 
@@ -19,9 +19,36 @@
 | 항목 | 통과하지 않은 주장 |
 |---|---|
 | G-QUAL-02 | V-PERF-1, V-PERF-2, V-PERF-3 |
-| G-REL-02 | V-PERF-3 |
-| D-OVL-01 | V-PERF-2 |
+| G-QUAL-07 | V-SIM-1, V-COMMIT-1 |
+| G-REL-01 | V-COMMIT-1, V-COMMIT-2, V-BOOT-1, V-REPLAY-1, V-COMMIT-4, V-BOOT-2 |
+| G-REL-02 | V-PERF-3, V-JRN-4 |
+| G-SEC-10 | V-PURE-1 |
+| G-OPS-03 | V-CFG-1 |
+| D-OWN-01 | V-NEW-1, V-SIM-1 |
+| D-DET-01 | V-PURE-1, V-REPLAY-1, V-SIM-3 |
+| D-DET-02 | V-PURE-1 |
+| D-ORD-01 | V-FILL-1, V-TERM-1, V-SIM-2 |
+| D-ORD-02 | V-CANCEL-1, V-TERM-1, V-FILL-1, V-MIS-1 |
+| D-ORD-04 | V-IDEM-1, V-JRN-3 |
+| D-NUM-01 | V-NUM-1, V-NUM-2 |
+| D-RISK-01 | V-NEW-1, V-SIM-1 |
+| D-RISK-02 | V-DOUBT-1, V-TERM-1, V-SIM-1 |
+| D-RISK-03 | V-NEW-2 |
+| D-RISK-07 | V-CANCEL-1, V-API-1 |
+| D-DUP-01 | V-IDEM-1, V-IDEM-2, V-IDEM-3 |
+| D-DUP-02 | V-FILL-1, V-SIM-1 |
+| D-DUP-03 | V-RECON-1, V-RECON-2 |
+| D-UNK-01 | V-DOUBT-1, V-DOUBT-2, V-DOUBT-3, V-BOOT-1 |
+| D-PER-01 | V-REPLAY-1 |
+| D-PER-02 | V-COMMIT-1, V-COMMIT-2, V-COMMIT-3, V-COMMIT-4 |
+| D-PER-03 | V-JRN-1, V-JRN-2 |
+| D-PER-04 | V-JRN-4, V-COMMIT-2 |
+| D-PER-05 | V-BOOT-1, V-COMMIT-2, V-SIM-1 |
+| D-REC-01 | V-RECON-1, V-LINK-1 |
+| D-REC-02 | V-RECON-1, V-EXT-1, V-MIS-1 |
+| D-OVL-01 | V-OVL-1, V-OVL-2, V-PERF-2 |
 | D-OPT-01 | V-PERF-1, V-PERF-2 |
+| D-TEST-01 | V-MUT-1, V-SIM-1 |
 | P-PERF-01 | V-PERF-1 |
 | P-PERF-02 | V-PERF-1 |
 

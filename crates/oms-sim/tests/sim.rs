@@ -157,3 +157,51 @@ fn assert_broken_absence(v: &oms_sim::world::Violation) {
     let expected = ["bridge", "venue-position-limit", "position-bounds", "final-orders", "final-fills", "final-position", "no-false-mismatch"];
     assert!(expected.contains(&v.property), "caught by an unexpected property: {v}");
 }
+
+// ---- the venue margin model (C-MARGIN) ---------------------------------------
+
+fn x() -> oms_core::InstrumentId {
+    oms_core::InstrumentId::new("X").unwrap()
+}
+
+fn amount(s: &str) -> oms_core::Amount {
+    oms_core::Amount::parse(s).unwrap()
+}
+
+fn place_req(order: u64, side: oms_core::Side, qty: &str, px: &str) -> venue::PlaceReq {
+    venue::PlaceReq {
+        client: oms_core::VenueClientId { instance_id: 7, order_id: oms_core::OrderId(order) },
+        instrument: x(),
+        side,
+        qty: oms_core::Qty::parse(qty).unwrap(),
+        px: oms_core::Px::parse(px).unwrap(),
+        tif: oms_core::Tif::Gtc,
+        expires_at: u64::MAX,
+    }
+}
+
+/// The model's account value against a hand-worked example. The numbers are
+/// worked out here, not with the model's code:
+///   deposit                                   100
+///   buy 0.5 at 100, mark 100: fee 2 bps of 50   -0.01  ->  99.99
+///   mark 100 -> 104: 0.5 x 4                    +2     -> 101.99
+///   funding 0.1 % of the position value 52      -0.052 -> 101.938
+/// This is our model. It does not show that the venue computes it this way.
+#[test]
+fn world_account_value_follows_fills_price_fees_and_funding() {
+    let mut v = venue::SimVenue::new(true);
+    v.deposit(amount("100"));
+    v.set_mark(&x(), oms_core::Px::parse("100").unwrap());
+    assert_eq!(v.account_value(), amount("100"));
+
+    let placed = v.place(1, &place_req(1, oms_core::Side::Buy, "0.5", "100"), oms_core::Qty::parse("0.5").unwrap());
+    assert!(matches!(placed, venue::PlaceResp::Placed { .. }), "{placed:?}");
+    assert_eq!(v.account_value(), amount("99.99"), "after the fill and its fee");
+
+    v.set_mark(&x(), oms_core::Px::parse("104").unwrap());
+    assert_eq!(v.account_value(), amount("101.99"), "after the price move");
+
+    let charged = v.charge_funding(&x(), 1_000);
+    assert_eq!(charged, amount("0.052"));
+    assert_eq!(v.account_value(), amount("101.938"), "after funding");
+}

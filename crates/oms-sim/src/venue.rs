@@ -105,9 +105,11 @@ pub struct SimVenue {
     pub place_requests: BTreeMap<u128, u32>,
     /// Client ids that produced more than one live order. Must stay empty.
     pub duplicate_placements: Vec<u128>,
-    /// Account value the venue states in a margin report. A control knob:
-    /// nothing in this model moves it.
-    pub account_value: Amount,
+    /// The margin model: what the account is worth. See `account_value`.
+    pub cash: Amount,
+    /// Mark price of each instrument. Until the driver sets one, the price
+    /// of the instrument's first fill stands in.
+    pub marks: BTreeMap<InstrumentId, Px>,
 }
 
 impl SimVenue {
@@ -119,6 +121,68 @@ impl SimVenue {
             fee_bps: 2,
             ..SimVenue::default()
         }
+    }
+
+    // ---- margin model ----------------------------------------------------
+    //
+    // This is our own model, not the venue's documented arithmetic:
+    //   account value = cash + sum over instruments of position x mark
+    // A deposit adds to the cash. A fill moves the cash by the price paid or
+    // received and takes its fee. Funding is taken from the cash. So the
+    // account value follows fills, price, fees and funding, and a fill at
+    // the mark changes it by the fee alone.
+
+    /// Adds `amount` to the cash (negative: a withdrawal).
+    pub fn deposit(&mut self, amount: Amount) {
+        self.cash = Amount(self.cash.0 + amount.0);
+    }
+
+    /// Sets the mark price of one instrument.
+    pub fn set_mark(&mut self, instrument: &InstrumentId, px: Px) {
+        self.marks.insert(instrument.clone(), px);
+    }
+
+    /// Charges funding on one instrument: `rate_ppm` millionths of the
+    /// position's value at the mark. A positive rate is paid by a long
+    /// position and received by a short one. Returns the amount charged.
+    pub fn charge_funding(&mut self, instrument: &InstrumentId, rate_ppm: i64) -> Amount {
+        let charge = Amount((i128::from(self.signed_value(instrument)) * i128::from(rate_ppm) / 1_000_000) as i64);
+        self.deposit(Amount(-charge.0));
+        charge
+    }
+
+    /// The mark price of one instrument, zero while it has none.
+    pub fn mark(&self, instrument: &InstrumentId) -> Px {
+        self.marks.get(instrument).copied().unwrap_or(Px(0))
+    }
+
+    /// Position times mark, signed like the position.
+    fn signed_value(&self, instrument: &InstrumentId) -> i64 {
+        let value = i128::from(self.position(instrument)) * i128::from(self.mark(instrument).0) / i128::from(oms_core::num::SCALE);
+        value as i64
+    }
+
+    /// What the account is worth now, as a margin report states it.
+    pub fn account_value(&self) -> Amount {
+        Amount(self.cash.0 + self.positions.keys().map(|i| self.signed_value(i)).sum::<i64>())
+    }
+
+    /// Books a trade into the margin model: the cash pays for a buy and
+    /// receives for a sell, and pays the fee.
+    fn settle(&mut self, instrument: &InstrumentId, side: Side, notional: i64, px: Px, fee: Amount) {
+        let paid = match side {
+            Side::Buy => notional,
+            Side::Sell => -notional,
+        };
+        self.cash = Amount(self.cash.0 - paid - fee.0);
+        self.marks.entry(instrument.clone()).or_insert(px);
+    }
+
+    /// Control knob: moves the cash so that the account is worth `value`
+    /// now. Fills, price, fees and funding move it on from there.
+    pub fn set_account_value(&mut self, value: Amount) {
+        let now = self.account_value();
+        self.deposit(Amount(value.0 - now.0));
     }
 
     fn emit_order(&mut self, oid: u64, now: Ts) {
@@ -212,6 +276,7 @@ impl SimVenue {
             o.status = SimStatus::Filled;
         }
         *self.positions.entry(fill.instrument.clone()).or_default() += qty.signed(fill.side).0;
+        self.settle(&fill.instrument, fill.side, notional, fill.px, fill.fee);
         self.fills.push(fill.clone());
         self.stream.push(StreamEvent::Fill(fill.clone()));
         self.emit_order(oid, now);
@@ -261,6 +326,7 @@ impl SimVenue {
         let signed = qty.signed(side).0;
         *self.positions.entry(instrument.clone()).or_default() += signed;
         *self.external_positions.entry(instrument.clone()).or_default() += signed;
+        self.settle(instrument, side, num_notional(px, qty), px, Amount::ZERO);
         self.fills.push(fill.clone());
         self.stream.push(StreamEvent::Fill(fill.clone()));
         fill

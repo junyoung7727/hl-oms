@@ -172,7 +172,7 @@ impl State {
             SimOp::Margin => {
                 self.margin_queries += 1;
                 Ok(json(&MarginResult {
-                    account_value: self.venue.account_value,
+                    account_value: self.venue.account_value(),
                 }))
             }
             SimOp::VenueSetting { instrument } => {
@@ -253,7 +253,7 @@ impl State {
                 Ok(serde_json::Value::Null)
             }
             Ctl::AccountValue { value } => {
-                self.venue.account_value = value;
+                self.venue.set_account_value(value);
                 Ok(serde_json::Value::Null)
             }
             Ctl::VenueSetting {
