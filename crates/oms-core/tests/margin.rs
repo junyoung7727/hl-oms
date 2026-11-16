@@ -329,7 +329,11 @@ fn margin_report_dated_after_the_record_time_is_not_fresh() {
     // One microsecond before its query time.
     next_input_at(&mut h, queried_at - 1);
     assert_eq!(h.reject("a", "k2", Side::Buy, "1", "100"), vec![RejectReason::MarginUnavailable]);
-    // At its query time the age is zero.
+
+    // A second report, again dated ten seconds ahead. An order recorded
+    // exactly at its query time sees age zero and is accepted.
+    let queried_at = h.now + 10 * SEC;
+    h.margin_report(1, 2, queried_at, "1000");
     next_input_at(&mut h, queried_at);
     let id = h.accept("a", "k3", Side::Buy, "1", "100");
     assert_eq!(h.order(id).accepted_at, queried_at);
