@@ -346,6 +346,10 @@ impl Core {
             Event::LinkChanged { up, session, .. } => {
                 self.link.up = *up;
                 self.link.session = *session;
+                // What the venue told in one link session says nothing
+                // about the next (C-MARGIN): the venue settings are unknown
+                // again. The last margin report stays.
+                self.margin.venue_settings.clear();
             }
             Event::RequestRejected { .. } => {
                 self.stats.rejected += 1;

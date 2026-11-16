@@ -1515,3 +1515,32 @@ fn a_setting_that_differs_from_config_holds_only_that_instrument() {
     let r = req_on(&h, "Y", "y3", Side::Buy, "1", "100");
     assert_eq!(submit(&mut h, r), Err(venue_setting_hold("Y")));
 }
+
+/// S17. A setting that matches the policy releases the hold at once. What
+/// the venue told in one link session says nothing about the next one: the
+/// operator may have changed the setting while the link was down. After a
+/// link loss the setting is unknown until the venue tells it again.
+#[test]
+fn a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again() {
+    let mut h = H::ready_with(config_with_margin());
+    h.report_margin("1000");
+    h.ref_price("X", "100");
+
+    h.venue_setting("X", false, 2);
+    assert_eq!(h.reject("a", "k1", Side::Buy, "1", "100"), venue_setting_hold("X"));
+    h.venue_setting("X", true, 2);
+    h.accept("a", "k1", Side::Buy, "1", "100");
+
+    // The link is lost and comes back as session 2, fully synced. The
+    // setting told in session 1 does not count.
+    link_down(&mut h);
+    h.link_up_and_sync_only();
+    assert_eq!(h.session, 2);
+    h.report_margin("1000");
+    h.ref_price("X", "100");
+    assert_eq!(h.reject("a", "k2", Side::Buy, "1", "100"), venue_setting_hold("X"));
+
+    // Told again in session 2: released.
+    h.venue_setting("X", true, 2);
+    h.accept("a", "k2", Side::Buy, "1", "100");
+}

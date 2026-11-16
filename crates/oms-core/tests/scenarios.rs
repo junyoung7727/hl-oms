@@ -1183,6 +1183,9 @@ fn reduce_only_order_is_accepted_during_resync() {
         session,
         reason: "reconnected".into(),
     });
+    // The venue settings of the new session are known, so that the resync
+    // is the only hold.
+    h.venue_matches_policy();
     assert_eq!(h.core.holds(None), vec![HoldReason::Resync]);
 
     // A plain order is refused, also one that would reduce the position.
