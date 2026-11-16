@@ -3315,8 +3315,19 @@ fn a_trigger_on_one_instrument_blocks_plain_orders_on_all() {
 
     let held = vec![RejectReason::Hold(HoldReason::Reducing)];
     for (n, instrument) in ["Y", "X"].into_iter().enumerate() {
-        let r = req_on(&h, instrument, &format!("plain-{n}"), Side::Buy, "0.1", "100");
-        assert_eq!(rejected(h.new_order(r)), held, "plain order on {instrument}");
+        let r = req_on(
+            &h,
+            instrument,
+            &format!("plain-{n}"),
+            Side::Buy,
+            "0.1",
+            "100",
+        );
+        assert_eq!(
+            rejected(h.new_order(r)),
+            held,
+            "plain order on {instrument}"
+        );
     }
     let r = NewOrderReq {
         reduce_only: true,
@@ -3581,7 +3592,8 @@ fn mm_comparison_is_exact_at_extreme_values() {
     let mut runner = proptest::test_runner::TestRunner::default();
     let result = runner.run(&(leverage, buffer, value), |(leverage, buffer, value)| {
         let scale = 2 * i128::from(leverage) * 10_000;
-        let scaled_line = i128::from(value) * (10_000 + 2 * i128::from(leverage) * i128::from(buffer));
+        let scaled_line =
+            i128::from(value) * (10_000 + 2 * i128::from(leverage) * i128::from(buffer));
         let (floor, on_a_unit) = (scaled_line / scale, scaled_line % scale == 0);
         let first_not_under = if on_a_unit { floor } else { floor + 1 };
         let last_under = first_not_under - 1;
