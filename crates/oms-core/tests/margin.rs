@@ -1732,3 +1732,54 @@ fn an_account_mode_off_the_allow_list_or_unknown_holds_the_account() {
     h.account_mode("standard");
     assert_eq!(h.core.holds(None), vec![HoldReason::AccountMode]);
 }
+
+/// Submits a sell of 1 X at 100 with the venue's reduce-only flag.
+fn reduce_only_sell(h: &mut H, key: &str) -> Result<OrderId, Vec<RejectReason>> {
+    let r = h.reduce_only_req("a", key, Side::Sell, "1", "100");
+    submit(h, r)
+}
+
+/// S17, S18. Both holds are in the right column of the hold table: they
+/// refuse plain orders and let an order with the venue's reduce-only flag
+/// through, so a position can be reduced while the setting or the mode is
+/// wrong or unknown.
+#[test]
+fn reduce_only_order_passes_the_venue_setting_and_account_mode_holds() {
+    let mut h = H::ready_with(config_with_margin());
+    h.report_margin("1000");
+    h.ref_price("X", "100");
+    h.long("a", "k0", "3");
+
+    // The instrument is on cross margin at leverage 3.
+    h.venue_setting("X", false, 3);
+    assert_eq!(h.reject("a", "p1", Side::Sell, "1", "100"), venue_setting_hold("X"));
+    let id = reduce_only_sell(&mut h, "r1").expect("the venue-setting hold refused a reduce-only order");
+    assert_eq!(h.sends().last(), Some(&id));
+
+    // The setting is right again; the account is in unified mode.
+    h.venue_setting("X", true, 2);
+    h.account_mode("unifiedAccount");
+    assert_eq!(h.reject("a", "p2", Side::Sell, "1", "100"), account_mode_hold());
+    let id = reduce_only_sell(&mut h, "r2").expect("the account-mode hold refused a reduce-only order");
+    assert_eq!(h.sends().last(), Some(&id));
+
+    // A new link session in which the venue has told neither: both holds
+    // at once, both unknown. (The margin report of session 1 stays and is
+    // still fresh.)
+    link_down(&mut h);
+    h.link_up_and_sync_only();
+    assert_eq!(
+        h.reject("a", "p3", Side::Sell, "1", "100"),
+        vec![
+            RejectReason::Hold(HoldReason::VenueSetting(iid("X"))),
+            RejectReason::Hold(HoldReason::AccountMode),
+        ]
+    );
+    let id = reduce_only_sell(&mut h, "r3").expect("unknown setting and mode refused a reduce-only order");
+    assert_eq!(h.sends().last(), Some(&id));
+    // The holds are still there.
+    assert_eq!(
+        h.core.holds(None),
+        vec![HoldReason::VenueSetting(iid("X")), HoldReason::AccountMode]
+    );
+}
