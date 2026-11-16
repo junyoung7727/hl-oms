@@ -87,6 +87,8 @@ pub struct Profile {
     /// ten minutes after it. The first report of the new day is then the
     /// first to show what the account lost meanwhile (S12).
     pub p_night_outage: u32,
+    /// Share of margin answers that the network delivers a second time.
+    pub p_report_dup: u32,
     pub reconcile_every_us: u64,
     /// Share of steps before which nothing acts for a while: only the
     /// timers run (margin poll, reconcile, tick).
@@ -146,6 +148,7 @@ impl Profile {
             stale_cancel_us: 1_200_000,
             outage_polls: (5, 25),
             p_night_outage: 0,
+            p_report_dup: 0,
             reconcile_every_us: 300_000,
             p_idle: 0,
             idle_us: (0, 0),
@@ -279,8 +282,8 @@ impl Profile {
     /// in between, during which only the timers run. On top of the faults
     /// of `margin_lossy` (rarer per step, the run has about ten times the
     /// steps): margin queries unanswered for up to an hour, and over every
-    /// second midnight; withdrawals and deposits; the operator's
-    /// `rebase-day`.
+    /// second midnight; margin answers delivered twice; withdrawals and
+    /// deposits; the operator's `rebase-day`.
     pub fn margin_days() -> Profile {
         let policy = MarginPolicy::default();
         Profile {
@@ -293,6 +296,7 @@ impl Profile {
             stale_cancel_us: policy.stale_cancel_us,
             outage_polls: (12, 720),
             p_night_outage: 500,
+            p_report_dup: 50,
             reconcile_every_us: 2_000_000,
             p_idle: 40,
             idle_us: (5_000_000, 600_000_000),
@@ -388,6 +392,14 @@ pub struct SimStats {
     /// than the daily-loss limit below the old base, the account not being
     /// REDUCING before: a loss first seen across a midnight.
     pub roll_losses: u64,
+    /// Margin queries the world made (one per poll of a link session).
+    pub margin_polls: u64,
+    /// Durable journal records whose input is a margin report.
+    pub margin_records: u64,
+    /// Polls (link session and query number) that those records answer.
+    pub margin_polls_recorded: u64,
+    /// Margin answers that the network delivered a second time.
+    pub report_dups: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -688,6 +700,7 @@ impl World {
                 let bytes = serde_json::to_vec(&rec).unwrap_or_default();
                 self.stats.trace_hash = fnv(self.stats.trace_hash, &bytes);
                 self.stats.records += 1;
+                self.stats.margin_records += u64::from(matches!(rec.input, Input::Venue(VenueInput::MarginReport(_))));
                 self.note_events(&rec.events);
                 self.durable.push(rec);
             }
@@ -970,13 +983,20 @@ impl World {
                 if epoch != self.epoch || self.chance(self.p.p_query_lost) {
                     return Ok(());
                 }
-                let late = self.p.margin && matches!(q, Query::Margin { .. }) && self.chance(self.p.p_req_slow);
+                let is_margin = matches!(q, Query::Margin { .. });
+                let late = self.p.margin && is_margin && self.chance(self.p.p_req_slow);
                 let inputs = self.answer(session, queried_at, q);
                 let mut d = self.net_delay();
                 if late {
                     // An answer that is old when it arrives, and that a
                     // later query's answer can overtake.
                     d += self.rng.range(2 * self.p.margin_poll_us, 15 * self.p.margin_poll_us);
+                }
+                if is_margin && !inputs.is_empty() && self.p.p_report_dup > 0 && self.chance(self.p.p_report_dup) {
+                    // The same answer once more, a little later.
+                    self.stats.report_dups += 1;
+                    let again = d + self.rng.range(1_000, self.p.margin_poll_us);
+                    self.schedule(again, Net::QueryResp { epoch, inputs: inputs.clone() });
                 }
                 self.schedule(d, Net::QueryResp { epoch, inputs });
             }
@@ -1020,6 +1040,7 @@ impl World {
     /// publishes its mark as the reference price.
     fn issue_margin_queries(&mut self) {
         self.margin_seq += 1;
+        self.stats.margin_polls += 1;
         let mut queries = vec![Query::Margin { seq: self.margin_seq }];
         if !self.core.margin.venue_settings.contains_key(&inst()) {
             queries.push(Query::VenueSetting);
@@ -1664,6 +1685,15 @@ impl World {
         }
         if self.p.margin {
             self.journal_reducing()?;
+            let answered: BTreeSet<(u64, u64)> = self
+                .durable
+                .iter()
+                .filter_map(|r| match &r.input {
+                    Input::Venue(VenueInput::MarginReport(m)) => Some((m.session, m.seq)),
+                    _ => None,
+                })
+                .collect();
+            self.stats.margin_polls_recorded = answered.len() as u64;
         }
         // Re-deciding every recorded input reproduces the recorded events.
         let mut redo = Core::new(INSTANCE);

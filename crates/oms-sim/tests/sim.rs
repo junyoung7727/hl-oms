@@ -95,6 +95,12 @@ fn run_profile_seeds(p: Profile, seeds: Vec<u64>) -> Vec<SimStats> {
             sum(|s| s.day_rolls),
             sum(|s| s.roll_losses),
         );
+        println!(
+            "profile={} margin: margin_polls={} margin_records={}",
+            p.name,
+            sum(|s| s.margin_polls),
+            sum(|s| s.margin_records),
+        );
     }
     all
 }
@@ -499,6 +505,29 @@ fn margin_days_runs() -> &'static [SimStats] {
 const SECOND: u64 = 1_000_000;
 const HOUR: u64 = 3_600 * SECOND;
 
+/// A world with the margin clock and the start time of `margin_days` and
+/// no random action, driven by the test. Ten seconds have passed.
+fn scripted_days_world() -> World {
+    let days = Profile::margin_days();
+    let mut w = World::new(1, Profile {
+        name: "margin_days_scripted",
+        margin: true,
+        start_at: days.start_at,
+        margin_poll_us: days.margin_poll_us,
+        margin_max_age_us: days.margin_max_age_us,
+        stale_cancel_us: days.stale_cancel_us,
+        reconcile_every_us: days.reconcile_every_us,
+        ..Profile::calm()
+    });
+    w.start().unwrap();
+    w.advance(10 * SECOND).unwrap();
+    w
+}
+
+fn margin_records(w: &World) -> usize {
+    w.durable.iter().filter(|r| matches!(r.input, oms_core::Input::Venue(oms_core::VenueInput::MarginReport(_)))).count()
+}
+
 fn day_base(w: &World) -> Option<(u64, oms_core::Amount)> {
     w.core.margin.day_base.as_ref().map(|b| (b.day, b.value))
 }
@@ -513,22 +542,9 @@ fn day_base(w: &World) -> Option<(u64, oms_core::Amount)> {
 /// before it and the account is not REDUCING after it.
 #[test]
 fn profile_margin_days_crosses_three_utc_days_with_restarts() {
-    // The exact sequence: no random action, the clock of `margin_days`.
-    // Day numbers are UTC days since 1970; the run starts on day 19675, one
-    // hour before day 19676.
-    let days = Profile::margin_days();
-    let mut w = World::new(1, Profile {
-        name: "margin_days_scripted",
-        margin: true,
-        start_at: days.start_at,
-        margin_poll_us: days.margin_poll_us,
-        margin_max_age_us: days.margin_max_age_us,
-        stale_cancel_us: days.stale_cancel_us,
-        reconcile_every_us: days.reconcile_every_us,
-        ..Profile::calm()
-    });
-    w.start().unwrap();
-    w.advance(10 * SECOND).unwrap();
+    // The exact sequence. Day numbers are UTC days since 1970; the run
+    // starts on day 19675, one hour before day 19676.
+    let mut w = scripted_days_world();
     assert_eq!(day_base(&w), Some((19_675, amount("100"))), "the first report sets the base");
     // Ten seconds before midnight the venue stops answering margin queries
     // for twenty seconds, and 6 leave the account meanwhile.
@@ -599,6 +615,41 @@ fn profile_margin_days_crosses_three_utc_days_with_restarts() {
     if all.len() >= 40 {
         assert!(total(all, |s| s.reducing_day_rolls) > 0, "no run crossed midnight while REDUCING");
         assert!(total(all, |s| s.roll_losses) > 0, "no loss was first seen by the report that rolled the day");
+    }
+}
+
+/// G8: the journal gains at most one margin record per poll, over days. A
+/// margin record is a journal record whose input is a margin report. The
+/// poll is every 5 s: 17 280 per day and link session. Journal bytes are
+/// not measured, and the journal is not pruned (U-04).
+#[test]
+fn margin_journal_records_stay_within_one_per_poll() {
+    // One quiet day of one link session: 86 400 s / 5 s = 17 280 polls,
+    // and as many margin records.
+    let mut w = scripted_days_world();
+    let (polls, records) = (w.stats.margin_polls, margin_records(&w));
+    w.sleep(24 * HOUR).unwrap();
+    assert_eq!(w.stats.margin_polls - polls, 17_280);
+    assert_eq!(margin_records(&w) - records, 17_280);
+
+    let all = margin_days_runs();
+    if all.len() >= 4 {
+        assert!(total(all, |s| s.report_dups) > 0, "no margin answer was delivered twice");
+        assert!(total(all, |s| s.reports_dropped) > 0, "no margin report was dropped");
+    }
+    for (i, s) in all.iter().enumerate() {
+        assert!(s.margin_records > 0, "run {i} journalled no margin record");
+        assert_eq!(s.margin_records, s.margin_polls_recorded, "run {i} journalled a poll's answer more than once");
+        assert!(
+            s.margin_records <= s.margin_polls,
+            "run {i} journalled {} margin records for {} polls",
+            s.margin_records,
+            s.margin_polls
+        );
+        // Each link session polls every 5 s from its start.
+        let sessions = u64::from(s.crashes) + u64::from(s.link_drops) + 1;
+        let most = s.sim_seconds / 5 + 1 + sessions;
+        assert!(s.margin_polls <= most, "run {i} polled {} times in {} s and {sessions} link sessions", s.margin_polls, s.sim_seconds);
     }
 }
 
