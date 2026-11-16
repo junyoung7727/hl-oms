@@ -278,6 +278,19 @@ pub enum HoldReason {
     StorageLow,
 }
 
+impl HoldReason {
+    /// The hold table of ADR-008 §7. False: the hold refuses every new
+    /// order. True: it refuses only plain orders, and an order with the
+    /// venue's reduce-only flag passes it. The table is used only when a
+    /// margin policy is set; the new-order check decides that.
+    pub fn refuses_only_plain_orders(&self) -> bool {
+        match self {
+            HoldReason::NoConfig | HoldReason::LinkDown | HoldReason::OperatorAccount | HoldReason::OperatorStrategy | HoldReason::StorageLow => false,
+            HoldReason::Resync | HoldReason::InDoubt | HoldReason::Mismatch => true,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MismatchKind {

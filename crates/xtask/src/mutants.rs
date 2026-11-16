@@ -80,7 +80,7 @@ const MUTANTS: &[Mutant] = &[
     },
     Mutant {
         id: "M07-holds-not-enforced",
-        what: "hold reasons no longer cause a rejection",
+        what: "hold reasons no longer cause a rejection, in either column of the hold table",
         file: "crates/oms-core/src/decide.rs",
         find: "why.push(R::Hold(h));",
         replace: "let _ = h;",
@@ -204,6 +204,34 @@ const MUTANTS: &[Mutant] = &[
         replace: "let pool = &ctx.connections;",
         test: &["-p", "oms-node", "--test", "review_node", "idle_trading_connections"],
         guards: "C-API / C-OVERLOAD",
+    },
+    // The hold table of ADR-008 §7 (margin rules, ticket 01).
+    Mutant {
+        id: "M21-partial-hold-refuses-reduce-only",
+        what: "a hold that refuses only plain orders also refuses a reduce-only order",
+        file: "crates/oms-core/src/model.rs",
+        find: "HoldReason::Resync | HoldReason::InDoubt | HoldReason::Mismatch => true,",
+        replace: "HoldReason::Resync | HoldReason::InDoubt | HoldReason::Mismatch => false,",
+        test: &["-p", "oms-core", "--test", "scenarios", "reduce_only_order_is_accepted"],
+        guards: "C-MARGIN / hold table",
+    },
+    Mutant {
+        id: "M22-block-all-hold-passes-reduce-only",
+        what: "a hold that refuses every new order lets a reduce-only order pass",
+        file: "crates/oms-core/src/model.rs",
+        find: "HoldReason::OperatorStrategy | HoldReason::StorageLow => false,",
+        replace: "HoldReason::OperatorStrategy | HoldReason::StorageLow => true,",
+        test: &["-p", "oms-core", "--test", "scenarios", "reduce_only_order_is_rejected_by_every_block_all_hold"],
+        guards: "C-MARGIN / hold table",
+    },
+    Mutant {
+        id: "M23-hold-table-without-margin-policy",
+        what: "the hold table applies although no margin policy is set",
+        file: "crates/oms-core/src/decide.rs",
+        find: "let table_applies = cfg.policy.margin.is_some();",
+        replace: "let table_applies = true;",
+        test: &["-p", "oms-core", "--test", "scenarios", "without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order"],
+        guards: "C-MARGIN / hold table",
     },
 ];
 

@@ -78,8 +78,17 @@ C. 구현은 `check_new_order`(`crates/oms-core/src/decide.rs`)와 `Book`(`model
 | `OperatorAccount` / `OperatorStrategy` | 운영자 중지 | 운영자 재개(범위별로 따로) |
 | `StorageLow` | 저널 저장 공간 부족 | 공간 확보 |
 
-차단은 신규 주문만 막는다. 취소, 체결 기장, 대조는 계속된다.
-위험을 줄이는 주문도 예외가 아니다(기존 결정 O08). 전략에서 위험 축소인 주문이 계좌에서는 아닐 수 있기 때문이다.
+차단은 신규 주문만 막는다. 취소, 체결 기장, 대조는 계속된다. 차단 사유는 두 종류다([ADR-018](ADR-018-margin-rules.md) §7의 개정).
+
+| 모든 신규 주문을 막는다 | 일반 주문만 막는다(감소 전용 주문은 통과) |
+|---|---|
+| `NoConfig`, `LinkDown`, `OperatorAccount`, `OperatorStrategy`, `StorageLow` | `Resync`, `InDoubt`, `Mismatch`, `Reducing`, `VenueSetting(종목)`, `AccountMode` |
+
+오른쪽 열의 구분은 증거금 정책(`policy.margin`)이 설정됐을 때만 적용한다. 정책이 없으면 모든 차단이 감소 전용 주문을 포함한 모든 신규 주문을 막는다(개정 전과 같다). 그래서 정책 없이 기록된 저널은 다시 판단해도(`verify --re-decide`) 기록된 결과와 같다.
+
+감소 전용 주문의 기준은 거래소의 reduce-only 표시다. OMS가 계산한 '줄이는 방향'이 아니다. 거래소가 계좌 포지션으로 판정하므로 기존 결정 O08의 우려(전략에서 축소인 주문이 계좌에서는 아닐 수 있다)가 이 표시에는 해당하지 않는다. 감소 전용 주문도 §7의 다른 검사는 모두 받는다.
+
+`Reducing`, `VenueSetting(종목)`, `AccountMode`는 아직 코드에 없는 사유다. 증거금 규칙의 뒤 티켓(`.scratch/margin-rules/issues/` 04, 08)이 추가하고, 그때 위 표의 오른쪽 열에 들어간다. 표는 `HoldReason::refuses_only_plain_orders`(`model.rs`)에 있다.
 
 한도를 현재 노출 아래로 낮추는 설정 변경은 허용한다. 기존 노출은 남고 새 주문만 새 한도로 검사된다. 그 동안 I-QTY는 성립하지 않는다.
 

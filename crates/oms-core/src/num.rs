@@ -161,6 +161,10 @@ scaled_type!(
     /// Signed position quantity.
     SQty
 );
+scaled_type!(
+    /// A factor without a unit, such as a leverage limit. Never negative.
+    Ratio
+);
 
 macro_rules! parse_impl {
     ($name:ident, non_negative) => {
@@ -199,6 +203,7 @@ parse_impl!(Qty, non_negative);
 parse_impl!(Px, non_negative);
 parse_impl!(Amount, signed);
 parse_impl!(SQty, signed);
+parse_impl!(Ratio, non_negative);
 
 impl Qty {
     pub fn signed(self, side: crate::model::Side) -> SQty {

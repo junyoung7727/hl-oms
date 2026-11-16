@@ -842,3 +842,18 @@ tests = ["core/overfill_is_booked_in_full_and_flagged", "core/a_fill_after_any_k
 repro = "cargo test -p oms-core"
 supports = "C-MISMATCH, 가정들의 탐지 칸"
 not_covered = "실제 거래소에서 이 조건들이 어떤 통보로 나타나는지"
+
+[[claim]]
+id = "V-MARGIN-1"
+statement = "증거금 정책이 있으면 감소 전용 주문은 재확인, 결과 불명, 불일치 차단을 통과하고, 일반 주문은 모든 차단에서 거절된다. 정책 구역은 선택이고, 없으면 저널 기록에 바이트를 더하지 않는다"
+why = "모든 차단이 줄이는 주문까지 막으면 '줄이기만 허용'하는 상태를 만들 수 없다. 정책이 없는 실행의 저널은 바뀌면 안 된다"
+level = "단위"
+scope = "차단 표(ADR-008 §7 개정)의 사유별 시험, 정책 구역의 직렬화와 기본값"
+real = "oms-core"
+simulated = "통보는 시험이 입력"
+faults = "링크 단절 뒤 재접속"
+criterion = "C-MARGIN의 차단 표와 설정 표. 기대값은 손으로 적었다"
+tests = ["core/absent_margin_policy_adds_no_bytes_to_a_journal_record", "core/empty_margin_section_takes_the_contract_defaults", "core/reduce_only_order_is_accepted_during_resync", "core/reduce_only_order_is_accepted_while_another_order_is_in_doubt", "core/reduce_only_order_is_accepted_under_an_unacknowledged_mismatch", "core/reduce_only_order_is_rejected_by_every_block_all_hold", "core/reduce_only_order_is_still_bound_by_the_strategy_position_limit", "core/without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order"]
+repro = "cargo test -p oms-core --test scenarios reduce_only && cargo test -p oms-core --test margin"
+supports = "C-MARGIN, ADR-018 §7의 8"
+not_covered = "거래소가 감소 전용 주문의 포지션 확대를 실제로 막는지(T5). `Reducing`, `VenueSetting`, `AccountMode` 차단은 뒤 티켓에서 생긴다. 정책 값을 읽는 규칙은 아직 없다"

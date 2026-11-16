@@ -1159,6 +1159,275 @@ fn holds_are_independent() {
     );
 }
 
+// ---- C-MARGIN: hold table (ADR-008 §7 as amended by ADR-018) -----------------
+//
+// With a margin policy set, the holds for resync, in-doubt orders and
+// mismatches refuse only plain orders. "Reduce-only" is the venue flag on the
+// order, not a direction the OMS works out.
+
+#[test]
+fn reduce_only_order_is_accepted_during_resync() {
+    let mut h = H::ready_with(config_with_margin());
+    h.long("a", "k1", "1");
+    h.venue(VenueInput::Link {
+        up: false,
+        session: h.session,
+        reason: "ws closed".into(),
+    });
+    h.session += 1;
+    let session = h.session;
+    h.venue(VenueInput::Link {
+        up: true,
+        session,
+        reason: "reconnected".into(),
+    });
+    assert_eq!(h.core.holds(None), vec![HoldReason::Resync]);
+
+    // A plain order is refused, also one that would reduce the position.
+    assert_eq!(
+        h.reject("a", "k2", Side::Sell, "1", "100"),
+        vec![RejectReason::Hold(HoldReason::Resync)]
+    );
+    // The same order with the flag is accepted and sent.
+    let r = h.reduce_only_req("a", "k3", Side::Sell, "1", "100");
+    let order_id = match h.new_order(r) {
+        NewOrderReply::Accepted { order_id } => order_id,
+        other => panic!("the resync hold refused a reduce-only order: {other:?}"),
+    };
+    assert!(h.order(order_id).reduce_only);
+    assert_eq!(h.sends().last(), Some(&order_id));
+    // The hold itself is still there.
+    assert_eq!(h.core.holds(None), vec![HoldReason::Resync]);
+}
+
+#[test]
+fn reduce_only_order_is_accepted_while_another_order_is_in_doubt() {
+    let mut h = H::ready_with(config_with_margin());
+    h.long("a", "k1", "1");
+    // Strategy b's order gets no answer: its outcome is unknown.
+    let b = h.accept("b", "k1", Side::Buy, "1", "100");
+    h.venue(VenueInput::SendResult {
+        order_id: b,
+        outcome: SendOutcome::Unknown { reason: "timeout".into() },
+        timing: Default::default(),
+    });
+    assert_eq!(h.core.holds(None), vec![HoldReason::InDoubt]);
+
+    assert_eq!(
+        h.reject("a", "k2", Side::Sell, "1", "100"),
+        vec![RejectReason::Hold(HoldReason::InDoubt)]
+    );
+    let r = h.reduce_only_req("a", "k3", Side::Sell, "1", "100");
+    let order_id = match h.new_order(r) {
+        NewOrderReply::Accepted { order_id } => order_id,
+        other => panic!("the in-doubt hold refused a reduce-only order: {other:?}"),
+    };
+    assert!(h.order(order_id).reduce_only);
+    assert_eq!(h.sends().last(), Some(&order_id));
+    assert_eq!(h.core.holds(None), vec![HoldReason::InDoubt]);
+}
+
+/// The mismatch here is a stuck cancel: the case that would otherwise trap a
+/// position once an "only reduce" state cancels resting orders.
+#[test]
+fn reduce_only_order_is_accepted_under_an_unacknowledged_mismatch() {
+    let mut h = H::ready_with(config_with_margin());
+    h.long("a", "k1", "1");
+    // Strategy b's resting order cannot be cancelled: every attempt ends
+    // without an answer until the attempts are used up.
+    let b = h.accept("b", "k1", Side::Buy, "1", "100");
+    h.placed_open(b, "v1");
+    h.cancel("b", b);
+    for attempt in 1..=5 {
+        h.venue(VenueInput::CancelResult {
+            order_id: b,
+            attempt,
+            outcome: CancelOutcome::Unknown { reason: "timeout".into() },
+            timing: Default::default(),
+        });
+        h.advance(SEC);
+        h.tick();
+    }
+    assert_eq!(h.unacked_mismatches(), vec![MismatchKind::CancelStuck]);
+    assert_eq!(h.core.holds(None), vec![HoldReason::Mismatch]);
+
+    assert_eq!(
+        h.reject("a", "k2", Side::Sell, "1", "100"),
+        vec![RejectReason::Hold(HoldReason::Mismatch)]
+    );
+    let r = h.reduce_only_req("a", "k3", Side::Sell, "1", "100");
+    let order_id = match h.new_order(r) {
+        NewOrderReply::Accepted { order_id } => order_id,
+        other => panic!("the mismatch hold refused a reduce-only order: {other:?}"),
+    };
+    assert!(h.order(order_id).reduce_only);
+    assert_eq!(h.sends().last(), Some(&order_id));
+    // Nobody acknowledged the mismatch: the hold is still there.
+    assert_eq!(h.core.holds(None), vec![HoldReason::Mismatch]);
+}
+
+/// The left column of the table: these holds refuse every new order, the
+/// flagged ones too. Each case starts from a fresh, ready core.
+#[test]
+fn reduce_only_order_is_rejected_by_every_block_all_hold() {
+    fn refused(h: &mut H, hold: HoldReason) {
+        let r = h.reduce_only_req("a", "k9", Side::Sell, "1", "100");
+        assert_eq!(
+            h.new_order(r),
+            NewOrderReply::Rejected { reasons: vec![RejectReason::Hold(hold.clone())] },
+            "{hold:?} let a reduce-only order through"
+        );
+    }
+    fn long_one() -> H {
+        let mut h = H::ready_with(config_with_margin());
+        h.long("a", "k1", "1");
+        h
+    }
+
+    let mut h = long_one();
+    h.venue(VenueInput::Link {
+        up: false,
+        session: h.session,
+        reason: "ws closed".into(),
+    });
+    refused(&mut h, HoldReason::LinkDown);
+
+    let mut h = long_one();
+    h.op(OperatorCmd::Halt {
+        scope: Scope::Account,
+        note: "t".into(),
+    })
+    .unwrap();
+    refused(&mut h, HoldReason::OperatorAccount);
+
+    let mut h = long_one();
+    h.op(OperatorCmd::Halt {
+        scope: Scope::Strategy(sid("a")),
+        note: "t".into(),
+    })
+    .unwrap();
+    refused(&mut h, HoldReason::OperatorStrategy);
+
+    let mut h = long_one();
+    h.inp(Input::Storage { low: true, free_bytes: 0 });
+    refused(&mut h, HoldReason::StorageLow);
+
+    // No configuration: there is no strategy and no margin policy either, so
+    // the order is refused for more than one reason. The hold is among them.
+    let mut h = H::new();
+    h.inp(Input::Boot { binary: "test".into() });
+    let r = h.reduce_only_req("a", "k9", Side::Sell, "1", "100");
+    match h.new_order(r) {
+        NewOrderReply::Rejected { reasons } => {
+            assert!(reasons.contains(&RejectReason::Hold(HoldReason::NoConfig)), "{reasons:?}")
+        }
+        other => panic!("accepted without a configuration: {other:?}"),
+    }
+}
+
+/// A position nobody owns (a manual trade at the venue): the account is long
+/// 1, strategy a is flat and may not go short. Its reduce-only sell passes
+/// the mismatch hold and is still refused by its own position limit. The
+/// flag skips holds of the right-hand column, not the quantity check.
+#[test]
+fn reduce_only_order_is_still_bound_by_the_strategy_position_limit() {
+    let mut cfg = config_with_margin();
+    cfg.strategies.get_mut(&sid("a")).unwrap().limits.insert(
+        iid("X"),
+        PosLimit {
+            min: sq("0"),
+            max: sq("10"),
+        },
+    );
+    let mut h = H::ready_with(cfg);
+    h.venue(VenueInput::Fill(FillIn {
+        key: fkey("t1"),
+        order_id: None,
+        venue_oid: Some(void("manual")),
+        instrument: iid("X"),
+        side: Side::Buy,
+        qty: q("1"),
+        px: px("100"),
+        fee: Amount::ZERO,
+        venue_ts: h.now,
+    }));
+    assert_eq!(h.acct().pos, sq("1"));
+    assert_eq!(h.core.unattributed[&iid("X")].pos, sq("1"));
+    assert_eq!(h.book("a").pos, sq("0"));
+    assert_eq!(h.core.holds(None), vec![HoldReason::Mismatch]);
+
+    let r = h.reduce_only_req("a", "k1", Side::Sell, "1", "100");
+    assert_eq!(
+        h.new_order(r),
+        NewOrderReply::Rejected { reasons: vec![RejectReason::StrategyPositionLimit] }
+    );
+    assert_eq!(h.sends(), vec![]);
+}
+
+/// Without a margin policy the table does not apply: every hold refuses
+/// every new order, as before the table existed. So re-deciding a journal
+/// recorded without a policy gives the recorded result.
+#[test]
+fn without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order() {
+    fn refused(h: &mut H, hold: HoldReason) {
+        assert_eq!(h.core.config.policy.margin, None);
+        assert_eq!(h.core.holds(None), vec![hold.clone()]);
+        let r = h.reduce_only_req("a", "k9", Side::Sell, "1", "100");
+        assert_eq!(
+            h.new_order(r),
+            NewOrderReply::Rejected { reasons: vec![RejectReason::Hold(hold.clone())] },
+            "without a margin policy {hold:?} let a reduce-only order through"
+        );
+    }
+    fn long_one() -> H {
+        let mut h = H::ready();
+        h.long("a", "k1", "1");
+        h
+    }
+
+    // Resync: the link came back and nothing was confirmed yet.
+    let mut h = long_one();
+    h.venue(VenueInput::Link {
+        up: false,
+        session: h.session,
+        reason: "ws closed".into(),
+    });
+    h.session += 1;
+    let session = h.session;
+    h.venue(VenueInput::Link {
+        up: true,
+        session,
+        reason: "reconnected".into(),
+    });
+    refused(&mut h, HoldReason::Resync);
+
+    // In doubt: strategy b's order got no answer.
+    let mut h = long_one();
+    let b = h.accept("b", "k1", Side::Buy, "1", "100");
+    h.venue(VenueInput::SendResult {
+        order_id: b,
+        outcome: SendOutcome::Unknown { reason: "timeout".into() },
+        timing: Default::default(),
+    });
+    refused(&mut h, HoldReason::InDoubt);
+
+    // Mismatch: an order at the venue that the OMS did not send.
+    let mut h = long_one();
+    let (session, queried_at) = (h.session, h.now + 1);
+    h.venue(VenueInput::OpenOrders {
+        session,
+        queried_at,
+        orders: vec![VenueOpenOrder {
+            venue_oid: void("m1"),
+            order_id: None,
+            instrument: iid("X"),
+            side: Side::Buy,
+            remaining: Some(q("1")),
+        }],
+    });
+    refused(&mut h, HoldReason::Mismatch);
+}
+
 #[test]
 fn acknowledging_one_mismatch_does_not_clear_another() {
     let mut h = H::ready();
