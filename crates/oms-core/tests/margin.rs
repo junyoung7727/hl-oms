@@ -2302,3 +2302,44 @@ fn stale_age_starts_at_link_up_when_no_report_has_arrived() {
         vec![stale_cancel(bid), cancel_sent(bid, 1)]
     );
 }
+
+/// S23. Nothing is cancelled while the link is down, however old the report
+/// is: a cancel could not be sent. And nothing is cancelled without a
+/// margin policy, also when a report of an earlier configuration is still
+/// in the state.
+#[test]
+fn stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off() {
+    // The link is down.
+    let mut h = at_base_100();
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    link_down(&mut h);
+    h.commands.clear();
+    h.advance(61 * SEC);
+    assert_eq!(decided(&h.tick()), vec![], "a cancel with the link down");
+    h.advance(3_600 * SEC);
+    assert_eq!(decided(&h.tick()), vec![], "a cancel with the link down");
+    assert_eq!(h.order(bid).cancel, None);
+    assert_eq!(h.commands, vec![]);
+
+    // The policy was taken out of the configuration.
+    let mut h = at_base_100();
+    let bid = resting(&mut h, "a", "bid", Side::Buy, "0.2", "90");
+    let out = h.inp(Input::Config(Box::new(CoreConfig {
+        version: 2,
+        ..config()
+    })));
+    assert!(matches!(out.reply, Some(Reply::Config(Ok(2)))));
+    h.commands.clear();
+    h.advance(61 * SEC);
+    assert_eq!(decided(&h.tick()), vec![], "a cancel without a policy");
+    assert_eq!(h.order(bid).cancel, None);
+    assert_eq!(h.commands, vec![]);
+
+    // It never was in the configuration.
+    let mut h = H::ready();
+    let bid = h.accept("a", "bid", Side::Buy, "0.2", "90");
+    h.placed_open(bid, "bid");
+    h.advance(61 * SEC);
+    assert_eq!(decided(&h.tick()), vec![], "a cancel without a policy");
+    assert_eq!(h.order(bid).cancel, None);
+}

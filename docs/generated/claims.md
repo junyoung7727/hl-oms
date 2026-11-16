@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `a02927c5cc47d9b7`, 검증 결과의 다이제스트 `44860df661c2396d`.
+> 소스 다이제스트 `68a6e52cce3a4b6d`, 검증 결과의 다이제스트 `44860df661c2396d`.
 
 주장 63건: 통과 0, 실패 0, 미실행 2, 이전 버전 결과 61.
 
@@ -1428,4 +1428,5 @@
 |---|---|---|
 | `core/report_stale_past_the_cancel_limit_cancels_each_plain_order_once` | 미실행 |  |
 | `core/stale_age_starts_at_link_up_when_no_report_has_arrived` | 미실행 |  |
+| `core/stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off` | 미실행 |  |
 

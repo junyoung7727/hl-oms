@@ -1440,6 +1440,11 @@ impl Tx<'_> {
         let Some(policy) = &self.core.config.policy.margin else {
             return Ok(());
         };
+        // With the link down a cancel cannot be sent, and no report can
+        // arrive: nothing is asked for.
+        if !self.core.link.up {
+            return Ok(());
+        }
         // Measured from the query time of the last recorded report, or from
         // the moment the current link session came up when that is later.
         let margin = &self.core.margin;
