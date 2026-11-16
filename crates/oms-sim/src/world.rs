@@ -65,6 +65,8 @@ pub struct Profile {
     pub p_price: u32,
     pub p_funding: u32,
     pub p_clear: u32,
+    /// Virtual time at the start of the run.
+    pub start_at: Ts,
 }
 
 impl Profile {
@@ -103,6 +105,7 @@ impl Profile {
             p_price: 0,
             p_funding: 0,
             p_clear: 0,
+            start_at: 1_700_000_000_000_000,
         }
     }
 
@@ -183,9 +186,12 @@ impl Profile {
             name: "margin_calm",
             margin: true,
             p_reduce_only: 150,
-            p_price: 60,
+            p_price: 100,
             p_funding: 10,
-            p_clear: 15,
+            p_clear: 5,
+            // Twelve seconds before a UTC midnight (day 19676), so that a
+            // run of about 25 s crosses it.
+            start_at: 19_676 * DAY_US - 12_000_000,
             ..Profile::calm()
         }
     }
@@ -243,6 +249,17 @@ pub struct SimStats {
     pub reducing_plain_rejects: u64,
     /// Reduce-only requests accepted while REDUCING.
     pub reducing_reduce_only_accepts: u64,
+    /// Times the operator's clear ended REDUCING.
+    pub reducing_clears: u64,
+    /// Times the operator's clear was refused.
+    pub clear_refusals: u64,
+    /// Reports that rolled the day base to a new UTC day while REDUCING.
+    pub reducing_day_rolls: u64,
+    /// Reports recorded while REDUCING whose account value was back within
+    /// the daily-loss limit of the day base.
+    pub reducing_recoveries: u64,
+    /// Restarts while the journal said REDUCING.
+    pub reducing_restarts: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -316,6 +333,7 @@ enum Inflight {
 struct MarginBefore {
     exposure: Option<i128>,
     reducing: bool,
+    day_base: Option<Amount>,
 }
 
 pub const INSTANCE: u64 = 0x51_4d_55_4c;
@@ -433,7 +451,7 @@ impl World {
         let mut w = World {
             seed,
             rng: Rng::new(seed),
-            now: 1_700_000_000_000_000,
+            now: p.start_at,
             step: 0,
             core: Core::new(INSTANCE),
             durable: Vec::new(),
@@ -939,7 +957,71 @@ impl World {
     // ---- margin rules: what the world checks after every input ------------
 
     fn margin_before(&self) -> MarginBefore {
-        MarginBefore { exposure: self.oracle_exposure(), reducing: self.core.margin.reducing.is_some() }
+        MarginBefore {
+            exposure: self.oracle_exposure(),
+            reducing: self.core.margin.reducing.is_some(),
+            day_base: self.core.margin.day_base.as_ref().map(|b| b.value),
+        }
+    }
+
+    /// Whether the durable journal says the account is REDUCING. Fails when
+    /// a `reducing_cleared` stands under an input that is not the
+    /// operator's clear (S14).
+    fn journal_reducing(&self) -> Result<bool, Violation> {
+        let mut reducing = false;
+        for rec in &self.durable {
+            for e in &rec.events {
+                match e {
+                    Event::ReducingEntered { .. } => reducing = true,
+                    Event::ReducingCleared { .. } => {
+                        if !matches!(rec.input, Input::Operator(OperatorCmd::ClearReduce { .. })) {
+                            return Err(self.violation(
+                                "reducing-release",
+                                format!("record {} clears REDUCING and its input is not the operator's clear", rec.seq),
+                            ));
+                        }
+                        reducing = false;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(reducing)
+    }
+
+    /// S14: REDUCING ends only by the operator's clear.
+    fn check_release(&mut self, input: &Input, out: &Output, before: &MarginBefore) -> Result<(), Violation> {
+        let is_clear = matches!(input, Input::Operator(OperatorCmd::ClearReduce { .. }));
+        if is_clear && matches!(out.reply, Some(Reply::Operator(Err(_)))) {
+            self.stats.clear_refusals += 1;
+        }
+        if !before.reducing {
+            return Ok(());
+        }
+        if self.core.margin.reducing.is_none() {
+            if !is_clear || !out.events.iter().any(|e| matches!(e, Event::ReducingCleared { .. })) {
+                return Err(self.violation("reducing-release", format!("REDUCING ended by {input:?} with events {:?}", out.events)));
+            }
+            self.stats.reducing_clears += 1;
+            return Ok(());
+        }
+        // Still REDUCING. Note the things that must not end it.
+        for e in &out.events {
+            match e {
+                Event::DayBaseSet { set_by: BaseSetBy::Report, .. } => self.stats.reducing_day_rolls += 1,
+                Event::MarginReported { .. } => {
+                    let value = self.core.margin.report.as_ref().map(|r| i128::from(r.account_value.0));
+                    if let (Some(value), Some(base)) = (value, before.day_base.map(|b| i128::from(b.0))) {
+                        // Not more than 5 % below the base any more.
+                        if (base - value) * 10_000 <= 500 * base {
+                            self.stats.reducing_recoveries += 1;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     /// Account exposure worked out by the world from the core's books: the
@@ -962,6 +1044,7 @@ impl World {
     }
 
     fn check_margin_rules(&mut self, input: &Input, out: &Output, before: &MarginBefore) -> Result<(), Violation> {
+        self.check_release(input, out, before)?;
         if out.events.iter().any(|e| matches!(e, Event::ReducingEntered { .. })) {
             // S8: every plain order that is open at the entry has a cancel
             // request when the input that entered is done.
@@ -1042,6 +1125,17 @@ impl World {
         // were waiting for them: nothing of them was ever released.
         self.pending.clear();
         self.core = self.rebuild()?;
+        if self.p.margin {
+            // S14: a restart neither ends REDUCING nor starts it.
+            let said = self.journal_reducing()?;
+            if self.core.margin.reducing.is_some() != said {
+                return Err(self.violation(
+                    "reducing-release",
+                    format!("after a restart REDUCING is {} and the journal says {said}", self.core.margin.reducing.is_some()),
+                ));
+            }
+            self.stats.reducing_restarts += u64::from(said);
+        }
         self.core
             .check_invariants()
             .map_err(|e| self.violation("structural-invariant", format!("{e} after recovery")))?;
@@ -1252,6 +1346,9 @@ impl World {
         let rebuilt = self.rebuild()?;
         if rebuilt != self.core {
             return Err(self.violation("replay-equivalence", "state rebuilt from the journal differs from the live state".into()));
+        }
+        if self.p.margin {
+            self.journal_reducing()?;
         }
         // Re-deciding every recorded input reproduces the recorded events.
         let mut redo = Core::new(INSTANCE);
@@ -1464,6 +1561,17 @@ impl World {
             self.check_always()?;
         }
         self.commit()
+    }
+
+    /// One operator command.
+    pub fn operator(&mut self, cmd: OperatorCmd) -> Result<(), Violation> {
+        self.feed(Input::Operator(cmd))?;
+        self.commit()
+    }
+
+    /// Kills the process and starts it again from the journal.
+    pub fn restart(&mut self) -> Result<(), Violation> {
+        self.crash()
     }
 
     /// One new-order request of a strategy.

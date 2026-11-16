@@ -67,6 +67,15 @@ fn run_profile(p: Profile) -> Vec<SimStats> {
             sum(|s| s.reducing_plain_rejects),
             sum(|s| s.reducing_reduce_only_accepts),
         );
+        println!(
+            "profile={} margin: reducing_clears={} clear_refusals={} reducing_day_rolls={} reducing_recoveries={} reducing_restarts={}",
+            p.name,
+            sum(|s| s.reducing_clears),
+            sum(|s| s.clear_refusals),
+            sum(|s| s.reducing_day_rolls),
+            sum(|s| s.reducing_recoveries),
+            sum(|s| s.reducing_restarts),
+        );
     }
     all
 }
@@ -377,5 +386,46 @@ fn profile_margin_calm_reducing_invariant() {
         assert!(total(all, |s| s.reducing_entry_cancels) > 0, "no plain order was open at an entry");
         assert!(total(all, |s| s.reducing_plain_rejects) > 0, "no plain order was refused while REDUCING");
         assert!(total(all, |s| s.reducing_reduce_only_accepts) > 0, "no reduce-only order was accepted while REDUCING");
+    }
+}
+
+fn is_reducing(w: &World) -> bool {
+    w.core.holds(None).contains(&oms_core::HoldReason::Reducing)
+}
+
+/// S14: only an operator input ends REDUCING. First one exact sequence
+/// (a restart, then a recovered account value, then the clear), then the
+/// random runs of `margin_calm`, which cross a UTC midnight. A run itself
+/// fails (`reducing-release`) when the latch is gone after an input that is
+/// not the operator's clear, when the journal holds a `reducing_cleared`
+/// under another input, or when a restart gives a state that differs from
+/// what the journal says.
+#[test]
+fn profile_margin_calm_release_invariant() {
+    let mut w = scripted_margin_world();
+    // A withdrawal of 6 reads as a loss of 6 %.
+    w.venue.deposit(amount("-6"));
+    w.advance(1_000_000).unwrap();
+    assert!(is_reducing(&w));
+    // A restart keeps the latch.
+    w.restart().unwrap();
+    w.advance(5_000_000).unwrap();
+    assert_eq!(w.stats.crashes, 1);
+    assert_eq!(reported_value(&w), Some(amount("94")), "reports arrive again after the restart");
+    assert!(is_reducing(&w), "a restart does not end REDUCING");
+    // The account value comes back to the day base. The latch stays.
+    w.venue.deposit(amount("6"));
+    w.advance(1_000_000).unwrap();
+    assert_eq!(reported_value(&w), Some(amount("100")));
+    assert!(is_reducing(&w), "a recovery does not end REDUCING");
+    // The operator's clear ends it.
+    w.operator(oms_core::OperatorCmd::ClearReduce { note: "checked by hand".into() }).unwrap();
+    assert!(!is_reducing(&w));
+
+    let all = margin_calm_runs();
+    if all.len() >= 10 {
+        assert!(total(all, |s| s.reducing_clears) > 0, "REDUCING was never cleared by the operator");
+        assert!(total(all, |s| s.reducing_day_rolls) > 0, "no run crossed midnight while REDUCING");
+        assert!(total(all, |s| s.reducing_recoveries) > 0, "the account value never recovered while REDUCING");
     }
 }
