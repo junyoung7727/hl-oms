@@ -12,7 +12,7 @@
 - [x] Test `profile_margin_calm` (seam D, S5): fails when on some interleaving a plain order was accepted with account exposure above the limit at acceptance.
 - [x] Test `profile_margin_calm_reducing_invariant` (seam D, S8): fails when while REDUCING a plain order is accepted, or a plain order open at entry has no cancel request.
 - [x] Test `profile_margin_calm_release_invariant` (seam D, S14): fails when REDUCING ends by a restart, a new day or a recovery and not by an operator input.
-- [ ] Test `profile_margin_lossy` (seam D, S11, S23): fails when an invariant breaks when reports are dropped or delayed or the node restarts.
+- [x] Test `profile_margin_lossy` (seam D, S11, S23): fails when an invariant breaks when reports are dropped or delayed or the node restarts.
 - [ ] Test `existing_profiles_give_the_same_run_with_margin_off` (seam D, S21): for a fixed list of seeds of each existing profile, the journal hash of the run (the `trace_hash` of the run statistics, a hash of every journal record's bytes) is compared with a literal recorded by running the same seed on main at 84db0f9. Fails when any hash differs with no margin policy. It never compares two runs of the same build. The state digest is not compared, because the state gains fields in this work.
 - [ ] Stated and not proven here: anything about the real venue; fills that beat a cancel; exposure after price moves.
 - [ ] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.

@@ -65,6 +65,11 @@ pub struct Profile {
     pub p_price: u32,
     pub p_funding: u32,
     pub p_clear: u32,
+    /// The venue leaves margin queries unanswered for a while.
+    pub p_margin_outage: u32,
+    /// The venue states no margin at all for the position for a while, so
+    /// that the MM buffer trips.
+    pub p_mm_squeeze: u32,
     /// Virtual time at the start of the run.
     pub start_at: Ts,
 }
@@ -105,6 +110,8 @@ impl Profile {
             p_price: 0,
             p_funding: 0,
             p_clear: 0,
+            p_margin_outage: 0,
+            p_mm_squeeze: 0,
             start_at: 1_700_000_000_000_000,
         }
     }
@@ -196,6 +203,38 @@ impl Profile {
         }
     }
 
+    /// `margin_calm` with a lossy network, link drops, process restarts,
+    /// margin queries that go unanswered for a while or are answered late,
+    /// and a venue that at times states too little margin for the position.
+    pub fn margin_lossy() -> Profile {
+        let calm = Profile::margin_calm();
+        Profile {
+            name: "margin_lossy",
+            margin: true,
+            // Orders rest longer than in `lossy` (fewer fills and strategy
+            // cancels), so that a stale cancel finds orders to cancel.
+            p_new: 230,
+            p_cancel: 40,
+            p_fill: 150,
+            p_tick: 150,
+            // Fewer link drops and restarts than `crashy`: each one costs
+            // the margin rules a fresh report, and a run that is blind most
+            // of the time accepts too few plain orders to say anything.
+            p_link_drop: 3,
+            p_crash: 2,
+            p_operator: 2,
+            p_commit: 500,
+            p_reduce_only: calm.p_reduce_only,
+            p_price: calm.p_price,
+            p_funding: calm.p_funding,
+            p_clear: 12,
+            p_margin_outage: 2,
+            p_mm_squeeze: 1,
+            start_at: calm.start_at,
+            ..Profile::lossy()
+        }
+    }
+
     /// The profiles that existed before the margin rules. None of them sets
     /// a margin policy.
     pub fn all() -> Vec<Profile> {
@@ -260,6 +299,17 @@ pub struct SimStats {
     pub reducing_recoveries: u64,
     /// Restarts while the journal said REDUCING.
     pub reducing_restarts: u64,
+    /// Plain requests refused with `MarginUnavailable`.
+    pub margin_unavailable_rejects: u64,
+    /// Margin reports the core did not record (late, or of an old session).
+    pub reports_dropped: u64,
+    /// Ticks at which the stale-cancel condition held and a plain order
+    /// was open.
+    pub stale_cancel_ticks: u64,
+    /// Cancel requests made by the rule `MarginStale`.
+    pub stale_rule_cancels: u64,
+    /// Times the account entered REDUCING by the MM buffer.
+    pub mm_entries: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -376,6 +426,12 @@ pub struct World {
     /// Number of the last margin query. It rises for the life of the
     /// process, as the node's does.
     margin_seq: u64,
+    /// The venue answers no margin query before this time.
+    margin_out_until: Ts,
+    /// The venue states no margin for the position before this time.
+    mm_squeeze_until: Ts,
+    /// When the current link session came up, by the world's own clock.
+    link_up_at: Option<Ts>,
     pub stats: SimStats,
 }
 
@@ -472,6 +528,9 @@ impl World {
             accepted_keys: BTreeMap::new(),
             external_seen: false,
             margin_seq: 0,
+            margin_out_until: 0,
+            mm_squeeze_until: 0,
+            link_up_at: None,
             stats: SimStats { trace_hash: 0xcbf2_9ce4_8422_2325, ..SimStats::default() },
             p,
         };
@@ -791,6 +850,7 @@ impl World {
                 if epoch == self.epoch && !self.link_up {
                     self.session += 1;
                     self.link_up = true;
+                    self.link_up_at = Some(self.now);
                     let session = self.session;
                     self.feed(Input::Venue(VenueInput::Link { up: true, session, reason: "connected".into() }))?;
                     self.schedule(1_000, Net::Reconcile { epoch, n: 0 });
@@ -826,8 +886,14 @@ impl World {
                 if epoch != self.epoch || self.chance(self.p.p_query_lost) {
                     return Ok(());
                 }
+                let late = self.p.margin && matches!(q, Query::Margin { .. }) && self.chance(self.p.p_req_slow);
                 let inputs = self.answer(session, queried_at, q);
-                let d = self.net_delay();
+                let mut d = self.net_delay();
+                if late {
+                    // An answer that is old when it arrives, and that a
+                    // later query's answer can overtake.
+                    d += self.rng.range(200_000, 1_500_000);
+                }
                 self.schedule(d, Net::QueryResp { epoch, inputs });
             }
             Net::QueryResp { epoch, inputs } => {
@@ -888,6 +954,7 @@ impl World {
 
     fn answer(&self, session: u64, queried_at: Ts, q: Query) -> Vec<VenueInput> {
         match q {
+            Query::Margin { .. } if self.now < self.margin_out_until => Vec::new(),
             Query::Margin { seq } => vec![VenueInput::MarginReport(MarginReportIn {
                 session,
                 seq,
@@ -1043,8 +1110,51 @@ impl World {
         Some((position + buys).max(sells - position).max(0))
     }
 
+    /// S23: once the link has been up, without a recorded margin report,
+    /// for longer than the stale-cancel limit, a tick leaves no open plain
+    /// order without a cancel request. The link-up time is the world's own.
+    fn check_stale_cancel(&mut self) -> Result<(), Violation> {
+        let Some(up_at) = self.link_up_at.filter(|_| self.link_up) else { return Ok(()) };
+        let reported_at = self.core.margin.report.as_ref().map_or(0, |r| r.queried_at);
+        if self.now.saturating_sub(reported_at.max(up_at)) <= STALE_CANCEL_US {
+            return Ok(());
+        }
+        let mut open_plain = false;
+        for o in self.core.open.iter().filter_map(|id| self.core.order(*id)).filter(|o| !o.reduce_only) {
+            if o.cancel.is_none() {
+                return Err(self.violation(
+                    "stale-cancel",
+                    format!("plain order {} has no cancel request after a tick past the stale-cancel limit", o.id),
+                ));
+            }
+            open_plain = true;
+        }
+        self.stats.stale_cancel_ticks += u64::from(open_plain);
+        Ok(())
+    }
+
     fn check_margin_rules(&mut self, input: &Input, out: &Output, before: &MarginBefore) -> Result<(), Violation> {
         self.check_release(input, out, before)?;
+        let is_report = matches!(input, Input::Venue(VenueInput::MarginReport(_)));
+        if is_report && out.events.is_empty() {
+            self.stats.reports_dropped += 1;
+        }
+        for e in &out.events {
+            match e {
+                Event::CancelRequested { by: Actor::Rule(RuleId::MarginStale), .. } => self.stats.stale_rule_cancels += 1,
+                Event::ReducingEntered { rule, .. } => {
+                    // Only a margin report latches; staleness never does.
+                    if !is_report {
+                        return Err(self.violation("reducing-entry", format!("REDUCING entered by {input:?}")));
+                    }
+                    self.stats.mm_entries += u64::from(*rule == RuleId::MmBuffer);
+                }
+                _ => {}
+            }
+        }
+        if matches!(input, Input::Tick) {
+            self.check_stale_cancel()?;
+        }
         if out.events.iter().any(|e| matches!(e, Event::ReducingEntered { .. })) {
             // S8: every plain order that is open at the entry has a cancel
             // request when the input that entered is done.
@@ -1071,6 +1181,9 @@ impl World {
                 if !req.reduce_only && reasons.contains(&RejectReason::Hold(HoldReason::Reducing)) {
                     self.stats.reducing_plain_rejects += 1;
                 }
+                if !req.reduce_only && reasons.contains(&RejectReason::MarginUnavailable) {
+                    self.stats.margin_unavailable_rejects += 1;
+                }
             }
             Some(Reply::NewOrder(NewOrderReply::Accepted { order_id })) if before.reducing && !req.reduce_only => {
                 // S8: while REDUCING no plain order is accepted.
@@ -1085,6 +1198,14 @@ impl World {
                 // S5: at acceptance the exposure is within twice the
                 // account value, or the order did not raise it.
                 self.stats.leverage_checked += 1;
+                // S11: the numbers it was judged with are fresh.
+                let age = self.core.margin.report.as_ref().and_then(|r| self.now.checked_sub(r.queried_at));
+                if age.is_none_or(|age| age > MARGIN_MAX_AGE_US) {
+                    return Err(self.violation(
+                        "margin-fresh",
+                        format!("plain order {order_id} accepted with a margin report of age {age:?} us"),
+                    ));
+                }
                 let value = self.core.margin.report.as_ref().map(|r| r.account_value.0);
                 let (Some(value), Some(was), Some(is)) = (value, before.exposure, self.oracle_exposure()) else {
                     return Err(self.violation(
@@ -1142,6 +1263,7 @@ impl World {
         self.epoch += 1;
         self.inflight.clear();
         self.link_up = false;
+        self.link_up_at = None;
         self.feed(Input::Boot { binary: "sim".into() })?;
         self.commit()?;
         let d = self.rng.range(100_000, 3_000_000);
@@ -1155,6 +1277,7 @@ impl World {
         }
         self.stats.link_drops += 1;
         self.link_up = false;
+        self.link_up_at = None;
         let inflight = std::mem::take(&mut self.inflight);
         for (_, kind) in inflight {
             self.feed(Input::Venue(unknown_result(kind, "connection lost before a response")))?;
@@ -1292,6 +1415,22 @@ impl World {
         let rate = self.rng.range(100, 3_000) as i64;
         let rate = if self.rng.chance(500) { rate } else { -rate };
         self.venue.charge_funding(&inst(), rate);
+    }
+
+    /// The venue leaves margin queries unanswered for 0.5 to 2.5 s.
+    fn act_margin_outage(&mut self) {
+        self.margin_out_until = self.now + self.rng.range(500_000, 2_500_000);
+    }
+
+    /// The venue states a margin of zero for the position for 0.2 to 1 s.
+    fn act_mm_squeeze(&mut self) {
+        self.mm_squeeze_until = self.now + self.rng.range(200_000, 1_000_000);
+        self.venue.margin_used_override.insert(inst(), Amount::ZERO);
+    }
+
+    fn end_mm_squeeze(&mut self) {
+        self.mm_squeeze_until = 0;
+        self.venue.margin_used_override.remove(&inst());
     }
 
     /// The operator asks to end REDUCING. The core may refuse.
@@ -1455,6 +1594,9 @@ impl World {
 
     fn one_step(&mut self) -> Result<(), Violation> {
         self.now += self.rng.range(1_000, 30_000);
+        if self.mm_squeeze_until != 0 && self.now >= self.mm_squeeze_until {
+            self.end_mm_squeeze();
+        }
         self.drain_due()?;
         let p = self.p.clone();
         let roll = self.rng.below(1000) as u32;
@@ -1489,6 +1631,10 @@ impl World {
             self.act_funding();
         } else if pick(p.p_clear) {
             self.act_clear()?;
+        } else if pick(p.p_margin_outage) {
+            self.act_margin_outage();
+        } else if pick(p.p_mm_squeeze) {
+            self.act_mm_squeeze();
         }
         self.check_always()
     }
@@ -1496,6 +1642,8 @@ impl World {
     /// Stops injecting faults and lets the system settle.
     fn quiesce(&mut self) -> Result<(), Violation> {
         self.calm = true;
+        self.margin_out_until = 0;
+        self.end_mm_squeeze();
         if self.core.halt_account.is_some() {
             self.act_operator()?;
         }

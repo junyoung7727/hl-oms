@@ -76,6 +76,15 @@ fn run_profile(p: Profile) -> Vec<SimStats> {
             sum(|s| s.reducing_recoveries),
             sum(|s| s.reducing_restarts),
         );
+        println!(
+            "profile={} margin: margin_unavailable_rejects={} reports_dropped={} stale_cancel_ticks={} stale_rule_cancels={} mm_entries={}",
+            p.name,
+            sum(|s| s.margin_unavailable_rejects),
+            sum(|s| s.reports_dropped),
+            sum(|s| s.stale_cancel_ticks),
+            sum(|s| s.stale_rule_cancels),
+            sum(|s| s.mm_entries),
+        );
     }
     all
 }
@@ -355,6 +364,10 @@ fn margin_calm_runs() -> &'static [SimStats] {
     RUNS.get_or_init(|| run_profile(Profile::margin_calm()))
 }
 
+// The assertions on what a margin profile reached are made from 40 seeds on:
+// some of the things counted (a midnight while REDUCING, a stale cancel that
+// finds an order) happen a few times in 40 runs.
+
 fn total(all: &[SimStats], f: fn(&SimStats) -> u64) -> u64 {
     all.iter().map(f).sum()
 }
@@ -366,7 +379,7 @@ fn total(all: &[SimStats], f: fn(&SimStats) -> u64) -> u64 {
 #[test]
 fn profile_margin_calm() {
     let all = margin_calm_runs();
-    if all.len() >= 10 {
+    if all.len() >= 40 {
         // The profile must reach the rule: orders were judged, and some
         // were refused by it.
         assert!(total(all, |s| s.leverage_checked) > 0, "no accepted plain order was judged");
@@ -381,7 +394,7 @@ fn profile_margin_calm() {
 #[test]
 fn profile_margin_calm_reducing_invariant() {
     let all = margin_calm_runs();
-    if all.len() >= 10 {
+    if all.len() >= 40 {
         assert!(total(all, |s| s.reducing_entries) > 0, "REDUCING was never entered");
         assert!(total(all, |s| s.reducing_entry_cancels) > 0, "no plain order was open at an entry");
         assert!(total(all, |s| s.reducing_plain_rejects) > 0, "no plain order was refused while REDUCING");
@@ -423,9 +436,37 @@ fn profile_margin_calm_release_invariant() {
     assert!(!is_reducing(&w));
 
     let all = margin_calm_runs();
-    if all.len() >= 10 {
+    if all.len() >= 40 {
         assert!(total(all, |s| s.reducing_clears) > 0, "REDUCING was never cleared by the operator");
         assert!(total(all, |s| s.reducing_day_rolls) > 0, "no run crossed midnight while REDUCING");
         assert!(total(all, |s| s.reducing_recoveries) > 0, "the account value never recovered while REDUCING");
+    }
+}
+
+/// S11 and S23, and every check of `margin_calm`, while margin reports are
+/// lost, unanswered for a while or answered late, the link drops and the
+/// process restarts. On top of the checks of `margin_calm` a run fails
+/// when a plain order is accepted without a fresh margin report
+/// (`margin-fresh`), when a tick past the stale-cancel limit leaves an open
+/// plain order without a cancel request (`stale-cancel`), or when REDUCING
+/// is entered by anything but a margin report (`reducing-entry`).
+#[test]
+fn profile_margin_lossy() {
+    let all = run_profile(Profile::margin_lossy());
+    if all.len() >= 40 {
+        // The faults happened ...
+        assert!(total(&all, |s| u64::from(s.crashes)) > 0, "no restart was injected");
+        assert!(total(&all, |s| u64::from(s.link_drops)) > 0, "the link never dropped");
+        assert!(total(&all, |s| s.reports_dropped) > 0, "no late margin report was dropped");
+        // ... and the rules were reached under them.
+        assert!(total(&all, |s| s.leverage_checked) > 0, "no accepted plain order was judged");
+        assert!(total(&all, |s| s.margin_unavailable_rejects) > 0, "no plain order was refused for want of a fresh report");
+        assert!(total(&all, |s| s.stale_cancel_ticks) > 0, "no tick came past the stale-cancel limit with a plain order open");
+        assert!(total(&all, |s| s.stale_rule_cancels) > 0, "the stale cancel never asked for a cancel");
+        assert!(total(&all, |s| s.reducing_entries) > 0, "REDUCING was never entered");
+        assert!(total(&all, |s| s.mm_entries) > 0, "the MM buffer never tripped");
+        assert!(total(&all, |s| s.reducing_restarts) > 0, "no restart happened while REDUCING");
+        assert!(total(&all, |s| s.clear_refusals) > 0, "no clear was refused");
+        assert!(total(&all, |s| s.reducing_clears) > 0, "REDUCING was never cleared by the operator");
     }
 }
