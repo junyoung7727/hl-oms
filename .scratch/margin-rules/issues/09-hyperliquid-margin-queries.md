@@ -7,7 +7,7 @@
 **Status:** claimed
 
 - [x] Test `documented_clearinghouse_state_parses_to_a_margin_report` (seam B, S25): fails when any field of the documented example maps to a wrong value. Does not prove the live answer equals the documented one.
-- [ ] Test `missing_zero_or_unparseable_max_leverage_rejects_the_whole_report` (seam B, S25): fails when a partial report is returned.
+- [x] Test `missing_zero_or_unparseable_max_leverage_rejects_the_whole_report` (seam B, S25): fails when a partial report is returned.
 - [ ] Test `any_unparseable_number_rejects_the_whole_report` (seam B, S25): fails when a bad account value, size, position value or margin is defaulted to zero.
 - [ ] Test `a_position_on_an_unconfigured_coin_is_kept` (seam B, S22): fails when it is dropped, so the MM-buffer rule cannot see a manual position.
 - [ ] Test `documented_active_asset_data_parses_leverage_and_mode` (seam B, S17): fails when the mapping is wrong. Does not prove it answers with no position (T11).

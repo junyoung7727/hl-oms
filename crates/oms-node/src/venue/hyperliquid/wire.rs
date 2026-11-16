@@ -349,6 +349,26 @@ pub fn fill_input(f: &HlFill, instance_id: u64) -> Option<FillIn> {
 /// Turns the answer to a `clearinghouseState` query into the core's input:
 /// a whole margin report, or a refusal with its reason. Never a part of one.
 pub fn margin_input(body: &serde_json::Value, session: u64, seq: u64, queried_at: Ts) -> VenueInput {
+    match margin_report(body) {
+        Ok((account_value, positions)) => VenueInput::MarginReport(MarginReportIn {
+            session,
+            seq,
+            queried_at,
+            account_value,
+            positions,
+        }),
+        Err(reason) => VenueInput::MarginReportInvalid {
+            session,
+            seq,
+            queried_at,
+            reason,
+        },
+    }
+}
+
+/// The account value and every position of a `clearinghouseState` answer,
+/// or the first thing in it that cannot be read.
+fn margin_report(body: &serde_json::Value) -> Result<(Amount, Vec<MarginPosition>), String> {
     let amount = |v: Option<&serde_json::Value>| {
         v.and_then(|v| v.as_str())
             .and_then(|s| Amount::parse(s).ok())
@@ -360,32 +380,39 @@ pub fn margin_input(body: &serde_json::Value, session: u64, seq: u64, queried_at
             .unwrap_or(0)
     };
     let list = body.get("assetPositions").and_then(|a| a.as_array());
-    let positions = list
-        .into_iter()
-        .flatten()
-        .filter_map(|p| {
-            let pos = p.get("position")?;
-            Some(MarginPosition {
-                instrument: instrument_id(pos.get("coin")?.as_str()?)?,
-                szi: SQty::parse(pos.get("szi")?.as_str()?).ok()?,
-                position_value: amount(pos.get("positionValue")),
-                margin_used: amount(pos.get("marginUsed")),
-                leverage_type: match pos.pointer("/leverage/type").and_then(|t| t.as_str()) {
-                    Some("isolated") => LeverageType::Isolated,
-                    _ => LeverageType::Cross,
-                },
-                leverage_value: whole(pos.pointer("/leverage/value")),
-                max_leverage: whole(pos.get("maxLeverage")),
-            })
-        })
-        .collect();
-    VenueInput::MarginReport(MarginReportIn {
-        session,
-        seq,
-        queried_at,
-        account_value: amount(body.pointer("/marginSummary/accountValue")),
-        positions,
-    })
+    let mut positions = Vec::new();
+    for (i, p) in list.into_iter().flatten().enumerate() {
+        let Some(pos) = p.get("position") else { continue };
+        let Some(coin) = pos.get("coin").and_then(|c| c.as_str()) else { continue };
+        let Some(instrument) = instrument_id(coin) else { continue };
+        let Some(szi) = pos.get("szi").and_then(|s| s.as_str()).and_then(|s| SQty::parse(s).ok()) else {
+            continue;
+        };
+        let at = format!("assetPositions[{i}] ({coin})");
+        // The maintenance margin rate is 1 / (2 x maxLeverage): a report
+        // without it cannot be judged, and zero would divide by nothing.
+        let max_leverage = match pos.get("maxLeverage") {
+            None => return Err(format!("{at}: maxLeverage is missing")),
+            Some(v) => match v.as_u64().and_then(|n| u32::try_from(n).ok()) {
+                None => return Err(format!("{at}: maxLeverage is not a whole number: {v}")),
+                Some(0) => return Err(format!("{at}: maxLeverage is zero")),
+                Some(n) => n,
+            },
+        };
+        positions.push(MarginPosition {
+            instrument,
+            szi,
+            position_value: amount(pos.get("positionValue")),
+            margin_used: amount(pos.get("marginUsed")),
+            leverage_type: match pos.pointer("/leverage/type").and_then(|t| t.as_str()) {
+                Some("isolated") => LeverageType::Isolated,
+                _ => LeverageType::Cross,
+            },
+            leverage_value: whole(pos.pointer("/leverage/value")),
+            max_leverage,
+        });
+    }
+    Ok((amount(body.pointer("/marginSummary/accountValue")), positions))
 }
 
 #[cfg(test)]
@@ -460,6 +487,56 @@ mod tests {
                 }],
             })
         );
+    }
+
+    /// The documented example with one more position (BTC, sound) in front
+    /// and `change` applied to the documented ETH position.
+    fn state_with(change: impl FnOnce(&mut serde_json::Value)) -> serde_json::Value {
+        let mut body = doc_state();
+        let mut btc = body["assetPositions"][0].clone();
+        btc["position"]["coin"] = json!("BTC");
+        body["assetPositions"].as_array_mut().unwrap().insert(0, btc);
+        change(&mut body["assetPositions"][1]["position"]);
+        body
+    }
+
+    /// The refusal reason of an answer that must be refused as a whole.
+    /// Panics if any report came out of it.
+    fn refusal(body: &serde_json::Value) -> String {
+        match margin_input(body, 7, 3, 1_700_000_000_000_000) {
+            VenueInput::MarginReportInvalid {
+                session: 7,
+                seq: 3,
+                queried_at: 1_700_000_000_000_000,
+                reason,
+            } => reason,
+            other => panic!("not refused as a whole: {other:?}\nanswer: {body}"),
+        }
+    }
+
+    /// S25. The maintenance margin rate comes from `maxLeverage`. Without a
+    /// usable one on any position there is no report at all: the sound
+    /// position next to it is not reported either.
+    #[test]
+    fn missing_zero_or_unparseable_max_leverage_rejects_the_whole_report() {
+        let missing = state_with(|p| {
+            p.as_object_mut().unwrap().remove("maxLeverage");
+        });
+        assert_eq!(refusal(&missing), "assetPositions[1] (ETH): maxLeverage is missing");
+        let zero = state_with(|p| p["maxLeverage"] = json!(0));
+        assert_eq!(refusal(&zero), "assetPositions[1] (ETH): maxLeverage is zero");
+        for bad in [json!("50"), json!(null), json!(-1), json!(50.5), json!(4294967296u64), json!([50])] {
+            let body = state_with(|p| p["maxLeverage"] = bad.clone());
+            assert_eq!(
+                refusal(&body),
+                format!("assetPositions[1] (ETH): maxLeverage is not a whole number: {bad}")
+            );
+        }
+        // The two-position answer is sound when nothing is changed.
+        assert!(matches!(
+            margin_input(&state_with(|_| {}), 7, 3, 1),
+            VenueInput::MarginReport(r) if r.positions.len() == 2
+        ));
     }
 
     /// Response examples from the Exchange endpoint documentation.
