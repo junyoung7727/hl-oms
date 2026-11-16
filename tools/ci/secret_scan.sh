@@ -2,7 +2,7 @@
 # Fails when a tracked file looks like it holds a key, a wallet address, a
 # journal, a snapshot or a log. This repository is public.
 #
-# What it checks, on tracked files only (`git ls-files`):
+# What it checks, on tracked files only (`git ls-files -z`):
 #   1. names: .env files, logs, key files, data/ directories, and this
 #      project's journal, snapshot and torn-tail files;
 #   2. binary files: none may be tracked unless listed in ALLOW_BINARY;
@@ -34,7 +34,10 @@ hex_runs() { # prints each distinct hex run of 40+ digits in file $1, lower case
   tr -c '0-9a-fA-F' '\n' < "$1" | grep -xE '[0-9a-fA-F]{40,}' | tr 'A-F' 'a-f' | sort -u || true
 }
 
-mapfile -t files < <(git ls-files)
+# -z: raw paths. Without it git prints a path that holds a non-ASCII byte, a
+# tab, a quote or a backslash as a quoted string, and no check would read
+# that file.
+mapfile -d '' -t files < <(git ls-files -z)
 
 # 1. File names that must never be tracked. The journal crate writes
 #    journal-<seq>.oj, snapshot-<seq>.snap, <name>.at-<offset>.<n>.bin and

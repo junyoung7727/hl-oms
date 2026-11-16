@@ -17,7 +17,8 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 base="${1:?usage: rustfmt_added.sh <base-commit>}"
 
-mapfile -t added < <(git diff --name-only --no-renames --diff-filter=A "$base"...HEAD -- '*.rs')
+# -z: raw paths, so a file name with non-ASCII bytes is read as it is.
+mapfile -d '' -t added < <(git diff -z --name-only --no-renames --diff-filter=A "$base"...HEAD -- '*.rs')
 if [[ ${#added[@]} -eq 0 ]]; then
   echo "rustfmt-added: no Rust file added since $base"
   exit 0
