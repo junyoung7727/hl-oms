@@ -1325,6 +1325,45 @@ fn reduce_only_order_is_rejected_by_every_block_all_hold() {
     }
 }
 
+/// A position nobody owns (a manual trade at the venue): the account is long
+/// 1, strategy a is flat and may not go short. Its reduce-only sell passes
+/// the mismatch hold and is still refused by its own position limit. The
+/// flag skips holds of the right-hand column, not the quantity check.
+#[test]
+fn reduce_only_order_is_still_bound_by_the_strategy_position_limit() {
+    let mut cfg = config_with_margin();
+    cfg.strategies.get_mut(&sid("a")).unwrap().limits.insert(
+        iid("X"),
+        PosLimit {
+            min: sq("0"),
+            max: sq("10"),
+        },
+    );
+    let mut h = H::ready_with(cfg);
+    h.venue(VenueInput::Fill(FillIn {
+        key: fkey("t1"),
+        order_id: None,
+        venue_oid: Some(void("manual")),
+        instrument: iid("X"),
+        side: Side::Buy,
+        qty: q("1"),
+        px: px("100"),
+        fee: Amount::ZERO,
+        venue_ts: h.now,
+    }));
+    assert_eq!(h.acct().pos, sq("1"));
+    assert_eq!(h.core.unattributed[&iid("X")].pos, sq("1"));
+    assert_eq!(h.book("a").pos, sq("0"));
+    assert_eq!(h.core.holds(None), vec![HoldReason::Mismatch]);
+
+    let r = h.reduce_only_req("a", "k1", Side::Sell, "1", "100");
+    assert_eq!(
+        h.new_order(r),
+        NewOrderReply::Rejected { reasons: vec![RejectReason::StrategyPositionLimit] }
+    );
+    assert_eq!(h.sends(), vec![]);
+}
+
 #[test]
 fn acknowledging_one_mismatch_does_not_clear_another() {
     let mut h = H::ready();
