@@ -4,7 +4,7 @@
 
 **Blocked by:** 01, 02
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Test `instrument_with_unknown_venue_setting_holds_plain_orders` (seam A, S17): fails when a plain order is accepted before the setting is known in this link session.
 - [ ] Test `a_setting_that_differs_from_config_holds_only_that_instrument` (seam A, S17): fails when cross mode or leverage 3 passes, or another instrument is held too.
