@@ -312,3 +312,25 @@ fn plain_order_is_rejected_margin_unavailable_without_a_fresh_report() {
     h.margin_report(1, 3, h.now, "1000");
     h.accept("a", "k4", Side::Buy, "1", "100");
 }
+
+/// G5. The wall clock stepped backwards after a query was sent: the report
+/// carries a query time after the record time. Its age is negative, and a
+/// negative age is not fresh. Age zero is.
+#[test]
+fn margin_report_dated_after_the_record_time_is_not_fresh() {
+    let mut h = H::ready_with(config_with_margin());
+    let queried_at = h.now + 10 * SEC;
+    let out = h.margin_report(1, 1, queried_at, "1000");
+    // The report is recorded: the number decides the order, not the time.
+    assert_eq!(names(&out), vec!["margin_reported"]);
+
+    // Ten seconds before its query time.
+    assert_eq!(h.reject("a", "k1", Side::Buy, "1", "100"), vec![RejectReason::MarginUnavailable]);
+    // One microsecond before its query time.
+    next_input_at(&mut h, queried_at - 1);
+    assert_eq!(h.reject("a", "k2", Side::Buy, "1", "100"), vec![RejectReason::MarginUnavailable]);
+    // At its query time the age is zero.
+    next_input_at(&mut h, queried_at);
+    let id = h.accept("a", "k3", Side::Buy, "1", "100");
+    assert_eq!(h.order(id).accepted_at, queried_at);
+}

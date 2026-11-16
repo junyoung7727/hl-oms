@@ -197,7 +197,12 @@ impl Core {
         let (Some(policy), Some(report)) = (&self.config.policy.margin, &self.margin.report) else {
             return false;
         };
-        at.saturating_sub(report.queried_at) <= policy.margin_max_age_us
+        // Age = record time − query time, both node clock values. A query
+        // time after the record time means the clock stepped backwards: the
+        // age is negative and the report does not count until it is not.
+        let not_from_the_future = report.queried_at <= at;
+        let young_enough = at.saturating_sub(report.queried_at) <= policy.margin_max_age_us;
+        not_from_the_future && young_enough
     }
 
     /// The gateway command an event calls for, if any. Used only by live
