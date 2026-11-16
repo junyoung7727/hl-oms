@@ -1,18 +1,18 @@
 {
-  "build": "oms-node 0.1.0 src:4792170a151450cf",
+  "build": "oms-node 0.1.0 src:762a4acf55af90fb",
   "commit_layout": "commit_thread",
   "connections": 4,
   "durability": "fdatasync after every commit batch",
   "environment": {
-    "busiest_processes": "57.0 python;33.3 xtask;18.6 WebKitWebProces;",
+    "busiest_processes": "200 ps;68.2 python;31.4 chrome;",
     "cpu": "Intel(R) Core(TM) i9-14900K",
     "cpus_online": "32",
     "device_model": "Samsung SSD 970 EVO Plus 2TB",
-    "df": "/dev/nvme1n1    1.8T  293G  1.5T  17% /mnt/nvme",
+    "df": "/dev/nvme1n1    1.8T  294G  1.5T  17% /mnt/nvme",
     "energy_pref": "balance_performance",
     "governor": "powersave",
     "kernel": "7.0.0-42-generic",
-    "loadavg": "2.53 2.30 2.41",
+    "loadavg": "3.90 3.84 3.47",
     "memory": "30Gi",
     "mount": "/dev/nvme1n1 ext4 rw,relatime",
     "os": "Ubuntu 26.04 LTS",
@@ -21,7 +21,7 @@
   },
   "label": "nvme-default-limits",
   "limits": "shipped defaults",
-  "node_config": "\ndata_dir = \"/mnt/nvme/gitproject/.cargo-target/hl-oms-t13/perf-data-limits/data\"\n\n[runtime]\ninline_commit = false\ntick_ms = 100\nreconcile_ms = 200\nsweep_ms = 5000\n\n\n[venue]\nkind = \"sim\"\nsocket = \"/mnt/nvme/gitproject/.cargo-target/hl-oms-t13/perf-data-limits/venue.sock\"\nrequest_timeout_ms = 2000\n\n[core]\nversion = 1\n\n[core.instruments.X]\nqty_step = \"0.001\"\npx_tick = \"0.1\"\nmin_notional = \"0\"\nmax_order_qty = \"100\"\nmax_order_notional = \"100000000\"\naccount_pos_min = \"-100000000\"\naccount_pos_max = \"100000000\"\n\n[core.strategies.a]\nenabled = true\nmax_open_orders = 500\n[core.strategies.a.limits.X]\nmin = \"-100000000\"\nmax = \"100000000\"\n\n# Every policy value at its shipped default.\n[core.policy]\n",
+  "node_config": "\ndata_dir = \"/mnt/nvme/gitproject/.cargo-target/hl-oms-integ/perf-data-t13-limits/data\"\n\n[runtime]\ninline_commit = false\ntick_ms = 100\nreconcile_ms = 200\nsweep_ms = 5000\n\n\n[venue]\nkind = \"sim\"\nsocket = \"/mnt/nvme/gitproject/.cargo-target/hl-oms-integ/perf-data-t13-limits/venue.sock\"\nrequest_timeout_ms = 2000\n\n[core]\nversion = 1\n\n[core.instruments.X]\nqty_step = \"0.001\"\npx_tick = \"0.1\"\nmin_notional = \"0\"\nmax_order_qty = \"100\"\nmax_order_notional = \"100000000\"\naccount_pos_min = \"-100000000\"\naccount_pos_max = \"100000000\"\n\n[core.strategies.a]\nenabled = true\nmax_open_orders = 500\n[core.strategies.a.limits.X]\nmin = \"-100000000\"\nmax = \"100000000\"\n\n# Every policy value at its shipped default.\n[core.policy]\n",
   "runs": [
     {
       "core_stats": {
@@ -36,14 +36,14 @@
       "ingress_rate_limited": 116901,
       "ingress_refused_overload": 0,
       "journal": {
-        "bytes_written": 4543577,
+        "bytes_written": 4628960,
         "durable_seq": 9317,
-        "last_commit_age_us": 744388,
-        "last_commit_at": 1794837389077285,
+        "last_commit_age_us": 738115,
+        "last_commit_at": 1794839212322351,
         "last_snapshot_at": 0,
         "last_snapshot_error": null,
         "last_snapshot_seq": 0,
-        "last_sync_us": 4551,
+        "last_sync_us": 4845,
         "records_since_snapshot": 9317
       },
       "load": {
@@ -58,38 +58,38 @@
           "Overloaded": 116901
         },
         "generator_lag": {
-          "max": 2384,
-          "mean": 62,
-          "min": 3,
+          "max": 4307,
+          "mean": 64,
+          "min": 4,
           "name": "generator lag (actual - intended send)",
-          "p50": 57,
-          "p90": 74,
-          "p99": 84,
-          "p999": 142,
+          "p50": 58,
+          "p90": 78,
+          "p99": 106,
+          "p999": 190,
           "samples": 120000,
           "unit": "us"
         },
         "latency_intended_to_response": {
-          "max": 9594,
-          "mean": 170,
-          "min": 9,
+          "max": 9189,
+          "mean": 176,
+          "min": 10,
           "name": "intended send -> response",
-          "p50": 98,
-          "p90": 151,
-          "p99": 2785,
-          "p999": 5107,
+          "p50": 94,
+          "p90": 161,
+          "p99": 2870,
+          "p999": 5665,
           "samples": 120000,
           "unit": "us"
         },
         "latency_sent_to_response": {
-          "max": 9522,
-          "mean": 107,
-          "min": 1,
+          "max": 9115,
+          "mean": 111,
+          "min": 4,
           "name": "actual send -> response",
-          "p50": 31,
-          "p90": 83,
-          "p99": 2719,
-          "p999": 5072,
+          "p50": 28,
+          "p90": 89,
+          "p99": 2801,
+          "p999": 5593,
           "samples": 119999,
           "unit": "us"
         },
@@ -98,21 +98,21 @@
         "seconds": 60,
         "sent": 120000,
         "unanswered": 0,
-        "wall_start_us": 1794837328113115
+        "wall_start_us": 1794839151358252
       },
       "pipeline": {
         "commands_released": 3099,
-        "commits": 7582,
+        "commits": 8032,
         "events_published": 0,
         "inputs": 19269,
-        "journal_bytes": 4543577,
+        "journal_bytes": 4628960,
         "last_batch": 1,
-        "last_commit_at": 1794837389077285,
+        "last_commit_at": 1794839212322351,
         "last_snapshot_at": 0,
         "last_snapshot_error": null,
         "last_snapshot_seq": 0,
-        "last_sync_us": 4551,
-        "max_batch": 28,
+        "last_sync_us": 4845,
+        "max_batch": 23,
         "noop_inputs": 9321,
         "records": 9317,
         "replies_released": 3100,
@@ -136,7 +136,7 @@
           0
         ],
         "high_water": [
-          171,
+          175,
           2,
           5
         ],
@@ -148,64 +148,64 @@
       },
       "stage_us": {
         "batch": {
-          "count": 7582,
-          "max_us": 28,
+          "count": 8032,
+          "max_us": 23,
           "mean_us": 1,
           "p50_us": 1,
           "p90_us": 2,
-          "p999_us": 19,
+          "p999_us": 17,
           "p99_us": 2
         },
         "core": {
           "count": 19269,
-          "max_us": 465,
-          "mean_us": 3,
-          "p50_us": 1,
-          "p90_us": 10,
-          "p999_us": 51,
-          "p99_us": 21
+          "max_us": 160,
+          "mean_us": 4,
+          "p50_us": 2,
+          "p90_us": 14,
+          "p999_us": 71,
+          "p99_us": 35
         },
         "persist": {
           "count": 9317,
-          "max_us": 14490,
-          "mean_us": 3110,
+          "max_us": 14639,
+          "mean_us": 3271,
           "p50_us": 2815,
-          "p90_us": 5119,
-          "p999_us": 12287,
+          "p90_us": 5631,
+          "p999_us": 9215,
           "p99_us": 6143
         },
         "queue": {
           "count": 19269,
-          "max_us": 2695,
-          "mean_us": 52,
-          "p50_us": 10,
+          "max_us": 2789,
+          "mean_us": 55,
+          "p50_us": 12,
           "p90_us": 87,
-          "p999_us": 2695,
-          "p99_us": 1663
+          "p999_us": 2789,
+          "p99_us": 2047
         },
         "sync": {
-          "count": 7582,
-          "max_us": 9123,
-          "mean_us": 2565,
+          "count": 8032,
+          "max_us": 9044,
+          "mean_us": 2590,
           "p50_us": 2559,
           "p90_us": 2815,
-          "p999_us": 9123,
+          "p999_us": 6655,
           "p99_us": 5631
         },
         "total": {
           "count": 9317,
-          "max_us": 14526,
-          "mean_us": 3163,
+          "max_us": 14657,
+          "mean_us": 3333,
           "p50_us": 2815,
-          "p90_us": 5119,
-          "p999_us": 12287,
-          "p99_us": 7679
+          "p90_us": 5631,
+          "p999_us": 9215,
+          "p99_us": 8191
         }
       }
     }
   ],
   "seconds_per_rate": 60,
-  "source_digest": "4792170a151450cf",
-  "taken_at_us": 1794837389848722,
+  "source_digest": "762a4acf55af90fb",
+  "taken_at_us": 1794839213112839,
   "venue": "simvenue (auto-fill full), same host, Unix socket"
 }
