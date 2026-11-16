@@ -865,6 +865,9 @@ impl Core {
             Event::AccountModeNoted { mode, .. } => {
                 self.margin.account_mode = Some(mode.clone());
             }
+            Event::ReducingCleared { .. } => {
+                self.margin.reducing = None;
+            }
         }
         Ok(())
     }

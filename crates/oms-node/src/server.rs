@@ -537,6 +537,14 @@ async fn dispatch(
             });
             submit(s, ctx, Lane::Control, id, input, permit)
         }),
+        Op::ClearReduce { note } => operator_only(s).or_else(|| {
+            let input = Input::Operator(OperatorCmd::ClearReduce { note });
+            submit(s, ctx, Lane::Control, id, input, permit)
+        }),
+        Op::RebaseDay { note } => operator_only(s).or_else(|| {
+            let input = Input::Operator(OperatorCmd::RebaseDay { note });
+            submit(s, ctx, Lane::Control, id, input, permit)
+        }),
         Op::Snapshot => operator_only(s).or_else(|| {
             ctx.shared.snapshot_requested.store(true, Ordering::SeqCst);
             Some(Response::ok(id, "snapshot requested"))

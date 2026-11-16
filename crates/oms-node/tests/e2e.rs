@@ -864,3 +864,218 @@ fn node_reads_venue_setting_and_account_mode_and_status_shows_them() {
     assert_eq!(env.venue_dump()["venue_setting_queries"], 0);
     assert_eq!(env.venue_dump()["account_mode_queries"], 0);
 }
+
+// ---- C-MARGIN: operator commands, restart (ticket 05) ---------------------------
+
+/// S14. `clear-reduce` and `rebase-day` exist only on the admin socket. From
+/// a strategy connection both are refused with `forbidden`, nothing reaches
+/// the core, and the latch and the day base stay as they were: a strategy
+/// cannot release itself.
+#[test]
+fn strategy_socket_cannot_clear_reducing_or_rebase() {
+    let mut env = margin_node("margin-strategy-socket", "100");
+    lose_to(&mut env, "94");
+    let before = env.status()["core"]["margin"].clone();
+    assert_eq!(before["day_base"]["value"], "100");
+    let records = env.status()["core"]["stats"].clone();
+
+    let mut c = env.client("a");
+    assert_eq!(api_error(c.call(Op::ClearReduce { note: "let me trade".into() })), ErrorCode::Forbidden);
+    assert_eq!(api_error(c.call(Op::RebaseDay { note: "let me trade".into() })), ErrorCode::Forbidden);
+
+    let st = env.status();
+    assert_eq!(st["core"]["margin"]["reducing"], before["reducing"]);
+    assert_eq!(st["core"]["margin"]["day_base"], before["day_base"]);
+    assert_eq!(st["core"]["holds"], json!(["reducing"]));
+    assert_eq!(st["core"]["stats"], records);
+}
+
+/// Runs the operator tool's own code (`omsctl`) with these arguments on a
+/// socket of the node.
+fn omsctl(socket: &std::path::Path, args: &[&str]) -> Result<String, String> {
+    let mut all = vec!["--socket".to_string(), socket.display().to_string()];
+    all.extend(args.iter().map(|a| a.to_string()));
+    oms_api::ctl::run(&all)
+}
+
+/// The `core.margin` part of what `omsctl status` prints.
+fn omsctl_margin(env: &Env) -> serde_json::Value {
+    let text = omsctl(&env.admin_sock(), &["status"]).expect("omsctl status");
+    let st: serde_json::Value = serde_json::from_str(&text).expect("omsctl status prints JSON");
+    json!({"margin": st["core"]["margin"], "holds": st["core"]["holds"]})
+}
+
+/// S14, S15. The operator tool end to end: `omsctl clear-reduce --note` and
+/// `omsctl rebase-day --note` on the admin socket reach the core of a
+/// running node, the answers come back, and `omsctl status` shows the state
+/// (NORMAL or REDUCING), the rule and the day base before and after.
+#[test]
+fn omsctl_clear_reduce_and_rebase_day_work_end_to_end() {
+    let mut env = margin_node("margin-omsctl", "100");
+    let admin = env.admin_sock();
+    let shown = omsctl_margin(&env);
+    assert_eq!(shown["margin"]["reducing"], serde_json::Value::Null);
+    assert_eq!(shown["margin"]["day_base"]["value"], "100");
+    assert_eq!(shown["margin"]["day_base"]["set_by"], "report");
+
+    // NORMAL: there is nothing to clear, and the tool says why.
+    let err = omsctl(&admin, &["clear-reduce", "--note", "nothing to clear"]).unwrap_err();
+    assert_eq!(err, "BadRequest: not_reducing: the account is not REDUCING");
+
+    lose_to(&mut env, "94");
+    let shown = omsctl_margin(&env);
+    assert_eq!(shown["margin"]["reducing"]["rule"], "daily_loss");
+    assert_eq!(shown["margin"]["day_base"]["value"], "100");
+    assert_eq!(shown["holds"], json!(["reducing"]));
+
+    // The note is part of the command: without it the tool sends nothing,
+    // and a blank one is refused by the node.
+    assert_eq!(omsctl(&admin, &["clear-reduce"]).unwrap_err(), "missing --note");
+    let err = omsctl(&admin, &["clear-reduce", "--note", " "]).unwrap_err();
+    assert_eq!(err, "BadRequest: note_required: the command needs a note");
+    assert_eq!(omsctl_margin(&env)["holds"], json!(["reducing"]));
+
+    // The release. The account value 94 is the new day base.
+    assert_eq!(omsctl(&admin, &["clear-reduce", "--note", "loss understood"]).unwrap(), "\"cleared\"");
+    let shown = omsctl_margin(&env);
+    assert_eq!(shown["margin"]["reducing"], serde_json::Value::Null);
+    assert_eq!(shown["margin"]["day_base"]["value"], "94");
+    assert_eq!(shown["margin"]["day_base"]["set_by"], "operator");
+    assert_eq!(shown["holds"], json!([]));
+    // The next reports at 94 do not latch again.
+    let seq = shown["margin"]["seq"].as_u64().expect("seq");
+    wait_margin(&env, "three more reports", |m| m["seq"].as_u64().is_some_and(|n| n >= seq + 3));
+    assert_eq!(omsctl_margin(&env)["margin"]["reducing"], serde_json::Value::Null);
+
+    // A deposit of 26, then the rebase: the base follows, the state does not
+    // change.
+    env.ctl(json!({"account_value": {"value": "120"}}));
+    wait_margin(&env, "the deposit", |m| m["account_value"] == "120");
+    assert_eq!(omsctl(&admin, &["rebase-day"]).unwrap_err(), "missing --note");
+    assert_eq!(omsctl(&admin, &["rebase-day", "--note", "deposit of 26"]).unwrap(), "\"rebased\"");
+    let shown = omsctl_margin(&env);
+    assert_eq!(shown["margin"]["day_base"]["value"], "120");
+    assert_eq!(shown["margin"]["day_base"]["set_by"], "operator");
+    assert_eq!(shown["margin"]["reducing"], serde_json::Value::Null);
+
+    // The same tool on the trading socket is refused.
+    let err = omsctl(&env.sock(), &["--strategy", "a", "clear-reduce", "--note", "x"]).unwrap_err();
+    assert_eq!(err, "Forbidden: operator operations need the admin socket");
+}
+
+/// S13. REDUCING and the day base are journal state. The node process is
+/// killed (SIGKILL) while REDUCING and started again: `status` shows the
+/// same latch (rule, detail, time of entry) and the same day base, although
+/// the venue's account value is what a fresh start would take as a new
+/// base. Plain orders stay refused. A clear survives a kill in the same
+/// way: after the next restart the account is NORMAL with the operator's
+/// base.
+#[test]
+fn reducing_and_day_base_survive_a_node_kill() {
+    let mut env = margin_node("margin-kill", "100");
+    lose_to(&mut env, "94");
+    let before = env.status()["core"]["margin"].clone();
+    assert_eq!(before["reducing"]["rule"], "daily_loss");
+    assert_eq!(before["day_base"]["value"], "100");
+
+    env.kill_node();
+    env.start_node();
+    // The restarted node is in session again and has taken new reports.
+    let seq_seen = |m: &serde_json::Value| m["seq"].as_u64().is_some_and(|n| n >= 3);
+    assert!(
+        env.wait(Duration::from_secs(20), || {
+            env.try_status().is_some_and(|st| {
+                st["core"]["boot"] == 2 && st["core"]["holds"] == json!(["reducing"]) && seq_seen(&st["core"]["margin"])
+            })
+        }),
+        "the restarted node did not come back REDUCING: {:?}\n{}",
+        env.try_status().map(|st| st["core"].to_string()),
+        env.log_tail(20)
+    );
+    let after = env.status()["core"]["margin"].clone();
+    assert_eq!(after["reducing"], before["reducing"], "the latch changed across the kill");
+    assert_eq!(after["day_base"], before["day_base"], "the day base changed across the kill");
+    assert_eq!(after["account_value"], "94");
+    let mut c = env.client("a");
+    match c.new_order(order_op("k1", Side::Buy, "0.1", "100", Tif::Gtc, 5_000)).unwrap() {
+        NewOrderReply::Rejected { reasons } => {
+            assert!(reasons.contains(&RejectReason::Hold(HoldReason::Reducing)), "{reasons:?}")
+        }
+        other => panic!("a plain order was not refused after the restart: {other:?}"),
+    }
+    drop(c);
+
+    // The operator clears, and the node is killed again.
+    assert_eq!(env.admin().call(Op::ClearReduce { note: "after the restart".into() }).unwrap(), json!("cleared"));
+    let cleared = env.status()["core"]["margin"].clone();
+    assert_eq!(cleared["day_base"]["value"], "94");
+    env.kill_node();
+    env.start_node();
+    env.wait_ready();
+    wait_margin(&env, "reports after the second restart", seq_seen);
+    let st = env.status();
+    assert_eq!(st["core"]["boot"], 3);
+    assert_eq!(st["core"]["margin"]["reducing"], serde_json::Value::Null);
+    assert_eq!(st["core"]["margin"]["day_base"], cleared["day_base"]);
+    assert_eq!(st["core"]["margin"]["day_base"]["set_by"], "operator");
+}
+
+/// S8, G7. Entry into REDUCING through a real node with many orders resting
+/// at the simulated venue: 300 plain orders of two strategies and 3
+/// reduce-only orders. After the loss report every plain order is cancelled
+/// at the venue and the three reduce-only orders are still open there. The
+/// burst of 300 cancels leaves the node working: margin reports keep
+/// arriving.
+#[test]
+fn reducing_cancels_every_resting_plain_order_through_the_node() {
+    let mut env = margin_node("margin-burst", "100000");
+    env.ctl(json!({"ref_price": {"instrument": "X", "px": "100"}}));
+    let mut a = env.client("a");
+    let mut b = env.client("b");
+    // Exposure: 150 buys at max(90, 100) = 15 000 against 150 sells at 110
+    // plus 3 at 120 = 16 860. Far below 2 x 100 000.
+    let mut plain = std::collections::BTreeSet::new();
+    for n in 0..150 {
+        let id = rest(&mut env, &mut a, &format!("bid{n}"), Side::Buy, "90", false);
+        plain.insert(env.cloid(id));
+        let id = rest(&mut env, &mut b, &format!("ask{n}"), Side::Sell, "110", false);
+        plain.insert(env.cloid(id));
+    }
+    let mut flagged = std::collections::BTreeSet::new();
+    for n in 0..3 {
+        let id = rest(&mut env, &mut a, &format!("flagged{n}"), Side::Sell, "120", true);
+        flagged.insert(env.cloid(id));
+    }
+    assert_eq!((plain.len(), flagged.len()), (300, 3));
+    assert!(
+        env.wait(Duration::from_secs(10), || env.status()["core"]["working"] == 303),
+        "the orders never rested: {}",
+        env.status()["core"]
+    );
+    let all: std::collections::BTreeSet<String> = plain.union(&flagged).cloned().collect();
+    assert_eq!(open_at_venue(&mut env), all);
+
+    // The account loses 5.001 % of the base.
+    lose_to(&mut env, "94999");
+    let mut left = open_at_venue(&mut env);
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    while left != flagged && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+        left = open_at_venue(&mut env);
+    }
+    let plain_left: Vec<&String> = left.intersection(&plain).collect();
+    assert!(plain_left.is_empty(), "{} plain orders are still open at the venue after entry", plain_left.len());
+    assert_eq!(left, flagged, "a reduce-only order was cancelled");
+    // The node agrees with the venue once the cancels are confirmed.
+    assert!(
+        env.wait(Duration::from_secs(10), || env.status()["core"]["open_orders"] == 3),
+        "the node still counts {} open orders",
+        env.status()["core"]["open_orders"]
+    );
+    let st = env.status();
+    assert_eq!(st["core"]["holds"], json!(["reducing"]));
+    assert_eq!(st["core"]["mismatches_unacked"], json!([]));
+    // After the burst the margin poll still runs.
+    let seq = st["core"]["margin"]["seq"].as_u64().expect("seq");
+    wait_margin(&env, "reports after the cancel burst", |m| m["seq"].as_u64().is_some_and(|n| n >= seq + 3));
+}
