@@ -451,7 +451,7 @@ criterion = "종료 코드 3과 오류 문구"
 tests = ["core/configuration_changes_are_validated_against_existing_exposure", "e2e/configuration_changes_need_a_new_version", "core/f10_config_validation_enforces_the_parked_fill_wait_rule", "node-unit/config::tests::mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused"]
 repro = "cargo test -p oms-node --test e2e configuration_changes && cargo test -p oms-node --lib config::tests"
 supports = "요구 R13, C-BOOT"
-not_covered = "설정 파일의 그 밖의 검증 규칙. 조회 weight 예산 검사와 runtime.venue_setting_poll_ms(뒤 티켓). account_modes_allowed의 내용"
+not_covered = "설정 파일의 그 밖의 검증 규칙. 조회 weight 예산 검사(뒤 티켓). account_modes_allowed의 내용(목록에 무엇을 적든 설정은 읽힌다. 허용 여부는 코어가 판정한다: V-MARGIN-9)"
 
 [[claim]]
 id = "V-OVL-1"

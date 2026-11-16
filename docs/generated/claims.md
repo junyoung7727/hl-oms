@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `35e367039c2d6298`, 검증 결과의 다이제스트 `0a86a80a92f2313c`.
+> 소스 다이제스트 `8b44821fd17e509c`, 검증 결과의 다이제스트 `0a86a80a92f2313c`.
 
 주장 61건: 통과 0, 실패 0, 미실행 4, 이전 버전 결과 57.
 
@@ -724,7 +724,7 @@
 - 판정 기준과 근거: 종료 코드 3과 오류 문구
 - 재현: `cargo test -p oms-node --test e2e configuration_changes && cargo test -p oms-node --lib config::tests`
 - 뒷받침하는 것: 요구 R13, C-BOOT
-- 확인하지 않은 범위: 설정 파일의 그 밖의 검증 규칙. 조회 weight 예산 검사와 runtime.venue_setting_poll_ms(뒤 티켓). account_modes_allowed의 내용
+- 확인하지 않은 범위: 설정 파일의 그 밖의 검증 규칙. 조회 weight 예산 검사(뒤 티켓). account_modes_allowed의 내용(목록에 무엇을 적든 설정은 읽힌다. 허용 여부는 코어가 판정한다: V-MARGIN-9)
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
