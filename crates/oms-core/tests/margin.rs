@@ -347,6 +347,9 @@ fn plain_order_is_rejected_margin_unavailable_without_a_fresh_report() {
 #[test]
 fn margin_report_dated_after_the_record_time_is_not_fresh() {
     let mut h = H::ready_with(config_with_margin());
+    // A reference price that stays fresh for the two refusals below, so
+    // that the date of the report is their only reason.
+    h.ref_price("X", "100");
     let queried_at = h.now + 10 * SEC;
     let out = h.margin_report(1, 1, queried_at, "1000");
     // The report is recorded: the number decides the order, not the time.
