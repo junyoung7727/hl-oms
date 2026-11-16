@@ -20,6 +20,8 @@
 //!   ack --id N --note TEXT
 //!   resolve --order N --note TEXT
 //!   adjust --instrument I --delta D [--target-strategy S] --note TEXT
+//!   clear-reduce --note TEXT     end REDUCING; the account value becomes the day base
+//!   rebase-day --note TEXT       after a deposit or withdrawal: account value becomes the day base
 //!   snapshot
 //! ```
 //!

@@ -819,3 +819,76 @@ fn strategy_socket_cannot_clear_reducing_or_rebase() {
     assert_eq!(st["core"]["holds"], json!(["reducing"]));
     assert_eq!(st["core"]["stats"], records);
 }
+
+/// Runs the operator tool's own code (`omsctl`) with these arguments on a
+/// socket of the node.
+fn omsctl(socket: &std::path::Path, args: &[&str]) -> Result<String, String> {
+    let mut all = vec!["--socket".to_string(), socket.display().to_string()];
+    all.extend(args.iter().map(|a| a.to_string()));
+    oms_api::ctl::run(&all)
+}
+
+/// The `core.margin` part of what `omsctl status` prints.
+fn omsctl_margin(env: &Env) -> serde_json::Value {
+    let text = omsctl(&env.admin_sock(), &["status"]).expect("omsctl status");
+    let st: serde_json::Value = serde_json::from_str(&text).expect("omsctl status prints JSON");
+    json!({"margin": st["core"]["margin"], "holds": st["core"]["holds"]})
+}
+
+/// S14, S15. The operator tool end to end: `omsctl clear-reduce --note` and
+/// `omsctl rebase-day --note` on the admin socket reach the core of a
+/// running node, the answers come back, and `omsctl status` shows the state
+/// (NORMAL or REDUCING), the rule and the day base before and after.
+#[test]
+fn omsctl_clear_reduce_and_rebase_day_work_end_to_end() {
+    let mut env = margin_node("margin-omsctl", "100");
+    let admin = env.admin_sock();
+    let shown = omsctl_margin(&env);
+    assert_eq!(shown["margin"]["reducing"], serde_json::Value::Null);
+    assert_eq!(shown["margin"]["day_base"]["value"], "100");
+    assert_eq!(shown["margin"]["day_base"]["set_by"], "report");
+
+    // NORMAL: there is nothing to clear, and the tool says why.
+    let err = omsctl(&admin, &["clear-reduce", "--note", "nothing to clear"]).unwrap_err();
+    assert_eq!(err, "BadRequest: not_reducing: the account is not REDUCING");
+
+    lose_to(&mut env, "94");
+    let shown = omsctl_margin(&env);
+    assert_eq!(shown["margin"]["reducing"]["rule"], "daily_loss");
+    assert_eq!(shown["margin"]["day_base"]["value"], "100");
+    assert_eq!(shown["holds"], json!(["reducing"]));
+
+    // The note is part of the command: without it the tool sends nothing,
+    // and a blank one is refused by the node.
+    assert_eq!(omsctl(&admin, &["clear-reduce"]).unwrap_err(), "missing --note");
+    let err = omsctl(&admin, &["clear-reduce", "--note", " "]).unwrap_err();
+    assert_eq!(err, "BadRequest: note_required: the command needs a note");
+    assert_eq!(omsctl_margin(&env)["holds"], json!(["reducing"]));
+
+    // The release. The account value 94 is the new day base.
+    assert_eq!(omsctl(&admin, &["clear-reduce", "--note", "loss understood"]).unwrap(), "\"cleared\"");
+    let shown = omsctl_margin(&env);
+    assert_eq!(shown["margin"]["reducing"], serde_json::Value::Null);
+    assert_eq!(shown["margin"]["day_base"]["value"], "94");
+    assert_eq!(shown["margin"]["day_base"]["set_by"], "operator");
+    assert_eq!(shown["holds"], json!([]));
+    // The next reports at 94 do not latch again.
+    let seq = shown["margin"]["seq"].as_u64().expect("seq");
+    wait_margin(&env, "three more reports", |m| m["seq"].as_u64().is_some_and(|n| n >= seq + 3));
+    assert_eq!(omsctl_margin(&env)["margin"]["reducing"], serde_json::Value::Null);
+
+    // A deposit of 26, then the rebase: the base follows, the state does not
+    // change.
+    env.ctl(json!({"account_value": {"value": "120"}}));
+    wait_margin(&env, "the deposit", |m| m["account_value"] == "120");
+    assert_eq!(omsctl(&admin, &["rebase-day"]).unwrap_err(), "missing --note");
+    assert_eq!(omsctl(&admin, &["rebase-day", "--note", "deposit of 26"]).unwrap(), "\"rebased\"");
+    let shown = omsctl_margin(&env);
+    assert_eq!(shown["margin"]["day_base"]["value"], "120");
+    assert_eq!(shown["margin"]["day_base"]["set_by"], "operator");
+    assert_eq!(shown["margin"]["reducing"], serde_json::Value::Null);
+
+    // The same tool on the trading socket is refused.
+    let err = omsctl(&env.sock(), &["--strategy", "a", "clear-reduce", "--note", "x"]).unwrap_err();
+    assert_eq!(err, "Forbidden: operator operations need the admin socket");
+}

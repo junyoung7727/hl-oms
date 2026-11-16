@@ -121,6 +121,12 @@ fn build(cmd: &str, args: &[String]) -> Result<Op, String> {
             delta: parse("--delta", SQty::parse(&need(args, "--delta")?))?,
             note: need(args, "--note")?,
         },
+        "clear-reduce" => Op::ClearReduce {
+            note: need(args, "--note")?,
+        },
+        "rebase-day" => Op::RebaseDay {
+            note: need(args, "--note")?,
+        },
         other => return Err(format!("unknown command {other}")),
     })
 }
