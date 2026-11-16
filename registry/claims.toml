@@ -890,18 +890,18 @@ not_covered = "주문 사이에 가격이 움직인 뒤의 노출은 지켜보�
 
 [[claim]]
 id = "V-MARGIN-11"
-statement = "증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이, 계좌 노출을 보여 준다. 정책이 없으면 묻지 않는다"
+statement = "증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이, 계좌 노출을 보여 준다. 링크가 올라오면 종목마다 거래소 설정을, 그리고 계좌 모드를 묻고, 포지션이 없는 종목의 설정은 정해진 간격으로 다시 묻는다. status는 종목별 거래소 설정과 계좌 모드, 그것이 정책과 맞는지를 보여 준다. 정책이 없으면 묻지 않는다"
 why = "코어의 규칙이 옳아도 조회가 연결되지 않으면 보고가 없어 모든 일반 주문이 거절되거나, 운영자가 왜 거절되는지 볼 수 없다"
 level = "프로세스"
-scope = "실제 oms-node와 simvenue 프로세스. 조회 간격 100 ms로 줄인 설정 1회, 정책 없는 설정 1회"
+scope = "실제 oms-node와 simvenue 프로세스. 조회 간격 100 ms(거래소 설정은 200 ms)로 줄인 설정, 정책 없는 설정"
 real = "oms-node(재조정 태스크의 타이머, 게이트웨이, 입력 큐, 저널, status), 소켓"
-simulated = "거래소(simvenue). 계좌 가치는 시험이 정한다"
-faults = "없음"
-criterion = "status의 core.margin(account_value, age_us, seq, fresh, account_exposure)과 simvenue가 센 조회 수"
-tests = ["e2e/node_polls_margin_and_status_shows_value_and_age", "e2e/status_shows_account_exposure"]
-repro = "cargo test -p oms-node --test e2e node_polls_margin && cargo test -p oms-node --test e2e status_shows_account_exposure"
+simulated = "거래소(simvenue). 계좌 가치, 종목의 거래소 설정, 계좌 모드는 시험이 정한다"
+faults = "거래소에서 바뀐 종목 설정(교차, 레버리지 3), 바뀐 계좌 모드(unifiedAccount), 스트림 끊김으로 생긴 새 링크 세션"
+criterion = "status의 core.margin(account_value, age_us, seq, fresh, account_exposure, venue_settings, account_mode), core.holds, simvenue가 센 조회 수"
+tests = ["e2e/node_polls_margin_and_status_shows_value_and_age", "e2e/status_shows_account_exposure", "e2e/node_reads_venue_setting_and_account_mode_and_status_shows_them"]
+repro = "cargo test -p oms-node --test e2e node_polls_margin && cargo test -p oms-node --test e2e status_shows_account_exposure && cargo test -p oms-node --test e2e node_reads_venue_setting"
 supports = "C-MARGIN"
-not_covered = "기본 간격 5초 그대로의 실행. Hyperliquid 게이트웨이(아직 이 조회에 답하지 않는다: 티켓 09). 운영자 명령과 재시작(뒤 티켓). 정확한 시간"
+not_covered = "기본 간격 5초(거래소 설정은 60초) 그대로의 실행. Hyperliquid 게이트웨이(아직 이 조회들에 답하지 않는다: 티켓 09). 포지션이 있는 종목의 설정이 보고로 갱신되는 것(simvenue의 보고에는 포지션이 없다: 티켓 10). 운영자 명령과 재시작(뒤 티켓). 정확한 시간"
 
 [[claim]]
 id = "V-MARGIN-9"

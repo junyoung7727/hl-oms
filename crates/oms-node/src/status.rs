@@ -85,6 +85,28 @@ pub fn status(ctx: &ApiCtx, strategy: Option<&StrategyId>) -> serde_json::Value 
             "seq": report.map(|r| r.seq),
             "positions": report.map(|r| &r.positions),
             "last_rejection": core.margin.last_rejection,
+            // What the venue told in this link session, per configured
+            // instrument: null while unknown. `as_configured` is false when
+            // the instrument is held by its setting.
+            "venue_settings": core
+                .config
+                .instruments
+                .keys()
+                .map(|i| {
+                    let seen = core.margin.venue_settings.get(i).map(|s| {
+                        serde_json::json!({
+                            "isolated": s.isolated,
+                            "leverage": s.leverage,
+                            "as_configured": core.venue_setting_is_as_configured(i),
+                        })
+                    });
+                    (i.to_string(), serde_json::json!(seen))
+                })
+                .collect::<serde_json::Map<String, serde_json::Value>>(),
+            // Null while the venue has not told it in this link session.
+            "account_mode": core.margin.account_mode.as_ref().map(|mode| {
+                serde_json::json!({ "mode": mode, "allowed": core.account_mode_is_allowed() })
+            }),
         })
     });
     serde_json::json!({

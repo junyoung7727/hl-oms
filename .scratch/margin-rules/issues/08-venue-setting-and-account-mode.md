@@ -14,7 +14,7 @@
 - [x] Test `unified_or_portfolio_account_mode_holds_the_account` (seam A, S18): fails when either mode lets a plain order through, also when it is on the allow-list.
 - [x] Test `an_account_mode_off_the_allow_list_or_unknown_holds_the_account` (seam A, S18): fails when an unlisted value, or no value in this link session, passes.
 - [x] Test `reduce_only_order_passes_the_venue_setting_and_account_mode_holds` (seam A, S17, S18): fails when it is rejected by either hold.
-- [ ] Test `node_reads_venue_setting_and_account_mode_and_status_shows_them` (seam C, S17, S18): fails when the queries, the simulated venue answers, the inputs or the status fields are not wired.
+- [x] Test `node_reads_venue_setting_and_account_mode_and_status_shows_them` (seam C, S17, S18): fails when the queries, the simulated venue answers, the inputs or the status fields are not wired.
 - [ ] Mutants: the mode comparison, the leverage comparison, the session reset and the two never-allowed modes are each caught by a named test.
 - [ ] Stated and not proven here: which mode string means standard (T10); whether the venue enforces the leverage on resting orders (T8).
 - [ ] Every test above was written first and seen red for the reason named, then made green (tdd skill); one commit per red→green cycle.
