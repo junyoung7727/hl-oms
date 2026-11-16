@@ -4,7 +4,7 @@
 
 **Blocked by:** 02, 08
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Test `documented_clearinghouse_state_parses_to_a_margin_report` (seam B, S25): fails when any field of the documented example maps to a wrong value. Does not prove the live answer equals the documented one.
 - [ ] Test `missing_zero_or_unparseable_max_leverage_rejects_the_whole_report` (seam B, S25): fails when a partial report is returned.
