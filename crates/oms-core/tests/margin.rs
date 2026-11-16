@@ -763,3 +763,47 @@ fn under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted() 
     // The accepted order is not cancelled by the latch that is already set.
     assert_eq!(h.order(order_id).cancel, None);
 }
+
+/// S9. An order that is still waiting for its send result when the account
+/// enters REDUCING gets the rule's cancel request at once, but no cancel is
+/// sent: the venue may not have the order yet. The cancel goes out in the
+/// input that brings the venue's acknowledgement. Until then the order can
+/// fill.
+#[test]
+fn an_order_pending_send_at_entry_is_cancelled_once_acknowledged() {
+    let mut h = at_base_100();
+    let pending = h.accept("a", "k1", Side::Buy, "1", "100");
+    assert_eq!(h.order(pending).phase, Phase::PendingSend);
+
+    let out = h.report_margin("94.99");
+    assert_eq!(
+        out.events[1..],
+        [
+            Event::ReducingEntered {
+                rule: RuleId::DailyLoss,
+                detail: "account value 94.99 is more than 500 bps below the day base 100".into(),
+            },
+            rule_cancel(pending),
+        ]
+    );
+    assert_eq!(
+        out.commands,
+        vec![],
+        "a cancel was sent before the venue acknowledged the order"
+    );
+    assert_eq!(h.cancels(), vec![]);
+
+    // Ticks in between send nothing either.
+    h.advance(SEC);
+    h.tick();
+    assert_eq!(h.cancels(), vec![]);
+
+    let out = h.placed_open(pending, "v1");
+    assert_eq!(names(&out), vec!["order_acked", "cancel_sent"]);
+    assert_eq!(out.events[1], cancel_sent(pending, 1));
+    assert_eq!(h.cancels(), vec![(pending, 1)]);
+    assert_eq!(
+        h.order(pending).cancel.as_ref().map(|c| c.by.clone()),
+        Some(Actor::Rule(RuleId::DailyLoss))
+    );
+}
