@@ -4,7 +4,7 @@
 
 **Blocked by:** 01, 02
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Test `first_report_sets_the_day_base` (seam A): fails when the first report emits no `day_base_set`.
 - [ ] Test `loss_greater_than_five_percent_of_the_base_enters_reducing` (seam A, S8): fails when 94.99 does not latch, or 95.00 does.
