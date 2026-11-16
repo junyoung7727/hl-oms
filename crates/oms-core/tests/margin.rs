@@ -1544,3 +1544,50 @@ fn a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again() {
     h.venue_setting("X", true, 2);
     h.accept("a", "k2", Side::Buy, "1", "100");
 }
+
+/// The next margin report of the current link session: account value 1000
+/// and one position on X with this margin mode and leverage.
+fn report_with_position_on_x(h: &mut H, leverage_type: LeverageType, leverage_value: u32) -> Output {
+    h.margin_seq += 1;
+    h.venue(VenueInput::MarginReport(MarginReportIn {
+        session: h.session,
+        seq: h.margin_seq,
+        queried_at: h.now,
+        account_value: amt("1000"),
+        positions: vec![MarginPosition {
+            leverage_type,
+            leverage_value,
+            ..position("X", 40)
+        }],
+    }))
+}
+
+/// S17. A position in a margin report states the margin mode and the
+/// leverage of its instrument, so every report is a source of the venue
+/// setting: a position that turns out to be on cross margin, or at another
+/// leverage, raises the hold with the report that shows it.
+#[test]
+fn a_cross_position_in_a_margin_report_raises_the_hold() {
+    let mut h = H::ready_with(config_with_margin());
+    h.ref_price("X", "100");
+
+    // The position is as the policy asks: no hold.
+    let out = report_with_position_on_x(&mut h, LeverageType::Isolated, 2);
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    h.accept("a", "k1", Side::Buy, "1", "100");
+
+    // The next report shows the position on cross margin.
+    let out = report_with_position_on_x(&mut h, LeverageType::Cross, 2);
+    assert_eq!(names(&out), vec!["margin_reported"]);
+    assert_eq!(h.reject("a", "k2", Side::Buy, "1", "100"), venue_setting_hold("X"));
+
+    // Isolated again, but at leverage 3.
+    report_with_position_on_x(&mut h, LeverageType::Isolated, 3);
+    assert_eq!(h.reject("a", "k2", Side::Buy, "1", "100"), venue_setting_hold("X"));
+
+    // A report that shows the policy's setting releases the hold.
+    report_with_position_on_x(&mut h, LeverageType::Isolated, 2);
+    h.accept("a", "k2", Side::Buy, "1", "100");
+    // The state rebuilt from the journal holds the same settings.
+    assert_eq!(h.rebuilt().margin, h.core.margin);
+}

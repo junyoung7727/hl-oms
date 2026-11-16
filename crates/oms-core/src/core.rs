@@ -790,6 +790,17 @@ impl Core {
             }
             Event::MarginReported { report } => {
                 self.margin.report = Some(report.clone());
+                // Every position states the margin mode and the leverage of
+                // its instrument: a report is a source of venue settings.
+                for p in &report.positions {
+                    self.margin.venue_settings.insert(
+                        p.instrument.clone(),
+                        VenueSettingSeen {
+                            isolated: p.leverage_type == crate::input::LeverageType::Isolated,
+                            leverage: p.leverage_value,
+                        },
+                    );
+                }
             }
             Event::MarginReportRejected { seq, queried_at, reason, .. } => {
                 self.margin.last_rejection = Some(MarginRejection {
