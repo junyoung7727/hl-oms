@@ -222,7 +222,7 @@ impl Tx<'_> {
         let mut why = Vec::new();
 
         for h in core.holds(Some(&r.strategy)) {
-            if r.reduce_only && matches!(h, HoldReason::Resync | HoldReason::InDoubt) {
+            if r.reduce_only && matches!(h, HoldReason::Resync | HoldReason::InDoubt | HoldReason::Mismatch) {
                 continue;
             }
             why.push(R::Hold(h));

@@ -1227,6 +1227,45 @@ fn reduce_only_order_is_accepted_while_another_order_is_in_doubt() {
     assert_eq!(h.core.holds(None), vec![HoldReason::InDoubt]);
 }
 
+/// The mismatch here is a stuck cancel: the case that would otherwise trap a
+/// position once an "only reduce" state cancels resting orders.
+#[test]
+fn reduce_only_order_is_accepted_under_an_unacknowledged_mismatch() {
+    let mut h = H::ready_with(config_with_margin());
+    h.long("a", "k1", "1");
+    // Strategy b's resting order cannot be cancelled: every attempt ends
+    // without an answer until the attempts are used up.
+    let b = h.accept("b", "k1", Side::Buy, "1", "100");
+    h.placed_open(b, "v1");
+    h.cancel("b", b);
+    for attempt in 1..=5 {
+        h.venue(VenueInput::CancelResult {
+            order_id: b,
+            attempt,
+            outcome: CancelOutcome::Unknown { reason: "timeout".into() },
+            timing: Default::default(),
+        });
+        h.advance(SEC);
+        h.tick();
+    }
+    assert_eq!(h.unacked_mismatches(), vec![MismatchKind::CancelStuck]);
+    assert_eq!(h.core.holds(None), vec![HoldReason::Mismatch]);
+
+    assert_eq!(
+        h.reject("a", "k2", Side::Sell, "1", "100"),
+        vec![RejectReason::Hold(HoldReason::Mismatch)]
+    );
+    let r = h.reduce_only_req("a", "k3", Side::Sell, "1", "100");
+    let order_id = match h.new_order(r) {
+        NewOrderReply::Accepted { order_id } => order_id,
+        other => panic!("the mismatch hold refused a reduce-only order: {other:?}"),
+    };
+    assert!(h.order(order_id).reduce_only);
+    assert_eq!(h.sends().last(), Some(&order_id));
+    // Nobody acknowledged the mismatch: the hold is still there.
+    assert_eq!(h.core.holds(None), vec![HoldReason::Mismatch]);
+}
+
 #[test]
 fn acknowledging_one_mismatch_does_not_clear_another() {
     let mut h = H::ready();
