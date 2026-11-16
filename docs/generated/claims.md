@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `473d418aabe3574c`, 검증 결과의 다이제스트 `4f6788394bb348d6`.
+> 소스 다이제스트 `1352d1b092b89e2a`, 검증 결과의 다이제스트 `4f6788394bb348d6`.
 
 주장 57건: 통과 0, 실패 0, 미실행 2, 이전 버전 결과 55.
 
@@ -1271,4 +1271,5 @@
 | `core/reduce_only_order_is_accepted_under_an_unacknowledged_mismatch` | 미실행 |  |
 | `core/reduce_only_order_is_rejected_by_every_block_all_hold` | 미실행 |  |
 | `core/reduce_only_order_is_still_bound_by_the_strategy_position_limit` | 미실행 |  |
+| `core/without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order` | 미실행 |  |
 

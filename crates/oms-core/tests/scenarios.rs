@@ -1364,6 +1364,70 @@ fn reduce_only_order_is_still_bound_by_the_strategy_position_limit() {
     assert_eq!(h.sends(), vec![]);
 }
 
+/// Without a margin policy the table does not apply: every hold refuses
+/// every new order, as before the table existed. So re-deciding a journal
+/// recorded without a policy gives the recorded result.
+#[test]
+fn without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order() {
+    fn refused(h: &mut H, hold: HoldReason) {
+        assert_eq!(h.core.config.policy.margin, None);
+        assert_eq!(h.core.holds(None), vec![hold.clone()]);
+        let r = h.reduce_only_req("a", "k9", Side::Sell, "1", "100");
+        assert_eq!(
+            h.new_order(r),
+            NewOrderReply::Rejected { reasons: vec![RejectReason::Hold(hold.clone())] },
+            "without a margin policy {hold:?} let a reduce-only order through"
+        );
+    }
+    fn long_one() -> H {
+        let mut h = H::ready();
+        h.long("a", "k1", "1");
+        h
+    }
+
+    // Resync: the link came back and nothing was confirmed yet.
+    let mut h = long_one();
+    h.venue(VenueInput::Link {
+        up: false,
+        session: h.session,
+        reason: "ws closed".into(),
+    });
+    h.session += 1;
+    let session = h.session;
+    h.venue(VenueInput::Link {
+        up: true,
+        session,
+        reason: "reconnected".into(),
+    });
+    refused(&mut h, HoldReason::Resync);
+
+    // In doubt: strategy b's order got no answer.
+    let mut h = long_one();
+    let b = h.accept("b", "k1", Side::Buy, "1", "100");
+    h.venue(VenueInput::SendResult {
+        order_id: b,
+        outcome: SendOutcome::Unknown { reason: "timeout".into() },
+        timing: Default::default(),
+    });
+    refused(&mut h, HoldReason::InDoubt);
+
+    // Mismatch: an order at the venue that the OMS did not send.
+    let mut h = long_one();
+    let (session, queried_at) = (h.session, h.now + 1);
+    h.venue(VenueInput::OpenOrders {
+        session,
+        queried_at,
+        orders: vec![VenueOpenOrder {
+            venue_oid: void("m1"),
+            order_id: None,
+            instrument: iid("X"),
+            side: Side::Buy,
+            remaining: Some(q("1")),
+        }],
+    });
+    refused(&mut h, HoldReason::Mismatch);
+}
+
 #[test]
 fn acknowledging_one_mismatch_does_not_clear_another() {
     let mut h = H::ready();
