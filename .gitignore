@@ -3,3 +3,4 @@
 *.log
 .env
 /dashboard/data/
+__pycache__/

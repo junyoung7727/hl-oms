@@ -237,7 +237,7 @@ kill -TERM <pid>
 
 ### 7.7 화면이 갱신되지 않는다
 
-화면 상단의 "브라우저와의 차이"가 커지거나 "노드 응답 없음"이 뜬다. 프로세스가 죽었거나 멈춘 것이다. 알림 기능은 없다(U-11).
+화면 상단의 "브라우저와의 차이"가 커지거나 "노드 응답 없음"이 뜬다. 프로세스가 죽었거나 멈춘 것이다. 알림 스크립트가 돌고 있으면 두 번 연속 조회에 실패한 뒤 텔레그램으로 "노드 응답 없음"이 온다(§12).
 `systemctl status`, 로그의 마지막 줄, 종료 코드를 본다.
 
 ### 7.8 감소 전용 상태가 걸렸다 (`holds`에 `reducing`)
@@ -361,3 +361,38 @@ mainnet은 `mainnet_confirmed = true`가 있어야 열린다(U-09). 증거금 �
 - `oms-node verify --data-dir <dir>`.
 - 사본에서 `verify`가 통과하는가.
 - 호스트의 시계 동기화 상태(`timedatectl`). 시계가 거래소와 2초 이상 어긋나면 체결 동기화 선언이 틀릴 수 있다(A-02).
+
+## 12. 알림 (텔레그램, U-11)
+
+`tools/alert/hl_alert.py`는 노드 밖에서 도는 작은 스크립트다. 표준 라이브러리만 쓴다. `/api/status`를 30초마다 읽고, 아래 상태가 생기거나 풀리면 텔레그램으로 보낸다. 한 번의 조회에서 바뀐 것은 한 통에 모은다(길면 나눈다). 노드는 이 스크립트를 모르고, 스크립트는 노드에 아무것도 쓰지 않는다.
+
+| 알리는 것 | status의 출처 |
+|---|---|
+| 계좌의 차단 사유 하나하나(감소 전용 상태는 규칙과 그때 본 숫자까지) | `core.holds`, `core.margin.reducing` |
+| 전략 중지 하나하나 | `core.operator_halt_strategy` |
+| 증거금 보고가 신선하지 않음(30초 넘게 없음, 또는 아직 없음). 차단 사유 목록에는 나오지 않는다 | `core.margin.fresh`, `core.margin.age_us` |
+| 치명 상태. 노드는 치명 상태가 되면 곧바로 끝나므로 조회가 이 값을 보는 일은 드물다. 대개 아래 두 줄로 온다 | `fatal` |
+| 확인하지 않은 불일치 하나하나 | `core.mismatches_unacked` |
+| 스냅샷 실패 | `journal.last_snapshot_error` |
+| 노드 재시작(🔴). systemd가 다시 띄우면 다음 조회 전에 돌아와 있을 수 있다. 직전 종료 코드(2 = 치명 상태)와 로그의 마지막 줄을 본다 | `node.started_at`이 바뀜 |
+| 노드 응답 없음 | 두 번 연속 조회 실패. 한 번이라도 응답한 노드에만 |
+
+설정은 저장소 밖 `~/.config/hl-oms/telegram.json`(`{"token": "…", "chat_id": "…"}`, 권한 0600)에 둔다. 소유자 말고 누구라도 읽을 수 있으면, 또는 토큰의 형식이 다르면 시작하지 않는다(토큰은 출력하지 않는다). 환경 변수의 프록시는 쓰지 않는다. `--interval`은 5초 이상이다.
+
+```sh
+python3 tools/alert/hl_alert.py test   # 시험 메시지 한 통
+python3 tools/alert/hl_alert.py once   # 지금의 상태를 출력만 한다
+python3 tools/alert/hl_alert.py run    # 노드와 함께 띄운다
+```
+
+systemd 사용자 단위로 띄우는 예(설치해 보지 않았다):
+
+```ini
+[Service]
+ExecStart=/usr/bin/python3 /opt/oms/tools/alert/hl_alert.py run
+Restart=always
+RestartSec=10
+```
+
+알리지 않는 것: 이 스크립트 자신이 멈춘 것, 두 조회 사이에 생겼다 풀린 상태, 거래소의 실제 상태(노드의 status만 믿는다), 증거금 보고 거부(`core.margin.last_rejection`). 텔레그램 전송이 실패하면 다음 조회 때 다시 보낸다. 50통이 넘게 쌓이면 오래된 것부터 버린다. 텔레그램이 그 메시지 때문에 거절하면(400, 413) 버린다. 봇이나 대화방 문제(401, 403 등)면 버리지 않고 다시 보낸다. 버린 것이 있으면 그 수를 알린다. 응답을 받기 전에 연결이 끊기면 같은 알림이 두 번 갈 수 있다.
+이 Linux PC의 네트워크는 `api.telegram.org`의 기본 주소를 막는다. 스크립트는 이름과 Telegram의 다른 주소(149.154.167.220)를 차례로 시도하고, 그다음부터는 마지막으로 성공한 쪽을 먼저 쓴다. 인증서는 `api.telegram.org`로 검사한다.
