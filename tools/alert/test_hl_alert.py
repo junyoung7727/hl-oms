@@ -47,6 +47,30 @@ class Conditions(unittest.TestCase):
         self.assertIn("daily_loss", c["hold:reducing"])
         self.assertIn("value 94", c["hold:reducing"])
 
+    def test_a_stale_margin_report_is_a_condition_though_it_is_not_a_hold(self):
+        st = status()
+        st["core"]["margin"] = {"fresh": False, "age_us": 45_000_000, "reducing": None}
+        c = a.conditions(st)
+        self.assertEqual(list(c), ["margin_stale"])
+        self.assertIn("45초", c["margin_stale"])
+
+    def test_no_margin_report_yet_is_stale_too(self):
+        st = status()
+        st["core"]["margin"] = {"fresh": False, "age_us": None, "reducing": None}
+        self.assertIn("아직", a.conditions(st)["margin_stale"])
+
+    def test_a_fresh_report_or_no_margin_policy_is_quiet(self):
+        st = status()
+        st["core"]["margin"] = {"fresh": True, "age_us": 4_000_000, "reducing": None}
+        self.assertEqual(a.conditions(st), {})
+        self.assertEqual(a.conditions(status()), {})
+
+    def test_a_strategy_halt_is_a_condition_per_strategy(self):
+        st = status()
+        st["core"]["operator_halt_strategy"] = {"demo": {"note": "x", "at": 1}}
+        self.assertEqual(list(a.conditions(st)), ["hold:operator_strategy:demo"])
+        self.assertIn("demo", a.conditions(st)["hold:operator_strategy:demo"])
+
     def test_fatal_mismatch_and_snapshot_error_are_conditions(self):
         m = {"id": 3, "kind": "overfill", "subject": "order 9", "detail": "cum 2 > qty 1"}
         c = a.conditions(status(fatal="journal write failed", mismatches=[m], snapshot_error="ENOSPC"))
@@ -94,11 +118,21 @@ class Watching(unittest.TestCase):
         self.assertIn("연결되지 않음", msgs[0])
         self.assertEqual(self.w.step(None), [])
 
-    def test_a_restart_of_the_node_is_sent(self):
+    def test_a_restart_of_the_node_is_sent_as_an_alert(self):
         self.w.step(status(started_at=1))
         msgs = self.w.step(status(started_at=2))
         self.assertEqual(len(msgs), 1)
+        self.assertIn("🔴", msgs[0])
         self.assertIn("다시 시작", msgs[0])
+        self.assertIn("종료 코드", msgs[0])
+
+    def test_a_status_that_cannot_be_read_does_not_lose_the_restart(self):
+        self.w.step(status(started_at=1))
+        bad = status(started_at=2)
+        bad["core"]["holds"] = 5  # not a list
+        with self.assertRaises(Exception):
+            self.w.step(bad)
+        self.assertIn("다시 시작", self.w.step(status(started_at=2))[0])
 
     def test_every_message_names_the_venue(self):
         msgs = self.w.step(status(venue="hyperliquid:testnet"))
@@ -127,22 +161,44 @@ class Delivery(unittest.TestCase):
         out = a.Outbox(sent.append, limit=2)
         out.add(["m1", "m2", "m3"])
         out.flush()
-        self.assertEqual(len(sent), 3)
-        self.assertIn("1", sent[0])
-        self.assertIn("버림", sent[0])
-        self.assertEqual(sent[1:], ["m2", "m3"])
+        self.assertEqual(sent[:2], ["m2", "m3"])
+        self.assertIn("1개를 버림", sent[2])
+
+
+    def test_a_message_telegram_refuses_is_dropped_and_the_rest_go(self):
+        sent = []
+
+        def send(text):
+            if text == "bad":
+                raise a.Rejected("400")
+            sent.append(text)
+
+        out = a.Outbox(send, limit=10)
+        out.add(["bad", "m2"])
+        out.flush()
+        self.assertEqual(sent[0], "m2")
+        self.assertIn("1개를 버림", sent[1])
+
+    def test_a_long_message_is_split_within_the_telegram_limit(self):
+        long = "\n".join(f"🔴 발생: 불일치 {i} " + "x" * 30 for i in range(300))
+        parts = a.split_message(long)
+        self.assertGreater(len(parts), 1)
+        self.assertTrue(all(len(p.encode("utf-16-le")) // 2 <= 4096 for p in parts))
+        self.assertEqual("\n".join(parts), long)
 
 
 class Config(unittest.TestCase):
     def write(self, mode, body=None):
-        d = tempfile.mkdtemp()
-        p = Path(d) / "telegram.json"
-        p.write_text(json.dumps(body or {"token": "1:x", "chat_id": "42"}))
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        p = Path(d.name) / "telegram.json"
+        p.write_text(json.dumps(body or {"token": "123456:abc_DEF-9", "chat_id": "42"}))
         os.chmod(p, mode)
         return p
 
     def test_a_private_file_is_read(self):
-        self.assertEqual(a.read_config(self.write(0o600)), ("1:x", "42"))
+        self.assertEqual(a.read_config(self.write(0o600)), ("123456:abc_DEF-9", "42"))
+        self.assertEqual(a.read_config(self.write(0o400))[1], "42")
 
     def test_a_file_others_can_read_is_refused(self):
         with self.assertRaises(a.ConfigError):
@@ -150,7 +206,16 @@ class Config(unittest.TestCase):
 
     def test_a_file_without_chat_id_is_refused(self):
         with self.assertRaises(a.ConfigError):
-            a.read_config(self.write(0o600, {"token": "1:x"}))
+            a.read_config(self.write(0o600, {"token": "123456:abc"}))
+
+    def test_a_malformed_token_is_refused_without_showing_it(self):
+        with self.assertRaises(a.ConfigError) as e:
+            a.read_config(self.write(0o600, {"token": "123456:abc def", "chat_id": "42"}))
+        self.assertNotIn("abc", str(e.exception))
+
+    def test_a_file_that_is_not_an_object_is_refused(self):
+        with self.assertRaises(a.ConfigError):
+            a.read_config(self.write(0o600, ["x"]))
 
 
 if __name__ == "__main__":
