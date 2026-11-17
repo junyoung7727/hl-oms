@@ -4,7 +4,7 @@
 Reads the node's read-only `/api/status` every 30 seconds and sends a
 Telegram message when a condition appears or clears: a hold reason
 (`core.holds`, REDUCING with its rule), a margin report that is not fresh
-(`core.margin.fresh`), the fatal state, an unacknowledged mismatch, a snapshot error, a restart of the node, or a node that does not
+(`core.margin.fresh`), a strategy halt, the fatal state, an unacknowledged mismatch, a snapshot error, a restart of the node, or a node that does not
 answer. It is a separate process: it changes nothing in the node, and the
 node does not know it exists.
 
@@ -82,7 +82,9 @@ def conditions(st: dict) -> dict[str, str]:
     if margin.get("fresh") is False:
         age = margin.get("age_us")
         seen = "아직 받은 증거금 보고가 없음" if age is None else f"마지막 증거금 보고가 {age // 1_000_000}초 전"
-        out["margin_stale"] = f"{seen}. 30초가 넘으면 일반 주문 거절, 60초가 넘으면 걸린 일반 주문 취소"
+        if age == 0:
+            seen = "증거금 보고가 신선하지 않음(보고 시각이 노드 시계보다 미래. 시계 역행?)"
+        out["margin_stale"] = f"{seen}. 일반 주문 거절, 오래 끌면 걸린 일반 주문 취소(기본값 30초·60초)"
     # A strategy halt is not in the account-wide `core.holds`.
     for s in core.get("operator_halt_strategy") or {}:
         out[f"hold:operator_strategy:{s}"] = f"운영자가 전략 {s}를 중지함. 그 전략의 신규 주문 거절"
@@ -263,7 +265,9 @@ def telegram_sender(token: str, chat_id: str, timeout: float = 10.0):
                 conn.close()
                 if not data.get("ok"):
                     msg = f"telegram answered {resp.status}: {data.get('description')}"
-                    raise Rejected(msg) if 400 <= resp.status < 500 and resp.status != 429 else RuntimeError(msg)
+                    # 400 and 413 are about this message. 401, 403 and the rest are
+                    # about the bot or the chat: keep the alerts until it is fixed.
+                    raise Rejected(msg) if resp.status in (400, 413) else RuntimeError(msg)
                 good[0] = ip
                 return
             except (OSError, http.client.HTTPException, ValueError) as e:
