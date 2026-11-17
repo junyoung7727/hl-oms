@@ -33,6 +33,9 @@ jobs:
       - name: Secret and address scan
         run: tools/ci/secret_scan.sh
 
+      - name: Alert script tests (tools/alert)
+        run: python3 -m unittest discover -s tools/alert -v
+
       - name: Toolchain (rust-toolchain.toml)
         run: |
           rustup show active-toolchain || rustup toolchain install
