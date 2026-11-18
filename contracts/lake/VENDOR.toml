@@ -1,0 +1,6 @@
+# Byte copy of the lake contract. Update by hand: copy the directory from a
+# newer qdp main commit and change source_commit and index_sha256 here.
+source_repo = "junyoung7727/quant-data-platform"
+source_path = "quant_data/crypto/contract"
+source_commit = "4876fbb4b028ba45b14d9b4ef482b948d7ffbc5b"
+index_sha256 = "764fda290804e4838b196fccc7cc39320a749ae789b727f4963b789503a022e8"

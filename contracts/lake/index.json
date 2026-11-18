@@ -1,0 +1,249 @@
+{
+  "contract_ver": 1,
+  "files": [
+    {
+      "name": "golden/headers/connection.json",
+      "sha256": "6fa4a64849d5ae25a1329d70c7fe33af6aa0aaf0b55103208afd7ecb4ee80097"
+    },
+    {
+      "name": "golden/headers/session.json",
+      "sha256": "711a884afb6b752902aaacc783e9ad607bad868f6db63f15dbf26fb439f257f8"
+    },
+    {
+      "name": "golden/headers/topic.json",
+      "sha256": "ea9b46f7e51311c69d03aa1acbee0c3e4a6d4bd9e172524da25aee69b7380865"
+    },
+    {
+      "name": "golden/l0/session_runs.json",
+      "sha256": "d6a2d7f60a59fab2c70573a9a623d272ac89f291fdb337642115ec2dff87e595"
+    },
+    {
+      "name": "golden/l0/venue=bybit/_session/date=2026-01-02/md1-1767308398000000000/stream.qraw",
+      "sha256": "d832a7013564bb875adbef580826238684d5efa19977610fbf822d250359d9c6"
+    },
+    {
+      "name": "golden/l0/venue=bybit/_session/date=2026-01-02/md_sealer-1767312300000000000/01.qraw",
+      "sha256": "fcd38090e136510f8f708e3b1f9665110932028f4140989742e5b65580c20faf"
+    },
+    {
+      "name": "golden/l0/venue=bybit/_session/date=2026-01-05/md_sealer-1767607440000000000/09.qraw",
+      "sha256": "2aadbc8bba172147016b4eac374c0d3f2f491df2c06a727ea2020fb52c2102f8"
+    },
+    {
+      "name": "golden/l0/venue=bybit/market=linear/channel=instruments/date=2026-01-02/_all/00.qraw",
+      "sha256": "038b42a8a9842b102221ebe8c4734b379f325645a778c15e928d3d8bf7363e18"
+    },
+    {
+      "name": "golden/l0/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-01/BTCUSDT/23.qraw",
+      "sha256": "65d1d9a9c5e7768998ad7f12a9d0386be1ee62e89977c664e2863c16d870dc56"
+    },
+    {
+      "name": "golden/l0/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT/00.qraw",
+      "sha256": "395bf72e4b039f2c638416c7c64008af1107d5884b358bdeda689be1675286dd"
+    },
+    {
+      "name": "golden/l0/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT/01.qraw",
+      "sha256": "2d21f35f3c555797f49da81c3192e3c744ce1f5a4ff8fde13e17829fe02d220a"
+    },
+    {
+      "name": "golden/l0/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT/02.qraw",
+      "sha256": "576bc6bf97abb3d83643bab19598cb4facd7fa385aca748c2e65f6155dab6774"
+    },
+    {
+      "name": "golden/l0/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT/05.qraw",
+      "sha256": "19d0cdc1c836d6c454d4fd3e93fabf27e1b540bed0564db9f7271334d2465db4"
+    },
+    {
+      "name": "golden/l0/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT/06.qraw",
+      "sha256": "f6149809ed446f316f7b75971505ab307b6bdf22014a00ca2f88c7c957ed247a"
+    },
+    {
+      "name": "golden/l0/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-05/BTCUSDT/09.qraw",
+      "sha256": "c92b5e167bdf2cf8b3e0a75d20accd826eb0af42465646a271e0e09b795a53e2"
+    },
+    {
+      "name": "golden/l0/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-05/BTCUSDT/10.qraw",
+      "sha256": "f8441cd76b3ab8f73b21de8e9b0f47dd32c4d78f5b24cc7ddbc6734854779ed1"
+    },
+    {
+      "name": "golden/l0/venue=bybit/market=linear/channel=publicTrade/date=2026-01-02/BTCUSDT/00.qraw",
+      "sha256": "9d33eb479a518cafc15d9cbf3a47e56e84a6527e3d0d0a64b772f32947cc4d24"
+    },
+    {
+      "name": "golden/l0/venue=bybit/market=linear/channel=publicTrade/date=2026-01-02/BTCUSDT/02.qraw",
+      "sha256": "309b34544673f59e848e6422d5f22c66834ae015aff5947d157fe009178579d8"
+    },
+    {
+      "name": "golden/l0/venue=bybit/market=linear/channel=publicTrade/date=2026-01-02/BTCUSDT/03.qraw",
+      "sha256": "3b7f341fd55e94401ec7e8bb734422304117bd044b2ff5bcafff1eb14245ae55"
+    },
+    {
+      "name": "golden/l0/venue=bybit/market=linear/channel=publicTrade/date=2026-01-02/BTCUSDT/04.qraw",
+      "sha256": "18d129f0ab6506c1cedc60570368197ca4a9c286c9578121424932ebe3c7727f"
+    },
+    {
+      "name": "golden/l0/venue=bybit/market=linear/channel=publicTrade/date=2026-01-02/BTCUSDT/05.qraw",
+      "sha256": "83bff8bff5b01ea90db6f09e7a49c2385568d9dd0fe1ea1036abe4b5001fd006"
+    },
+    {
+      "name": "golden/l0/venue=bybit/market=linear/channel=publicTrade/date=2026-01-02/BTCUSDT/06.qraw",
+      "sha256": "4269edf65812644cb3b5beb8ea830211855866d8d63ce080024b40cbd1236f90"
+    },
+    {
+      "name": "golden/l0/venue=bybit/market=linear/channel=tickers/date=2026-01-02/BTCUSDT/00.qraw",
+      "sha256": "07468d32d5e3e601349f5ad7c5325c0b2af9f00e2793261560f8a0d9988b8691"
+    },
+    {
+      "name": "golden/l1/book_msg.json",
+      "sha256": "375bbd443e8d182ad417d6186b717516a8d4330813301603d14c08fcf5f4971e"
+    },
+    {
+      "name": "golden/l1/gap.json",
+      "sha256": "c168ce5bc9e4183a0b1fa7c85eb398493fb46cbc7863134b29ff04ac89306a8b"
+    },
+    {
+      "name": "golden/l1/instrument.json",
+      "sha256": "d7542ed445da48f7b80683e72bbb74e0afea635613c0e55deb78c88974a452b1"
+    },
+    {
+      "name": "golden/l1/join_cases.json",
+      "sha256": "c9012203162fdf454c81f697367330581c11599aebe47380dcf21fa8e11e7470"
+    },
+    {
+      "name": "golden/l1/ticker.json",
+      "sha256": "30ec45b14309bd188ade5282ebc0a1bd84d1b43a939d85a3fd388a5f209ba173"
+    },
+    {
+      "name": "golden/l1/trade.json",
+      "sha256": "68e5f6916d11b413ef42599e5ba4b4fb921bf91224f023c4df3fad6e4ab832db"
+    },
+    {
+      "name": "golden/trading/events.json",
+      "sha256": "62be43e9d5181fdc587200a26668968f09b679826558d3bd3518c2cae82e0665"
+    },
+    {
+      "name": "golden/trading/fills.json",
+      "sha256": "bc6e143bf3a0e0c6a826f9e5ec7d45297523d9c48c890d869a91a8538070bec7"
+    },
+    {
+      "name": "golden/trading/order_joins.json",
+      "sha256": "42c22926aa2cf441cc28d3ce55d323a274bb05b30117964d5cf707ece112731b"
+    },
+    {
+      "name": "golden/trading/orders.json",
+      "sha256": "dd41a9266732d0e250416c258a483ee67c582eedfb9e0a9271954449f1cfb3f2"
+    },
+    {
+      "name": "golden/xrepo/audit_clean.json",
+      "sha256": "749189c266ebc2a8be7853ce3e1c175c2197167e5552d805a75f9aba00419aab"
+    },
+    {
+      "name": "golden/xrepo/audit_failed.json",
+      "sha256": "8ce1abdf7f15aec085698f7afeebcd1788b2a4b9e0e5bc05f01d37d3b53e8d0b"
+    },
+    {
+      "name": "golden/xrepo/audit_not_audited.json",
+      "sha256": "98c6e596f4783632b25543ef7c3390cfa4ca4b75a79f6108dc1552df19c06497"
+    },
+    {
+      "name": "golden/xrepo/manifest.jsonl",
+      "sha256": "cb6cd232f9fcdb08a5da66f3ddbce0fbe69c3ae28b8d468bf160fe7266178818"
+    },
+    {
+      "name": "golden/xrepo/seal_log/date=2026-01-01/hour=20.json",
+      "sha256": "818dab6d40a00553c4197ca1da2e3728b9a3b2b5920358ec18ef7937529e6ee7"
+    },
+    {
+      "name": "golden/xrepo/seal_log/date=2026-01-02/hour=02.json",
+      "sha256": "ced0f98b8fe6c980bbb678f03b44db461624ac46d64d66c24ef176b3a9e362d0"
+    },
+    {
+      "name": "golden/xrepo/seal_log/date=2026-01-05/hour=09.json",
+      "sha256": "258a9a7996b40903f25e3f8d0e26366f5120c42486750ab4d06104a09776789e"
+    },
+    {
+      "name": "golden/xrepo/sidecar.txt",
+      "sha256": "40422da38b7127322ed28208ef875ca1ec2f54ab7e2b7c83a708da709b43acd1"
+    },
+    {
+      "name": "golden/xrepo/verify_result.json",
+      "sha256": "15668c772164b2414714fd5cc7aabf35eda30575af093c630d765f1200622d78"
+    },
+    {
+      "name": "index.schema.json",
+      "sha256": "f4ef81e7f4097e15c57a5bfdbf87e36a712c0a85496a5fbd036e646f1aac5926"
+    },
+    {
+      "name": "l0/header.schema.json",
+      "sha256": "92dd71c0a91249db72d8eaf66dbe95577dfdb8c8c4b9a6db157789681788a369"
+    },
+    {
+      "name": "l0/note.schema.json",
+      "sha256": "4fbb9e2503cfbc86a17a0ab527cc8d6d8c1324a0fe3f5e4ca62b3190f2731451"
+    },
+    {
+      "name": "l0/paths.json",
+      "sha256": "96ff1393e9b61e7e52e62292fa2dc5f4ac9d2cbfff17a3c3e364981f0fede3f2"
+    },
+    {
+      "name": "l0/seal_log_entry.schema.json",
+      "sha256": "521b66c62b9b8f833eba84437c53786b1763d1ae08a03322864b8d43484acb93"
+    },
+    {
+      "name": "l1/book_msg.table.json",
+      "sha256": "44f37b182305b8616c9cbe722e2d1c57f6f7ff08d8d5ce74f8e7719023729ec9"
+    },
+    {
+      "name": "l1/gap.table.json",
+      "sha256": "5cd6f06bbd9a3b4cb1ec71f7ae9aea2d7725bc69105db0174106aabd060cf904"
+    },
+    {
+      "name": "l1/instrument.table.json",
+      "sha256": "6f0052a6d39b6c1156076be9c5b03f5a4f5b8d8af1c8ae3db427aa60431ed4d3"
+    },
+    {
+      "name": "l1/table_schema.schema.json",
+      "sha256": "3b137ba5e0daba5c2c31e9a4ed6044da693562b2d152cbd4b7b8ab2da5ff1406"
+    },
+    {
+      "name": "l1/ticker.table.json",
+      "sha256": "c9cdfa592c57accc82ad78bbf899ba43f7b2076bedbc6ceaf55ad410c7e069bb"
+    },
+    {
+      "name": "l1/trade.table.json",
+      "sha256": "b2f8bc84c3e1f0898a7a45b3962a1af45774017291d866f416f67a8562656567"
+    },
+    {
+      "name": "trading/events.table.json",
+      "sha256": "8c401ec1d08e597cd1e3edc2e955820a635b66795624d933e74f1867e4ce9897"
+    },
+    {
+      "name": "trading/fills.table.json",
+      "sha256": "0177738dd6d352752f1aa33c6ec99c6d22d13c866455d62791148527b68f8f01"
+    },
+    {
+      "name": "trading/orders.table.json",
+      "sha256": "a0bcd340d130f0a5ad59b9ad9cff4e97f24a33cd7bcdadccb18e5d65cc6c4b87"
+    },
+    {
+      "name": "xrepo/audit_result.schema.json",
+      "sha256": "3cbdc362b73a4841a1830a6fa7da37ab6043ae9fbb883bbf83af11cca8f3d585"
+    },
+    {
+      "name": "xrepo/manifest_line.schema.json",
+      "sha256": "5db7bec79eadf167674c5fed8425d93859e7bbd22048d4df26fda3ddba27a99c"
+    },
+    {
+      "name": "xrepo/metrics.json",
+      "sha256": "5cfd54c5d8e76b5ed74b3921eeda0599be4040f0789983ac91d65161da6d6bcd"
+    },
+    {
+      "name": "xrepo/metrics.schema.json",
+      "sha256": "e87c400b891cea48556223d0b827fc7d59ed6e6cb5bf200dce459cfe6fb9a0e1"
+    },
+    {
+      "name": "xrepo/verify_result.schema.json",
+      "sha256": "27be97d4f26e8c7eb5fa091ffefcfdb69cd9762994cbcfc733b6dfd877ec7ec4"
+    }
+  ]
+}

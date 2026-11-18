@@ -1,0 +1,156 @@
+{
+  "table": "trade",
+  "contract_ver": 1,
+  "description": "One row per trade; the earliest copy of a trade id is kept (contract 3.3).",
+  "key": [
+    "venue",
+    "market",
+    "symbol",
+    "trade_id"
+  ],
+  "sort": [
+    {
+      "column": "symbol"
+    },
+    {
+      "column": "recv_ns"
+    },
+    {
+      "column": "rec_no"
+    },
+    {
+      "column": "msg_idx"
+    }
+  ],
+  "path": "crypto/l1/trade/venue={venue}/market={market}/channel={channel}/date={date}/",
+  "file_names": [
+    "hour={hour}.parquet",
+    "day.parquet"
+  ],
+  "compression": "zstd",
+  "compression_level": 9,
+  "size_target_bytes": {
+    "min": 100000000,
+    "max": 10000000000
+  },
+  "metadata": [
+    "contract_ver",
+    "parser_ver",
+    "table"
+  ],
+  "columns": [
+    {
+      "name": "venue",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "market",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "symbol",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "channel",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "venue_ts_ns",
+      "type": "int64",
+      "nullable": false,
+      "description": "Bybit T"
+    },
+    {
+      "name": "recv_ns",
+      "type": "int64",
+      "nullable": false
+    },
+    {
+      "name": "trade_id",
+      "type": "string",
+      "nullable": false,
+      "description": "Bybit i"
+    },
+    {
+      "name": "side",
+      "type": "int8",
+      "nullable": false,
+      "description": "+1 taker bought, -1 taker sold"
+    },
+    {
+      "name": "px",
+      "type": "int64",
+      "nullable": false
+    },
+    {
+      "name": "qty",
+      "type": "int64",
+      "nullable": false
+    },
+    {
+      "name": "px_exp",
+      "type": "int8",
+      "nullable": false,
+      "description": "price exponent (1.3)"
+    },
+    {
+      "name": "qty_exp",
+      "type": "int8",
+      "nullable": false,
+      "description": "quantity exponent (1.3)"
+    },
+    {
+      "name": "venue_seq",
+      "type": "int64",
+      "nullable": true,
+      "description": "Bybit seq"
+    },
+    {
+      "name": "flags",
+      "type": "int32",
+      "nullable": false,
+      "description": "bit 0 block trade, bit 1 RPI trade"
+    },
+    {
+      "name": "msg_idx",
+      "type": "int16",
+      "nullable": false,
+      "description": "position of the trade inside its message, from 0"
+    },
+    {
+      "name": "conn_id",
+      "type": "int32",
+      "nullable": false,
+      "description": "lineage: connection number inside the collector session"
+    },
+    {
+      "name": "frame_no",
+      "type": "int64",
+      "nullable": false,
+      "description": "lineage"
+    },
+    {
+      "name": "l0_file_id",
+      "type": "string",
+      "nullable": false,
+      "description": "lineage"
+    },
+    {
+      "name": "rec_no",
+      "type": "int64",
+      "nullable": false,
+      "description": "lineage"
+    },
+    {
+      "name": "parser_ver",
+      "type": "string",
+      "nullable": false,
+      "description": "lineage"
+    }
+  ]
+}

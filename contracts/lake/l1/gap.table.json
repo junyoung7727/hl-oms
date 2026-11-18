@@ -1,0 +1,138 @@
+{
+  "table": "gap",
+  "contract_ver": 1,
+  "description": "One row per gap of one topic (contract 3.5). In the key a null conn_id equals another null.",
+  "key": [
+    "venue",
+    "market",
+    "symbol",
+    "channel",
+    "kind",
+    "start_recv_ns",
+    "conn_id"
+  ],
+  "sort": [
+    {
+      "column": "market"
+    },
+    {
+      "column": "symbol"
+    },
+    {
+      "column": "channel"
+    },
+    {
+      "column": "start_recv_ns"
+    },
+    {
+      "column": "kind"
+    },
+    {
+      "column": "conn_id"
+    }
+  ],
+  "path": "crypto/l1/gap/venue={venue}/date={date}/",
+  "file_names": [
+    "day.parquet"
+  ],
+  "compression": "zstd",
+  "compression_level": 9,
+  "size_target_bytes": {
+    "min": 100000000,
+    "max": 10000000000
+  },
+  "metadata": [
+    "contract_ver",
+    "parser_ver",
+    "table"
+  ],
+  "columns": [
+    {
+      "name": "venue",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "market",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "symbol",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "channel",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "kind",
+      "type": "string",
+      "nullable": false,
+      "enum": [
+        "seq_gap",
+        "reconnect",
+        "resnapshot",
+        "stale",
+        "parse_error",
+        "crash_truncate",
+        "handover",
+        "overflow",
+        "disk_floor",
+        "clock_step",
+        "collector_down"
+      ]
+    },
+    {
+      "name": "conn_id",
+      "type": "int32",
+      "nullable": true,
+      "description": "for handover and reconnect: the connection replay moves to"
+    },
+    {
+      "name": "start_recv_ns",
+      "type": "int64",
+      "nullable": false
+    },
+    {
+      "name": "end_recv_ns",
+      "type": "int64",
+      "nullable": true
+    },
+    {
+      "name": "last_good_update_id",
+      "type": "int64",
+      "nullable": true
+    },
+    {
+      "name": "next_update_id",
+      "type": "int64",
+      "nullable": true
+    },
+    {
+      "name": "detail",
+      "type": "string",
+      "nullable": false,
+      "description": "a JSON object as text"
+    },
+    {
+      "name": "l0_file_id",
+      "type": "string",
+      "nullable": true,
+      "description": "the L0 file of the evidence record"
+    },
+    {
+      "name": "rec_no",
+      "type": "int64",
+      "nullable": true,
+      "description": "the evidence record"
+    },
+    {
+      "name": "parser_ver",
+      "type": "string",
+      "nullable": false
+    }
+  ]
+}

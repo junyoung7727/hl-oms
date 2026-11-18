@@ -1,0 +1,10 @@
+{
+ "o-0002": {
+  "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+  "rec_no": 3
+ },
+ "o-0003": {
+  "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+  "rec_no": 18
+ }
+}

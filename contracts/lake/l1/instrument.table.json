@@ -1,0 +1,129 @@
+{
+  "table": "instrument",
+  "contract_ver": 1,
+  "description": "One row per symbol in each instruments response (contract 3.6).",
+  "key": [
+    "venue",
+    "market",
+    "symbol",
+    "recv_ns"
+  ],
+  "sort": [
+    {
+      "column": "symbol"
+    },
+    {
+      "column": "recv_ns"
+    }
+  ],
+  "path": "crypto/l1/instrument/venue={venue}/market={market}/date={date}/",
+  "file_names": [
+    "day.parquet"
+  ],
+  "compression": "zstd",
+  "compression_level": 9,
+  "size_target_bytes": {
+    "min": 100000000,
+    "max": 10000000000
+  },
+  "metadata": [
+    "contract_ver",
+    "parser_ver",
+    "table"
+  ],
+  "columns": [
+    {
+      "name": "venue",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "market",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "symbol",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "recv_ns",
+      "type": "int64",
+      "nullable": false
+    },
+    {
+      "name": "venue_ts_ns",
+      "type": "int64",
+      "nullable": true,
+      "description": "the response's own time field"
+    },
+    {
+      "name": "status",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "tick_size",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "lot_size",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "px_exp",
+      "type": "int8",
+      "nullable": false,
+      "description": "price exponent (1.3)"
+    },
+    {
+      "name": "qty_exp",
+      "type": "int8",
+      "nullable": false,
+      "description": "quantity exponent (1.3)"
+    },
+    {
+      "name": "contract_type",
+      "type": "string",
+      "nullable": true
+    },
+    {
+      "name": "settle_coin",
+      "type": "string",
+      "nullable": true
+    },
+    {
+      "name": "conn_id",
+      "type": "int32",
+      "nullable": false,
+      "description": "lineage: connection number inside the collector session"
+    },
+    {
+      "name": "frame_no",
+      "type": "int64",
+      "nullable": false,
+      "description": "lineage"
+    },
+    {
+      "name": "l0_file_id",
+      "type": "string",
+      "nullable": false,
+      "description": "lineage"
+    },
+    {
+      "name": "rec_no",
+      "type": "int64",
+      "nullable": false,
+      "description": "lineage"
+    },
+    {
+      "name": "parser_ver",
+      "type": "string",
+      "nullable": false,
+      "description": "lineage"
+    }
+  ]
+}

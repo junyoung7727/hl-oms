@@ -1,0 +1,81 @@
+{
+ "table": "events",
+ "contract_ver": 1,
+ "description": "One row per journal event, every kind (contract 4.3).",
+ "key": [
+  "seq",
+  "event_idx"
+ ],
+ "sort": [
+  {
+   "column": "seq"
+  },
+  {
+   "column": "event_idx"
+  }
+ ],
+ "path": "crypto/trading/events/date={date}/",
+ "file_names": [
+  "day.parquet"
+ ],
+ "compression": "zstd",
+ "compression_level": 9,
+ "size_target_bytes": {
+  "min": 0,
+  "max": 10000000000
+ },
+ "metadata": [
+  "contract_ver",
+  "export_ver",
+  "table"
+ ],
+ "columns": [
+  {
+   "name": "seq",
+   "type": "int64",
+   "nullable": false
+  },
+  {
+   "name": "event_idx",
+   "type": "int32",
+   "nullable": false
+  },
+  {
+   "name": "at_us",
+   "type": "int64",
+   "nullable": false
+  },
+  {
+   "name": "kind",
+   "type": "string",
+   "nullable": false,
+   "description": "event name as the journal writes it"
+  },
+  {
+   "name": "order_id",
+   "type": "string",
+   "nullable": true
+  },
+  {
+   "name": "venue",
+   "type": "string",
+   "nullable": true
+  },
+  {
+   "name": "symbol",
+   "type": "string",
+   "nullable": true
+  },
+  {
+   "name": "payload",
+   "type": "string",
+   "nullable": false,
+   "description": "the event as JSON text, keys sorted"
+  },
+  {
+   "name": "record_schema",
+   "type": "int16",
+   "nullable": false
+  }
+ ]
+}

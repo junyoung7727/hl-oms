@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "index.schema.json",
+  "title": "Contract index",
+  "description": "contract_ver and the SHA-256 of every contract file except index.json and .gitattributes. Written by python -m quant_data.crypto write-index.",
+  "type": "object",
+  "properties": {
+    "contract_ver": {"type": "integer", "const": 1},
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "description": "path below the contract directory, separated by /"},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        },
+        "required": ["name", "sha256"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["contract_ver", "files"],
+  "additionalProperties": false
+}

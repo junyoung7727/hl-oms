@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "l0/note.schema.json",
+  "title": "Note",
+  "description": "Payload of a src = 2 record (contract document 2.3).",
+  "type": "object",
+  "properties": {
+    "note": {
+      "enum": [
+        "clock_step",
+        "crash_truncate",
+        "collector_down",
+        "overflow",
+        "disk_floor",
+        "stale"
+      ]
+    },
+    "writer": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_]*$"
+    },
+    "conn_id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "topics": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "market": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9.-]*$"
+          },
+          "channel": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9.-]*$"
+          },
+          "symbol": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9.-]*$"
+          }
+        },
+        "required": [
+          "market",
+          "channel",
+          "symbol"
+        ],
+        "additionalProperties": false
+      },
+      "description": "null = every topic of the venue, or of the connection when conn_id is set"
+    },
+    "start_recv_ns": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854775807
+    },
+    "end_recv_ns": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 9223372036854775807
+    },
+    "detail": {
+      "description": "fields for people; only these keys, all optional",
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "minLength": 1,
+          "description": "crash_truncate: the file that was cut back, relative to the lake root"
+        },
+        "prev_session_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "next_session_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "back_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807,
+          "description": "clock_step: how far recv_ns went backward"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "note",
+    "writer",
+    "conn_id",
+    "topics",
+    "start_recv_ns",
+    "end_recv_ns",
+    "detail"
+  ],
+  "additionalProperties": false
+}

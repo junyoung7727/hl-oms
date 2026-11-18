@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "xrepo/verify_result.schema.json",
+  "title": "Verify result",
+  "description": "crypto/l0/_verify/venue=<venue>/date=<date>.json, written whole by md-lake verify --json (contract document 5.2). It holds no update_id: the verifier does not parse payloads.",
+  "type": "object",
+  "properties": {
+    "contract_ver": {
+      "type": "integer",
+      "const": 1
+    },
+    "venue": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9.-]*$"
+    },
+    "date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+    },
+    "verifier": {
+      "type": "string",
+      "minLength": 1
+    },
+    "verifier_ver": {
+      "type": "string",
+      "minLength": 1
+    },
+    "verified_at": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854775807
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "l0_file_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "frames": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          "records": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          "first_recv_ns": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          "last_recv_ns": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          "framing_errors": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "l0_file_id",
+          "path",
+          "bytes",
+          "sha256",
+          "frames",
+          "records",
+          "first_recv_ns",
+          "last_recv_ns",
+          "framing_errors",
+          "error"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "contract_ver",
+    "venue",
+    "date",
+    "verifier",
+    "verifier_ver",
+    "verified_at",
+    "files"
+  ],
+  "additionalProperties": false
+}

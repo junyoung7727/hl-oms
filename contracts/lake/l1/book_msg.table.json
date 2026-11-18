@@ -1,0 +1,185 @@
+{
+  "table": "book_msg",
+  "contract_ver": 1,
+  "description": "One row per order book message of every connection, plus checkpoint rows (contract 3.2).",
+  "key": [
+    "venue",
+    "market",
+    "symbol",
+    "channel",
+    "l0_file_id",
+    "rec_no",
+    "kind",
+    "recv_ns"
+  ],
+  "sort": [
+    {
+      "column": "symbol"
+    },
+    {
+      "column": "recv_ns"
+    },
+    {
+      "column": "kind",
+      "first": 2
+    },
+    {
+      "column": "l0_file_id"
+    },
+    {
+      "column": "rec_no"
+    }
+  ],
+  "path": "crypto/l1/book_msg/venue={venue}/market={market}/channel={channel}/date={date}/",
+  "file_names": [
+    "hour={hour}.parquet",
+    "day.parquet"
+  ],
+  "compression": "zstd",
+  "compression_level": 9,
+  "size_target_bytes": {
+    "min": 100000000,
+    "max": 10000000000
+  },
+  "metadata": [
+    "contract_ver",
+    "parser_ver",
+    "table",
+    "first_update_id",
+    "last_update_id"
+  ],
+  "columns": [
+    {
+      "name": "venue",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "market",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "symbol",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "channel",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "depth",
+      "type": "int16",
+      "nullable": false,
+      "description": "subscribed depth"
+    },
+    {
+      "name": "kind",
+      "type": "int8",
+      "nullable": false,
+      "description": "0 snapshot, 1 delta, 2 checkpoint"
+    },
+    {
+      "name": "venue_ts_ns",
+      "type": "int64",
+      "nullable": false,
+      "description": "the venue's event time"
+    },
+    {
+      "name": "recv_ns",
+      "type": "int64",
+      "nullable": false,
+      "description": "our receive time"
+    },
+    {
+      "name": "update_id",
+      "type": "int64",
+      "nullable": true,
+      "description": "Bybit u, Binance u, OKX seqId; null for Hyperliquid"
+    },
+    {
+      "name": "prev_update_id",
+      "type": "int64",
+      "nullable": true,
+      "description": "Binance pu, OKX prevSeqId"
+    },
+    {
+      "name": "first_update_id",
+      "type": "int64",
+      "nullable": true,
+      "description": "Binance U"
+    },
+    {
+      "name": "venue_seq",
+      "type": "int64",
+      "nullable": true,
+      "description": "Bybit seq"
+    },
+    {
+      "name": "bid_px",
+      "type": "list<int64>",
+      "nullable": false,
+      "description": "levels as received; a checkpoint row holds the full book, best price first"
+    },
+    {
+      "name": "bid_qty",
+      "type": "list<int64>",
+      "nullable": false,
+      "description": "quantity 0 = remove the level"
+    },
+    {
+      "name": "ask_px",
+      "type": "list<int64>",
+      "nullable": false
+    },
+    {
+      "name": "ask_qty",
+      "type": "list<int64>",
+      "nullable": false
+    },
+    {
+      "name": "px_exp",
+      "type": "int8",
+      "nullable": false,
+      "description": "price exponent (1.3)"
+    },
+    {
+      "name": "qty_exp",
+      "type": "int8",
+      "nullable": false,
+      "description": "quantity exponent (1.3)"
+    },
+    {
+      "name": "conn_id",
+      "type": "int32",
+      "nullable": false,
+      "description": "lineage: connection number inside the collector session"
+    },
+    {
+      "name": "frame_no",
+      "type": "int64",
+      "nullable": false,
+      "description": "lineage"
+    },
+    {
+      "name": "l0_file_id",
+      "type": "string",
+      "nullable": false,
+      "description": "lineage"
+    },
+    {
+      "name": "rec_no",
+      "type": "int64",
+      "nullable": false,
+      "description": "lineage"
+    },
+    {
+      "name": "parser_ver",
+      "type": "string",
+      "nullable": false,
+      "description": "lineage"
+    }
+  ]
+}

@@ -1,0 +1,199 @@
+{
+  "contract_ver": 1,
+  "venue": "bybit",
+  "date": "2026-01-02",
+  "auditor_ver": "0.1.0",
+  "audited_at": 1767399120000000000,
+  "status": "not_audited",
+  "l0_files": [
+    {
+      "l0_file_id": "venue=bybit/_session/date=2026-01-02/md1-1767308398000000000",
+      "status": "clean",
+      "checks": {
+        "manifest_listing": "pass",
+        "sidecar_sha256": "pass",
+        "manifest_sha256": "pass",
+        "verify_records": "pass",
+        "verify_framing": "pass"
+      },
+      "findings": []
+    },
+    {
+      "l0_file_id": "venue=bybit/_session/date=2026-01-02/md_sealer-1767312300000000000",
+      "status": "clean",
+      "checks": {
+        "manifest_listing": "pass",
+        "sidecar_sha256": "pass",
+        "manifest_sha256": "pass",
+        "verify_records": "pass",
+        "verify_framing": "pass"
+      },
+      "findings": []
+    },
+    {
+      "l0_file_id": "venue=bybit/market=linear/channel=instruments/date=2026-01-02/_all",
+      "status": "clean",
+      "checks": {
+        "manifest_listing": "pass",
+        "sidecar_sha256": "pass",
+        "manifest_sha256": "pass",
+        "verify_records": "pass",
+        "verify_framing": "pass"
+      },
+      "findings": []
+    },
+    {
+      "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+      "status": "clean",
+      "checks": {
+        "manifest_listing": "pass",
+        "sidecar_sha256": "pass",
+        "manifest_sha256": "pass",
+        "verify_records": "pass",
+        "verify_framing": "pass"
+      },
+      "findings": []
+    },
+    {
+      "l0_file_id": "venue=bybit/market=linear/channel=publicTrade/date=2026-01-02/BTCUSDT",
+      "status": "clean",
+      "checks": {
+        "manifest_listing": "pass",
+        "sidecar_sha256": "pass",
+        "manifest_sha256": "pass",
+        "verify_records": "pass",
+        "verify_framing": "pass"
+      },
+      "findings": []
+    },
+    {
+      "l0_file_id": "venue=bybit/market=linear/channel=tickers/date=2026-01-02/BTCUSDT",
+      "status": "not_audited",
+      "checks": {
+        "manifest_listing": "pass",
+        "sidecar_sha256": "pass",
+        "manifest_sha256": "pass",
+        "verify_records": "not_evaluable",
+        "verify_framing": "not_evaluable"
+      },
+      "findings": [
+        {
+          "code": "verify_records",
+          "detail": "no verify result for the file"
+        },
+        {
+          "code": "verify_framing",
+          "detail": "no verify result for the file"
+        }
+      ]
+    }
+  ],
+  "l1_files": [
+    {
+      "path": "crypto/l1/book_msg/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/hour=00.parquet",
+      "status": "clean",
+      "checks": {
+        "schema": "pass",
+        "lineage": "pass"
+      },
+      "findings": []
+    },
+    {
+      "path": "crypto/l1/book_msg/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/hour=01.parquet",
+      "status": "clean",
+      "checks": {
+        "schema": "pass",
+        "lineage": "pass"
+      },
+      "findings": []
+    },
+    {
+      "path": "crypto/l1/book_msg/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/hour=02.parquet",
+      "status": "clean",
+      "checks": {
+        "schema": "pass",
+        "lineage": "pass"
+      },
+      "findings": []
+    },
+    {
+      "path": "crypto/l1/book_msg/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/hour=03.parquet",
+      "status": "clean",
+      "checks": {
+        "schema": "pass",
+        "lineage": "pass"
+      },
+      "findings": []
+    },
+    {
+      "path": "crypto/l1/book_msg/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/hour=04.parquet",
+      "status": "clean",
+      "checks": {
+        "schema": "pass",
+        "lineage": "pass"
+      },
+      "findings": []
+    },
+    {
+      "path": "crypto/l1/book_msg/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/hour=05.parquet",
+      "status": "clean",
+      "checks": {
+        "schema": "pass",
+        "lineage": "pass"
+      },
+      "findings": []
+    },
+    {
+      "path": "crypto/l1/book_msg/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/hour=06.parquet",
+      "status": "clean",
+      "checks": {
+        "schema": "pass",
+        "lineage": "pass"
+      },
+      "findings": []
+    },
+    {
+      "path": "crypto/l1/gap/venue=bybit/date=2026-01-02/day.parquet",
+      "status": "clean",
+      "checks": {
+        "schema": "pass",
+        "lineage": "pass"
+      },
+      "findings": []
+    },
+    {
+      "path": "crypto/l1/instrument/venue=bybit/market=linear/date=2026-01-02/day.parquet",
+      "status": "clean",
+      "checks": {
+        "schema": "pass",
+        "lineage": "pass"
+      },
+      "findings": []
+    },
+    {
+      "path": "crypto/l1/ticker/venue=bybit/market=linear/channel=tickers/date=2026-01-02/day.parquet",
+      "status": "clean",
+      "checks": {
+        "schema": "pass",
+        "lineage": "pass"
+      },
+      "findings": []
+    },
+    {
+      "path": "crypto/l1/trade/venue=bybit/market=linear/channel=publicTrade/date=2026-01-02/day.parquet",
+      "status": "clean",
+      "checks": {
+        "schema": "pass",
+        "lineage": "pass"
+      },
+      "findings": []
+    }
+  ],
+  "gap_summary": {
+    "collector_down": 4,
+    "handover": 2,
+    "reconnect": 3,
+    "resnapshot": 1,
+    "seq_gap": 2
+  }
+}

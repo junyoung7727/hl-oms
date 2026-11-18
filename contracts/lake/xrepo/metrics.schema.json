@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "xrepo/metrics.schema.json",
+  "title": "Auditor metric list",
+  "description": "xrepo/metrics.json (contract document 5.4): the metrics the auditor emits, and the lake_* names reserved for hl-oms programs.",
+  "type": "object",
+  "properties": {
+    "contract_ver": {
+      "type": "integer",
+      "const": 1
+    },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^lake_[a-z0-9_]+$"
+          },
+          "type": {
+            "enum": [
+              "counter",
+              "gauge"
+            ]
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z_][a-z0-9_]*$"
+            }
+          },
+          "help": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "labels",
+          "help"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    },
+    "reserved": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^lake_[a-z0-9_]+$"
+      }
+    }
+  },
+  "required": [
+    "contract_ver",
+    "metrics",
+    "reserved"
+  ],
+  "additionalProperties": false
+}

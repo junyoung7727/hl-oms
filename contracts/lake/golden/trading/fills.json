@@ -1,0 +1,36 @@
+{
+ "crypto/trading/fills/date=2026-01-02/day.parquet": [
+  {
+   "venue": "bybit",
+   "symbol": "BTCUSDT",
+   "exec_id": "e-0001",
+   "order_id": "o-0002",
+   "seq": 21,
+   "event_idx": 0,
+   "at_us": 1767312007300500,
+   "side": 1,
+   "px": "42000.2",
+   "qty": "0.010",
+   "fee": "0.0042",
+   "is_maker": false,
+   "venue_ts_ns": 1767312007298000000,
+   "recv_ns": 1767312007300000000
+  },
+  {
+   "venue": "bybit",
+   "symbol": "BTCUSDT",
+   "exec_id": "e-0002",
+   "order_id": "o-0003",
+   "seq": 31,
+   "event_idx": 0,
+   "at_us": 1767322200400500,
+   "side": -1,
+   "px": "41999.9",
+   "qty": "0.005",
+   "fee": "-0.0010",
+   "is_maker": true,
+   "venue_ts_ns": 1767322200398000000,
+   "recv_ns": 1767322200400000000
+  }
+ ]
+}

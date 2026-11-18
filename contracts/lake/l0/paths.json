@@ -1,0 +1,85 @@
+{
+  "contract_ver": 1,
+  "description": "L0 paths and the QRAW1 record layout (contract document 1.4, 2.1, 2.2). Paths are relative to the lake root and use /. {name} is a field; its pattern is in 'fields'. A kind listed in 'partial_kinds' carries the suffix .partial until the day seal; the open file always carries it.",
+  "l0_root": "crypto/l0",
+  "paths": {
+    "open": "crypto/l0/_open/venue={venue}/date={date}/hour={hour}/{collector}-{session_ns}-c{conn_id}.qraw.zst.partial",
+    "seal_log": "crypto/l0/_seal/venue={venue}/date={date}/hour={hour}.json",
+    "day_by_symbol": "crypto/l0/venue={venue}/market={market}/channel={channel}/date={date}/{symbol}.qraw.zst",
+    "day_by_connection": "crypto/l0/venue={venue}/_conn/date={date}/{collector}-{session_ns}-c{conn_id}.qraw.zst",
+    "instruments": "crypto/l0/venue={venue}/market={market}/channel=instruments/date={date}/_all.qraw.zst",
+    "session": "crypto/l0/venue={venue}/_session/date={date}/{writer}-{start_ns}.qraw.zst",
+    "sidecar": "{file}.sha256",
+    "manifest": "crypto/l0/_manifest/venue={venue}/date={date}.jsonl"
+  },
+  "partial_kinds": [
+    "day_by_symbol",
+    "day_by_connection",
+    "instruments",
+    "session"
+  ],
+  "partial_suffix": ".partial",
+  "sealed_extension": ".qraw.zst",
+  "fields": {
+    "venue": "^[a-z0-9][a-z0-9.-]*$",
+    "market": "^[a-z0-9][a-z0-9.-]*$",
+    "channel": "^[A-Za-z0-9][A-Za-z0-9.-]*$",
+    "symbol": "^[A-Za-z0-9][A-Za-z0-9.-]*$",
+    "date": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+    "hour": "^([01][0-9]|2[0-3])$",
+    "collector": "^[a-z0-9][a-z0-9_]*$",
+    "writer": "^[a-z0-9][a-z0-9_]*$",
+    "session_ns": "^(0|[1-9][0-9]*)$",
+    "start_ns": "^(0|[1-9][0-9]*)$",
+    "conn_id": "^(0|[1-9][0-9]*)$"
+  },
+  "integer_fields": [
+    "session_ns",
+    "start_ns",
+    "conn_id"
+  ],
+  "integer_max": {
+    "session_ns": 9223372036854775807,
+    "start_ns": 9223372036854775807,
+    "conn_id": 4294967295
+  },
+  "name_rules": "No value contains '..'; date is a real calendar date; names that start with _ are reserved for the contract.",
+  "qraw1": {
+    "magic_hex": "515241573100",
+    "header_len": "u32",
+    "byte_order": "little",
+    "record": [
+      {
+        "name": "recv_ns",
+        "type": "u64"
+      },
+      {
+        "name": "src",
+        "type": "u8",
+        "values": {
+          "0": "websocket",
+          "1": "rest",
+          "2": "note"
+        }
+      },
+      {
+        "name": "conn_id",
+        "type": "u32"
+      },
+      {
+        "name": "frame_no",
+        "type": "u64"
+      },
+      {
+        "name": "len",
+        "type": "u32",
+        "max": 16777216
+      },
+      {
+        "name": "payload",
+        "type": "bytes",
+        "length": "len"
+      }
+    ]
+  }
+}

@@ -1,0 +1,276 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "xrepo/audit_result.schema.json",
+  "title": "Audit result",
+  "description": "crypto/audit/venue=<venue>/date=<date>.json, written whole by the auditor of this repository (contract document 5.3).",
+  "type": "object",
+  "properties": {
+    "contract_ver": {
+      "type": "integer",
+      "const": 1
+    },
+    "venue": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9.-]*$"
+    },
+    "date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+    },
+    "auditor_ver": {
+      "type": "string",
+      "minLength": 1
+    },
+    "audited_at": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854775807
+    },
+    "status": {
+      "enum": [
+        "clean",
+        "fail",
+        "not_audited"
+      ]
+    },
+    "l0_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "l0_file_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "enum": [
+              "clean",
+              "fail",
+              "not_audited"
+            ]
+          },
+          "checks": {
+            "type": "object",
+            "properties": {
+              "manifest_listing": {
+                "enum": [
+                  "pass",
+                  "fail",
+                  "not_evaluable"
+                ]
+              },
+              "sidecar_sha256": {
+                "enum": [
+                  "pass",
+                  "fail",
+                  "not_evaluable"
+                ]
+              },
+              "manifest_sha256": {
+                "enum": [
+                  "pass",
+                  "fail",
+                  "not_evaluable"
+                ]
+              },
+              "verify_records": {
+                "enum": [
+                  "pass",
+                  "fail",
+                  "not_evaluable"
+                ]
+              },
+              "verify_framing": {
+                "enum": [
+                  "pass",
+                  "fail",
+                  "not_evaluable"
+                ]
+              }
+            },
+            "required": [
+              "manifest_listing",
+              "sidecar_sha256",
+              "manifest_sha256",
+              "verify_records",
+              "verify_framing"
+            ],
+            "additionalProperties": false
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "detail": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "detail"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "l0_file_id",
+          "status",
+          "checks",
+          "findings"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "l1_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "enum": [
+              "clean",
+              "fail",
+              "not_audited"
+            ]
+          },
+          "checks": {
+            "type": "object",
+            "properties": {
+              "schema": {
+                "enum": [
+                  "pass",
+                  "fail",
+                  "not_evaluable"
+                ]
+              },
+              "lineage": {
+                "enum": [
+                  "pass",
+                  "fail",
+                  "not_evaluable"
+                ]
+              }
+            },
+            "required": [
+              "schema",
+              "lineage"
+            ],
+            "additionalProperties": false
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "detail": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "detail"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "path",
+          "status",
+          "checks",
+          "findings"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "gap_summary": {
+      "type": "object",
+      "properties": {
+        "seq_gap": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "reconnect": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "resnapshot": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "stale": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "parse_error": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "crash_truncate": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "handover": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "overflow": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "disk_floor": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "clock_step": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "collector_down": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        }
+      },
+      "required": [],
+      "additionalProperties": false,
+      "description": "number of gap rows of the date per kind; kinds without rows may be left out"
+    }
+  },
+  "required": [
+    "contract_ver",
+    "venue",
+    "date",
+    "auditor_ver",
+    "audited_at",
+    "status",
+    "l0_files",
+    "l1_files",
+    "gap_summary"
+  ],
+  "additionalProperties": false
+}
