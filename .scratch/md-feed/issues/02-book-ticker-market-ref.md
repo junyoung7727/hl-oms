@@ -4,10 +4,10 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Test `book_matches_fake_after_snapshot_and_deltas`: Bybit snapshot + deltas → `read_book` levels equal the hand-computed book.
-- [ ] Test `market_ref_is_last_applied_message`: fields equal the last delta's `u`, `ts`·10^6 and its `recv_ns` from the sink, venue `bybit`, configured market, channel and symbol.
-- [ ] Test `ticker_merges_and_trades_reach_message_sink`.
-- [ ] Test `resnapshot_event`: a second snapshot on the same connection gives one `Resnapshot` and restarts the book.
-- [ ] Test `parse_error_event`: a malformed book delta gives `ParseError`, the frame is still in the sink, and the book is treated as a gap.
+- [x] Test `book_matches_fake_after_snapshot_and_deltas`: Bybit snapshot + deltas → `read_book` levels equal the hand-computed book.
+- [x] Test `market_ref_is_last_applied_message`: fields equal the last delta's `u`, `ts`·10^6 and its `recv_ns` from the sink, venue `bybit`, configured market, channel and symbol.
+- [x] Test `ticker_merges_and_trades_reach_message_sink`.
+- [x] Test `resnapshot_event`: a second snapshot on the same connection gives one `Resnapshot` and restarts the book.
+- [x] Test `parse_error_event`: a malformed book delta gives `ParseError`, the frame is still in the sink, and the book is treated as a gap.

@@ -300,3 +300,31 @@ pub async fn eventually(mut f: impl FnMut() -> bool) {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
+
+pub fn ticker(symbol: &str, kind: &str, ts: i64, fields: &str) -> String {
+    format!(
+        r#"{{"topic":"tickers.{symbol}","type":"{kind}","ts":{ts},"cs":1,"data":{{"symbol":"{symbol}"{fields}}}}}"#
+    )
+}
+
+/// One connection with these channels for each symbol.
+pub fn plan_of(symbols: &[&str], channels: &[&str]) -> Vec<md_core::adapter::ConnPlan> {
+    use md_core::adapter::MarketDataAdapter;
+    let symbols: Vec<String> = symbols.iter().map(|s| s.to_string()).collect();
+    let channels: Vec<String> = channels.iter().map(|s| s.to_string()).collect();
+    bybit().plan(&symbols, &channels, 50).expect("plan")
+}
+
+pub fn key(channel: &str, symbol: &str) -> md_core::StreamKey {
+    md_core::StreamKey::new(channel, symbol)
+}
+
+/// Keeps every forwarded message.
+#[derive(Default)]
+pub struct VecMsgs(pub Mutex<Vec<(u32, md_core::Normalized)>>);
+
+impl md_feed::MessageSink for VecMsgs {
+    fn message(&self, conn_id: u32, msg: &md_core::Normalized) {
+        self.0.lock().expect("msgs").push((conn_id, msg.clone()));
+    }
+}
