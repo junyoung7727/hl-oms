@@ -11,5 +11,6 @@ pub mod qraw;
 pub mod read;
 pub mod seal;
 pub mod time;
+pub mod verify;
 pub mod writer;
 pub mod zst;
