@@ -214,68 +214,108 @@ pub enum ScanError {
 /// Reads the frame and block headers of concatenated zstd frames without
 /// decompressing. A file whose end lies inside a frame gives `unfinished`.
 pub fn scan(b: &[u8]) -> Result<Scan, ScanError> {
+    scan_with(b.len() as u64, |at, buf| {
+        let at = at as usize;
+        let n = buf.len().min(b.len().saturating_sub(at));
+        buf[..n].copy_from_slice(&b[at..at + n]);
+        Ok(n)
+    })
+    .map_err(|e| match e {
+        ScanIo::Scan(s) => s,
+        ScanIo::Io(_) => ScanError::BadMagic { at: 0 },
+    })
+}
+
+#[derive(Debug)]
+pub enum ScanIo {
+    Scan(ScanError),
+    Io(io::Error),
+}
+
+/// `scan` over a file of `len` bytes read by `read_at(offset, buf)`: only
+/// the frame and block headers are read, a few bytes per 128 KiB block.
+pub fn scan_with(
+    len: u64,
+    mut read_at: impl FnMut(u64, &mut [u8]) -> io::Result<usize>,
+) -> Result<Scan, ScanIo> {
     let mut out = Scan::default();
-    let mut at = 0;
-    while at < b.len() {
-        let start = at;
-        let unfinished = |end: usize| Unfinished {
+    let mut at: u64 = 0;
+    let mut read = |at: u64, n: usize| -> Result<Vec<u8>, ScanIo> {
+        let mut buf = vec![0; n];
+        let mut got = 0;
+        while got < n {
+            let k = read_at(at + got as u64, &mut buf[got..]).map_err(ScanIo::Io)?;
+            if k == 0 {
+                break;
+            }
+            got += k;
+        }
+        buf.truncate(got);
+        Ok(buf)
+    };
+    while at < len {
+        let start = at as usize;
+        let left = |at: u64| len - at;
+        let unfinished = |end: u64| Unfinished {
             start,
-            complete_blocks_end: end,
+            complete_blocks_end: end as usize,
         };
-        if b.len() - at < 4 {
-            if MAGIC.to_le_bytes().starts_with(&b[at..]) {
-                out.unfinished = Some(unfinished(start));
+        if left(at) < 4 {
+            let tail = read(at, left(at) as usize)?;
+            if MAGIC.to_le_bytes().starts_with(&tail) {
+                out.unfinished = Some(unfinished(at));
                 return Ok(out);
             }
-            return Err(ScanError::BadMagic { at });
+            return Err(ScanIo::Scan(ScanError::BadMagic { at: start }));
         }
-        if u32::from_le_bytes([b[at], b[at + 1], b[at + 2], b[at + 3]]) != MAGIC {
-            return Err(ScanError::BadMagic { at });
+        let m = read(at, 4)?;
+        if u32::from_le_bytes([m[0], m[1], m[2], m[3]]) != MAGIC {
+            return Err(ScanIo::Scan(ScanError::BadMagic { at: start }));
         }
         at += 4;
-        let Some(&fhd) = b.get(at) else {
-            out.unfinished = Some(unfinished(start));
+        if left(at) < 1 {
+            out.unfinished = Some(unfinished(start as u64));
             return Ok(out);
-        };
-        if fhd & 0x08 != 0 {
-            return Err(ScanError::ReservedBit { at });
         }
-        let fcs_flag = fhd >> 6;
+        let fhd = read(at, 1)?[0];
+        if fhd & 0x08 != 0 {
+            return Err(ScanIo::Scan(ScanError::ReservedBit { at: at as usize }));
+        }
         let single = fhd & 0x20 != 0;
         let checksum = fhd & 0x04 != 0;
-        let dict = [0, 1, 2, 4][(fhd & 0x03) as usize];
-        let fcs = match (fcs_flag, single) {
+        let dict = [0u64, 1, 2, 4][(fhd & 0x03) as usize];
+        let fcs = match (fhd >> 6, single) {
             (0, false) => 0,
             (0, true) => 1,
             (1, _) => 2,
             (2, _) => 4,
             _ => 8,
         };
-        let header = 1 + usize::from(!single) + dict + fcs;
-        if b.len() - at < header {
-            out.unfinished = Some(unfinished(start));
+        let header = 1 + u64::from(!single) + dict + fcs;
+        if left(at) < header {
+            out.unfinished = Some(unfinished(start as u64));
             return Ok(out);
         }
         at += header;
         let mut last_complete = at;
         loop {
-            if b.len() - at < 3 {
+            if left(at) < 3 {
                 out.unfinished = Some(unfinished(last_complete));
                 return Ok(out);
             }
-            let h = u32::from(b[at]) | (u32::from(b[at + 1]) << 8) | (u32::from(b[at + 2]) << 16);
+            let hb = read(at, 3)?;
+            let h = u32::from(hb[0]) | (u32::from(hb[1]) << 8) | (u32::from(hb[2]) << 16);
             let last = h & 1 == 1;
-            let kind = (h >> 1) & 3;
-            let size = (h >> 3) as usize;
-            let content = match kind {
+            let size = (h >> 3) as u64;
+            let content = match (h >> 1) & 3 {
                 0 | 2 => size,
                 1 => 1,
-                _ => return Err(ScanError::BadBlock { at }),
+                _ => return Err(ScanIo::Scan(ScanError::BadBlock { at: at as usize })),
             };
-            if size > MAX_BLOCK {
-                return Err(ScanError::BadBlock { at });
+            if size > MAX_BLOCK as u64 {
+                return Err(ScanIo::Scan(ScanError::BadBlock { at: at as usize }));
             }
-            if b.len() - at - 3 < content {
+            if left(at) - 3 < content {
                 out.unfinished = Some(unfinished(last_complete));
                 return Ok(out);
             }
@@ -286,15 +326,51 @@ pub fn scan(b: &[u8]) -> Result<Scan, ScanError> {
             }
         }
         if checksum {
-            if b.len() - at < 4 {
+            if left(at) < 4 {
                 out.unfinished = Some(unfinished(last_complete));
                 return Ok(out);
             }
             at += 4;
         }
-        out.frames.push(FrameSpan { start, end: at });
+        out.frames.push(FrameSpan {
+            start,
+            end: at as usize,
+        });
     }
     Ok(out)
+}
+
+/// A streaming decoder of concatenated frames: feed compressed bytes, get
+/// decompressed bytes, in bounded memory.
+pub struct StreamDecoder {
+    d: DCtx<'static>,
+}
+
+impl Default for StreamDecoder {
+    fn default() -> Self {
+        Self { d: DCtx::create() }
+    }
+}
+
+impl StreamDecoder {
+    /// Decompresses `input` into `out` (appended). Returns the bytes of
+    /// `input` consumed; call again with the rest.
+    pub fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> io::Result<usize> {
+        let mut ib = InBuffer::around(input);
+        loop {
+            out.reserve(CHUNK);
+            let pos = out.len();
+            let mut ob = OutBuffer::around_pos(out, pos);
+            self.d.decompress_stream(&mut ob, &mut ib).map_err(zerr)?;
+            let produced = ob.pos() > pos;
+            if ib.pos == input.len() && !produced {
+                return Ok(ib.pos);
+            }
+            if out.len() >= 4 * CHUNK {
+                return Ok(ib.pos);
+            }
+        }
+    }
 }
 
 fn decompress(input: &[u8], whole: bool) -> io::Result<Vec<u8>> {

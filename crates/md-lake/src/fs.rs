@@ -166,3 +166,28 @@ impl Fs for RealFs {
         Ok(Box::new(RealFile(File::open(p)?)))
     }
 }
+
+/// A held lock that is released with `LOCK_UN` when dropped, not only when
+/// the descriptor closes: a forked child that still shares the descriptor
+/// (between fork and exec) would otherwise keep the lock alive.
+#[derive(Debug)]
+pub struct Held(pub Box<dyn LakeFile>);
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
+impl std::ops::Deref for Held {
+    type Target = Box<dyn LakeFile>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Held {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}

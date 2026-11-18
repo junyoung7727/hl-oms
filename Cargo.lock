@@ -927,7 +927,10 @@ dependencies = [
 name = "md-lake"
 version = "0.1.0"
 dependencies = [
+ "hex",
+ "regex-lite",
  "serde_json",
+ "sha2",
  "zstd",
 ]
 
@@ -1282,6 +1285,12 @@ checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
 dependencies = [
  "rand_core 0.9.5",
 ]
+
+[[package]]
+name = "regex-lite"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973"
 
 [[package]]
 name = "regex-syntax"

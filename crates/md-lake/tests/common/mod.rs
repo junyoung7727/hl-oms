@@ -5,6 +5,9 @@
 #![allow(dead_code)]
 
 pub mod counting;
+pub mod kit;
+pub mod lock_holder;
+pub mod schema;
 
 use std::fs;
 use std::path::{Path, PathBuf};
