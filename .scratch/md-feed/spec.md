@@ -63,9 +63,23 @@ A new workspace library crate `md-feed` (tokio) that runs the connections of one
 
 - Instrument fetching and paging (the caller builds the adapter; `RestClient::get` is public so U5b can fetch with the same loopback guard).
 - L0 writing, notes, bounded queues, the disk floor, day-change scheduling (U5b), metrics export (U6).
-- Binance, OKX and Hyperliquid adapters (U10, U11). Binance's server ping needs tungstenite's automatic pong to be flushed; the driver flushes after every read when a pong is queued — tested in U10 with its adapter.
+- Binance, OKX and Hyperliquid adapters (U10, U11). Open contract item for U10: an L0 home and a replay rule for REST depth snapshot bodies (R1). Binance's server ping needs tungstenite's automatic pong to be flushed; the driver flushes after every read when a pong is queued — tested in U10 with its adapter.
 - Any change to `oms-*` crates, `.github/`, the journal or registry contracts.
 
 ## Further Notes
 
 - Built directly by Claude Opus 5.5 (2026-11-19), lean spec (owner: "검증 사소한 것까지 하지마").
+
+## Review decisions (spec review, 2026-11-19)
+
+These override the sections above where they differ.
+
+- **R1 REST snapshot lineage.** A REST snapshot body in the sink carries `for_conn_id` (the connection whose book it starts) and `topic`; `conn_id` stays 0 (contract 2.2) and `frame_no` comes from the session-wide counter in `ConnIds`. The lake contract has no L0 file kind for REST depth bodies and its replay rule needs a snapshot row of the connection; Bybit never uses REST snapshots, so this is an open contract item for U10 (Binance), recorded in Out of Scope.
+- **R2 Sink overflow.** `FrameSink::frame` returns `Result<(), Overflow>`. On `Err` the feed closes that connection with reason `overflow` (contract 2.3 note `overflow`: the collector closed the connection), and reconnects as after any end.
+- **R3 Dead connection.** When a connection ends for any reason, its state is marked closed before `Disconnected` is sent; every book of a closed connection is stale. The reconnect's new connection becomes the slot's active connection when it starts, and is stale until its snapshots.
+- **R4 Loopback guard.** REST: `reqwest` client with `no_proxy()`, `redirect(Policy::none())` and, with `loopback_only`, the host pinned with `resolve` to the checked address. WS: the TCP socket is opened only to the checked addresses, then `client_async_tls`.
+- **R5 Gap while resyncing.** While a topic is resyncing the feed ignores the detector: no further `Gap`, nothing applied, until a snapshot (or REST bridge) ends the resync. A parse error of a book delta starts a resync without touching the detector.
+- **R6 Reconnect spread.** By the slot's position in this feed's plans (not the global `conn_index`), 100 ms each, at most 2 s.
+- **R7 Old connection dies during a switch.** The switch's connection takes over the slot at once (no third connection), `SwitchDone` is sent with the dead connection as `from_conn_id`; it is stale until its snapshots.
+- **R8 Market name.** Additive trait method `market_name() -> Option<&'static str>` (default `None`; Bybit returns its category). `Feed::start` returns an error when it differs from `FeedConfig::market`.
+- **R9 Bridging is an adapter method.** Additive trait method `bridge(key, snapshot_update_id, delta) -> Bridge { Drop, Bridges, Fails }`; the default is the generic rule of this spec (Binance spot style). Binance USD-M (`drop u < S`, `U <= S <= u`) overrides it in U10.
