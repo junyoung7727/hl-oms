@@ -81,7 +81,9 @@ pub struct Ticker {
     pub venue_ts_ns: i64,
     pub recv_ns: i64,
     pub last_px: Option<i64>,
+    /// With `ref_px_exp`: computed prices can be finer than the tick (lake contract 1.3).
     pub mark_px: Option<i64>,
+    /// With `ref_px_exp`.
     pub index_px: Option<i64>,
     /// In units of 1e-8.
     pub funding_rate: Option<i64>,
@@ -93,7 +95,43 @@ pub struct Ticker {
     pub best_ask_px: Option<i64>,
     pub best_ask_qty: Option<i64>,
     pub px_exp: i8,
+    /// `px_exp - 2`, the exponent of `mark_px` and `index_px`.
+    pub ref_px_exp: i8,
     pub qty_exp: i8,
+}
+
+impl Ticker {
+    /// Applies a delta to this state: each field the delta carries replaces
+    /// the state's, the others stay, and the times become the delta's. Both
+    /// must be of the same instrument row: with other exponents nothing
+    /// changes and `false` is returned, because the integers would not be
+    /// comparable.
+    pub fn merge(&mut self, delta: &Ticker) -> bool {
+        if (self.px_exp, self.ref_px_exp, self.qty_exp)
+            != (delta.px_exp, delta.ref_px_exp, delta.qty_exp)
+        {
+            return false;
+        }
+        self.venue_ts_ns = delta.venue_ts_ns;
+        self.recv_ns = delta.recv_ns;
+        for (to, from) in [
+            (&mut self.last_px, delta.last_px),
+            (&mut self.mark_px, delta.mark_px),
+            (&mut self.index_px, delta.index_px),
+            (&mut self.funding_rate, delta.funding_rate),
+            (&mut self.next_funding_ns, delta.next_funding_ns),
+            (&mut self.open_interest, delta.open_interest),
+            (&mut self.best_bid_px, delta.best_bid_px),
+            (&mut self.best_bid_qty, delta.best_bid_qty),
+            (&mut self.best_ask_px, delta.best_ask_px),
+            (&mut self.best_ask_qty, delta.best_ask_qty),
+        ] {
+            if from.is_some() {
+                *to = from;
+            }
+        }
+        true
+    }
 }
 
 /// A frame that is not market data: subscribe answers, pongs, errors.

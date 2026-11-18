@@ -91,7 +91,7 @@
     },
     {
       "name": "golden/l0/venue=bybit/market=linear/channel=tickers/date=2026-01-02/BTCUSDT/00.qraw",
-      "sha256": "07468d32d5e3e601349f5ad7c5325c0b2af9f00e2793261560f8a0d9988b8691"
+      "sha256": "af713dbb2832336ed23bb5ab1d9e01aa07256983cd26cbc553bfe81e009f0408"
     },
     {
       "name": "golden/l1/book_msg.json",
@@ -111,7 +111,7 @@
     },
     {
       "name": "golden/l1/ticker.json",
-      "sha256": "30ec45b14309bd188ade5282ebc0a1bd84d1b43a939d85a3fd388a5f209ba173"
+      "sha256": "28e5ddffa5c49ca7f9d9ed25b5deddc101a2c5bd551a428c5475564268ed5430"
     },
     {
       "name": "golden/l1/trade.json",
@@ -147,7 +147,7 @@
     },
     {
       "name": "golden/xrepo/manifest.jsonl",
-      "sha256": "cb6cd232f9fcdb08a5da66f3ddbce0fbe69c3ae28b8d468bf160fe7266178818"
+      "sha256": "9efe6230c9f69dc866793145efa334a658698e1aed1eea92b8c50ab39b3e19bf"
     },
     {
       "name": "golden/xrepo/seal_log/date=2026-01-01/hour=20.json",
@@ -167,7 +167,7 @@
     },
     {
       "name": "golden/xrepo/verify_result.json",
-      "sha256": "15668c772164b2414714fd5cc7aabf35eda30575af093c630d765f1200622d78"
+      "sha256": "7d3a7fc762818cf229a45c9a5dc4bcc1dc6bdce92c99f39bafd07ee65973c2b6"
     },
     {
       "name": "index.schema.json",
@@ -207,7 +207,7 @@
     },
     {
       "name": "l1/ticker.table.json",
-      "sha256": "c9cdfa592c57accc82ad78bbf899ba43f7b2076bedbc6ceaf55ad410c7e069bb"
+      "sha256": "a87fe369bccb7e24dfe23833020cd1138c98c3a7b2702d02fd947f6431bbd062"
     },
     {
       "name": "l1/trade.table.json",
