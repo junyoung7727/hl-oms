@@ -69,7 +69,7 @@ impl FakeWs {
                     if s.len() > 1 {
                         s.pop_front().unwrap_or_default()
                     } else {
-                        s.front().map(clone_steps).unwrap_or_default()
+                        s.front().map(|v| clone_steps(v)).unwrap_or_default()
                     }
                 };
                 let log = Arc::new(Mutex::new(ConnLog::default()));
@@ -95,7 +95,7 @@ impl FakeWs {
     }
 }
 
-fn clone_steps(steps: &Vec<Step>) -> Vec<Step> {
+fn clone_steps(steps: &[Step]) -> Vec<Step> {
     steps
         .iter()
         .map(|s| match s {
