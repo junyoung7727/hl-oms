@@ -4,11 +4,11 @@
 
 **Blocked by:** 02, 03
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] Test `fake_adapter_passes_the_conformance_harness` (seam A).
 - [x] Test `harness_fails_an_adapter_that_drops_zero_quantity_levels` (seam A).
 - [x] Test `harness_fails_an_adapter_that_ignores_the_sequence_field` (seam A).
 - [x] Test `route_never_fails_on_garbage_frames` (seam A): empty bytes, non-UTF-8, JSON without a topic → `Route::Control`.
-- [ ] Docs: `docs/03-architecture.md` 3.1 crate table gains `md-core`; `GLOSSARY.md` gains the market-data terms used in code. `cargo run -p xtask -- docs` regenerated.
-- [ ] Full local gate passes (the unit's checks in `pr_plan.json`).
+- [x] Docs: `docs/03-architecture.md` 3.1 crate table gains `md-core`; `GLOSSARY.md` gains the market-data terms used in code. `cargo run -p xtask -- docs` regenerated.
+- [x] Full local gate passes (the unit's checks in `pr_plan.json`).

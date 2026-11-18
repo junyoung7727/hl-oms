@@ -4,10 +4,10 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] Test `plus_one_reports_a_missing_update_id_once` (seam A): 100 snapshot, 101, 103 → one gap (101 → 103); 104 → no second gap; snapshot 1 (venue restart) then 2 → no gap.
 - [x] Test `prev_equals_reports_a_wrong_prev` (seam A): Binance-style `pu`.
 - [x] Test `none_rule_never_reports_a_gap` (seam A).
 - [x] Test `delta_before_any_snapshot_is_a_gap` (seam A).
-- [ ] Full local gate passes.
+- [x] Full local gate passes.
