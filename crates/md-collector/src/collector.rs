@@ -1,0 +1,589 @@
+//! The collector run (spec D5–D8): instruments, one feed per plan group,
+//! events, the instrument refresh, the day change and the disk floor.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use md_core::adapter::Instrument;
+use md_feed::{
+    ConnIds, FeedConfig, FeedEvent, FeedHandle, FrameSink, Overflow, RawFrame, RestClient,
+};
+use md_lake::fs::{Fs, RealFs};
+use md_lake::seal::Topic;
+use md_lake::writer::WriterSettings;
+use serde_json::json;
+use tokio::task::JoinHandle;
+
+use crate::config::{Config, MarketConfig, Symbols};
+use crate::disk::{FreeSpace, StatVfs};
+use crate::ingest::{self, Ingest, IngestSnapshot, Limits, WriterThread};
+use crate::notes::Note;
+use crate::plan::{self, Group};
+use crate::registry::{self, Venue};
+
+/// Wall clock of the day-change scheduler and the disk checker (spec R7).
+pub trait WallClock: Send + Sync {
+    fn now_ns(&self) -> i64;
+}
+
+pub struct SystemClock;
+
+impl WallClock for SystemClock {
+    fn now_ns(&self) -> i64 {
+        crate::wall_ns()
+    }
+}
+
+/// What the collector touches, injected so that tests can slow the disk,
+/// set the free space and move the day change.
+pub struct Deps {
+    pub fs: Arc<dyn Fs>,
+    pub free_space: Arc<dyn FreeSpace>,
+    pub clock: Arc<dyn WallClock>,
+}
+
+impl Deps {
+    pub fn real(cfg: &Config) -> Deps {
+        Deps {
+            fs: RealFs::new(&cfg.lake_root),
+            free_space: Arc::new(StatVfs(cfg.lake_root.clone())),
+            clock: Arc::new(SystemClock),
+        }
+    }
+}
+
+/// Total in-flight bytes over all slots (spec R1; judgement, not a model:
+/// half of `MemoryMax=1G`).
+pub const TOTAL_QUEUE_BYTES: usize = 512 * 1024 * 1024;
+
+/// One line of the log (stderr), as oms-node writes it.
+pub(crate) fn log(level: &str, msg: &str, fields: serde_json::Value) {
+    eprintln!(
+        "{}",
+        json!({"ts": crate::wall_ns() / 1000, "level": level, "msg": msg, "fields": fields})
+    );
+}
+
+/// The sink of one feed: forwards to the ingest until the feed is stopped
+/// (spec R5), and remembers the feed's connections.
+pub(crate) struct FeedSink {
+    inner: Arc<Ingest>,
+    open: AtomicBool,
+    active: AtomicUsize,
+    seen: Mutex<BTreeSet<u32>>,
+}
+
+impl FeedSink {
+    fn new(inner: Arc<Ingest>) -> Arc<FeedSink> {
+        Arc::new(FeedSink {
+            inner,
+            open: AtomicBool::new(true),
+            active: AtomicUsize::new(0),
+            seen: Mutex::new(BTreeSet::new()),
+        })
+    }
+
+    /// Closes the gate and waits until no call is in progress.
+    async fn close(&self) {
+        self.open.store(false, Ordering::SeqCst);
+        while self.active.load(Ordering::SeqCst) > 0 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    }
+
+    fn seen(&self) -> Vec<u32> {
+        self.seen
+            .lock()
+            .map(|s| s.iter().copied().collect())
+            .unwrap_or_default()
+    }
+}
+
+impl FrameSink for FeedSink {
+    fn frame(&self, f: RawFrame) -> Result<(), Overflow> {
+        self.active.fetch_add(1, Ordering::SeqCst);
+        // A frame after the stop decision is not written: the stop is the
+        // start of the gap (its note, or the end of the session).
+        let r = if self.open.load(Ordering::SeqCst) {
+            if f.conn_id != 0 {
+                if let Ok(mut s) = self.seen.lock() {
+                    s.insert(f.conn_id);
+                }
+            }
+            self.inner.frame(f)
+        } else {
+            Ok(())
+        };
+        self.active.fetch_sub(1, Ordering::SeqCst);
+        r
+    }
+
+    fn conn_ended(&self, conn_id: u32) {
+        self.inner.conn_ended(conn_id);
+    }
+}
+
+/// Counters for U6 (spec D10).
+#[derive(Debug, Default)]
+pub(crate) struct Counters {
+    pub events: Mutex<BTreeMap<&'static str, u64>>,
+    pub instruments_ok: AtomicU64,
+    pub instruments_failed: AtomicU64,
+    pub instruments_last_recv_ns: AtomicU64,
+    pub switches_done: AtomicU64,
+    pub switches_failed: AtomicU64,
+    pub disk_floor: AtomicBool,
+    pub free_bytes: AtomicU64,
+}
+
+/// What the collector reports to U6.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StateSnapshot {
+    pub ingest: IngestSnapshot,
+    pub events: BTreeMap<&'static str, u64>,
+    pub instruments_ok: u64,
+    pub instruments_failed: u64,
+    pub instruments_last_recv_ns: u64,
+    pub switches_done: u64,
+    pub switches_failed: u64,
+    pub disk_floor: bool,
+    pub free_bytes: u64,
+    /// `conn_id` of the active connection of every running slot, by
+    /// (market, conn_index).
+    pub active: BTreeMap<(String, u32), u32>,
+}
+
+fn event_kind(e: &FeedEvent) -> &'static str {
+    match e {
+        FeedEvent::Connected { .. } => "connected",
+        FeedEvent::Disconnected { .. } => "disconnected",
+        FeedEvent::Gap { .. } => "gap",
+        FeedEvent::Resnapshot { .. } => "resnapshot",
+        FeedEvent::Resynced { .. } => "resynced",
+        FeedEvent::ParseError { .. } => "parse_error",
+        FeedEvent::StaleRaised { .. } => "stale_raised",
+        FeedEvent::StaleCleared { .. } => "stale_cleared",
+        FeedEvent::SwitchDone { .. } => "switch_done",
+        FeedEvent::SwitchFailed { .. } => "switch_failed",
+    }
+}
+
+/// A plan group and its running feed.
+pub(crate) struct Running {
+    pub group: Group,
+    pub handle: Option<FeedHandle>,
+    pub sink: Arc<FeedSink>,
+    pub events: Option<JoinHandle<()>>,
+}
+
+/// The markets' fixed inputs for starting feeds again.
+pub(crate) struct MarketRun {
+    pub cfg: MarketConfig,
+    pub ids: Arc<ConnIds>,
+    pub instruments: Vec<Instrument>,
+    pub rest_base: String,
+}
+
+pub(crate) struct Inner {
+    pub venue: &'static dyn Venue,
+    pub cfg: Config,
+    pub ingest: Arc<Ingest>,
+    pub markets: Vec<MarketRun>,
+    pub groups: tokio::sync::Mutex<Vec<Running>>,
+    pub counters: Arc<Counters>,
+    pub clock: Arc<dyn WallClock>,
+    pub free_space: Arc<dyn FreeSpace>,
+    pub session_ids: Arc<ConnIds>,
+}
+
+/// A running collector.
+pub struct CollectorHandle {
+    inner: Arc<Inner>,
+    writer: Option<WriterThread>,
+    tasks: Vec<JoinHandle<()>>,
+}
+
+pub struct Collector;
+
+/// Fetches every page of one market's instrument list; every body goes to
+/// L0. `Err` when an answer failed or a page did not parse.
+pub(crate) async fn fetch_instruments(
+    venue: &dyn Venue,
+    market: &str,
+    rest_base: &str,
+    loopback_only: bool,
+    ids: &ConnIds,
+    ingest: &Ingest,
+) -> Result<Vec<Instrument>, String> {
+    let client = RestClient::new(rest_base, Duration::from_secs(10), loopback_only)?;
+    let mut out = Vec::new();
+    let mut cursor: Option<String> = None;
+    // Judgement: a venue list of more than 100 pages is a fault.
+    for _ in 0..100 {
+        let req = venue
+            .instruments_request(market, cursor.as_deref())
+            .ok_or_else(|| format!("no instruments request for {market}"))?;
+        let (recv_ns, status, body) = client.get_any(&req).await?;
+        ingest.rest_body(recv_ns, ids.next_rest_frame_no(), body.clone());
+        if !(200..300).contains(&status) {
+            return Err(format!("instruments of {market}: status {status}"));
+        }
+        out.extend(venue.parse_instruments(market, &body, recv_ns)?);
+        cursor = venue.next_page_cursor(&body);
+        if cursor.is_none() {
+            return Ok(out);
+        }
+    }
+    Err(format!("instruments of {market}: more than 100 pages"))
+}
+
+fn conn_index_base(cfg: &Config, market: usize) -> u32 {
+    cfg.markets[..market].iter().map(|m| m.conn_budget).sum()
+}
+
+impl Inner {
+    fn feed_config(&self, m: &MarketRun) -> FeedConfig {
+        let ws_url = m
+            .cfg
+            .ws_url
+            .clone()
+            .or_else(|| self.venue.default_ws_url(&m.cfg.name).map(str::to_string))
+            .unwrap_or_default();
+        let mut fc = FeedConfig::new(m.cfg.name.clone(), ws_url, m.ids.clone());
+        fc.rest_base = Some(m.rest_base.clone());
+        fc.loopback_only = self.cfg.loopback_only;
+        fc
+    }
+
+    fn market(&self, name: &str) -> Option<&MarketRun> {
+        self.markets.iter().find(|m| m.cfg.name == name)
+    }
+
+    /// Starts the feed of a group.
+    pub(crate) fn start_group(&self, group: Group) -> Result<Running, String> {
+        let m = self
+            .market(&group.market)
+            .ok_or_else(|| format!("no market {}", group.market))?;
+        let sink = FeedSink::new(self.ingest.clone());
+        let mut handle = self.venue.start_feed(
+            &m.cfg.name,
+            &m.instruments,
+            m.cfg.max_topics_per_conn,
+            self.feed_config(m),
+            group.plans.clone(),
+            Some(sink.clone() as Arc<dyn FrameSink>),
+        )?;
+        let events = handle.take_events().map(|mut rx| {
+            let (counters, market) = (self.counters.clone(), group.market.clone());
+            tokio::spawn(async move {
+                while let Some(e) = rx.recv().await {
+                    let kind = event_kind(&e);
+                    if let Ok(mut m) = counters.events.lock() {
+                        *m.entry(kind).or_default() += 1;
+                    }
+                    match &e {
+                        FeedEvent::SwitchDone { .. } => {
+                            counters.switches_done.fetch_add(1, Ordering::Relaxed);
+                        }
+                        FeedEvent::SwitchFailed { .. } => {
+                            counters.switches_failed.fetch_add(1, Ordering::Relaxed);
+                        }
+                        _ => {}
+                    }
+                    let level = match &e {
+                        FeedEvent::Disconnected { .. }
+                        | FeedEvent::Gap { .. }
+                        | FeedEvent::ParseError { .. }
+                        | FeedEvent::SwitchFailed { .. }
+                        | FeedEvent::StaleRaised { .. } => "warn",
+                        _ => "info",
+                    };
+                    log(
+                        level,
+                        kind,
+                        json!({"market": market, "event": format!("{e:?}")}),
+                    );
+                }
+            })
+        });
+        Ok(Running {
+            group,
+            handle: Some(handle),
+            sink,
+            events,
+        })
+    }
+
+    /// Stops a group's feed (spec R5): gate, drop, close markers.
+    pub(crate) async fn stop_group(&self, r: &mut Running) {
+        r.sink.close().await;
+        drop(r.handle.take());
+        for id in r.sink.seen() {
+            self.ingest.conn_ended(id);
+        }
+        if let Some(t) = r.events.take() {
+            t.abort();
+        }
+    }
+
+    pub(crate) fn note(&self, n: &Note<'_>) {
+        self.ingest.note(n);
+    }
+
+    pub(crate) fn topics_of(group: &Group) -> Vec<Topic> {
+        group
+            .topics()
+            .into_iter()
+            .map(|k| Topic {
+                market: group.market.clone(),
+                channel: k.channel,
+                symbol: k.symbol,
+            })
+            .collect()
+    }
+}
+
+/// Every page of every market, again (D5): bodies recorded, list logged.
+async fn refresh_instruments(inner: Arc<Inner>) {
+    let every = Duration::from_millis(inner.cfg.instruments.refresh_ms.max(1000));
+    let mut t = tokio::time::interval(every);
+    t.tick().await;
+    loop {
+        t.tick().await;
+        for m in &inner.markets {
+            let r = fetch_instruments(
+                inner.venue,
+                &m.cfg.name,
+                &m.rest_base,
+                inner.cfg.loopback_only,
+                &inner.session_ids,
+                &inner.ingest,
+            )
+            .await;
+            match r {
+                Ok(list) => {
+                    inner
+                        .counters
+                        .instruments_ok
+                        .fetch_add(1, Ordering::Relaxed);
+                    let now = u64::try_from(crate::wall_ns()).unwrap_or(0);
+                    inner
+                        .counters
+                        .instruments_last_recv_ns
+                        .store(now, Ordering::Relaxed);
+                    let had: BTreeSet<&str> =
+                        m.instruments.iter().map(|i| i.symbol.as_str()).collect();
+                    let new: Vec<&str> = list
+                        .iter()
+                        .filter(|i| inner.venue.is_trading(i) && !had.contains(i.symbol.as_str()))
+                        .map(|i| i.symbol.as_str())
+                        .collect();
+                    if !new.is_empty() {
+                        log(
+                            "info",
+                            "new symbols are collected from the next start",
+                            json!({"market": m.cfg.name, "symbols": new}),
+                        );
+                    }
+                }
+                Err(e) => {
+                    inner
+                        .counters
+                        .instruments_failed
+                        .fetch_add(1, Ordering::Relaxed);
+                    log(
+                        "warn",
+                        "instruments refresh failed",
+                        json!({"market": m.cfg.name, "error": e}),
+                    );
+                }
+            }
+        }
+    }
+}
+
+impl Collector {
+    /// Starts the collector on the current tokio runtime.
+    pub async fn start(cfg: Config, deps: Deps) -> Result<CollectorHandle, String> {
+        let venue = registry::venue(&cfg.venue)
+            .ok_or_else(|| format!("venue {} is not registered", cfg.venue))?;
+        let session_ns = crate::wall_ns();
+        let mut ws = WriterSettings::new(
+            &cfg.venue,
+            &cfg.collector,
+            env!("CARGO_PKG_VERSION"),
+            &cfg.host,
+            session_ns,
+        );
+        ws.flush_ns = i64::try_from(cfg.write.flush_ms).unwrap_or(1000) * 1_000_000;
+        ws.fsync_ns = i64::try_from(cfg.write.fsync_ms).unwrap_or(5000) * 1_000_000;
+        let (ingest, writer) = ingest::start(
+            deps.fs.clone(),
+            ws,
+            venue,
+            Limits {
+                queue_bytes: cfg.write.queue_bytes,
+                total_bytes: TOTAL_QUEUE_BYTES.max(cfg.write.queue_bytes),
+            },
+        )?;
+        match Self::start_inner(cfg, deps, venue, ingest).await {
+            Ok((inner, tasks)) => Ok(CollectorHandle {
+                inner,
+                writer: Some(writer),
+                tasks,
+            }),
+            Err(e) => {
+                // The bodies fetched so far stay in L0.
+                let _ = writer.stop();
+                Err(e)
+            }
+        }
+    }
+
+    async fn start_inner(
+        cfg: Config,
+        deps: Deps,
+        venue: &'static dyn Venue,
+        ingest: Arc<Ingest>,
+    ) -> Result<(Arc<Inner>, Vec<JoinHandle<()>>), String> {
+        let session_ids = Arc::new(ConnIds::new());
+        let counters = Arc::new(Counters::default());
+        let mut markets = Vec::new();
+        let mut all_groups = Vec::new();
+        for (i, m) in cfg.markets.iter().enumerate() {
+            let slot = venue
+                .market_slot(&m.name)
+                .ok_or_else(|| format!("no market {}", m.name))?;
+            let (start, end) = registry::conn_range(slot);
+            let ids = session_ids.range(start, end);
+            let rest_base = m
+                .rest_base
+                .clone()
+                .unwrap_or_else(|| venue.default_rest_base().to_string());
+            let instruments =
+                fetch_instruments(venue, &m.name, &rest_base, cfg.loopback_only, &ids, &ingest)
+                    .await?;
+            counters.instruments_ok.fetch_add(1, Ordering::Relaxed);
+            counters.instruments_last_recv_ns.store(
+                u64::try_from(crate::wall_ns()).unwrap_or(0),
+                Ordering::Relaxed,
+            );
+            let symbols: Vec<String> = match &m.symbols {
+                Symbols::List(l) => l.clone(),
+                Symbols::All => instruments
+                    .iter()
+                    .filter(|i| venue.is_trading(i))
+                    .map(|i| i.symbol.clone())
+                    .collect(),
+            };
+            let groups = plan::groups(
+                venue,
+                m,
+                conn_index_base(&cfg, i),
+                &cfg.traded_channels,
+                &symbols,
+            )?;
+            // R4: every traded topic of this market is planned.
+            let planned: BTreeSet<(String, String)> = groups
+                .iter()
+                .flat_map(|g| g.topics())
+                .map(|k| (k.symbol, k.channel))
+                .collect();
+            for t in cfg.traded_channels.iter().filter(|t| t.market == m.name) {
+                if !planned.contains(&(t.symbol.clone(), t.channel.clone())) {
+                    return Err(format!(
+                        "traded channel {}/{}/{} is not collected (not trading at the venue?)",
+                        t.market, t.symbol, t.channel
+                    ));
+                }
+            }
+            all_groups.extend(groups);
+            markets.push(MarketRun {
+                cfg: m.clone(),
+                ids,
+                instruments,
+                rest_base,
+            });
+        }
+        let inner = Arc::new(Inner {
+            venue,
+            cfg,
+            ingest,
+            markets,
+            groups: tokio::sync::Mutex::new(Vec::new()),
+            counters,
+            clock: deps.clock,
+            free_space: deps.free_space,
+            session_ids,
+        });
+        {
+            let mut running = inner.groups.lock().await;
+            for g in all_groups {
+                running.push(inner.start_group(g)?);
+            }
+        }
+        let tasks = vec![
+            tokio::spawn(refresh_instruments(inner.clone())),
+            tokio::spawn(crate::daychange::run(inner.clone())),
+            tokio::spawn(crate::disk::run(inner.clone())),
+        ];
+        Ok((inner, tasks))
+    }
+}
+
+impl CollectorHandle {
+    pub fn state(&self) -> StateSnapshot {
+        let c = &self.inner.counters;
+        let active = match self.inner.groups.try_lock() {
+            Ok(groups) => groups
+                .iter()
+                .filter_map(|r| r.handle.as_ref().map(|h| (r, h)))
+                .flat_map(|(r, h)| {
+                    r.group.plans.iter().filter_map(move |p| {
+                        h.active_conn_id(p.conn_index)
+                            .map(|id| ((r.group.market.clone(), p.conn_index), id))
+                    })
+                })
+                .collect(),
+            Err(_) => BTreeMap::new(),
+        };
+        StateSnapshot {
+            ingest: self.inner.ingest.state(),
+            events: c.events.lock().map(|m| m.clone()).unwrap_or_default(),
+            instruments_ok: c.instruments_ok.load(Ordering::Relaxed),
+            instruments_failed: c.instruments_failed.load(Ordering::Relaxed),
+            instruments_last_recv_ns: c.instruments_last_recv_ns.load(Ordering::Relaxed),
+            switches_done: c.switches_done.load(Ordering::Relaxed),
+            switches_failed: c.switches_failed.load(Ordering::Relaxed),
+            disk_floor: c.disk_floor.load(Ordering::Relaxed),
+            free_bytes: c.free_bytes.load(Ordering::Relaxed),
+            active,
+        }
+    }
+
+    /// The writer's error, if it stopped on one (the process must exit).
+    pub fn failed(&self) -> Option<String> {
+        self.writer.as_ref().and_then(WriterThread::failed)
+    }
+
+    /// Stops every feed, then closes every file (frame end, fsync, unlock).
+    pub async fn shutdown(mut self) -> Result<(), String> {
+        for t in self.tasks.drain(..) {
+            t.abort();
+        }
+        {
+            let mut groups = self.inner.groups.lock().await;
+            for r in groups.iter_mut() {
+                self.inner.stop_group(r).await;
+            }
+        }
+        match self.writer.take() {
+            Some(w) => tokio::task::spawn_blocking(move || w.stop())
+                .await
+                .map_err(|e| e.to_string())?,
+            None => Ok(()),
+        }
+    }
+}

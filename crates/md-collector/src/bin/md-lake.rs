@@ -10,6 +10,9 @@
 //! Exit codes: 0 done (hours waiting on a locked file are reported, not an
 //! error), 1 seal or I/O error, 2 usage error or unknown venue (nothing is
 //! touched), 3 another run of the venue holds the seal lock.
+//!
+//! `--now-ns` replaces the wall clock (a person re-running a past state); a
+//! value in the future is refused unless `MD_LAKE_TEST_ALLOW_FUTURE_NOW=1`.
 
 use md_collector::registry;
 use md_lake::fs::RealFs;
@@ -89,6 +92,14 @@ fn run(args: &[String]) -> i32 {
         Some(Ok(n)) => Some(n),
         Some(Err(_)) => return usage(),
     };
+    // A clock in the future could seal hours that are not closed yet (spec
+    // R8): only tests may use one.
+    if now.is_some_and(|n| n > md_collector::wall_ns())
+        && std::env::var("MD_LAKE_TEST_ALLOW_FUTURE_NOW").as_deref() != Ok("1")
+    {
+        eprintln!("--now-ns is in the future");
+        return 2;
+    }
     let clock = ArgClock(now);
     let host = md_collector::host_name();
     let ver = env!("CARGO_PKG_VERSION");

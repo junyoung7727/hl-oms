@@ -243,3 +243,29 @@ fn md_lake_seal_and_verify() {
     ]);
     assert_eq!(code, 0, "{out}");
 }
+
+#[test]
+fn md_lake_future_now_refused() {
+    // Spec R8: a clock in the future could seal hours that are not closed.
+    let dir = test_dir("future-now");
+    let lake = dir.to_string_lossy().to_string();
+    let future = (md_collector::wall_ns() + 2 * HOUR).to_string();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_md-lake"))
+        .args([
+            "seal",
+            "--venue",
+            "bybit",
+            "--lake",
+            &lake,
+            "--first-hour",
+            "2026-01-02T14",
+            "--now-ns",
+            &future,
+        ])
+        .env_remove("MD_LAKE_TEST_ALLOW_FUTURE_NOW")
+        .output()
+        .expect("run");
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("future"));
+    assert!(tree(&dir).is_empty(), "nothing was written");
+}

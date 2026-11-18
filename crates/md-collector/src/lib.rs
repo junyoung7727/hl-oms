@@ -2,7 +2,9 @@
 //! that writes every received frame to the lake's stage-1 files, and the
 //! `md-lake` commands that seal and verify them.
 
+pub mod collector;
 pub mod config;
+pub mod daychange;
 pub mod disk;
 pub mod ingest;
 pub mod notes;

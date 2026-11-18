@@ -16,3 +16,8 @@ impl FreeSpace for StatVfs {
         Ok(s.f_bavail.saturating_mul(s.f_frsize))
     }
 }
+
+/// The disk floor checker (spec D8).
+pub(crate) async fn run(_inner: std::sync::Arc<crate::collector::Inner>) {
+    std::future::pending::<()>().await;
+}
