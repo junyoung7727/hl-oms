@@ -143,3 +143,30 @@ _Avoid_: leverage config
 **Account mode** (계좌 모드):
 The venue's account-wide margin scheme, for example standard, unified account or portfolio margin.
 _Avoid_: abstraction, account type
+
+### Market data
+
+**Stream key** (스트림 키):
+The `(channel, symbol)` pair that names one topic of a venue, for example `orderbook.50` / `BTCUSDT`.
+_Avoid_: feed, subscription
+
+**Snapshot** (스냅샷):
+An order book message that holds the whole book; it replaces both sides and starts a new sequence run.
+_Avoid_: full update
+
+**Delta** (변경분):
+An order book message that sets levels; quantity 0 removes a level.
+_Avoid_: diff, incremental update
+
+**Sequence rule** (순번 규칙):
+How a venue chains its order book messages: `PlusOne` (Bybit `u`), `PrevEquals` (Binance `pu`, OKX `prevSeqId`) or `None` (Hyperliquid).
+_Avoid_: seq check
+
+**Gap** (공백):
+A delta that breaks the sequence rule; the book is wrong from there until the next snapshot.
+_Avoid_: drop, missing message
+
+**Market-data adapter** (시세 어댑터):
+The per-venue code behind `md_core::adapter::MarketDataAdapter` that plans connections, routes and parses frames and chooses the resync after a gap.
+_Avoid_: connector, driver
+
