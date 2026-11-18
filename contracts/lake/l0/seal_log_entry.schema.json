@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "l0/seal_log_entry.schema.json",
+  "title": "Seal log entry",
+  "description": "One JSON line of a seal log (contract document 2.6): a begin entry or a done entry.",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "entry": {
+          "const": "begin"
+        },
+        "contract_ver": {
+          "type": "integer",
+          "const": 1
+        },
+        "venue": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.-]*$"
+        },
+        "date": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+        },
+        "hour": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3])$"
+        },
+        "layout": {
+          "enum": [
+            "by_symbol",
+            "by_connection"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "at_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9223372036854775807
+              }
+            },
+            "required": [
+              "path",
+              "bytes"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "offset_before": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9223372036854775807
+              }
+            },
+            "required": [
+              "path",
+              "offset_before"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "entry",
+        "contract_ver",
+        "venue",
+        "date",
+        "hour",
+        "layout",
+        "attempt",
+        "at_ns",
+        "sources",
+        "targets"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "entry": {
+          "const": "done"
+        },
+        "contract_ver": {
+          "type": "integer",
+          "const": 1
+        },
+        "venue": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.-]*$"
+        },
+        "date": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+        },
+        "hour": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3])$"
+        },
+        "layout": {
+          "enum": [
+            "by_symbol",
+            "by_connection"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "at_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "offset_after": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9223372036854775807
+              },
+              "records": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9223372036854775807
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "sessions": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "collector": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9_]*$"
+                    },
+                    "session_ns": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9223372036854775807
+                    },
+                    "records": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9223372036854775807
+                    }
+                  },
+                  "required": [
+                    "collector",
+                    "session_ns",
+                    "records"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "by_symbol day file: the session runs of the appended frame in order; null otherwise"
+              }
+            },
+            "required": [
+              "path",
+              "offset_after",
+              "records",
+              "sha256",
+              "sessions"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "records": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "unroutable_records": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "live_contexts_max": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "measure": {
+          "type": "object",
+          "properties": {
+            "by_symbol_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "by_connection_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            }
+          },
+          "required": [
+            "by_symbol_bytes",
+            "by_connection_bytes"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "entry",
+        "contract_ver",
+        "venue",
+        "date",
+        "hour",
+        "layout",
+        "attempt",
+        "at_ns",
+        "targets",
+        "records",
+        "unroutable_records",
+        "live_contexts_max",
+        "seconds"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

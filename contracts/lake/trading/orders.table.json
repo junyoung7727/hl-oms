@@ -1,0 +1,148 @@
+{
+ "table": "orders",
+ "contract_ver": 1,
+ "description": "One row per order, written once from the creating journal record (contract 4.1).",
+ "key": [
+  "order_id"
+ ],
+ "sort": [
+  {
+   "column": "seq"
+  }
+ ],
+ "path": "crypto/trading/orders/date={date}/",
+ "file_names": [
+  "day.parquet"
+ ],
+ "compression": "zstd",
+ "compression_level": 9,
+ "size_target_bytes": {
+  "min": 0,
+  "max": 10000000000
+ },
+ "metadata": [
+  "contract_ver",
+  "export_ver",
+  "table"
+ ],
+ "columns": [
+  {
+   "name": "order_id",
+   "type": "string",
+   "nullable": false
+  },
+  {
+   "name": "seq",
+   "type": "int64",
+   "nullable": false,
+   "description": "journal sequence number of the creating record"
+  },
+  {
+   "name": "at_us",
+   "type": "int64",
+   "nullable": false,
+   "description": "journal time, microseconds"
+  },
+  {
+   "name": "strategy",
+   "type": "string",
+   "nullable": false
+  },
+  {
+   "name": "client_order_id",
+   "type": "string",
+   "nullable": false
+  },
+  {
+   "name": "venue",
+   "type": "string",
+   "nullable": false
+  },
+  {
+   "name": "market",
+   "type": "string",
+   "nullable": false
+  },
+  {
+   "name": "symbol",
+   "type": "string",
+   "nullable": false
+  },
+  {
+   "name": "side",
+   "type": "int8",
+   "nullable": false,
+   "description": "+1 buy, -1 sell"
+  },
+  {
+   "name": "qty",
+   "type": "string",
+   "nullable": false,
+   "description": "decimal string"
+  },
+  {
+   "name": "px",
+   "type": "string",
+   "nullable": true,
+   "description": "decimal string; null without a limit price"
+  },
+  {
+   "name": "tif",
+   "type": "string",
+   "nullable": false,
+   "description": "GTC, IOC, FOK or PostOnly"
+  },
+  {
+   "name": "reduce_only",
+   "type": "bool",
+   "nullable": false
+  },
+  {
+   "name": "wire_id",
+   "type": "string",
+   "nullable": true,
+   "description": "the id sent to the venue (Bybit orderLinkId)"
+  },
+  {
+   "name": "market_ref_venue",
+   "type": "string",
+   "nullable": true
+  },
+  {
+   "name": "market_ref_market",
+   "type": "string",
+   "nullable": true
+  },
+  {
+   "name": "market_ref_symbol",
+   "type": "string",
+   "nullable": true
+  },
+  {
+   "name": "market_ref_channel",
+   "type": "string",
+   "nullable": true
+  },
+  {
+   "name": "market_ref_update_id",
+   "type": "int64",
+   "nullable": true
+  },
+  {
+   "name": "market_ref_venue_ts_ns",
+   "type": "int64",
+   "nullable": true
+  },
+  {
+   "name": "market_ref_recv_ns",
+   "type": "int64",
+   "nullable": true
+  },
+  {
+   "name": "record_schema",
+   "type": "int16",
+   "nullable": false,
+   "description": "journal record schema of the creating record"
+  }
+ ]
+}

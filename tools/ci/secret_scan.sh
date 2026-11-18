@@ -14,6 +14,13 @@
 #   4. credentials with a fixed shape (PEM, AWS, GitHub, Slack, sk-), in
 #      file content and in paths.
 #
+# The vendored lake contract (contracts/lake/, a byte copy from
+# quant-data-platform, checked by crates/md-core/tests/vendored.rs) has three
+# narrow exemptions: 64-digit hex runs (its SHA-256 digests), .jsonl files
+# under golden/ (the golden manifest) and binary .qraw files under golden/l0/
+# (the golden L0 frames, uncompressed QRAW1). Every other rule applies there
+# as anywhere; the content of a golden .qraw still gets checks 3 and 4.
+#
 # What it does not check: it is a pattern check and does not prove that no
 # secret exists. A key split over lines, written with separators, encoded
 # in base64 or given as a mnemonic passes. Untracked files are not read.
@@ -27,6 +34,8 @@ LOCK_FILE="Cargo.lock"
 # Tracked binary files. Empty on purpose: a binary file cannot be read by
 # a reviewer or by this scan. Add a path only with a reason in the PR.
 ALLOW_BINARY=()
+# The vendored lake contract. See the header.
+CONTRACT_DIR="contracts/lake/"
 
 fail=0
 report() {
@@ -53,7 +62,9 @@ mapfile -d '' -t files < <(git ls-files -z)
 #    credential checks, with no allow-list.
 for f in "${files[@]}"; do
   lower="${f,,}"
-  if [[ "$lower" =~ (^|/)\.env(\..*)?$ || "$lower" =~ \.(log|pem|key|jsonl|oj|snap|bin|tmp)$ || "$lower" =~ (^|/)data/ ]]; then
+  if [[ "$f" == "${CONTRACT_DIR}golden/"*.jsonl ]]; then
+    : # the golden manifest of the vendored contract; the other rules still run
+  elif [[ "$lower" =~ (^|/)\.env(\..*)?$ || "$lower" =~ \.(log|pem|key|jsonl|oj|snap|bin|tmp)$ || "$lower" =~ (^|/)data/ ]]; then
     report "forbidden file is tracked: $f"
   fi
   if [[ -L "$f" ]]; then
@@ -92,8 +103,12 @@ for f in "${files[@]}"; do
   if ! LC_ALL=C tr -d '\000' < "$f" | cmp -s - "$f"; then
     listed=0
     for a in "${ALLOW_BINARY[@]}"; do [[ "$f" == "$a" ]] && listed=1; done
-    [[ $listed -eq 1 ]] || report "binary file is tracked: $f"
-    continue
+    if [[ "$f" == "${CONTRACT_DIR}golden/l0/"*.qraw ]]; then
+      : # golden L0 frames: their text is read by checks 3 and 4 below
+    else
+      [[ $listed -eq 1 ]] || report "binary file is tracked: $f"
+      continue
+    fi
   fi
 
   # 3. Hex runs, each one checked by value. The allow-list file is not
@@ -103,6 +118,7 @@ for f in "${files[@]}"; do
   while read -r value; do
     [[ -z "$value" ]] && continue
     [[ "$f" == "$LOCK_FILE" && ${#value} -eq 64 ]] && continue
+    [[ "$f" == "$CONTRACT_DIR"* && ${#value} -eq 64 ]] && continue
     if [[ "$f" == "$ALLOW_FILE" ]]; then
       [[ -n "${allowed_values["$value"]:-}" ]] && continue
       line=$(grep -inF -- "$value" "$f" | head -1 | cut -d: -f1)

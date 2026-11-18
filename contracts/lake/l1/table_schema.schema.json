@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "l1/table_schema.schema.json",
+  "title": "L1 or export table schema",
+  "description": "Format of a table schema file (contract document 3, 4). Columns are ordered. A sort item orders by its column ascending; with 'first', rows whose value equals 'first' come before the others at that position.",
+  "type": "object",
+  "properties": {
+    "table": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "contract_ver": {
+      "type": "integer",
+      "const": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "key": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "sort": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "column": {
+            "type": "string"
+          },
+          "first": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "column"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "folder of the files, with {column} placeholders, ending in /"
+    },
+    "file_names": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "compression": {
+      "const": "zstd"
+    },
+    "compression_level": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 22
+    },
+    "size_target_bytes": {
+      "type": "object",
+      "properties": {
+        "min": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "min",
+        "max"
+      ],
+      "additionalProperties": false
+    },
+    "metadata": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Parquet key-value metadata keys every file holds"
+    },
+    "columns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "type": {
+            "enum": [
+              "string",
+              "bool",
+              "int8",
+              "int16",
+              "int32",
+              "int64",
+              "list<int64>"
+            ]
+          },
+          "nullable": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enum": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "nullable"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    }
+  },
+  "required": [
+    "table",
+    "contract_ver",
+    "key",
+    "sort",
+    "path",
+    "file_names",
+    "compression",
+    "compression_level",
+    "size_target_bytes",
+    "metadata",
+    "columns"
+  ],
+  "additionalProperties": false
+}

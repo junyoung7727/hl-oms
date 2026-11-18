@@ -1,0 +1,92 @@
+{
+ "crypto/trading/events/date=2026-01-02/day.parquet": [
+  {
+   "seq": 10,
+   "event_idx": 0,
+   "at_us": 1767312005000000,
+   "kind": "order_created",
+   "order_id": "o-0001",
+   "venue": "bybit",
+   "symbol": "BTCUSDT",
+   "payload": "{\"order_id\":\"o-0001\",\"px\":\"41990.0\",\"qty\":\"0.010\"}",
+   "record_schema": 1
+  },
+  {
+   "seq": 11,
+   "event_idx": 0,
+   "at_us": 1767312005200000,
+   "kind": "order_acked",
+   "order_id": "o-0001",
+   "venue": "bybit",
+   "symbol": "BTCUSDT",
+   "payload": "{\"order_id\":\"o-0001\",\"venue_order_id\":\"v-0001\"}",
+   "record_schema": 1
+  },
+  {
+   "seq": 20,
+   "event_idx": 0,
+   "at_us": 1767312007100000,
+   "kind": "order_created",
+   "order_id": "o-0002",
+   "venue": "bybit",
+   "symbol": "BTCUSDT",
+   "payload": "{\"order_id\":\"o-0002\",\"px\":\"42000.2\",\"qty\":\"0.010\"}",
+   "record_schema": 1
+  },
+  {
+   "seq": 21,
+   "event_idx": 0,
+   "at_us": 1767312007300000,
+   "kind": "fill",
+   "order_id": "o-0002",
+   "venue": "bybit",
+   "symbol": "BTCUSDT",
+   "payload": "{\"exec_id\":\"e-0001\",\"order_id\":\"o-0002\",\"px\":\"42000.2\",\"qty\":\"0.010\"}",
+   "record_schema": 1
+  },
+  {
+   "seq": 21,
+   "event_idx": 1,
+   "at_us": 1767312007300000,
+   "kind": "order_filled",
+   "order_id": "o-0002",
+   "venue": "bybit",
+   "symbol": "BTCUSDT",
+   "payload": "{\"order_id\":\"o-0002\"}",
+   "record_schema": 1
+  },
+  {
+   "seq": 30,
+   "event_idx": 0,
+   "at_us": 1767322200200000,
+   "kind": "order_created",
+   "order_id": "o-0003",
+   "venue": "bybit",
+   "symbol": "BTCUSDT",
+   "payload": "{\"order_id\":\"o-0003\",\"qty\":\"0.005\"}",
+   "record_schema": 1
+  },
+  {
+   "seq": 31,
+   "event_idx": 0,
+   "at_us": 1767322200400000,
+   "kind": "fill",
+   "order_id": "o-0003",
+   "venue": "bybit",
+   "symbol": "BTCUSDT",
+   "payload": "{\"exec_id\":\"e-0002\",\"order_id\":\"o-0003\",\"px\":\"41999.9\",\"qty\":\"0.005\"}",
+   "record_schema": 1
+  },
+  {
+   "seq": 40,
+   "event_idx": 0,
+   "at_us": 1767322800000000,
+   "kind": "heartbeat",
+   "order_id": null,
+   "venue": null,
+   "symbol": null,
+   "payload": "{\"note\":\"no order\"}",
+   "record_schema": 1
+  }
+ ]
+}

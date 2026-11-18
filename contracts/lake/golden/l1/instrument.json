@@ -1,0 +1,23 @@
+{
+ "crypto/l1/instrument/venue=bybit/market=linear/date=2026-01-02/day.parquet": [
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "recv_ns": 1767312000500000000,
+   "venue_ts_ns": 1767312000497000000,
+   "status": "Trading",
+   "tick_size": "0.10",
+   "lot_size": "0.001",
+   "px_exp": -1,
+   "qty_exp": -3,
+   "contract_type": "LinearPerpetual",
+   "settle_coin": "USDT",
+   "conn_id": 0,
+   "frame_no": 0,
+   "l0_file_id": "venue=bybit/market=linear/channel=instruments/date=2026-01-02/_all",
+   "rec_no": 0,
+   "parser_ver": "bybit-1"
+  }
+ ]
+}

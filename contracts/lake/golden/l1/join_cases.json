@@ -1,0 +1,74 @@
+[
+ {
+  "case": "a delta seen on two connections: the earliest recv_ns",
+  "market_ref": {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "update_id": 106,
+   "venue_ts_ns": 1767312006997000000
+  },
+  "expect": {
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 3
+  }
+ },
+ {
+  "case": "an update_id shared by a snapshot and a delta: the delta",
+  "market_ref": {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "update_id": 105,
+   "venue_ts_ns": 1767312002997000000
+  },
+  "expect": {
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 1
+  }
+ },
+ {
+  "case": "update_id 1 used twice in the day: venue_ts_ns decides",
+  "market_ref": {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "update_id": 1,
+   "venue_ts_ns": 1767333601997000000
+  },
+  "expect": {
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 22
+  }
+ },
+ {
+  "case": "null update_id: match on venue_ts_ns; checkpoint rows with the same venue_ts_ns are never taken",
+  "market_ref": {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "update_id": null,
+   "venue_ts_ns": 1767322199997000000
+  },
+  "expect": {
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 18
+  }
+ },
+ {
+  "case": "no book_msg row matches",
+  "market_ref": {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "update_id": 999,
+   "venue_ts_ns": 1767322199997000000
+  },
+  "expect": null
+ }
+]

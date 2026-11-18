@@ -1,0 +1,108 @@
+{
+ "table": "fills",
+ "contract_ver": 1,
+ "description": "One row per fill of an order the journal knows (contract 4.2).",
+ "key": [
+  "venue",
+  "symbol",
+  "exec_id"
+ ],
+ "sort": [
+  {
+   "column": "seq"
+  },
+  {
+   "column": "event_idx"
+  }
+ ],
+ "path": "crypto/trading/fills/date={date}/",
+ "file_names": [
+  "day.parquet"
+ ],
+ "compression": "zstd",
+ "compression_level": 9,
+ "size_target_bytes": {
+  "min": 0,
+  "max": 10000000000
+ },
+ "metadata": [
+  "contract_ver",
+  "export_ver",
+  "table"
+ ],
+ "columns": [
+  {
+   "name": "venue",
+   "type": "string",
+   "nullable": false
+  },
+  {
+   "name": "symbol",
+   "type": "string",
+   "nullable": false
+  },
+  {
+   "name": "exec_id",
+   "type": "string",
+   "nullable": false,
+   "description": "Bybit execId"
+  },
+  {
+   "name": "order_id",
+   "type": "string",
+   "nullable": false
+  },
+  {
+   "name": "seq",
+   "type": "int64",
+   "nullable": false
+  },
+  {
+   "name": "event_idx",
+   "type": "int32",
+   "nullable": false
+  },
+  {
+   "name": "at_us",
+   "type": "int64",
+   "nullable": false
+  },
+  {
+   "name": "side",
+   "type": "int8",
+   "nullable": false
+  },
+  {
+   "name": "px",
+   "type": "string",
+   "nullable": false
+  },
+  {
+   "name": "qty",
+   "type": "string",
+   "nullable": false
+  },
+  {
+   "name": "fee",
+   "type": "string",
+   "nullable": false
+  },
+  {
+   "name": "is_maker",
+   "type": "bool",
+   "nullable": false
+  },
+  {
+   "name": "venue_ts_ns",
+   "type": "int64",
+   "nullable": false,
+   "description": "venue execution time"
+  },
+  {
+   "name": "recv_ns",
+   "type": "int64",
+   "nullable": false,
+   "description": "our receive time"
+  }
+ ]
+}

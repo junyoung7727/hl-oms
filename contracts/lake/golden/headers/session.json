@@ -1,0 +1,10 @@
+{
+  "contract_ver": 1,
+  "venue": "bybit",
+  "date": "2026-01-02",
+  "collector": "md1",
+  "collector_ver": "0.1.0",
+  "host": "golden",
+  "form": "session",
+  "session_ns": 1767308398000000000
+}

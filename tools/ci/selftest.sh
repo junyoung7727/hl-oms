@@ -106,6 +106,59 @@ reset
 printf 'rev = "%s"\n' "$(hex 3d 20)" >> Cargo.lock
 expect fail "40-digit hex in Cargo.lock" scan
 reset
+# The vendored lake contract: only its three exemptions, only under it.
+mkdir -p contracts/lake/golden/l0/x contracts/lakeside
+printf 'sha256 = "%s"\n' "$(hex 3d 32)" > contracts/lake/index.json
+expect ok "64-digit digest in the vendored contract" scan
+reset
+mkdir -p contracts/lake
+printf 'rev = "%s"\n' "$(hex 3d 20)" > contracts/lake/VENDOR.toml
+expect fail "40-digit hex in the vendored contract" scan
+reset
+mkdir -p contracts/lake
+printf 'sig %s\n' "$(hex 3d 64)" > contracts/lake/index.json
+expect fail "128-digit hex in the vendored contract" scan
+reset
+mkdir -p contracts/lakeside
+printf 'sha256 = "%s"\n' "$(hex 3d 32)" > contracts/lakeside/index.json
+expect fail "64-digit hex in a directory that only starts like the contract" scan
+reset
+mkdir -p contracts/lake/golden/xrepo
+printf '{}\n' > contracts/lake/golden/xrepo/manifest.jsonl
+expect ok "golden manifest .jsonl in the vendored contract" scan
+reset
+mkdir -p contracts/lake/l1
+printf '{}\n' > contracts/lake/l1/rows.jsonl
+expect fail ".jsonl in the vendored contract outside golden/" scan
+reset
+mkdir -p contracts/lake/golden
+printf 'text\n' > contracts/lake/golden/run.log
+git add -f contracts/lake/golden/run.log
+expect fail "log file in the vendored contract" tools/ci/secret_scan.sh
+reset
+mkdir -p contracts/lake/golden/l0/x
+printf 'a\0b\n' > contracts/lake/golden/l0/x/00.qraw
+expect ok "binary golden .qraw in the vendored contract" scan
+reset
+mkdir -p contracts/lake/golden/l0/x
+printf 'a\0b k=%s\n' "$(hex cd 20)" > contracts/lake/golden/l0/x/00.qraw
+expect fail "40-digit hex inside a golden .qraw" scan
+reset
+mkdir -p contracts/lake/golden/l0/x
+printf 'a\0b token gh%s_%s\n' p "$(hex Ab 18)" > contracts/lake/golden/l0/x/00.qraw
+expect fail "credential inside a golden .qraw" scan
+reset
+mkdir -p contracts/lake/l1
+printf 'a\0b\n' > contracts/lake/l1/00.qraw
+expect fail "binary .qraw in the vendored contract outside golden/l0/" scan
+reset
+mkdir -p contracts/lake/golden/l0/x
+printf 'a\0b\n' > contracts/lake/golden/l0/x/00.dat
+expect fail "binary file that is not .qraw under golden/l0/" scan
+reset
+printf 'a\0b\n' > 00.qraw
+expect fail "binary .qraw outside the vendored contract" scan
+reset
 printf '\n\n' > blank.txt
 expect ok "text file that holds only empty lines" scan
 reset

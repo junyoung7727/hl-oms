@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/oms-core", "crates/oms-journal", "crates/oms-sim", "crates/oms-api", "crates/oms-node", "crates/xtask"]
+members = ["crates/oms-core", "crates/oms-journal", "crates/oms-sim", "crates/oms-api", "crates/oms-node", "crates/xtask", "crates/md-core"]
 
 [workspace.package]
 version = "0.1.0"

@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "xrepo/manifest_line.schema.json",
+  "title": "Manifest line",
+  "description": "One line of crypto/l0/_manifest/venue=<venue>/date=<date>.jsonl, written by the day seal (contract document 5.1). A by_symbol file lists its session runs; the other layouts have sessions null.",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "l0_file_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "records": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "first_recv_ns": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "last_recv_ns": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "sealed_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "contract_ver": {
+          "type": "integer",
+          "const": 1
+        },
+        "layout": {
+          "const": "by_symbol"
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "collector": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_]*$"
+              },
+              "session_ns": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9223372036854775807
+              },
+              "first_rec_no": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9223372036854775807
+              },
+              "records": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9223372036854775807
+              }
+            },
+            "required": [
+              "collector",
+              "session_ns",
+              "first_rec_no",
+              "records"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "l0_file_id",
+        "path",
+        "sha256",
+        "bytes",
+        "records",
+        "first_recv_ns",
+        "last_recv_ns",
+        "sealed_at",
+        "contract_ver",
+        "layout",
+        "sessions"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "l0_file_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "records": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "first_recv_ns": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "last_recv_ns": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "sealed_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "contract_ver": {
+          "type": "integer",
+          "const": 1
+        },
+        "layout": {
+          "enum": [
+            "by_connection",
+            "session"
+          ]
+        },
+        "sessions": {
+          "type": "null"
+        }
+      },
+      "required": [
+        "l0_file_id",
+        "path",
+        "sha256",
+        "bytes",
+        "records",
+        "first_recv_ns",
+        "last_recv_ns",
+        "sealed_at",
+        "contract_ver",
+        "layout",
+        "sessions"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

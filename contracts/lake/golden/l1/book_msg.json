@@ -1,0 +1,1350 @@
+{
+ "crypto/l1/book_msg/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-01/hour=23.parquet": [
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 0,
+   "venue_ts_ns": 1767308399997000000,
+   "recv_ns": 1767308400000000000,
+   "update_id": 100,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9000,
+   "bid_px": [
+    420000,
+    419999
+   ],
+   "bid_qty": [
+    1000,
+    2000
+   ],
+   "ask_px": [
+    420001,
+    420002
+   ],
+   "ask_qty": [
+    1500,
+    3000
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 2,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-01/BTCUSDT",
+   "rec_no": 0,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767308400997000000,
+   "recv_ns": 1767308401000000000,
+   "update_id": 101,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9001,
+   "bid_px": [
+    420000
+   ],
+   "bid_qty": [
+    1200
+   ],
+   "ask_px": [],
+   "ask_qty": [],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 3,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-01/BTCUSDT",
+   "rec_no": 1,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767310199997000000,
+   "recv_ns": 1767310200000000000,
+   "update_id": 102,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9002,
+   "bid_px": [],
+   "bid_qty": [],
+   "ask_px": [
+    420001
+   ],
+   "ask_qty": [
+    0
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 4,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-01/BTCUSDT",
+   "rec_no": 2,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767311998997000000,
+   "recv_ns": 1767311999000000000,
+   "update_id": 103,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9003,
+   "bid_px": [
+    419998
+   ],
+   "bid_qty": [
+    4000
+   ],
+   "ask_px": [],
+   "ask_qty": [],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 5,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-01/BTCUSDT",
+   "rec_no": 3,
+   "parser_ver": "bybit-1"
+  }
+ ],
+ "crypto/l1/book_msg/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/hour=00.parquet": [
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 2,
+   "venue_ts_ns": 1767311998997000000,
+   "recv_ns": 1767312000000000000,
+   "update_id": 103,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9003,
+   "bid_px": [
+    420000,
+    419999,
+    419998
+   ],
+   "bid_qty": [
+    1200,
+    2000,
+    4000
+   ],
+   "ask_px": [
+    420002
+   ],
+   "ask_qty": [
+    3000
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 5,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-01/BTCUSDT",
+   "rec_no": 3,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767312000997000000,
+   "recv_ns": 1767312001000000000,
+   "update_id": 104,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9004,
+   "bid_px": [],
+   "bid_qty": [],
+   "ask_px": [
+    420003
+   ],
+   "ask_qty": [
+    2000
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 6,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 0,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767312002997000000,
+   "recv_ns": 1767312003000000000,
+   "update_id": 105,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9005,
+   "bid_px": [
+    420000
+   ],
+   "bid_qty": [
+    0
+   ],
+   "ask_px": [],
+   "ask_qty": [],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 7,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 1,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 0,
+   "venue_ts_ns": 1767312002997000000,
+   "recv_ns": 1767312006000000000,
+   "update_id": 105,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9005,
+   "bid_px": [
+    419999,
+    419998
+   ],
+   "bid_qty": [
+    2000,
+    4000
+   ],
+   "ask_px": [
+    420002,
+    420003
+   ],
+   "ask_qty": [
+    3000,
+    2000
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 2,
+   "frame_no": 2,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 2,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767312006997000000,
+   "recv_ns": 1767312007000000000,
+   "update_id": 106,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9006,
+   "bid_px": [
+    419999
+   ],
+   "bid_qty": [
+    2500
+   ],
+   "ask_px": [],
+   "ask_qty": [],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 8,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 3,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767312006997000000,
+   "recv_ns": 1767312007010000000,
+   "update_id": 106,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9006,
+   "bid_px": [
+    419999
+   ],
+   "bid_qty": [
+    2500
+   ],
+   "ask_px": [],
+   "ask_qty": [],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 2,
+   "frame_no": 4,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 4,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767312007997000000,
+   "recv_ns": 1767312008000000000,
+   "update_id": 107,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9007,
+   "bid_px": [],
+   "bid_qty": [],
+   "ask_px": [
+    420002
+   ],
+   "ask_qty": [
+    2990
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 10,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 5,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767312007997000000,
+   "recv_ns": 1767312008010000000,
+   "update_id": 107,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9007,
+   "bid_px": [],
+   "bid_qty": [],
+   "ask_px": [
+    420002
+   ],
+   "ask_qty": [
+    2990
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 2,
+   "frame_no": 6,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 6,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767312599997000000,
+   "recv_ns": 1767312600000000000,
+   "update_id": 108,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9008,
+   "bid_px": [
+    419997
+   ],
+   "bid_qty": [
+    1000
+   ],
+   "ask_px": [],
+   "ask_qty": [],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 2,
+   "frame_no": 8,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 7,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767313199997000000,
+   "recv_ns": 1767313200000000000,
+   "update_id": 110,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9010,
+   "bid_px": [
+    419996
+   ],
+   "bid_qty": [
+    1000
+   ],
+   "ask_px": [],
+   "ask_qty": [],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 2,
+   "frame_no": 10,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 8,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 0,
+   "venue_ts_ns": 1767313202997000000,
+   "recv_ns": 1767313203000000000,
+   "update_id": 111,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9011,
+   "bid_px": [
+    419999,
+    419997
+   ],
+   "bid_qty": [
+    2500,
+    1000
+   ],
+   "ask_px": [
+    420002,
+    420003
+   ],
+   "ask_qty": [
+    2990,
+    2000
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 3,
+   "frame_no": 2,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 9,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767314399997000000,
+   "recv_ns": 1767314400000000000,
+   "update_id": 112,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9012,
+   "bid_px": [
+    419999
+   ],
+   "bid_qty": [
+    2400
+   ],
+   "ask_px": [],
+   "ask_qty": [],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 3,
+   "frame_no": 4,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 10,
+   "parser_ver": "bybit-1"
+  }
+ ],
+ "crypto/l1/book_msg/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/hour=01.parquet": [
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 2,
+   "venue_ts_ns": 1767314399997000000,
+   "recv_ns": 1767315600000000000,
+   "update_id": 112,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9012,
+   "bid_px": [
+    419999,
+    419997
+   ],
+   "bid_qty": [
+    2400,
+    1000
+   ],
+   "ask_px": [
+    420002,
+    420003
+   ],
+   "ask_qty": [
+    2990,
+    2000
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 3,
+   "frame_no": 4,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 10,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767315600997000000,
+   "recv_ns": 1767315601000000000,
+   "update_id": 113,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9013,
+   "bid_px": [],
+   "bid_qty": [],
+   "ask_px": [
+    420004
+   ],
+   "ask_qty": [
+    1000
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 3,
+   "frame_no": 5,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 11,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 0,
+   "venue_ts_ns": 1767316499997000000,
+   "recv_ns": 1767316500000000000,
+   "update_id": 1,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9014,
+   "bid_px": [
+    419999
+   ],
+   "bid_qty": [
+    2000
+   ],
+   "ask_px": [
+    420002
+   ],
+   "ask_qty": [
+    1000
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 3,
+   "frame_no": 6,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 12,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767316559997000000,
+   "recv_ns": 1767316560000000000,
+   "update_id": 2,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9015,
+   "bid_px": [
+    419998
+   ],
+   "bid_qty": [
+    3000
+   ],
+   "ask_px": [],
+   "ask_qty": [],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 3,
+   "frame_no": 7,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 13,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767317399997000000,
+   "recv_ns": 1767317400000000000,
+   "update_id": 3,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9016,
+   "bid_px": [],
+   "bid_qty": [],
+   "ask_px": [
+    420003
+   ],
+   "ask_qty": [
+    1500
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 3,
+   "frame_no": 8,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 14,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 0,
+   "venue_ts_ns": 1767317429997000000,
+   "recv_ns": 1767317430000000000,
+   "update_id": 50,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9017,
+   "bid_px": [
+    419999,
+    419998
+   ],
+   "bid_qty": [
+    2000,
+    3000
+   ],
+   "ask_px": [
+    420002,
+    420003
+   ],
+   "ask_qty": [
+    1000,
+    1500
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 0,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 15,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767318299997000000,
+   "recv_ns": 1767318300000000000,
+   "update_id": 51,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9018,
+   "bid_px": [
+    419999
+   ],
+   "bid_qty": [
+    2100
+   ],
+   "ask_px": [],
+   "ask_qty": [],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 1,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 16,
+   "parser_ver": "bybit-1"
+  }
+ ],
+ "crypto/l1/book_msg/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/hour=02.parquet": [
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 2,
+   "venue_ts_ns": 1767318299997000000,
+   "recv_ns": 1767319200000000000,
+   "update_id": 51,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9018,
+   "bid_px": [
+    419999,
+    419998
+   ],
+   "bid_qty": [
+    2100,
+    3000
+   ],
+   "ask_px": [
+    420002,
+    420003
+   ],
+   "ask_qty": [
+    1000,
+    1500
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 1,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 16,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767319799997000000,
+   "recv_ns": 1767319800000000000,
+   "update_id": 52,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9019,
+   "bid_px": [],
+   "bid_qty": [],
+   "ask_px": [
+    420002
+   ],
+   "ask_qty": [
+    900
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 2,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 17,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767322199997000000,
+   "recv_ns": 1767322200000000000,
+   "update_id": 53,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9020,
+   "bid_px": [
+    419997
+   ],
+   "bid_qty": [
+    500
+   ],
+   "ask_px": [],
+   "ask_qty": [],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 3,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 18,
+   "parser_ver": "bybit-1"
+  }
+ ],
+ "crypto/l1/book_msg/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/hour=03.parquet": [
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 2,
+   "venue_ts_ns": 1767322199997000000,
+   "recv_ns": 1767322800000000000,
+   "update_id": 53,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9020,
+   "bid_px": [
+    419999,
+    419998,
+    419997
+   ],
+   "bid_qty": [
+    2100,
+    3000,
+    500
+   ],
+   "ask_px": [
+    420002,
+    420003
+   ],
+   "ask_qty": [
+    900,
+    1500
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 3,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 18,
+   "parser_ver": "bybit-1"
+  }
+ ],
+ "crypto/l1/book_msg/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/hour=04.parquet": [
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 2,
+   "venue_ts_ns": 1767322199997000000,
+   "recv_ns": 1767326400000000000,
+   "update_id": 53,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9020,
+   "bid_px": [
+    419999,
+    419998,
+    419997
+   ],
+   "bid_qty": [
+    2100,
+    3000,
+    500
+   ],
+   "ask_px": [
+    420002,
+    420003
+   ],
+   "ask_qty": [
+    900,
+    1500
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 3,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 18,
+   "parser_ver": "bybit-1"
+  }
+ ],
+ "crypto/l1/book_msg/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/hour=05.parquet": [
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 2,
+   "venue_ts_ns": 1767322199997000000,
+   "recv_ns": 1767330000000000000,
+   "update_id": 53,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9020,
+   "bid_px": [
+    419999,
+    419998,
+    419997
+   ],
+   "bid_qty": [
+    2100,
+    3000,
+    500
+   ],
+   "ask_px": [
+    420002,
+    420003
+   ],
+   "ask_qty": [
+    900,
+    1500
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 3,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 18,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767333589997000000,
+   "recv_ns": 1767333590000000000,
+   "update_id": 54,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9021,
+   "bid_px": [
+    419999
+   ],
+   "bid_qty": [
+    2200
+   ],
+   "ask_px": [],
+   "ask_qty": [],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 4,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 19,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767333594997000000,
+   "recv_ns": 1767333595000000000,
+   "update_id": 56,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9023,
+   "bid_px": [
+    419998
+   ],
+   "bid_qty": [
+    2900
+   ],
+   "ask_px": [],
+   "ask_qty": [],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 5,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 20,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767333596997000000,
+   "recv_ns": 1767333597000000000,
+   "update_id": 57,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9024,
+   "bid_px": [
+    419997
+   ],
+   "bid_qty": [
+    600
+   ],
+   "ask_px": [],
+   "ask_qty": [],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 6,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 21,
+   "parser_ver": "bybit-1"
+  }
+ ],
+ "crypto/l1/book_msg/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/hour=06.parquet": [
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 0,
+   "venue_ts_ns": 1767333601997000000,
+   "recv_ns": 1767333602000000000,
+   "update_id": 1,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9024,
+   "bid_px": [
+    419999,
+    419998
+   ],
+   "bid_qty": [
+    2200,
+    2900
+   ],
+   "ask_px": [
+    420002,
+    420003
+   ],
+   "ask_qty": [
+    900,
+    1500
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 3,
+   "frame_no": 0,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 22,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767334199997000000,
+   "recv_ns": 1767334200000000000,
+   "update_id": 2,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 9025,
+   "bid_px": [
+    419997
+   ],
+   "bid_qty": [
+    400
+   ],
+   "ask_px": [],
+   "ask_qty": [],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 3,
+   "frame_no": 1,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-02/BTCUSDT",
+   "rec_no": 23,
+   "parser_ver": "bybit-1"
+  }
+ ],
+ "crypto/l1/book_msg/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-05/hour=09.parquet": [
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 0,
+   "venue_ts_ns": 1767604199997000000,
+   "recv_ns": 1767604200000000000,
+   "update_id": 500,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 500,
+   "bid_px": [
+    430000
+   ],
+   "bid_qty": [
+    1000
+   ],
+   "ask_px": [
+    430001
+   ],
+   "ask_qty": [
+    1000
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 0,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-05/BTCUSDT",
+   "rec_no": 0,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767604799997000000,
+   "recv_ns": 1767604800000000000,
+   "update_id": 501,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 501,
+   "bid_px": [
+    429999
+   ],
+   "bid_qty": [
+    2000
+   ],
+   "ask_px": [],
+   "ask_qty": [],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 1,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-05/BTCUSDT",
+   "rec_no": 1,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767605399997000000,
+   "recv_ns": 1767605400000000000,
+   "update_id": 502,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 502,
+   "bid_px": [],
+   "bid_qty": [],
+   "ask_px": [
+    430002
+   ],
+   "ask_qty": [
+    1000
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 2,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-05/BTCUSDT",
+   "rec_no": 2,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 0,
+   "venue_ts_ns": 1767605403997000000,
+   "recv_ns": 1767605404000000000,
+   "update_id": 600,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 600,
+   "bid_px": [
+    430000
+   ],
+   "bid_qty": [
+    1000
+   ],
+   "ask_px": [
+    430001
+   ],
+   "ask_qty": [
+    1000
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 0,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-05/BTCUSDT",
+   "rec_no": 3,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767606299997000000,
+   "recv_ns": 1767606300000000000,
+   "update_id": 601,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 601,
+   "bid_px": [
+    429998
+   ],
+   "bid_qty": [
+    1000
+   ],
+   "ask_px": [],
+   "ask_qty": [],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 1,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-05/BTCUSDT",
+   "rec_no": 4,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767607196997000000,
+   "recv_ns": 1767607197000000000,
+   "update_id": 602,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 602,
+   "bid_px": [],
+   "bid_qty": [],
+   "ask_px": [
+    430003
+   ],
+   "ask_qty": [
+    2000
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 2,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-05/BTCUSDT",
+   "rec_no": 5,
+   "parser_ver": "bybit-1"
+  }
+ ],
+ "crypto/l1/book_msg/venue=bybit/market=linear/channel=orderbook.50/date=2026-01-05/hour=10.parquet": [
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 0,
+   "venue_ts_ns": 1767607201997000000,
+   "recv_ns": 1767607202000000000,
+   "update_id": 700,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 700,
+   "bid_px": [
+    430000
+   ],
+   "bid_qty": [
+    1000
+   ],
+   "ask_px": [
+    430001
+   ],
+   "ask_qty": [
+    1000
+   ],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 0,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-05/BTCUSDT",
+   "rec_no": 6,
+   "parser_ver": "bybit-1"
+  },
+  {
+   "venue": "bybit",
+   "market": "linear",
+   "symbol": "BTCUSDT",
+   "channel": "orderbook.50",
+   "depth": 50,
+   "kind": 1,
+   "venue_ts_ns": 1767607799997000000,
+   "recv_ns": 1767607800000000000,
+   "update_id": 701,
+   "prev_update_id": null,
+   "first_update_id": null,
+   "venue_seq": 701,
+   "bid_px": [
+    429999
+   ],
+   "bid_qty": [
+    1500
+   ],
+   "ask_px": [],
+   "ask_qty": [],
+   "px_exp": -1,
+   "qty_exp": -3,
+   "conn_id": 1,
+   "frame_no": 1,
+   "l0_file_id": "venue=bybit/market=linear/channel=orderbook.50/date=2026-01-05/BTCUSDT",
+   "rec_no": 7,
+   "parser_ver": "bybit-1"
+  }
+ ]
+}

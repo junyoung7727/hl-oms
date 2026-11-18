@@ -1,0 +1,54 @@
+{
+  "contract_ver": 1,
+  "metrics": [
+    {
+      "name": "lake_audit_fail_total",
+      "type": "counter",
+      "labels": [
+        "venue"
+      ],
+      "help": "Files (L0 and L1) found failing, summed over all audit runs."
+    },
+    {
+      "name": "lake_audit_clean_total",
+      "type": "counter",
+      "labels": [
+        "venue"
+      ],
+      "help": "Files found clean, summed over all audit runs."
+    },
+    {
+      "name": "lake_audit_not_audited_files",
+      "type": "gauge",
+      "labels": [
+        "venue"
+      ],
+      "help": "Sealed L0 files that have no usable verify result now."
+    },
+    {
+      "name": "lake_audit_last_run_ts",
+      "type": "gauge",
+      "labels": [
+        "venue"
+      ],
+      "help": "Unix time in seconds of the last finished audit run."
+    },
+    {
+      "name": "lake_audit_gap_rows",
+      "type": "gauge",
+      "labels": [
+        "venue",
+        "kind"
+      ],
+      "help": "Gap rows of the newest audited date, per gap kind."
+    }
+  ],
+  "reserved": [
+    "lake_l0_open_files",
+    "lake_l0_bytes_total",
+    "lake_l0_write_errors_total",
+    "lake_seal_lag_hours",
+    "lake_disk_free_bytes",
+    "lake_disk_days_left"
+  ]
+}
