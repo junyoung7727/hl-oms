@@ -238,3 +238,19 @@ fn the_real_fs_refuses_paths_outside_the_lake() {
         assert!(fs.create_new(bad).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn new_directories_are_found_outermost_first() {
+    // RealFs fsyncs the parent of each of these after creating them.
+    let dir = common::test_dir("writer-dirs");
+    let d = dir.join("a/b/c");
+    assert_eq!(
+        md_lake::fs::missing_dirs(&d),
+        vec![dir.join("a"), dir.join("a/b"), dir.join("a/b/c")]
+    );
+    std::fs::create_dir_all(dir.join("a")).expect("mkdir");
+    assert_eq!(
+        md_lake::fs::missing_dirs(&d),
+        vec![dir.join("a/b"), dir.join("a/b/c")]
+    );
+}

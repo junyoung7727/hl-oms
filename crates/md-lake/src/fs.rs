@@ -110,11 +110,36 @@ impl LakeFile for RealFile {
     }
 }
 
+/// The directories of `d` that do not exist yet, outermost first.
+pub fn missing_dirs(d: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = d
+        .ancestors()
+        .take_while(|a| !a.as_os_str().is_empty() && !a.exists())
+        .map(Path::to_path_buf)
+        .collect();
+    out.reverse();
+    out
+}
+
+/// `create_dir_all`, then an fsync of the parent of every directory it
+/// made, so that a new directory entry survives a power loss like the
+/// file entries inside it.
+fn create_dirs(d: &Path) -> io::Result<()> {
+    let missing = missing_dirs(d);
+    fs::create_dir_all(d)?;
+    for m in &missing {
+        if let Some(parent) = m.parent() {
+            File::open(parent)?.sync_all()?;
+        }
+    }
+    Ok(())
+}
+
 impl Fs for RealFs {
     fn create_new(&self, path: &str) -> io::Result<Box<dyn LakeFile>> {
         let p = self.at(path)?;
         if let Some(d) = p.parent() {
-            fs::create_dir_all(d)?;
+            create_dirs(d)?;
         }
         let f = OpenOptions::new()
             .read(true)
@@ -136,7 +161,7 @@ impl Fs for RealFs {
     fn rename(&self, from: &str, to: &str) -> io::Result<()> {
         let to_p = self.at(to)?;
         if let Some(d) = to_p.parent() {
-            fs::create_dir_all(d)?;
+            create_dirs(d)?;
         }
         fs::rename(self.at(from)?, to_p)
     }
@@ -162,7 +187,7 @@ impl Fs for RealFs {
     }
     fn open_dir(&self, dir: &str) -> io::Result<Box<dyn LakeFile>> {
         let p = self.at(dir)?;
-        fs::create_dir_all(&p)?;
+        create_dirs(&p)?;
         Ok(Box::new(RealFile(File::open(p)?)))
     }
 }
