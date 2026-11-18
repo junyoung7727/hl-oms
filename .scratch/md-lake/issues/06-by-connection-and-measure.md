@@ -6,6 +6,6 @@
 
 **Status:** ready-for-agent
 
-- [ ] Test `by_connection_is_lossless`: records and bytes per connection unchanged; `sessions` null.
+- [ ] Test `by_connection_is_lossless`: records and bytes per connection unchanged; one header, at the start of the day file only (F2); `sessions` null.
 - [ ] Test `crash_at_every_step_by_connection` (as in ticket 05).
 - [ ] Test `measure_layouts_records_both_sizes` and writes no extra file.
