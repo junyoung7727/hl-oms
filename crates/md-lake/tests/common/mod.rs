@@ -8,6 +8,7 @@ pub mod counting;
 pub mod kit;
 pub mod lock_holder;
 pub mod schema;
+pub mod sim;
 
 use std::fs;
 use std::path::{Path, PathBuf};
