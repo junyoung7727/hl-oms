@@ -18,12 +18,12 @@
 # quant-data-platform, checked by crates/md-core/tests/vendored.rs) has three
 # narrow exemptions: 64-digit hex runs (its SHA-256 digests), .jsonl files
 # under golden/ (the golden manifest) and binary .qraw files under golden/l0/
-# (the golden L0 frames). Every other rule applies there as anywhere.
+# (the golden L0 frames, uncompressed QRAW1). Every other rule applies there
+# as anywhere; the content of a golden .qraw still gets checks 3 and 4.
 #
 # What it does not check: it is a pattern check and does not prove that no
 # secret exists. A key split over lines, written with separators, encoded
 # in base64 or given as a mnemonic passes. Untracked files are not read.
-# The content of an exempt .qraw file is not read (it is zstd-compressed).
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
@@ -103,9 +103,12 @@ for f in "${files[@]}"; do
   if ! LC_ALL=C tr -d '\000' < "$f" | cmp -s - "$f"; then
     listed=0
     for a in "${ALLOW_BINARY[@]}"; do [[ "$f" == "$a" ]] && listed=1; done
-    [[ "$f" == "${CONTRACT_DIR}golden/l0/"*.qraw ]] && listed=1
-    [[ $listed -eq 1 ]] || report "binary file is tracked: $f"
-    continue
+    if [[ "$f" == "${CONTRACT_DIR}golden/l0/"*.qraw ]]; then
+      : # golden L0 frames: their text is read by checks 3 and 4 below
+    else
+      [[ $listed -eq 1 ]] || report "binary file is tracked: $f"
+      continue
+    fi
   fi
 
   # 3. Hex runs, each one checked by value. The allow-list file is not

@@ -140,6 +140,14 @@ mkdir -p contracts/lake/golden/l0/x
 printf 'a\0b\n' > contracts/lake/golden/l0/x/00.qraw
 expect ok "binary golden .qraw in the vendored contract" scan
 reset
+mkdir -p contracts/lake/golden/l0/x
+printf 'a\0b k=%s\n' "$(hex cd 20)" > contracts/lake/golden/l0/x/00.qraw
+expect fail "40-digit hex inside a golden .qraw" scan
+reset
+mkdir -p contracts/lake/golden/l0/x
+printf 'a\0b token gh%s_%s\n' p "$(hex Ab 18)" > contracts/lake/golden/l0/x/00.qraw
+expect fail "credential inside a golden .qraw" scan
+reset
 mkdir -p contracts/lake/l1
 printf 'a\0b\n' > contracts/lake/l1/00.qraw
 expect fail "binary .qraw in the vendored contract outside golden/l0/" scan
