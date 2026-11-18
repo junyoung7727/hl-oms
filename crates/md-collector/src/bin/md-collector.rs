@@ -7,13 +7,14 @@
 //! md-collector version
 //! ```
 //!
-//! Exit codes: 0 stopped by SIGTERM or Ctrl-C, 1 start or write error (the
-//! files are left for `md-lake seal` to recover), 2 configuration error.
+//! Exit codes: 0 stopped by SIGTERM or Ctrl-C, 1 start or write error that a
+//! restart may cure (the files are left for `md-lake seal` to recover), 2
+//! configuration error or a plan the config cannot give (no restart).
 
 use std::path::PathBuf;
 use std::time::Duration;
 
-use md_collector::collector::{Collector, Deps};
+use md_collector::collector::{Collector, Deps, StartError};
 use md_collector::config::Config;
 
 fn arg(args: &[String], name: &str) -> Option<String> {
@@ -40,8 +41,15 @@ async fn run(cfg: Config) -> i32 {
     let handle = match Collector::start(cfg, deps).await {
         Ok(h) => h,
         Err(e) => {
-            line("error", "start failed", serde_json::json!({"error": e}));
-            return 1;
+            line(
+                "error",
+                "start failed",
+                serde_json::json!({"error": e.to_string()}),
+            );
+            return match e {
+                StartError::Refused(_) => 2,
+                StartError::Failed(_) => 1,
+            };
         }
     };
     line("info", "collector started", serde_json::json!({}));

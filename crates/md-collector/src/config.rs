@@ -20,8 +20,11 @@ pub enum Symbols {
 pub struct Write {
     pub flush_ms: u64,
     pub fsync_ms: u64,
-    /// Bytes a connection may have between receive and write.
+    /// Bytes a plan slot may have between receive and write.
     pub queue_bytes: usize,
+    /// Bytes all slots together may have (spec R1; judgement, not a model:
+    /// half of `MemoryMax=1G`).
+    pub total_queue_bytes: usize,
 }
 
 impl Default for Write {
@@ -30,6 +33,7 @@ impl Default for Write {
             flush_ms: 1000,
             fsync_ms: 5000,
             queue_bytes: 16 * 1024 * 1024,
+            total_queue_bytes: 512 * 1024 * 1024,
         }
     }
 }

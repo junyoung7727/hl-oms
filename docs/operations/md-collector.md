@@ -17,8 +17,8 @@ md-lake verify    --venue V --lake DIR --date YYYY-MM-DD --json
 | 종료 코드 | md-collector | md-lake |
 |---|---|---|
 | 0 | SIGTERM·Ctrl-C로 정상 종료 | 끝남(잠긴 파일 때문에 기다리는 시간은 보고만 함) |
-| 1 | 시작 실패(종목정보 실패 포함), 쓰기 오류 | 봉인 오류(`Unroutable`, `UnknownSource`, `Check`, 입출력) |
-| 2 | 설정 오류 | 사용법 오류, 등록되지 않은 거래소(파일을 건드리지 않음), 미래의 `--now-ns` |
+| 1 | 다시 시작하면 나을 수 있는 실패(종목정보 받기 실패, 쓰기 오류) | 봉인 오류(`Unroutable`, `UnknownSource`, `Check`, 입출력) |
+| 2 | 설정 오류, 설정으로 계획을 만들 수 없음(전략용 토픽이 거래 중이 아님 등). systemd는 다시 시작하지 않는다 | 사용법 오류, 등록되지 않은 거래소(파일을 건드리지 않음), 미래의 `--now-ns` |
 | 3 | — | 같은 거래소의 다른 봉인이 실행 중 |
 
 `--now-ns`는 과거 상태를 다시 돌릴 때만 쓴다. 미래 값은 거절한다(`MD_LAKE_TEST_ALLOW_FUTURE_NOW=1`은 시험 전용).
@@ -34,7 +34,7 @@ md-lake verify    --venue V --lake DIR --date YYYY-MM-DD --json
 | `lake_root` | (필수) | 레이크 루트 |
 | `host` | `/etc/hostname`, 없으면 `unknown` | 파일 머리의 호스트 |
 | `write.flush_ms` / `write.fsync_ms` | 1000 / 5000 | zstd 블록 flush, fsync 간격 |
-| `write.queue_bytes` | 16 MiB | 연결 자리 하나의 받기 큐 상한. 전체 상한은 512 MiB(코드 상수) |
+| `write.queue_bytes` / `write.total_queue_bytes` | 16 MiB / 512 MiB | 연결 자리 하나와 전체의 받기 큐 상한(바이트만 셈. 큐 항목·zstd 문맥·호가창 메모리는 따로) |
 | `disk.floor_bytes` / `disk.margin_bytes` / `disk.check_ms` | 20 GB / 20 GB / 10 s | 디스크 하한(판단: 전체 계획 약 하루치) |
 | `day_change.start_offset_ms` / `stagger_ms` | 5000 / 2000 | 자정 전환 시작(00:00:05 UTC)과 연결 간격 |
 | `instruments.refresh_ms` | 3600000 | 종목정보 다시 받기 간격 |

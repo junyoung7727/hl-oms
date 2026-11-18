@@ -173,3 +173,14 @@ These override the sections above where they differ.
 - **R7 Clocks.** Only the day-change scheduler and the disk checker's timing use the injected clock; the writer, ticks and note records use the real wall clock (md-feed stamps `recv_ns` with it).
 - **R8 `--now-ns` in the future** is refused unless `MD_LAKE_TEST_ALLOW_FUTURE_NOW=1` is set (tests): a future clock could seal hours that are not closed yet.
 - **R9 D1 is recorded** in `docs/adr/ADR-019-market-conn-slots.md` (readers of `by_connection` files need it). A later qdp contract change may adopt it (U8).
+
+## Final review decisions (code review, 2026-11-19)
+
+No finding at the data-loss level. Fixed:
+
+- **F1** The `disk_floor` note starts when the gate closes (before the stop), so no dropped frame lies before the note's `start_recv_ns`.
+- **F2** `Collector::start` returns `StartError::Refused` (config or plan the venue cannot give: exit 2) or `Failed` (exit 1). `md-collector@.service` has `RestartPreventExitStatus=2`; `md-lake-seal@.service` has `SuccessExitStatus=3` (another run holds the lock).
+- **F3** `write.total_queue_bytes` is a config key (default 512 MiB). It counts payload bytes only; queue items, zstd contexts and books are extra (documented).
+- **F4** Tests: the slow-disk test checks `frames_written == frames_accepted` for the overflowed connection; the lock test checks every held file still starts with its bytes from before the seal.
+
+Not fixed (bounded, recorded for U6): per-connection entries of the ingest's stats map and closed set, and the feed sink's seen set, grow by one small entry per connection for the process lifetime.

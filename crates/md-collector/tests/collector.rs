@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use common::*;
 use fake::{Behaviour, Pages};
-use md_collector::collector::{Collector, Deps, SystemClock};
+use md_collector::collector::{Collector, Deps, StartError, SystemClock};
 use md_lake::qraw::{Record, Src};
 use run::*;
 use slowfs::{Gate, SetFree, SlowFs};
@@ -143,6 +143,10 @@ async fn open_files_locked_while_running() {
             "{p} is not locked"
         );
     }
+    let before: Vec<Vec<u8>> = open
+        .iter()
+        .map(|p| std::fs::read(s.dir.join(p)).expect("read"))
+        .collect();
     let now = md_collector::wall_ns() + 2 * HOUR;
     let (code, out, err) = seal(&s.dir, md_collector::wall_ns(), now);
     assert_eq!(code, 0, "{out}\n{err}");
@@ -153,8 +157,11 @@ async fn open_files_locked_while_running() {
         files_with(&s.dir, "market=").is_empty(),
         "no day file while the collector holds the hour"
     );
-    for p in &open {
-        assert!(s.dir.join(p).exists(), "{p} was removed");
+    // The seal neither cut nor removed a held file: each still starts with
+    // the bytes it had (the collector keeps appending).
+    for (p, b) in open.iter().zip(&before) {
+        let after = std::fs::read(s.dir.join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(after.starts_with(b), "{p} changed under its lock");
     }
     h.shutdown().await.expect("shutdown");
 }
@@ -231,7 +238,11 @@ async fn instruments_failure_refuses_start() {
         .await
         .err()
         .expect("refused");
-    assert!(e.contains("500"), "{e}");
+    // A failed fetch may pass: a restart may help (exit 1).
+    assert!(
+        matches!(&e, StartError::Failed(m) if m.contains("500")),
+        "{e}"
+    );
     assert_eq!(s.ws.conns().len(), 0, "no connection was opened");
     let sess = records_under(s.fs.as_ref(), &s.dir, "/_session/");
     assert_eq!(
@@ -257,7 +268,11 @@ async fn traded_topic_not_planned_refuses_start() {
         .await
         .err()
         .expect("refused");
-    assert!(e.contains("ETHUSDT"), "{e}");
+    // A plan the config cannot give: no restart (exit 2).
+    assert!(
+        matches!(&e, StartError::Refused(m) if m.contains("ETHUSDT")),
+        "{e}"
+    );
     assert_eq!(s.ws.conns().len(), 0);
 }
 
@@ -305,7 +320,9 @@ async fn slow_disk_overflow_reconnects() {
             .any(|(id, c)| *id > 1 && c.frames_written > 3)
     })
     .await;
+    let pre = h.state();
     h.shutdown().await.expect("shutdown");
+    let final_state = pre;
     let conns = s.ws.conns();
     assert!(conns[0].ended, "the overflowed connection was closed");
     assert!(
@@ -331,6 +348,14 @@ async fn slow_disk_overflow_reconnects() {
             .collect::<Vec<_>>(),
     );
     assert!(c1.len() >= 2, "{}", c1.len());
+    // Every frame the sink took from connection 1 is in L0 (not only a prefix).
+    let st1 = &final_state.ingest.conns[&1];
+    assert_eq!(st1.frames_written, st1.frames_accepted);
+    let answers = sess
+        .iter()
+        .filter(|r| r.conn_id == 1 && r.src == Src::WebSocket)
+        .count() as u64;
+    assert_eq!(c1.len() as u64 + answers, st1.frames_accepted);
     assert_eq!(c1[..], conns[0].data[..c1.len()]);
     assert_eq!(
         consecutive_us(&c1),

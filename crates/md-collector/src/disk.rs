@@ -58,8 +58,10 @@ pub(crate) async fn run(inner: std::sync::Arc<crate::collector::Inner>) {
                 .iter_mut()
                 .filter(|r| !r.group.traded && r.handle.is_some())
             {
-                inner.stop_group(r).await;
+                // The note starts when the gate closes: frames after it are
+                // not written (review finding 1).
                 let now = crate::wall_ns();
+                inner.stop_group(r).await;
                 for topic in Inner::topics_of(&r.group) {
                     inner.note(&Note {
                         note: "disk_floor",

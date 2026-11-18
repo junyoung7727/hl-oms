@@ -54,10 +54,6 @@ impl Deps {
     }
 }
 
-/// Total in-flight bytes over all slots (spec R1; judgement, not a model:
-/// half of `MemoryMax=1G`).
-pub const TOTAL_QUEUE_BYTES: usize = 512 * 1024 * 1024;
-
 /// One line of the log (stderr), as oms-node writes it.
 pub(crate) fn log(level: &str, msg: &str, fields: serde_json::Value) {
     eprintln!(
@@ -206,6 +202,30 @@ pub struct CollectorHandle {
 }
 
 pub struct Collector;
+
+/// Why the collector did not start.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartError {
+    /// The config or the venue's instrument list cannot give the plan; a
+    /// restart cannot help (`md-collector` exits 2, systemd does not restart).
+    Refused(String),
+    /// Anything else (network, the writer); a restart may help (exit 1).
+    Failed(String),
+}
+
+impl std::fmt::Display for StartError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StartError::Refused(e) | StartError::Failed(e) => f.write_str(e),
+        }
+    }
+}
+
+impl From<String> for StartError {
+    fn from(e: String) -> Self {
+        StartError::Failed(e)
+    }
+}
 
 /// Fetches every page of one market's instrument list; every body goes to
 /// L0. `Err` when an answer failed or a page did not parse.
@@ -406,9 +426,9 @@ async fn refresh_instruments(inner: Arc<Inner>) {
 
 impl Collector {
     /// Starts the collector on the current tokio runtime.
-    pub async fn start(cfg: Config, deps: Deps) -> Result<CollectorHandle, String> {
+    pub async fn start(cfg: Config, deps: Deps) -> Result<CollectorHandle, StartError> {
         let venue = registry::venue(&cfg.venue)
-            .ok_or_else(|| format!("venue {} is not registered", cfg.venue))?;
+            .ok_or_else(|| StartError::Refused(format!("venue {} is not registered", cfg.venue)))?;
         let session_ns = crate::wall_ns();
         let mut ws = WriterSettings::new(
             &cfg.venue,
@@ -425,7 +445,7 @@ impl Collector {
             venue,
             Limits {
                 queue_bytes: cfg.write.queue_bytes,
-                total_bytes: TOTAL_QUEUE_BYTES.max(cfg.write.queue_bytes),
+                total_bytes: cfg.write.total_queue_bytes.max(cfg.write.queue_bytes),
             },
         )?;
         match Self::start_inner(cfg, deps, venue, ingest).await {
@@ -447,7 +467,7 @@ impl Collector {
         deps: Deps,
         venue: &'static dyn Venue,
         ingest: Arc<Ingest>,
-    ) -> Result<(Arc<Inner>, Vec<JoinHandle<()>>), String> {
+    ) -> Result<(Arc<Inner>, Vec<JoinHandle<()>>), StartError> {
         let session_ids = Arc::new(ConnIds::new());
         let counters = Arc::new(Counters::default());
         let mut markets = Vec::new();
@@ -455,7 +475,7 @@ impl Collector {
         for (i, m) in cfg.markets.iter().enumerate() {
             let slot = venue
                 .market_slot(&m.name)
-                .ok_or_else(|| format!("no market {}", m.name))?;
+                .ok_or_else(|| StartError::Refused(format!("no market {}", m.name)))?;
             let (start, end) = registry::conn_range(slot);
             let ids = session_ids.range(start, end);
             let rest_base = m
@@ -484,7 +504,8 @@ impl Collector {
                 conn_index_base(&cfg, i),
                 &cfg.traded_channels,
                 &symbols,
-            )?;
+            )
+            .map_err(StartError::Refused)?;
             // R4: every traded topic of this market is planned.
             let planned: BTreeSet<(String, String)> = groups
                 .iter()
@@ -493,10 +514,10 @@ impl Collector {
                 .collect();
             for t in cfg.traded_channels.iter().filter(|t| t.market == m.name) {
                 if !planned.contains(&(t.symbol.clone(), t.channel.clone())) {
-                    return Err(format!(
+                    return Err(StartError::Refused(format!(
                         "traded channel {}/{}/{} is not collected (not trading at the venue?)",
                         t.market, t.symbol, t.channel
-                    ));
+                    )));
                 }
             }
             all_groups.extend(groups);

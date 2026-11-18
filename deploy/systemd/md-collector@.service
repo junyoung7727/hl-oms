@@ -10,6 +10,8 @@ Type=simple
 ExecStart=/usr/local/bin/md-collector run --config /etc/md-collector/%i.toml
 Restart=always
 RestartSec=5
+# Exit 2 = configuration or plan refused: a restart cannot help.
+RestartPreventExitStatus=2
 # Receive queues are capped at 512 MiB in total (spec R1).
 MemoryMax=1G
 # SIGTERM: stop the feeds, close every file (frame end, fsync, unlock).

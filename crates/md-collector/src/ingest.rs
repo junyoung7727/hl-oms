@@ -52,6 +52,8 @@ enum Item {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConnSnapshot {
+    /// Frames the sink took (each is written, or the writer failed).
+    pub frames_accepted: u64,
     pub frames_written: u64,
     pub bytes_written: u64,
     pub overflows: u64,
@@ -95,6 +97,7 @@ struct Shared {
 #[derive(Default)]
 struct ConnStats {
     overflowed: bool,
+    accepted: u64,
     frames: u64,
     bytes: u64,
     overflows: u64,
@@ -169,6 +172,7 @@ fn snapshot(shared: &Mutex<Shared>) -> IngestSnapshot {
                 (
                     *id,
                     ConnSnapshot {
+                        frames_accepted: c.accepted,
                         frames_written: c.frames,
                         bytes_written: c.bytes,
                         overflows: c.overflows,
@@ -232,6 +236,9 @@ impl Ingest {
             payload: body,
         };
         let dest = self.dest(&f);
+        if let Ok(mut s) = self.shared.lock() {
+            s.conns.entry(0).or_default().accepted += 1;
+        }
         self.send(Item::Frame {
             dest,
             rec: record(f),
@@ -295,6 +302,7 @@ impl FrameSink for Ingest {
                 }
                 return Err(Overflow);
             }
+            c.accepted += 1;
             *s.slots.entry(slot).or_default() += bytes;
             s.total += bytes;
         }
