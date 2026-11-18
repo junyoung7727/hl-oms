@@ -271,7 +271,7 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
                     next: None,
                     recv_ns,
                 };
-                return self.gap(&key, &mut st, gap).into_iter().collect();
+                return self.gap(&key, &mut st, gap, None).into_iter().collect();
             }
         };
         let mut actions = Vec::new();
@@ -361,7 +361,7 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
                     return self.start_rest(&key, &mut st, vec![u]);
                 }
                 let key = u.key.clone();
-                self.gap(&key, &mut st, gap)
+                self.gap(&key, &mut st, gap, Some(u))
             }
             None => {
                 if st.has_book {
@@ -374,7 +374,15 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
     }
 
     /// One `Gap` event and the adapter's resync.
-    fn gap(&self, key: &StreamKey, st: &mut TopicState, gap: GapEvent) -> Option<Action> {
+    /// `pending` is the delta that showed the gap; a REST resync keeps it,
+    /// because it is newer than the book and may bridge the snapshot.
+    fn gap(
+        &self,
+        key: &StreamKey,
+        st: &mut TopicState,
+        gap: GapEvent,
+        pending: Option<BookUpdate>,
+    ) -> Option<Action> {
         let resync = self.ctx.adapter.on_gap(key, &gap);
         self.ctx.emit(FeedEvent::Gap {
             conn_id: self.state.conn_id,
@@ -400,7 +408,7 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
                 "gap on {}.{}",
                 key.channel, key.symbol
             ))),
-            Resync::RestSnapshotThenReplay => self.start_rest(key, st, Vec::new()),
+            Resync::RestSnapshotThenReplay => self.start_rest(key, st, pending.into_iter().collect()),
         }
     }
 
@@ -542,21 +550,29 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
             None => Default::default(),
         };
         let mut actions = Vec::new();
-        for d in buffered {
-            if st.rest.is_none() {
+        let mut rest_of = buffered.into_iter();
+        while let Some(d) = rest_of.next() {
+            let action = if st.rest.is_none() {
                 // Bridged: the rest are ordinary deltas.
                 match st.detector.delta(d.update_id, d.prev_update_id, d.recv_ns) {
                     Some(gap) => {
                         let k = d.key.clone();
-                        actions.extend(self.gap(&k, &mut st, gap));
-                        break;
+                        self.gap(&k, &mut st, gap, Some(d))
                     }
                     None => {
                         st.book.apply_delta(&d);
                         self.applied(&mut st, &d);
+                        None
                     }
                 }
-            } else if let Some(a) = self.rest_delta(&mut st, d) {
+            } else {
+                self.rest_delta(&mut st, d)
+            };
+            if let Some(a) = action {
+                // A new REST fetch keeps the deltas not yet replayed.
+                if let Some(r) = st.rest.as_mut().filter(|r| r.snapshot.is_none()) {
+                    r.buffer.extend(rest_of);
+                }
                 actions.push(a);
                 break;
             }

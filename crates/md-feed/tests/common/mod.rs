@@ -4,6 +4,8 @@
 //! Bybit API terms 6.7). Nothing here opens a non-loopback socket.
 #![allow(dead_code)]
 
+pub mod rest_adapter;
+
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -161,6 +163,11 @@ pub struct FakeRest {
 
 impl FakeRest {
     pub async fn start(bodies: Vec<String>) -> FakeRest {
+        Self::start_with_delay(bodies, Duration::ZERO).await
+    }
+
+    /// Each answer waits `delay` after the request has arrived.
+    pub async fn start_with_delay(bodies: Vec<String>, delay: Duration) -> FakeRest {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let base = format!("http://{}", listener.local_addr().expect("addr"));
         let requests: Arc<Mutex<Vec<String>>> = Arc::default();
@@ -195,6 +202,7 @@ impl FakeRest {
                             b.front().cloned().unwrap_or_default()
                         }
                     };
+                    tokio::time::sleep(delay).await;
                     let resp = format!(
                         "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
                         body.len()
