@@ -6,7 +6,9 @@
 
 pub mod book;
 pub mod decimal;
+pub mod seq;
 pub mod types;
 
 pub use book::{BookSide, OrderBook};
+pub use seq::{GapDetector, GapEvent, SeqRule};
 pub use types::{BookUpdate, Control, Level, Normalized, Side, StreamKey, Ticker, Trade};
