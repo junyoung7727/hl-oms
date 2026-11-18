@@ -182,6 +182,18 @@ _Avoid_: connection limit (that is Bybit's)
 The collector's file of one connection and one UTC hour under `crypto/l0/_open/`, one zstd level-3 stream, locked by its writer until the frame end and the last fsync.
 _Avoid_: raw file, buffer file
 
+**Market slot** (시장 슬롯):
+A venue market's fixed position (Bybit: linear 0, inverse 1, spot 2); slot `k` owns `conn_id`s `[max(k << 28, 1), (k + 1) << 28)`, so the sealer reads a record's market from its `conn_id` (ADR-019).
+_Avoid_: market id, shard
+
+**Plan slot** (연결 자리):
+One `ConnPlan` of a feed (`conn_index`): its topics keep their slot across reconnects and day-change switches; the collector's receive budget is counted per slot.
+_Avoid_: connection (a slot has a new connection after each reconnect)
+
+**Disk floor** (디스크 하한):
+Free space of the lake below which the collector keeps only the traded topics (`traded_channels`) and writes a `disk_floor` note per dropped topic; it collects everything again above floor plus margin.
+_Avoid_: quota
+
 **Hour seal** (시간별 봉인):
 The sealer's move of a closed hour's open files into the day files, recorded by a begin and a done entry of the seal log; lossless and restartable at any step.
 _Avoid_: compaction, flush

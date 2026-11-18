@@ -1,0 +1,20 @@
+# Template only: not installed or enabled by this repository (U5b).
+# Instance = venue: md-collector@bybit.service reads /etc/md-collector/bybit.toml.
+[Unit]
+Description=md-collector for %i (market data to the lake's stage-1 files)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/md-collector run --config /etc/md-collector/%i.toml
+Restart=always
+RestartSec=5
+# Receive queues are capped at 512 MiB in total (spec R1).
+MemoryMax=1G
+# SIGTERM: stop the feeds, close every file (frame end, fsync, unlock).
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

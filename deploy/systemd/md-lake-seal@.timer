@@ -1,0 +1,10 @@
+# Template only: not installed or enabled by this repository (U5b).
+[Unit]
+Description=Seal the closed hours of %i every hour at :02
+
+[Timer]
+OnCalendar=*-*-* *:02:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

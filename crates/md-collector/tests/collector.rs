@@ -347,3 +347,84 @@ fn consecutive_us(frames: &[String]) -> usize {
     assert!(us.windows(2).all(|w| w[1] == w[0] + 1), "{us:?}");
     us.len()
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn state_counts() {
+    let s = setup(
+        "e2e-state",
+        Behaviour::default(),
+        pages(&[("linear", &["BTCUSDT"])]),
+    )
+    .await;
+    let cfg = s.config(
+        &[(
+            "linear",
+            "symbols = [\"BTCUSDT\"]\nchannels = [\"orderbook.50\"]\nconn_budget = 1",
+        )],
+        "",
+    );
+    let h = Collector::start(cfg, s.deps()).await.expect("start");
+    eventually("written", || written(&h) >= 1 + 1 + 4).await;
+    let st = h.state();
+    assert_eq!(st.instruments_ok, 1);
+    assert!(st.instruments_last_recv_ns > 0);
+    assert_eq!(
+        st.ingest.conns[&0].frames_written, 1,
+        "one instruments body"
+    );
+    assert_eq!(
+        st.ingest.conns[&1].frames_written, 5,
+        "answer + snapshot + 3 deltas"
+    );
+    assert!(st.ingest.conns.values().all(|c| c.overflows == 0));
+    assert_eq!(st.events.get("connected"), Some(&1));
+    assert_eq!(st.active.get(&("linear".to_string(), 0)), Some(&1));
+    assert!(!st.disk_floor);
+    assert!(st.free_bytes > 0, "the checker ran");
+    h.shutdown().await.expect("shutdown");
+}
+
+/// Every collector test goes through `Setup::config`, which sets
+/// `loopback_only`; no test source names a non-loopback address.
+#[test]
+fn no_non_loopback_socket() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let run = std::fs::read_to_string(dir.join("common/run.rs")).expect("run.rs");
+    assert!(run.contains("loopback_only = true"));
+    let mut sources = Vec::new();
+    for e in std::fs::read_dir(&dir).expect("tests").flatten() {
+        let p = e.path();
+        if p.extension().is_some_and(|x| x == "rs") {
+            sources.push(p);
+        }
+    }
+    for e in std::fs::read_dir(dir.join("common"))
+        .expect("common")
+        .flatten()
+    {
+        sources.push(e.path());
+    }
+    for p in sources {
+        let text = std::fs::read_to_string(&p).expect("read");
+        // Built at run time, so that this file does not name them itself.
+        let bad: Vec<String> = [
+            ("wss", ":/"),
+            ("https", ":/"),
+            ("stream.bybit", ".com"),
+            ("api.bybit", ".com"),
+        ]
+        .iter()
+        .map(|(a, b)| format!("{a}{b}"))
+        .collect();
+        for b in &bad {
+            assert!(!text.contains(b.as_str()), "{} names {b}", p.display());
+        }
+        if text.contains("Collector::start(") {
+            assert!(
+                text.contains("s.config(") || text.contains(".config("),
+                "{} starts a collector without Setup::config",
+                p.display()
+            );
+        }
+    }
+}
