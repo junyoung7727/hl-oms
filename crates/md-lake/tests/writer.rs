@@ -255,3 +255,35 @@ fn new_directories_are_found_outermost_first() {
         vec![dir.join("a/b"), dir.join("a/b/c")]
     );
 }
+
+#[test]
+fn a_new_writer_never_opens_an_hour_before_its_floor() {
+    // U5b spec R2: a frame that waited in the collector's queue past its hour
+    // must not create a file in that hour (the sealer may have sealed it,
+    // and a new file there would stop the seal with UnknownSource).
+    let dir = common::test_dir("writer-min-hour");
+    let fs = RealFs::new(&dir);
+    let mut w = OpenWriter::new(fs.clone(), settings(), 3, &Contexts::default());
+    w.set_min_hour(T14 + time::HOUR_NS + 2 * 60 * S); // wall clock 15:02
+    w.append(&rec(T14 + 30 * S, 0)).expect("a 14:00:30 frame");
+    let path = w.current_path().expect("open").to_string();
+    assert!(path.contains("/hour=15/"), "{path}");
+    // A floor only moves forward, and an open file of a later hour stays.
+    w.set_min_hour(T14);
+    w.append(&rec(T14 + 31 * S, 1)).expect("next");
+    assert_eq!(w.current_path(), Some(path.as_str()));
+    // A floor past the current file's hour closes it at the next append.
+    w.set_min_hour(T14 + 2 * time::HOUR_NS);
+    w.append(&rec(T14 + 32 * S, 2)).expect("after 16:00");
+    let p16 = w.current_path().expect("16").to_string();
+    w.close().expect("close");
+    assert!(p16.contains("/hour=16/"), "{p16}");
+    let (r15, finished) = read_records(fs.as_ref(), &path);
+    assert_eq!(r15.len(), 2);
+    assert!(finished, "the hour 15 file was closed with a frame end");
+    assert!(
+        fs.list("crypto/l0/_open/venue=bybit/date=2026-01-02/hour=14")
+            .expect("ls")
+            .is_empty()
+    );
+}

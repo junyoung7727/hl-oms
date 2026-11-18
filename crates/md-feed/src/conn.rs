@@ -83,8 +83,12 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
     /// Runs the connection until it ends or `stop` becomes true. The
     /// connection is marked closed (its books stale) before this returns.
     pub async fn run(ctx: Arc<Ctx<A>>, state: Arc<ConnState>, stop: watch::Receiver<bool>) -> End {
+        let sink = ctx.sink.clone();
         let end = Self::run_inner(ctx, state.clone(), stop).await;
         state.closed.store(true, Ordering::Release);
+        if let Some(sink) = sink {
+            sink.conn_ended(state.conn_id);
+        }
         end
     }
 

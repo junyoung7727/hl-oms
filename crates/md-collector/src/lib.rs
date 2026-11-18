@@ -3,6 +3,9 @@
 //! `md-lake` commands that seal and verify them.
 
 pub mod config;
+pub mod disk;
+pub mod ingest;
+pub mod notes;
 pub mod plan;
 pub mod registry;
 

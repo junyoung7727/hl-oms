@@ -159,3 +159,17 @@ md-lake verify    --venue V --lake DIR --date YYYY-MM-DD --json [--now-ns N]
 
 - Built directly by Claude Opus 5.5 (2026-11-19, owner: "이제 개발을 너가 직접해"); lean spec (owner: "검증 사소한 것까지 하지마").
 - D1 was told to the owner on 2026-11-19 (Buzz DM) with the invitation to override.
+
+## Review decisions (spec review, 2026-11-19)
+
+These override the sections above where they differ.
+
+- **R1 Memory bound per slot and in total.** In-flight bytes are counted per plan slot (`conn_index`, unique in the session because each market's range starts after the previous market's budget), so a reconnect inherits its slot's backlog, and against one total cap `write.total_queue_bytes` (default 512 MiB, judgement: inside `MemoryMax=1G`). A frame is refused when its slot is non-empty and would pass `queue_bytes`, or when the total would pass the total cap. One `overflow` note per refused **connection** (`conn_id`).
+- **R2 No open file in a sealed hour.** md-lake gets an additive `OpenWriter::set_min_hour(now_ns)`: the writer's next file is never earlier than the hour of `now_ns`. The collector's writer calls it with the wall clock before each append, so a frame that waited in the queue past its hour goes to the current hour's file (as md-lake R1 does for a closed hour), never into an hour the sealer may have sealed.
+- **R3 Slow-disk end to end.** Ticket 04 gets a test with the fake Bybit and the gated `Fs`: `Disconnected` with reason `overflow`, a new connection that subscribes again, the `overflow` note in the session file, every accepted frame in L0.
+- **R4 Traded start check on topics.** After the instrument fetch, every `traded_channels` entry must be in the planned topic set of its market (not only a collected channel); otherwise the start is refused. The load-time check stays.
+- **R5 Ordered close markers; stop without md-feed changes to the supervisor.** md-feed gets an additive `FrameSink::conn_ended(conn_id)` (default no-op), called by the connection's own task after its last frame, so the close marker follows the connection's frames and cannot be dropped like an event. The collector ignores `Disconnected` for closing. Stopping a feed (disk floor, shutdown): the feed's sink wrapper first closes its gate (later calls are refused: the stop is the start of the gap and its note) and waits until no call is in progress, then drops the `FeedHandle` and sends close markers for every `conn_id` the wrapper has seen. `FeedHandle::stop` (D6) is dropped. Close markers for `conn_id 0` are ignored.
+- **R6 REST bodies.** The collector's own instrument bodies are written past the cap (`Ingest::rest_body`). A refused md-feed REST body gets a note every time.
+- **R7 Clocks.** Only the day-change scheduler and the disk checker's timing use the injected clock; the writer, ticks and note records use the real wall clock (md-feed stamps `recv_ns` with it).
+- **R8 `--now-ns` in the future** is refused unless `MD_LAKE_TEST_ALLOW_FUTURE_NOW=1` is set (tests): a future clock could seal hours that are not closed yet.
+- **R9 D1 is recorded** in `docs/adr/ADR-019-market-conn-slots.md` (readers of `by_connection` files need it). A later qdp contract change may adopt it (U8).
