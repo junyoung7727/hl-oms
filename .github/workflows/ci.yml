@@ -57,6 +57,9 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
+      - name: Test (failpoints)
+        run: cargo test --locked -p oms-node --features failpoints
+
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
