@@ -54,8 +54,10 @@ impl WallClock for NearMidnight {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn day_change_switches_in_order() {
-    let mut b = Behaviour::default();
-    b.stream_every = Some(Duration::from_millis(20));
+    let b = Behaviour {
+        stream_every: Some(Duration::from_millis(20)),
+        ..Behaviour::default()
+    };
     let s = setup(
         "daychange",
         b,

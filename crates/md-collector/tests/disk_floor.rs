@@ -26,8 +26,10 @@ fn locked(dir: &std::path::Path, p: &str) -> bool {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn disk_floor_drops_and_restores() {
-    let mut b = Behaviour::default();
-    b.stream_every = Some(Duration::from_millis(20));
+    let b = Behaviour {
+        stream_every: Some(Duration::from_millis(20)),
+        ..Behaviour::default()
+    };
     let s = setup(
         "disk-floor",
         b,

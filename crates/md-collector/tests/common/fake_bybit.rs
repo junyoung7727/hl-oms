@@ -155,6 +155,8 @@ async fn serve(
 ) {
     let path = Arc::new(Mutex::new(String::new()));
     let p2 = path.clone();
+    // The handshake callback's error type is tungstenite's (not ours).
+    #[allow(clippy::result_large_err)]
     let cb = move |req: &Request, resp: Response| {
         *p2.lock().expect("path") = req.uri().path().trim_start_matches('/').to_string();
         Ok(resp)

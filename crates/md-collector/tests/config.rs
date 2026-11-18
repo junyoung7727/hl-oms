@@ -218,8 +218,7 @@ fn plan_groups_respect_budget() {
         "SOLUSDT".to_string(),
     ];
     let e = plan::groups(venue, &c.markets[0], 0, &c.traded_channels, &symbols)
-        .err()
-        .expect("over budget");
+        .expect_err("over budget");
     assert!(e.contains("budget"), "{e}");
 }
 

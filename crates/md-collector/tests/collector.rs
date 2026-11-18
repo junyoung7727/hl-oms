@@ -161,8 +161,10 @@ async fn open_files_locked_while_running() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn forced_disconnect_resubscribes() {
-    let mut b = Behaviour::default();
-    b.drop_after = BTreeMap::from([(0, 2)]);
+    let b = Behaviour {
+        drop_after: BTreeMap::from([(0, 2)]),
+        ..Behaviour::default()
+    };
     let s = setup("e2e-disconnect", b, pages(&[("linear", &["BTCUSDT"])])).await;
     let cfg = s.config(
         &[(
@@ -261,9 +263,11 @@ async fn traded_topic_not_planned_refuses_start() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn slow_disk_overflow_reconnects() {
-    let mut b = Behaviour::default();
-    b.stream_every = Some(Duration::from_millis(1));
-    b.pace = Duration::ZERO;
+    let b = Behaviour {
+        stream_every: Some(Duration::from_millis(1)),
+        pace: Duration::ZERO,
+        ..Behaviour::default()
+    };
     let s = setup("e2e-slow-disk", b, pages(&[("linear", &["BTCUSDT"])])).await;
     let gate = Arc::new(Gate::default());
     gate.close();
