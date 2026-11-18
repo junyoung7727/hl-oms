@@ -8,7 +8,7 @@ use md_core::adapter::{
 };
 use md_core::{GapEvent, Normalized, SeqRule, StreamKey};
 
-use crate::{Market, instruments, parse, route};
+use crate::{Market, instruments, parse, plan, route};
 
 /// The adapter of one market. It knows the exponents of the instruments it
 /// was built with; a symbol without an instrument row cannot be parsed.
@@ -16,6 +16,9 @@ use crate::{Market, instruments, parse, route};
 pub struct BybitAdapter {
     market: Market,
     instruments: BTreeMap<String, Instrument>,
+    max_topics_per_conn: usize,
+    first_conn_index: u32,
+    max_conns: u32,
 }
 
 impl BybitAdapter {
@@ -26,7 +29,28 @@ impl BybitAdapter {
                 .iter()
                 .map(|i| (i.symbol.clone(), i.clone()))
                 .collect(),
+            max_topics_per_conn: plan::DEFAULT_MAX_TOPICS,
+            first_conn_index: 0,
+            max_conns: 100,
         }
+    }
+
+    /// At most `n` topics per connection (default 200).
+    pub fn with_max_topics_per_conn(mut self, n: usize) -> Self {
+        self.max_topics_per_conn = n;
+        self
+    }
+
+    /// The connections this market may open: `conn_index` runs from `first`
+    /// and a plan that needs more than `max` connections is refused. Bybit
+    /// counts 500 new connections per 5 minutes over all markets of
+    /// `stream.bybit.com`, so the collector gives each market a disjoint range
+    /// and keeps the sum of the budgets ≤ 250, leaving room for a full
+    /// reconnect (judgement, not a model). Default `(0, 100)`.
+    pub fn with_conn_budget(mut self, first: u32, max: u32) -> Self {
+        self.first_conn_index = first;
+        self.max_conns = max;
+        self
     }
 
     pub fn market(&self) -> Market {
@@ -53,15 +77,22 @@ impl MarketDataAdapter for BybitAdapter {
 
     fn plan(
         &self,
-        _symbols: &[String],
-        _channels: &[String],
-        _depth: u32,
+        symbols: &[String],
+        channels: &[String],
+        depth: u32,
     ) -> Result<Vec<ConnPlan>, PlanError> {
-        Err(PlanError("plan is built in ticket 04".into()))
+        plan::plan(
+            symbols,
+            channels,
+            depth,
+            self.max_topics_per_conn,
+            self.first_conn_index,
+            self.max_conns,
+        )
     }
 
-    fn subscribe_frames(&self, _plan: &ConnPlan) -> Vec<String> {
-        Vec::new()
+    fn subscribe_frames(&self, plan: &ConnPlan) -> Vec<String> {
+        plan::subscribe_frames(plan)
     }
 
     fn keepalive(&self) -> Keepalive {

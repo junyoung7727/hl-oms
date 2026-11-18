@@ -9,6 +9,7 @@
 mod adapter;
 mod instruments;
 mod parse;
+mod plan;
 mod route;
 
 pub use adapter::BybitAdapter;
