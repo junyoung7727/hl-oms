@@ -62,6 +62,16 @@ A library crate `md-lake` with no venue knowledge and no executable (the `md-lak
 - **F13** Ticket 04 rebuilds the open files of the golden restart hour (2026-01-05 09) from the golden segments, seals them, and compares records, SHA-256, `sessions` and the note bytes with the golden seal log and `09.qraw`.
 - **F14** A record across a frame boundary is refused (ticket 02, done); `verify` reports it (ticket 08). Ticket 04 counts read calls on a locked file (must be 0).
 - **F15 Seal lock.** A run takes `LOCK_EX | LOCK_NB` on the directory `crypto/l0/_seal/venue=<venue>/` for its whole length (no extra file). A second run exits at once. Each open file's lock is taken at the check and held until the file is deleted or the run ends.
+- **R1–R8 (final review, 2026-11-19).** One independent review of the whole unit; each fix has a test that failed before it.
+  - R1 An hour closed by `tick` is never reopened: a late record of it goes to the next hour's file (F5 extended).
+  - R2 A run skips a settled hour (done entry, empty open folder) with a log read and a folder list; it reads no day file of it. The tail (F6) is then read once, before the next hour that is sealed.
+  - R3 Condition 1 of the day seal counts only hours from `first_hour` on (open files of earlier hours are never sealed, F7).
+  - R4 The day seal of a run covers the last 7 dates (judgement, not a model) and every date from the first hour the run sealed. `Sealer::seal_days_since(clock, from)` runs the day seal alone from any date (2.7); U5b exposes it as a command.
+  - R5 The day seal hashes files 1 MB at a time; step 0 streams the crashed session file in two passes; the sealer's session frame is written every 1 MB.
+  - R6 The session tail of F6 is the last `recv_ns` of a record that goes to a day file: routed records for by_symbol (no notes, no unroutable records), every record for by_connection (its day file names the session). One run and two runs give the same note.
+  - R7 A failed hour makes only its own date wait: the day seal runs, then the error is returned.
+  - R8 `RealFs` fsyncs the parent of each directory it creates. An instruments topic must have the symbol `_all` (the seal stops before writing otherwise).
+  - Not fixed: a power loss can leave garbage inside a block whose length is complete; the scanner trusts the length and pass 1 then fails on every run (the venue stops for a person). The simulated file system only makes clean torn prefixes. Recorded for U5b's runbook.
 
 ## Testing Decisions
 
