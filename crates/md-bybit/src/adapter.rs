@@ -82,13 +82,11 @@ impl MarketDataAdapter for BybitAdapter {
         recv_ns: i64,
     ) -> Result<Vec<Normalized>, ParseError> {
         let inst = self.instrument(&key.symbol)?;
-        if key.channel.starts_with("orderbook.") {
-            parse::book(key, inst, frame, recv_ns)
-        } else {
-            Err(ParseError::new(format!(
-                "channel {} is built in ticket 03",
-                key.channel
-            )))
+        match key.channel.as_str() {
+            c if c.starts_with("orderbook.") => parse::book(key, inst, frame, recv_ns),
+            "publicTrade" => parse::trades(key, inst, frame, recv_ns),
+            "tickers" => parse::ticker(key, inst, self.market == Market::Spot, frame, recv_ns),
+            other => Err(ParseError::new(format!("channel {other} is not parsed"))),
         }
     }
 
