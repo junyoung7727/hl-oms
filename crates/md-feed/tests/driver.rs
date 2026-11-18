@@ -124,3 +124,39 @@ async fn non_loopback_refused() {
     assert!(reason.contains("not loopback"), "{reason}");
     assert!(start.elapsed() < Duration::from_secs(1));
 }
+
+/// A sink whose queue is full after `cap` frames.
+struct FullSink {
+    cap: usize,
+    n: std::sync::atomic::AtomicUsize,
+}
+
+impl FrameSink for FullSink {
+    fn frame(&self, _f: md_feed::RawFrame) -> Result<(), md_feed::Overflow> {
+        if self.n.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < self.cap {
+            Ok(())
+        } else {
+            Err(md_feed::Overflow)
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sink_overflow_closes_the_connection() {
+    let mut frames = vec![Step::WaitFor("subscribe".into())];
+    for _ in 0..10 {
+        frames.push(Step::Send(r#"{"op":"pong"}"#.into()));
+    }
+    let fake = FakeWs::start(vec![frames]).await;
+    let sink = Arc::new(FullSink { cap: 3, n: Default::default() });
+    let mut feed = Feed::start(
+        bybit(),
+        config(&fake.url, Arc::new(ConnIds::new())),
+        plans(&["BTCUSDT"], 200),
+        Some(sink as Arc<dyn FrameSink>),
+    )
+    .expect("start");
+    let mut events = feed.take_events().expect("events");
+    let e = wait_event(&mut events, |e| matches!(e, FeedEvent::Disconnected { .. })).await;
+    assert!(matches!(&e, FeedEvent::Disconnected { reason, .. } if reason == "overflow"), "{e:?}");
+}
