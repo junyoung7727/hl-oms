@@ -1,7 +1,7 @@
 # 사용자 결정이 필요한 항목
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `f8bb6e2616bbdfe1`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `067626c1b2cdff8d`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 ## U-01 testnet 실주문 검증
 

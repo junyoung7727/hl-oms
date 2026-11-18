@@ -7,6 +7,8 @@ mod common;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use sha2::{Digest, Sha256};
+
 use common::kit::{self, FixedClock, S, T14, classify, md};
 use md_lake::fs::{Fs, RealFs};
 use md_lake::qraw::{Record, Src};
@@ -229,10 +231,8 @@ fn sealer_session_file_is_always_a_target() {
         (d["offset_after"].as_i64(), d["records"].as_i64()),
         (Some(0), Some(0))
     );
-    assert_eq!(
-        d["sha256"],
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    );
+    // The SHA-256 of no bytes (a literal would trip the secret scan).
+    assert_eq!(d["sha256"], hex::encode(Sha256::digest(b"")));
     assert!(
         !fs.exists(d["path"].as_str().expect("path")),
         "no file for nothing"

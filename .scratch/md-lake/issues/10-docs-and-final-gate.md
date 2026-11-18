@@ -4,7 +4,7 @@
 
 **Blocked by:** 06, 07, 08, 09
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] No file is written outside the lake root in any test (the real `Fs` refuses it; a test checks the refusal).
-- [ ] Full local gate passes, plus `cargo test --release -p md-lake -- --ignored seal_rss_2gb`.
+- [x] No file is written outside the lake root in any test (the real `Fs` refuses it; a test checks the refusal).
+- [x] Full local gate passes, plus `cargo test --release -p md-lake -- --ignored seal_rss_2gb`.
