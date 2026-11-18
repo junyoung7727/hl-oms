@@ -641,3 +641,25 @@ fn session_gap_across_runs_is_the_same_as_in_one_run() {
         assert_eq!(gap_notes(layout, true), one, "{layout:?} two runs");
     }
 }
+
+#[test]
+fn instruments_topics_must_use_the_all_symbol() {
+    // The contract names one instruments file per market (symbol `_all`); a
+    // classifier that gives a symbol is refused before anything is written.
+    let fs = lake("seal-instruments-symbol");
+    kit::write_open(
+        &fs,
+        "md1",
+        T14 - S,
+        1,
+        &[md(T14 + S, 1, 0, "instruments.BTCUSDT")],
+        false,
+    );
+    let clock = FixedClock::at(T14 + time::HOUR_NS + S);
+    let r = Sealer::new(fs.clone(), settings()).seal(clock.as_ref(), &classify);
+    assert!(
+        matches!(&r, Err(SealError::Io(e)) if e.to_string().contains("_all")),
+        "{r:?}"
+    );
+    assert!(kit::seal_log(fs.as_ref(), D, 14).is_empty());
+}

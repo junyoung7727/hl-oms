@@ -779,6 +779,17 @@ impl Sealer {
                 total,
             });
         }
+        // One instruments file per market (2.2): its topic's symbol is
+        // `_all`, or two symbols would share one target.
+        if let Some(t) = stats
+            .keys()
+            .find(|t| t.channel == "instruments" && t.symbol != "_all")
+        {
+            return Err(SealError::Io(io_err(format!(
+                "{hour_name}: instruments topic with symbol {:?}; the contract needs \"_all\"",
+                t.symbol
+            ))));
+        }
         report
             .topic_bytes
             .extend(stats.iter().map(|(t, s)| (t.clone(), s.bytes)));

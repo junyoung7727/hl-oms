@@ -165,7 +165,8 @@ fn an_hour_closed_by_tick_is_not_reopened() {
     let fs = RealFs::new(&dir);
     let mut w = OpenWriter::new(fs.clone(), settings(), 3, &Contexts::default());
     w.append(&rec(T14 + S, 0)).expect("14:00:01");
-    w.tick(T14 + time::HOUR_NS).expect("tick at 15:00 closes hour 14");
+    w.tick(T14 + time::HOUR_NS)
+        .expect("tick at 15:00 closes hour 14");
     assert!(w.current_path().is_none());
     w.append(&rec(T14 + time::HOUR_NS - S, 1))
         .expect("14:59:59 after the close");

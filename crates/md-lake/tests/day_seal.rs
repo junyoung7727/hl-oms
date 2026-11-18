@@ -348,14 +348,20 @@ fn a_failed_hour_does_not_block_an_earlier_date() {
     let fs = RealFs::new(&dir);
     day(&fs);
     let next = T14 + 10 * time::HOUR_NS;
-    let junk: Vec<Record> = (0..5).map(|i| kit::control(next + i * S, 1, i as u64)).collect();
+    let junk: Vec<Record> = (0..5)
+        .map(|i| kit::control(next + i * S, 1, i as u64))
+        .collect();
     kit::write_open(&fs, "md1", next - S, 1, &junk, false);
     let r = seal(&fs, next + time::HOUR_NS + S);
     assert!(
         matches!(r, Err(md_lake::seal::SealError::Unroutable { .. })),
         "{r:?}"
     );
-    assert!(partials_of(&dir, D).is_empty(), "{:?}", partials_of(&dir, D));
+    assert!(
+        partials_of(&dir, D).is_empty(),
+        "{:?}",
+        partials_of(&dir, D)
+    );
     assert!(!manifest(fs.as_ref()).is_empty());
 }
 

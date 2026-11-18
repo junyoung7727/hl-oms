@@ -12,7 +12,9 @@ use crate::fs::{Held, parent};
 use crate::paths::{L0Path, sidecar};
 use crate::qraw::{self, Header, Record, Src};
 use crate::read::{RecordIter, scan_file};
-use crate::seal::{Clock, SEAL_LEVEL, SealError, SealReport, Sealer, note_payload, read_whole, sha256_of};
+use crate::seal::{
+    Clock, SEAL_LEVEL, SealError, SealReport, Sealer, note_payload, read_whole, sha256_of,
+};
 use crate::time::{self, DAY_NS, HOUR_NS};
 use crate::zst::{Contexts, FrameEncoder};
 
@@ -202,8 +204,7 @@ impl Sealer {
                 changed = true;
             }
             if need_line {
-                let line =
-                    self.manifest_line(&lp, &sealed, &id, &sha, len, d, clock)?;
+                let line = self.manifest_line(&lp, &sealed, &id, &sha, len, d, clock)?;
                 self.append_line(&manifest, &line)?;
                 have.insert(id);
                 changed = true;
