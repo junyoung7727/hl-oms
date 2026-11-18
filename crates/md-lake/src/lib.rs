@@ -6,3 +6,4 @@
 
 pub mod paths;
 pub mod qraw;
+pub mod zst;
