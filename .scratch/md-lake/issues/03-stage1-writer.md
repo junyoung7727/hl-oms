@@ -1,0 +1,18 @@
+# 03: Stage 1 writer: open files and the collector's session file
+
+**What to build:** `OpenWriter` (per connection) and `SessionWriter` (per collector) with the lock rule, level 3, flush and fsync driven by `tick(now_ns)`, hourly rotation and date change. Spec: "Stage 1".
+
+**Blocked by:** 02
+
+**Status:** done
+
+- [x] Test `open_file_is_created_locked_under_a_tmp_name`: at the link call the lock is already held (F12); after it the open-file name exists and a second handle cannot take the lock; an existing open-file name is never replaced (F5).
+- [x] Test `flush_every_second_and_fsync_every_five`: with a fake clock and a counting `Fs`, 12 s of records give 12 flushes and 2 fsyncs (settings changed: 2 s / 3 s give 6 and 4).
+- [x] Test `rotation_at_the_utc_hour`: records at 13:59:59.9 and 14:00:00.0 go to two files; the first is finished (frame end), fsynced and unlocked.
+- [x] Test `one_level3_context_per_connection`: 3 connections over 2 hours → never more than 3 live contexts.
+- [x] Test `session_file_by_date_and_backward_clock`: `tick` rolls the session file at UTC midnight without any record (F8); a record whose date's session file is already closed goes to the newest started date.
+- [x] Test `rotation_is_forward_only`: a clock step back across an hour keeps writing the current file (F5).
+
+## Comments
+
+- Test-first was not followed here: the writer was written before its tests. To make up for it, the tests were checked against five mutations (lock taken after the link, no periodic fsync, backward rotation, no midnight roll); each fails a test.

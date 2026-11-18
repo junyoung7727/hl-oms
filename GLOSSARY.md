@@ -178,3 +178,23 @@ _Avoid_: scale, precision
 The range of `conn_index` values one market's plan may use. Bybit counts 500 new connections per 5 minutes over every market of `stream.bybit.com`, so the budgets of all markets together stay ≤ 250.
 _Avoid_: connection limit (that is Bybit's)
 
+**Open file** (열린 파일):
+The collector's file of one connection and one UTC hour under `crypto/l0/_open/`, one zstd level-3 stream, locked by its writer until the frame end and the last fsync.
+_Avoid_: raw file, buffer file
+
+**Hour seal** (시간별 봉인):
+The sealer's move of a closed hour's open files into the day files, recorded by a begin and a done entry of the seal log; lossless and restartable at any step.
+_Avoid_: compaction, flush
+
+**Day seal** (일별 봉인):
+The rename of a complete date's `.partial` files to their sealed names, with a sidecar and one manifest line each; a sealed file never changes again.
+_Avoid_: finalize, close
+
+**Session run** (세션 구간):
+The records of one collector session inside one frame of a by_symbol day file; listed in the done entry and, joined, in the manifest line's `sessions`, so that `rec_no` gives a record's session.
+_Avoid_: segment, batch
+
+**Seal log** (봉인 기록):
+The JSON lines of one hour's seal: begin entries (sources and target offsets) and the done entry (offsets, counts, SHA-256, session runs).
+_Avoid_: journal (that is the OMS's), WAL
+
