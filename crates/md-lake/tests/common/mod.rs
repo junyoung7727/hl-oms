@@ -4,6 +4,8 @@
 //! fsync and ENOSPC behaviour differ from a real disk.
 #![allow(dead_code)]
 
+pub mod counting;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

@@ -4,6 +4,9 @@
 //! No venue knowledge: the seal takes the venue's topic classifier as a
 //! function. Paths are relative to a lake root.
 
+pub mod fs;
 pub mod paths;
 pub mod qraw;
+pub mod time;
+pub mod writer;
 pub mod zst;
