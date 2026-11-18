@@ -205,6 +205,11 @@ async fn switch_without_books_waits_for_a_frame_of_each_topic() {
         5_000,
         r#","lastPrice":"42000.0""#,
     )));
+    // The trade topic's first frame comes 120 ms after the ticker: the
+    // switch must wait for it, and the old connection's trades (every 40 ms)
+    // overlap the new connection's first frames for sure (without the pause
+    // the overlap was a few ms and the test failed about 1 run in 20).
+    new.push(Step::Pause(Duration::from_millis(120)));
     new.extend(trades(1_000, 40));
     let fake = FakeWs::start(vec![old, new]).await;
     let sink = Arc::new(VecSink::default());
@@ -229,6 +234,12 @@ async fn switch_without_books_waits_for_a_frame_of_each_topic() {
         "done before the new connection had frames"
     );
     let frames = sink.frames();
+    assert!(
+        frames
+            .iter()
+            .any(|f| f.conn_id == c2 && String::from_utf8_lossy(&f.payload).contains("publicTrade")),
+        "done before the new connection had a frame of every topic"
+    );
     let first_new = frames
         .iter()
         .find(|f| f.conn_id == c2)
