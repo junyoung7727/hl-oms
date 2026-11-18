@@ -18,7 +18,8 @@ fn plans(symbols: &[&str], per_conn: usize) -> Vec<md_core::adapter::ConnPlan> {
     )
     .with_max_topics_per_conn(per_conn);
     let symbols: Vec<String> = symbols.iter().map(|s| s.to_string()).collect();
-    a.plan(&symbols, &["orderbook.50".to_string()], 50).expect("plan")
+    a.plan(&symbols, &["orderbook.50".to_string()], 50)
+        .expect("plan")
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -120,7 +121,9 @@ async fn non_loopback_refused() {
     let mut events = feed.take_events().expect("events");
     let start = std::time::Instant::now();
     let e = wait_event(&mut events, |e| matches!(e, FeedEvent::Disconnected { .. })).await;
-    let FeedEvent::Disconnected { reason, .. } = e else { unreachable!() };
+    let FeedEvent::Disconnected { reason, .. } = e else {
+        unreachable!()
+    };
     assert!(reason.contains("not loopback"), "{reason}");
     assert!(start.elapsed() < Duration::from_secs(1));
 }
@@ -148,7 +151,10 @@ async fn sink_overflow_closes_the_connection() {
         frames.push(Step::Send(r#"{"op":"pong"}"#.into()));
     }
     let fake = FakeWs::start(vec![frames]).await;
-    let sink = Arc::new(FullSink { cap: 3, n: Default::default() });
+    let sink = Arc::new(FullSink {
+        cap: 3,
+        n: Default::default(),
+    });
     let mut feed = Feed::start(
         bybit(),
         config(&fake.url, Arc::new(ConnIds::new())),
@@ -158,5 +164,8 @@ async fn sink_overflow_closes_the_connection() {
     .expect("start");
     let mut events = feed.take_events().expect("events");
     let e = wait_event(&mut events, |e| matches!(e, FeedEvent::Disconnected { .. })).await;
-    assert!(matches!(&e, FeedEvent::Disconnected { reason, .. } if reason == "overflow"), "{e:?}");
+    assert!(
+        matches!(&e, FeedEvent::Disconnected { reason, .. } if reason == "overflow"),
+        "{e:?}"
+    );
 }

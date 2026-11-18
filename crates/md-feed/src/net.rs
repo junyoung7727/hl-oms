@@ -48,7 +48,11 @@ pub(crate) async fn resolve(url: &str, loopback_only: bool) -> Result<Vec<Socket
 }
 
 /// Opens the WebSocket on one of the checked addresses.
-pub(crate) async fn connect_ws(url: &str, loopback_only: bool, timeout: Duration) -> Result<Ws, String> {
+pub(crate) async fn connect_ws(
+    url: &str,
+    loopback_only: bool,
+    timeout: Duration,
+) -> Result<Ws, String> {
     let addrs = resolve(url, loopback_only).await?;
     let attempt = async {
         let tcp = TcpStream::connect(addrs.as_slice())
@@ -82,7 +86,11 @@ pub struct RestClient {
 }
 
 impl RestClient {
-    pub fn new(base: impl Into<String>, timeout: Duration, loopback_only: bool) -> Result<Self, String> {
+    pub fn new(
+        base: impl Into<String>,
+        timeout: Duration,
+        loopback_only: bool,
+    ) -> Result<Self, String> {
         Ok(Self {
             base: base.into(),
             timeout,

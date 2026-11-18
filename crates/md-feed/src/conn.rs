@@ -79,7 +79,11 @@ pub(crate) struct Conn<A> {
 
 impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
     /// Runs the connection until it ends or `stop` becomes true.
-    pub async fn run(ctx: Arc<Ctx<A>>, state: Arc<ConnState>, mut stop: watch::Receiver<bool>) -> End {
+    pub async fn run(
+        ctx: Arc<Ctx<A>>,
+        state: Arc<ConnState>,
+        mut stop: watch::Receiver<bool>,
+    ) -> End {
         let conn_id = state.conn_id;
         let conn_index = state.plan.conn_index;
         let mut shutdown = ctx.shutdown.clone();
@@ -261,8 +265,12 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
                     return Vec::new();
                 }
                 // The book may now be wrong: handle it as a gap.
-                let Some(lock) = self.state.books.get(&key) else { return Vec::new() };
-                let Ok(mut st) = lock.write() else { return Vec::new() };
+                let Some(lock) = self.state.books.get(&key) else {
+                    return Vec::new();
+                };
+                let Ok(mut st) = lock.write() else {
+                    return Vec::new();
+                };
                 if st.resyncing || !st.has_book {
                     return Vec::new();
                 }
@@ -314,7 +322,9 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
     }
 
     fn snapshot(&self, u: &BookUpdate) {
-        let Some(lock) = self.state.books.get(&u.key) else { return };
+        let Some(lock) = self.state.books.get(&u.key) else {
+            return;
+        };
         let Ok(mut st) = lock.write() else { return };
         if st.has_book {
             self.ctx.emit(FeedEvent::Resnapshot {
@@ -408,12 +418,24 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
                 "gap on {}.{}",
                 key.channel, key.symbol
             ))),
-            Resync::RestSnapshotThenReplay => self.start_rest(key, st, pending.into_iter().collect()),
+            Resync::RestSnapshotThenReplay => {
+                self.start_rest(key, st, pending.into_iter().collect())
+            }
         }
     }
 
-    fn start_rest(&self, key: &StreamKey, st: &mut TopicState, buffered: Vec<BookUpdate>) -> Option<Action> {
-        let req = match (&self.ctx.rest, self.ctx.adapter.snapshot_request(key, self.state.plan.depth)) {
+    fn start_rest(
+        &self,
+        key: &StreamKey,
+        st: &mut TopicState,
+        buffered: Vec<BookUpdate>,
+    ) -> Option<Action> {
+        let req = match (
+            &self.ctx.rest,
+            self.ctx
+                .adapter
+                .snapshot_request(key, self.state.plan.depth),
+        ) {
             (Some(_), Some(req)) => req,
             _ => {
                 return Some(Action::Reconnect(format!(
@@ -432,7 +454,9 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
     }
 
     fn spawn_rest(&self, key: StreamKey, req: RestRequest) {
-        let Some(rest) = self.ctx.rest.clone() else { return };
+        let Some(rest) = self.ctx.rest.clone() else {
+            return;
+        };
         let tx = self.rest_tx.clone();
         tokio::spawn(async move {
             let res = rest.get(&req).await;
@@ -489,11 +513,15 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
     }
 
     fn on_rest(&self, key: &StreamKey, res: Result<(i64, Vec<u8>), String>) -> Vec<Action> {
-        let Some(lock) = self.state.books.get(key) else { return Vec::new() };
+        let Some(lock) = self.state.books.get(key) else {
+            return Vec::new();
+        };
         let (recv_ns, body) = match res {
             Ok(x) => x,
             Err(e) => {
-                let Ok(mut st) = lock.write() else { return Vec::new() };
+                let Ok(mut st) = lock.write() else {
+                    return Vec::new();
+                };
                 if st.rest.is_none() {
                     return Vec::new();
                 }
@@ -522,7 +550,9 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
                 return vec![Action::Reconnect("overflow".into())];
             }
         }
-        let Ok(mut st) = lock.write() else { return Vec::new() };
+        let Ok(mut st) = lock.write() else {
+            return Vec::new();
+        };
         if st.rest.is_none() {
             // A WebSocket snapshot ended the resync first.
             return Vec::new();

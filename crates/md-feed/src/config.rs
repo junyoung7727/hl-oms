@@ -76,7 +76,11 @@ impl FeedConfig {
     /// Defaults: stale after 5 s, connect timeout 10 s, backoff 500 ms to
     /// 30 s, resync timeout 5 s (judgement, not a model: Bybit's first
     /// snapshot came 223–676 ms after subscribing, design §6.3).
-    pub fn new(market: impl Into<String>, ws_url: impl Into<String>, conn_ids: Arc<ConnIds>) -> Self {
+    pub fn new(
+        market: impl Into<String>,
+        ws_url: impl Into<String>,
+        conn_ids: Arc<ConnIds>,
+    ) -> Self {
         Self {
             market: market.into(),
             ws_url: ws_url.into(),

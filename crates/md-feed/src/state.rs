@@ -123,8 +123,10 @@ impl ConnState {
     /// Every book topic has an applied book (a switch may activate).
     pub fn all_books_ready(&self) -> bool {
         !self.closed.load(std::sync::atomic::Ordering::Acquire)
-            && self.books
-            .values()
-            .all(|t| t.read().map(|t| t.has_book && !t.resyncing).unwrap_or(false))
+            && self.books.values().all(|t| {
+                t.read()
+                    .map(|t| t.has_book && !t.resyncing)
+                    .unwrap_or(false)
+            })
     }
 }

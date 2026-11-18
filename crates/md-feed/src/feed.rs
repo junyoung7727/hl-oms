@@ -95,7 +95,11 @@ impl Feed {
             }
         }
         let rest = match &cfg.rest_base {
-            Some(base) => Some(RestClient::new(base.clone(), cfg.connect_timeout, cfg.loopback_only)?),
+            Some(base) => Some(RestClient::new(
+                base.clone(),
+                cfg.connect_timeout,
+                cfg.loopback_only,
+            )?),
             None => None,
         };
         let (tx, rx) = mpsc::channel(cfg.event_capacity.max(1));
@@ -124,7 +128,12 @@ impl Feed {
         let slots = Arc::new(slots);
         let mut tasks = Vec::new();
         for (pos, (slot, cmds)) in slots.iter().zip(cmd_rxs).enumerate() {
-            tasks.push(tokio::spawn(supervise(ctx.clone(), slot.clone(), cmds, pos)));
+            tasks.push(tokio::spawn(supervise(
+                ctx.clone(),
+                slot.clone(),
+                cmds,
+                pos,
+            )));
         }
         tasks.push(tokio::spawn(stale_checker(ctx.clone(), slots.clone())));
         let c2 = ctx.clone();
@@ -307,7 +316,9 @@ async fn supervise<A: MarketDataAdapter + Send + Sync + 'static>(
             slot.set_active(&r.conn);
             current = Some(r);
         }
-        let Some(cur) = current.as_mut() else { continue };
+        let Some(cur) = current.as_mut() else {
+            continue;
+        };
         tokio::select! {
             end = &mut cur.done => {
                 let Some(r) = current.take() else { continue };

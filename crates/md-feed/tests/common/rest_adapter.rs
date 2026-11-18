@@ -19,7 +19,12 @@ fn levels(v: &Value, side: &str) -> Vec<Level> {
         .as_array()
         .map(|rows| {
             rows.iter()
-                .filter_map(|r| Some(Level { px: r[0].as_i64()?, qty: r[1].as_i64()? }))
+                .filter_map(|r| {
+                    Some(Level {
+                        px: r[0].as_i64()?,
+                        qty: r[1].as_i64()?,
+                    })
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -45,18 +50,32 @@ impl MarketDataAdapter for RestVenue {
     fn venue(&self) -> &'static str {
         "restvenue"
     }
-    fn plan(&self, symbols: &[String], _c: &[String], depth: u32) -> Result<Vec<ConnPlan>, PlanError> {
+    fn plan(
+        &self,
+        symbols: &[String],
+        _c: &[String],
+        depth: u32,
+    ) -> Result<Vec<ConnPlan>, PlanError> {
         Ok(vec![ConnPlan {
             conn_index: 0,
-            topics: symbols.iter().map(|s| StreamKey::new(CHANNEL, s.clone())).collect(),
+            topics: symbols
+                .iter()
+                .map(|s| StreamKey::new(CHANNEL, s.clone()))
+                .collect(),
             depth,
         }])
     }
     fn subscribe_frames(&self, plan: &ConnPlan) -> Vec<String> {
-        plan.topics.iter().map(|k| format!(r#"{{"sub":"{}"}}"#, k.symbol)).collect()
+        plan.topics
+            .iter()
+            .map(|k| format!(r#"{{"sub":"{}"}}"#, k.symbol))
+            .collect()
     }
     fn keepalive(&self) -> Keepalive {
-        Keepalive { interval_ms: 20_000, frame: None }
+        Keepalive {
+            interval_ms: 20_000,
+            frame: None,
+        }
     }
     fn route(&self, frame: &[u8]) -> Route {
         match serde_json::from_slice::<Value>(frame) {
@@ -67,7 +86,12 @@ impl MarketDataAdapter for RestVenue {
             _ => Route::Control,
         }
     }
-    fn parse(&self, key: &StreamKey, frame: &[u8], recv_ns: i64) -> Result<Vec<Normalized>, ParseError> {
+    fn parse(
+        &self,
+        key: &StreamKey,
+        frame: &[u8],
+        recv_ns: i64,
+    ) -> Result<Vec<Normalized>, ParseError> {
         let v: Value = serde_json::from_slice(frame).map_err(|e| ParseError::new(e.to_string()))?;
         Ok(vec![Normalized::BookDelta(update(key, &v, recv_ns))])
     }
@@ -78,7 +102,11 @@ impl MarketDataAdapter for RestVenue {
         Resync::RestSnapshotThenReplay
     }
     fn instruments_request(&self) -> RestRequest {
-        RestRequest { method: "GET", path: "/instruments".into(), query: vec![] }
+        RestRequest {
+            method: "GET",
+            path: "/instruments".into(),
+            query: vec![],
+        }
     }
     fn parse_instruments(&self, _b: &[u8], _r: i64) -> Result<Vec<Instrument>, ParseError> {
         Ok(vec![])
@@ -90,10 +118,18 @@ impl MarketDataAdapter for RestVenue {
         Some(RestRequest {
             method: "GET",
             path: "/depth".into(),
-            query: vec![("symbol".into(), key.symbol.clone()), ("limit".into(), depth.to_string())],
+            query: vec![
+                ("symbol".into(), key.symbol.clone()),
+                ("limit".into(), depth.to_string()),
+            ],
         })
     }
-    fn parse_snapshot(&self, key: &StreamKey, body: &[u8], recv_ns: i64) -> Result<BookUpdate, ParseError> {
+    fn parse_snapshot(
+        &self,
+        key: &StreamKey,
+        body: &[u8],
+        recv_ns: i64,
+    ) -> Result<BookUpdate, ParseError> {
         let v: Value = serde_json::from_slice(body).map_err(|e| ParseError::new(e.to_string()))?;
         Ok(update(key, &v, recv_ns))
     }
@@ -101,7 +137,9 @@ impl MarketDataAdapter for RestVenue {
 
 /// A WS delta frame.
 pub fn d(first: i64, last: i64, prev: i64, bids: &str) -> String {
-    format!(r#"{{"t":"d","s":"BTC","E":{last},"U":{first},"u":{last},"pu":{prev},"b":[{bids}],"a":[]}}"#)
+    format!(
+        r#"{{"t":"d","s":"BTC","E":{last},"U":{first},"u":{last},"pu":{prev},"b":[{bids}],"a":[]}}"#
+    )
 }
 
 /// A REST snapshot body.

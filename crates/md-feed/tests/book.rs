@@ -31,8 +31,22 @@ async fn book_matches_fake_after_snapshot_and_deltas() {
     let fake = FakeWs::start(vec![vec![
         Step::WaitFor("subscribe".into()),
         snap(),
-        Step::Send(book("BTCUSDT", "delta", 101, 1_020, r#"["41999.9","0"]"#, "")),
-        Step::Send(book("BTCUSDT", "delta", 102, 1_040, "", r#"["42000.2","3.000"]"#)),
+        Step::Send(book(
+            "BTCUSDT",
+            "delta",
+            101,
+            1_020,
+            r#"["41999.9","0"]"#,
+            "",
+        )),
+        Step::Send(book(
+            "BTCUSDT",
+            "delta",
+            102,
+            1_040,
+            "",
+            r#"["42000.2","3.000"]"#,
+        )),
     ]])
     .await;
     let feed = Feed::start(
@@ -46,7 +60,11 @@ async fn book_matches_fake_after_snapshot_and_deltas() {
     eventually(|| feed.market_ref(&k).and_then(|r| r.update_id) == Some(102)).await;
     let (bids, asks, stale) = feed
         .read_book(&k, |v| {
-            (v.book.levels(BookSide::Bid), v.book.levels(BookSide::Ask), v.stale)
+            (
+                v.book.levels(BookSide::Bid),
+                v.book.levels(BookSide::Ask),
+                v.stale,
+            )
         })
         .expect("book");
     assert_eq!(bids, vec![lv(420000, 1000)]);
@@ -59,7 +77,14 @@ async fn market_ref_is_last_applied_message() {
     let fake = FakeWs::start(vec![vec![
         Step::WaitFor("subscribe".into()),
         snap(),
-        Step::Send(book("BTCUSDT", "delta", 101, 1_020, r#"["41999.9","0"]"#, "")),
+        Step::Send(book(
+            "BTCUSDT",
+            "delta",
+            101,
+            1_020,
+            r#"["41999.9","0"]"#,
+            "",
+        )),
     ]])
     .await;
     let sink = Arc::new(VecSink::default());
@@ -79,7 +104,12 @@ async fn market_ref_is_last_applied_message() {
         .find(|f| String::from_utf8_lossy(&f.payload).contains(r#""u":101"#))
         .expect("delta frame in the sink");
     assert_eq!(
-        (r.venue.as_str(), r.market.as_str(), r.symbol.as_str(), r.channel.as_str()),
+        (
+            r.venue.as_str(),
+            r.market.as_str(),
+            r.symbol.as_str(),
+            r.channel.as_str()
+        ),
         ("bybit", "linear", "BTCUSDT", "orderbook.50")
     );
     assert_eq!(r.venue_ts_ns, 1_020 * 1_000_000);
@@ -96,7 +126,12 @@ async fn ticker_merges_and_trades_reach_message_sink() {
             1_000,
             r#","lastPrice":"42000.0","bid1Price":"41999.9""#,
         )),
-        Step::Send(ticker("BTCUSDT", "delta", 1_100, r#","lastPrice":"42001.0""#)),
+        Step::Send(ticker(
+            "BTCUSDT",
+            "delta",
+            1_100,
+            r#","lastPrice":"42001.0""#,
+        )),
         Step::Send(trade("BTCUSDT", "t-1", 1_200)),
     ]])
     .await;
@@ -117,7 +152,10 @@ async fn ticker_merges_and_trades_reach_message_sink() {
     let got = msgs.0.lock().expect("msgs");
     assert!(matches!(&got[2].1, Normalized::Trade(tr) if tr.trade_id == "t-1"));
     // Trades and tickers are not books: no book, always stale for reads.
-    assert!(feed.read_book(&key("publicTrade", "BTCUSDT"), |_| ()).is_none());
+    assert!(
+        feed.read_book(&key("publicTrade", "BTCUSDT"), |_| ())
+            .is_none()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -125,8 +163,22 @@ async fn resnapshot_event() {
     let fake = FakeWs::start(vec![vec![
         Step::WaitFor("subscribe".into()),
         snap(),
-        Step::Send(book("BTCUSDT", "snapshot", 1, 2_000, r#"["41000.0","1.000"]"#, "")),
-        Step::Send(book("BTCUSDT", "delta", 2, 2_020, r#"["41000.1","1.000"]"#, "")),
+        Step::Send(book(
+            "BTCUSDT",
+            "snapshot",
+            1,
+            2_000,
+            r#"["41000.0","1.000"]"#,
+            "",
+        )),
+        Step::Send(book(
+            "BTCUSDT",
+            "delta",
+            2,
+            2_020,
+            r#"["41000.1","1.000"]"#,
+            "",
+        )),
     ]])
     .await;
     let mut feed = Feed::start(
@@ -141,8 +193,14 @@ async fn resnapshot_event() {
     assert!(matches!(e, FeedEvent::Resnapshot { ref key, .. } if key.symbol == "BTCUSDT"));
     let k = key("orderbook.50", "BTCUSDT");
     eventually(|| feed.market_ref(&k).and_then(|r| r.update_id) == Some(2)).await;
-    let bids = feed.read_book(&k, |v| v.book.levels(BookSide::Bid)).expect("book");
-    assert_eq!(bids, vec![lv(410001, 1000), lv(410000, 1000)], "restarted from the new snapshot");
+    let bids = feed
+        .read_book(&k, |v| v.book.levels(BookSide::Bid))
+        .expect("book");
+    assert_eq!(
+        bids,
+        vec![lv(410001, 1000), lv(410000, 1000)],
+        "restarted from the new snapshot"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -165,7 +223,9 @@ async fn parse_error_event() {
     .expect("start");
     let mut ev = feed.take_events().expect("events");
     let e = wait_event(&mut ev, |e| matches!(e, FeedEvent::ParseError { .. })).await;
-    let FeedEvent::ParseError { frame_no, .. } = e else { unreachable!() };
+    let FeedEvent::ParseError { frame_no, .. } = e else {
+        unreachable!()
+    };
     // The broken frame is still in the sink (L0 keeps everything).
     eventually(|| sink.frames().iter().any(|f| f.frame_no == frame_no)).await;
     // The book may be wrong: handled as one gap, and stale until a snapshot.

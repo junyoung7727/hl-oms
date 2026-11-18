@@ -60,7 +60,9 @@ impl FakeWs {
         let (c2, a2) = (conns.clone(), accepted.clone());
         tokio::spawn(async move {
             loop {
-                let Ok((tcp, _)) = listener.accept().await else { return };
+                let Ok((tcp, _)) = listener.accept().await else {
+                    return;
+                };
                 a2.fetch_add(1, Ordering::SeqCst);
                 let script = {
                     let mut s = scripts.lock().expect("scripts");
@@ -107,7 +109,9 @@ fn clone_steps(steps: &Vec<Step>) -> Vec<Step> {
 }
 
 async fn serve(tcp: tokio::net::TcpStream, script: Vec<Step>, log: Arc<Mutex<ConnLog>>) {
-    let Ok(ws) = tokio_tungstenite::accept_async(tcp).await else { return };
+    let Ok(ws) = tokio_tungstenite::accept_async(tcp).await else {
+        return;
+    };
     let (mut write, mut read) = ws.split();
     let got = Arc::new(Notify::new());
     let (log2, got2) = (log.clone(), got.clone());
@@ -129,7 +133,12 @@ async fn serve(tcp: tokio::net::TcpStream, script: Vec<Step>, log: Arc<Mutex<Con
             Step::WaitFor(t) => {
                 let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
                 loop {
-                    let seen = log.lock().expect("log").texts.iter().any(|x| x.contains(&t));
+                    let seen = log
+                        .lock()
+                        .expect("log")
+                        .texts
+                        .iter()
+                        .any(|x| x.contains(&t));
                     if seen {
                         break;
                     }
@@ -175,13 +184,17 @@ impl FakeRest {
         let r2 = requests.clone();
         tokio::spawn(async move {
             loop {
-                let Ok((mut tcp, _)) = listener.accept().await else { return };
+                let Ok((mut tcp, _)) = listener.accept().await else {
+                    return;
+                };
                 let (r3, b3) = (r2.clone(), bodies.clone());
                 tokio::spawn(async move {
                     let mut buf = vec![0u8; 8192];
                     let mut have = 0;
                     loop {
-                        let Ok(n) = tcp.read(&mut buf[have..]).await else { return };
+                        let Ok(n) = tcp.read(&mut buf[have..]).await else {
+                            return;
+                        };
                         if n == 0 {
                             return;
                         }

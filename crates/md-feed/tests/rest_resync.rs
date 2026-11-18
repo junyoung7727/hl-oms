@@ -16,7 +16,9 @@ fn lv(px: i64, qty: i64) -> Level {
 }
 
 fn plans() -> Vec<md_core::adapter::ConnPlan> {
-    RestVenue.plan(&["BTC".to_string()], &[], 100).expect("plan")
+    RestVenue
+        .plan(&["BTC".to_string()], &[], 100)
+        .expect("plan")
 }
 
 fn k() -> md_core::StreamKey {
@@ -37,15 +39,29 @@ async fn initial_rest_sync_no_gap_event() {
     let mut cfg = config(&fake.url, Arc::new(ConnIds::new()));
     cfg.rest_base = Some(rest.base.clone());
     let sink = Arc::new(VecSink::default());
-    let mut feed = Feed::start(Arc::new(RestVenue), cfg, plans(), Some(sink.clone() as Arc<dyn FrameSink>))
-        .expect("start");
+    let mut feed = Feed::start(
+        Arc::new(RestVenue),
+        cfg,
+        plans(),
+        Some(sink.clone() as Arc<dyn FrameSink>),
+    )
+    .expect("start");
     let mut ev = feed.take_events().expect("events");
     eventually(|| feed.market_ref(&k()).and_then(|r| r.update_id) == Some(15)).await;
-    let bids = feed.read_book(&k(), |v| v.book.levels(BookSide::Bid)).expect("book");
-    assert_eq!(bids, vec![lv(101, 3), lv(100, 2), lv(99, 1)], "snapshot + 6..10 + 11..15; u 5 dropped");
+    let bids = feed
+        .read_book(&k(), |v| v.book.levels(BookSide::Bid))
+        .expect("book");
+    assert_eq!(
+        bids,
+        vec![lv(101, 3), lv(100, 2), lv(99, 1)],
+        "snapshot + 6..10 + 11..15; u 5 dropped"
+    );
     assert!(!feed.is_stale(&k()));
     while let Ok(e) = ev.try_recv() {
-        assert!(!matches!(e, FeedEvent::Gap { .. }), "initial sync is not a gap: {e:?}");
+        assert!(
+            !matches!(e, FeedEvent::Gap { .. }),
+            "initial sync is not a gap: {e:?}"
+        );
     }
     assert_eq!(rest.requests.lock().expect("req").len(), 1);
     assert!(rest.requests.lock().expect("req")[0].starts_with("GET /depth?symbol=BTC&limit=100 "));
@@ -68,8 +84,13 @@ async fn gap_rest_resync_book_equals_fake() {
     let mut cfg = config(&fake.url, Arc::new(ConnIds::new()));
     cfg.rest_base = Some(rest.base.clone());
     let sink = Arc::new(VecSink::default());
-    let mut feed = Feed::start(Arc::new(RestVenue), cfg, plans(), Some(sink.clone() as Arc<dyn FrameSink>))
-        .expect("start");
+    let mut feed = Feed::start(
+        Arc::new(RestVenue),
+        cfg,
+        plans(),
+        Some(sink.clone() as Arc<dyn FrameSink>),
+    )
+    .expect("start");
     let mut ev = feed.take_events().expect("events");
     let g = wait_event(&mut ev, |e| matches!(e, FeedEvent::Gap { .. })).await;
     assert!(
@@ -77,16 +98,39 @@ async fn gap_rest_resync_book_equals_fake() {
         "{g:?}"
     );
     eventually(|| feed.market_ref(&k()).and_then(|r| r.update_id) == Some(35)).await;
-    let bids = feed.read_book(&k(), |v| v.book.levels(BookSide::Bid)).expect("book");
-    assert_eq!(bids, vec![lv(150, 5), lv(103, 1), lv(102, 1)], "second snapshot + 25..30 + 31..35");
+    let bids = feed
+        .read_book(&k(), |v| v.book.levels(BookSide::Bid))
+        .expect("book");
+    assert_eq!(
+        bids,
+        vec![lv(150, 5), lv(103, 1), lv(102, 1)],
+        "second snapshot + 25..30 + 31..35"
+    );
     // Both REST bodies are in the sink, with conn_id 0 and the connection they start.
     let conn = feed.read_book(&k(), |v| v.conn_id).expect("conn");
-    let rest_frames: Vec<_> = sink.frames().into_iter().filter(|f| f.src == Src::Rest).collect();
+    let rest_frames: Vec<_> = sink
+        .frames()
+        .into_iter()
+        .filter(|f| f.src == Src::Rest)
+        .collect();
     let mut evs = Vec::new();
-    while let Ok(e) = ev.try_recv() { evs.push(e); }
-    assert_eq!(rest_frames.len(), 2, "{:?} {evs:?}", rest_frames.iter().map(|f| String::from_utf8_lossy(&f.payload).to_string()).collect::<Vec<_>>());
+    while let Ok(e) = ev.try_recv() {
+        evs.push(e);
+    }
+    assert_eq!(
+        rest_frames.len(),
+        2,
+        "{:?} {evs:?}",
+        rest_frames
+            .iter()
+            .map(|f| String::from_utf8_lossy(&f.payload).to_string())
+            .collect::<Vec<_>>()
+    );
     for (i, f) in rest_frames.iter().enumerate() {
-        assert_eq!((f.conn_id, f.frame_no, f.for_conn_id), (0, i as u64, Some(conn)));
+        assert_eq!(
+            (f.conn_id, f.frame_no, f.for_conn_id),
+            (0, i as u64, Some(conn))
+        );
         assert_eq!(f.topic.as_ref(), Some(&k()));
     }
     assert_eq!(fake.accepted.load(Ordering::SeqCst), 1, "no reconnect");
@@ -106,7 +150,10 @@ async fn non_bridging_snapshot_retries_then_reconnects() {
     let mut feed = Feed::start(Arc::new(RestVenue), cfg, plans(), None).expect("start");
     let mut ev = feed.take_events().expect("events");
     let e = wait_event(&mut ev, |e| matches!(e, FeedEvent::Disconnected { .. })).await;
-    assert!(matches!(&e, FeedEvent::Disconnected { reason, .. } if reason.contains("did not bridge twice")), "{e:?}");
+    assert!(
+        matches!(&e, FeedEvent::Disconnected { reason, .. } if reason.contains("did not bridge twice")),
+        "{e:?}"
+    );
     assert_eq!(rest.requests.lock().expect("req").len(), 2, "one retry");
     assert!(feed.is_stale(&k()));
 }
@@ -135,7 +182,9 @@ async fn gap_inside_the_buffer_keeps_the_later_deltas() {
     let mut ev = feed.take_events().expect("events");
     wait_event(&mut ev, |e| matches!(e, FeedEvent::Gap { .. })).await;
     eventually(|| feed.market_ref(&k()).and_then(|r| r.update_id) == Some(25)).await;
-    let bids = feed.read_book(&k(), |v| v.book.levels(BookSide::Bid)).expect("book");
+    let bids = feed
+        .read_book(&k(), |v| v.book.levels(BookSide::Bid))
+        .expect("book");
     assert_eq!(bids, vec![lv(150, 5), lv(103, 1), lv(102, 1)]);
     assert_eq!(fake.accepted.load(Ordering::SeqCst), 1, "no reconnect");
     assert_eq!(rest.requests.lock().expect("req").len(), 2);
