@@ -152,6 +152,9 @@ pub struct OpenWriter {
     contexts: Contexts,
     /// Hour start and stream of the current open file.
     cur: Option<(i64, Stream)>,
+    /// The earliest hour a new file may have: the hour after the last
+    /// closed one (an hour is never reopened, it may be sealed already).
+    next_hour: i64,
 }
 
 impl OpenWriter {
@@ -167,6 +170,7 @@ impl OpenWriter {
             conn_id,
             contexts: contexts.clone(),
             cur: None,
+            next_hour: i64::MIN,
         }
     }
 
@@ -198,9 +202,10 @@ impl OpenWriter {
 
     /// Writes a record to the open file of its hour. An hour is never
     /// reopened: a record whose hour is earlier than the current file's
-    /// (the clock stepped back) goes to the current file.
+    /// (the clock stepped back) goes to the current file, and one whose
+    /// hour was closed already goes to the next hour's file.
     pub fn append(&mut self, r: &Record) -> io::Result<()> {
-        let hour = time::hour_start(r.recv_ns);
+        let hour = time::hour_start(r.recv_ns).max(self.next_hour);
         match &self.cur {
             Some((h, _)) if hour > *h => {
                 self.close_current()?;
@@ -234,7 +239,10 @@ impl OpenWriter {
 
     fn close_current(&mut self) -> io::Result<()> {
         match self.cur.take() {
-            Some((_, s)) => s.close(),
+            Some((h, s)) => {
+                self.next_hour = h + time::HOUR_NS;
+                s.close()
+            }
             None => Ok(()),
         }
     }

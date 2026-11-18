@@ -157,6 +157,29 @@ fn rotation_is_forward_only() {
 }
 
 #[test]
+fn an_hour_closed_by_tick_is_not_reopened() {
+    // A record of hour 14 that arrives after tick closed hour 14 (taken just
+    // before the tick, or the clock stepped back) goes to the next hour's
+    // file: hour 14 may be sealed already.
+    let dir = common::test_dir("writer-closed-hour");
+    let fs = RealFs::new(&dir);
+    let mut w = OpenWriter::new(fs.clone(), settings(), 3, &Contexts::default());
+    w.append(&rec(T14 + S, 0)).expect("14:00:01");
+    w.tick(T14 + time::HOUR_NS).expect("tick at 15:00 closes hour 14");
+    assert!(w.current_path().is_none());
+    w.append(&rec(T14 + time::HOUR_NS - S, 1))
+        .expect("14:59:59 after the close");
+    let path = w.current_path().expect("15").to_string();
+    w.close().expect("close");
+    assert!(path.contains("/hour=15/"), "{path}");
+    assert_eq!(read_records(fs.as_ref(), &path).0.len(), 1);
+    let h14 = fs
+        .list("crypto/l0/_open/venue=bybit/date=2026-01-02/hour=14")
+        .expect("ls");
+    assert_eq!(h14.len(), 1, "{h14:?}");
+}
+
+#[test]
 fn one_level3_context_per_connection() {
     let dir = common::test_dir("writer-contexts");
     let fs = RealFs::new(&dir);
