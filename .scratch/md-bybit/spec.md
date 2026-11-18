@@ -1,6 +1,6 @@
 # Spec: md-bybit, the Bybit public market-data adapter (unit U3)
 
-Status: ready-for-agent
+Status: done
 
 Design source: `RESEARCH/CRYPTO_TRADING_INTEGRATED_TN_20261118/10_DESIGN_DRAFT.md` §6.2–6.4, §6.6 and the venue facts `04_VENUE_MARKET_DATA_FACTS.md` §1.1 (crypto integrated design TN v1.0, outside this repository). Lake contract: `contracts/lake/` (vendored, U2) and its document `docs/crypto/lake-contract.md` in quant-data-platform (§1.2, §1.3, §3.2–3.6). Tickets: `issues/` next to this file.
 

@@ -2,6 +2,8 @@
 //! venue data (the repository is public; Bybit API terms 6.7).
 #![allow(dead_code)]
 
+pub mod qraw;
+
 use md_bybit::{BybitAdapter, Market};
 use md_core::adapter::Instrument;
 
