@@ -40,3 +40,8 @@ panic = "abort"
 [profile.dev]
 debug = "line-tables-only"
 panic = "abort"
+
+# libzstd is C; unoptimised it compresses the memory tests' hundreds of MB
+# too slowly for the default test run. Only this C build changes.
+[profile.dev.package.zstd-sys]
+opt-level = 3
