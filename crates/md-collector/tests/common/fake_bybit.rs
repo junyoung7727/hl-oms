@@ -53,6 +53,8 @@ pub struct FakeConn {
     pub control: Vec<String>,
     /// The connection has ended.
     pub ended: bool,
+    pub accepted_at: Option<std::time::Instant>,
+    pub ended_at: Option<std::time::Instant>,
 }
 
 pub struct FakeBybit {
@@ -75,7 +77,10 @@ impl FakeBybit {
                     return;
                 };
                 let i = a2.fetch_add(1, Ordering::SeqCst);
-                c2.lock().expect("conns").push(FakeConn::default());
+                c2.lock().expect("conns").push(FakeConn {
+                    accepted_at: Some(std::time::Instant::now()),
+                    ..FakeConn::default()
+                });
                 tokio::spawn(serve(tcp, i, c2.clone(), b.clone()));
             }
         });
@@ -280,7 +285,10 @@ async fn serve(
     stop.store(true, Ordering::SeqCst);
     reader.abort();
     producer.abort();
-    set(&|c| c.ended = true);
+    set(&|c| {
+        c.ended = true;
+        c.ended_at = Some(std::time::Instant::now());
+    });
 }
 
 /// A minimal HTTP/1.1 server for `GET /v5/market/instruments-info`: the
