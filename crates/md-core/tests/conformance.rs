@@ -16,6 +16,12 @@ use serde_json::Value;
 struct Fake {
     drop_zero_levels: bool,
     ignore_sequence: bool,
+    /// Parses every frame with `u` 14 (the fixture's gap delta) as a snapshot.
+    gap_as_snapshot: bool,
+    /// Converts `ts` to nanoseconds on snapshots only.
+    delta_ts_in_ms: bool,
+    /// Scales prices by 10^-1 but reports exponent -3.
+    wrong_px_exp: bool,
 }
 
 impl MarketDataAdapter for Fake {
@@ -86,9 +92,16 @@ impl MarketDataAdapter for Fake {
             }
             Ok(out)
         };
+        let is_snapshot = v["type"].as_str() == Some("snapshot")
+            || (self.gap_as_snapshot && v["u"].as_i64() == Some(14));
+        let ts_ms = v["ts"].as_i64().ok_or_else(|| ParseError::new("ts"))?;
         let update = BookUpdate {
             key: key.clone(),
-            venue_ts_ns: v["ts"].as_i64().ok_or_else(|| ParseError::new("ts"))? * 1_000_000,
+            venue_ts_ns: if self.delta_ts_in_ms && !is_snapshot {
+                ts_ms
+            } else {
+                ts_ms * 1_000_000
+            },
             recv_ns,
             update_id: if self.ignore_sequence {
                 None
@@ -100,12 +113,13 @@ impl MarketDataAdapter for Fake {
             venue_seq: None,
             bids: side("b")?,
             asks: side("a")?,
-            px_exp: -1,
+            px_exp: if self.wrong_px_exp { -3 } else { -1 },
             qty_exp: 0,
         };
-        Ok(vec![match v["type"].as_str() {
-            Some("snapshot") => Normalized::BookSnapshot(update),
-            _ => Normalized::BookDelta(update),
+        Ok(vec![if is_snapshot {
+            Normalized::BookSnapshot(update)
+        } else {
+            Normalized::BookDelta(update)
         }])
     }
     fn seq_rule(&self, _key: &StreamKey) -> SeqRule {
@@ -149,6 +163,9 @@ fn fixture() -> Fixture {
         expected_resync: Resync::Resubscribe,
         recv_ns: 1_000,
         expected_venue_ts_ns: 5_000_000,
+        expected_delta_venue_ts_ns: vec![6_000_000, 7_000_000],
+        expected_px_exp: -1,
+        expected_qty_exp: 0,
         garbage: vec![b"".to_vec(), vec![0xff, 0xfe], br#"{"op":"pong"}"#.to_vec(), b"ping".to_vec()],
     }
 }
@@ -191,4 +208,69 @@ fn route_never_fails_on_garbage_frames() {
     for frame in fixture().garbage {
         assert_eq!(fake.route(&frame), Route::Control);
     }
+}
+
+fn fails_with(adapter: &Fake, fixture: &Fixture, needle: &str) {
+    let failures = run(adapter, fixture);
+    assert!(
+        failures.iter().any(|f| f.contains(needle)),
+        "expected a failure containing {needle:?}, got {failures:?}"
+    );
+}
+
+#[test]
+fn harness_fails_an_adapter_that_parses_the_gap_delta_as_a_snapshot() {
+    let fake = Fake {
+        gap_as_snapshot: true,
+        ..Fake::default()
+    };
+    fails_with(&fake, &fixture(), "gap delta: parsed as a snapshot");
+}
+
+#[test]
+fn harness_fails_an_adapter_that_leaves_delta_times_in_milliseconds() {
+    let fake = Fake {
+        delta_ts_in_ms: true,
+        ..Fake::default()
+    };
+    fails_with(&fake, &fixture(), "delta 0: venue_ts_ns");
+}
+
+#[test]
+fn harness_fails_an_adapter_that_reports_the_wrong_exponent() {
+    let fake = Fake {
+        wrong_px_exp: true,
+        ..Fake::default()
+    };
+    fails_with(&fake, &fixture(), "snapshot: exponents");
+}
+
+#[test]
+fn harness_refuses_a_fixture_that_cannot_catch_a_broken_adapter() {
+    let fake = Fake::default();
+    let mut f = fixture();
+    f.gap_delta = None;
+    fails_with(&fake, &f, "fixture: no gap delta");
+
+    let mut f = fixture();
+    f.deltas.clear();
+    f.expected_delta_venue_ts_ns.clear();
+    fails_with(&fake, &f, "fixture: no deltas");
+
+    let mut f = fixture();
+    f.deleted_px = 12345;
+    fails_with(
+        &fake,
+        &f,
+        "fixture: deleted level 12345 is not in the snapshot",
+    );
+
+    // In the snapshot but never removed: the end-of-deltas check names it.
+    let mut f = fixture();
+    f.deleted_px = 1001;
+    fails_with(&fake, &f, "deleted level 1001 is still in the book");
+
+    let mut f = fixture();
+    f.expected_delta_venue_ts_ns.pop();
+    fails_with(&fake, &f, "fixture: 1 delta times for 2 deltas");
 }

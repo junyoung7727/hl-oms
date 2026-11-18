@@ -1,10 +1,11 @@
 //! Depth-agnostic in-memory order book.
 //!
 //! Each side is an ordered map from price to quantity. A snapshot replaces both
-//! sides; a delta sets a level, and quantity 0 removes it. With a max depth the
-//! book keeps only the best N levels per side after every update; levels it
-//! dropped come back only with a later message. A crossed book is not repaired;
-//! `is_crossed` reports it.
+//! sides; a delta sets a level, and quantity 0 removes it. The book keeps every
+//! level the venue sent; a max depth limits only what the read methods show
+//! (the best N levels per side). Dropping levels on update would show a hole:
+//! when a better level is removed, the venue sends nothing for a level the
+//! book had dropped. A crossed book is not repaired; `is_crossed` reports it.
 
 use std::collections::BTreeMap;
 
@@ -51,26 +52,19 @@ impl OrderBook {
                 }
             }
         }
-        if let Some(depth) = self.max_depth {
-            while self.bids.len() > depth {
-                self.bids.pop_first();
-            }
-            while self.asks.len() > depth {
-                self.asks.pop_last();
-            }
-        }
     }
 
-    /// The levels of one side, best price first.
+    /// The levels of one side, best price first, at most the max depth.
     pub fn levels(&self, side: BookSide) -> Vec<Level> {
         self.iter(side).collect()
     }
 
     fn iter(&self, side: BookSide) -> Box<dyn Iterator<Item = Level> + '_> {
         let to_level = |(&px, &qty): (&i64, &i64)| Level { px, qty };
+        let depth = self.max_depth.unwrap_or(usize::MAX);
         match side {
-            BookSide::Bid => Box::new(self.bids.iter().rev().map(to_level)),
-            BookSide::Ask => Box::new(self.asks.iter().map(to_level)),
+            BookSide::Bid => Box::new(self.bids.iter().rev().map(to_level).take(depth)),
+            BookSide::Ask => Box::new(self.asks.iter().map(to_level).take(depth)),
         }
     }
 
@@ -99,9 +93,10 @@ impl OrderBook {
         Some((ask - bid) as f64 * 2.0 / mid_x2 * 10_000.0)
     }
 
-    /// Sum of the quantities of the best `n` levels of one side.
-    pub fn depth_sum(&self, side: BookSide, n: usize) -> i64 {
-        self.iter(side).take(n).map(|l| l.qty).sum()
+    /// Sum of the quantities of the best `n` levels of one side (within the
+    /// max depth), exact.
+    pub fn depth_sum(&self, side: BookSide, n: usize) -> i128 {
+        self.iter(side).take(n).map(|l| i128::from(l.qty)).sum()
     }
 
     pub fn is_crossed(&self) -> bool {

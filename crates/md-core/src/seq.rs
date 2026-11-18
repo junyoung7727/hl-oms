@@ -10,6 +10,12 @@ pub enum SeqRule {
     /// `update_id` = previous `update_id` + 1 (Bybit `u`).
     PlusOne,
     /// `prev_update_id` = previous `update_id` (Binance `pu`, OKX `prevSeqId`).
+    ///
+    /// After a REST snapshot, Binance's first valid delta bridges it
+    /// (`U <= lastUpdateId <= u`) and older buffered deltas are dropped. The
+    /// detector does not know that rule: the adapter or the feed must bridge
+    /// and drop before it calls [`GapDetector::delta`], or every resync ends in
+    /// a false gap. Open for U10 (md-binance).
     PrevEquals,
     /// No sequence numbers (Hyperliquid): never a gap; staleness is watched elsewhere.
     None,

@@ -28,6 +28,11 @@ pub struct Fixture {
     pub recv_ns: i64,
     /// `venue_ts_ns` the snapshot must give.
     pub expected_venue_ts_ns: i64,
+    /// `venue_ts_ns` each delta must give, in order.
+    pub expected_delta_venue_ts_ns: Vec<i64>,
+    /// Exponents every book message must carry.
+    pub expected_px_exp: i8,
+    pub expected_qty_exp: i8,
     /// Frames that are not market data; `route` must give `Route::Control`.
     pub garbage: Vec<Vec<u8>>,
 }
@@ -44,10 +49,28 @@ fn book_update(
             "{what}: route does not give the fixture's stream key"
         ));
     }
+    let checked = |u: &BookUpdate, failures: &mut Vec<String>| {
+        if u.key != f.key {
+            failures.push(format!("{what}: key is {:?}, expected {:?}", u.key, f.key));
+        }
+        if (u.px_exp, u.qty_exp) != (f.expected_px_exp, f.expected_qty_exp) {
+            failures.push(format!(
+                "{what}: exponents are ({}, {}), expected ({}, {})",
+                u.px_exp, u.qty_exp, f.expected_px_exp, f.expected_qty_exp
+            ));
+        }
+        if u.recv_ns != f.recv_ns {
+            failures.push(format!(
+                "{what}: recv_ns is {}, expected {}",
+                u.recv_ns, f.recv_ns
+            ));
+        }
+        u.clone()
+    };
     match adapter.parse(&f.key, frame, f.recv_ns) {
         Ok(msgs) => match msgs.as_slice() {
-            [Normalized::BookSnapshot(u)] => Some((true, u.clone())),
-            [Normalized::BookDelta(u)] => Some((false, u.clone())),
+            [Normalized::BookSnapshot(u)] => Some((true, checked(u, failures))),
+            [Normalized::BookDelta(u)] => Some((false, checked(u, failures))),
             other => {
                 failures.push(format!(
                     "{what}: parse gave {} messages, not one book message",
@@ -63,9 +86,58 @@ fn book_update(
     }
 }
 
+/// A fixture too weak to catch a broken adapter: without deltas, without a
+/// removed level that was in the snapshot, or without a gap delta for a venue
+/// that has sequence numbers, the harness would pass an adapter that drops
+/// zero-quantity levels or never reports a gap.
+fn fixture_problems(adapter: &dyn MarketDataAdapter, f: &Fixture) -> Vec<String> {
+    let mut problems = Vec::new();
+    if f.deltas.is_empty() {
+        problems.push("fixture: no deltas".to_string());
+    }
+    if f.expected_delta_venue_ts_ns.len() != f.deltas.len() {
+        problems.push(format!(
+            "fixture: {} delta times for {} deltas",
+            f.expected_delta_venue_ts_ns.len(),
+            f.deltas.len()
+        ));
+    }
+    if f.expected_rule != SeqRule::None && f.gap_delta.is_none() {
+        problems.push("fixture: no gap delta for a venue with sequence numbers".to_string());
+    }
+    let parsed = |frame: &[u8]| -> Vec<BookUpdate> {
+        match adapter.parse(&f.key, frame, f.recv_ns) {
+            Ok(msgs) => msgs
+                .into_iter()
+                .filter_map(|m| match m {
+                    Normalized::BookSnapshot(u) | Normalized::BookDelta(u) => Some(u),
+                    _ => None,
+                })
+                .collect(),
+            Err(_) => Vec::new(),
+        }
+    };
+    // If the level was never in the book, "it is gone at the end" proves
+    // nothing. If it was, only a delta can remove it, so the book check at the
+    // end catches an adapter that drops zero-quantity levels.
+    let in_snapshot = parsed(&f.snapshot).iter().any(|u: &BookUpdate| {
+        u.bids
+            .iter()
+            .chain(&u.asks)
+            .any(|l| l.px == f.deleted_px && l.qty != 0)
+    });
+    if !in_snapshot {
+        problems.push(format!(
+            "fixture: deleted level {} is not in the snapshot",
+            f.deleted_px
+        ));
+    }
+    problems
+}
+
 /// Every failed check, as text; empty when the adapter conforms.
 pub fn run(adapter: &dyn MarketDataAdapter, f: &Fixture) -> Vec<String> {
-    let mut failures = Vec::new();
+    let mut failures = fixture_problems(adapter, f);
     let rule = adapter.seq_rule(&f.key);
     if rule != f.expected_rule {
         failures.push(format!(
@@ -78,10 +150,10 @@ pub fn run(adapter: &dyn MarketDataAdapter, f: &Fixture) -> Vec<String> {
 
     match book_update(adapter, f, &f.snapshot, "snapshot", &mut failures) {
         Some((true, u)) => {
-            if (u.venue_ts_ns, u.recv_ns) != (f.expected_venue_ts_ns, f.recv_ns) {
+            if u.venue_ts_ns != f.expected_venue_ts_ns {
                 failures.push(format!(
-                    "snapshot times are ({}, {}), expected ({}, {})",
-                    u.venue_ts_ns, u.recv_ns, f.expected_venue_ts_ns, f.recv_ns
+                    "snapshot: venue_ts_ns is {}, expected {}",
+                    u.venue_ts_ns, f.expected_venue_ts_ns
                 ));
             }
             book.apply_snapshot(&u);
@@ -93,6 +165,14 @@ pub fn run(adapter: &dyn MarketDataAdapter, f: &Fixture) -> Vec<String> {
     for (i, frame) in f.deltas.iter().enumerate() {
         match book_update(adapter, f, frame, &format!("delta {i}"), &mut failures) {
             Some((false, u)) => {
+                if let Some(&want) = f.expected_delta_venue_ts_ns.get(i) {
+                    if u.venue_ts_ns != want {
+                        failures.push(format!(
+                            "delta {i}: venue_ts_ns is {}, expected {want}",
+                            u.venue_ts_ns
+                        ));
+                    }
+                }
                 if gaps
                     .delta(u.update_id, u.prev_update_id, u.recv_ns)
                     .is_some()
@@ -128,8 +208,10 @@ pub fn run(adapter: &dyn MarketDataAdapter, f: &Fixture) -> Vec<String> {
         ));
     }
     if let Some(frame) = &f.gap_delta {
-        if let Some((false, u)) = book_update(adapter, f, frame, "gap delta", &mut failures) {
-            match gaps.delta(u.update_id, u.prev_update_id, u.recv_ns) {
+        match book_update(adapter, f, frame, "gap delta", &mut failures) {
+            Some((true, _)) => failures.push("gap delta: parsed as a snapshot".into()),
+            None => {}
+            Some((false, u)) => match gaps.delta(u.update_id, u.prev_update_id, u.recv_ns) {
                 Some(gap) => {
                     let resync = adapter.on_gap(&f.key, &gap);
                     if resync != f.expected_resync {
@@ -140,7 +222,7 @@ pub fn run(adapter: &dyn MarketDataAdapter, f: &Fixture) -> Vec<String> {
                     }
                 }
                 None => failures.push("gap delta: no gap was reported".into()),
-            }
+            },
         }
     }
     for (i, frame) in f.garbage.iter().enumerate() {

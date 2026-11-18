@@ -121,3 +121,28 @@ fn a_new_snapshot_replaces_the_whole_book() {
     assert_eq!(book.levels(BookSide::Ask), vec![]);
     assert_eq!(book.best_ask(), None);
 }
+
+#[test]
+fn max_depth_never_shows_a_hole_where_the_venue_still_has_a_level() {
+    // Bybit keeps a 50-level book and sends no message for level 51 when a
+    // better level is removed; a book that had dropped level 3 would show
+    // level 4 as the second best.
+    let mut book = OrderBook::new(Some(2));
+    book.apply_snapshot(&update(
+        vec![lv(1000, 1), lv(999, 2), lv(998, 3), lv(997, 4)],
+        vec![],
+    ));
+    book.apply_delta(&update(vec![lv(1000, 0)], vec![]));
+    book.apply_delta(&update(vec![lv(997, 7)], vec![]));
+    assert_eq!(book.levels(BookSide::Bid), vec![lv(999, 2), lv(998, 3)]);
+    assert_eq!(book.depth_sum(BookSide::Bid, 2), 5);
+    assert_eq!(book.best_bid(), Some(lv(999, 2)));
+}
+
+#[test]
+fn depth_sum_does_not_overflow() {
+    let big = i64::MAX / 2 + 1;
+    let mut book = OrderBook::new(None);
+    book.apply_snapshot(&update(vec![lv(2, big), lv(1, big)], vec![]));
+    assert_eq!(book.depth_sum(BookSide::Bid, 2), 2 * i128::from(big));
+}

@@ -32,7 +32,7 @@ A new workspace crate `md-core` with no I/O. It holds:
 
 - **Crate boundary.** `md-core` depends on nothing outside the standard library at run time (dev-dependencies `sha2` and `hex`, already in `Cargo.lock`, for the vendored-contract test). It has no network, file, clock or randomness access, like `oms-core` (ADR-002). No `oms-*` crate depends on it in this unit, and no `oms-*` file changes.
 - **Integers.** Prices and quantities are `i64` with `px_exp`/`qty_exp` (`i8`), as in the lake contract 1.3, not the OMS's 1e-8 fixed point (ADR-009): market data keeps the venue's tick, and the conversion happens where an order is built. Decimal-string conversion is exact or an error, never rounded. `spread_bp` and `mid` are `f64` because they are monitoring values, not order inputs; the exact form (`bid + ask` as `i128`) is also exposed.
-- **Book sides** are ordered maps keyed by price. A max depth keeps the best N levels per side after each update. A crossed book after a delta is not repaired; it is reported by `is_crossed()`.
+- **Book sides** are ordered maps keyed by price. The book keeps every level the venue sent; a max depth limits only what the read methods show (changed after the final review: dropping levels on update showed a hole when a better level was removed). `depth_sum` is `i128`. A crossed book after a delta is not repaired; it is reported by `is_crossed()`.
 - **Gap detector** state is per stream: the last update id of the current run. `PlusOne`: a delta with `u != last + 1` is a gap. `PrevEquals`: a delta with `prev != last` is a gap. `None`: never a gap. A delta before any snapshot is a gap (no run). After a gap the run is broken until the next snapshot; further deltas are not reported again.
 - **Resync** choices: `Resubscribe`, `RestSnapshotThenReplay`, `Reconnect` (design §6.4).
 - **`route`** returns `Route::Stream(StreamKey)` or `Route::Control`; it reads only the topic and never returns an error.
@@ -54,3 +54,5 @@ A new workspace crate `md-core` with no I/O. It holds:
 
 - Built directly by Claude Opus 5.5 (2026-11-18, owner instruction "이제 개발을 너가 직접해"); the spec and tickets are lean (owner: "검증 사소한 것까지 하지마").
 - The vendored copy is taken from qdp main after PR #28 merges; until then ticket 01 waits for that commit.
+- Final review (2026-11-18) fixes: the conformance harness also fails a gap delta parsed as a snapshot; checks key, exponents, `recv_ns` and `venue_ts_ns` on every book message (fixture fields `expected_delta_venue_ts_ns`, `expected_px_exp`, `expected_qty_exp`); refuses a fixture with no deltas, no gap delta for a sequenced venue, or a deleted level that the snapshot does not hold.
+- Open for U10 (md-binance): `PrevEquals` has no bridging rule. After a REST snapshot, Binance's first valid delta has `U <= lastUpdateId <= u` and older buffered deltas are dropped; the adapter or the feed must do that before calling the detector, or every resync ends in a false gap.
