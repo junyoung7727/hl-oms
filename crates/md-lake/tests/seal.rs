@@ -4,7 +4,7 @@
 
 mod common;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
@@ -559,4 +559,30 @@ fn check_catches_a_lost_or_duplicated_record() {
         let log = kit::seal_log(fs.as_ref(), D, 14);
         assert_eq!(log.last().expect("done")["attempt"], 2);
     }
+}
+
+#[test]
+fn a_run_does_not_reread_sealed_history() {
+    // Two days of sealed hours; the next run seals one hour of the third day
+    // and reads no lake data of the earlier days.
+    let dir = common::test_dir("seal-history");
+    let (fs, counts) = common::counting::CountingFs::open_at(&dir);
+    let s1 = T14 - 5 * S;
+    let last = T14 + 44 * time::HOUR_NS; // 2026-01-04 10:00
+    let mut h = T14;
+    while h < last {
+        kit::write_open(&fs, "md1", s1, 1, &[md(h + 10 * S, 1, 0, OB)], false);
+        h += time::HOUR_NS;
+    }
+    seal(&fs, settings(), last + S).expect("first run");
+    kit::write_open(&fs, "md1", s1, 1, &[md(last + 10 * S, 1, 0, OB)], false);
+    counts.reads.lock().expect("reads").clear();
+    let report = seal(&fs, settings(), last + time::HOUR_NS + S).expect("second run");
+    assert_eq!(report.sealed, vec![("2026-01-04".to_string(), 10)]);
+    let reads = counts.reads.lock().expect("reads").clone();
+    let old: BTreeSet<&String> = reads
+        .iter()
+        .filter(|p| p.contains(".qraw") && !p.contains("date=2026-01-04"))
+        .collect();
+    assert!(old.is_empty(), "read sealed history: {old:?}");
 }

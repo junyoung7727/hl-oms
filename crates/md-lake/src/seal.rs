@@ -310,6 +310,14 @@ impl Sealer {
         let mut tail: Option<(String, i64, i64)> = None;
         let mut h = self.s.first_hour_ns;
         while h <= last_closed {
+            // A done hour with no open file left needs nothing: skip it
+            // without reading its day frames (the tail is found again
+            // before the next hour that is sealed).
+            if self.is_settled(h)? {
+                tail = None;
+                h += HOUR_NS;
+                continue;
+            }
             match self.seal_hour(h, start, clock, classify, &mut tail, &mut report)? {
                 HourOutcome::Done => {}
                 HourOutcome::Waiting(p) => {
@@ -321,6 +329,15 @@ impl Sealer {
         }
         self.seal_days(clock, last_closed, &mut report)?;
         Ok(report)
+    }
+
+    /// The hour has a done entry and no file in its open folder.
+    fn is_settled(&self, h: i64) -> io::Result<bool> {
+        if !self.fs.list(&self.open_dir(h))?.is_empty() {
+            return Ok(false);
+        }
+        let log = self.read_log(h)?;
+        Ok(log.last().and_then(|e| e["entry"].as_str()) == Some("done"))
     }
 
     /// The complete lines of a seal log; a torn last line is cut off.
