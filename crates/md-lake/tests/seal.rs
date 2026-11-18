@@ -586,3 +586,58 @@ fn a_run_does_not_reread_sealed_history() {
         .collect();
     assert!(old.is_empty(), "read sealed history: {old:?}");
 }
+
+/// The `collector_down` notes between two sessions when session 1 ends in
+/// hour 15 and session 2 starts in hour 16; `split` seals the two hours in
+/// two runs.
+fn gap_notes(layout: md_lake::seal::Layout, split: bool) -> Vec<serde_json::Value> {
+    let fs = lake(&format!("seal-gap-{layout:?}-{split}"));
+    let h15 = T14 + time::HOUR_NS;
+    let h16 = T14 + 2 * time::HOUR_NS;
+    let (s1, s2) = (h15 - 5 * S, h16 + 19 * S);
+    let note = Record {
+        recv_ns: h16 - 2 * S,
+        src: Src::Note,
+        conn_id: 1,
+        frame_no: 0,
+        payload: br#"{"note":"x"}"#.to_vec(),
+    };
+    kit::write_open(
+        &fs,
+        "md1",
+        s1,
+        1,
+        &[md(h15 + 10 * S, 1, 0, OB), md(h16 - 10 * S, 1, 1, OB), note],
+        false,
+    );
+    kit::write_open(&fs, "md1", s2, 1, &[md(h16 + 20 * S, 1, 0, OB)], false);
+    let mut s = settings();
+    s.layout = layout;
+    if split {
+        seal(&fs, s.clone(), h16 + S).expect("run 1");
+    }
+    seal(&fs, s, h16 + time::HOUR_NS + S).expect("run 2");
+    sealer_notes(fs.as_ref())
+        .into_iter()
+        .filter(|n| n["note"] == "collector_down" && n["detail"]["prev_session_ns"] == s1)
+        .collect()
+}
+
+#[test]
+fn session_gap_across_runs_is_the_same_as_in_one_run() {
+    use md_lake::seal::Layout;
+    let h16 = T14 + 2 * time::HOUR_NS;
+    // by_symbol: the tail is the session's last routed record (the day
+    // files hold no notes or unroutable records); by_connection: its last
+    // record, notes included.
+    for (layout, end) in [
+        (Layout::BySymbol, h16 - 10 * S),
+        (Layout::ByConnection, h16 - 2 * S),
+    ] {
+        let one = gap_notes(layout, false);
+        assert_eq!(one.len(), 1, "{layout:?} one run: {one:?}");
+        assert_eq!(one[0]["start_recv_ns"], end, "{layout:?}");
+        assert_eq!(one[0]["end_recv_ns"], h16 + 20 * S);
+        assert_eq!(gap_notes(layout, true), one, "{layout:?} two runs");
+    }
+}

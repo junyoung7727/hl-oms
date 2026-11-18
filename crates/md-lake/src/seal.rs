@@ -571,40 +571,50 @@ impl Sealer {
         if done["records"].as_u64().unwrap_or(0) == 0 {
             return Ok(());
         }
-        let mut best: Option<(String, i64)> = None;
+        // Per target: the session of its last run in this hour's frame and
+        // that run's record count. by_symbol day files name their runs;
+        // a by_connection file is one session's (named by its path).
+        let mut runs: Vec<(String, i64, &Value, u64)> = Vec::new();
         for t in done["targets"].as_array().into_iter().flatten() {
-            for r in t["sessions"].as_array().into_iter().flatten() {
-                let (Some(c), Some(ns)) = (r["collector"].as_str(), r["session_ns"].as_i64())
-                else {
-                    continue;
-                };
-                if best
-                    .as_ref()
-                    .is_none_or(|(bc, bns)| (ns, c) > (*bns, bc.as_str()))
-                {
-                    best = Some((c.to_string(), ns));
+            if let Some(lr) = t["sessions"].as_array().and_then(|r| r.last()) {
+                if let (Some(c), Some(ns), Some(n)) = (
+                    lr["collector"].as_str(),
+                    lr["session_ns"].as_i64(),
+                    lr["records"].as_u64(),
+                ) {
+                    runs.push((c.to_string(), ns, t, n));
+                }
+            } else if let Some(Ok(L0Path::DayByConnection {
+                collector,
+                session_ns,
+                ..
+            })) = t["path"].as_str().map(L0Path::parse)
+            {
+                if let Some(n) = t["records"].as_u64().filter(|&n| n > 0) {
+                    runs.push((collector, session_ns, t, n));
                 }
             }
         }
-        let Some((c, ns)) = best else { return Ok(()) };
+        let Some((c, ns)) = runs
+            .iter()
+            .map(|(c, ns, _, _)| (c.clone(), *ns))
+            .max_by(|a, b| (a.1, &a.0).cmp(&(b.1, &b.0)))
+        else {
+            return Ok(());
+        };
         let mut last_recv: Option<i64> = None;
-        for t in done["targets"].as_array().into_iter().flatten() {
-            let Some(runs) = t["sessions"].as_array() else {
-                continue;
-            };
-            let Some(lr) = runs.last() else { continue };
-            if lr["session_ns"].as_i64() != Some(ns) || lr["collector"].as_str() != Some(c.as_str())
-            {
+        for (rc, rns, t, n) in &runs {
+            if *rns != ns || *rc != c {
                 continue;
             }
-            let (Some(p), Some(after), Some(total), Some(n)) = (
+            let (Some(p), Some(after), Some(total)) = (
                 t["path"].as_str(),
                 t["offset_after"].as_u64(),
                 t["records"].as_u64(),
-                lr["records"].as_u64(),
             ) else {
                 continue;
             };
+            let n = *n;
             // The frame of this hour is the last frame ending at offset_after.
             let path = if self.fs.exists(p) {
                 p.to_string()
@@ -704,8 +714,13 @@ impl Sealer {
         let mut unroutable_md = 0u64;
         let mut unroutable_all = TopicStats::default();
         let mut total = 0u64;
-        // (session_ns, collector) → (first recv, last recv)
-        let mut sessions: BTreeMap<(i64, String), (i64, i64)> = BTreeMap::new();
+        // (session_ns, collector) → first recv
+        let mut sessions: BTreeMap<(i64, String), i64> = BTreeMap::new();
+        // (session_ns, collector) → last recv of a record that goes to a day
+        // file: the session tail, the same value a later run reads back from
+        // the day files (update_tail_from_log).
+        let by_conn = self.s.layout == Layout::ByConnection;
+        let mut day_last: BTreeMap<(i64, String), i64> = BTreeMap::new();
         for (slot, src) in sources.iter_mut().enumerate() {
             let mut f = fs.open(&src.path)?;
             let mut it = RecordIter::new(f.as_mut(), 0, src.end, true);
@@ -717,7 +732,14 @@ impl Sealer {
                 src.stat.records += 1;
                 src.stat.bytes += bytes.len() as u64;
                 src.stat.digest.add(&bytes);
-                match classify(&r) {
+                let routed = classify(&r);
+                if by_conn || routed.is_some() {
+                    let e = day_last
+                        .entry((src.session_ns, src.collector.clone()))
+                        .or_insert(r.recv_ns);
+                    *e = (*e).max(r.recv_ns);
+                }
+                match routed {
                     Some(t) => {
                         let st = stats.entry(t.clone()).or_default();
                         st.records += 1;
@@ -739,13 +761,11 @@ impl Sealer {
                 src.last_recv_ns = Some(r.recv_ns);
                 let e = sessions
                     .entry((src.session_ns, src.collector.clone()))
-                    .or_insert((r.recv_ns, r.recv_ns));
-                e.0 = e.0.min(r.recv_ns);
-                e.1 = e.1.max(r.recv_ns);
+                    .or_insert(r.recv_ns);
+                *e = (*e).min(r.recv_ns);
             }
             src.header = it.header().cloned();
         }
-        let by_conn = self.s.layout == Layout::ByConnection;
         if by_conn {
             // by_connection does not classify (2.5 step 4): nothing is unroutable.
             unroutable_all = TopicStats::default();
@@ -799,7 +819,7 @@ impl Sealer {
         if tail.is_none() {
             self.find_tail_before(h, tail)?;
         }
-        for ((ns, c), (first, last)) in &sessions {
+        for ((ns, c), first) in &sessions {
             if let Some((pc, pns, plast)) = tail.clone() {
                 if (pns, pc.as_str()) != (*ns, c.as_str()) && first - plast > self.s.session_gap_ns
                 {
@@ -817,7 +837,9 @@ impl Sealer {
                     ));
                 }
             }
-            *tail = Some((c.clone(), *ns, *last));
+            if let Some(last) = day_last.get(&(*ns, c.clone())) {
+                *tail = Some((c.clone(), *ns, *last));
+            }
         }
 
         // ---- Recovery is applied now (after the guard): cut crashed files back.
