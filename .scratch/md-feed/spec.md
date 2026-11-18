@@ -83,3 +83,12 @@ These override the sections above where they differ.
 - **R7 Old connection dies during a switch.** The switch's connection takes over the slot at once (no third connection), `SwitchDone` is sent with the dead connection as `from_conn_id`; it is stale until its snapshots.
 - **R8 Market name.** Additive trait method `market_name() -> Option<&'static str>` (default `None`; Bybit returns its category). `Feed::start` returns an error when it differs from `FeedConfig::market`.
 - **R9 Bridging is an adapter method.** Additive trait method `bridge(key, snapshot_update_id, delta) -> Bridge { Drop, Bridges, Fails }`; the default is the generic rule of this spec (Binance spot style). Binance USD-M (`drop u < S`, `U <= S <= u`) overrides it in U10.
+
+## Final review decisions (code review, 2026-11-19)
+
+- **F1 Switch readiness.** The new connection is ready when it is connected, every book topic has an applied snapshot and every other topic has had a frame. A plan without book topics therefore still overlaps.
+- **F2 Resync limits.** More than `max_resyncs` (default 5) resyncs of one topic within `resync_window` (default 60 s) reconnect instead (judgement). The backoff resets only when the ended connection had applied a snapshot and lived at least `backoff_reset_after` (default 60 s, judgement).
+- **F3 First snapshot.** A book topic with no snapshot and no sync in progress `resync_timeout` after subscribe reconnects the connection.
+- **F4 Candidate end.** The supervisor watches the switch's connection: when it ends before it is ready, `Disconnected` and `SwitchFailed` are sent at once, and a finished candidate is never promoted. A candidate stopped at the deadline also gets `Disconnected`.
+- **F5 Sink first.** A frame goes to the sink before it is parsed; a connection is marked closed by its own task before it returns.
+- **F6 Every REST body is sunk.** Non-2xx answers too, and also when the connection has ended meanwhile (the REST task sinks the body itself).
