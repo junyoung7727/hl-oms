@@ -29,6 +29,15 @@ pub(crate) fn ms_to_ns(ms: i64, name: &str) -> Result<i64, ParseError> {
         .ok_or_else(|| ParseError::new(format!("{name} overflows")))
 }
 
+/// A price or a traded quantity is never 0 or negative.
+pub(crate) fn positive(x: i64, name: &str) -> Result<i64, ParseError> {
+    if x > 0 {
+        Ok(x)
+    } else {
+        Err(ParseError::new(format!("{name} {x} is not positive")))
+    }
+}
+
 pub(crate) fn decimal(s: &str, exp: i8, name: &str) -> Result<i64, ParseError> {
     to_int(s, exp).map_err(|e| ParseError::new(format!("{name} {s:?} at 10^{exp}: {e:?}")))
 }
@@ -58,10 +67,15 @@ fn levels(data: &Value, name: &str, inst: &Instrument) -> Result<Vec<Level>, Par
                         "{name}: a level is not two strings"
                     )));
                 };
-                Ok(Level {
-                    px: decimal(px, inst.px_exp, "price")?,
+                // Contract 7: level quantities are >= 0 (0 removes the level).
+                let level = Level {
+                    px: positive(decimal(px, inst.px_exp, "price")?, "price")?,
                     qty: decimal(qty, inst.qty_exp, "quantity")?,
-                })
+                };
+                if level.qty < 0 {
+                    return Err(ParseError::new(format!("{name}: negative quantity")));
+                }
+                Ok(level)
             }
             _ => Err(ParseError::new(format!(
                 "{name}: a level is not [price, size]"
@@ -146,8 +160,11 @@ pub(crate) fn trades(
                 recv_ns,
                 trade_id: str_field(t, "i")?.to_string(),
                 side,
-                px: decimal(str_field(t, "p")?, inst.px_exp, "price")?,
-                qty: decimal(str_field(t, "v")?, inst.qty_exp, "quantity")?,
+                px: positive(decimal(str_field(t, "p")?, inst.px_exp, "price")?, "price")?,
+                qty: positive(
+                    decimal(str_field(t, "v")?, inst.qty_exp, "quantity")?,
+                    "quantity",
+                )?,
                 px_exp: inst.px_exp,
                 qty_exp: inst.qty_exp,
                 venue_seq: t.get("seq").and_then(Value::as_i64),

@@ -59,3 +59,4 @@ A new workspace crate `md-bybit` with no I/O that implements `MarketDataAdapter`
 
 - Built directly by Claude Opus 5.5 (2026-11-18, owner instruction "이제 개발을 너가 직접해"); lean spec (owner: "검증 사소한 것까지 하지마").
 - `orderbook.1` resends a snapshot with the same `u` after 3 s without change (documented). By contract 3.5 each would be a `resnapshot` row. We do not subscribe depth 1 now (grill decision: 50 for all, 1000 for traded symbols); revisit with U7 if depth 1 is ever used.
+- Final review (2026-11-18) fixes: negative level quantities, prices ≤ 0 and trade quantities ≤ 0 are refused (contract 7 table: level quantities ≥ 0); the plan accepts only the exact channel strings (`u32::from_str` took `orderbook.+50`); connection numbers that would pass `u32::MAX` are a `PlanError`; the golden test also counts instrument rows per record.

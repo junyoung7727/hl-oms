@@ -99,6 +99,8 @@ fn trades_keep_order_side_and_flags() {
         r#"{"topic":"publicTrade.BTCUSDT","type":"snapshot","ts":1,"data":[{"T":1,"s":"ETHUSDT","S":"Buy","v":"1","p":"1","i":"x","BT":false,"seq":1}]}"#,
         r#"{"topic":"publicTrade.BTCUSDT","type":"snapshot","ts":1,"data":[{"s":"BTCUSDT","S":"Buy","v":"1","p":"1","i":"x","BT":false,"seq":1}]}"#,
         r#"{"topic":"publicTrade.BTCUSDT","type":"snapshot","ts":1,"data":{}}"#,
+        r#"{"topic":"publicTrade.BTCUSDT","type":"snapshot","ts":1,"data":[{"T":1,"s":"BTCUSDT","S":"Buy","v":"-1","p":"1","i":"x","BT":false,"seq":1}]}"#,
+        r#"{"topic":"publicTrade.BTCUSDT","type":"snapshot","ts":1,"data":[{"T":1,"s":"BTCUSDT","S":"Buy","v":"1","p":"0","i":"x","BT":false,"seq":1}]}"#,
     ] {
         assert!(linear().parse(&key, bad.as_bytes(), 5).is_err(), "{bad}");
     }

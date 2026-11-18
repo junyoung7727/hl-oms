@@ -74,6 +74,8 @@ fn adapter(golden: &mut Golden) -> BybitAdapter {
         let parsed = BybitAdapter::new(Market::Linear, &[])
             .parse_instruments(&r.payload, r.recv_ns)
             .expect("golden instruments");
+        let naming = rows.iter().filter(|x| lineage(x) == lineage(row)).count();
+        assert_eq!(parsed.len(), naming, "instrument rows of the record");
         let inst = parsed
             .iter()
             .find(|x| x.symbol == s(row, "symbol"))

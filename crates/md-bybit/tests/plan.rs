@@ -116,6 +116,23 @@ fn plan_refuses_what_bybit_would_refuse() {
         "depth differs"
     );
     assert!(a.plan(&symbols("x", 1), &["kline.1".into()], 50).is_err());
+    // u32::from_str accepts these; Bybit has no such topic.
+    for odd in ["orderbook.+50", "orderbook.050", "orderbook. 50"] {
+        assert!(
+            a.plan(&symbols("x", 1), &[odd.into()], 50).is_err(),
+            "{odd}"
+        );
+    }
+    let near_max = a
+        .clone()
+        .with_max_topics_per_conn(1)
+        .with_conn_budget(u32::MAX - 1, 5);
+    assert!(
+        near_max
+            .plan(&symbols("x", 3), &["tickers".into()], 50)
+            .is_err(),
+        "connection numbers would repeat past u32::MAX"
+    );
     let dup = vec!["BTCUSDT".to_string(), "BTCUSDT".to_string()];
     assert!(a.plan(&dup, &one, 50).is_err(), "duplicate symbol");
     assert!(

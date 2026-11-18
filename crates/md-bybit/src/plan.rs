@@ -26,17 +26,14 @@ fn arg_chars(key: &StreamKey) -> usize {
 }
 
 fn check_channel(channel: &str, depth: u32) -> Result<(), PlanError> {
-    match channel.strip_prefix("orderbook.") {
-        Some(d) => match d.parse::<u32>() {
-            Ok(n) if DEPTHS.contains(&n) && n == depth => Ok(()),
-            Ok(n) if DEPTHS.contains(&n) => {
-                Err(PlanError(format!("channel {channel} with depth {depth}")))
-            }
-            _ => Err(PlanError(format!(
-                "Bybit has no order book channel {channel}"
-            ))),
-        },
-        None if channel == "publicTrade" || channel == "tickers" => Ok(()),
+    if channel == "publicTrade" || channel == "tickers" {
+        return Ok(());
+    }
+    // Exact strings only: `u32::from_str` would also take "+50" or "050",
+    // which are not Bybit topics.
+    match DEPTHS.iter().find(|d| channel == format!("orderbook.{d}")) {
+        Some(&d) if d == depth => Ok(()),
+        Some(_) => Err(PlanError(format!("channel {channel} with depth {depth}"))),
         None => Err(PlanError(format!("channel {channel} is not supported"))),
     }
 }
@@ -83,7 +80,9 @@ pub(crate) fn plan(
                 )));
             }
             plans.push(ConnPlan {
-                conn_index: first_conn_index.saturating_add(n),
+                conn_index: first_conn_index
+                    .checked_add(n)
+                    .ok_or_else(|| PlanError("connection numbers would pass u32::MAX".into()))?,
                 topics: Vec::new(),
                 depth,
             });

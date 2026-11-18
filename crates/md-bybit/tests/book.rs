@@ -148,6 +148,10 @@ fn inexact_or_mismatched_book_frames_are_refused() {
         book("delta", 1, 1, r#"["42000.1","1.0001"]"#, ""),
         book("delta", 1, 1, r#"["42000.1","99999999999999999.000"]"#, ""),
         book("delta", 1, 1, r#"["42000.1"]"#, ""),
+        // Contract 7: level quantities are >= 0; a price is never <= 0.
+        book("delta", 1, 1, r#"["42000.0","-1.000"]"#, ""),
+        book("delta", 1, 1, "", r#"["-42000.0","1.000"]"#),
+        book("delta", 1, 1, r#"["0","1.000"]"#, ""),
         book("partial", 1, 1, "", ""),
         br#"{"topic":"orderbook.50.BTCUSDT","type":"delta","ts":1,"data":{"s":"ETHUSDT","b":[],"a":[],"u":1,"seq":1}}"#.to_vec(),
         br#"{"topic":"orderbook.200.BTCUSDT","type":"delta","ts":1,"data":{"s":"BTCUSDT","b":[],"a":[],"u":1,"seq":1}}"#.to_vec(),
