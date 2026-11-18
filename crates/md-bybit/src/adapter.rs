@@ -8,7 +8,7 @@ use md_core::adapter::{
 };
 use md_core::{GapEvent, Normalized, SeqRule, StreamKey};
 
-use crate::{Market, instruments, route};
+use crate::{Market, instruments, parse, route};
 
 /// The adapter of one market. It knows the exponents of the instruments it
 /// was built with; a symbol without an instrument row cannot be parsed.
@@ -78,11 +78,18 @@ impl MarketDataAdapter for BybitAdapter {
     fn parse(
         &self,
         key: &StreamKey,
-        _frame: &[u8],
-        _recv_ns: i64,
+        frame: &[u8],
+        recv_ns: i64,
     ) -> Result<Vec<Normalized>, ParseError> {
-        self.instrument(&key.symbol)?;
-        Err(ParseError::new("parse is built in tickets 02 and 03"))
+        let inst = self.instrument(&key.symbol)?;
+        if key.channel.starts_with("orderbook.") {
+            parse::book(key, inst, frame, recv_ns)
+        } else {
+            Err(ParseError::new(format!(
+                "channel {} is built in ticket 03",
+                key.channel
+            )))
+        }
     }
 
     fn seq_rule(&self, key: &StreamKey) -> SeqRule {
