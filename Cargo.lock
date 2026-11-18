@@ -932,6 +932,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "md-feed"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "md-bybit",
+ "md-core",
+ "reqwest",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
 name = "md-lake"
 version = "0.1.0"
 dependencies = [
@@ -1331,6 +1344,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",

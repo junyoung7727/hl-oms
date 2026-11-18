@@ -1,0 +1,12 @@
+# 05: Stale flag and events
+
+**What to build:** `is_stale` and `BookView.stale` by the spec rule, per-channel `stale_after`, the checker task with `StaleRaised`/`StaleCleared`. Spec: "Stale".
+
+**Blocked by:** 02, 03
+
+**Status:** done
+
+- [x] Test `stale_before_first_snapshot`.
+- [x] Test `stale_on_silence_and_cleared_by_next_message`: fake stops for > `stale_after`; `StaleRaised`; next delta → `StaleCleared`, `is_stale` false.
+- [x] Test `stale_during_resync`: during a resubscribe the book is stale even with fresh deltas, until the snapshot applies.
+- [x] Test `closed_connection_is_stale_at_once` (spec R3).
