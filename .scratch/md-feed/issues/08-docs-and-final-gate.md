@@ -4,7 +4,7 @@
 
 **Blocked by:** 01–07
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Full gate passes (secret scan, selftest, build, tests, failpoints, clippy, docs diff, rustfmt on added files).
-- [ ] No test opens a non-loopback socket (all test URLs are `127.0.0.1`; `loopback_only` set in every test config).
+- [x] Full gate passes (secret scan, selftest, build, tests, failpoints, clippy, docs diff, rustfmt on added files).
+- [x] No test opens a non-loopback socket (all test URLs are `127.0.0.1`; `loopback_only` set in every test config).

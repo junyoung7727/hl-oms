@@ -49,6 +49,8 @@ pub(crate) struct TopicState {
     pub resyncing: bool,
     pub resync_started: Option<Instant>,
     pub rest: Option<RestSync>,
+    /// Start times of the recent resyncs (spec F2).
+    pub resyncs: VecDeque<Instant>,
 }
 
 impl TopicState {
@@ -69,6 +71,11 @@ pub(crate) struct ConnState {
     /// Book topics only (adapter `is_book`).
     pub books: BTreeMap<StreamKey, RwLock<TopicState>>,
     pub tickers: BTreeMap<StreamKey, Mutex<Option<Ticker>>>,
+    /// Non-book topics that have had a frame (switch readiness, spec F1).
+    pub seen: BTreeMap<StreamKey, AtomicBool>,
+    /// Connected and subscribed.
+    pub connected: AtomicBool,
+    pub subscribed_at: Mutex<Option<Instant>>,
     /// Reads and the message sink use the active connection of a slot.
     pub active: AtomicBool,
     /// A snapshot was applied on this connection (resets the backoff).
@@ -102,6 +109,7 @@ impl ConnState {
                         resyncing: false,
                         resync_started: None,
                         rest: None,
+                        resyncs: VecDeque::new(),
                     }),
                 );
             } else {
@@ -112,7 +120,13 @@ impl ConnState {
             conn_id,
             plan,
             books,
+            seen: tickers
+                .keys()
+                .map(|k| (k.clone(), AtomicBool::new(false)))
+                .collect(),
             tickers,
+            connected: AtomicBool::new(false),
+            subscribed_at: Mutex::new(None),
             active: AtomicBool::new(false),
             applied_any: AtomicBool::new(false),
             ready: tokio::sync::Notify::new(),
@@ -120,9 +134,13 @@ impl ConnState {
         }
     }
 
-    /// Every book topic has an applied book (a switch may activate).
+    /// Ready to take over a slot (spec F1): connected, every book topic has
+    /// an applied book and every other topic has had a frame.
     pub fn all_books_ready(&self) -> bool {
-        !self.closed.load(std::sync::atomic::Ordering::Acquire)
+        use std::sync::atomic::Ordering;
+        self.connected.load(Ordering::Acquire)
+            && !self.closed.load(Ordering::Acquire)
+            && self.seen.values().all(|s| s.load(Ordering::Acquire))
             && self.books.values().all(|t| {
                 t.read()
                     .map(|t| t.has_book && !t.resyncing)

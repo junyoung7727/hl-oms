@@ -177,3 +177,104 @@ async fn old_connection_dies_during_switch() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(fake.accepted.load(Ordering::SeqCst), 2);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn switch_without_books_waits_for_a_frame_of_each_topic() {
+    // F1: a plan with only trades and tickers must still overlap.
+    let trades = |from: usize, n: usize| -> Vec<Step> {
+        let mut v = Vec::new();
+        for i in from..from + n {
+            v.push(Step::Send(common::trade(
+                "BTCUSDT",
+                &format!("t{i}"),
+                1_000 + i as i64,
+            )));
+            v.push(Step::Pause(Duration::from_millis(40)));
+        }
+        v
+    };
+    let mut old = vec![Step::WaitFor("subscribe".into())];
+    old.extend(trades(0, 60));
+    let mut new = vec![
+        Step::WaitFor("subscribe".into()),
+        Step::Pause(Duration::from_millis(400)),
+    ];
+    new.push(Step::Send(common::ticker(
+        "BTCUSDT",
+        "snapshot",
+        5_000,
+        r#","lastPrice":"42000.0""#,
+    )));
+    new.extend(trades(1_000, 40));
+    let fake = FakeWs::start(vec![old, new]).await;
+    let sink = Arc::new(VecSink::default());
+    let mut feed = Feed::start(
+        bybit(),
+        config(&fake.url, Arc::new(ConnIds::new())),
+        plan_of(&["BTCUSDT"], &["publicTrade", "tickers"]),
+        Some(sink.clone() as Arc<dyn FrameSink>),
+    )
+    .expect("start");
+    let mut ev = feed.take_events().expect("events");
+    eventually(|| !sink.frames().is_empty()).await;
+    let c1 = feed.active_conn_id(0).expect("active");
+    let asked = std::time::Instant::now();
+    feed.switch(0).expect("switch");
+    let done = wait_event(&mut ev, |e| matches!(e, FeedEvent::SwitchDone { .. })).await;
+    let FeedEvent::SwitchDone { to_conn_id: c2, .. } = done else {
+        unreachable!()
+    };
+    assert!(
+        asked.elapsed() >= Duration::from_millis(350),
+        "done before the new connection had frames"
+    );
+    let frames = sink.frames();
+    let first_new = frames
+        .iter()
+        .find(|f| f.conn_id == c2)
+        .expect("new frames")
+        .recv_ns;
+    assert!(
+        frames
+            .iter()
+            .any(|f| f.conn_id == c1 && f.recv_ns > first_new),
+        "no overlap"
+    );
+    assert!(feed.ticker(&key("tickers", "BTCUSDT")).is_some());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn candidate_that_ends_fails_the_switch_at_once() {
+    // F4.
+    let mut old = vec![Step::WaitFor("subscribe".into()), snap(1)];
+    old.extend(deltas(2, 80));
+    let fake = FakeWs::start(vec![old, vec![Step::Close], vec![]]).await;
+    let mut cfg = config(&fake.url, Arc::new(ConnIds::new()));
+    cfg.resync_timeout = Duration::from_secs(3);
+    let mut feed =
+        Feed::start(bybit(), cfg, plan_of(&["BTCUSDT"], &["orderbook.50"]), None).expect("start");
+    let k = key("orderbook.50", "BTCUSDT");
+    let mut ev = feed.take_events().expect("events");
+    eventually(|| feed.market_ref(&k).is_some()).await;
+    let c1 = feed.active_conn_id(0).expect("active");
+    let asked = std::time::Instant::now();
+    feed.switch(0).expect("switch");
+    let mut disconnected = None;
+    let failed = wait_event(&mut ev, |e| {
+        if let FeedEvent::Disconnected { conn_id, .. } = e {
+            disconnected = Some(*conn_id);
+        }
+        matches!(e, FeedEvent::SwitchFailed { .. })
+    })
+    .await;
+    assert!(
+        asked.elapsed() < Duration::from_secs(2),
+        "not at the 6 s deadline"
+    );
+    let FeedEvent::SwitchFailed { conn_id: c2, .. } = failed else {
+        unreachable!()
+    };
+    assert_eq!(disconnected, Some(c2), "the candidate's end is reported");
+    assert_eq!(feed.active_conn_id(0), Some(c1));
+    assert!(!feed.is_stale(&k));
+}

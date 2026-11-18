@@ -177,6 +177,11 @@ impl FakeRest {
 
     /// Each answer waits `delay` after the request has arrived.
     pub async fn start_with_delay(bodies: Vec<String>, delay: Duration) -> FakeRest {
+        Self::start_full(bodies.into_iter().map(|b| (200, b)).collect(), delay).await
+    }
+
+    /// Answers with these statuses and bodies, in order (the last repeats).
+    pub async fn start_full(bodies: Vec<(u16, String)>, delay: Duration) -> FakeRest {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let base = format!("http://{}", listener.local_addr().expect("addr"));
         let requests: Arc<Mutex<Vec<String>>> = Arc::default();
@@ -207,17 +212,17 @@ impl FakeRest {
                     r3.lock()
                         .expect("requests")
                         .push(head.lines().next().unwrap_or("").to_string());
-                    let body = {
+                    let (status, body) = {
                         let mut b = b3.lock().expect("bodies");
                         if b.len() > 1 {
-                            b.pop_front().unwrap_or_default()
+                            b.pop_front().unwrap_or((200, String::new()))
                         } else {
-                            b.front().cloned().unwrap_or_default()
+                            b.front().cloned().unwrap_or((200, String::new()))
                         }
                     };
                     tokio::time::sleep(delay).await;
                     let resp = format!(
-                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
                         body.len()
                     );
                     let _ = tcp.write_all(resp.as_bytes()).await;

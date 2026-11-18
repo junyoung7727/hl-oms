@@ -238,6 +238,7 @@ struct Running {
     conn: Arc<ConnState>,
     stop: watch::Sender<bool>,
     done: JoinHandle<End>,
+    started: Instant,
 }
 
 fn spawn_conn<A: MarketDataAdapter + Send + Sync + 'static>(
@@ -255,7 +256,12 @@ fn spawn_conn<A: MarketDataAdapter + Send + Sync + 'static>(
     ));
     let (stop, stop_rx) = watch::channel(false);
     let done = tokio::spawn(Conn::run(ctx.clone(), conn.clone(), stop_rx));
-    Some(Running { conn, stop, done })
+    Some(Running {
+        conn,
+        stop,
+        done,
+        started: Instant::now(),
+    })
 }
 
 /// Marks the connection closed (its books stale, R3) and reports it.
@@ -272,15 +278,31 @@ fn ended<A>(ctx: &Ctx<A>, r: &Running, end: Result<End, tokio::task::JoinError>)
     });
 }
 
-async fn wait_ready(c: &Option<(Running, tokio::time::Instant)>) {
-    match c {
-        Some((r, _)) => loop {
-            if r.conn.all_books_ready() {
+/// What happened to the switch's connection (the candidate).
+enum CandEvent {
+    Ready,
+    Ended(Result<End, tokio::task::JoinError>),
+    Timeout,
+}
+
+async fn candidate_event(c: &mut Option<(Running, tokio::time::Instant)>) -> CandEvent {
+    let Some((r, deadline)) = c.as_mut() else {
+        return std::future::pending().await;
+    };
+    let deadline = *deadline;
+    let conn = r.conn.clone();
+    let ready = async move {
+        loop {
+            if conn.all_books_ready() {
                 return;
             }
-            r.conn.ready.notified().await;
-        },
-        None => std::future::pending().await,
+            conn.ready.notified().await;
+        }
+    };
+    tokio::select! {
+        end = &mut r.done => CandEvent::Ended(end),
+        _ = ready => CandEvent::Ready,
+        _ = tokio::time::sleep_until(deadline) => CandEvent::Timeout,
     }
 }
 
@@ -298,6 +320,11 @@ async fn supervise<A: MarketDataAdapter + Send + Sync + 'static>(
     let mut current: Option<Running> = None;
     let mut candidate: Option<(Running, tokio::time::Instant)> = None;
     let mut first = true;
+    let failed = |c: &Running, reason: String| FeedEvent::SwitchFailed {
+        conn_index: slot.plan.conn_index,
+        conn_id: c.conn.conn_id,
+        reason,
+    };
     loop {
         if current.is_none() {
             if !first {
@@ -323,18 +350,30 @@ async fn supervise<A: MarketDataAdapter + Send + Sync + 'static>(
             end = &mut cur.done => {
                 let Some(r) = current.take() else { continue };
                 ended(&ctx, &r, end);
-                if r.conn.applied_any.load(Ordering::Acquire) {
+                // F2: only a connection that worked for a while resets it.
+                if r.conn.applied_any.load(Ordering::Acquire)
+                    && r.started.elapsed() >= cfg.backoff_reset_after
+                {
                     backoff = cfg.backoff_min;
                 }
                 if let Some((c, _)) = candidate.take() {
-                    // R7: the switch's connection takes over the slot.
-                    slot.set_active(&c.conn);
-                    ctx.emit(FeedEvent::SwitchDone {
-                        conn_index: slot.plan.conn_index,
-                        from_conn_id: r.conn.conn_id,
-                        to_conn_id: c.conn.conn_id,
-                    });
-                    current = Some(c);
+                    if c.done.is_finished() {
+                        // F4: never promote a candidate that has ended.
+                        let mut c = c;
+                        let end = (&mut c.done).await;
+                        let reason = end.as_ref().map(End::reason).unwrap_or_else(|e| e.to_string());
+                        ended(&ctx, &c, end);
+                        ctx.emit(failed(&c, reason));
+                    } else {
+                        // R7: the switch's connection takes over the slot.
+                        slot.set_active(&c.conn);
+                        ctx.emit(FeedEvent::SwitchDone {
+                            conn_index: slot.plan.conn_index,
+                            from_conn_id: r.conn.conn_id,
+                            to_conn_id: c.conn.conn_id,
+                        });
+                        current = Some(c);
+                    }
                 }
             }
             cmd = cmds.recv() => match cmd {
@@ -355,45 +394,40 @@ async fn supervise<A: MarketDataAdapter + Send + Sync + 'static>(
                 }
                 None => return,
             },
-            _ = wait_ready(&candidate) => {
+            ev = candidate_event(&mut candidate) => {
                 let Some((c, _)) = candidate.take() else { continue };
-                let Some(old) = current.replace(c) else { continue };
-                if let Some(new) = current.as_ref() {
-                    slot.set_active(&new.conn);
-                    ctx.emit(FeedEvent::SwitchDone {
-                        conn_index: slot.plan.conn_index,
-                        from_conn_id: old.conn.conn_id,
-                        to_conn_id: new.conn.conn_id,
-                    });
-                }
-                let _ = old.stop.send(true);
-                let ctx2 = ctx.clone();
-                tokio::spawn(async move {
-                    let mut old = old;
-                    let end = (&mut old.done).await;
-                    ended(&ctx2, &old, end);
-                });
-            }
-            _ = async {
-                match &candidate {
-                    Some((_, deadline)) => tokio::time::sleep_until(*deadline).await,
-                    None => std::future::pending().await,
-                }
-            } => {
-                if let Some((c, _)) = candidate.take() {
-                    let _ = c.stop.send(true);
-                    let mut c = c;
-                    let end = (&mut c.done).await;
-                    c.conn.closed.store(true, Ordering::Release);
-                    ctx.emit(FeedEvent::SwitchFailed {
-                        conn_index: slot.plan.conn_index,
-                        conn_id: c.conn.conn_id,
-                        reason: match end {
-                            Ok(End::Stopped) => "no snapshot of every book in time".into(),
-                            Ok(e) => e.reason(),
-                            Err(e) => e.to_string(),
-                        },
-                    });
+                match ev {
+                    CandEvent::Ready => {
+                        let Some(old) = current.replace(c) else { continue };
+                        if let Some(new) = current.as_ref() {
+                            slot.set_active(&new.conn);
+                            ctx.emit(FeedEvent::SwitchDone {
+                                conn_index: slot.plan.conn_index,
+                                from_conn_id: old.conn.conn_id,
+                                to_conn_id: new.conn.conn_id,
+                            });
+                        }
+                        let _ = old.stop.send(true);
+                        let ctx2 = ctx.clone();
+                        tokio::spawn(async move {
+                            let mut old = old;
+                            let end = (&mut old.done).await;
+                            ended(&ctx2, &old, end);
+                        });
+                    }
+                    CandEvent::Ended(end) => {
+                        // F4: report at once, not at the deadline.
+                        let reason = end.as_ref().map(End::reason).unwrap_or_else(|e| e.to_string());
+                        ended(&ctx, &c, end);
+                        ctx.emit(failed(&c, reason));
+                    }
+                    CandEvent::Timeout => {
+                        let _ = c.stop.send(true);
+                        let mut c = c;
+                        let end = (&mut c.done).await;
+                        ended(&ctx, &c, end);
+                        ctx.emit(failed(&c, "no snapshot of every book in time".into()));
+                    }
                 }
             }
         }

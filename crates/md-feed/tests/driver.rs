@@ -169,3 +169,83 @@ async fn sink_overflow_closes_the_connection() {
         "{e:?}"
     );
 }
+
+/// Bybit, but `parse` panics on a frame that contains `boom`.
+struct Panicky(md_bybit::BybitAdapter);
+
+impl MarketDataAdapter for Panicky {
+    fn venue(&self) -> &'static str {
+        self.0.venue()
+    }
+    fn plan(
+        &self,
+        s: &[String],
+        c: &[String],
+        d: u32,
+    ) -> Result<Vec<md_core::adapter::ConnPlan>, md_core::adapter::PlanError> {
+        self.0.plan(s, c, d)
+    }
+    fn subscribe_frames(&self, p: &md_core::adapter::ConnPlan) -> Vec<String> {
+        self.0.subscribe_frames(p)
+    }
+    fn keepalive(&self) -> md_core::adapter::Keepalive {
+        self.0.keepalive()
+    }
+    fn route(&self, f: &[u8]) -> md_core::adapter::Route {
+        self.0.route(f)
+    }
+    fn parse(
+        &self,
+        k: &md_core::StreamKey,
+        f: &[u8],
+        r: i64,
+    ) -> Result<Vec<md_core::Normalized>, md_core::adapter::ParseError> {
+        assert!(!String::from_utf8_lossy(f).contains("boom"), "adapter bug");
+        self.0.parse(k, f, r)
+    }
+    fn seq_rule(&self, k: &md_core::StreamKey) -> md_core::SeqRule {
+        self.0.seq_rule(k)
+    }
+    fn on_gap(&self, k: &md_core::StreamKey, g: &md_core::GapEvent) -> md_core::adapter::Resync {
+        self.0.on_gap(k, g)
+    }
+    fn instruments_request(&self) -> md_core::adapter::RestRequest {
+        self.0.instruments_request()
+    }
+    fn parse_instruments(
+        &self,
+        b: &[u8],
+        r: i64,
+    ) -> Result<Vec<md_core::adapter::Instrument>, md_core::adapter::ParseError> {
+        self.0.parse_instruments(b, r)
+    }
+    fn venue_ts_field(&self, c: &str) -> &'static str {
+        self.0.venue_ts_field(c)
+    }
+    fn market_name(&self) -> Option<&'static str> {
+        self.0.market_name()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn frame_is_sunk_before_it_is_parsed() {
+    // F5: an adapter that panics on a frame still leaves the frame in L0.
+    let boom = r#"{"topic":"orderbook.50.BTCUSDT","type":"delta","ts":1,"data":{"boom":1}}"#;
+    let fake = FakeWs::start(vec![
+        vec![Step::WaitFor("subscribe".into()), Step::Send(boom.into())],
+        vec![],
+    ])
+    .await;
+    let sink = Arc::new(VecSink::default());
+    let adapter =
+        md_bybit::BybitAdapter::new(md_bybit::Market::Linear, &[common::instrument("BTCUSDT")]);
+    let feed = Feed::start(
+        Arc::new(Panicky(adapter)),
+        config(&fake.url, Arc::new(ConnIds::new())),
+        plans(&["BTCUSDT"], 200),
+        Some(sink.clone() as Arc<dyn FrameSink>),
+    )
+    .expect("start");
+    eventually(|| sink.frames().iter().any(|f| f.payload == boom.as_bytes())).await;
+    drop(feed);
+}

@@ -181,3 +181,72 @@ async fn resync_timeout_reconnects() {
     eventually(|| feed.market_ref(&k).and_then(|r| r.update_id) == Some(1)).await;
     assert!(!feed.is_stale(&k));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn recurring_gap_escalates_to_reconnect() {
+    // F2: a topic that breaks after every resync does not resubscribe forever.
+    let mut script = vec![Step::WaitFor("subscribe".into())];
+    for round in 0..4 {
+        let base = round * 100;
+        script.push(Step::Send(book(
+            "BTCUSDT",
+            "snapshot",
+            base + 1,
+            1_000,
+            r#"["42000.0","1.000"]"#,
+            "",
+        )));
+        script.push(Step::Send(book(
+            "BTCUSDT",
+            "delta",
+            base + 3,
+            1_010,
+            "",
+            "",
+        )));
+        script.push(Step::Pause(Duration::from_millis(100)));
+    }
+    let fake = FakeWs::start(vec![script, vec![]]).await;
+    let mut cfg = config(&fake.url, Arc::new(ConnIds::new()));
+    cfg.max_resyncs = 2;
+    let mut feed =
+        Feed::start(bybit(), cfg, plan_of(&["BTCUSDT"], &["orderbook.50"]), None).expect("start");
+    let mut ev = feed.take_events().expect("events");
+    let mut gaps = 0;
+    let d = wait_event(&mut ev, |e| {
+        if matches!(e, FeedEvent::Gap { .. }) {
+            gaps += 1;
+        }
+        matches!(e, FeedEvent::Disconnected { .. })
+    })
+    .await;
+    assert!(
+        matches!(&d, FeedEvent::Disconnected { reason, .. } if reason.contains("resyncs")),
+        "{d:?}"
+    );
+    assert_eq!(gaps, 3, "two resubscribes, then the third gap reconnects");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn no_first_snapshot_reconnects() {
+    // F3: pongs keep the connection alive, but the book never starts.
+    let mut script = vec![Step::WaitFor("subscribe".into())];
+    for _ in 0..30 {
+        script.push(Step::Send(r#"{"op":"pong"}"#.into()));
+        script.push(Step::Pause(Duration::from_millis(100)));
+    }
+    let fake = FakeWs::start(vec![script]).await;
+    let mut feed = Feed::start(
+        bybit(),
+        config(&fake.url, Arc::new(ConnIds::new())),
+        plan_of(&["BTCUSDT"], &["orderbook.50"]),
+        None,
+    )
+    .expect("start");
+    let mut ev = feed.take_events().expect("events");
+    let d = wait_event(&mut ev, |e| matches!(e, FeedEvent::Disconnected { .. })).await;
+    assert!(
+        matches!(&d, FeedEvent::Disconnected { reason, .. } if reason.contains("no snapshot")),
+        "{d:?}"
+    );
+}

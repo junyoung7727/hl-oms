@@ -94,7 +94,18 @@ async fn server_close_reconnects_with_backoff() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn busy_connection_is_not_silent() {
-    let mut script = vec![Step::WaitFor("subscribe".into())];
+    // A snapshot first: without one the book would time out (spec F3).
+    let mut script = vec![
+        Step::WaitFor("subscribe".into()),
+        Step::Send(book(
+            "BTCUSDT",
+            "snapshot",
+            1,
+            1_000,
+            r#"["42000.0","1.000"]"#,
+            "",
+        )),
+    ];
     for _ in 0..10 {
         script.push(Step::Send(r#"{"op":"pong"}"#.into()));
         script.push(Step::Pause(Duration::from_millis(100)));
@@ -109,4 +120,35 @@ async fn busy_connection_is_not_silent() {
     while let Ok(e) = ev.try_recv() {
         assert!(!matches!(e, FeedEvent::Disconnected { .. }), "{e:?}");
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn backoff_not_reset_by_a_short_lived_connection() {
+    // F2: a snapshot then a close at once must not reset the backoff.
+    let fake = FakeWs::start(vec![vec![
+        Step::WaitFor("subscribe".into()),
+        Step::Send(book(
+            "BTCUSDT",
+            "snapshot",
+            1,
+            1_000,
+            r#"["42000.0","1.000"]"#,
+            "",
+        )),
+        Step::Pause(Duration::from_millis(20)),
+        Step::Close,
+    ]])
+    .await;
+    let mut cfg = config(&fake.url, Arc::new(ConnIds::new()));
+    cfg.backoff_reset_after = Duration::from_secs(10);
+    let min = cfg.backoff_min;
+    let mut feed =
+        Feed::start(bybit(), cfg, plan_of(&["BTCUSDT"], &["orderbook.50"]), None).expect("start");
+    let mut ev = feed.take_events().expect("events");
+    let mut at = Vec::new();
+    while at.len() < 3 {
+        wait_event(&mut ev, |e| matches!(e, FeedEvent::Connected { .. })).await;
+        at.push(Instant::now());
+    }
+    assert!(at[2] - at[1] >= min * 2, "{:?}", at[2] - at[1]);
 }

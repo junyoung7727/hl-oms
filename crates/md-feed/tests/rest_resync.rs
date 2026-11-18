@@ -189,3 +189,41 @@ async fn gap_inside_the_buffer_keeps_the_later_deltas() {
     assert_eq!(fake.accepted.load(Ordering::SeqCst), 1, "no reconnect");
     assert_eq!(rest.requests.lock().expect("req").len(), 2);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_rest_answer_body_is_sunk() {
+    // F6: L0 keeps every REST body, also a 5xx one.
+    let fake = FakeWs::start(vec![vec![
+        Step::WaitFor("sub".into()),
+        Step::Send(d(6, 10, 5, "[100,2]")),
+        Step::Send(d(11, 15, 10, "[101,3]")),
+    ]])
+    .await;
+    let rest = FakeRest::start_full(
+        vec![
+            (503, r#"{"err":"busy"}"#.into()),
+            (200, snapshot(7, "[100,1]")),
+        ],
+        std::time::Duration::ZERO,
+    )
+    .await;
+    let mut cfg = config(&fake.url, Arc::new(ConnIds::new()));
+    cfg.rest_base = Some(rest.base.clone());
+    let sink = Arc::new(VecSink::default());
+    let feed = Feed::start(
+        Arc::new(RestVenue),
+        cfg,
+        plans(),
+        Some(sink.clone() as Arc<dyn FrameSink>),
+    )
+    .expect("start");
+    eventually(|| feed.market_ref(&k()).and_then(|r| r.update_id) == Some(15)).await;
+    let bodies: Vec<String> = sink
+        .frames()
+        .into_iter()
+        .filter(|f| f.src == Src::Rest)
+        .map(|f| String::from_utf8_lossy(&f.payload).to_string())
+        .collect();
+    assert_eq!(bodies.len(), 2, "{bodies:?}");
+    assert_eq!(bodies[0], r#"{"err":"busy"}"#);
+}

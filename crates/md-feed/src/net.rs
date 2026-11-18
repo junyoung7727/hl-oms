@@ -113,9 +113,18 @@ impl RestClient {
         b.build().map_err(|e| e.to_string())
     }
 
-    /// Sends the request; returns `(recv_ns, body)` of a 2xx answer. `recv_ns`
-    /// is read when the whole body has arrived.
+    /// Sends the request; returns `(recv_ns, body)` of a 2xx answer.
     pub async fn get(&self, req: &RestRequest) -> Result<(i64, Vec<u8>), String> {
+        match self.get_any(req).await? {
+            (recv_ns, status, body) if (200..300).contains(&status) => Ok((recv_ns, body)),
+            (_, status, _) => Err(format!("GET {}: status {status}", req.path)),
+        }
+    }
+
+    /// Sends the request; returns `(recv_ns, status, body)` of any answer, so
+    /// that a failed answer's body can be kept too. `recv_ns` is read when
+    /// the whole body has arrived.
+    pub async fn get_any(&self, req: &RestRequest) -> Result<(i64, u16, Vec<u8>), String> {
         if req.method != "GET" {
             return Err(format!("method {} is not supported", req.method));
         }
@@ -128,15 +137,11 @@ impl RestClient {
             .send()
             .await
             .map_err(|e| format!("GET {}: {e}", req.path))?;
-        let status = resp.status();
+        let status = resp.status().as_u16();
         let body = resp
             .bytes()
             .await
             .map_err(|e| format!("GET {}: {e}", req.path))?;
-        let recv_ns = now_ns();
-        if !status.is_success() {
-            return Err(format!("GET {}: status {status}", req.path));
-        }
-        Ok((recv_ns, body.to_vec()))
+        Ok((now_ns(), status, body.to_vec()))
     }
 }

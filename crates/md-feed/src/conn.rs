@@ -69,7 +69,9 @@ enum Action {
     Reconnect(String),
 }
 
-type RestResult = (StreamKey, Result<(i64, Vec<u8>), String>);
+/// A REST answer: `(recv_ns, frame_no, status, body)` (already in the sink),
+/// or a transport error; `true` when the sink overflowed.
+type RestResult = (StreamKey, Result<(i64, u64, u16, Vec<u8>), String>, bool);
 
 pub(crate) struct Conn<A> {
     ctx: Arc<Ctx<A>>,
@@ -78,8 +80,15 @@ pub(crate) struct Conn<A> {
 }
 
 impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
-    /// Runs the connection until it ends or `stop` becomes true.
-    pub async fn run(
+    /// Runs the connection until it ends or `stop` becomes true. The
+    /// connection is marked closed (its books stale) before this returns.
+    pub async fn run(ctx: Arc<Ctx<A>>, state: Arc<ConnState>, stop: watch::Receiver<bool>) -> End {
+        let end = Self::run_inner(ctx, state.clone(), stop).await;
+        state.closed.store(true, Ordering::Release);
+        end
+    }
+
+    async fn run_inner(
         ctx: Arc<Ctx<A>>,
         state: Arc<ConnState>,
         mut stop: watch::Receiver<bool>,
@@ -106,6 +115,11 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
                 return End::Failed(format!("subscribe failed: {e}"));
             }
         }
+        if let Ok(mut t) = state.subscribed_at.lock() {
+            *t = Some(Instant::now());
+        }
+        state.connected.store(true, Ordering::Release);
+        state.ready.notify_one();
         let keep = ctx.adapter.keepalive();
         let interval = ctx
             .cfg
@@ -148,15 +162,19 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
                     if last_rx.elapsed() > silence {
                         return End::Reconnect(format!("no message for {silence:?}"));
                     }
-                    if let Some(key) = me.resync_timed_out() {
-                        return End::Reconnect(format!(
-                            "resync of {}.{} took longer than {:?}",
-                            key.channel, key.symbol, ctx.cfg.resync_timeout
-                        ));
+                    if let Some(reason) = me.resync_timed_out() {
+                        return End::Reconnect(reason);
                     }
                     continue;
                 }
-                Some((key, res)) = rest_rx.recv() => me.on_rest(&key, res),
+                Some((key, res, overflow)) = rest_rx.recv() => {
+                    if overflow {
+                        state.closed.store(true, Ordering::Release);
+                        let _ = write.send(Message::Close(None)).await;
+                        return End::Reconnect("overflow".into());
+                    }
+                    me.on_rest(&key, res)
+                }
                 m = read.next() => {
                     let msg = match m {
                         None => return End::Failed("closed by the venue".into()),
@@ -180,7 +198,8 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
                     };
                     let no = frame_no;
                     frame_no += 1;
-                    let actions = me.on_frame(&payload, recv_ns, no);
+                    // The sink first (spec F5): L0 keeps the frame even if
+                    // parsing it goes wrong.
                     if let Some(sink) = &ctx.sink {
                         let f = RawFrame {
                             recv_ns,
@@ -190,14 +209,15 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
                             conn_index,
                             topic: None,
                             for_conn_id: None,
-                            payload,
+                            payload: payload.clone(),
                         };
                         if sink.frame(f).is_err() {
+                            state.closed.store(true, Ordering::Release);
                             let _ = write.send(Message::Close(None)).await;
                             return End::Reconnect("overflow".into());
                         }
                     }
-                    actions
+                    me.on_frame(&payload, recv_ns, no)
                 }
             };
             for a in actions {
@@ -219,12 +239,24 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
         }
     }
 
-    fn resync_timed_out(&self) -> Option<StreamKey> {
+    /// A resync, or the first snapshot after subscribe (spec F3), that took
+    /// longer than `resync_timeout`.
+    fn resync_timed_out(&self) -> Option<String> {
         let limit = self.ctx.cfg.resync_timeout;
+        let subscribed = self.state.subscribed_at.lock().ok().and_then(|t| *t);
         self.state.books.iter().find_map(|(key, st)| {
             let st = st.read().ok()?;
             match (st.resyncing, st.resync_started) {
-                (true, Some(t)) if t.elapsed() > limit => Some(key.clone()),
+                (true, Some(t)) if t.elapsed() > limit => Some(format!(
+                    "resync of {}.{} took longer than {limit:?}",
+                    key.channel, key.symbol
+                )),
+                (false, _) if !st.has_book && subscribed.is_some_and(|t| t.elapsed() > limit) => {
+                    Some(format!(
+                        "no snapshot of {}.{} within {limit:?} of subscribing",
+                        key.channel, key.symbol
+                    ))
+                }
                 _ => None,
             }
         })
@@ -248,9 +280,14 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
             Route::Stream(key) => key,
         };
         let is_book = self.state.books.contains_key(&key);
-        if !is_book && !self.state.tickers.contains_key(&key) {
-            // A topic this connection did not subscribe: kept in the sink only.
-            return Vec::new();
+        if !is_book {
+            let Some(seen) = self.state.seen.get(&key) else {
+                // A topic this connection did not subscribe: kept in the sink only.
+                return Vec::new();
+            };
+            if !seen.swap(true, Ordering::AcqRel) {
+                self.state.ready.notify_one();
+            }
         }
         let msgs = match self.ctx.adapter.parse(&key, payload, recv_ns) {
             Ok(msgs) => msgs,
@@ -400,8 +437,24 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
             gap,
             resync,
         });
+        let now = Instant::now();
         st.resyncing = true;
-        st.resync_started = Some(Instant::now());
+        st.resync_started = Some(now);
+        let window = self.ctx.cfg.resync_window;
+        while st
+            .resyncs
+            .front()
+            .is_some_and(|t| now.saturating_duration_since(*t) > window)
+        {
+            st.resyncs.pop_front();
+        }
+        st.resyncs.push_back(now);
+        if st.resyncs.len() > self.ctx.cfg.max_resyncs as usize {
+            return Some(Action::Reconnect(format!(
+                "more than {} resyncs of {}.{} within {window:?}",
+                self.ctx.cfg.max_resyncs, key.channel, key.symbol
+            )));
+        }
         match resync {
             Resync::Resubscribe => {
                 let frames = self.ctx.adapter.resubscribe_frames(&self.state.plan, key);
@@ -453,14 +506,38 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
         Some(Action::Rest(key.clone(), req))
     }
 
+    /// Fetches on its own task and sinks every body it receives, also a
+    /// non-2xx one and also when the connection has ended meanwhile (F6).
     fn spawn_rest(&self, key: StreamKey, req: RestRequest) {
         let Some(rest) = self.ctx.rest.clone() else {
             return;
         };
         let tx = self.rest_tx.clone();
+        let ctx = self.ctx.clone();
+        let (conn_index, for_conn_id) = (self.state.plan.conn_index, self.state.conn_id);
         tokio::spawn(async move {
-            let res = rest.get(&req).await;
-            let _ = tx.send((key, res)).await;
+            let mut overflow = false;
+            let res = match rest.get_any(&req).await {
+                Ok((recv_ns, status, body)) => {
+                    let frame_no = ctx.cfg.conn_ids.next_rest_frame_no();
+                    if let Some(sink) = &ctx.sink {
+                        let f = RawFrame {
+                            recv_ns,
+                            src: Src::Rest,
+                            conn_id: 0,
+                            frame_no,
+                            conn_index,
+                            topic: Some(key.clone()),
+                            for_conn_id: Some(for_conn_id),
+                            payload: body.clone(),
+                        };
+                        overflow = sink.frame(f).is_err();
+                    }
+                    Ok((recv_ns, frame_no, status, body))
+                }
+                Err(e) => Err(e),
+            };
+            let _ = tx.send((key, res, overflow)).await;
         });
     }
 
@@ -512,44 +589,34 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
         self.start_rest(&key, st, vec![u])
     }
 
-    fn on_rest(&self, key: &StreamKey, res: Result<(i64, Vec<u8>), String>) -> Vec<Action> {
+    fn on_rest(
+        &self,
+        key: &StreamKey,
+        res: Result<(i64, u64, u16, Vec<u8>), String>,
+    ) -> Vec<Action> {
         let Some(lock) = self.state.books.get(key) else {
             return Vec::new();
         };
-        let (recv_ns, body) = match res {
-            Ok(x) => x,
-            Err(e) => {
-                let Ok(mut st) = lock.write() else {
-                    return Vec::new();
-                };
-                if st.rest.is_none() {
-                    return Vec::new();
-                }
-                self.ctx.emit(FeedEvent::ParseError {
-                    conn_id: 0,
-                    key: Some(key.clone()),
-                    frame_no: 0,
-                    reason: e,
-                });
-                return self.retry_rest(key, &mut st).into_iter().collect();
-            }
-        };
-        let frame_no = self.ctx.cfg.conn_ids.next_rest_frame_no();
-        if let Some(sink) = &self.ctx.sink {
-            let f = RawFrame {
-                recv_ns,
-                src: Src::Rest,
-                conn_id: 0,
-                frame_no,
-                conn_index: self.state.plan.conn_index,
-                topic: Some(key.clone()),
-                for_conn_id: Some(self.state.conn_id),
-                payload: body.clone(),
+        let failed = |reason: String, frame_no: u64| -> Vec<Action> {
+            let Ok(mut st) = lock.write() else {
+                return Vec::new();
             };
-            if sink.frame(f).is_err() {
-                return vec![Action::Reconnect("overflow".into())];
+            if st.rest.is_none() {
+                return Vec::new();
             }
-        }
+            self.ctx.emit(FeedEvent::ParseError {
+                conn_id: 0,
+                key: Some(key.clone()),
+                frame_no,
+                reason,
+            });
+            self.retry_rest(key, &mut st).into_iter().collect()
+        };
+        let (recv_ns, frame_no, body) = match res {
+            Ok((r, n, status, body)) if (200..300).contains(&status) => (r, n, body),
+            Ok((_, n, status, _)) => return failed(format!("REST snapshot answered {status}"), n),
+            Err(e) => return failed(e, 0),
+        };
         let Ok(mut st) = lock.write() else {
             return Vec::new();
         };

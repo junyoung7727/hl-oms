@@ -64,6 +64,13 @@ pub struct FeedConfig {
     pub backoff_max: Duration,
     /// A resync that has not applied a snapshot within this time reconnects.
     pub resync_timeout: Duration,
+    /// More resyncs of one topic than this within `resync_window` reconnect
+    /// instead (spec F2).
+    pub max_resyncs: u32,
+    pub resync_window: Duration,
+    /// The backoff resets only after a connection that applied a snapshot
+    /// and lived at least this long (spec F2).
+    pub backoff_reset_after: Duration,
     /// Deltas buffered per topic during a REST resync; more restarts the resync.
     pub max_buffered_deltas: usize,
     /// Refuse every address that is not loopback (all tests set it).
@@ -75,7 +82,9 @@ pub struct FeedConfig {
 impl FeedConfig {
     /// Defaults: stale after 5 s, connect timeout 10 s, backoff 500 ms to
     /// 30 s, resync timeout 5 s (judgement, not a model: Bybit's first
-    /// snapshot came 223–676 ms after subscribing, design §6.3).
+    /// snapshot came 223–676 ms after subscribing, design §6.3), at most 5
+    /// resyncs per topic per 60 s, backoff reset after 60 s of life
+    /// (judgement).
     pub fn new(
         market: impl Into<String>,
         ws_url: impl Into<String>,
@@ -94,6 +103,9 @@ impl FeedConfig {
             backoff_min: Duration::from_millis(500),
             backoff_max: Duration::from_secs(30),
             resync_timeout: Duration::from_secs(5),
+            max_resyncs: 5,
+            resync_window: Duration::from_secs(60),
+            backoff_reset_after: Duration::from_secs(60),
             max_buffered_deltas: 100_000,
             loopback_only: false,
             event_capacity: 65_536,
