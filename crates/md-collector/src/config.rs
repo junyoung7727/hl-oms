@@ -169,14 +169,6 @@ struct Raw {
     traded_channels: Vec<TradedChannel>,
 }
 
-fn default_host() -> String {
-    std::fs::read_to_string("/etc/hostname")
-        .ok()
-        .map(|h| h.trim().to_string())
-        .filter(|h| !h.is_empty())
-        .unwrap_or_else(|| "unknown".into())
-}
-
 impl MarketConfig {
     /// Whether this market collects `channel` for `symbol`. With
     /// `symbols = "all"` a main channel counts for every symbol.
@@ -270,7 +262,7 @@ impl Config {
             venue: raw.venue,
             collector,
             lake_root: raw.lake_root,
-            host: raw.host.unwrap_or_else(default_host),
+            host: raw.host.unwrap_or_else(crate::host_name),
             loopback_only: raw.loopback_only,
             write: raw.write,
             disk: raw.disk,
