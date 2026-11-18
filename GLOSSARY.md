@@ -170,6 +170,14 @@ _Avoid_: drop, missing message
 The per-venue code behind `md_core::adapter::MarketDataAdapter` that plans connections, routes and parses frames and chooses the resync after a gap.
 _Avoid_: connector, driver
 
+**Exponent** (지수):
+`px_exp` or `qty_exp`: a price or quantity is an integer × 10^exp, with exp from the instrument's `tick_size` or `lot_size` (lake contract 1.3). Ticker mark and index prices use `ref_px_exp = px_exp - 2`, because the venue computes them finer than the tick.
+_Avoid_: scale, precision
+
+**Connection budget** (연결 예산):
+The range of `conn_index` values one market's plan may use. Bybit counts 500 new connections per 5 minutes over every market of `stream.bybit.com`, so the budgets of all markets together stay ≤ 250.
+_Avoid_: connection limit (that is Bybit's)
+
 **Open file** (열린 파일):
 The collector's file of one connection and one UTC hour under `crypto/l0/_open/`, one zstd level-3 stream, locked by its writer until the frame end and the last fsync.
 _Avoid_: raw file, buffer file

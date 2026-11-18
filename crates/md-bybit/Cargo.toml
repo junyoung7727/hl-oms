@@ -1,0 +1,15 @@
+[package]
+name = "md-bybit"
+description = "Bybit v5 public market data adapter (linear, inverse, spot) for md-core. No I/O."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+md-core = { path = "../md-core" }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
