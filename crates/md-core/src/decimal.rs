@@ -46,7 +46,11 @@ pub fn to_int(s: &str, exp: i8) -> Result<i64, DecimalError> {
     if trimmed.len() > 20 {
         return Err(DecimalError::Overflow);
     }
-    let magnitude: i128 = if trimmed.is_empty() { 0 } else { trimmed.parse().map_err(|_| DecimalError::Overflow)? };
+    let magnitude: i128 = if trimmed.is_empty() {
+        0
+    } else {
+        trimmed.parse().map_err(|_| DecimalError::Overflow)?
+    };
     let value = if neg { -magnitude } else { magnitude };
     i64::try_from(value).map_err(|_| DecimalError::Overflow)
 }
@@ -57,5 +61,7 @@ pub fn to_int(s: &str, exp: i8) -> Result<i64, DecimalError> {
 pub fn exponent_of(s: &str) -> Result<i8, DecimalError> {
     let (_, _, frac) = split(s)?;
     let places = frac.trim_end_matches('0').len();
-    i8::try_from(places).map(|p| -p).map_err(|_| DecimalError::Overflow)
+    i8::try_from(places)
+        .map(|p| -p)
+        .map_err(|_| DecimalError::Overflow)
 }

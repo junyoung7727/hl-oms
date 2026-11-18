@@ -25,7 +25,11 @@ pub struct OrderBook {
 
 impl OrderBook {
     pub fn new(max_depth: Option<usize>) -> Self {
-        Self { bids: BTreeMap::new(), asks: BTreeMap::new(), max_depth }
+        Self {
+            bids: BTreeMap::new(),
+            asks: BTreeMap::new(),
+            max_depth,
+        }
     }
 
     pub fn apply_snapshot(&mut self, update: &BookUpdate) {
@@ -35,7 +39,10 @@ impl OrderBook {
     }
 
     pub fn apply_delta(&mut self, update: &BookUpdate) {
-        for (side, levels) in [(&mut self.bids, &update.bids), (&mut self.asks, &update.asks)] {
+        for (side, levels) in [
+            (&mut self.bids, &update.bids),
+            (&mut self.asks, &update.asks),
+        ] {
             for level in levels {
                 if level.qty == 0 {
                     side.remove(&level.px);

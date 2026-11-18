@@ -11,7 +11,18 @@ fn decimal_string_converts_exactly_or_fails() {
     assert_eq!(to_int("5", 0), Ok(5));
     assert_eq!(to_int("1767340800000", 0), Ok(1767340800000));
     assert_eq!(to_int("0.0001", -8), Ok(10000));
-    for bad in ["42000.15", "", "1e3", "1.", ".5", "+1", "1,0", " 1", "--1", "92233720368547758.08"] {
+    for bad in [
+        "42000.15",
+        "",
+        "1e3",
+        "1.",
+        ".5",
+        "+1",
+        "1,0",
+        " 1",
+        "--1",
+        "92233720368547758.08",
+    ] {
         assert!(to_int(bad, -1).is_err(), "{bad:?} must be refused");
     }
     assert!(to_int("9223372036854775808", 0).is_err(), "beyond i64");

@@ -74,20 +74,32 @@ pub struct ParseError {
 
 impl ParseError {
     pub fn new(reason: impl Into<String>) -> Self {
-        Self { reason: reason.into() }
+        Self {
+            reason: reason.into(),
+        }
     }
 }
 
 pub trait MarketDataAdapter {
     fn venue(&self) -> &'static str;
     /// Split the topics over connections within the venue's limits.
-    fn plan(&self, symbols: &[String], channels: &[String], depth: u32) -> Result<Vec<ConnPlan>, PlanError>;
+    fn plan(
+        &self,
+        symbols: &[String],
+        channels: &[String],
+        depth: u32,
+    ) -> Result<Vec<ConnPlan>, PlanError>;
     /// Frames to send after connecting.
     fn subscribe_frames(&self, plan: &ConnPlan) -> Vec<String>;
     fn keepalive(&self) -> Keepalive;
     /// Never fails: a frame that cannot be routed is `Route::Control`.
     fn route(&self, frame: &[u8]) -> Route;
-    fn parse(&self, key: &StreamKey, frame: &[u8], recv_ns: i64) -> Result<Vec<Normalized>, ParseError>;
+    fn parse(
+        &self,
+        key: &StreamKey,
+        frame: &[u8],
+        recv_ns: i64,
+    ) -> Result<Vec<Normalized>, ParseError>;
     fn seq_rule(&self, key: &StreamKey) -> SeqRule;
     fn on_gap(&self, key: &StreamKey, gap: &GapEvent) -> Resync;
     fn instruments_request(&self) -> RestRequest;

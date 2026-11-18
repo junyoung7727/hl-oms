@@ -2,8 +2,11 @@
 //! This test runs the harness on a made-up venue format, and on two broken
 //! adapters that the harness must reject.
 
-use md_core::adapter::{ConnPlan, Instrument, Keepalive, MarketDataAdapter, ParseError, PlanError, Resync, RestRequest, Route};
-use md_core::conformance::{run, Fixture};
+use md_core::adapter::{
+    ConnPlan, Instrument, Keepalive, MarketDataAdapter, ParseError, PlanError, RestRequest, Resync,
+    Route,
+};
+use md_core::conformance::{Fixture, run};
 use md_core::decimal::to_int;
 use md_core::{BookUpdate, GapEvent, Level, Normalized, SeqRule, StreamKey};
 use serde_json::Value;
@@ -19,30 +22,64 @@ impl MarketDataAdapter for Fake {
     fn venue(&self) -> &'static str {
         "fake"
     }
-    fn plan(&self, symbols: &[String], channels: &[String], depth: u32) -> Result<Vec<ConnPlan>, PlanError> {
-        let topics = symbols.iter().flat_map(|s| channels.iter().map(move |c| StreamKey::new(c.clone(), s.clone()))).collect();
-        Ok(vec![ConnPlan { conn_index: 0, topics, depth }])
+    fn plan(
+        &self,
+        symbols: &[String],
+        channels: &[String],
+        depth: u32,
+    ) -> Result<Vec<ConnPlan>, PlanError> {
+        let topics = symbols
+            .iter()
+            .flat_map(|s| {
+                channels
+                    .iter()
+                    .map(move |c| StreamKey::new(c.clone(), s.clone()))
+            })
+            .collect();
+        Ok(vec![ConnPlan {
+            conn_index: 0,
+            topics,
+            depth,
+        }])
     }
     fn subscribe_frames(&self, plan: &ConnPlan) -> Vec<String> {
-        plan.topics.iter().map(|k| format!("sub {}.{}", k.channel, k.symbol)).collect()
+        plan.topics
+            .iter()
+            .map(|k| format!("sub {}.{}", k.channel, k.symbol))
+            .collect()
     }
     fn keepalive(&self) -> Keepalive {
-        Keepalive { interval_ms: 20_000, frame: Some("ping".into()) }
+        Keepalive {
+            interval_ms: 20_000,
+            frame: Some("ping".into()),
+        }
     }
     fn route(&self, frame: &[u8]) -> Route {
-        let topic = serde_json::from_slice::<Value>(frame).ok().and_then(|v| v["topic"].as_str().map(str::to_owned));
+        let topic = serde_json::from_slice::<Value>(frame)
+            .ok()
+            .and_then(|v| v["topic"].as_str().map(str::to_owned));
         match topic.as_deref().and_then(|t| t.split_once('.')) {
             Some((channel, symbol)) => Route::Stream(StreamKey::new(channel, symbol)),
             None => Route::Control,
         }
     }
-    fn parse(&self, key: &StreamKey, frame: &[u8], recv_ns: i64) -> Result<Vec<Normalized>, ParseError> {
+    fn parse(
+        &self,
+        key: &StreamKey,
+        frame: &[u8],
+        recv_ns: i64,
+    ) -> Result<Vec<Normalized>, ParseError> {
         let v: Value = serde_json::from_slice(frame).map_err(|e| ParseError::new(e.to_string()))?;
         let side = |name: &str| -> Result<Vec<Level>, ParseError> {
             let mut out = Vec::new();
-            for pair in v[name].as_array().ok_or_else(|| ParseError::new("levels"))? {
-                let px = to_int(pair[0].as_str().unwrap_or(""), -1).map_err(|e| ParseError::new(format!("{e:?}")))?;
-                let qty = to_int(pair[1].as_str().unwrap_or(""), 0).map_err(|e| ParseError::new(format!("{e:?}")))?;
+            for pair in v[name]
+                .as_array()
+                .ok_or_else(|| ParseError::new("levels"))?
+            {
+                let px = to_int(pair[0].as_str().unwrap_or(""), -1)
+                    .map_err(|e| ParseError::new(format!("{e:?}")))?;
+                let qty = to_int(pair[1].as_str().unwrap_or(""), 0)
+                    .map_err(|e| ParseError::new(format!("{e:?}")))?;
                 if !(self.drop_zero_levels && qty == 0) {
                     out.push(Level { px, qty });
                 }
@@ -53,7 +90,11 @@ impl MarketDataAdapter for Fake {
             key: key.clone(),
             venue_ts_ns: v["ts"].as_i64().ok_or_else(|| ParseError::new("ts"))? * 1_000_000,
             recv_ns,
-            update_id: if self.ignore_sequence { None } else { v["u"].as_i64() },
+            update_id: if self.ignore_sequence {
+                None
+            } else {
+                v["u"].as_i64()
+            },
             prev_update_id: None,
             first_update_id: None,
             venue_seq: None,
@@ -74,9 +115,17 @@ impl MarketDataAdapter for Fake {
         Resync::Resubscribe
     }
     fn instruments_request(&self) -> RestRequest {
-        RestRequest { method: "GET", path: "/instruments".into(), query: vec![] }
+        RestRequest {
+            method: "GET",
+            path: "/instruments".into(),
+            query: vec![],
+        }
     }
-    fn parse_instruments(&self, _body: &[u8], _recv_ns: i64) -> Result<Vec<Instrument>, ParseError> {
+    fn parse_instruments(
+        &self,
+        _body: &[u8],
+        _recv_ns: i64,
+    ) -> Result<Vec<Instrument>, ParseError> {
         Ok(vec![])
     }
     fn venue_ts_field(&self, _channel: &str) -> &'static str {
@@ -111,13 +160,28 @@ fn fake_adapter_passes_the_conformance_harness() {
 
 #[test]
 fn harness_fails_an_adapter_that_drops_zero_quantity_levels() {
-    let failures = run(&Fake { drop_zero_levels: true, ..Fake::default() }, &fixture());
-    assert!(failures.iter().any(|f| f.contains("deleted level")), "{failures:?}");
+    let failures = run(
+        &Fake {
+            drop_zero_levels: true,
+            ..Fake::default()
+        },
+        &fixture(),
+    );
+    assert!(
+        failures.iter().any(|f| f.contains("deleted level")),
+        "{failures:?}"
+    );
 }
 
 #[test]
 fn harness_fails_an_adapter_that_ignores_the_sequence_field() {
-    let failures = run(&Fake { ignore_sequence: true, ..Fake::default() }, &fixture());
+    let failures = run(
+        &Fake {
+            ignore_sequence: true,
+            ..Fake::default()
+        },
+        &fixture(),
+    );
     assert!(failures.iter().any(|f| f.contains("gap")), "{failures:?}");
 }
 

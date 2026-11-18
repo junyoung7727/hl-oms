@@ -10,7 +10,10 @@ pub struct StreamKey {
 
 impl StreamKey {
     pub fn new(channel: impl Into<String>, symbol: impl Into<String>) -> Self {
-        Self { channel: channel.into(), symbol: symbol.into() }
+        Self {
+            channel: channel.into(),
+            symbol: symbol.into(),
+        }
     }
 }
 

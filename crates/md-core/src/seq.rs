@@ -28,8 +28,12 @@ pub struct GapEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum State {
     /// No run: before the first snapshot, or after a gap (`reported`).
-    NoRun { reported: bool },
-    Run { last: i64 },
+    NoRun {
+        reported: bool,
+    },
+    Run {
+        last: i64,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -40,7 +44,10 @@ pub struct GapDetector {
 
 impl GapDetector {
     pub fn new(rule: SeqRule) -> Self {
-        Self { rule, state: State::NoRun { reported: false } }
+        Self {
+            rule,
+            state: State::NoRun { reported: false },
+        }
     }
 
     pub fn rule(&self) -> SeqRule {
@@ -56,7 +63,12 @@ impl GapDetector {
         None
     }
 
-    pub fn delta(&mut self, update_id: Option<i64>, prev_update_id: Option<i64>, recv_ns: i64) -> Option<GapEvent> {
+    pub fn delta(
+        &mut self,
+        update_id: Option<i64>,
+        prev_update_id: Option<i64>,
+        recv_ns: i64,
+    ) -> Option<GapEvent> {
         if self.rule == SeqRule::None {
             return None;
         }
@@ -64,7 +76,11 @@ impl GapDetector {
             State::NoRun { reported: true } => None,
             State::NoRun { reported: false } => {
                 self.state = State::NoRun { reported: true };
-                Some(GapEvent { last_good: None, next: update_id, recv_ns })
+                Some(GapEvent {
+                    last_good: None,
+                    next: update_id,
+                    recv_ns,
+                })
             }
             State::Run { last } => {
                 let follows = match self.rule {
@@ -79,7 +95,11 @@ impl GapDetector {
                     }
                     _ => {
                         self.state = State::NoRun { reported: true };
-                        Some(GapEvent { last_good: Some(last), next: update_id, recv_ns })
+                        Some(GapEvent {
+                            last_good: Some(last),
+                            next: update_id,
+                            recv_ns,
+                        })
                     }
                 }
             }
