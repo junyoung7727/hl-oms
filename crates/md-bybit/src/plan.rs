@@ -114,3 +114,24 @@ pub(crate) fn subscribe_frames(plan: &ConnPlan) -> Vec<String> {
         })
         .collect()
 }
+
+/// Unsubscribe and subscribe one topic of the plan (after a gap), with
+/// `req_id`s that do not collide with the subscribe frames'. Empty when the
+/// topic is not in the plan.
+pub(crate) fn resubscribe_frames(plan: &ConnPlan, key: &StreamKey) -> Vec<String> {
+    if !plan.topics.contains(key) {
+        return Vec::new();
+    }
+    let arg = format!("{}.{}", key.channel, key.symbol);
+    ["unsubscribe", "subscribe"]
+        .iter()
+        .map(|op| {
+            serde_json::json!({
+                "op": op,
+                "req_id": format!("c{}-r{op}-{arg}", plan.conn_index),
+                "args": [arg],
+            })
+            .to_string()
+        })
+        .collect()
+}

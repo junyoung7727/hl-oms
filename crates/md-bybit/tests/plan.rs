@@ -177,3 +177,29 @@ fn keepalive_is_a_ping_every_20_seconds() {
     assert_eq!(k.interval_ms, 20_000);
     assert_eq!(k.frame.as_deref(), Some(r#"{"op":"ping"}"#));
 }
+
+#[test]
+fn resubscribe_frames_unsubscribe_then_subscribe_one_topic() {
+    use md_core::adapter::ConnPlan;
+    let key = StreamKey::new("orderbook.50", "BTCUSDT");
+    let plan = ConnPlan {
+        conn_index: 7,
+        topics: vec![key.clone(), StreamKey::new("publicTrade", "BTCUSDT")],
+        depth: 50,
+    };
+    let frames = BybitAdapter::new(Market::Linear, &[]).resubscribe_frames(&plan, &key);
+    let v: Vec<serde_json::Value> = frames
+        .iter()
+        .map(|f| serde_json::from_str(f).expect("json"))
+        .collect();
+    assert_eq!(v.len(), 2);
+    assert_eq!(v[0]["op"], "unsubscribe");
+    assert_eq!(v[1]["op"], "subscribe");
+    for f in &v {
+        assert_eq!(f["args"], serde_json::json!(["orderbook.50.BTCUSDT"]));
+    }
+    assert_ne!(v[0]["req_id"], v[1]["req_id"]);
+    // A topic that is not in the plan has nothing to resubscribe.
+    let other = StreamKey::new("orderbook.50", "ETHUSDT");
+    assert!(BybitAdapter::new(Market::Linear, &[]).resubscribe_frames(&plan, &other).is_empty());
+}

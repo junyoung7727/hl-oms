@@ -144,4 +144,12 @@ impl MarketDataAdapter for BybitAdapter {
     fn venue_ts_field(&self, channel: &str) -> &'static str {
         if channel == "publicTrade" { "T" } else { "ts" }
     }
+
+    fn resubscribe_frames(&self, plan: &ConnPlan, key: &StreamKey) -> Vec<String> {
+        plan::resubscribe_frames(plan, key)
+    }
+
+    fn market_name(&self) -> Option<&'static str> {
+        Some(self.market.category())
+    }
 }
