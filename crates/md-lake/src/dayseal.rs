@@ -22,15 +22,43 @@ use crate::zst::{Contexts, FrameEncoder};
 const LOOKBACK_DAYS: i64 = 7;
 
 impl Sealer {
+    /// The day seal alone for every date from `from_ns` on (2.7: it can run
+    /// at any time), for a date that became sealable after the lookback of
+    /// the normal run, e.g. once a person resolved a stopped hour.
+    pub fn seal_days_since(
+        &self,
+        clock: &dyn Clock,
+        from_ns: i64,
+    ) -> Result<SealReport, SealError> {
+        let _lock = self.seal_lock()?;
+        let last_closed = time::hour_start(clock.now_ns()) - HOUR_NS;
+        let mut report = SealReport::default();
+        self.seal_days_from(clock, time::day_start(from_ns), last_closed, &mut report)?;
+        Ok(report)
+    }
+
+    /// The day seal of a seal run: the last `LOOKBACK_DAYS` dates, and every
+    /// date from the first hour this run sealed (`earliest`).
     pub(crate) fn seal_days(
         &self,
         clock: &dyn Clock,
         last_closed: i64,
+        earliest: Option<i64>,
         report: &mut SealReport,
     ) -> Result<(), SealError> {
-        let first_day = time::day_start(self.s.first_hour_ns)
-            .max(time::day_start(last_closed) - LOOKBACK_DAYS * DAY_NS);
-        let mut d = first_day;
+        let window = time::day_start(last_closed) - LOOKBACK_DAYS * DAY_NS;
+        let from = earliest.map_or(window, |e| time::day_start(e).min(window));
+        self.seal_days_from(clock, from, last_closed, report)
+    }
+
+    fn seal_days_from(
+        &self,
+        clock: &dyn Clock,
+        from_day: i64,
+        last_closed: i64,
+        report: &mut SealReport,
+    ) -> Result<(), SealError> {
+        let mut d = from_day.max(time::day_start(self.s.first_hour_ns));
         while d + 23 * HOUR_NS <= last_closed {
             if self.seal_day(d, clock)? {
                 report.days_sealed.push(time::date(d));
@@ -74,10 +102,15 @@ impl Sealer {
     fn seal_day(&self, d: i64, clock: &dyn Clock) -> Result<bool, SealError> {
         let fs = self.fs.as_ref();
         let date = time::date(d);
-        // Condition 1: no open file of the date.
+        // Condition 1: no open file of the date in the hours in scope (an
+        // hour before first_hour is never sealed, F7).
         let open = format!("crypto/l0/_open/venue={}/date={date}", self.s.venue);
         for hour in fs.list(&open)? {
-            if !fs.list(&format!("{open}/{hour}"))?.is_empty() {
+            let before = hour
+                .strip_prefix("hour=")
+                .and_then(|v| v.parse::<i64>().ok())
+                .is_some_and(|hh| d + hh * HOUR_NS < self.s.first_hour_ns);
+            if !before && !fs.list(&format!("{open}/{hour}"))?.is_empty() {
                 return Ok(false);
             }
         }

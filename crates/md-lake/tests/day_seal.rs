@@ -318,3 +318,80 @@ fn day_seal_rerun_is_idempotent() {
 fn lock_holder_child() {
     common::lock_holder::child_main();
 }
+
+fn partials_of(dir: &std::path::Path, date: &str) -> Vec<String> {
+    partials(dir)
+        .into_iter()
+        .filter(|p| p.contains(&format!("date={date}")))
+        .collect()
+}
+
+#[test]
+fn hours_before_first_hour_do_not_block_the_day() {
+    // An open file of hour 13 is from before this sealer (F7): never sealed,
+    // never touched, and the date still day-seals.
+    let dir = common::test_dir("day-before-first-hour");
+    let fs = RealFs::new(&dir);
+    day(&fs);
+    let early = T14 - time::HOUR_NS;
+    kit::write_open(&fs, "md0", early - S, 1, &[md(early + S, 1, 0, OB)], false);
+    let r = seal(&fs, NEXT_DAY).expect("seal");
+    assert_eq!(r.days_sealed, vec![D.to_string()]);
+    assert_eq!(kit::open_files(fs.as_ref(), D, 13).len(), 1);
+}
+
+#[test]
+fn a_failed_hour_does_not_block_an_earlier_date() {
+    // Hour 00 of the next date stops on the unroutable guard; the complete
+    // date before it is day-sealed all the same, then the error is returned.
+    let dir = common::test_dir("day-after-failed-hour");
+    let fs = RealFs::new(&dir);
+    day(&fs);
+    let next = T14 + 10 * time::HOUR_NS;
+    let junk: Vec<Record> = (0..5).map(|i| kit::control(next + i * S, 1, i as u64)).collect();
+    kit::write_open(&fs, "md1", next - S, 1, &junk, false);
+    let r = seal(&fs, next + time::HOUR_NS + S);
+    assert!(
+        matches!(r, Err(md_lake::seal::SealError::Unroutable { .. })),
+        "{r:?}"
+    );
+    assert!(partials_of(&dir, D).is_empty(), "{:?}", partials_of(&dir, D));
+    assert!(!manifest(fs.as_ref()).is_empty());
+}
+
+#[test]
+fn a_date_older_than_the_lookback_seals_after_an_outage() {
+    // No seal run for nine days: the run that seals the hours also
+    // day-seals their dates, however old.
+    let dir = common::test_dir("day-after-outage");
+    let fs = RealFs::new(&dir);
+    day(&fs);
+    let r = seal(&fs, T14 + 9 * time::DAY_NS).expect("seal");
+    assert_eq!(r.days_sealed.first(), Some(&D.to_string()));
+    assert!(partials_of(&dir, D).is_empty());
+}
+
+#[test]
+fn seal_days_since_reaches_any_date() {
+    // A date that becomes sealable only after the lookback (here: a
+    // collector held its session file for nine days) is sealed on demand.
+    let dir = common::test_dir("day-since");
+    let fs = RealFs::new(&dir);
+    day(&fs);
+    let mut w = SessionWriter::new(
+        fs.clone(),
+        WriterSettings::new("bybit", "md2", "0.1.0", "test", T14),
+        &Contexts::default(),
+    );
+    w.append(&kit::control(T14 + 5 * S, 1, 0)).expect("control");
+    let later = T14 + 9 * time::DAY_NS;
+    let r = seal(&fs, later).expect("seal");
+    assert!(!r.days_sealed.contains(&D.to_string()));
+    w.close().expect("close");
+    let clock = FixedClock::at(later + time::HOUR_NS);
+    let r = Sealer::new(fs.clone(), settings())
+        .seal_days_since(clock.as_ref(), T14)
+        .expect("seal days");
+    assert_eq!(r.days_sealed.first(), Some(&D.to_string()));
+    assert!(partials_of(&dir, D).is_empty());
+}

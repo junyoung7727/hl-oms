@@ -297,16 +297,48 @@ impl Sealer {
         clock: &dyn Clock,
         classify: &dyn Fn(&Record) -> Option<Topic>,
     ) -> Result<SealReport, SealError> {
+        let _lock = self.seal_lock()?;
+        let start = clock.now_ns();
+        let mut report = SealReport::default();
+        let last_closed = time::hour_start(start) - HOUR_NS;
+        let mut earliest = None;
+        let hours = self.seal_hours(
+            start,
+            last_closed,
+            clock,
+            classify,
+            &mut report,
+            &mut earliest,
+        );
+        // A failed hour makes only its own date wait (2.7): the day seal
+        // runs before the error is returned.
+        let days = self.seal_days(clock, last_closed, earliest, &mut report);
+        hours?;
+        days?;
+        Ok(report)
+    }
+
+    /// The per-venue seal lock: one seal or day seal run at a time.
+    pub(crate) fn seal_lock(&self) -> Result<Held, SealError> {
         let mut lock = self
             .fs
             .open_dir(&format!("crypto/l0/_seal/venue={}", self.s.venue))?;
         if !lock.try_lock()? {
             return Err(SealError::Busy);
         }
-        let _lock = Held(lock);
-        let start = clock.now_ns();
-        let mut report = SealReport::default();
-        let last_closed = time::hour_start(start) - HOUR_NS;
+        Ok(Held(lock))
+    }
+
+    /// The hour loop of a run; `earliest` gets the first hour it sealed.
+    fn seal_hours(
+        &self,
+        start: i64,
+        last_closed: i64,
+        clock: &dyn Clock,
+        classify: &dyn Fn(&Record) -> Option<Topic>,
+        report: &mut SealReport,
+        earliest: &mut Option<i64>,
+    ) -> Result<(), SealError> {
         let mut tail: Option<(String, i64, i64)> = None;
         let mut h = self.s.first_hour_ns;
         while h <= last_closed {
@@ -318,8 +350,10 @@ impl Sealer {
                 h += HOUR_NS;
                 continue;
             }
-            match self.seal_hour(h, start, clock, classify, &mut tail, &mut report)? {
-                HourOutcome::Done => {}
+            match self.seal_hour(h, start, clock, classify, &mut tail, report)? {
+                HourOutcome::Done => {
+                    earliest.get_or_insert(h);
+                }
                 HourOutcome::Waiting(p) => {
                     report.waiting_on = Some(p);
                     break;
@@ -327,8 +361,7 @@ impl Sealer {
             }
             h += HOUR_NS;
         }
-        self.seal_days(clock, last_closed, &mut report)?;
-        Ok(report)
+        Ok(())
     }
 
     /// The hour has a done entry and no file in its open folder.
