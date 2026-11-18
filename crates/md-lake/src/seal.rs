@@ -195,6 +195,8 @@ struct Source {
     header: Option<Header>,
     topics: BTreeSet<Topic>,
     has_unroutable: bool,
+    /// All records of the file (count, bytes, set digest).
+    stat: TopicStats,
     /// The handle that holds the lock until the end of the hour.
     lock: Held,
 }
@@ -619,6 +621,7 @@ impl Sealer {
                 header: None,
                 topics: BTreeSet::new(),
                 has_unroutable: false,
+                stat: TopicStats::default(),
                 lock,
             });
         }
@@ -641,6 +644,9 @@ impl Sealer {
                 total += 1;
                 let mut bytes = Vec::with_capacity(r.encoded_len());
                 qraw::encode_record(&r, &mut bytes).map_err(|e| io_err(format!("{e:?}")))?;
+                src.stat.records += 1;
+                src.stat.bytes += bytes.len() as u64;
+                src.stat.digest.add(&bytes);
                 match classify(&r) {
                     Some(t) => {
                         let st = stats.entry(t.clone()).or_default();
@@ -669,7 +675,14 @@ impl Sealer {
             }
             src.header = it.header().cloned();
         }
-        if total > 0 && unroutable_md as f64 > self.s.unroutable_max_share * total as f64 {
+        let by_conn = self.s.layout == Layout::ByConnection;
+        if by_conn {
+            // by_connection does not classify (2.5 step 4): nothing is unroutable.
+            unroutable_all = TopicStats::default();
+            for src in &mut sources {
+                src.has_unroutable = false;
+            }
+        } else if total > 0 && unroutable_md as f64 > self.s.unroutable_max_share * total as f64 {
             return Err(SealError::Unroutable {
                 hour: hour_name,
                 unroutable: unroutable_md,
@@ -747,7 +760,7 @@ impl Sealer {
 
         // ---- Targets and the begin entry.
         let mut topic_target: BTreeMap<Topic, String> = BTreeMap::new();
-        for t in stats.keys() {
+        for t in stats.keys().filter(|_| !by_conn) {
             let p = if t.channel == "instruments" {
                 L0Path::Instruments {
                     venue: self.s.venue.clone(),
@@ -785,6 +798,28 @@ impl Sealer {
                 sha256: String::new(),
                 sessions: Some(Vec::new()),
             });
+        }
+        let conn_ti0 = targets.len();
+        if by_conn {
+            for src in &sources {
+                let p = L0Path::DayByConnection {
+                    venue: self.s.venue.clone(),
+                    date: date.clone(),
+                    collector: src.collector.clone(),
+                    session_ns: src.session_ns,
+                    conn_id: src.conn_id,
+                    partial: true,
+                }
+                .to_path();
+                targets.push(Target {
+                    path: p.clone(),
+                    offset_before: size(&p)?,
+                    offset_after: 0,
+                    records: 0,
+                    sha256: String::new(),
+                    sessions: None,
+                });
+            }
         }
         targets.push(Target {
             path: session_path.clone(),
@@ -828,33 +863,15 @@ impl Sealer {
             .map(|(i, t)| (t, i))
             .collect();
         let mut frame_bytes: BTreeMap<Topic, u64> = BTreeMap::new();
-        for (t, st) in &stats {
+        for (t, st) in stats.iter().filter(|_| !by_conn) {
             let first = targets[topic_ti[t]].offset_before == 0;
             frame_bytes.insert(t.clone(), st.bytes + if first { header_len(t) } else { 0 });
         }
-        let mut groups: Vec<Group> = Vec::new();
-        for slot in 0..sources.len() {
-            let mut cur: Vec<Topic> = Vec::new();
-            let mut cur_bytes = 0usize;
-            for (t, s) in &topic_slot {
-                if *s != slot {
-                    continue;
-                }
-                let c = zst::context_bytes(SEAL_LEVEL, Some(frame_bytes[t]));
-                if !cur.is_empty() && cur_bytes + c > self.s.context_budget {
-                    groups.push(Group {
-                        slot,
-                        topics: std::mem::take(&mut cur),
-                    });
-                    cur_bytes = 0;
-                }
-                cur.push(t.clone());
-                cur_bytes += c;
-            }
-            if !cur.is_empty() {
-                groups.push(Group { slot, topics: cur });
-            }
-        }
+        let groups = if by_conn {
+            Vec::new()
+        } else {
+            self.make_groups(sources.len(), &topic_slot, &frame_bytes)
+        };
 
         // ---- Merge and append, group by group.
         let contexts = Contexts::default();
@@ -962,6 +979,81 @@ impl Sealer {
                 t.sessions = Some(o.runs);
             }
         }
+        // ---- Layout by_connection: each open file whole, one frame per hour.
+        if by_conn {
+            for (k, src) in sources.iter().enumerate() {
+                let ti = conn_ti0 + k;
+                let path = targets[ti].path.clone();
+                let new = targets[ti].offset_before == 0;
+                let hb = qraw::encode_header(&self.conn_header(src, &date));
+                let pledged = src.stat.bytes + if new { hb.len() as u64 } else { 0 };
+                let mut file = if new {
+                    created.insert(path.clone());
+                    let f = fs.create_new(&path)?;
+                    fs.sync_dir(parent(&path))?;
+                    f
+                } else {
+                    fs.open(&path)?
+                };
+                let mut enc = FrameEncoder::new(SEAL_LEVEL, Some(pledged), &contexts)?;
+                let mut buf = Vec::new();
+                if new {
+                    enc.write(&hb, &mut buf)?;
+                }
+                let mut sha = Sha256::new();
+                let mut n = 0u64;
+                let mut f = fs.open(&src.path)?;
+                for r in RecordIter::new(f.as_mut(), 0, src.end, true) {
+                    let r = r?;
+                    let mut bytes = Vec::with_capacity(r.encoded_len());
+                    qraw::encode_record(&r, &mut bytes).map_err(|e| io_err(format!("{e:?}")))?;
+                    sha.update(&bytes);
+                    n += 1;
+                    enc.write(&bytes, &mut buf)?;
+                    if buf.len() >= 1 << 20 {
+                        file.write_all(&buf)?;
+                        buf.clear();
+                    }
+                }
+                enc.finish(&mut buf)?;
+                file.write_all(&buf)?;
+                file.sync()?;
+                let t = &mut targets[ti];
+                t.offset_after = file.len()?;
+                t.records = n;
+                t.sha256 = hex::encode(sha.finalize());
+            }
+        }
+        let measure = if self.s.measure_layouts {
+            let appended: u64 = targets[..targets.len() - 1]
+                .iter()
+                .map(|t| t.offset_after - t.offset_before)
+                .sum();
+            if by_conn {
+                let mut fb: BTreeMap<Topic, u64> = BTreeMap::new();
+                for (t, st) in &stats {
+                    let hl =
+                        qraw::encode_header(&self.topic_header(t, &date, &sources, &topic_slot))
+                            .len() as u64;
+                    fb.insert(t.clone(), st.bytes + hl);
+                }
+                let gs = self.make_groups(sources.len(), &topic_slot, &fb);
+                let sym = self.measure_by_symbol(
+                    &sources,
+                    &session_order,
+                    &gs,
+                    &fb,
+                    &date,
+                    &topic_slot,
+                    classify,
+                )?;
+                Some((sym, appended))
+            } else {
+                Some((appended, self.measure_by_connection(&sources, &date)?))
+            }
+        } else {
+            None
+        };
         report.groups.extend(groups);
 
         // ---- The sealer's session file: notes, then unroutable records.
@@ -1058,7 +1150,22 @@ impl Sealer {
         }
 
         // ---- Check (F4): read every appended frame back.
-        for (t, st) in &stats {
+        if by_conn {
+            for (k, src) in sources.iter().enumerate() {
+                let tg = &targets[conn_ti0 + k];
+                let (sha, n, digest) = self.read_back(tg).map_err(|e| SealError::Check {
+                    hour: hour_name.clone(),
+                    what: format!("{}: {e}", tg.path),
+                })?;
+                if sha != tg.sha256 || n != src.stat.records || digest != src.stat.digest {
+                    return Err(SealError::Check {
+                        hour: hour_name.clone(),
+                        what: format!("{}: differs from {}", tg.path, src.path),
+                    });
+                }
+            }
+        }
+        for (t, st) in stats.iter().filter(|_| !by_conn) {
             let tg = &targets[topic_ti[t]];
             let (sha, n, digest) = self.read_back(tg).map_err(|e| SealError::Check {
                 hour: hour_name.clone(),
@@ -1111,6 +1218,12 @@ impl Sealer {
         done.insert("records".into(), json!(moved));
         done.insert("unroutable_records".into(), json!(unroutable_all.records));
         done.insert("live_contexts_max".into(), json!(contexts.max_live()));
+        if let Some((sym, conn)) = measure {
+            done.insert(
+                "measure".into(),
+                json!({"by_symbol_bytes": sym, "by_connection_bytes": conn}),
+            );
+        }
         let seconds = (clock.now_ns() - run_start).max(0) as f64 / 1e9;
         done.insert("seconds".into(), json!(seconds));
         self.append_log(h, &Value::Object(done))?;
@@ -1123,6 +1236,149 @@ impl Sealer {
             fs.sync_dir(&self.open_dir(h))?;
         }
         Ok(())
+    }
+
+    /// Groups of topics inside one connection slot, each bounded by the sum
+    /// of its level-9 context sizes (a group holds at least one topic).
+    fn make_groups(
+        &self,
+        slots: usize,
+        topic_slot: &BTreeMap<Topic, usize>,
+        frame_bytes: &BTreeMap<Topic, u64>,
+    ) -> Vec<Group> {
+        let mut groups = Vec::new();
+        for slot in 0..slots {
+            let mut cur: Vec<Topic> = Vec::new();
+            let mut cur_bytes = 0usize;
+            for (t, s) in topic_slot {
+                if *s != slot {
+                    continue;
+                }
+                let c = zst::context_bytes(SEAL_LEVEL, Some(frame_bytes[t]));
+                if !cur.is_empty() && cur_bytes + c > self.s.context_budget {
+                    groups.push(Group {
+                        slot,
+                        topics: std::mem::take(&mut cur),
+                    });
+                    cur_bytes = 0;
+                }
+                cur.push(t.clone());
+                cur_bytes += c;
+            }
+            if !cur.is_empty() {
+                groups.push(Group { slot, topics: cur });
+            }
+        }
+        groups
+    }
+
+    /// Compressed bytes of `topics` frames in the by_symbol order, written to
+    /// a counting sink (for `measure_layouts`).
+    #[allow(clippy::too_many_arguments)]
+    fn measure_by_symbol(
+        &self,
+        sources: &[Source],
+        session_order: &[(i64, String)],
+        groups: &[Group],
+        frame_bytes: &BTreeMap<Topic, u64>,
+        date: &str,
+        topic_slot: &BTreeMap<Topic, usize>,
+        classify: &dyn Fn(&Record) -> Option<Topic>,
+    ) -> io::Result<u64> {
+        let contexts = Contexts::default();
+        let mut total = 0u64;
+        for g in groups {
+            let in_group: BTreeSet<&Topic> = g.topics.iter().collect();
+            let mut encs: BTreeMap<Topic, (FrameEncoder, Vec<u8>)> = BTreeMap::new();
+            for t in &g.topics {
+                let mut enc = FrameEncoder::new(SEAL_LEVEL, Some(frame_bytes[t]), &contexts)?;
+                let mut buf = Vec::new();
+                enc.write(
+                    &qraw::encode_header(&self.topic_header(t, date, sources, topic_slot)),
+                    &mut buf,
+                )?;
+                encs.insert(t.clone(), (enc, buf));
+            }
+            for (ns, c) in session_order {
+                let idx: Vec<usize> = (0..sources.len())
+                    .filter(|&i| {
+                        sources[i].session_ns == *ns
+                            && &sources[i].collector == c
+                            && sources[i].topics.iter().any(|t| in_group.contains(t))
+                    })
+                    .collect();
+                self.merge(
+                    sources,
+                    &idx,
+                    |r| classify(r).filter(|t| in_group.contains(t)).is_some(),
+                    &mut |r: Record| {
+                        let Some(t) = classify(&r) else { return Ok(()) };
+                        let (enc, buf) = encs.get_mut(&t).ok_or_else(|| io_err("topic"))?;
+                        let mut bytes = Vec::with_capacity(r.encoded_len());
+                        qraw::encode_record(&r, &mut bytes)
+                            .map_err(|e| io_err(format!("{e:?}")))?;
+                        enc.write(&bytes, buf)?;
+                        total += buf.len() as u64;
+                        buf.clear();
+                        Ok(())
+                    },
+                )?;
+            }
+            for (_, (mut enc, mut buf)) in encs {
+                enc.finish(&mut buf)?;
+                total += buf.len() as u64;
+            }
+        }
+        Ok(total)
+    }
+
+    /// Compressed bytes of one level-9 frame per connection (for `measure_layouts`).
+    fn measure_by_connection(&self, sources: &[Source], date: &str) -> io::Result<u64> {
+        let contexts = Contexts::default();
+        let mut total = 0u64;
+        for src in sources {
+            let header = self.conn_header(src, date);
+            let hb = qraw::encode_header(&header);
+            let mut enc = FrameEncoder::new(
+                SEAL_LEVEL,
+                Some(src.stat.bytes + hb.len() as u64),
+                &contexts,
+            )?;
+            let mut buf = Vec::new();
+            enc.write(&hb, &mut buf)?;
+            let mut f = self.fs.open(&src.path)?;
+            for r in RecordIter::new(f.as_mut(), 0, src.end, true) {
+                let r = r?;
+                let mut bytes = Vec::with_capacity(r.encoded_len());
+                qraw::encode_record(&r, &mut bytes).map_err(|e| io_err(format!("{e:?}")))?;
+                enc.write(&bytes, &mut buf)?;
+                total += buf.len() as u64;
+                buf.clear();
+            }
+            enc.finish(&mut buf)?;
+            total += buf.len() as u64;
+        }
+        Ok(total)
+    }
+
+    /// The header of a by_connection day file: the connection form with the day's date.
+    fn conn_header(&self, src: &Source, date: &str) -> Header {
+        let get = |k: &str| {
+            src.header
+                .as_ref()
+                .and_then(|h| h.get_str(k))
+                .unwrap_or("unknown")
+                .to_string()
+        };
+        Header::connection(
+            &self.s.venue,
+            date,
+            &src.collector,
+            &get("collector_ver"),
+            &get("host"),
+            src.session_ns,
+            src.conn_id,
+        )
     }
 
     /// Ordered SHA-256, count and set digest of the frame a target got.

@@ -192,3 +192,8 @@ fn torn_last_seal_log_line_is_cut() {
     assert_eq!(log.len(), 2, "the torn line is gone, then begin and done");
     assert_eq!(lake_records(fs.as_ref()), want);
 }
+
+#[test]
+fn crash_at_every_step_by_connection() {
+    crash_at_every_step(Layout::ByConnection);
+}
