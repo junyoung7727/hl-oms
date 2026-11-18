@@ -155,6 +155,8 @@ pub struct SealReport {
     /// The record bytes of each topic counted in pass 1.
     pub topic_bytes: BTreeMap<Topic, u64>,
     pub max_live_context_bytes: usize,
+    /// Dates this run day-sealed (2.7).
+    pub days_sealed: Vec<String>,
 }
 
 /// Order-independent digest of a set of records: the wrapping sum of their
@@ -215,7 +217,7 @@ struct Target {
 /// A record of the merge with its sort key.
 type Head = Reverse<(i64, u32, u64, usize)>;
 
-fn note_payload(
+pub(crate) fn note_payload(
     note: &str,
     writer: &str,
     conn_id: Option<u32>,
@@ -238,7 +240,7 @@ fn io_err(what: impl Into<String>) -> io::Error {
     io::Error::other(what.into())
 }
 
-fn read_whole(fs: &dyn Fs, path: &str) -> io::Result<Vec<u8>> {
+pub(crate) fn read_whole(fs: &dyn Fs, path: &str) -> io::Result<Vec<u8>> {
     let mut f = fs.open(path)?;
     let len = f.len()? as usize;
     let mut buf = vec![0; len];
@@ -255,8 +257,8 @@ fn read_whole(fs: &dyn Fs, path: &str) -> io::Result<Vec<u8>> {
 }
 
 pub struct Sealer {
-    fs: Arc<dyn Fs>,
-    s: SealSettings,
+    pub(crate) fs: Arc<dyn Fs>,
+    pub(crate) s: SealSettings,
 }
 
 /// What happened to one hour.
@@ -317,11 +319,12 @@ impl Sealer {
             }
             h += HOUR_NS;
         }
+        self.seal_days(clock, last_closed, &mut report)?;
         Ok(report)
     }
 
     /// The complete lines of a seal log; a torn last line is cut off.
-    fn read_log(&self, h: i64) -> io::Result<Vec<Value>> {
+    pub(crate) fn read_log(&self, h: i64) -> io::Result<Vec<Value>> {
         let path = self.log_path(h);
         if !self.fs.exists(&path) {
             return Ok(Vec::new());

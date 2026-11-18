@@ -17,4 +17,6 @@ zstd = "0.13.5"
 workspace = true
 
 [dev-dependencies]
+hex = "0.4.3"
 regex-lite = "0.1.9"
+sha2 = "0.11.0"

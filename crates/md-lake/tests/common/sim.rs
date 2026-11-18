@@ -306,14 +306,16 @@ impl Fs for SimFs {
             return Err(crash());
         }
         let prefix = format!("{dir}/");
+        // Files and the subdirectories that hold files, like a real listing.
         let mut out: Vec<String> = s
             .names
             .keys()
             .filter_map(|p| p.strip_prefix(&prefix))
-            .filter(|rest| !rest.contains('/') && !rest.contains('\u{0}'))
-            .map(str::to_owned)
+            .filter(|rest| !rest.contains('\u{0}'))
+            .map(|rest| rest.split('/').next().unwrap_or(rest).to_owned())
             .collect();
         out.sort();
+        out.dedup();
         Ok(out)
     }
     fn open_dir(&self, dir: &str) -> io::Result<Box<dyn LakeFile>> {
