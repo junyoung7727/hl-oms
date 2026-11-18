@@ -7,13 +7,12 @@ use std::collections::BTreeSet;
 use std::io;
 
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 
 use crate::fs::{Held, parent};
 use crate::paths::{L0Path, sidecar};
 use crate::qraw::{self, Header, Record, Src};
 use crate::read::{RecordIter, scan_file};
-use crate::seal::{Clock, SEAL_LEVEL, SealError, SealReport, Sealer, note_payload, read_whole};
+use crate::seal::{Clock, SEAL_LEVEL, SealError, SealReport, Sealer, note_payload, read_whole, sha256_of};
 use crate::time::{self, DAY_NS, HOUR_NS};
 use crate::zst::{Contexts, FrameEncoder};
 
@@ -187,8 +186,7 @@ impl Sealer {
             if !need_side && !need_line {
                 continue;
             }
-            let bytes = read_whole(fs, &sealed)?;
-            let sha = hex::encode(Sha256::digest(&bytes));
+            let (sha, len) = sha256_of(fs, &sealed)?;
             if need_side {
                 let name = sealed.rsplit('/').next().unwrap_or_default();
                 let tmp = format!("{side}.tmp");
@@ -205,7 +203,7 @@ impl Sealer {
             }
             if need_line {
                 let line =
-                    self.manifest_line(&lp, &sealed, &id, &sha, bytes.len() as u64, d, clock)?;
+                    self.manifest_line(&lp, &sealed, &id, &sha, len, d, clock)?;
                 self.append_line(&manifest, &line)?;
                 have.insert(id);
                 changed = true;
@@ -236,15 +234,19 @@ impl Sealer {
             return Ok(false);
         }
         let end = scan.unfinished.map_or(0, |u| u.complete_blocks_end as u64);
-        let mut records: Vec<Record> = Vec::new();
-        let mut header: Option<Header> = None;
-        {
+        // Pass 1: the header, the records' length and the last record kept;
+        // pass 2 streams the records into the new file (memory does not grow
+        // with the session file).
+        let (mut records_len, mut last_recv) = (0u64, None);
+        let header = {
             let mut it = RecordIter::new(f.as_mut(), 0, end, true);
             for r in it.by_ref() {
-                records.push(r?);
+                let r = r?;
+                records_len += r.encoded_len() as u64;
+                last_recv = Some(r.recv_ns);
             }
-            header = header.or_else(|| it.header().cloned());
-        }
+            it.header().cloned()
+        };
         let header = header.unwrap_or_else(|| {
             Header::session(&self.s.venue, date, writer, "unknown", "unknown", start_ns)
         });
@@ -252,7 +254,6 @@ impl Sealer {
             .ok()
             .and_then(|x| x.l0_file_id())
             .unwrap_or_default();
-        let start = records.last().map_or(start_ns, |r| r.recv_ns);
         let note = Record {
             recv_ns: clock.now_ns(),
             src: Src::Note,
@@ -262,22 +263,33 @@ impl Sealer {
                 "crash_truncate",
                 &self.s.sealer,
                 None,
-                start,
+                last_recv.unwrap_or(start_ns),
                 None,
                 &json!({"file": id}),
             ),
         };
-        records.push(note);
-        let mut content = qraw::encode_header(&header);
-        for r in &records {
-            qraw::encode_record(r, &mut content).map_err(|e| io::Error::other(format!("{e:?}")))?;
-        }
+        let hb = qraw::encode_header(&header);
+        let pledged = hb.len() as u64 + records_len + note.encoded_len() as u64;
         let contexts = Contexts::default();
-        let mut enc = FrameEncoder::new(SEAL_LEVEL, Some(content.len() as u64), &contexts)?;
-        let mut out = Vec::new();
-        enc.write(&content, &mut out)?;
-        enc.finish(&mut out)?;
+        let mut enc = FrameEncoder::new(SEAL_LEVEL, Some(pledged), &contexts)?;
+        let enc_err = |e| io::Error::other(format!("{e:?}"));
         let mut t = fs.create_new(&tmp)?;
+        let mut out = Vec::new();
+        enc.write(&hb, &mut out)?;
+        let mut bytes = Vec::new();
+        for r in RecordIter::new(f.as_mut(), 0, end, true) {
+            bytes.clear();
+            qraw::encode_record(&r?, &mut bytes).map_err(enc_err)?;
+            enc.write(&bytes, &mut out)?;
+            if out.len() >= 1 << 20 {
+                t.write_all(&out)?;
+                out.clear();
+            }
+        }
+        bytes.clear();
+        qraw::encode_record(&note, &mut bytes).map_err(enc_err)?;
+        enc.write(&bytes, &mut out)?;
+        enc.finish(&mut out)?;
         t.write_all(&out)?;
         t.sync()?;
         drop(t);

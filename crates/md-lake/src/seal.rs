@@ -256,6 +256,23 @@ pub(crate) fn read_whole(fs: &dyn Fs, path: &str) -> io::Result<Vec<u8>> {
     Ok(buf)
 }
 
+/// SHA-256 (hex) and length of a file, read 1 MB at a time.
+pub(crate) fn sha256_of(fs: &dyn Fs, path: &str) -> io::Result<(String, u64)> {
+    let mut f = fs.open(path)?;
+    let mut sha = Sha256::new();
+    let mut buf = vec![0; 1 << 20];
+    let mut at = 0u64;
+    loop {
+        let n = f.read_at(at, &mut buf)?;
+        if n == 0 {
+            break;
+        }
+        sha.update(&buf[..n]);
+        at += n as u64;
+    }
+    Ok((hex::encode(sha.finalize()), at))
+}
+
 pub struct Sealer {
     pub(crate) fs: Arc<dyn Fs>,
     pub(crate) s: SealSettings,
@@ -1154,7 +1171,12 @@ impl Sealer {
                     sess_sha.update(&bytes);
                     sess_digest.add(&bytes);
                     sess_records += 1;
-                    enc.write(&bytes, buf)
+                    enc.write(&bytes, buf)?;
+                    if buf.len() >= 1 << 20 {
+                        file.write_all(buf)?;
+                        buf.clear();
+                    }
+                    Ok(())
                 };
             for n in &notes {
                 put(n, &mut enc, &mut buf)?;

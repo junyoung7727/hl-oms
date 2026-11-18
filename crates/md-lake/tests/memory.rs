@@ -20,10 +20,11 @@ use md_lake::zst::{self, Contexts};
 
 const ENV_DIR: &str = "MD_LAKE_RSS_DIR";
 const ENV_BUDGET: &str = "MD_LAKE_RSS_BUDGET";
+const ENV_HOUR: &str = "MD_LAKE_RSS_HOUR";
 
 /// Writes an hour of `topics` topics spread over connections of
 /// `per_conn` topics each, about `total` bytes of records.
-fn synthetic_hour(fs: &Arc<dyn Fs>, topics: usize, per_conn: usize, total: usize) {
+fn synthetic_hour(fs: &Arc<dyn Fs>, hour: i64, topics: usize, per_conn: usize, total: usize) {
     let payload_len = 480;
     let n = total / (payload_len + 25);
     let conns = topics.div_ceil(per_conn);
@@ -31,7 +32,7 @@ fn synthetic_hour(fs: &Arc<dyn Fs>, topics: usize, per_conn: usize, total: usize
         .map(|c| {
             OpenWriter::new(
                 fs.clone(),
-                WriterSettings::new("bybit", "md1", "0.1.0", "t", T14 - S),
+                WriterSettings::new("bybit", "md1", "0.1.0", "t", hour - S),
                 c as u32 + 1,
                 &Contexts::default(),
             )
@@ -49,7 +50,7 @@ fn synthetic_hour(fs: &Arc<dyn Fs>, topics: usize, per_conn: usize, total: usize
             digits.push_str(&format!("{},", x % 100_000));
         }
         let payload = format!("{{\"topic\":\"orderbook.50.S{t:04}\",\"d\":\"{digits}\"}}");
-        let recv = T14 + (i as i64) * (3_000 * S / n as i64);
+        let recv = hour + (i as i64) * (3_000 * S / n as i64);
         let conn = t / per_conn;
         writers[conn]
             .append(&Record {
@@ -68,7 +69,7 @@ fn synthetic_hour(fs: &Arc<dyn Fs>, topics: usize, per_conn: usize, total: usize
 
 /// Seals the lake at `dir` in a child process; returns (peak RSS, max live
 /// context bytes), both in bytes.
-fn seal_in_child(dir: &Path, budget: usize) -> (u64, u64) {
+fn seal_in_child(dir: &Path, hour: i64, budget: usize) -> (u64, u64) {
     let out = Command::new(std::env::current_exe().expect("exe"))
         .args([
             "--exact",
@@ -79,6 +80,7 @@ fn seal_in_child(dir: &Path, budget: usize) -> (u64, u64) {
         ])
         .env(ENV_DIR, dir)
         .env(ENV_BUDGET, budget.to_string())
+        .env(ENV_HOUR, hour.to_string())
         .output()
         .expect("child");
     let text = String::from_utf8_lossy(&out.stdout);
@@ -98,14 +100,18 @@ fn seal_child() {
     let (Ok(dir), Ok(budget)) = (std::env::var(ENV_DIR), std::env::var(ENV_BUDGET)) else {
         return;
     };
+    let hour: i64 = std::env::var(ENV_HOUR).map_or(T14, |v| v.parse().expect("hour"));
     let fs = RealFs::new(dir);
-    let mut s = SealSettings::new("bybit", "md_sealer", "0.1.0", "t", T14);
+    let mut s = SealSettings::new("bybit", "md_sealer", "0.1.0", "t", hour);
     s.context_budget = budget.parse().expect("budget");
-    let clock = FixedClock::at(T14 + time::HOUR_NS + 60 * S);
+    let clock = FixedClock::at(hour + time::HOUR_NS + 60 * S);
     let report = Sealer::new(fs, s)
         .seal(clock.as_ref(), &classify)
         .expect("seal");
     assert_eq!(report.sealed.len(), 1);
+    if hour + time::HOUR_NS == time::day_start(hour) + time::DAY_NS {
+        assert_eq!(report.days_sealed.len(), 1, "the day seal ran");
+    }
     let status = std::fs::read_to_string("/proc/self/status").expect("status");
     let hwm_kb: u64 = status
         .lines()
@@ -128,10 +134,10 @@ fn seal_rss_does_not_grow_with_input() {
     for total in [50 * MB, 200 * MB] {
         let dir = common::test_dir(&format!("rss-{}", total / MB));
         let fs = RealFs::new(&dir);
-        synthetic_hour(&fs, 200, 4, total);
+        synthetic_hour(&fs, T14, 200, 4, total);
         let topic = (total / 200) as u64;
         let budget = 4 * zst::context_bytes(9, Some(topic + 1024));
-        let (rss, live) = seal_in_child(&dir, budget);
+        let (rss, live) = seal_in_child(&dir, T14, budget);
         assert!(live as usize <= budget, "live {live} > budget {budget}");
         eprintln!(
             "rss {} MB: peak {} MB, live contexts {} MB",
@@ -155,8 +161,8 @@ fn seal_rss_does_not_grow_with_input() {
 fn seal_rss_minus_contexts_is_bounded() {
     let dir = common::test_dir("rss-big-topics");
     let fs = RealFs::new(&dir);
-    synthetic_hour(&fs, 4, 4, 400 * MB);
-    let (rss, live) = seal_in_child(&dir, 512 * MB);
+    synthetic_hour(&fs, T14, 4, 4, 400 * MB);
+    let (rss, live) = seal_in_child(&dir, T14, 512 * MB);
     let _ = std::fs::remove_dir_all(&dir);
     assert!(
         rss.saturating_sub(live) <= 96 * MB as u64,
@@ -172,10 +178,10 @@ fn seal_rss_2gb() {
     let dir = common::test_dir("rss-2gb");
     let fs = RealFs::new(&dir);
     let started = std::time::Instant::now();
-    synthetic_hour(&fs, 200, 4, 2048 * MB);
+    synthetic_hour(&fs, T14, 200, 4, 2048 * MB);
     let written = started.elapsed();
     let sealed_at = std::time::Instant::now();
-    let (rss, live) = seal_in_child(&dir, 512 * MB);
+    let (rss, live) = seal_in_child(&dir, T14, 512 * MB);
     let secs = sealed_at.elapsed().as_secs_f64();
     let _ = std::fs::remove_dir_all(&dir);
     println!(
@@ -185,4 +191,22 @@ fn seal_rss_2gb() {
         written.as_secs_f64()
     );
     assert!(rss <= 1024 * MB as u64, "peak RSS {} MB", rss / MB as u64);
+}
+
+#[test]
+fn day_seal_memory_does_not_grow_with_the_day_file() {
+    // Hour 23 closes the date: the same run seals the hour and the day
+    // (rename, sidecar SHA-256, manifest line) of a ~150 MB day file.
+    let dir = common::test_dir("rss-day-seal");
+    let fs = RealFs::new(&dir);
+    let h23 = time::day_start(T14) + 23 * time::HOUR_NS;
+    synthetic_hour(&fs, h23, 1, 1, 400 * MB);
+    let (rss, live) = seal_in_child(&dir, h23, 512 * MB);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        rss.saturating_sub(live) <= 96 * MB as u64,
+        "RSS {} MB, contexts {} MB",
+        rss / MB as u64,
+        live / MB as u64
+    );
 }
