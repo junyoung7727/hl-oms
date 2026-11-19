@@ -346,11 +346,13 @@ pub fn key(channel: &str, symbol: &str) -> md_core::StreamKey {
 }
 
 /// Keeps every forwarded message.
+/// One `book_msg` call: (conn_id, channel, symbol, venue_ts_ns, recv_ns).
+pub type BookMsg = (u32, String, String, i64, i64);
+
 #[derive(Default)]
 pub struct VecMsgs(
     pub Mutex<Vec<(u32, md_core::Normalized)>>,
-    /// `book_msg` calls: (conn_id, channel, symbol, venue_ts_ns, recv_ns).
-    pub Mutex<Vec<(u32, String, String, i64, i64)>>,
+    pub Mutex<Vec<BookMsg>>,
 );
 
 impl md_feed::MessageSink for VecMsgs {

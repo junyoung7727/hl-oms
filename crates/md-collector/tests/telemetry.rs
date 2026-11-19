@@ -210,7 +210,7 @@ fn msgs_bytes_per_conn_channel_and_last_msg_age() {
     assert!(
         find(&v, "md_msgs", &[("conn", "3")])
             .iter()
-            .all(|s| s.labels.get("conn_id").is_none())
+            .all(|s| !s.labels.contains_key("conn_id"))
     );
 }
 

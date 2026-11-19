@@ -32,6 +32,14 @@ pub fn slot_of_conn_id(conn_id: u32) -> u32 {
     conn_id >> SLOT_SHIFT
 }
 
+/// Where a feed hands its frames and its parsed messages.
+#[derive(Default, Clone)]
+pub struct Sinks {
+    pub frames: Option<Arc<dyn FrameSink>>,
+    /// U6: receive lag of books, trades and tickers.
+    pub msgs: Option<Arc<dyn MessageSink>>,
+}
+
 /// Venue code the collector and the seal need.
 pub trait Venue: Send + Sync {
     fn name(&self) -> &'static str;
@@ -78,8 +86,7 @@ pub trait Venue: Send + Sync {
         max_topics: Option<usize>,
         cfg: FeedConfig,
         plans: Vec<ConnPlan>,
-        sink: Option<Arc<dyn FrameSink>>,
-        msgs: Option<Arc<dyn MessageSink>>,
+        sinks: Sinks,
     ) -> Result<FeedHandle, String>;
 
     fn market_slot(&self, market: &str) -> Option<u32> {
@@ -244,10 +251,9 @@ impl Venue for Bybit {
         max_topics: Option<usize>,
         cfg: FeedConfig,
         plans: Vec<ConnPlan>,
-        sink: Option<Arc<dyn FrameSink>>,
-        msgs: Option<Arc<dyn MessageSink>>,
+        sinks: Sinks,
     ) -> Result<FeedHandle, String> {
         let a = Arc::new(bybit_adapter(market, instruments, max_topics)?);
-        md_feed::Feed::start_with(a, cfg, plans, sink, msgs)
+        md_feed::Feed::start_with(a, cfg, plans, sinks.frames, sinks.msgs)
     }
 }

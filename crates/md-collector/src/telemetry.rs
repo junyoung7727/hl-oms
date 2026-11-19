@@ -170,9 +170,10 @@ pub trait BookSource {
     fn exps(&self, market: &str, symbol: &str) -> Option<(i8, i8)>;
 }
 
-/// The reconnect rule of R8, per (market, conn_index).
+/// A plan slot: its topics and the reconnect rule of R8.
 #[derive(Debug, Default)]
 struct SlotLink {
+    topics: Vec<TopicKey>,
     active: Option<u32>,
 }
 
@@ -183,7 +184,7 @@ pub struct Telemetry {
     /// summary of that connection's period.
     conns: Mutex<BTreeMap<(String, String, u32), ConnStats>>,
     /// Topics of each (market, conn_index), and the R8 state.
-    slots: Mutex<BTreeMap<(String, u32), (Vec<TopicKey>, SlotLink)>>,
+    slots: Mutex<BTreeMap<(String, u32), SlotLink>>,
 }
 
 fn shard_of(t: &TopicKey) -> usize {
@@ -238,11 +239,13 @@ impl Telemetry {
             }
         }
         if let Ok(mut s) = self.slots.lock() {
-            let e = s
-                .entry((market.to_string(), conn_index))
-                .or_insert_with(|| (Vec::new(), SlotLink::default()));
-            e.0 = keys;
-            e.1 = SlotLink::default();
+            s.insert(
+                (market.to_string(), conn_index),
+                SlotLink {
+                    topics: keys,
+                    active: None,
+                },
+            );
         }
     }
 
@@ -292,7 +295,7 @@ impl Telemetry {
             .ok()
             .and_then(|s| {
                 s.get(&(market.to_string(), conn_index))
-                    .map(|e| e.0.clone())
+                    .map(|e| e.topics.clone())
             })
             .unwrap_or_default()
     }
@@ -322,8 +325,8 @@ impl Telemetry {
             } => {
                 if let Ok(mut s) = self.slots.lock() {
                     if let Some(e) = s.get_mut(&(market.to_string(), *conn_index)) {
-                        if e.1.active.is_none() {
-                            e.1.active = Some(*conn_id);
+                        if e.active.is_none() {
+                            e.active = Some(*conn_id);
                         }
                     }
                 }
@@ -335,7 +338,7 @@ impl Telemetry {
             } => {
                 if let Ok(mut s) = self.slots.lock() {
                     if let Some(e) = s.get_mut(&(market.to_string(), *conn_index)) {
-                        e.1.active = Some(*to_conn_id);
+                        e.active = Some(*to_conn_id);
                     }
                 }
             }
@@ -346,8 +349,8 @@ impl Telemetry {
             } => {
                 let ended_active = match self.slots.lock() {
                     Ok(mut s) => match s.get_mut(&(market.to_string(), *conn_index)) {
-                        Some(e) if e.1.active == Some(*conn_id) => {
-                            e.1.active = None;
+                        Some(e) if e.active == Some(*conn_id) => {
+                            e.active = None;
                             true
                         }
                         _ => false,

@@ -293,8 +293,10 @@ impl Inner {
             m.cfg.max_topics_per_conn,
             self.feed_config(m),
             group.plans.clone(),
-            Some(sink.clone() as Arc<dyn FrameSink>),
-            None,
+            registry::Sinks {
+                frames: Some(sink.clone() as Arc<dyn FrameSink>),
+                msgs: None,
+            },
         )?;
         let events = handle.take_events().map(|mut rx| {
             let (counters, market) = (self.counters.clone(), group.market.clone());
