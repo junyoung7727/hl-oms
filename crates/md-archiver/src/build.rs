@@ -1249,7 +1249,7 @@ impl Out<'_> {
             // Final review F6: the collector writes to the same disk, so
             // the floor is checked while a file grows too.
             self.pushed += 1;
-            if self.pushed % DISK_CHECK_ROWS == 0 {
+            if self.pushed.is_multiple_of(DISK_CHECK_ROWS) {
                 if let Some(DiskCheck(check)) = &self.disk_check {
                     check().map_err(BuildError::Disk)?;
                 }
