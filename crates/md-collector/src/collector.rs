@@ -20,6 +20,7 @@ use crate::config::{Config, MarketConfig, Symbols};
 use crate::disk::{FreeSpace, StatVfs};
 use crate::ingest::{self, Ingest, IngestSnapshot, Limits, WriterThread};
 use crate::notes::Note;
+use crate::notify::{Notifier, SdNotify};
 use crate::plan::{self, Group};
 use crate::registry::{self, Venue};
 
@@ -42,6 +43,8 @@ pub struct Deps {
     pub fs: Arc<dyn Fs>,
     pub free_space: Arc<dyn FreeSpace>,
     pub clock: Arc<dyn WallClock>,
+    /// systemd notify (`READY=1`, `WATCHDOG=1`; U6 D5).
+    pub notifier: Option<Arc<dyn Notifier>>,
 }
 
 impl Deps {
@@ -50,6 +53,7 @@ impl Deps {
             fs: RealFs::new(&cfg.lake_root),
             free_space: Arc::new(StatVfs(cfg.lake_root.clone())),
             clock: Arc::new(SystemClock),
+            notifier: SdNotify::from_env().map(|n| Arc::new(n) as Arc<dyn Notifier>),
         }
     }
 }
@@ -442,7 +446,8 @@ impl Collector {
         );
         ws.flush_ns = i64::try_from(cfg.write.flush_ms).unwrap_or(1000) * 1_000_000;
         ws.fsync_ns = i64::try_from(cfg.write.fsync_ms).unwrap_or(5000) * 1_000_000;
-        let (ingest, writer) = ingest::start(
+        let notifier = deps.notifier.clone();
+        let (ingest, writer) = ingest::start_with(
             deps.fs.clone(),
             ws,
             venue,
@@ -450,13 +455,19 @@ impl Collector {
                 queue_bytes: cfg.write.queue_bytes,
                 total_bytes: cfg.write.total_queue_bytes.max(cfg.write.queue_bytes),
             },
+            notifier.clone(),
         )?;
         match Self::start_inner(cfg, deps, venue, ingest).await {
-            Ok((inner, tasks)) => Ok(CollectorHandle {
-                inner,
-                writer: Some(writer),
-                tasks,
-            }),
+            Ok((inner, tasks)) => {
+                if let Some(n) = &notifier {
+                    n.notify("READY=1");
+                }
+                Ok(CollectorHandle {
+                    inner,
+                    writer: Some(writer),
+                    tasks,
+                })
+            }
             Err(e) => {
                 // The bodies fetched so far stay in L0.
                 let _ = writer.stop();

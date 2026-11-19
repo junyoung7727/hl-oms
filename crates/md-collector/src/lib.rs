@@ -8,6 +8,7 @@ pub mod daychange;
 pub mod disk;
 pub mod ingest;
 pub mod notes;
+pub mod notify;
 pub mod plan;
 pub mod registry;
 pub mod telemetry;

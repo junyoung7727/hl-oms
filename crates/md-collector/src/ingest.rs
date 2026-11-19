@@ -24,10 +24,25 @@ use md_lake::zst::Contexts;
 use serde_json::json;
 
 use crate::notes::{self, Note};
+use crate::notify::Notifier;
 use crate::registry::{self, Venue};
 
 /// How often the writer ticks its files.
 const TICK: Duration = Duration::from_millis(100);
+/// How often the writer beats (heartbeat value and `WATCHDOG=1`, U6 D5).
+const BEAT: Duration = Duration::from_secs(1);
+
+/// `ENOSPC`, `EIO`, `EDQUOT`, ... for the alert text (U6 R7); else the kind.
+pub fn os_error_name(e: &std::io::Error) -> String {
+    match e.raw_os_error() {
+        Some(28) => "ENOSPC".into(),
+        Some(5) => "EIO".into(),
+        Some(122) => "EDQUOT".into(),
+        Some(30) => "EROFS".into(),
+        Some(n) => format!("errno {n}"),
+        None => format!("{:?}", e.kind()),
+    }
+}
 
 /// Where a frame goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +86,13 @@ pub struct IngestSnapshot {
     pub notes: u64,
     /// The writer stopped on an error (the collector must exit).
     pub failed: Option<String>,
+    /// Its OS error name (`ENOSPC`, `EIO`, ...).
+    pub failed_os_error: Option<String>,
+    /// Unix seconds of the writer's last beat (`md_collector_heartbeat_ts`).
+    pub heartbeat_s: Option<i64>,
+    pub beats: u64,
+    /// Open stage-1 writers (`lake_l0_open_files`).
+    pub open_files: usize,
 }
 
 /// The receive queue budgets (spec D4, R1).
@@ -92,6 +114,10 @@ struct Shared {
     late_frames: u64,
     notes: u64,
     failed: Option<String>,
+    failed_os_error: Option<String>,
+    heartbeat_s: Option<i64>,
+    beats: u64,
+    open_files: usize,
 }
 
 #[derive(Default)]
@@ -126,6 +152,17 @@ pub fn start(
     venue: &'static dyn Venue,
     limits: Limits,
 ) -> Result<(Arc<Ingest>, WriterThread), String> {
+    start_with(fs, settings, venue, limits, None)
+}
+
+/// As [`start`], with the systemd notifier the writer beats to (U6 D5).
+pub fn start_with(
+    fs: Arc<dyn Fs>,
+    settings: WriterSettings,
+    venue: &'static dyn Venue,
+    limits: Limits,
+    notifier: Option<Arc<dyn Notifier>>,
+) -> Result<(Arc<Ingest>, WriterThread), String> {
     let (tx, rx) = mpsc::channel();
     let shared: Arc<Mutex<Shared>> = Arc::default();
     let writer = settings.collector.clone();
@@ -138,6 +175,7 @@ pub fn start(
         last_recv: BTreeMap::new(),
         session: SessionWriter::new(fs, settings, &Contexts::default()),
         shared: shared.clone(),
+        notifier,
     };
     let join = std::thread::Builder::new()
         .name("md-writer".into())
@@ -186,6 +224,10 @@ fn snapshot(shared: &Mutex<Shared>) -> IngestSnapshot {
         late_frames: s.late_frames,
         notes: s.notes,
         failed: s.failed.clone(),
+        failed_os_error: s.failed_os_error.clone(),
+        heartbeat_s: s.heartbeat_s,
+        beats: s.beats,
+        open_files: s.open_files,
     }
 }
 
@@ -357,11 +399,13 @@ struct Writer {
     last_recv: BTreeMap<u32, i64>,
     session: SessionWriter,
     shared: Arc<Mutex<Shared>>,
+    notifier: Option<Arc<dyn Notifier>>,
 }
 
 impl Writer {
     fn run(mut self, rx: mpsc::Receiver<Item>) {
         let mut last_tick = Instant::now();
+        let mut last_beat = Instant::now();
         loop {
             let item = match rx.recv_timeout(TICK) {
                 Ok(i) => Some(i),
@@ -374,9 +418,11 @@ impl Writer {
                 Some(i) => self.handle(i),
                 None => Ok(()),
             };
+            let mut ticked = false;
             let r = r.and_then(|()| {
                 if !stop && last_tick.elapsed() >= TICK {
                     last_tick = Instant::now();
+                    ticked = true;
                     self.tick()
                 } else {
                     Ok(())
@@ -384,15 +430,22 @@ impl Writer {
             });
             if let Err(e) = r {
                 // Files are left as they are (no frame end): md-lake seal
-                // cuts them back and notes it (crash_truncate).
+                // cuts them back and notes it (crash_truncate). No beat
+                // follows (U6 D5): the thread ends here.
+                let os = os_error_name(&e);
                 eprintln!(
                     "{}",
-                    json!({"level": "error", "msg": "writer failed", "fields": {"error": e}})
+                    json!({"level": "error", "msg": "writer failed", "fields": {"error": e.to_string(), "os_error": os}})
                 );
                 if let Ok(mut s) = self.shared.lock() {
-                    s.failed = Some(e);
+                    s.failed = Some(e.to_string());
+                    s.failed_os_error = Some(os);
                 }
                 return;
+            }
+            if ticked && !stop && last_beat.elapsed() >= BEAT {
+                last_beat = Instant::now();
+                self.beat();
             }
             if stop {
                 return;
@@ -400,7 +453,7 @@ impl Writer {
         }
     }
 
-    fn handle(&mut self, item: Item) -> Result<(), String> {
+    fn handle(&mut self, item: Item) -> std::io::Result<()> {
         match item {
             Item::Frame {
                 dest,
@@ -430,14 +483,14 @@ impl Writer {
                 if let Ok(mut s) = self.shared.lock() {
                     s.notes += 1;
                 }
-                self.session.append(&rec).map_err(|e| e.to_string())
+                self.session.append(&rec)
             }
             Item::Close(0) => Ok(()),
             Item::Close(conn_id) => {
                 self.closed.insert(conn_id);
                 self.last_recv.remove(&conn_id);
                 match self.open.remove(&conn_id) {
-                    Some(w) => w.close().map_err(|e| e.to_string()),
+                    Some(w) => w.close(),
                     None => Ok(()),
                 }
             }
@@ -445,7 +498,7 @@ impl Writer {
         }
     }
 
-    fn frame(&mut self, dest: Dest, rec: Record) -> Result<(), String> {
+    fn frame(&mut self, dest: Dest, rec: Record) -> std::io::Result<()> {
         if rec.src == qraw::Src::WebSocket && rec.conn_id > 0 {
             if let Some(&prev) = self.last_recv.get(&rec.conn_id) {
                 if rec.recv_ns < prev {
@@ -465,7 +518,7 @@ impl Writer {
                         s.clock_steps += 1;
                         s.notes += 1;
                     }
-                    self.session.append(&n).map_err(|e| e.to_string())?;
+                    self.session.append(&n)?;
                 }
             }
             self.last_recv.insert(rec.conn_id, rec.recv_ns);
@@ -481,7 +534,7 @@ impl Writer {
                 if let Ok(mut s) = self.shared.lock() {
                     s.late_frames += 1;
                 }
-                self.session.append(&rec).map_err(|e| e.to_string())
+                self.session.append(&rec)
             }
             Dest::Open(c) => {
                 let (fs, settings, contexts) = (&self.fs, &self.settings, &self.contexts);
@@ -491,25 +544,41 @@ impl Writer {
                     .or_insert_with(|| OpenWriter::new(fs.clone(), settings.clone(), c, contexts));
                 // Never a file in an hour that has passed (spec R2).
                 w.set_min_hour(crate::wall_ns());
-                w.append(&rec).map_err(|e| e.to_string())
+                w.append(&rec)
             }
-            Dest::Session => self.session.append(&rec).map_err(|e| e.to_string()),
+            Dest::Session => self.session.append(&rec),
         }
     }
 
-    fn tick(&mut self) -> Result<(), String> {
+    /// A beat (U6 D5): only after a tick in which every writer's tick
+    /// returned `Ok`, at most once per second, also without frames.
+    fn beat(&mut self) {
+        let now_s = crate::wall_ns() / 1_000_000_000;
+        if let Ok(mut s) = self.shared.lock() {
+            s.heartbeat_s = Some(now_s);
+            s.beats += 1;
+        }
+        if let Some(n) = &self.notifier {
+            n.notify("WATCHDOG=1");
+        }
+    }
+
+    fn tick(&mut self) -> std::io::Result<()> {
         let now = crate::wall_ns();
         for w in self.open.values_mut() {
-            w.tick(now).map_err(|e| e.to_string())?;
+            w.tick(now)?;
         }
-        self.session.tick(now).map_err(|e| e.to_string())
+        if let Ok(mut s) = self.shared.lock() {
+            s.open_files = self.open.len();
+        }
+        self.session.tick(now)
     }
 
-    fn close_all(&mut self) -> Result<(), String> {
+    fn close_all(&mut self) -> std::io::Result<()> {
         let mut first_err = None;
         for (_, w) in std::mem::take(&mut self.open) {
             if let Err(e) = w.close() {
-                first_err.get_or_insert(e.to_string());
+                first_err.get_or_insert(e);
             }
         }
         let session = std::mem::replace(
@@ -517,7 +586,7 @@ impl Writer {
             SessionWriter::new(self.fs.clone(), self.settings.clone(), &self.contexts),
         );
         if let Err(e) = session.close() {
-            first_err.get_or_insert(e.to_string());
+            first_err.get_or_insert(e);
         }
         match first_err {
             Some(e) => Err(e),

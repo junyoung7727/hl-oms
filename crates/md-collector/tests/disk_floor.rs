@@ -48,6 +48,7 @@ async fn disk_floor_drops_and_restores() {
         fs: s.fs.clone(),
         free_space: free.clone(),
         clock: Arc::new(SystemClock),
+        notifier: None,
     };
     let h = Collector::start(cfg, deps).await.expect("start");
     // Traded: BTCUSDT book. Other: BTCUSDT trades; ETHUSDT book and trades

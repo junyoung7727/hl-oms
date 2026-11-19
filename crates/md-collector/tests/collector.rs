@@ -293,6 +293,7 @@ async fn slow_disk_overflow_reconnects() {
         }),
         free_space: SetFree::new(u64::MAX),
         clock: Arc::new(SystemClock),
+        notifier: None,
     };
     let cfg = s.config(
         &[(

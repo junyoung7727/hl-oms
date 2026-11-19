@@ -14,6 +14,8 @@ pub struct Gate {
     cv: Condvar,
     /// Writes that waited at the gate.
     pub waited: AtomicU64,
+    /// When set, every file write fails with this OS error (e.g. 28 = ENOSPC).
+    pub fail_os: AtomicU64,
 }
 
 impl Gate {
@@ -24,7 +26,15 @@ impl Gate {
         *self.closed.lock().expect("gate") = false;
         self.cv.notify_all();
     }
-    fn pass(&self) {
+    /// Every later write fails with OS error `code`.
+    pub fn fail_with(&self, code: i32) {
+        self.fail_os.store(code as u64, Ordering::SeqCst);
+    }
+    fn pass(&self) -> io::Result<()> {
+        let code = self.fail_os.load(Ordering::SeqCst);
+        if code != 0 {
+            return Err(io::Error::from_raw_os_error(code as i32));
+        }
         let mut c = self.closed.lock().expect("gate");
         if *c {
             self.waited.fetch_add(1, Ordering::SeqCst);
@@ -32,6 +42,7 @@ impl Gate {
         while *c {
             c = self.cv.wait(c).expect("gate");
         }
+        Ok(())
     }
 }
 
@@ -49,7 +60,7 @@ struct SlowFile {
 
 impl LakeFile for SlowFile {
     fn write_all(&mut self, data: &[u8]) -> io::Result<()> {
-        self.gate.pass();
+        self.gate.pass()?;
         self.inner.write_all(data)
     }
     fn sync(&mut self) -> io::Result<()> {
