@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use md_core::StreamKey;
 use md_core::adapter::Route;
 use md_feed::{FrameSink, Overflow, RawFrame, Src};
 use md_lake::fs::Fs;
@@ -24,10 +25,27 @@ use md_lake::zst::Contexts;
 use serde_json::json;
 
 use crate::notes::{self, Note};
+use crate::notify::Notifier;
+use crate::obs::LogSink;
+use crate::telemetry::Telemetry;
 use crate::registry::{self, Venue};
 
 /// How often the writer ticks its files.
 const TICK: Duration = Duration::from_millis(100);
+/// How often the writer beats (heartbeat value and `WATCHDOG=1`, U6 D5).
+const BEAT: Duration = Duration::from_secs(1);
+
+/// `ENOSPC`, `EIO`, `EDQUOT`, ... for the alert text (U6 R7); else the kind.
+pub fn os_error_name(e: &std::io::Error) -> String {
+    match e.raw_os_error() {
+        Some(28) => "ENOSPC".into(),
+        Some(5) => "EIO".into(),
+        Some(122) => "EDQUOT".into(),
+        Some(30) => "EROFS".into(),
+        Some(n) => format!("errno {n}"),
+        None => format!("{:?}", e.kind()),
+    }
+}
 
 /// Where a frame goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +89,13 @@ pub struct IngestSnapshot {
     pub notes: u64,
     /// The writer stopped on an error (the collector must exit).
     pub failed: Option<String>,
+    /// Its OS error name (`ENOSPC`, `EIO`, ...).
+    pub failed_os_error: Option<String>,
+    /// Unix seconds of the writer's last beat (`md_collector_heartbeat_ts`).
+    pub heartbeat_s: Option<i64>,
+    pub beats: u64,
+    /// Open stage-1 writers (`lake_l0_open_files`).
+    pub open_files: usize,
 }
 
 /// The receive queue budgets (spec D4, R1).
@@ -92,6 +117,25 @@ struct Shared {
     late_frames: u64,
     notes: u64,
     failed: Option<String>,
+    failed_os_error: Option<String>,
+    heartbeat_s: Option<i64>,
+    beats: u64,
+    open_files: usize,
+    /// Payload bytes written since the start (all connections).
+    bytes_total: u64,
+}
+
+/// The writer's health without copying the per-connection map (U6 review
+/// finding 5: the frame path takes the same lock).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Health {
+    pub failed: Option<String>,
+    pub failed_os_error: Option<String>,
+    pub heartbeat_s: Option<i64>,
+    pub beats: u64,
+    pub open_files: usize,
+    pub bytes_total: u64,
+    pub slot_bytes: BTreeMap<u32, usize>,
 }
 
 #[derive(Default)]
@@ -110,6 +154,7 @@ pub struct Ingest {
     writer: String,
     limits: Limits,
     shared: Arc<Mutex<Shared>>,
+    telemetry: Option<Arc<Telemetry>>,
 }
 
 /// The writer thread.
@@ -126,6 +171,31 @@ pub fn start(
     venue: &'static dyn Venue,
     limits: Limits,
 ) -> Result<(Arc<Ingest>, WriterThread), String> {
+    start_with(fs, settings, venue, limits, Hooks::default())
+}
+
+/// What the ingest reports to (U6): the systemd notifier the writer beats
+/// to, the log sink and the telemetry model.
+#[derive(Default, Clone)]
+pub struct Hooks {
+    pub notifier: Option<Arc<dyn Notifier>>,
+    pub log: Option<Arc<LogSink>>,
+    pub telemetry: Option<Arc<Telemetry>>,
+}
+
+/// As [`start`], with the U6 hooks.
+pub fn start_with(
+    fs: Arc<dyn Fs>,
+    settings: WriterSettings,
+    venue: &'static dyn Venue,
+    limits: Limits,
+    hooks: Hooks,
+) -> Result<(Arc<Ingest>, WriterThread), String> {
+    let notifier = hooks.notifier.clone();
+    let log = hooks
+        .log
+        .clone()
+        .unwrap_or_else(|| Arc::new(LogSink::stderr_only(&settings.venue)));
     let (tx, rx) = mpsc::channel();
     let shared: Arc<Mutex<Shared>> = Arc::default();
     let writer = settings.collector.clone();
@@ -138,6 +208,8 @@ pub fn start(
         last_recv: BTreeMap::new(),
         session: SessionWriter::new(fs, settings, &Contexts::default()),
         shared: shared.clone(),
+        notifier,
+        log: log.clone(),
     };
     let join = std::thread::Builder::new()
         .name("md-writer".into())
@@ -149,6 +221,7 @@ pub fn start(
         writer,
         limits,
         shared: shared.clone(),
+        telemetry: hooks.telemetry,
     });
     Ok((
         ingest,
@@ -186,6 +259,10 @@ fn snapshot(shared: &Mutex<Shared>) -> IngestSnapshot {
         late_frames: s.late_frames,
         notes: s.notes,
         failed: s.failed.clone(),
+        failed_os_error: s.failed_os_error.clone(),
+        heartbeat_s: s.heartbeat_s,
+        beats: s.beats,
+        open_files: s.open_files,
     }
 }
 
@@ -198,20 +275,26 @@ impl Ingest {
     }
 
     fn dest(&self, f: &RawFrame) -> Dest {
+        self.dest_topic(f).0
+    }
+
+    /// Where a frame goes, and its stream topic with its market (U6 R7:
+    /// WebSocket frames carry no topic; the route names it).
+    fn dest_topic(&self, f: &RawFrame) -> (Dest, Option<(&'static str, StreamKey)>) {
         match f.src {
             Src::Ws => {
                 let slot = usize::try_from(registry::slot_of_conn_id(f.conn_id)).ok();
-                let market = slot.and_then(|s| self.venue.markets().get(s));
-                match market.map(|m| self.venue.route(m, &f.payload)) {
-                    Some(Route::Stream(_)) => Dest::Open(f.conn_id),
-                    _ => Dest::Session,
+                let market = slot.and_then(|s| self.venue.markets().get(s)).copied();
+                match market.map(|m| (m, self.venue.route(m, &f.payload))) {
+                    Some((m, Route::Stream(k))) => (Dest::Open(f.conn_id), Some((m, k))),
+                    _ => (Dest::Session, None),
                 }
             }
             // A REST body that names a market of the venue is market data
             // (the instruments topic, D1); any other body is control.
             Src::Rest => match self.venue.rest_market(&f.payload) {
-                Some(m) if self.venue.market_slot(&m).is_some() => Dest::Open(0),
-                _ => Dest::Session,
+                Some(m) if self.venue.market_slot(&m).is_some() => (Dest::Open(0), None),
+                _ => (Dest::Session, None),
             },
         }
     }
@@ -250,6 +333,21 @@ impl Ingest {
     pub fn state(&self) -> IngestSnapshot {
         snapshot(&self.shared)
     }
+
+    pub fn health(&self) -> Health {
+        match self.shared.lock() {
+            Ok(s) => Health {
+                failed: s.failed.clone(),
+                failed_os_error: s.failed_os_error.clone(),
+                heartbeat_s: s.heartbeat_s,
+                beats: s.beats,
+                open_files: s.open_files,
+                bytes_total: s.bytes_total,
+                slot_bytes: s.slots.clone(),
+            },
+            Err(_) => Health::default(),
+        }
+    }
 }
 
 fn record(f: RawFrame) -> Record {
@@ -267,7 +365,7 @@ fn record(f: RawFrame) -> Record {
 
 impl FrameSink for Ingest {
     fn frame(&self, f: RawFrame) -> Result<(), Overflow> {
-        let dest = self.dest(&f);
+        let (dest, topic) = self.dest_topic(&f);
         let bytes = qraw::FIXED_LEN + f.payload.len();
         let slot = f.conn_index;
         {
@@ -305,6 +403,9 @@ impl FrameSink for Ingest {
             c.accepted += 1;
             *s.slots.entry(slot).or_default() += bytes;
             s.total += bytes;
+        }
+        if let (Some(t), Some((market, key))) = (&self.telemetry, &topic) {
+            t.frame(market, key, slot, f.payload.len(), f.recv_ns);
         }
         if self.send(Item::Frame {
             dest,
@@ -357,11 +458,14 @@ struct Writer {
     last_recv: BTreeMap<u32, i64>,
     session: SessionWriter,
     shared: Arc<Mutex<Shared>>,
+    notifier: Option<Arc<dyn Notifier>>,
+    log: Arc<LogSink>,
 }
 
 impl Writer {
     fn run(mut self, rx: mpsc::Receiver<Item>) {
         let mut last_tick = Instant::now();
+        let mut last_beat = Instant::now();
         loop {
             let item = match rx.recv_timeout(TICK) {
                 Ok(i) => Some(i),
@@ -374,9 +478,11 @@ impl Writer {
                 Some(i) => self.handle(i),
                 None => Ok(()),
             };
+            let mut ticked = false;
             let r = r.and_then(|()| {
                 if !stop && last_tick.elapsed() >= TICK {
                     last_tick = Instant::now();
+                    ticked = true;
                     self.tick()
                 } else {
                     Ok(())
@@ -384,15 +490,23 @@ impl Writer {
             });
             if let Err(e) = r {
                 // Files are left as they are (no frame end): md-lake seal
-                // cuts them back and notes it (crash_truncate).
-                eprintln!(
-                    "{}",
-                    json!({"level": "error", "msg": "writer failed", "fields": {"error": e}})
+                // cuts them back and notes it (crash_truncate). No beat
+                // follows (U6 D5): the thread ends here.
+                let os = os_error_name(&e);
+                self.log.log(
+                    "error",
+                    "writer failed",
+                    json!({"error": e.to_string(), "os_error": os}),
                 );
                 if let Ok(mut s) = self.shared.lock() {
-                    s.failed = Some(e);
+                    s.failed = Some(e.to_string());
+                    s.failed_os_error = Some(os);
                 }
                 return;
+            }
+            if ticked && !stop && last_beat.elapsed() >= BEAT {
+                last_beat = Instant::now();
+                self.beat();
             }
             if stop {
                 return;
@@ -400,7 +514,7 @@ impl Writer {
         }
     }
 
-    fn handle(&mut self, item: Item) -> Result<(), String> {
+    fn handle(&mut self, item: Item) -> std::io::Result<()> {
         match item {
             Item::Frame {
                 dest,
@@ -418,10 +532,13 @@ impl Writer {
                         }
                         s.total = s.total.saturating_sub(bytes);
                     }
-                    let c = s.conns.entry(conn_id).or_default();
                     if r.is_ok() {
+                        let c = s.conns.entry(conn_id).or_default();
                         c.frames += 1;
                         c.bytes += len;
+                        s.bytes_total += len;
+                    } else {
+                        s.conns.entry(conn_id).or_default();
                     }
                 }
                 r
@@ -430,14 +547,14 @@ impl Writer {
                 if let Ok(mut s) = self.shared.lock() {
                     s.notes += 1;
                 }
-                self.session.append(&rec).map_err(|e| e.to_string())
+                self.session.append(&rec)
             }
             Item::Close(0) => Ok(()),
             Item::Close(conn_id) => {
                 self.closed.insert(conn_id);
                 self.last_recv.remove(&conn_id);
                 match self.open.remove(&conn_id) {
-                    Some(w) => w.close().map_err(|e| e.to_string()),
+                    Some(w) => w.close(),
                     None => Ok(()),
                 }
             }
@@ -445,7 +562,7 @@ impl Writer {
         }
     }
 
-    fn frame(&mut self, dest: Dest, rec: Record) -> Result<(), String> {
+    fn frame(&mut self, dest: Dest, rec: Record) -> std::io::Result<()> {
         if rec.src == qraw::Src::WebSocket && rec.conn_id > 0 {
             if let Some(&prev) = self.last_recv.get(&rec.conn_id) {
                 if rec.recv_ns < prev {
@@ -465,7 +582,7 @@ impl Writer {
                         s.clock_steps += 1;
                         s.notes += 1;
                     }
-                    self.session.append(&n).map_err(|e| e.to_string())?;
+                    self.session.append(&n)?;
                 }
             }
             self.last_recv.insert(rec.conn_id, rec.recv_ns);
@@ -474,14 +591,12 @@ impl Writer {
             Dest::Open(c) if self.closed.contains(&c) => {
                 // Kept, never dropped: an open file once closed is not
                 // reopened (the sealer may hold it).
-                eprintln!(
-                    "{}",
-                    json!({"level": "warn", "msg": "frame of a closed connection", "fields": {"conn_id": c}})
-                );
+                self.log
+                    .log("warn", "frame of a closed connection", json!({"conn_id": c}));
                 if let Ok(mut s) = self.shared.lock() {
                     s.late_frames += 1;
                 }
-                self.session.append(&rec).map_err(|e| e.to_string())
+                self.session.append(&rec)
             }
             Dest::Open(c) => {
                 let (fs, settings, contexts) = (&self.fs, &self.settings, &self.contexts);
@@ -491,25 +606,41 @@ impl Writer {
                     .or_insert_with(|| OpenWriter::new(fs.clone(), settings.clone(), c, contexts));
                 // Never a file in an hour that has passed (spec R2).
                 w.set_min_hour(crate::wall_ns());
-                w.append(&rec).map_err(|e| e.to_string())
+                w.append(&rec)
             }
-            Dest::Session => self.session.append(&rec).map_err(|e| e.to_string()),
+            Dest::Session => self.session.append(&rec),
         }
     }
 
-    fn tick(&mut self) -> Result<(), String> {
+    /// A beat (U6 D5): only after a tick in which every writer's tick
+    /// returned `Ok`, at most once per second, also without frames.
+    fn beat(&mut self) {
+        let now_s = crate::wall_ns() / 1_000_000_000;
+        if let Ok(mut s) = self.shared.lock() {
+            s.heartbeat_s = Some(now_s);
+            s.beats += 1;
+        }
+        if let Some(n) = &self.notifier {
+            n.notify("WATCHDOG=1");
+        }
+    }
+
+    fn tick(&mut self) -> std::io::Result<()> {
         let now = crate::wall_ns();
         for w in self.open.values_mut() {
-            w.tick(now).map_err(|e| e.to_string())?;
+            w.tick(now)?;
         }
-        self.session.tick(now).map_err(|e| e.to_string())
+        if let Ok(mut s) = self.shared.lock() {
+            s.open_files = self.open.len();
+        }
+        self.session.tick(now)
     }
 
-    fn close_all(&mut self) -> Result<(), String> {
+    fn close_all(&mut self) -> std::io::Result<()> {
         let mut first_err = None;
         for (_, w) in std::mem::take(&mut self.open) {
             if let Err(e) = w.close() {
-                first_err.get_or_insert(e.to_string());
+                first_err.get_or_insert(e);
             }
         }
         let session = std::mem::replace(
@@ -517,7 +648,7 @@ impl Writer {
             SessionWriter::new(self.fs.clone(), self.settings.clone(), &self.contexts),
         );
         if let Err(e) = session.close() {
-            first_err.get_or_insert(e.to_string());
+            first_err.get_or_insert(e);
         }
         match first_err {
             Some(e) => Err(e),

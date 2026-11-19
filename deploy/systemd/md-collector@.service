@@ -1,4 +1,4 @@
-# Template only: not installed or enabled by this repository (U5b).
+# Template only: not installed or enabled by this repository (U5b, U6).
 # Instance = venue: md-collector@bybit.service reads /etc/md-collector/bybit.toml.
 [Unit]
 Description=md-collector for %i (market data to the lake's stage-1 files)
@@ -6,7 +6,16 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
+# U6: READY=1 after the start, WATCHDOG=1 on every writer beat (once a
+# second, also when the venue is quiet; none while a write is stuck or after
+# a write error). 30 s > the 20 s exit flush of the [MD P1] alert (R2).
+Type=notify
+WatchdogSec=30s
+NotifyAccess=main
+# The alert repeat state survives restarts here, off the lake's file
+# system (U6 R3): $RUNTIME_DIRECTORY/alert-state.json.
+RuntimeDirectory=md-collector-%i
+RuntimeDirectoryPreserve=restart
 ExecStart=/usr/local/bin/md-collector run --config /etc/md-collector/%i.toml
 Restart=always
 RestartSec=5

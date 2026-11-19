@@ -158,6 +158,44 @@ async fn ticker_merges_and_trades_reach_message_sink() {
     );
 }
 
+/// U6 spec D3, R6: every book message of the active connection reaches the
+/// message sink's `book_msg`, with the venue time, after the book lock is
+/// released (the sink may read the book).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn book_messages_reach_the_message_sink() {
+    let fake = FakeWs::start(vec![vec![
+        Step::WaitFor("subscribe".into()),
+        snap(),
+        Step::Send(book(
+            "BTCUSDT",
+            "delta",
+            101,
+            1_020,
+            r#"["41999.9","0"]"#,
+            "",
+        )),
+    ]])
+    .await;
+    let msgs = Arc::new(VecMsgs::default());
+    let feed = Feed::start_with(
+        bybit(),
+        config(&fake.url, Arc::new(ConnIds::new())),
+        plan_of(&["BTCUSDT"], &["orderbook.50"]),
+        None,
+        Some(msgs.clone() as Arc<dyn MessageSink>),
+    )
+    .expect("start");
+    eventually(|| msgs.1.lock().expect("msgs").len() == 2).await;
+    let got = msgs.1.lock().expect("msgs").clone();
+    let conn = feed.active_conn_id(0).expect("active");
+    assert_eq!(got[0].0, conn);
+    assert_eq!((got[0].1.as_str(), got[0].2.as_str()), ("orderbook.50", "BTCUSDT"));
+    assert_eq!(got[0].3, 1_000 * 1_000_000);
+    assert_eq!(got[1].3, 1_020 * 1_000_000);
+    assert!(got.iter().all(|g| g.4 >= g.3 || g.4 > 0), "recv_ns is set");
+    assert!(msgs.0.lock().expect("msgs").is_empty(), "books are not messages");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn resnapshot_event() {
     let fake = FakeWs::start(vec![vec![
