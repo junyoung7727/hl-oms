@@ -194,6 +194,14 @@ _Avoid_: connection (a slot has a new connection after each reconnect)
 Free space of the lake below which the collector keeps only the traded topics (`traded_channels`) and writes a `disk_floor` note per dropped topic; it collects everything again above floor plus margin.
 _Avoid_: quota
 
+**Writer beat** (쓰기 박동):
+The collector's writer loop marking itself alive once a second after a tick in which every file tick succeeded, also without frames: it sets `md_collector_heartbeat_ts` and sends `WATCHDOG=1`; a stuck or failed write stops it, a quiet venue does not.
+_Avoid_: heartbeat of the venue, keepalive (that is the WebSocket ping)
+
+**Direct alert** (직접 알림):
+A Telegram message sent by the process itself (alert-direct), not through the observability stack, with the repeat rule: once at start, every 5 min while the condition lasts, once at clear; prefixes `[MD P1]`, later `[OMS P1]`, `[WATCH P1]`.
+_Avoid_: notification (the stack's alerts are `[MON P?]`)
+
 **Hour seal** (시간별 봉인):
 The sealer's move of a closed hour's open files into the day files, recorded by a begin and a done entry of the seal log; lossless and restartable at any step.
 _Avoid_: compaction, flush
