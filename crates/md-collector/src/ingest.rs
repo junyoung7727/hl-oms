@@ -121,6 +121,21 @@ struct Shared {
     heartbeat_s: Option<i64>,
     beats: u64,
     open_files: usize,
+    /// Payload bytes written since the start (all connections).
+    bytes_total: u64,
+}
+
+/// The writer's health without copying the per-connection map (U6 review
+/// finding 5: the frame path takes the same lock).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Health {
+    pub failed: Option<String>,
+    pub failed_os_error: Option<String>,
+    pub heartbeat_s: Option<i64>,
+    pub beats: u64,
+    pub open_files: usize,
+    pub bytes_total: u64,
+    pub slot_bytes: BTreeMap<u32, usize>,
 }
 
 #[derive(Default)]
@@ -318,6 +333,21 @@ impl Ingest {
     pub fn state(&self) -> IngestSnapshot {
         snapshot(&self.shared)
     }
+
+    pub fn health(&self) -> Health {
+        match self.shared.lock() {
+            Ok(s) => Health {
+                failed: s.failed.clone(),
+                failed_os_error: s.failed_os_error.clone(),
+                heartbeat_s: s.heartbeat_s,
+                beats: s.beats,
+                open_files: s.open_files,
+                bytes_total: s.bytes_total,
+                slot_bytes: s.slots.clone(),
+            },
+            Err(_) => Health::default(),
+        }
+    }
 }
 
 fn record(f: RawFrame) -> Record {
@@ -502,10 +532,13 @@ impl Writer {
                         }
                         s.total = s.total.saturating_sub(bytes);
                     }
-                    let c = s.conns.entry(conn_id).or_default();
                     if r.is_ok() {
+                        let c = s.conns.entry(conn_id).or_default();
                         c.frames += 1;
                         c.bytes += len;
+                        s.bytes_total += len;
+                    } else {
+                        s.conns.entry(conn_id).or_default();
                     }
                 }
                 r

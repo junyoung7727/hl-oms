@@ -126,7 +126,22 @@ fn lag_quantiles() {
     let mut q99 = l.to_vec();
     q99.push(("quantile", "0.99"));
     assert!((one(&v, "md_recv_lag_ms", &q99) / 20.0 - 1.0).abs() < 0.13);
-    assert_eq!(one(&v, "md_recv_lag_negative_total", &l), 1.0);
+    assert!(
+        find(&v, "md_recv_lag_negative_total", &[]).is_empty(),
+        "slow period only"
+    );
+    let slow = t.summary(11 * S, Period::Slow, &none());
+    assert_eq!(
+        one(&slow, "md_recv_lag_negative_total", &[("venue", "bybit")]),
+        1.0
+    );
+    assert_eq!(
+        find(&slow, "md_recv_lag_negative_total", &[])[0]
+            .labels
+            .len(),
+        1,
+        "one series per venue"
+    );
     // The histogram is per period.
     let v = t.summary(12 * S, Period::Fast, &none());
     assert!(find(&v, "md_recv_lag_ms", &l).is_empty());
@@ -272,7 +287,10 @@ fn gaps_reconnects_totals() {
         "switches are not reconnects"
     );
     assert_eq!(one(&v, "md_gaps_total", &btc), 1.0);
-    assert_eq!(one(&v, "md_gaps_total", &[("symbol", "ETHUSDT")]), 0.0);
+    assert!(
+        find(&v, "md_gaps_total", &[("symbol", "ETHUSDT")]).is_empty(),
+        "no gap series for a topic without a book and without gaps"
+    );
     // A real drop of the active connection, then two failed attempts, then up.
     ev(FeedEvent::Disconnected {
         conn_index: 0,
@@ -337,4 +355,32 @@ fn book_info_from_a_real_order_book() {
     assert_eq!(i.depth[2], 20_000);
     assert_eq!(i.depth[3], 100_000);
     assert!(!i.crossed && !i.stale);
+}
+
+#[test]
+fn stopped_slot_leaves_the_summaries() {
+    let t = Telemetry::new("bybit");
+    t.register_slot("linear", 1, &[k("orderbook.50", "AUSDT")], false, 0);
+    t.frame("linear", &k("orderbook.50", "AUSDT"), 1, 10, S);
+    assert!(
+        !find(
+            &t.summary(2 * S, Period::Slow, &none()),
+            "md_last_msg_age_s",
+            &[]
+        )
+        .is_empty()
+    );
+    t.stop_slot("linear", 1);
+    let v = t.summary(3 * S, Period::Slow, &none());
+    assert!(find(&v, "md_last_msg_age_s", &[]).is_empty(), "{v:?}");
+    assert!(find(&v, "md_msgs", &[]).is_empty());
+    t.register_slot("linear", 1, &[k("orderbook.50", "AUSDT")], false, 4 * S);
+    assert!(
+        !find(
+            &t.summary(5 * S, Period::Slow, &none()),
+            "md_last_msg_age_s",
+            &[]
+        )
+        .is_empty()
+    );
 }

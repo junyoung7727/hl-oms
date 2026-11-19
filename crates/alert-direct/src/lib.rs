@@ -406,6 +406,11 @@ impl Repeat {
         self.conds.keys().cloned().collect()
     }
 
+    /// Drops a condition without a message; `true` when it held.
+    pub fn forget(&mut self, key: &str) -> bool {
+        self.conds.remove(key).is_some()
+    }
+
     /// The state as JSON (spec R3: kept across restarts).
     pub fn to_json(&self) -> serde_json::Value {
         let conds: serde_json::Map<String, serde_json::Value> = self
@@ -760,6 +765,21 @@ impl AlertHandle {
                     serde_json::json!({"level": "warn", "msg": "alert state not saved", "fields": {"error": e.to_string()}})
                 );
             }
+        }
+    }
+
+    /// Drops the condition `key` without a message (and from the state
+    /// file): used when its start message was not delivered, so that the
+    /// next process sends the start again.
+    pub fn forget(&self, key: &str) {
+        let mut changed = None;
+        if let Ok(mut i) = self.shared.inner.lock() {
+            if i.repeat.forget(key) && self.state_file.is_some() {
+                changed = Some(i.repeat.to_json());
+            }
+        }
+        if let (Some(v), Some(path)) = (changed, &self.state_file) {
+            let _ = save_state(path, &v);
         }
     }
 

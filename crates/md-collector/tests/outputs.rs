@@ -449,3 +449,40 @@ async fn refused_token_file_refuses_start() {
     }
     let _ = SystemClock;
 }
+
+/// Review findings 1 and 2: the L0 write condition clears only after a
+/// session has run past its first fsync without a failure, and a writer
+/// beat older than 15 s is a stall alert.
+#[test]
+fn l0_conditions_clear_late_and_report_stalls() {
+    use md_collector::ingest::Health;
+    use md_collector::obs::l0_conditions;
+    let failed = Health {
+        failed: Some("No space left on device (os error 28)".into()),
+        failed_os_error: Some("ENOSPC".into()),
+        heartbeat_s: Some(100),
+        beats: 3,
+        ..Health::default()
+    };
+    let c = l0_conditions(&failed, 200, 0, 10_000);
+    let text = c.l0_write.expect("held").expect("set");
+    assert!(text.starts_with("L0 쓰기 실패: ENOSPC"), "{text}");
+    assert_eq!(c.writer_stall, None, "a failed writer is not a stall");
+
+    let ok = Health {
+        heartbeat_s: Some(100),
+        beats: 2,
+        ..Health::default()
+    };
+    // The first beats of a new session do not clear it.
+    assert_eq!(l0_conditions(&ok, 101, 2_000, 10_000).l0_write, None);
+    assert_eq!(l0_conditions(&ok, 110, 10_000, 10_000).l0_write, Some(None));
+    let none = Health::default();
+    assert_eq!(l0_conditions(&none, 110, 0, 10_000).l0_write, None);
+
+    assert_eq!(l0_conditions(&ok, 115, 0, 10_000).writer_stall, None);
+    let stall = l0_conditions(&ok, 116, 0, 10_000)
+        .writer_stall
+        .expect("stall");
+    assert!(stall.contains("16초"), "{stall}");
+}

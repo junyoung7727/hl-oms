@@ -111,18 +111,19 @@ channel = "orderbook.1000"
 | `md_spread_bp`, `md_mid_px` | venue, market, symbol, channel | 거래 종목 `fast_ms`, 나머지 `slow_ms`. 호가창이 낡았거나 교차하면 보내지 않는다 |
 | `md_depth_qty` | + side(bid/ask), levels(10/50) | 같음 |
 | `md_recv_lag_ms` | + quantile(0.5/0.99) | 같음. 구간에 표본이 없으면 없음. 로그 버킷(×1.25), 오차 약 ±12% |
-| `md_recv_lag_negative_total` | venue, market, symbol, channel | 같음. 거래소 시각이 받은 시각보다 늦은 메시지 수(시계 차이) |
-| `md_gaps_total`, `md_reconnects_total` | venue, market, symbol, channel | 같음. 재연결은 쓰던 연결이 끊긴 것만 센다(자정 전환·실패한 후보·재시도 제외) |
+| `md_recv_lag_negative_total` | venue | `slow_ms`. 거래소 시각이 받은 시각보다 늦은 메시지 수(시계 차이) |
+| `md_gaps_total` | venue, market, symbol, channel | 같음. 호가창 토픽만 |
+| `md_reconnects_total` | venue, market, symbol, channel | 같음. 쓰던 연결이 끊긴 것만 센다(자정 전환·실패한 후보·재시도 제외) |
 | `md_last_msg_age_s` | venue, market, symbol, channel | 같음. 첫 프레임 전에는 그 연결 자리가 시작한 뒤로 지난 시간 |
 | `md_msgs`, `md_bytes` | venue, market, channel, conn | 같음(그 자리의 주기). 주기 안의 합 |
-| `lake_l0_open_files`, `lake_l0_bytes_total`, `lake_l0_write_errors_total`, `lake_disk_free_bytes` | venue | `slow_ms` |
+| `lake_l0_open_files`, `lake_l0_bytes_total`, `lake_l0_write_errors_total`, `lake_disk_free_bytes` | venue | `slow_ms`. `lake_l0_bytes_total`은 압축 전 페이로드 바이트다(디스크에 쓴 바이트가 아님) |
 | `md_queue_bytes` | venue, conn | `slow_ms` |
 | `md_collector_heartbeat_ts` | venue | `slow_ms`(우선 큐). 값은 쓰기 루프가 1초마다 정한다(아래) |
-| `node_clock_offset_ms` | venue, host | `slow_ms`. `chronyc -c tracking` 5번째 칸 × 1000. 양수 = 시스템 시계가 NTP보다 늦음 |
+| `node_clock_offset_ms` | host | `slow_ms`. `chronyc -c tracking` 5번째 칸 × 1000. 양수 = 시스템 시계가 NTP보다 늦음 |
 | `lake_seal_lag_hours` | venue | 60 s. 열린 파일이 남은 가장 오래된 닫힌 시간(7일 안)부터 지금 시간까지 |
 | `obs_push_dropped_total`, `obs_push_queue_lines` | service, venue, endpoint | 10 s. 전송 큐가 버린 줄과 남은 줄 |
 
-수집기는 디스크가 며칠 남았는지 계산하지 않는다(vmalert, U20a).
+디스크 하한으로 멈춘 토픽과 연결은 다시 구독할 때까지 요약에서 빠진다. 수집기는 디스크가 며칠 남았는지 계산하지 않는다(vmalert, U20a).
 
 ### 5.2 심장박동과 systemd 감시
 
@@ -138,11 +139,14 @@ stderr의 JSON 줄과 같은 항목을 보낸다. `_stream_fields=service,host,v
 
 | 조건 | 보내는 때 | 문구 |
 |---|---|---|
-| L0 쓰기 실패(`l0_write`) | 시작 1번, 계속되면 5분마다, 다음 세션의 첫 박동에 해소 1번. 상태 파일 덕분에 systemd가 다시 시작해도 재시작마다 보내지 않는다 | `L0 쓰기 실패: ENOSPC (...) — 수집기가 종료되고 systemd가 다시 시작함` |
-| 디스크 하한(`disk_floor`) | 시작 1번, 5분마다, 해소 1번 | `디스크 하한: 여유 N 바이트 < 하한 M 바이트 — 거래 종목만 수집 중` |
+| L0 쓰기 실패(`l0_write`) | 시작 1번, 계속되면 5분마다, 해소 1번. 해소는 다음 세션이 실패 없이 `fsync_ms` + 5초를 지난 뒤(첫 fsync에서 실패하는 디스크가 재시작마다 해소·시작을 번갈아 보내지 않게). 상태 파일 덕분에 systemd가 다시 시작해도 재시작마다 보내지 않는다. 종료 전에 보내지 못하면 상태에서 지워 다음 프로세스가 다시 보낸다 | `L0 쓰기 실패: ENOSPC (...) — 수집기가 종료되고 systemd가 다시 시작함` |
+| 쓰기 멈춤(`writer_stall`) | 박동이 15초 넘게 없을 때(오류 없이 쓰기가 막힘). 30초에 systemd가 죽이기 전에 나간다 | `L0 쓰기 멈춤: 쓰기 루프가 N초 동안 응답 없음 — ...` |
+| 디스크 하한(`disk_floor`) | 시작 1번(피드를 멈추기 전), 5분마다, 해소 1번. 하한 위로 올랐는데 피드 재시작이 실패하면 문구가 바뀌어 계속 알린다 | `디스크 하한: 여유 N 바이트 < 하한 M 바이트 — 거래 종목만 수집 중` |
 | 수집기 정지(`md-lake seal`) | 봉인 실행마다 1통(시간이 여러 개여도) | `수집기 정지: 수집기 파일이 하나도 없는 시간 N개 (UTC)` 와 시간 목록(24개까지) |
 
-쓰기 실패로 끝날 때 수집기는 알림을 최대 20초 기다렸다 보내고 종료 코드 1로 끝난다. 보내지 못하면 stderr에 적는다.
+쓰기 실패로 끝날 때 수집기는 알림을 최대 20초 기다렸다 보내고 종료 코드 1로 끝난다. 보내지 못하면 stderr에 적는다. SIGTERM으로 끝날 때는 남은 알림을 최대 5초 보낸다.
+
+알려진 한계: `md-lake seal`의 수집기 정지 알림은 그 실행에서 텔레그램에 닿지 않으면 다시 보내지 않는다(그 시간은 이미 봉인돼 다음 실행이 다시 찾지 않는다). stderr(journald)에만 남는다.
 
 | 보이는 것 | 뜻 | 할 일 |
 |---|---|---|

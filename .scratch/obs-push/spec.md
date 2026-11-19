@@ -163,3 +163,18 @@ One Opus reviewer, 6 MUST and 6 SHOULD; all accepted. These override the section
 - **R10 (notify socket).** The notify socket is non-blocking; `WouldBlock` and other send errors are ignored (counted).
 - **R11 (permanent rejects, heartbeat first).** obs-push treats 400, 413 and 422 as permanent: the batch is dropped and counted `rejected`, one stderr line. A small priority queue (1,000 lines) is sent before the main queue; the heartbeat and the self metrics use it.
 - **R12 (seal error path).** md-lake gets `Sealer::seal_into(&mut SealReport)`; `seal` calls it. The binary alerts on the hours in the report even when the run then fails, before exiting 1. Ticket 05 adds a dead port (connection refused) to the "store never blocks ingest" test.
+
+## Final review decisions (code review, 2026-11-19)
+
+One Opus reviewer: 1 MUST, 9 SHOULD. No token leak, no nested lock on the frame path.
+
+- **F1 (MUST, flood).** `l0_write` cleared at the first beat, before the first flush or fsync: a disk failing at fsync sent a clear and a new start on every restart. Now it clears only after the session has beaten for `fsync_ms + 5 s` with no failure (`obs::l0_conditions`, test `l0_conditions_clear_late_and_report_stalls`).
+- **F2.** A stuck write had no direct alert. New condition `writer_stall`: beat older than 15 s and no failure (same test).
+- **F3.** A start message that was queued but not delivered before exit counted as sent: `AlertHandle::forget` removes it from the state file after a failed exit flush; `shutdown` flushes for 5 s (test `forget_makes_the_next_start_send_again`).
+- **F4 (not fixed).** The seal's `collector_down` alert is not retried when Telegram is unreachable during that run; documented as a known limit in the operations doc.
+- **F5.** The alert and lake paths copied the per-connection map every second under the frame-path lock: new `Ingest::health()` with a running byte total. The map itself still grows by one small entry per connection (U5b handoff; ≈ 64 B each, judgement: a few MB a year).
+- **F6.** Fast/slow intervals use `MissedTickBehavior::Delay`; the heartbeat and lake metrics go before the summary; chronyc and the seal-lag listing run in their own tasks.
+- **F7.** The disk-floor alert is set before the feeds are stopped; above the floor with a feed that did not restart, the text says so.
+- **F8.** `lake_l0_bytes_total` is payload bytes before zstd; documented, name kept (design §5.4.5).
+- **F9.** Topics stopped at the disk floor leave the summaries (`Telemetry::stop_slot`, test `stopped_slot_leaves_the_summaries`).
+- **F10.** `node_clock_offset_ms{host}` only; `md_recv_lag_negative_total{venue}` one series; `md_gaps_total` only for book topics.

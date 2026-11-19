@@ -199,18 +199,14 @@ fn sample(name: &str, labels: &[(&str, &str)], value: f64, ts_ms: i64) -> Sample
 
 /// The lake and process metrics of the slow period (spec D4).
 pub(crate) fn lake_samples(inner: &Inner, now_ns: i64) -> (Vec<Sample>, Option<Sample>) {
-    let st = inner.ingest.state();
+    let st = inner.ingest.health();
     let venue = inner.cfg.venue.as_str();
     let ts = now_ns / 1_000_000;
     let v = [("venue", venue)];
     let mut out = vec![
         sample("lake_l0_open_files", &v, st.open_files as f64, ts),
-        sample(
-            "lake_l0_bytes_total",
-            &v,
-            st.conns.values().map(|c| c.bytes_written).sum::<u64>() as f64,
-            ts,
-        ),
+        // Payload bytes before zstd (review 8: not the bytes on disk).
+        sample("lake_l0_bytes_total", &v, st.bytes_total as f64, ts),
         sample(
             "lake_l0_write_errors_total",
             &v,
@@ -246,11 +242,16 @@ pub(crate) async fn run(inner: Arc<Inner>) {
     let Some(t) = inner.cfg.telemetry.clone() else {
         return;
     };
+    use tokio::time::MissedTickBehavior::Delay;
+    // The slow readers run on their own (review 6): chronyc may take 2 s
+    // and the lake listing touches the disk.
+    tokio::spawn(clock_offset_loop(inner.clone(), obs.clone(), t.slow_ms));
+    tokio::spawn(seal_lag_loop(inner.clone(), obs.clone()));
     let mut fast = tokio::time::interval(Duration::from_millis(t.fast_ms));
     let mut slow = tokio::time::interval(Duration::from_millis(t.slow_ms));
-    let mut seal = tokio::time::interval(Duration::from_secs(60));
-    let host = inner.cfg.host.clone();
-    let venue = inner.cfg.venue.clone();
+    // After a delay, one summary, not a burst of them (review 6).
+    fast.set_missed_tick_behavior(Delay);
+    slow.set_missed_tick_behavior(Delay);
     loop {
         tokio::select! {
             _ = fast.tick() => {
@@ -258,33 +259,65 @@ pub(crate) async fn run(inner: Arc<Inner>) {
                 obs.metrics(samples);
             }
             _ = slow.tick() => {
-                let mut samples = summary(&inner, Period::Slow).await;
-                let now = crate::wall_ns();
-                let (lake, hb) = lake_samples(&inner, now);
-                samples.extend(lake);
+                // The heartbeat and the lake metrics before the summary,
+                // which waits for the feeds' lock (review 6).
+                let (lake, hb) = lake_samples(&inner, crate::wall_ns());
                 if let Some(hb) = hb {
                     obs.priority(hb);
                 }
-                if let Some(c) = inner.clock_offset.clone() {
-                    let off = tokio::task::spawn_blocking(move || c.offset_ms()).await.ok().flatten();
-                    if let Some(ms) = off {
-                        samples.push(sample("node_clock_offset_ms", &[("venue", &venue), ("host", &host)], ms, now / 1_000_000));
-                    }
-                }
+                obs.metrics(lake);
+                let samples = summary(&inner, Period::Slow).await;
                 obs.metrics(samples);
             }
-            _ = seal.tick() => {
-                let (fs, v) = (inner.fs.clone(), venue.clone());
-                let now = crate::wall_ns();
-                let r = tokio::task::spawn_blocking(move || {
-                    md_lake::seal::unsealed_hours(fs.as_ref(), &v, now, SEAL_LOOKBACK_HOURS)
-                }).await;
-                if let Ok(Ok(hours)) = r {
-                    let cur = md_lake::time::hour_start(now);
-                    let lag = hours.first().map_or(0, |h| (cur - h) / md_lake::time::HOUR_NS);
-                    obs.metric(sample("lake_seal_lag_hours", &[("venue", &venue)], lag as f64, now / 1_000_000));
-                }
-            }
+        }
+    }
+}
+
+async fn clock_offset_loop(inner: Arc<Inner>, obs: Arc<ObsHandle>, every_ms: u64) {
+    let Some(c) = inner.clock_offset.clone() else {
+        return;
+    };
+    let host = inner.cfg.host.clone();
+    let mut t = tokio::time::interval(Duration::from_millis(every_ms));
+    t.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        t.tick().await;
+        let c = c.clone();
+        let off = tokio::task::spawn_blocking(move || c.offset_ms())
+            .await
+            .ok()
+            .flatten();
+        if let Some(ms) = off {
+            // One series per host (review 10: not per venue).
+            let ts = crate::wall_ns() / 1_000_000;
+            obs.metric(sample("node_clock_offset_ms", &[("host", &host)], ms, ts));
+        }
+    }
+}
+
+async fn seal_lag_loop(inner: Arc<Inner>, obs: Arc<ObsHandle>) {
+    let venue = inner.cfg.venue.clone();
+    let mut t = tokio::time::interval(Duration::from_secs(60));
+    t.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        t.tick().await;
+        let (fs, v) = (inner.fs.clone(), venue.clone());
+        let now = crate::wall_ns();
+        let r = tokio::task::spawn_blocking(move || {
+            md_lake::seal::unsealed_hours(fs.as_ref(), &v, now, SEAL_LOOKBACK_HOURS)
+        })
+        .await;
+        if let Ok(Ok(hours)) = r {
+            let cur = md_lake::time::hour_start(now);
+            let lag = hours
+                .first()
+                .map_or(0, |h| (cur - h) / md_lake::time::HOUR_NS);
+            obs.metric(sample(
+                "lake_seal_lag_hours",
+                &[("venue", &venue)],
+                lag as f64,
+                now / 1_000_000,
+            ));
         }
     }
 }
@@ -300,21 +333,67 @@ pub fn write_failure_text(os: &str, error: &str) -> String {
     format!("L0 쓰기 실패: {os} ({error}) — 수집기가 종료되고 systemd가 다시 시작함")
 }
 
-/// The alert task (spec D8, R3): every second, the L0 write condition. A
-/// failure holds it; the first beat of a session without a failure clears
-/// it (a restart that works).
+/// A writer beat older than this is a stall alert (review 2: half the
+/// 30 s watchdog, so the message goes before systemd kills the process).
+pub const STALL_S: i64 = 15;
+
+/// What the L0 write conditions are now (spec D8, R3, review 1, 2).
+/// `ok_for_ms`: how long this session has run with beats and no failure;
+/// the failure clears only after `clear_after_ms` of that (past the first
+/// fsync), so a disk that fails at the first flush or fsync cannot send a
+/// clear and a new start on every restart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct L0Conditions {
+    /// `None`: leave the condition as it is.
+    pub l0_write: Option<Option<String>>,
+    pub writer_stall: Option<String>,
+}
+
+pub fn l0_conditions(
+    h: &crate::ingest::Health,
+    now_s: i64,
+    ok_for_ms: u64,
+    clear_after_ms: u64,
+) -> L0Conditions {
+    let l0_write = match &h.failed {
+        Some(e) => Some(Some(write_failure_text(
+            h.failed_os_error.as_deref().unwrap_or(""),
+            e,
+        ))),
+        None if h.beats > 0 && ok_for_ms >= clear_after_ms => Some(None),
+        None => None,
+    };
+    let writer_stall = match (h.failed.is_none(), h.heartbeat_s) {
+        (true, Some(hb)) if now_s - hb > STALL_S => Some(format!(
+            "L0 쓰기 멈춤: 쓰기 루프가 {}초 동안 응답 없음 — 30초가 되면 systemd가 수집기를 다시 시작함",
+            now_s - hb
+        )),
+        _ => None,
+    };
+    L0Conditions {
+        l0_write,
+        writer_stall,
+    }
+}
+
+/// The alert task: every second, the L0 write conditions.
 pub(crate) async fn alerts(inner: Arc<Inner>, alert: Arc<AlertHandle>) {
+    let clear_after_ms = inner.cfg.write.fsync_ms.saturating_add(5000);
     let mut t = tokio::time::interval(Duration::from_secs(1));
+    let mut ok_since: Option<Instant> = None;
     loop {
         t.tick().await;
-        let st = inner.ingest.state();
-        match &st.failed {
-            Some(e) => {
-                let os = st.failed_os_error.clone().unwrap_or_default();
-                alert.set("l0_write", Some(write_failure_text(&os, e)));
-            }
-            None if st.beats > 0 => alert.set("l0_write", None),
-            None => {}
+        let h = inner.ingest.health();
+        if h.failed.is_some() || h.beats == 0 {
+            ok_since = None;
+        } else if ok_since.is_none() {
+            ok_since = Some(Instant::now());
         }
+        let ok_for = ok_since.map_or(0, |s| s.elapsed().as_millis() as u64);
+        let c = l0_conditions(&h, crate::wall_ns() / 1_000_000_000, ok_for, clear_after_ms);
+        if let Some(v) = c.l0_write {
+            alert.set("l0_write", v);
+        }
+        alert.set("writer_stall", c.writer_stall);
     }
 }

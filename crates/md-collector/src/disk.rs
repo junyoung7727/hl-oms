@@ -46,7 +46,15 @@ pub(crate) async fn run(inner: std::sync::Arc<crate::collector::Inner>) {
         };
         inner.counters.free_bytes.store(free, Ordering::Relaxed);
         inner.counters.free_known.store(true, Ordering::Relaxed);
+        let floor_text = format!(
+            "디스크 하한: 여유 {free} 바이트 < 하한 {} 바이트 — 거래 종목만 수집 중",
+            d.floor_bytes
+        );
         if !dropped && free < d.floor_bytes {
+            // The alert first: stopping the feeds takes time (review 7).
+            if let Some(a) = &inner.alert {
+                a.set("disk_floor", Some(floor_text.clone()));
+            }
             dropped = true;
             inner.counters.disk_floor.store(true, Ordering::Relaxed);
             inner.log(
@@ -101,12 +109,14 @@ pub(crate) async fn run(inner: std::sync::Arc<crate::collector::Inner>) {
         }
         // U6 D8: start, every 5 min while it lasts, clear (alert-direct).
         if let Some(a) = &inner.alert {
-            let text = dropped.then(|| {
-                format!(
-                    "디스크 하한: 여유 {free} 바이트 < 하한 {} 바이트 — 거래 종목만 수집 중",
-                    d.floor_bytes
-                )
-            });
+            let text = match (dropped, free < d.floor_bytes) {
+                (false, _) => None,
+                (true, true) => Some(floor_text),
+                // Above the floor but a feed did not start again (review 7).
+                (true, false) => Some(format!(
+                    "디스크 하한 해소(여유 {free} 바이트)했지만 피드 재시작 실패 — 일부 종목 수집 중단"
+                )),
+            };
             a.set("disk_floor", text);
         }
     }

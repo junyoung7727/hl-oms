@@ -423,3 +423,23 @@ fn default_timeouts() {
     assert_eq!(c.outbox_limit, 50);
     assert_eq!(c.repeat_ms, 300_000);
 }
+
+#[test]
+fn forget_makes_the_next_start_send_again() {
+    let d = test_dir("forget");
+    let state = d.join("alert-state.json");
+    let f = FakeHttp::start(ok());
+    let clock = Arc::new(TestClock(AtomicI64::new(0)));
+    let mut c = cfg_for(vec![loopback(&f)]);
+    c.state_file = Some(state.clone());
+    let h = AlertDirect::start(c.clone(), clock.clone()).expect("start");
+    h.set("l0_write", Some("EIO".into()));
+    assert!(h.flush_for(Duration::from_secs(5)));
+    h.forget("l0_write");
+    drop(h);
+    let h = AlertDirect::start(c, clock).expect("start");
+    h.set("l0_write", Some("EIO".into()));
+    assert!(h.flush_for(Duration::from_secs(5)));
+    assert_eq!(texts(&f).len(), 2, "sent again after forget");
+    assert_eq!(h.state().active, vec!["l0_write".to_string()]);
+}

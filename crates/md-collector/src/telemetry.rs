@@ -116,10 +116,11 @@ impl LagHist {
 #[derive(Debug, Clone, Default)]
 struct TopicStats {
     traded: bool,
+    /// The topic's group runs (not stopped at the disk floor; review 9).
+    running: bool,
     started_ns: i64,
     last_recv_ns: Option<i64>,
     lag: LagHist,
-    lag_negative_total: u64,
     gaps_total: u64,
     reconnects_total: u64,
 }
@@ -127,6 +128,7 @@ struct TopicStats {
 #[derive(Debug, Clone, Default)]
 struct ConnStats {
     traded: bool,
+    running: bool,
     msgs: u64,
     bytes: u64,
 }
@@ -185,6 +187,9 @@ pub struct Telemetry {
     conns: Mutex<BTreeMap<(String, String, u32), ConnStats>>,
     /// Topics of each (market, conn_index), and the R8 state.
     slots: Mutex<BTreeMap<(String, u32), SlotLink>>,
+    /// Messages whose venue time is after their receive time (one series
+    /// per venue; review 10: per topic tripled the series).
+    negative_lag: std::sync::atomic::AtomicU64,
 }
 
 fn shard_of(t: &TopicKey) -> usize {
@@ -207,6 +212,7 @@ impl Telemetry {
             shards: (0..SHARDS).map(|_| Mutex::new(BTreeMap::new())).collect(),
             conns: Mutex::new(BTreeMap::new()),
             slots: Mutex::new(BTreeMap::new()),
+            negative_lag: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -225,6 +231,7 @@ impl Telemetry {
             if let Ok(mut s) = self.shards[shard_of(t)].lock() {
                 let st = s.entry(t.clone()).or_default();
                 st.traded = traded;
+                st.running = true;
                 if st.last_recv_ns.is_none() {
                     st.started_ns = now_ns;
                 }
@@ -233,9 +240,9 @@ impl Telemetry {
         let channels: BTreeSet<String> = keys.iter().map(|t| t.channel.clone()).collect();
         if let Ok(mut c) = self.conns.lock() {
             for ch in channels {
-                c.entry((market.to_string(), ch, conn_index))
-                    .or_default()
-                    .traded = traded;
+                let cs = c.entry((market.to_string(), ch, conn_index)).or_default();
+                cs.traded = traded;
+                cs.running = true;
             }
         }
         if let Ok(mut s) = self.slots.lock() {
@@ -246,6 +253,21 @@ impl Telemetry {
                     active: None,
                 },
             );
+        }
+    }
+
+    /// A slot's group was stopped (the disk floor): its topics and
+    /// connections leave the summaries until `register_slot` again.
+    pub fn stop_slot(&self, market: &str, conn_index: u32) {
+        for t in self.slot_topics(market, conn_index) {
+            self.bump(&t, |st| st.running = false);
+        }
+        if let Ok(mut c) = self.conns.lock() {
+            for ((m, _, i), cs) in c.iter_mut() {
+                if m == market && *i == conn_index {
+                    cs.running = false;
+                }
+            }
         }
     }
 
@@ -282,7 +304,8 @@ impl Telemetry {
             if let Some(st) = s.get_mut(&t) {
                 let ms = (recv_ns - venue_ts_ns) as f64 / 1e6;
                 if ms < 0.0 {
-                    st.lag_negative_total += 1;
+                    self.negative_lag
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
                 st.lag.add(ms.max(0.0));
             }
@@ -386,7 +409,10 @@ impl Telemetry {
         let mut picked: Vec<(TopicKey, TopicStats)> = Vec::new();
         for shard in &self.shards {
             let Ok(mut s) = shard.lock() else { continue };
-            for (t, st) in s.iter_mut().filter(|(_, st)| st.traded == want_traded) {
+            for (t, st) in s
+                .iter_mut()
+                .filter(|(_, st)| st.running && st.traded == want_traded)
+            {
                 picked.push((t.clone(), st.clone()));
                 st.lag = LagHist::default();
             }
@@ -399,7 +425,8 @@ impl Telemetry {
                 ("symbol", &t.symbol),
                 ("channel", &t.channel),
             ]);
-            if let Some(b) = books.book(&t) {
+            let book = books.book(&t);
+            if let Some(b) = &book {
                 let exps = books.exps(&t.market, &t.symbol);
                 if !b.stale && !b.crossed {
                     if let Some(sp) = b.spread_bp {
@@ -434,12 +461,10 @@ impl Telemetry {
                     push("md_recv_lag_ms", l, v);
                 }
             }
-            push(
-                "md_recv_lag_negative_total",
-                base.clone(),
-                st.lag_negative_total as f64,
-            );
-            push("md_gaps_total", base.clone(), st.gaps_total as f64);
+            // Gaps exist only on book topics (review 10).
+            if book.is_some() || st.gaps_total > 0 {
+                push("md_gaps_total", base.clone(), st.gaps_total as f64);
+            }
             push(
                 "md_reconnects_total",
                 base.clone(),
@@ -453,8 +478,9 @@ impl Telemetry {
             );
         }
         if let Ok(mut c) = self.conns.lock() {
-            for ((market, channel, conn), cs) in
-                c.iter_mut().filter(|(_, cs)| cs.traded == want_traded)
+            for ((market, channel, conn), cs) in c
+                .iter_mut()
+                .filter(|(_, cs)| cs.running && cs.traded == want_traded)
             {
                 let l = labels(&[
                     ("venue", venue),
@@ -467,6 +493,13 @@ impl Telemetry {
                 cs.msgs = 0;
                 cs.bytes = 0;
             }
+        }
+        if period == Period::Slow {
+            push(
+                "md_recv_lag_negative_total",
+                labels(&[("venue", venue)]),
+                self.negative_lag.load(std::sync::atomic::Ordering::Relaxed) as f64,
+            );
         }
         out
     }

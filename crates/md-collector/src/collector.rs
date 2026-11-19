@@ -434,6 +434,9 @@ impl Inner {
 
     /// Stops a group's feed (spec R5): gate, drop, close markers.
     pub(crate) async fn stop_group(&self, r: &mut Running) {
+        for p in &r.group.plans {
+            self.telemetry.stop_slot(&r.group.market, p.conn_index);
+        }
         r.sink.close().await;
         drop(r.handle.take());
         for id in r.sink.seen() {
@@ -732,13 +735,21 @@ impl CollectorHandle {
         let Some(a) = self.inner.alert.clone() else {
             return true;
         };
-        let st = self.inner.ingest.state();
+        let st = self.inner.ingest.health();
         let os = st.failed_os_error.clone().unwrap_or_default();
         let e = st.failed.clone().unwrap_or_default();
         a.set("l0_write", Some(crate::obs::write_failure_text(&os, &e)));
-        tokio::task::spawn_blocking(move || a.flush_for(wait))
-            .await
-            .unwrap_or(false)
+        tokio::task::spawn_blocking(move || {
+            let ok = a.flush_for(wait);
+            if !ok {
+                // Not delivered: the next process must send the start again
+                // instead of waiting 5 min (review 3).
+                a.forget("l0_write");
+            }
+            ok
+        })
+        .await
+        .unwrap_or(false)
     }
 
     /// What the pushes and the alerts have done (tests, status).
@@ -753,6 +764,10 @@ impl CollectorHandle {
     pub async fn shutdown(mut self) -> Result<(), String> {
         for t in self.tasks.drain(..) {
             t.abort();
+        }
+        // Queued alerts go before the exit (review 3).
+        if let Some(a) = self.inner.alert.clone() {
+            let _ = tokio::task::spawn_blocking(move || a.flush_for(Duration::from_secs(5))).await;
         }
         {
             let mut groups = self.inner.groups.lock().await;
