@@ -1,4 +1,4 @@
-# Template only: not installed or enabled by this repository (U5b).
+# Template only: not installed or enabled by this repository (U5b, U6).
 # Instance = venue. Set FIRST_HOUR once (the first UTC hour this lake seals,
 # YYYY-MM-DDTHH) and never move it back (md-lake F7).
 [Unit]
@@ -10,4 +10,8 @@ Type=oneshot
 SuccessExitStatus=3
 Environment=LAKE=/mnt/nvme/lake
 Environment=FIRST_HOUR=2026-12-01T00
-ExecStart=/usr/local/bin/md-lake seal --venue %i --lake ${LAKE} --first-hour ${FIRST_HOUR}
+# U6 D9, R4: an absolute path (a system unit's %h is /root). The file is
+# {"token", "chat_id"}, mode 0600, outside any repository; one that cannot
+# be loaded makes the run exit 2 before the lake is touched.
+Environment=TELEGRAM=/etc/hl-oms/telegram.json
+ExecStart=/usr/local/bin/md-lake seal --venue %i --lake ${LAKE} --first-hour ${FIRST_HOUR} --telegram ${TELEGRAM}

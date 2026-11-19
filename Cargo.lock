@@ -3,6 +3,16 @@
 version = 4
 
 [[package]]
+name = "alert-direct"
+version = "0.1.0"
+dependencies = [
+ "http-fake",
+ "reqwest",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -574,6 +584,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-fake"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -925,11 +942,14 @@ dependencies = [
 name = "md-collector"
 version = "0.1.0"
 dependencies = [
+ "alert-direct",
  "futures-util",
+ "http-fake",
  "md-bybit",
  "md-core",
  "md-feed",
  "md-lake",
+ "obs-push",
  "rustix",
  "serde",
  "serde_json",
@@ -1002,6 +1022,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "obs-push"
+version = "0.1.0"
+dependencies = [
+ "http-fake",
+ "reqwest",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

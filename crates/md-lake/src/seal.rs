@@ -157,6 +157,10 @@ pub struct SealReport {
     pub max_live_context_bytes: usize,
     /// Dates this run day-sealed (2.7).
     pub days_sealed: Vec<String>,
+    /// Hours this run found with no open file (the whole-hour
+    /// `collector_down` note; U6 D9: the seal's direct alert). An hour whose
+    /// seal then fails is sealed, noted and listed again by the next run.
+    pub collector_down_hours: Vec<(String, u8)>,
 }
 
 /// Order-independent digest of a set of records: the wrapping sum of their
@@ -314,9 +318,22 @@ impl Sealer {
         clock: &dyn Clock,
         classify: &dyn Fn(&Record) -> Option<Topic>,
     ) -> Result<SealReport, SealError> {
+        let mut report = SealReport::default();
+        self.seal_into(clock, classify, &mut report)?;
+        Ok(report)
+    }
+
+    /// As [`Sealer::seal`], into `report`: what was done before an error
+    /// stays in it (U6 R12: the hours noted `collector_down` are alerted
+    /// even when a later hour fails).
+    pub fn seal_into(
+        &self,
+        clock: &dyn Clock,
+        classify: &dyn Fn(&Record) -> Option<Topic>,
+        report: &mut SealReport,
+    ) -> Result<(), SealError> {
         let _lock = self.seal_lock()?;
         let start = clock.now_ns();
-        let mut report = SealReport::default();
         let last_closed = time::hour_start(start) - HOUR_NS;
         let mut earliest = None;
         let hours = self.seal_hours(
@@ -324,15 +341,15 @@ impl Sealer {
             last_closed,
             clock,
             classify,
-            &mut report,
+            report,
             &mut earliest,
         );
         // A failed hour makes only its own date wait (2.7): the day seal
         // runs before the error is returned.
-        let days = self.seal_days(clock, last_closed, earliest, &mut report);
+        let days = self.seal_days(clock, last_closed, earliest, report);
         hours?;
         days?;
-        Ok(report)
+        Ok(())
     }
 
     /// The per-venue seal lock: one seal or day seal run at a time.
@@ -821,6 +838,9 @@ impl Sealer {
             }
         }
         if sources.is_empty() {
+            report
+                .collector_down_hours
+                .push((time::date(h), time::hour(h)));
             let detail = json!({"text": "no open file in the hour"});
             notes.push(note(
                 note_payload("collector_down", &self.s.sealer, None, h, None, &detail),
@@ -1632,4 +1652,29 @@ impl Sealer {
         }
         Ok(())
     }
+}
+
+/// Closed hours (before the hour of `now_ns`, at most `lookback_hours`
+/// back) whose `_open` folder still holds a file: hours the seal has not
+/// finished (U6 D7, `lake_seal_lag_hours`). Oldest first.
+pub fn unsealed_hours(
+    fs: &dyn Fs,
+    venue: &str,
+    now_ns: i64,
+    lookback_hours: u32,
+) -> io::Result<Vec<i64>> {
+    let current = time::hour_start(now_ns);
+    let mut out = Vec::new();
+    for back in (1..=i64::from(lookback_hours)).rev() {
+        let h = current - back * HOUR_NS;
+        let dir = format!(
+            "crypto/l0/_open/venue={venue}/date={}/hour={:02}",
+            time::date(h),
+            time::hour(h)
+        );
+        if !fs.list(&dir)?.is_empty() {
+            out.push(h);
+        }
+    }
+    Ok(out)
 }

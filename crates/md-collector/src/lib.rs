@@ -8,8 +8,11 @@ pub mod daychange;
 pub mod disk;
 pub mod ingest;
 pub mod notes;
+pub mod notify;
+pub mod obs;
 pub mod plan;
 pub mod registry;
+pub mod telemetry;
 
 /// CLOCK_REALTIME in ns.
 pub fn wall_ns() -> i64 {

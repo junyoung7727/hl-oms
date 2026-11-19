@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use md_core::adapter::{ConnPlan, Instrument, MarketDataAdapter, RestRequest, Route};
-use md_feed::{FeedConfig, FeedHandle, FrameSink};
+use md_feed::{FeedConfig, FeedHandle, FrameSink, MessageSink};
 use md_lake::qraw::{Record, Src};
 use md_lake::seal::Topic;
 
@@ -30,6 +30,14 @@ pub fn conn_range(slot: u32) -> (u32, u32) {
 /// The market slot of a `conn_id`.
 pub fn slot_of_conn_id(conn_id: u32) -> u32 {
     conn_id >> SLOT_SHIFT
+}
+
+/// Where a feed hands its frames and its parsed messages.
+#[derive(Default, Clone)]
+pub struct Sinks {
+    pub frames: Option<Arc<dyn FrameSink>>,
+    /// U6: receive lag of books, trades and tickers.
+    pub msgs: Option<Arc<dyn MessageSink>>,
 }
 
 /// Venue code the collector and the seal need.
@@ -78,7 +86,7 @@ pub trait Venue: Send + Sync {
         max_topics: Option<usize>,
         cfg: FeedConfig,
         plans: Vec<ConnPlan>,
-        sink: Option<Arc<dyn FrameSink>>,
+        sinks: Sinks,
     ) -> Result<FeedHandle, String>;
 
     fn market_slot(&self, market: &str) -> Option<u32> {
@@ -243,9 +251,9 @@ impl Venue for Bybit {
         max_topics: Option<usize>,
         cfg: FeedConfig,
         plans: Vec<ConnPlan>,
-        sink: Option<Arc<dyn FrameSink>>,
+        sinks: Sinks,
     ) -> Result<FeedHandle, String> {
         let a = Arc::new(bybit_adapter(market, instruments, max_topics)?);
-        md_feed::Feed::start(a, cfg, plans, sink)
+        md_feed::Feed::start_with(a, cfg, plans, sinks.frames, sinks.msgs)
     }
 }

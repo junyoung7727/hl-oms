@@ -9,7 +9,7 @@ use std::time::Duration;
 use md_lake::time::{DAY_NS, day_start};
 use serde_json::json;
 
-use crate::collector::{Inner, log};
+use crate::collector::Inner;
 
 /// The switch times of `n` slots after `midnight_ns`.
 pub fn times(midnight_ns: i64, n: usize, start_offset_ms: u64, stagger_ms: u64) -> Vec<i64> {
@@ -55,7 +55,7 @@ pub(crate) async fn run(inner: Arc<Inner>) {
                 continue;
             };
             if let Err(e) = h.switch(*conn_index) {
-                log(
+                inner.log(
                     "warn",
                     "day change switch not started",
                     json!({"conn_index": conn_index, "error": e}),

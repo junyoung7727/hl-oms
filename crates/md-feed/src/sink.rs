@@ -48,4 +48,9 @@ pub trait FrameSink: Send + Sync {
 /// Receives the parsed trades and tickers of the active connections.
 pub trait MessageSink: Send + Sync {
     fn message(&self, conn_id: u32, msg: &Normalized);
+
+    /// A book snapshot or delta arrived on the active connection (U6: the
+    /// collector's receive lag). Called before the book is updated, with no
+    /// book lock held, so it may read books. Default: nothing.
+    fn book_msg(&self, _conn_id: u32, _key: &StreamKey, _venue_ts_ns: i64, _recv_ns: i64) {}
 }

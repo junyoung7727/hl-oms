@@ -326,8 +326,14 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
         let mut actions = Vec::new();
         for m in msgs {
             match m {
-                Normalized::BookSnapshot(u) => self.snapshot(&u),
-                Normalized::BookDelta(u) => actions.extend(self.delta(u)),
+                Normalized::BookSnapshot(u) => {
+                    self.forward_book(&u);
+                    self.snapshot(&u);
+                }
+                Normalized::BookDelta(u) => {
+                    self.forward_book(&u);
+                    actions.extend(self.delta(u));
+                }
                 Normalized::Ticker(t) => {
                     if let Some(slot) = self.state.tickers.get(&t.key) {
                         if let Ok(mut cur) = slot.lock() {
@@ -353,6 +359,15 @@ impl<A: MarketDataAdapter + Send + Sync + 'static> Conn<A> {
         if let Some(msgs) = &self.ctx.msgs {
             if self.state.active.load(Ordering::Acquire) {
                 msgs.message(self.state.conn_id, m);
+            }
+        }
+    }
+
+    /// Before the book's lock is taken (U6 R6).
+    fn forward_book(&self, u: &BookUpdate) {
+        if let Some(msgs) = &self.ctx.msgs {
+            if self.state.active.load(Ordering::Acquire) {
+                msgs.book_msg(self.state.conn_id, &u.key, u.venue_ts_ns, u.recv_ns);
             }
         }
     }

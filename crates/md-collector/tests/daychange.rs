@@ -76,6 +76,8 @@ async fn day_change_switches_in_order() {
         fs: s.fs.clone(),
         free_space: SetFree::new(u64::MAX),
         clock: Arc::new(NearMidnight::new(Duration::from_millis(1500))),
+        notifier: None,
+        clock_offset: None,
     };
     let started = std::time::Instant::now();
     let h = Collector::start(cfg, deps).await.expect("start");
