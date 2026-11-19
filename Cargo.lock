@@ -1024,6 +1024,7 @@ dependencies = [
  "md-core",
  "md-lake",
  "parquet",
+ "rustix",
  "serde_json",
  "sha2",
  "zstd 0.13.5",

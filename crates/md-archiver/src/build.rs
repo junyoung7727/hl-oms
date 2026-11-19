@@ -28,11 +28,24 @@ use crate::table::Table;
 /// the seven before (spec D3).
 pub const INSTRUMENT_LOOKBACK_DAYS: i64 = 7;
 
+/// Called before each new file: `Err` stops the build (spec R7).
+#[derive(Clone)]
+pub struct DiskCheck(pub std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync>);
+
+impl std::fmt::Debug for DiskCheck {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DiskCheck")
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Settings {
     /// Channels written as one `day.parquet` per date (lake contract 3.1).
     pub small_channels: BTreeSet<String>,
     pub write: WriteSettings,
+    /// Topics replayed at once; their rows are written in symbol order.
+    pub threads: usize,
+    pub disk_check: Option<DiskCheck>,
 }
 
 impl Default for Settings {
@@ -40,6 +53,8 @@ impl Default for Settings {
         Self {
             small_channels: ["publicTrade", "tickers"].map(String::from).into(),
             write: WriteSettings::default(),
+            threads: 4,
+            disk_check: None,
         }
     }
 }
@@ -54,6 +69,8 @@ pub enum BuildError {
     /// A defect of this crate (two gap rows with one key, a row the schema
     /// does not take). Nothing is committed.
     Defect(String),
+    /// Free disk space fell below the floor (spec R7).
+    Disk(String),
 }
 
 impl std::fmt::Display for BuildError {
@@ -64,6 +81,7 @@ impl std::fmt::Display for BuildError {
             BuildError::Wait(w) => write!(f, "waiting: {w}"),
             BuildError::Write(e) => write!(f, "{e}"),
             BuildError::Defect(e) => write!(f, "defect: {e}"),
+            BuildError::Disk(e) => write!(f, "disk: {e}"),
         }
     }
 }
@@ -1147,6 +1165,7 @@ struct Out<'a> {
     date: &'a str,
     parser_ver: &'a str,
     write: WriteSettings,
+    disk_check: Option<DiskCheck>,
     open: BTreeMap<String, (FileWriter, u64, Option<i64>, Option<i64>)>,
     done: Vec<BuiltFile>,
 }
@@ -1181,6 +1200,9 @@ impl Out<'_> {
         update_ids: impl Fn(&R) -> Option<i64>,
     ) -> Result<(), BuildError> {
         if !self.open.contains_key(&path) {
+            if let Some(DiskCheck(check)) = &self.disk_check {
+                check().map_err(BuildError::Disk)?;
+            }
             let file = self.file(&path);
             if let Some(dir) = file.parent() {
                 std::fs::create_dir_all(dir)?;
@@ -1227,6 +1249,78 @@ impl Out<'_> {
         }
         Ok(())
     }
+}
+
+/// Writes the rows of one topic to the open files of its channel.
+fn write_topic(
+    out: &mut Out,
+    ctx: &Ctx,
+    settings: &Settings,
+    topic: &Topic,
+    t: &mut TopicOut,
+    gaps: &mut Vec<GapRow>,
+    unattributed: &mut u64,
+) -> Result<(), BuildError> {
+    *unattributed += t.unattributed_drops;
+    gaps.append(&mut t.gaps);
+    let small = settings.small_channels.contains(&topic.channel);
+    let name = |h: usize| {
+        if small {
+            "day.parquet".to_string()
+        } else {
+            format!("hour={h:02}.parquet")
+        }
+    };
+    for (h, rows) in std::mem::take(&mut t.book) {
+        let mut rows = rows;
+        rows.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
+        let path = out.path(Table::BookMsg, &topic.market, &topic.channel, &name(h));
+        out.push(
+            Table::BookMsg,
+            path,
+            &topic.market,
+            &topic.channel,
+            &rows,
+            |r| {
+                if r.kind == 2 { None } else { r.update_id }
+            },
+        )?;
+    }
+    let mut trade: BTreeMap<usize, Vec<TradeRow>> = BTreeMap::new();
+    for r in std::mem::take(&mut t.trade) {
+        let h = if small { 0 } else { ctx.hour_of(r.recv_ns) };
+        trade.entry(h).or_default().push(r);
+    }
+    for (h, mut rows) in trade {
+        rows.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
+        let path = out.path(Table::Trade, &topic.market, &topic.channel, &name(h));
+        out.push(
+            Table::Trade,
+            path,
+            &topic.market,
+            &topic.channel,
+            &rows,
+            |_| None,
+        )?;
+    }
+    let mut ticker: BTreeMap<usize, Vec<TickerRow>> = BTreeMap::new();
+    for r in std::mem::take(&mut t.ticker) {
+        let h = if small { 0 } else { ctx.hour_of(r.recv_ns) };
+        ticker.entry(h).or_default().push(r);
+    }
+    for (h, mut rows) in ticker {
+        rows.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
+        let path = out.path(Table::Ticker, &topic.market, &topic.channel, &name(h));
+        out.push(
+            Table::Ticker,
+            path,
+            &topic.market,
+            &topic.channel,
+            &rows,
+            |_| None,
+        )?;
+    }
+    Ok(())
 }
 
 /// Builds `d` into `.tmp` files below `root` (the lake root of `fs`).
@@ -1280,129 +1374,58 @@ pub fn build_date(
         date: d,
         parser_ver: venue.parser_ver(),
         write: settings.write,
+        disk_check: settings.disk_check.clone(),
         open: BTreeMap::new(),
         done: Vec::new(),
     };
     let mut unattributed = 0;
     let mut group: Option<(String, String)> = None;
-    for topic in &topics {
-        if topic.channel == "instruments" {
-            continue;
-        }
-        let g = (topic.market.clone(), topic.channel.clone());
-        if group.as_ref() != Some(&g) {
-            out.close_all()?;
-            group = Some(g);
-        }
-        let tfiles: Vec<&L0File> = files
-            .iter()
-            .filter(|f| f.topic().as_ref() == Some(topic))
-            .collect();
-        let no_ends = Vec::new();
-        let mut t = replay_topic(
-            fs,
-            &ctx,
-            settings,
-            topic,
-            &tfiles,
-            ends.get(topic).unwrap_or(&no_ends),
-        )?;
-        unattributed += t.unattributed_drops;
-        gaps.append(&mut t.gaps);
-        let small = settings.small_channels.contains(&topic.channel);
-        for (h, mut rows) in t.book {
-            rows.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
-            let name = if small {
-                "day.parquet".to_string()
-            } else {
-                format!("hour={h:02}.parquet")
-            };
-            let path = out.path(Table::BookMsg, &topic.market, &topic.channel, &name);
-            out.push(
-                Table::BookMsg,
-                path,
-                &topic.market,
-                &topic.channel,
-                &rows,
-                |r| {
-                    if r.kind == 2 { None } else { r.update_id }
-                },
+    let order: Vec<&Topic> = topics
+        .iter()
+        .filter(|t| t.channel != "instruments")
+        .collect();
+    let no_ends = Vec::new();
+    // R6: up to `threads` topics are replayed at once; their rows are
+    // written in topic order, so every file stays in symbol order.
+    for chunk in order.chunks(settings.threads.max(1)) {
+        let results: Vec<Result<TopicOut, BuildError>> = std::thread::scope(|sc| {
+            let handles: Vec<_> = chunk
+                .iter()
+                .map(|topic| {
+                    let tfiles: Vec<&L0File> = files
+                        .iter()
+                        .filter(|f| f.topic().as_ref() == Some(*topic))
+                        .collect();
+                    let ends = ends.get(*topic).unwrap_or(&no_ends);
+                    let ctx = &ctx;
+                    sc.spawn(move || replay_topic(fs, ctx, settings, topic, &tfiles, ends))
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| {
+                    h.join().unwrap_or_else(|_| {
+                        Err(BuildError::Defect("a replay thread panicked".into()))
+                    })
+                })
+                .collect()
+        });
+        for (topic, t) in chunk.iter().zip(results) {
+            let mut t = t?;
+            let g = (topic.market.clone(), topic.channel.clone());
+            if group.as_ref() != Some(&g) {
+                out.close_all()?;
+                group = Some(g);
+            }
+            write_topic(
+                &mut out,
+                &ctx,
+                settings,
+                topic,
+                &mut t,
+                &mut gaps,
+                &mut unattributed,
             )?;
-        }
-        if !t.trade.is_empty() {
-            t.trade.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
-            let name = if small {
-                "day.parquet".to_string()
-            } else {
-                String::new()
-            };
-            if small {
-                let path = out.path(Table::Trade, &topic.market, &topic.channel, &name);
-                out.push(
-                    Table::Trade,
-                    path,
-                    &topic.market,
-                    &topic.channel,
-                    &t.trade,
-                    |_| None,
-                )?;
-            } else {
-                let mut by_hour: BTreeMap<usize, Vec<TradeRow>> = BTreeMap::new();
-                for r in t.trade {
-                    by_hour.entry(ctx.hour_of(r.recv_ns)).or_default().push(r);
-                }
-                for (h, rows) in by_hour {
-                    let path = out.path(
-                        Table::Trade,
-                        &topic.market,
-                        &topic.channel,
-                        &format!("hour={h:02}.parquet"),
-                    );
-                    out.push(
-                        Table::Trade,
-                        path,
-                        &topic.market,
-                        &topic.channel,
-                        &rows,
-                        |_| None,
-                    )?;
-                }
-            }
-        }
-        if !t.ticker.is_empty() {
-            t.ticker.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
-            if small {
-                let path = out.path(Table::Ticker, &topic.market, &topic.channel, "day.parquet");
-                out.push(
-                    Table::Ticker,
-                    path,
-                    &topic.market,
-                    &topic.channel,
-                    &t.ticker,
-                    |_| None,
-                )?;
-            } else {
-                let mut by_hour: BTreeMap<usize, Vec<TickerRow>> = BTreeMap::new();
-                for r in t.ticker {
-                    by_hour.entry(ctx.hour_of(r.recv_ns)).or_default().push(r);
-                }
-                for (h, rows) in by_hour {
-                    let path = out.path(
-                        Table::Ticker,
-                        &topic.market,
-                        &topic.channel,
-                        &format!("hour={h:02}.parquet"),
-                    );
-                    out.push(
-                        Table::Ticker,
-                        path,
-                        &topic.market,
-                        &topic.channel,
-                        &rows,
-                        |_| None,
-                    )?;
-                }
-            }
         }
     }
     out.close_all()?;

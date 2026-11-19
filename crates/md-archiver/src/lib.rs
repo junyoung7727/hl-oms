@@ -6,7 +6,9 @@ pub mod commit;
 pub mod input;
 pub mod parquet_out;
 pub mod registry;
+pub mod retain;
 pub mod rows;
+pub mod run;
 pub mod table;
 
 /// The parser version on every L1 row and file (lake contract 6). Raise it
