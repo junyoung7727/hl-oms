@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 pub mod lake;
+pub mod synth;
 
 use std::fs;
 use std::path::{Path, PathBuf};
