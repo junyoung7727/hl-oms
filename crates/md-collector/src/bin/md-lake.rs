@@ -2,7 +2,7 @@
 //! venue (spec D9).
 //!
 //! ```text
-//! md-lake seal      --venue V --lake DIR --first-hour YYYY-MM-DDTHH [--layout by_symbol|by_connection] [--now-ns N]
+//! md-lake seal      --venue V --lake DIR --first-hour YYYY-MM-DDTHH [--layout by_symbol|by_connection] [--now-ns N] [--telegram FILE]
 //! md-lake seal-days --venue V --lake DIR --first-hour YYYY-MM-DDTHH --from YYYY-MM-DD [--now-ns N]
 //! md-lake verify    --venue V --lake DIR --date YYYY-MM-DD --json [--now-ns N]
 //! ```
@@ -16,6 +16,7 @@
 
 use md_collector::registry;
 use md_lake::fs::RealFs;
+use alert_direct::{AlertConfig, AlertDirect, Route, TelegramConfig};
 use md_lake::seal::{Clock, Layout, SealError, SealReport, SealSettings, Sealer};
 use serde_json::json;
 
@@ -125,6 +126,14 @@ fn run(args: &[String]) -> i32 {
     let Some(first_hour) = arg(args, "--first-hour").as_deref().and_then(parse_hour) else {
         return usage();
     };
+    // U6 D9, R4: the alert config is checked before the lake is touched.
+    let alert = match alert_config(args, venue.name()) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
     let mut s = SealSettings::new(venue.name(), SEALER, ver, &host, first_hour);
     s.layout = match arg(args, "--layout").as_deref() {
         None | Some("by_symbol") => Layout::BySymbol,
@@ -133,8 +142,9 @@ fn run(args: &[String]) -> i32 {
     };
     let sealer = Sealer::new(RealFs::new(&lake), s);
     let classify = |r: &md_lake::qraw::Record| venue.classify(r);
+    let mut report = SealReport::default();
     let result = if cmd == "seal" {
-        sealer.seal(&clock, &classify)
+        sealer.seal_into(&clock, &classify, &mut report)
     } else {
         let Some(from) = arg(args, "--from")
             .as_deref()
@@ -142,14 +152,81 @@ fn run(args: &[String]) -> i32 {
         else {
             return usage();
         };
-        sealer.seal_days_since(&clock, from)
+        sealer.seal_days_since(&clock, from).map(|r| report = r)
     };
+    // R12: hours noted before an error are alerted too.
+    send_down_alert(alert, &report.collector_down_hours);
     match result {
-        Ok(r) => {
-            println!("{}", report_json(&r));
+        Ok(()) => {
+            println!("{}", report_json(&report));
             0
         }
         Err(e) => seal_exit(&e),
+    }
+}
+
+/// `--telegram FILE` (the token file) and `--telegram-api URL` (tests
+/// only: a loopback Bot API; the token file may then sit in a checkout).
+fn alert_config(args: &[String], venue: &str) -> Result<Option<AlertConfig>, String> {
+    let api = arg(args, "--telegram-api");
+    if let Some(u) = &api {
+        let host = u
+            .strip_prefix("http://")
+            .and_then(|r| r.split('/').next())
+            .and_then(|hp| hp.rsplit_once(':').map(|(h, _)| h.to_string()));
+        let loopback = host
+            .as_deref()
+            .and_then(|h| h.parse::<std::net::IpAddr>().ok())
+            .is_some_and(|ip| ip.is_loopback());
+        if !loopback {
+            return Err(format!("--telegram-api {u}: tests only, a loopback http://IP:PORT"));
+        }
+    }
+    let Some(path) = arg(args, "--telegram") else {
+        if api.is_some() {
+            return Err("--telegram-api needs --telegram".into());
+        }
+        return Ok(None);
+    };
+    let tg = TelegramConfig::load_with(std::path::Path::new(&path), api.is_none())
+        .map_err(|e| format!("--telegram: {e}"))?;
+    let mut c = AlertConfig::new(tg, "[MD P1]", venue);
+    if let Some(u) = &api {
+        c.routes = vec![Route::direct(u)?];
+    }
+    Ok(Some(c))
+}
+
+/// One message per run for the hours with no open file (spec D9): a long
+/// outage gives one message, not one per hour.
+fn send_down_alert(alert: Option<AlertConfig>, hours: &[(String, u8)]) {
+    if hours.is_empty() {
+        return;
+    }
+    let Some(cfg) = alert else {
+        eprintln!("collector_down hours {hours:?}: no --telegram, no direct alert");
+        return;
+    };
+    let shown: Vec<String> = hours.iter().take(24).map(|(d, h)| format!("{d}T{h:02}")).collect();
+    let more = hours.len().saturating_sub(shown.len());
+    let mut text = format!(
+        "수집기 정지: 수집기 파일이 하나도 없는 시간 {}개 (UTC)\n{}",
+        hours.len(),
+        shown.join(", ")
+    );
+    if more > 0 {
+        text.push_str(&format!(" 외 {more}개"));
+    }
+    match AlertDirect::start(cfg, std::sync::Arc::new(alert_direct::SystemClock)) {
+        Ok(h) => {
+            h.once(&text);
+            // R2: a blocked first route plus the pinned one fit in 20 s.
+            if !h.flush_for(std::time::Duration::from_secs(20)) {
+                let st = h.state();
+                eprintln!("the [MD P1] collector_down alert was not delivered: {:?}", st.last_errors);
+            }
+        }
+        Err(e) => eprintln!("cannot start the alert sender: {e}"),
     }
 }
 

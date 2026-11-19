@@ -306,6 +306,9 @@ fn hour_without_open_files_and_session_gap() {
         ]
     );
 
+    // U6 D9: the whole-hour note is listed for the seal's alert; the
+    // session-gap note is not a whole hour.
+    assert_eq!(report.collector_down_hours, vec![(D.to_string(), 14)]);
     let empty = kit::seal_log(fs.as_ref(), D, 14);
     assert_eq!(empty[1]["records"], 0);
     assert_eq!(empty[0]["sources"], serde_json::json!([]));
