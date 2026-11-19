@@ -7,7 +7,8 @@ After=md-lake-seal@%i.service
 [Service]
 Type=oneshot
 Environment=LAKE=/mnt/nvme/lake
-# Judgement: one large topic-day in memory per thread (spec R6).
+# One topic-day in memory per thread (spec R6): measured 2.57 GB peak for a
+# 3.2 M-row book day with one thread (docs/operations/md-archiver.md 5).
 Environment=THREADS=2
 # Unset = keep L1 forever. Design D1-c: keep the last N days until the lake
 # disk arrives, e.g. --retain-l1-days 14.

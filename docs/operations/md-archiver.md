@@ -62,7 +62,7 @@ md-archiver version     # crate 버전과 parser_ver
 
 ## 5. 한계 (U7)
 
-- 큰 하루(Bybit 전 종목)의 시간과 메모리는 아직 재지 않았다. 메모리는 토픽 하루치 행 × `--threads`다(BTC 선형 50단계 하루 약 318만 행, 판단: 1 GB 안팎).
+- 메모리는 토픽 하루치 행 × `--threads`다. 실측(Linux PC, 2026-11-19, 릴리스, 합성 호가 한 종목 320만 행, 변경분마다 4단계, `--threads 1`): 최대 RSS 2.57 GB, 그 날짜 만들기 18.8초(`tests/memory.rs`, 수동 실행). 행 하나에 약 800 B다. 처음 적은 "1 GB 안팎"(판단)은 틀렸다. Bybit 전 종목 하루의 시간은 아직 재지 않았다.
 - D−1에 스냅샷 없이 D−2부터 살아 있던 호가 상태는 이어받지 못한다(ADR-020 2번).
 - `by_connection` 배치, Binance·OKX·Hyperliquid는 읽지 않는다(U10, U11).
 - `--rebuild` 도중 멈춘 경우(gap 파일을 먼저 지우는 순서)는 코드만 있고 시험이 없다. 보통 실행의 커밋 도중 실패는 시험한다(`crash_mid_write_rebuilds`).
