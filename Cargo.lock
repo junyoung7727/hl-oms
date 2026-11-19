@@ -1022,6 +1022,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "obs-push"
+version = "0.1.0"
+dependencies = [
+ "http-fake",
+ "reqwest",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "oms-api"
 version = "0.1.0"
 dependencies = [

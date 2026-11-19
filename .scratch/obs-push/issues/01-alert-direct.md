@@ -13,3 +13,4 @@
 - [x] Test `fallback_route_and_last_good_first`: route 1 a dead loopback port, route 2 a fake reached through `resolve(host → 127.0.0.1:port)`; the message arrives with `Host: <host>`; the next send tries route 2 first.
 - [x] Test `repeat_rule_with_injected_clock`: start → 1 message; +4 min → none; +5 min → 1 (latest text); +10 min → 1; clear → 1 `해소:`; clear again → none.
 - [x] Test `set_never_waits`: with a fake that never answers, 1,000 `set`/`once` calls return within 50 ms in total.
+- [x] (review R2, R3) Test `default_timeouts` (connect 3 s, request 10 s) and `repeat_state_survives_restart`: a restart loop sends one start message, the 5 min repeat and the clear across processes.

@@ -405,6 +405,71 @@ impl Repeat {
     pub fn active(&self) -> Vec<String> {
         self.conds.keys().cloned().collect()
     }
+
+    /// The state as JSON (spec R3: kept across restarts).
+    pub fn to_json(&self) -> serde_json::Value {
+        let conds: serde_json::Map<String, serde_json::Value> = self
+            .conds
+            .iter()
+            .map(|(k, c)| {
+                (
+                    k.clone(),
+                    serde_json::json!({"first_text": c.first_text, "last_sent_ms": c.last_sent_ms}),
+                )
+            })
+            .collect();
+        serde_json::json!({"conds": conds})
+    }
+
+    /// Restores [`Repeat::to_json`]; entries that do not parse are skipped.
+    pub fn restore(&mut self, v: &serde_json::Value) {
+        if let Some(m) = v["conds"].as_object() {
+            for (k, c) in m {
+                if let (Some(t), Some(ms)) = (c["first_text"].as_str(), c["last_sent_ms"].as_i64())
+                {
+                    self.conds.insert(
+                        k.clone(),
+                        Cond {
+                            first_text: t.to_string(),
+                            last_sent_ms: ms,
+                        },
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Writes the repeat state: temp file, fsync, rename, fsync of the folder.
+fn save_state(path: &Path, v: &serde_json::Value) -> std::io::Result<()> {
+    use std::io::Write;
+    let tmp = path.with_extension("tmp");
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(v.to_string().as_bytes())?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)?;
+    if let Some(d) = path.parent() {
+        if let Ok(d) = std::fs::File::open(d) {
+            let _ = d.sync_all();
+        }
+    }
+    Ok(())
+}
+
+fn load_state(path: &Path) -> Option<serde_json::Value> {
+    let raw = std::fs::read(path).ok()?;
+    match serde_json::from_slice(&raw) {
+        Ok(v) => Some(v),
+        Err(_) => {
+            eprintln!(
+                "{}",
+                serde_json::json!({"level": "warn", "msg": "alert state file not understood; starting empty", "fields": {"path": path.display().to_string()}})
+            );
+            None
+        }
+    }
 }
 
 // ---------------------------------------------------------------- routes
@@ -489,6 +554,12 @@ pub struct AlertConfig {
     pub flush_every: Duration,
     pub outbox_limit: usize,
     pub repeat_ms: i64,
+    /// Connect timeout per route (spec R2: a blocked first route must not
+    /// use up the whole exit flush).
+    pub connect_timeout: Duration,
+    /// Where the repeat state is kept across restarts (spec R3); `None`:
+    /// only within this process.
+    pub state_file: Option<std::path::PathBuf>,
 }
 
 impl AlertConfig {
@@ -502,6 +573,8 @@ impl AlertConfig {
             flush_every: Duration::from_secs(5),
             outbox_limit: OUTBOX_LIMIT,
             repeat_ms: REPEAT_MS,
+            connect_timeout: Duration::from_secs(3),
+            state_file: None,
         }
     }
 }
@@ -546,6 +619,7 @@ pub struct AlertHandle {
     clock: Arc<dyn Clock>,
     prefix: String,
     venue: String,
+    state_file: Option<std::path::PathBuf>,
 }
 
 pub struct AlertDirect;
@@ -560,7 +634,7 @@ impl AlertDirect {
         for r in &cfg.routes {
             let mut b = reqwest::Client::builder()
                 .timeout(cfg.timeout)
-                .connect_timeout(cfg.timeout)
+                .connect_timeout(cfg.connect_timeout.min(cfg.timeout))
                 .no_proxy();
             if let Some((host, addr)) = &r.resolve {
                 b = b.resolve(host, *addr);
@@ -574,10 +648,14 @@ impl AlertDirect {
                 .map_err(|_| "cannot build the Telegram URL".to_string())?;
             clients.push((c, url));
         }
+        let mut repeat = Repeat::new(cfg.repeat_ms);
+        if let Some(v) = cfg.state_file.as_deref().and_then(load_state) {
+            repeat.restore(&v);
+        }
         let shared = Arc::new(Shared {
             inner: Mutex::new(Inner {
                 outbox: Outbox::new(cfg.outbox_limit),
-                repeat: Repeat::new(cfg.repeat_ms),
+                repeat,
                 in_flight: false,
                 delivered: 0,
                 failures: 0,
@@ -607,6 +685,7 @@ impl AlertDirect {
             clock,
             prefix: cfg.prefix,
             venue: cfg.venue,
+            state_file: cfg.state_file,
         })
     }
 }
@@ -661,11 +740,25 @@ impl AlertHandle {
     /// check, the repeat rule decides what is sent.
     pub fn set(&self, key: &str, text: Option<String>) {
         let now = self.clock.now_ms();
+        let mut changed = None;
         if let Ok(mut i) = self.shared.inner.lock() {
             if let Some(body) = i.repeat.set(key, text.as_deref(), now) {
                 let msg = self.message(&body);
                 i.outbox.add(&msg);
                 self.wake(&mut i);
+                if self.state_file.is_some() {
+                    changed = Some(i.repeat.to_json());
+                }
+            }
+        }
+        // The state changes only when a message is made (start, repeat,
+        // clear): the file is written then, outside the lock.
+        if let (Some(v), Some(path)) = (changed, &self.state_file) {
+            if let Err(e) = save_state(path, &v) {
+                eprintln!(
+                    "{}",
+                    serde_json::json!({"level": "warn", "msg": "alert state not saved", "fields": {"error": e.to_string()}})
+                );
             }
         }
     }

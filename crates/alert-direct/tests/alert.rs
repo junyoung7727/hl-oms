@@ -375,3 +375,51 @@ fn set_never_waits() {
     );
     assert!(h.state().queued <= 50, "the outbox stays bounded");
 }
+
+#[test]
+fn repeat_state_survives_restart() {
+    const MIN: i64 = 60_000;
+    let d = test_dir("state");
+    let state = d.join("alert-state.json");
+    let f = FakeHttp::start(ok());
+    let clock = Arc::new(TestClock(AtomicI64::new(1_763_500_000_000)));
+    let start = |clock: Arc<TestClock>| {
+        let mut c = cfg_for(vec![loopback(&f)]);
+        c.state_file = Some(state.clone());
+        AlertDirect::start(c, clock).expect("start")
+    };
+    // A restart loop: each process sees the condition again.
+    let h = start(clock.clone());
+    h.set("l0_write", Some("ENOSPC".into()));
+    assert!(h.flush_for(Duration::from_secs(5)));
+    drop(h);
+    for _ in 0..3 {
+        clock.0.fetch_add(MIN, Ordering::SeqCst);
+        let h = start(clock.clone());
+        h.set("l0_write", Some("ENOSPC".into()));
+        assert!(h.flush_for(Duration::from_secs(5)));
+    }
+    assert_eq!(texts(&f).len(), 1, "no message per restart");
+    clock.0.fetch_add(2 * MIN, Ordering::SeqCst);
+    let h = start(clock.clone());
+    h.set("l0_write", Some("ENOSPC".into()));
+    assert!(h.flush_for(Duration::from_secs(5)));
+    assert_eq!(texts(&f).len(), 2, "the 5 min repeat holds across restarts");
+    drop(h);
+    let h = start(clock.clone());
+    h.set("l0_write", None);
+    assert!(h.flush_for(Duration::from_secs(5)));
+    let t = texts(&f);
+    assert_eq!(t.len(), 3);
+    assert!(t[2].ends_with("\n해소: ENOSPC"), "{}", t[2]);
+}
+
+#[test]
+fn default_timeouts() {
+    let tg = TelegramConfig::new(TOKEN, "42").expect("config");
+    let c = AlertConfig::new(tg, "[MD P1]", "bybit");
+    assert_eq!(c.connect_timeout, Duration::from_secs(3));
+    assert_eq!(c.timeout, Duration::from_secs(10));
+    assert_eq!(c.outbox_limit, 50);
+    assert_eq!(c.repeat_ms, 300_000);
+}
