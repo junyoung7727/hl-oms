@@ -22,6 +22,10 @@ _Avoid_: admin, user
 The exchange that holds the orders and positions; here Hyperliquid or the simulated venue.
 _Avoid_: exchange, HL (in rule text)
 
+**Gateway** (게이트웨이):
+The part of the OMS that talks to one venue. It implements the `VenueGateway` trait (send an order, send a cancel, answer a query, start its long-running tasks); one driver runs its command and query loops (ADR-021).
+_Avoid_: connector, adapter (adapter is the market-data term)
+
 **Instrument** (종목):
 One perpetual contract that the configuration allows, for example BTC.
 _Avoid_: coin, asset, symbol

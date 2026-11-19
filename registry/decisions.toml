@@ -179,3 +179,13 @@ alternatives = ["수량 한도만 유지하고 거래소의 증거금 거부에 
 chosen = "전체 구간 노출로 주문 전 계좌 레버리지 검사. 일 손실과 유지증거금 여유는 거래소의 증거금 보고만 읽어 감소 전용 상태를 건다. 해제는 운영자만. 거래소 설정은 읽고 비교만 한다"
 gives_up = "마크 가격 피드, 입출금 자동 감지, 주문 수명 제한, 두 보고 사이의 손실 방어"
 revisit = "testnet 실험에서 T1~T11이 가정과 다를 때, 소유자가 O1~O6을 바꿀 때"
+
+[[adr]]
+id = "ADR-021"
+title = "게이트웨이 trait 하나와 구동기 하나"
+file = "docs/adr/ADR-021-venue-gateway-trait.md"
+problem = "두 게이트웨이가 명령·조회 루프를 각자 복사했고, 세 번째가 또 복사하면 동시 상한과 시작 순서가 갈라진다"
+alternatives = ["그대로 둔다", "지금 쓰는 네 가지만 담은 trait + 정적 디스패치 구동기", "설계 TN §6.5의 메서드를 모두 담은 trait", "dyn trait 객체"]
+chosen = "지금 쓰는 네 가지(send_order, send_cancel, query, spawn_tasks)와 조회 동시 상한 상수. 구동기 venue::start가 루프를 돌린다. 나머지 메서드는 쓰는 단위에서 더한다"
+gives_up = "설계 TN의 trait 전체를 한 번에 정의하는 것"
+revisit = "게이트웨이를 실행 중에 바꾸거나 둘 이상을 동시에 돌려야 할 때, 명령 종류가 늘 때"

@@ -25,8 +25,8 @@
 | `md-collector` | 수집기 실행 파일(거래소마다 하나): 설정 검사, 종목정보 기록, 계획 묶음(전략용 토픽은 별도 연결), 연결 자리마다·전체 상한이 있는 받기 큐, 쓰기 스레드, 시계 역행·큐 넘침·디스크 하한 메모, 자정 전환. `md-lake seal|seal-days|verify` 실행 파일과 거래소 등록부(분류기 포함) | md-lake 라이브러리와 거래소 지식을 잇는 유일한 곳이다. 시장은 `conn_id` 구간으로 정한다([ADR-019](adr/ADR-019-market-conn-slots.md)) |
 | `md-archiver` | L0 → L1 Parquet 생성 실행 파일(거래소마다 하루 한 번): 일별 봉인이 끝난 날짜를 오래된 순으로, 전날을 다시 재생해 이어받은 상태로 `book_msg`(체크포인트 행 포함)·`trade`(중복 제거)·`ticker`·`instrument`·`gap`을 쓴다. 날짜마다 원자적 교체(gap 파일 마지막), 디스크 하한, `--rebuild`, `--retain-l1-days` | 수집기와 같은 md-bybit 파서를 쓴다. 표의 열은 반입한 계약 파일에서 읽는다. L0는 읽기만 한다. 계약에 없는 다섯 곳은 [ADR-020](adr/ADR-020-md-archiver-input-rules.md) |
 
-게이트웨이에는 trait이 없다. 구현 둘(가상 거래소, Hyperliquid)을 시작할 때 설정으로 고르며,
-지켜야 할 것은 채널로 주고받는 메시지 계약이다([C-GW](contracts/gateway.md)).
+게이트웨이는 `VenueGateway` trait을 구현하고, 명령·조회 루프는 구동기 `venue::start` 하나가 돌린다([ADR-021](adr/ADR-021-venue-gateway-trait.md)).
+구현 둘(가상 거래소, Hyperliquid)을 시작할 때 설정으로 고르며, 지켜야 할 것은 채널로 주고받는 메시지 계약이다([C-GW](contracts/gateway.md)).
 
 ## 3.2 정적 구성도
 

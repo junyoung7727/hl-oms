@@ -28,3 +28,4 @@
 | [ADR-018](ADR-018-margin-rules.md) | 증거금 규칙: 계좌 레버리지 검사, 감소 전용 상태, 거래소 설정 확인(구현됨. 실제 거래소 미확인) | 리스크 |
 | [ADR-019](ADR-019-market-conn-slots.md) | 시세 레코드의 시장은 conn_id 구간으로 정한다(Bybit 프레임에 시장이 없음) | 시세 |
 | [ADR-020](ADR-020-md-archiver-input-rules.md) | 아카이버가 계약에 없는 다섯 곳(종목정보 응답, 전날 상태, 완료 표시, 보존, update_id 메타데이터)을 정하는 방법 | 시세 |
+| [ADR-021](ADR-021-venue-gateway-trait.md) | 게이트웨이 trait 하나와 구동기 하나, 지금 쓰는 네 가지만(동작 변화 없음) | 거래소 |

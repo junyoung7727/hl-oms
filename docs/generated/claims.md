@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `dea521f57f5b1033`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `067143ba17eee1fb`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
-주장 68건: 통과 0, 실패 0, 미실행 1, 이전 버전 결과 67.
+주장 69건: 통과 0, 실패 0, 미실행 2, 이전 버전 결과 67.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -43,6 +43,7 @@
 | V-API-1 | 전략 연결은 자기 주문만 보고 취소하며, 운영 명령은 운영 소켓에서만 받아들여진다. 알 수 없는 전략과 잘못된 요청은 거절된다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e a_strategy_sees` |
 | V-API-2 | 문서의 요청 예가 그대로 해석되고, 수치에 JSON 숫자를 쓰면 거부된다 | 단위 | 이전 버전 결과 | `cargo test -p oms-api` |
 | V-SLICE-1 | 신규 주문 → 영속 접수 → 거래소 접수 → 부분 체결 → 잔량 취소 → 종결이 실제 프로세스에서 이어지고, 구독자는 저널 순서로 이벤트를 받으며, 정상 종료 뒤 재시작해도 상태가 같고 재전송이 없다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e vertical_slice` |
+| V-GW-SEAM-1 | VenueGateway를 구현한 세 번째(가짜) 게이트웨이가 oms-core를 고치지 않고 구동기에 꽂히며, 상시 작업은 첫 명령 전에 한 번 시작되고, 주문 명령은 send_order로, 취소 명령은 send_cancel로, 조회는 query로 각각 한 번씩 간다. 동시에 도는 명령은 max_concurrent, 조회는 QUERY_CONCURRENCY를 넘지 않고 넘치는 것은 기다렸다가 모두 처리된다 | 단위 | 미실행 | `cargo test -p oms-node --lib venue::tests` |
 | V-LINK-1 | 스트림이 끊기면 신규 주문을 막고, 그동안의 취소 요청을 기억했다가 복귀 뒤 보내며, 놓친 체결을 메운 뒤에야 거래를 재개한다 | 프로세스 | 이전 버전 결과 | `cargo test -p oms-node --test e2e link_loss` |
 | V-HL-1 | L1 액션의 해시와 서명이 공식 Python SDK의 결과와 같고, 서명 키는 출력되지 않는다 | 단위 | 이전 버전 결과 | `cargo test -p oms-node --lib sign` |
 | V-HL-2 | 문서에 실린 응답 예를 올바르게 해석한다. 문서에 없는 주문 응답 형태와 최상위 오류는 결과 불명으로 두고, 문서의 표에 없는 상태 이름에서는 아무 결론도 내지 않으며, 종결 상태에서 최종 수량을 추정하지 않는다. 체결 조회는 마지막 쪽임이 확실할 때만 완료를 선언한다 | 단위 | 이전 버전 결과 | `cargo test -p oms-node --lib hyperliquid` |
@@ -858,6 +859,25 @@
 |---|---|---|
 | `e2e/vertical_slice_new_partial_fill_cancel_restart` | 이전 버전 결과 | last result: passed |
 | `e2e/a_lost_response_is_covered_by_stream_evidence` | 이전 버전 결과 | last result: passed |
+
+## V-GW-SEAM-1 — VenueGateway를 구현한 세 번째(가짜) 게이트웨이가 oms-core를 고치지 않고 구동기에 꽂히며, 상시 작업은 첫 명령 전에 한 번 시작되고, 주문 명령은 send_order로, 취소 명령은 send_cancel로, 조회는 query로 각각 한 번씩 간다. 동시에 도는 명령은 max_concurrent, 조회는 QUERY_CONCURRENCY를 넘지 않고 넘치는 것은 기다렸다가 모두 처리된다
+
+- 상태: **미실행**
+- 왜 중요한가: Bybit 게이트웨이가 배선을 복사하지 않고 같은 상한과 시작 순서를 물려받는 전제
+- 수준: 단위
+- 전제와 범위: 명령 13건, 조회 8건
+- 실제 구성요소: 구동기 venue::start, 채널, 세마포어
+- 모의·시뮬레이션: 게이트웨이(기록하는 가짜)
+- 주입한 장애: 없음. 가짜가 열어 줄 때까지 모든 작업이 멈춰 있어 상한에 걸린 상태를 만든다
+- 판정 기준과 근거: 가짜가 남긴 호출 기록(첫 줄이 상시 작업 시작, 나머지가 명령·조회 각 한 번), 동시 실행 최대값 3과 2, 처리 수 16
+- 재현: `cargo test -p oms-node --lib venue::tests`
+- 뒷받침하는 것: C-GW
+- 확인하지 않은 범위: 가상 거래소와 Hyperliquid 게이트웨이가 구동기를 거쳐도 전과 같다는 것은 이 시험이 아니라 기존 e2e(가상 거래소)가 본다. Hyperliquid 경로는 실제 거래소 시험 없이 컴파일과 단위 시험만 확인했다
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `node-unit/a_gateway_plugged_in_through_the_trait_gets_each_command_and_query_once` | 미실행 |  |
+| `node-unit/the_driver_bounds_concurrent_commands_and_queries_and_drops_none` | 미실행 |  |
 
 ## V-LINK-1 — 스트림이 끊기면 신규 주문을 막고, 그동안의 취소 요청을 기억했다가 복귀 뒤 보내며, 놓친 체결을 메운 뒤에야 거래를 재개한다
 
