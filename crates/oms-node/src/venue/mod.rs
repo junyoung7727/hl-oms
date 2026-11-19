@@ -1,8 +1,8 @@
 //! Venue gateways.
 //!
-//! A gateway is a set of tasks connected to the rest of the process by three
-//! channels. There is no gateway trait: the two implementations (the
-//! simulated venue and Hyperliquid) are chosen once at startup, and what they
+//! A gateway implements [`VenueGateway`] and is started by [`start`], which
+//! owns the command and query loops. The two implementations (the simulated
+//! venue and Hyperliquid) are chosen once at startup (ADR-021). What they
 //! must honour is this message contract, documented in
 //! docs/contracts/gateway.md:
 //!
@@ -27,7 +27,7 @@ pub mod simproto;
 use crate::queues::{CoreMsg, InputQueues};
 use oms_core::*;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{Semaphore, mpsc};
 
 #[derive(Clone, Debug)]
 pub enum QueryReq {
@@ -67,6 +67,69 @@ pub struct GatewayPorts {
     pub boot: u32,
 }
 
+/// What the driver needs from a gateway. Static dispatch: the methods
+/// return futures, so the trait is not used as `dyn` (ADR-021).
+pub trait VenueGateway: Send + Sync + 'static {
+    /// How many queries run at the same time.
+    const QUERY_CONCURRENCY: usize;
+
+    /// Handles one `VenueCommand::SendOrder`. Delivers exactly one
+    /// `SendResult` (G-1).
+    fn send_order(&self, cmd: VenueCommand) -> impl Future<Output = ()> + Send;
+
+    /// Handles one `VenueCommand::SendCancel`. Delivers exactly one
+    /// `CancelResult` (G-5).
+    fn send_cancel(&self, cmd: VenueCommand) -> impl Future<Output = ()> + Send;
+
+    /// Answers one query with venue inputs, or not at all.
+    fn query(&self, q: QueryReq) -> impl Future<Output = ()> + Send;
+
+    /// Starts the long-running tasks: the event stream and anything else the
+    /// gateway keeps running. Called once, before the first command.
+    fn spawn_tasks(self: &Arc<Self>, boot: u32);
+}
+
+/// Starts a gateway: its long-running tasks, then the command loop, then the
+/// query loop. Each command and each query runs as its own task, at most
+/// `max_concurrent` commands and `G::QUERY_CONCURRENCY` queries at once.
+/// The core already bounds outstanding sends; the semaphore bounds tasks
+/// even if that sizing were wrong.
+pub fn start<G: VenueGateway>(gw: Arc<G>, mut ports: GatewayPorts, max_concurrent: usize) {
+    gw.spawn_tasks(ports.boot);
+
+    let cmd_gw = gw.clone();
+    tokio::spawn(async move {
+        let permits = Arc::new(Semaphore::new(max_concurrent));
+        while let Some(cmd) = ports.commands.recv().await {
+            let Ok(permit) = permits.clone().acquire_owned().await else {
+                return;
+            };
+            let gw = cmd_gw.clone();
+            tokio::spawn(async move {
+                match &cmd {
+                    VenueCommand::SendOrder { .. } => gw.send_order(cmd).await,
+                    VenueCommand::SendCancel { .. } => gw.send_cancel(cmd).await,
+                }
+                drop(permit);
+            });
+        }
+    });
+
+    tokio::spawn(async move {
+        let permits = Arc::new(Semaphore::new(G::QUERY_CONCURRENCY));
+        while let Some(q) = ports.queries.recv().await {
+            let Ok(permit) = permits.clone().acquire_owned().await else {
+                return;
+            };
+            let gw = gw.clone();
+            tokio::spawn(async move {
+                gw.query(q).await;
+                drop(permit);
+            });
+        }
+    });
+}
+
 #[derive(Clone)]
 pub struct VenueInputTx {
     queues: Arc<InputQueues>,
@@ -88,4 +151,180 @@ impl VenueInputTx {
 /// boot number forms the high part.
 pub fn session_number(boot: u32, connection: u32) -> u64 {
     (u64::from(boot) << 32) | u64::from(connection)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+    use tokio::sync::Semaphore;
+
+    /// A third gateway: records what the driver hands it. Every operation
+    /// waits at `gate` until the test opens it.
+    struct Fake {
+        log: Mutex<Vec<String>>,
+        gate: Semaphore,
+        running: AtomicUsize,
+        peak: AtomicUsize,
+        done: AtomicUsize,
+    }
+
+    impl Fake {
+        fn new() -> Arc<Fake> {
+            Arc::new(Fake {
+                log: Mutex::new(Vec::new()),
+                gate: Semaphore::new(0),
+                running: AtomicUsize::new(0),
+                peak: AtomicUsize::new(0),
+                done: AtomicUsize::new(0),
+            })
+        }
+
+        async fn op(&self, what: String) {
+            let now = self.running.fetch_add(1, Ordering::SeqCst) + 1;
+            self.peak.fetch_max(now, Ordering::SeqCst);
+            if let Ok(p) = self.gate.acquire().await {
+                p.forget();
+            }
+            self.log.lock().unwrap().push(what);
+            self.running.fetch_sub(1, Ordering::SeqCst);
+            self.done.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn log(&self) -> Vec<String> {
+            self.log.lock().unwrap().clone()
+        }
+    }
+
+    impl VenueGateway for Fake {
+        const QUERY_CONCURRENCY: usize = 2;
+
+        async fn send_order(&self, cmd: VenueCommand) {
+            let VenueCommand::SendOrder { order_id, .. } = cmd else {
+                self.log.lock().unwrap().push("send_order got a cancel".into());
+                return;
+            };
+            self.op(format!("order {}", order_id.0)).await;
+        }
+
+        async fn send_cancel(&self, cmd: VenueCommand) {
+            let VenueCommand::SendCancel { order_id, .. } = cmd else {
+                self.log.lock().unwrap().push("send_cancel got an order".into());
+                return;
+            };
+            self.op(format!("cancel {}", order_id.0)).await;
+        }
+
+        async fn query(&self, q: QueryReq) {
+            self.op(format!("query {q:?}")).await;
+        }
+
+        fn spawn_tasks(self: &Arc<Self>, boot: u32) {
+            self.log.lock().unwrap().push(format!("tasks boot={boot}"));
+        }
+    }
+
+    fn order(id: u64) -> VenueCommand {
+        VenueCommand::SendOrder {
+            order_id: OrderId(id),
+            instance_id: 1,
+            instrument: InstrumentId::new("BTC").unwrap(),
+            side: Side::Buy,
+            qty: Qty(1),
+            px: Px(1),
+            tif: Tif::Gtc,
+            reduce_only: false,
+            expires_at: 0,
+        }
+    }
+
+    fn cancel(id: u64) -> VenueCommand {
+        VenueCommand::SendCancel {
+            order_id: OrderId(id),
+            instance_id: 1,
+            attempt: 1,
+            instrument: InstrumentId::new("BTC").unwrap(),
+            venue_oid: None,
+        }
+    }
+
+    struct Wired {
+        commands: mpsc::Sender<VenueCommand>,
+        queries: mpsc::Sender<QueryReq>,
+    }
+
+    fn wire(gw: &Arc<Fake>, boot: u32, max_concurrent: usize) -> Wired {
+        let (cmd_tx, cmd_rx) = mpsc::channel(64);
+        let (q_tx, q_rx) = mpsc::channel(64);
+        let ports = GatewayPorts {
+            commands: cmd_rx,
+            queries: q_rx,
+            input: VenueInputTx::new(Arc::new(InputQueues::new(16, 16, 16))),
+            instance_id: 1,
+            boot,
+        };
+        start(gw.clone(), ports, max_concurrent);
+        Wired {
+            commands: cmd_tx,
+            queries: q_tx,
+        }
+    }
+
+    async fn until(what: &str, f: impl Fn() -> bool) {
+        for _ in 0..500 {
+            if f() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        panic!("timed out waiting for {what}");
+    }
+
+    #[tokio::test]
+    async fn a_gateway_plugged_in_through_the_trait_gets_each_command_and_query_once() {
+        let gw = Fake::new();
+        gw.gate.add_permits(1000);
+        let w = wire(&gw, 7, 4);
+        w.commands.send(order(1)).await.unwrap();
+        w.commands.send(cancel(2)).await.unwrap();
+        w.commands.send(order(3)).await.unwrap();
+        w.queries.send(QueryReq::Positions).await.unwrap();
+        w.queries.send(QueryReq::Margin { seq: 9 }).await.unwrap();
+        until("five operations", || gw.done.load(Ordering::SeqCst) == 5).await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let mut log = gw.log();
+        assert_eq!(log.remove(0), "tasks boot=7", "the long-running tasks start first, once");
+        log.sort();
+        assert_eq!(
+            log,
+            vec!["cancel 2", "order 1", "order 3", "query Margin { seq: 9 }", "query Positions"]
+        );
+    }
+
+    #[tokio::test]
+    async fn the_driver_bounds_concurrent_commands_and_queries_and_drops_none() {
+        let gw = Fake::new();
+        let w = wire(&gw, 1, 3);
+        for i in 0..10 {
+            w.commands.send(order(i)).await.unwrap();
+        }
+        until("three commands running", || gw.running.load(Ordering::SeqCst) == 3).await;
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert_eq!(gw.peak.load(Ordering::SeqCst), 3, "max_concurrent bounds the commands");
+        gw.gate.add_permits(10);
+        until("ten commands done", || gw.done.load(Ordering::SeqCst) == 10).await;
+
+        gw.peak.store(0, Ordering::SeqCst);
+        for _ in 0..6 {
+            w.queries.send(QueryReq::OpenOrders).await.unwrap();
+        }
+        until("two queries running", || gw.running.load(Ordering::SeqCst) == 2).await;
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert_eq!(gw.peak.load(Ordering::SeqCst), Fake::QUERY_CONCURRENCY, "the gateway's constant bounds the queries");
+        gw.gate.add_permits(6);
+        until("six queries done", || gw.done.load(Ordering::SeqCst) == 16).await;
+        assert_eq!(gw.log().len(), 1 + 16, "nothing was dropped");
+    }
 }
