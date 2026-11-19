@@ -1,0 +1,17 @@
+# Template only: not installed or enabled by this repository (U7).
+# Instance = venue. Builds every day-sealed date without L1, oldest first.
+[Unit]
+Description=md-archiver L0 to L1 build for %i
+After=md-lake-seal@%i.service
+
+[Service]
+Type=oneshot
+Environment=LAKE=/mnt/nvme/lake
+# Judgement: one large topic-day in memory per thread (spec R6).
+Environment=THREADS=2
+# Unset = keep L1 forever. Design D1-c: keep the last N days until the lake
+# disk arrives, e.g. --retain-l1-days 14.
+Environment=RETAIN_ARGS=
+MemoryMax=8G
+Nice=10
+ExecStart=/usr/local/bin/md-archiver run --venue %i --lake ${LAKE} --threads ${THREADS} $RETAIN_ARGS

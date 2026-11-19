@@ -214,6 +214,22 @@ _Avoid_: finalize, close
 The records of one collector session inside one frame of a by_symbol day file; listed in the done entry and, joined, in the manifest line's `sessions`, so that `rec_no` gives a record's session.
 _Avoid_: segment, batch
 
+**Checkpoint row** (체크포인트 행):
+A derived `book_msg` row (`kind = 2`) at the start of an L1 hour (or day) file: the full book of the connection followed then, with the lineage of the last record applied; written only while the symbol has book state.
+_Avoid_: snapshot (that is the venue's message)
+
+**Book state** (호가 상태):
+What replay holds for a symbol between a snapshot row and the first break (a sequence gap, a parse error, the end of every connection that carries the topic, a `collector_down`, `disk_floor` or `stale` note); checkpoint rows exist only inside it.
+_Avoid_: book (the in-memory structure), sync
+
+**Followed connection** (따라가는 연결):
+The connection whose messages replay applies to the book of a topic; it moves by a handover (overlapping connection) or a reconnect.
+_Avoid_: active connection, primary
+
+**Carry-in** (이어받기):
+The replay of the date before, without rows, that gives the book state at 00:00:00 of the date being built.
+_Avoid_: warm-up, backfill
+
 **Seal log** (봉인 기록):
 The JSON lines of one hour's seal: begin entries (sources and target offsets) and the done entry (offsets, counts, SHA-256, session runs).
 _Avoid_: journal (that is the OMS's), WAL

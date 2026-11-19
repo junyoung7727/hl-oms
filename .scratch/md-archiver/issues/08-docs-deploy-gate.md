@@ -4,6 +4,6 @@
 
 **Blocked by:** 07
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Full gate of `pr_plan.json` U7 `checks` passes.
+- [x] Full gate of `pr_plan.json` U7 `checks` passes.

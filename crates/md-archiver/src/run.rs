@@ -245,8 +245,24 @@ pub fn run(args: &RunArgs) -> Result<RunReport, RunError> {
             log(json!({"date": r.date, "retained": r.removed, "kept": r.kept_reason}));
         }
     }
+    log(
+        json!({"run": "done", "built": report.built.len(), "waiting": report.waiting.len(),
+               "peak_rss_kb": peak_rss_kb()}),
+    );
     drop(lock);
     Ok(report)
+}
+
+/// VmHWM of this process (Linux), for the run's last log line.
+fn peak_rss_kb() -> Option<u64> {
+    let s = fs::read_to_string("/proc/self/status").ok()?;
+    s.lines()
+        .find_map(|l| l.strip_prefix("VmHWM:"))?
+        .trim()
+        .trim_end_matches("kB")
+        .trim()
+        .parse()
+        .ok()
 }
 
 /// For tests of the crash order: the `.tmp` name of a final path.
