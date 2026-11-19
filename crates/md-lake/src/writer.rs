@@ -220,6 +220,14 @@ impl OpenWriter {
         }
     }
 
+    /// No file of an hour before `now_ns`'s hour is opened from now on (the
+    /// floor only moves forward). The collector passes its wall clock, so
+    /// that a record that waited in its queue past its hour goes to the
+    /// current hour's file, never into an hour the sealer may have sealed.
+    pub fn set_min_hour(&mut self, now_ns: i64) {
+        self.next_hour = self.next_hour.max(time::hour_start(now_ns));
+    }
+
     /// Flush and fsync on time; closes the file when its hour has passed.
     pub fn tick(&mut self, now: i64) -> io::Result<()> {
         let (flush, fsync) = (self.settings.flush_ns, self.settings.fsync_ns);

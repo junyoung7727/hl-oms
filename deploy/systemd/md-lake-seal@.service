@@ -1,0 +1,13 @@
+# Template only: not installed or enabled by this repository (U5b).
+# Instance = venue. Set FIRST_HOUR once (the first UTC hour this lake seals,
+# YYYY-MM-DDTHH) and never move it back (md-lake F7).
+[Unit]
+Description=md-lake hour and day seal for %i
+
+[Service]
+Type=oneshot
+# Exit 3 = another seal run of the venue holds the lock: not a failure.
+SuccessExitStatus=3
+Environment=LAKE=/mnt/nvme/lake
+Environment=FIRST_HOUR=2026-12-01T00
+ExecStart=/usr/local/bin/md-lake seal --venue %i --lake ${LAKE} --first-hour ${FIRST_HOUR}

@@ -249,3 +249,29 @@ async fn frame_is_sunk_before_it_is_parsed() {
     eventually(|| sink.frames().iter().any(|f| f.payload == boom.as_bytes())).await;
     drop(feed);
 }
+
+/// U5b spec D1: a market's range hands out ids only inside it, and every
+/// range of a session shares one REST `frame_no` sequence (`conn_id 0`).
+#[test]
+fn conn_ids_range_shares_rest_counter() {
+    let session = ConnIds::new();
+    let linear = session.range(1, 4);
+    let spot = session.range(1 << 29, (1 << 29) + 2);
+    assert_eq!(
+        [linear.next(), linear.next(), linear.next(), linear.next()],
+        [Some(1), Some(2), Some(3), None]
+    );
+    assert_eq!(
+        [spot.next(), spot.next(), spot.next()],
+        [Some(1 << 29), Some((1 << 29) + 1), None]
+    );
+    let rest: Vec<u64> = vec![
+        linear.next_rest_frame_no(),
+        spot.next_rest_frame_no(),
+        session.next_rest_frame_no(),
+        linear.next_rest_frame_no(),
+    ];
+    assert_eq!(rest, vec![0, 1, 2, 3]);
+    // A range never starts at 0, which is reserved (lake contract 2.2).
+    assert_eq!(session.range(0, 2).next(), Some(1));
+}

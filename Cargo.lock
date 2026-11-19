@@ -922,6 +922,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "md-collector"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "md-bybit",
+ "md-core",
+ "md-feed",
+ "md-lake",
+ "rustix",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "toml",
+]
+
+[[package]]
 name = "md-core"
 version = "0.1.0"
 dependencies = [

@@ -26,3 +26,4 @@
 | [ADR-016](ADR-016-observability.md) | 읽기 모델 기반 관측, 판정 종류 표시 | 운영 |
 | [ADR-017](ADR-017-hyperliquid-gateway.md) | Hyperliquid 게이트웨이를 직접 구현, 공백은 보수적으로 | 거래소 |
 | [ADR-018](ADR-018-margin-rules.md) | 증거금 규칙: 계좌 레버리지 검사, 감소 전용 상태, 거래소 설정 확인(구현됨. 실제 거래소 미확인) | 리스크 |
+| [ADR-019](ADR-019-market-conn-slots.md) | 시세 레코드의 시장은 conn_id 구간으로 정한다(Bybit 프레임에 시장이 없음) | 시세 |

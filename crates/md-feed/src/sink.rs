@@ -39,6 +39,10 @@ pub struct Overflow;
 /// (the collector puts a bounded queue behind it).
 pub trait FrameSink: Send + Sync {
     fn frame(&self, f: RawFrame) -> Result<(), Overflow>;
+
+    /// The connection `conn_id` has ended: called once by its own task,
+    /// after its last [`FrameSink::frame`] call. Default: nothing.
+    fn conn_ended(&self, _conn_id: u32) {}
 }
 
 /// Receives the parsed trades and tickers of the active connections.

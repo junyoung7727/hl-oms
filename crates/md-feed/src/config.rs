@@ -8,30 +8,55 @@ use std::time::Duration;
 /// Hands out `conn_id`s for one collector session, over all its markets.
 /// `0` is reserved for REST bodies and notes (lake contract 2.2), so the first
 /// connection gets `1`. A reconnect is a new connection and gets a new number.
+///
+/// A collector that must tell its markets apart by `conn_id` gives each market
+/// a [`ConnIds::range`]; all ranges of a session share one REST counter.
 #[derive(Debug)]
 pub struct ConnIds {
     next: AtomicU32,
-    rest_frame_no: AtomicU64,
+    /// First number not handed out (`None`: up to `u32::MAX`).
+    end: Option<u32>,
+    rest_frame_no: Arc<AtomicU64>,
 }
 
 impl ConnIds {
     pub fn new() -> Self {
         Self {
             next: AtomicU32::new(1),
-            rest_frame_no: AtomicU64::new(0),
+            end: None,
+            rest_frame_no: Arc::new(AtomicU64::new(0)),
         }
     }
 
-    /// The next `conn_id`, or `None` after 2^32 − 1 numbers.
+    /// An allocator for `[start, end)` (`0` is never handed out) that shares
+    /// this session's REST `frame_no` counter.
+    pub fn range(&self, start: u32, end: u32) -> Arc<ConnIds> {
+        Arc::new(ConnIds {
+            next: AtomicU32::new(start.max(1)),
+            end: Some(end),
+            rest_frame_no: self.rest_frame_no.clone(),
+        })
+    }
+
+    /// The next `conn_id`, or `None` when the range (or 2^32 − 1 numbers)
+    /// is used up.
     pub fn next(&self) -> Option<u32> {
-        self.next
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
-            .ok()
+        let n = self
+            .next
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+                let next = n.checked_add(1)?;
+                match self.end {
+                    Some(end) if n >= end => None,
+                    _ => Some(next),
+                }
+            })
+            .ok()?;
+        Some(n)
     }
 
     /// `frame_no` of the next REST body (`conn_id` 0), counted from 0 per
-    /// session.
-    pub(crate) fn next_rest_frame_no(&self) -> u64 {
+    /// session over all ranges.
+    pub fn next_rest_frame_no(&self) -> u64 {
         self.rest_frame_no.fetch_add(1, Ordering::Relaxed)
     }
 }
