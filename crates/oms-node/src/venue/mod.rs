@@ -85,7 +85,8 @@ pub trait VenueGateway: Send + Sync + 'static {
     fn query(&self, q: QueryReq) -> impl Future<Output = ()> + Send;
 
     /// Starts the long-running tasks: the event stream and anything else the
-    /// gateway keeps running. Called once, before the first command.
+    /// gateway keeps running. `start` calls it once, synchronously, before it
+    /// spawns the command loop.
     fn spawn_tasks(self: &Arc<Self>, boot: u32);
 }
 
@@ -222,6 +223,9 @@ mod tests {
         }
 
         fn spawn_tasks(self: &Arc<Self>, boot: u32) {
+            // Slow on purpose: if the command loop were spawned first, the
+            // queued commands would be handled while this sleeps.
+            std::thread::sleep(Duration::from_millis(20));
             self.log.lock().unwrap().push(format!("tasks boot={boot}"));
         }
     }
@@ -255,7 +259,7 @@ mod tests {
         queries: mpsc::Sender<QueryReq>,
     }
 
-    fn wire(gw: &Arc<Fake>, boot: u32, max_concurrent: usize) -> Wired {
+    fn ports(boot: u32) -> (GatewayPorts, Wired) {
         let (cmd_tx, cmd_rx) = mpsc::channel(64);
         let (q_tx, q_rx) = mpsc::channel(64);
         let ports = GatewayPorts {
@@ -265,11 +269,11 @@ mod tests {
             instance_id: 1,
             boot,
         };
-        start(gw.clone(), ports, max_concurrent);
-        Wired {
+        let wired = Wired {
             commands: cmd_tx,
             queries: q_tx,
-        }
+        };
+        (ports, wired)
     }
 
     async fn until(what: &str, f: impl Fn() -> bool) {
@@ -282,20 +286,23 @@ mod tests {
         panic!("timed out waiting for {what}");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_gateway_plugged_in_through_the_trait_gets_each_command_and_query_once() {
         let gw = Fake::new();
         gw.gate.add_permits(1000);
-        let w = wire(&gw, 7, 4);
+        let (p, w) = ports(7);
+        // Queued before the start, so a command loop that ran before the
+        // long-running tasks would log first.
         w.commands.send(order(1)).await.unwrap();
         w.commands.send(cancel(2)).await.unwrap();
         w.commands.send(order(3)).await.unwrap();
         w.queries.send(QueryReq::Positions).await.unwrap();
         w.queries.send(QueryReq::Margin { seq: 9 }).await.unwrap();
+        start(gw.clone(), p, 4);
         until("five operations", || gw.done.load(Ordering::SeqCst) == 5).await;
         tokio::time::sleep(Duration::from_millis(20)).await;
         let mut log = gw.log();
-        assert_eq!(log.remove(0), "tasks boot=7", "the long-running tasks start first, once");
+        assert_eq!(log.remove(0), "tasks boot=7", "spawn_tasks runs once, before the command loop");
         log.sort();
         assert_eq!(
             log,
@@ -306,7 +313,8 @@ mod tests {
     #[tokio::test]
     async fn the_driver_bounds_concurrent_commands_and_queries_and_drops_none() {
         let gw = Fake::new();
-        let w = wire(&gw, 1, 3);
+        let (p, w) = ports(1);
+        start(gw.clone(), p, 3);
         for i in 0..10 {
             w.commands.send(order(i)).await.unwrap();
         }

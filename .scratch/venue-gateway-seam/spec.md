@@ -32,7 +32,7 @@ pub trait VenueGateway: Send + Sync + 'static {
     fn send_cancel(&self, cmd: VenueCommand) -> impl Future<Output = ()> + Send;
     /// Answers one query with venue inputs, or not at all.
     fn query(&self, q: QueryReq) -> impl Future<Output = ()> + Send;
-    /// Starts the gateway's long-running tasks (event stream and any other). Called once, before the first command.
+    /// Starts the gateway's long-running tasks (event stream and any other). `start` calls it once, synchronously, before it spawns the command loop.
     fn spawn_tasks(self: &Arc<Self>, boot: u32);
 }
 ```
@@ -60,7 +60,7 @@ pub trait VenueGateway: Send + Sync + 'static {
 Unit tests in `venue/mod.rs` with a fake gateway that records calls:
 
 1. every `SendOrder` reaches `send_order` and every `SendCancel` reaches `send_cancel`, each exactly once; every query reaches `query`;
-2. `spawn_tasks` runs exactly once, with the boot number, before the first command is handled;
+2. `spawn_tasks` runs exactly once, with the boot number, before the command loop is spawned (commands queued before `start`, multi-thread runtime, slow `spawn_tasks`; review fix 2026-11-20);
 3. at most `max_concurrent` commands and at most `QUERY_CONCURRENCY` queries run at the same time, and the rest wait instead of being dropped.
 
 Claim `V-GW-SEAM-1` under contract C-GW names these tests. The existing e2e suite (simulated venue) shows that the simulated gateway behaves as before through the driver.

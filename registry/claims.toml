@@ -545,15 +545,15 @@ not_covered = "실제 거래소"
 
 [[claim]]
 id = "V-GW-SEAM-1"
-statement = "VenueGateway를 구현한 세 번째(가짜) 게이트웨이가 oms-core를 고치지 않고 구동기에 꽂히며, 상시 작업은 첫 명령 전에 한 번 시작되고, 주문 명령은 send_order로, 취소 명령은 send_cancel로, 조회는 query로 각각 한 번씩 간다. 동시에 도는 명령은 max_concurrent, 조회는 QUERY_CONCURRENCY를 넘지 않고 넘치는 것은 기다렸다가 모두 처리된다"
+statement = "VenueGateway를 구현한 세 번째(가짜) 게이트웨이가 oms-core를 고치지 않고 구동기에 꽂히며, 구동기는 상시 작업 시작(spawn_tasks)을 명령 루프를 띄우기 전에 한 번 동기적으로 부르고, 주문 명령은 send_order로, 취소 명령은 send_cancel로, 조회는 query로 각각 한 번씩 간다. 동시에 도는 명령은 max_concurrent, 조회는 QUERY_CONCURRENCY를 넘지 않고 넘치는 것은 기다렸다가 모두 처리된다"
 why = "Bybit 게이트웨이가 배선을 복사하지 않고 같은 상한과 시작 순서를 물려받는 전제"
 level = "단위"
 scope = "명령 13건, 조회 8건"
 real = "구동기 venue::start, 채널, 세마포어"
 simulated = "게이트웨이(기록하는 가짜)"
-faults = "없음. 가짜가 열어 줄 때까지 모든 작업이 멈춰 있어 상한에 걸린 상태를 만든다"
+faults = "없음. 가짜가 열어 줄 때까지 모든 작업이 멈춰 있어 상한에 걸린 상태를 만든다. 순서 시험은 명령을 시작 전에 큐에 넣고, 다중 스레드 런타임에서 가짜의 spawn_tasks가 20 ms 늦게 기록한다"
 criterion = "가짜가 남긴 호출 기록(첫 줄이 상시 작업 시작, 나머지가 명령·조회 각 한 번), 동시 실행 최대값 3과 2, 처리 수 16"
-tests = ["node-unit/a_gateway_plugged_in_through_the_trait_gets_each_command_and_query_once", "node-unit/the_driver_bounds_concurrent_commands_and_queries_and_drops_none"]
+tests = ["node-unit/venue::tests::a_gateway_plugged_in_through_the_trait_gets_each_command_and_query_once", "node-unit/venue::tests::the_driver_bounds_concurrent_commands_and_queries_and_drops_none"]
 repro = "cargo test -p oms-node --lib venue::tests"
 supports = "C-GW"
 not_covered = "가상 거래소와 Hyperliquid 게이트웨이가 구동기를 거쳐도 전과 같다는 것은 이 시험이 아니라 기존 e2e(가상 거래소)가 본다. Hyperliquid 경로는 실제 거래소 시험 없이 컴파일과 단위 시험만 확인했다"

@@ -60,7 +60,7 @@ B. `crates/oms-node/src/venue/mod.rs`의 `VenueGateway`와 `start`.
 ## 8. 포기한 장점, 남은 위험, 가정
 
 - 포기: 설계 TN §6.5 trait 전체를 한 번에 보는 것. 나머지는 단위마다 생긴다.
-- 위험: 고유 메서드를 지우면 trait 구현의 `Gateway::send_order(self, cmd)`가 trait 메서드 자신을 가리켜 무한 재귀가 된다. 컴파일러의 `unconditional_recursion` 경고와 clippy `-D warnings`가 막는다(판단: 이 경고가 이 형태를 잡는다고 보았고 따로 시험하지 않았다).
+- 위험: 고유 메서드를 지우면 trait 구현의 `Gateway::send_order(self, cmd)`가 trait 메서드 자신을 가리켜 무한 재귀가 된다. 막는 것은 컴파일러다. 검토(2026-11-20)에서 가상 거래소의 고유 `send_order` 이름을 바꿔 보니 컴파일 오류(E0277)와 `unconditional_recursion` 경고가 났고, clippy `-D warnings`가 경고도 오류로 만든다. 시험으로 남기지는 않았다.
 - 가정: 조회 동시 상한 8과 4는 기존 값을 옮긴 것이며 그 값이 맞는지는 이 결정의 범위가 아니다.
 
 ## 9. 근거
