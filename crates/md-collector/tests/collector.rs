@@ -51,6 +51,20 @@ async fn end_to_end_seal() {
     // spot: BTCUSDT and SOLUSDT books. 4 per book, 4 per trade topic.
     let want = 4 * (1 + 1 + 2 + 2) as u64 + 2;
     eventually("all frames written", || written(&h) >= want).await;
+    // The count above also holds the subscribe answers, so it can be reached
+    // before the last data frame (seen once in 6 full runs, U6): wait until
+    // the fake has sent everything and the count stops growing.
+    eventually("the fake sent every data frame", || {
+        s.ws.sent_by_topic().values().map(Vec::len).sum::<usize>() == 24
+    })
+    .await;
+    let mut last = written(&h);
+    eventually("written stops growing", || {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let now = written(&h);
+        std::mem::replace(&mut last, now) == now
+    })
+    .await;
     h.shutdown().await.expect("shutdown");
     let sent = s.ws.sent_by_topic();
     assert_eq!(sent.len(), 6, "{:?}", sent.keys());
@@ -294,6 +308,7 @@ async fn slow_disk_overflow_reconnects() {
         free_space: SetFree::new(u64::MAX),
         clock: Arc::new(SystemClock),
         notifier: None,
+        clock_offset: None,
     };
     let cfg = s.config(
         &[(

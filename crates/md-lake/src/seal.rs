@@ -1633,3 +1633,28 @@ impl Sealer {
         Ok(())
     }
 }
+
+/// Closed hours (before the hour of `now_ns`, at most `lookback_hours`
+/// back) whose `_open` folder still holds a file: hours the seal has not
+/// finished (U6 D7, `lake_seal_lag_hours`). Oldest first.
+pub fn unsealed_hours(
+    fs: &dyn Fs,
+    venue: &str,
+    now_ns: i64,
+    lookback_hours: u32,
+) -> io::Result<Vec<i64>> {
+    let current = time::hour_start(now_ns);
+    let mut out = Vec::new();
+    for back in (1..=i64::from(lookback_hours)).rev() {
+        let h = current - back * HOUR_NS;
+        let dir = format!(
+            "crypto/l0/_open/venue={venue}/date={}/hour={:02}",
+            time::date(h),
+            time::hour(h)
+        );
+        if !fs.list(&dir)?.is_empty() {
+            out.push(h);
+        }
+    }
+    Ok(out)
+}

@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use md_core::StreamKey;
 use md_core::adapter::Route;
 use md_feed::{FrameSink, Overflow, RawFrame, Src};
 use md_lake::fs::Fs;
@@ -25,6 +26,8 @@ use serde_json::json;
 
 use crate::notes::{self, Note};
 use crate::notify::Notifier;
+use crate::obs::LogSink;
+use crate::telemetry::Telemetry;
 use crate::registry::{self, Venue};
 
 /// How often the writer ticks its files.
@@ -136,6 +139,7 @@ pub struct Ingest {
     writer: String,
     limits: Limits,
     shared: Arc<Mutex<Shared>>,
+    telemetry: Option<Arc<Telemetry>>,
 }
 
 /// The writer thread.
@@ -152,17 +156,31 @@ pub fn start(
     venue: &'static dyn Venue,
     limits: Limits,
 ) -> Result<(Arc<Ingest>, WriterThread), String> {
-    start_with(fs, settings, venue, limits, None)
+    start_with(fs, settings, venue, limits, Hooks::default())
 }
 
-/// As [`start`], with the systemd notifier the writer beats to (U6 D5).
+/// What the ingest reports to (U6): the systemd notifier the writer beats
+/// to, the log sink and the telemetry model.
+#[derive(Default, Clone)]
+pub struct Hooks {
+    pub notifier: Option<Arc<dyn Notifier>>,
+    pub log: Option<Arc<LogSink>>,
+    pub telemetry: Option<Arc<Telemetry>>,
+}
+
+/// As [`start`], with the U6 hooks.
 pub fn start_with(
     fs: Arc<dyn Fs>,
     settings: WriterSettings,
     venue: &'static dyn Venue,
     limits: Limits,
-    notifier: Option<Arc<dyn Notifier>>,
+    hooks: Hooks,
 ) -> Result<(Arc<Ingest>, WriterThread), String> {
+    let notifier = hooks.notifier.clone();
+    let log = hooks
+        .log
+        .clone()
+        .unwrap_or_else(|| Arc::new(LogSink::stderr_only(&settings.venue)));
     let (tx, rx) = mpsc::channel();
     let shared: Arc<Mutex<Shared>> = Arc::default();
     let writer = settings.collector.clone();
@@ -176,6 +194,7 @@ pub fn start_with(
         session: SessionWriter::new(fs, settings, &Contexts::default()),
         shared: shared.clone(),
         notifier,
+        log: log.clone(),
     };
     let join = std::thread::Builder::new()
         .name("md-writer".into())
@@ -187,6 +206,7 @@ pub fn start_with(
         writer,
         limits,
         shared: shared.clone(),
+        telemetry: hooks.telemetry,
     });
     Ok((
         ingest,
@@ -240,20 +260,26 @@ impl Ingest {
     }
 
     fn dest(&self, f: &RawFrame) -> Dest {
+        self.dest_topic(f).0
+    }
+
+    /// Where a frame goes, and its stream topic with its market (U6 R7:
+    /// WebSocket frames carry no topic; the route names it).
+    fn dest_topic(&self, f: &RawFrame) -> (Dest, Option<(&'static str, StreamKey)>) {
         match f.src {
             Src::Ws => {
                 let slot = usize::try_from(registry::slot_of_conn_id(f.conn_id)).ok();
-                let market = slot.and_then(|s| self.venue.markets().get(s));
-                match market.map(|m| self.venue.route(m, &f.payload)) {
-                    Some(Route::Stream(_)) => Dest::Open(f.conn_id),
-                    _ => Dest::Session,
+                let market = slot.and_then(|s| self.venue.markets().get(s)).copied();
+                match market.map(|m| (m, self.venue.route(m, &f.payload))) {
+                    Some((m, Route::Stream(k))) => (Dest::Open(f.conn_id), Some((m, k))),
+                    _ => (Dest::Session, None),
                 }
             }
             // A REST body that names a market of the venue is market data
             // (the instruments topic, D1); any other body is control.
             Src::Rest => match self.venue.rest_market(&f.payload) {
-                Some(m) if self.venue.market_slot(&m).is_some() => Dest::Open(0),
-                _ => Dest::Session,
+                Some(m) if self.venue.market_slot(&m).is_some() => (Dest::Open(0), None),
+                _ => (Dest::Session, None),
             },
         }
     }
@@ -309,7 +335,7 @@ fn record(f: RawFrame) -> Record {
 
 impl FrameSink for Ingest {
     fn frame(&self, f: RawFrame) -> Result<(), Overflow> {
-        let dest = self.dest(&f);
+        let (dest, topic) = self.dest_topic(&f);
         let bytes = qraw::FIXED_LEN + f.payload.len();
         let slot = f.conn_index;
         {
@@ -347,6 +373,9 @@ impl FrameSink for Ingest {
             c.accepted += 1;
             *s.slots.entry(slot).or_default() += bytes;
             s.total += bytes;
+        }
+        if let (Some(t), Some((market, key))) = (&self.telemetry, &topic) {
+            t.frame(market, key, slot, f.payload.len(), f.recv_ns);
         }
         if self.send(Item::Frame {
             dest,
@@ -400,6 +429,7 @@ struct Writer {
     session: SessionWriter,
     shared: Arc<Mutex<Shared>>,
     notifier: Option<Arc<dyn Notifier>>,
+    log: Arc<LogSink>,
 }
 
 impl Writer {
@@ -433,9 +463,10 @@ impl Writer {
                 // cuts them back and notes it (crash_truncate). No beat
                 // follows (U6 D5): the thread ends here.
                 let os = os_error_name(&e);
-                eprintln!(
-                    "{}",
-                    json!({"level": "error", "msg": "writer failed", "fields": {"error": e.to_string(), "os_error": os}})
+                self.log.log(
+                    "error",
+                    "writer failed",
+                    json!({"error": e.to_string(), "os_error": os}),
                 );
                 if let Ok(mut s) = self.shared.lock() {
                     s.failed = Some(e.to_string());
@@ -527,10 +558,8 @@ impl Writer {
             Dest::Open(c) if self.closed.contains(&c) => {
                 // Kept, never dropped: an open file once closed is not
                 // reopened (the sealer may hold it).
-                eprintln!(
-                    "{}",
-                    json!({"level": "warn", "msg": "frame of a closed connection", "fields": {"conn_id": c}})
-                );
+                self.log
+                    .log("warn", "frame of a closed connection", json!({"conn_id": c}));
                 if let Ok(mut s) = self.shared.lock() {
                     s.late_frames += 1;
                 }

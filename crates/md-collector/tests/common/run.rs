@@ -69,6 +69,7 @@ impl Setup {
             free_space: SetFree::new(u64::MAX),
             clock: Arc::new(SystemClock),
             notifier: None,
+            clock_offset: None,
         }
     }
 }

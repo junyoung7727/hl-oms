@@ -87,6 +87,45 @@ impl Default for Instruments {
     }
 }
 
+/// Pushes to VictoriaMetrics and VictoriaLogs (U6 spec D11); absent: none.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Telemetry {
+    pub vm_url: Option<String>,
+    pub vl_url: Option<String>,
+    /// Summary period of the traded topics.
+    pub fast_ms: u64,
+    /// Summary period of every other topic, and of the lake metrics.
+    pub slow_ms: u64,
+    /// Lines each push queue holds.
+    pub queue_lines: usize,
+}
+
+impl Default for Telemetry {
+    fn default() -> Self {
+        Self {
+            vm_url: None,
+            vl_url: None,
+            fast_ms: 1000,
+            slow_ms: 10_000,
+            queue_lines: 100_000,
+        }
+    }
+}
+
+/// Direct Telegram alerts (U6 spec D8, R3, R4); absent: none.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Alert {
+    /// The token file (`{"token", "chat_id"}`, mode 0600, outside any repository).
+    pub telegram: PathBuf,
+    /// Where the repeat state survives restarts; default
+    /// `$RUNTIME_DIRECTORY/alert-state.json` when that is set.
+    pub state_file: Option<PathBuf>,
+    /// Tests only: a loopback Bot API, honoured only with `loopback_only`.
+    pub api_base: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Extra {
@@ -128,6 +167,8 @@ pub struct Config {
     pub instruments: Instruments,
     pub markets: Vec<MarketConfig>,
     pub traded_channels: Vec<TradedChannel>,
+    pub telemetry: Option<Telemetry>,
+    pub alert: Option<Alert>,
 }
 
 #[derive(Deserialize)]
@@ -171,6 +212,37 @@ struct Raw {
     markets: Vec<RawMarket>,
     #[serde(default)]
     traded_channels: Vec<TradedChannel>,
+    telemetry: Option<Telemetry>,
+    alert: Option<Alert>,
+}
+
+/// `http(s)://` with a host that is a loopback address or `localhost`.
+fn is_loopback_url(u: &str) -> bool {
+    let Some(rest) = u.strip_prefix("http://").or_else(|| u.strip_prefix("https://")) else {
+        return false;
+    };
+    let host_port = rest.split('/').next().unwrap_or("");
+    let host = match host_port.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or(""),
+        None => host_port.rsplit_once(':').map_or(host_port, |(h, _)| h),
+    };
+    host == "localhost"
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
+impl Alert {
+    /// Loads the token file with the rules of alert-direct; with
+    /// `loopback_only` (tests) the "outside any repository" rule is skipped,
+    /// because test directories sit inside a checkout.
+    pub fn load_telegram(
+        &self,
+        loopback_only: bool,
+    ) -> Result<alert_direct::TelegramConfig, String> {
+        alert_direct::TelegramConfig::load_with(&self.telegram, !loopback_only)
+            .map_err(|e| format!("[alert] telegram: {e}"))
+    }
 }
 
 impl MarketConfig {
@@ -262,6 +334,31 @@ impl Config {
                 ));
             }
         }
+        if let Some(t) = &raw.telemetry {
+            if t.fast_ms < 100 || t.slow_ms < t.fast_ms {
+                return Err(format!(
+                    "[telemetry] needs fast_ms >= 100 and slow_ms >= fast_ms (got {} and {})",
+                    t.fast_ms, t.slow_ms
+                ));
+            }
+            for u in [&t.vm_url, &t.vl_url].into_iter().flatten() {
+                if raw.loopback_only && !is_loopback_url(u) {
+                    return Err(format!("[telemetry] {u} is not loopback (loopback_only)"));
+                }
+            }
+        }
+        if let Some(a) = &raw.alert {
+            if a.api_base.is_some() && !raw.loopback_only {
+                return Err("[alert] api_base is for tests only (needs loopback_only)".into());
+            }
+            if let Some(u) = &a.api_base {
+                if !is_loopback_url(u) {
+                    return Err(format!("[alert] api_base {u} is not loopback"));
+                }
+            }
+            // R4: a configured file that cannot be loaded is a config error.
+            a.load_telegram(raw.loopback_only)?;
+        }
         Ok(Config {
             venue: raw.venue,
             collector,
@@ -274,6 +371,8 @@ impl Config {
             instruments: raw.instruments,
             markets,
             traded_channels: raw.traded_channels,
+            telemetry: raw.telemetry,
+            alert: raw.alert,
         })
     }
 }

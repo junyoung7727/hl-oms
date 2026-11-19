@@ -73,6 +73,11 @@ async fn run(cfg: Config) -> i32 {
             _ = check.tick() => {
                 if let Some(e) = handle.failed() {
                     line("error", "writer failed", serde_json::json!({"error": e}));
+                    // U6 D8, R2: the [MD P1] goes out first (20 s at most,
+                    // below WatchdogSec=30s).
+                    if !handle.report_write_failure(Duration::from_secs(20)).await {
+                        line("error", "the [MD P1] alert was not delivered", serde_json::json!({}));
+                    }
                     // Exit without closing: the open files are recovered by
                     // md-lake seal (crash_truncate); a new session starts.
                     return 1;

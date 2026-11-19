@@ -98,7 +98,10 @@ fn heartbeat_and_watchdog_without_frames() {
         settings(md_collector::wall_ns()),
         bybit(),
         limits(),
-        Some(sock.notifier()),
+        ingest::Hooks {
+            notifier: Some(sock.notifier()),
+            ..Default::default()
+        },
     )
     .expect("start");
     let t0 = md_collector::wall_ns() / 1_000_000_000;
@@ -129,7 +132,10 @@ fn stalled_writer_stops_beats() {
         settings(md_collector::wall_ns()),
         bybit(),
         limits(),
-        Some(sock.notifier()),
+        ingest::Hooks {
+            notifier: Some(sock.notifier()),
+            ..Default::default()
+        },
     )
     .expect("start");
     std::thread::sleep(Duration::from_millis(1200));
@@ -182,7 +188,10 @@ fn failed_write_stops_beats() {
         settings(md_collector::wall_ns()),
         bybit(),
         limits(),
-        Some(sock.notifier()),
+        ingest::Hooks {
+            notifier: Some(sock.notifier()),
+            ..Default::default()
+        },
     )
     .expect("start");
     gate.fail_with(28);

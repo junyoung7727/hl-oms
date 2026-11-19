@@ -9,6 +9,7 @@ pub mod disk;
 pub mod ingest;
 pub mod notes;
 pub mod notify;
+pub mod obs;
 pub mod plan;
 pub mod registry;
 pub mod telemetry;

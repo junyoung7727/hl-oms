@@ -21,6 +21,10 @@ use crate::disk::{FreeSpace, StatVfs};
 use crate::ingest::{self, Ingest, IngestSnapshot, Limits, WriterThread};
 use crate::notes::Note;
 use crate::notify::{Notifier, SdNotify};
+use crate::obs::{Chrony, ClockOffset, LagSink, LogSink, SERVICE};
+use crate::telemetry::Telemetry;
+use alert_direct::{AlertConfig, AlertDirect, AlertHandle, Route};
+use obs_push::{ObsConfig, ObsHandle, ObsPush};
 use crate::plan::{self, Group};
 use crate::registry::{self, Venue};
 
@@ -45,6 +49,8 @@ pub struct Deps {
     pub clock: Arc<dyn WallClock>,
     /// systemd notify (`READY=1`, `WATCHDOG=1`; U6 D5).
     pub notifier: Option<Arc<dyn Notifier>>,
+    /// The clock offset reader (U6 D6).
+    pub clock_offset: Option<Arc<dyn ClockOffset>>,
 }
 
 impl Deps {
@@ -54,16 +60,78 @@ impl Deps {
             free_space: Arc::new(StatVfs(cfg.lake_root.clone())),
             clock: Arc::new(SystemClock),
             notifier: SdNotify::from_env().map(|n| Arc::new(n) as Arc<dyn Notifier>),
+            clock_offset: Some(Arc::new(Chrony)),
         }
     }
 }
 
-/// One line of the log (stderr), as oms-node writes it.
-pub(crate) fn log(level: &str, msg: &str, fields: serde_json::Value) {
-    eprintln!(
-        "{}",
-        json!({"ts": crate::wall_ns() / 1000, "level": level, "msg": msg, "fields": fields})
-    );
+/// The collector's outputs, made before the writer starts (U6).
+pub(crate) struct Out {
+    pub logs: Arc<LogSink>,
+    pub telemetry: Arc<Telemetry>,
+    pub obs: Option<Arc<ObsHandle>>,
+    pub alert: Option<Arc<AlertHandle>>,
+}
+
+impl Out {
+    fn start(cfg: &Config) -> Result<Out, StartError> {
+        let obs = match &cfg.telemetry {
+            Some(t) if t.vm_url.is_some() || t.vl_url.is_some() => {
+                let mut oc = ObsConfig::new(t.vm_url.clone(), t.vl_url.clone());
+                oc.queue_lines = t.queue_lines;
+                oc.self_labels = [("service", SERVICE), ("venue", cfg.venue.as_str())]
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect();
+                Some(Arc::new(ObsPush::start(oc).map_err(StartError::Failed)?))
+            }
+            _ => None,
+        };
+        let logs = Arc::new(LogSink {
+            obs: obs.clone(),
+            host: cfg.host.clone(),
+            venue: cfg.venue.clone(),
+        });
+        let alert = match &cfg.alert {
+            None => {
+                logs.log(
+                    "warn",
+                    "no [alert] section: direct [MD P1] alerts are off",
+                    json!({}),
+                );
+                None
+            }
+            Some(a) => {
+                let tg = a
+                    .load_telegram(cfg.loopback_only)
+                    .map_err(StartError::Refused)?;
+                let mut ac = AlertConfig::new(tg, "[MD P1]", &cfg.venue);
+                if let Some(base) = &a.api_base {
+                    ac.routes = vec![Route::direct(base).map_err(StartError::Refused)?];
+                }
+                ac.state_file = a.state_file.clone().or_else(|| {
+                    std::env::var_os("RUNTIME_DIRECTORY")
+                        .map(|d| std::path::PathBuf::from(d).join("alert-state.json"))
+                });
+                if ac.state_file.is_none() {
+                    logs.log(
+                        "warn",
+                        "no alert state file: the repeat rule holds only within this process",
+                        json!({}),
+                    );
+                }
+                let h = AlertDirect::start(ac, Arc::new(alert_direct::SystemClock))
+                    .map_err(StartError::Failed)?;
+                Some(Arc::new(h))
+            }
+        };
+        Ok(Out {
+            logs,
+            telemetry: Arc::new(Telemetry::new(&cfg.venue)),
+            obs,
+            alert,
+        })
+    }
 }
 
 /// The sink of one feed: forwards to the ingest until the feed is stopped
@@ -136,6 +204,8 @@ pub(crate) struct Counters {
     pub switches_failed: AtomicU64,
     pub disk_floor: AtomicBool,
     pub free_bytes: AtomicU64,
+    /// A free-space reading exists (U6: `lake_disk_free_bytes`).
+    pub free_known: AtomicBool,
 }
 
 /// What the collector reports to U6.
@@ -196,6 +266,14 @@ pub(crate) struct Inner {
     pub clock: Arc<dyn WallClock>,
     pub free_space: Arc<dyn FreeSpace>,
     pub session_ids: Arc<ConnIds>,
+    pub fs: Arc<dyn Fs>,
+    pub logs: Arc<LogSink>,
+    pub telemetry: Arc<Telemetry>,
+    pub obs: Option<Arc<ObsHandle>>,
+    pub alert: Option<Arc<AlertHandle>>,
+    pub clock_offset: Option<Arc<dyn ClockOffset>>,
+    /// `(px_exp, qty_exp)` by (market, symbol).
+    pub exps: BTreeMap<(String, String), (i8, i8)>,
 }
 
 /// A running collector.
@@ -291,6 +369,15 @@ impl Inner {
             .market(&group.market)
             .ok_or_else(|| format!("no market {}", group.market))?;
         let sink = FeedSink::new(self.ingest.clone());
+        let now = crate::wall_ns();
+        for p in &group.plans {
+            self.telemetry
+                .register_slot(&group.market, p.conn_index, &p.topics, group.traded, now);
+        }
+        let lag: Arc<dyn md_feed::MessageSink> = Arc::new(LagSink {
+            market: group.market.clone(),
+            telemetry: self.telemetry.clone(),
+        });
         let mut handle = self.venue.start_feed(
             &m.cfg.name,
             &m.instruments,
@@ -299,13 +386,15 @@ impl Inner {
             group.plans.clone(),
             registry::Sinks {
                 frames: Some(sink.clone() as Arc<dyn FrameSink>),
-                msgs: None,
+                msgs: Some(lag),
             },
         )?;
         let events = handle.take_events().map(|mut rx| {
             let (counters, market) = (self.counters.clone(), group.market.clone());
+            let (telemetry, logs) = (self.telemetry.clone(), self.logs.clone());
             tokio::spawn(async move {
                 while let Some(e) = rx.recv().await {
+                    telemetry.event(&market, &e);
                     let kind = event_kind(&e);
                     if let Ok(mut m) = counters.events.lock() {
                         *m.entry(kind).or_default() += 1;
@@ -327,7 +416,7 @@ impl Inner {
                         | FeedEvent::StaleRaised { .. } => "warn",
                         _ => "info",
                     };
-                    log(
+                    logs.log(
                         level,
                         kind,
                         json!({"market": market, "event": format!("{e:?}")}),
@@ -357,6 +446,11 @@ impl Inner {
 
     pub(crate) fn note(&self, n: &Note<'_>) {
         self.ingest.note(n);
+    }
+
+    /// One log line to stderr and VictoriaLogs (U6 D10).
+    pub(crate) fn log(&self, level: &str, msg: &str, fields: serde_json::Value) {
+        self.logs.log(level, msg, fields);
     }
 
     pub(crate) fn topics_of(group: &Group) -> Vec<Topic> {
@@ -408,7 +502,7 @@ async fn refresh_instruments(inner: Arc<Inner>) {
                         .map(|i| i.symbol.as_str())
                         .collect();
                     if !new.is_empty() {
-                        log(
+                        inner.log(
                             "info",
                             "new symbols are collected from the next start",
                             json!({"market": m.cfg.name, "symbols": new}),
@@ -420,7 +514,7 @@ async fn refresh_instruments(inner: Arc<Inner>) {
                         .counters
                         .instruments_failed
                         .fetch_add(1, Ordering::Relaxed);
-                    log(
+                    inner.log(
                         "warn",
                         "instruments refresh failed",
                         json!({"market": m.cfg.name, "error": e}),
@@ -447,6 +541,7 @@ impl Collector {
         ws.flush_ns = i64::try_from(cfg.write.flush_ms).unwrap_or(1000) * 1_000_000;
         ws.fsync_ns = i64::try_from(cfg.write.fsync_ms).unwrap_or(5000) * 1_000_000;
         let notifier = deps.notifier.clone();
+        let out = Out::start(&cfg)?;
         let (ingest, writer) = ingest::start_with(
             deps.fs.clone(),
             ws,
@@ -455,9 +550,13 @@ impl Collector {
                 queue_bytes: cfg.write.queue_bytes,
                 total_bytes: cfg.write.total_queue_bytes.max(cfg.write.queue_bytes),
             },
-            notifier.clone(),
+            ingest::Hooks {
+                notifier: notifier.clone(),
+                log: Some(out.logs.clone()),
+                telemetry: Some(out.telemetry.clone()),
+            },
         )?;
-        match Self::start_inner(cfg, deps, venue, ingest).await {
+        match Self::start_inner(cfg, deps, venue, ingest, out).await {
             Ok((inner, tasks)) => {
                 if let Some(n) = &notifier {
                     n.notify("READY=1");
@@ -481,6 +580,7 @@ impl Collector {
         deps: Deps,
         venue: &'static dyn Venue,
         ingest: Arc<Ingest>,
+        out: Out,
     ) -> Result<(Arc<Inner>, Vec<JoinHandle<()>>), StartError> {
         let session_ids = Arc::new(ConnIds::new());
         let counters = Arc::new(Counters::default());
@@ -542,6 +642,17 @@ impl Collector {
                 rest_base,
             });
         }
+        let exps = markets
+            .iter()
+            .flat_map(|m| {
+                m.instruments.iter().map(|i| {
+                    (
+                        (m.cfg.name.clone(), i.symbol.clone()),
+                        (i.px_exp, i.qty_exp),
+                    )
+                })
+            })
+            .collect();
         let inner = Arc::new(Inner {
             venue,
             cfg,
@@ -552,6 +663,13 @@ impl Collector {
             clock: deps.clock,
             free_space: deps.free_space,
             session_ids,
+            fs: deps.fs,
+            logs: out.logs,
+            telemetry: out.telemetry,
+            obs: out.obs,
+            alert: out.alert,
+            clock_offset: deps.clock_offset,
+            exps,
         });
         {
             let mut running = inner.groups.lock().await;
@@ -559,11 +677,15 @@ impl Collector {
                 running.push(inner.start_group(g)?);
             }
         }
-        let tasks = vec![
+        let mut tasks = vec![
             tokio::spawn(refresh_instruments(inner.clone())),
             tokio::spawn(crate::daychange::run(inner.clone())),
             tokio::spawn(crate::disk::run(inner.clone())),
+            tokio::spawn(crate::obs::run(inner.clone())),
         ];
+        if let Some(a) = inner.alert.clone() {
+            tasks.push(tokio::spawn(crate::obs::alerts(inner.clone(), a)));
+        }
         Ok((inner, tasks))
     }
 }
@@ -601,6 +723,30 @@ impl CollectorHandle {
     /// The writer's error, if it stopped on one (the process must exit).
     pub fn failed(&self) -> Option<String> {
         self.writer.as_ref().and_then(WriterThread::failed)
+    }
+
+    /// Before an exit on a writer error (U6 D8, R2, R3): the `l0_write`
+    /// condition is set and the alert outbox flushed for up to `wait`.
+    /// `true` when everything was delivered (or no alert is configured).
+    pub async fn report_write_failure(&self, wait: Duration) -> bool {
+        let Some(a) = self.inner.alert.clone() else {
+            return true;
+        };
+        let st = self.inner.ingest.state();
+        let os = st.failed_os_error.clone().unwrap_or_default();
+        let e = st.failed.clone().unwrap_or_default();
+        a.set("l0_write", Some(crate::obs::write_failure_text(&os, &e)));
+        tokio::task::spawn_blocking(move || a.flush_for(wait))
+            .await
+            .unwrap_or(false)
+    }
+
+    /// What the pushes and the alerts have done (tests, status).
+    pub fn out_state(&self) -> (Option<obs_push::ObsState>, Option<alert_direct::AlertState>) {
+        (
+            self.inner.obs.as_ref().map(|o| o.state()),
+            self.inner.alert.as_ref().map(|a| a.state()),
+        )
     }
 
     /// Stops every feed, then closes every file (frame end, fsync, unlock).
