@@ -130,3 +130,19 @@ One line per date on stderr: date, files, rows per table, gap rows per kind, sec
 - A carry-in state cache (each build replays D−1 again; measure first).
 - Metrics, timers enabled, the auditor (U8), DuckDB query helpers (U9).
 - A topic whose book state lived across D−1 without any snapshot in D−1 (state from D−2): the build of D starts without it until the next snapshot. With the daily handover this needs a failed day change; documented as a limit.
+
+## Review decisions (spec review, 2026-11-19)
+
+These replace the sections they name where they differ.
+
+- **R1 (D5, reconnect).** "A connection that carries the topic overlaps A" means: another such connection is alive at A's end (`first ≤ A.last ≤ last`). B is the earliest connection that carries the topic whose first record (any topic) is after `A.last`. At most one `reconnect` row per A and topic. (Under "lifetimes intersect" the golden reconnects at 00:20 are lost; pairing A with every later connection adds a wrong A→C row on 2026-01-05.)
+- **R2 (D4, handover).** A snapshot on connection c is a `handover` from the followed f when it is c's first snapshot of the topic, c ≠ f, and c started while f was alive (`f.first < c.first ≤ f.last`). Evidence: that snapshot. The book-state end rule uses the chain of overlaps: when f ends with a topic-carrying connection alive at its end, the end moves to that connection's end, and so on. So a day-change connection whose snapshot comes after f's last record still gives a `handover`, and a book never lives on a dead connection.
+- **R3 (D4, end of book state).** As contract 3.2 and rule 7: any `seq_gap` or `parse_error` of the symbol ends the book state, on any connection, not only the followed one.
+- **R4 (tests).** The build of 2026-01-01 writes an empty gap file; the golden test asserts it exists with 0 rows.
+- **R5 (D7, crash order).** (1) delete the gap file, fsync its directory; (2) write and fsync every `.tmp`; (3) delete stale files, rename the other files, fsync each directory; (4) rename the gap file, fsync its directory.
+- **R6 (D4/D6, memory).** The hour writers (or the day writer) of a `(market, channel)` stay open and get the topics in ascending symbol order; rows are sorted per topic and hour; the trade de-dup set is per topic. Topics may run in parallel, committed to the writers in symbol order. A large synthetic test checks the peak memory.
+- **R7 (D8, disk).** Before a date: free bytes ≥ floor + the date's L0 bytes (an upper bound for its L1, judgement: L1 ≈ 0.7 × L0). Checked again before each file; on a breach the `.tmp` files are deleted and the run exits 1.
+- **R8 (D4, snapshots).** `resnapshot` only while c's sequence tracking is alive (c had a book and no break since). A snapshot after a break (Bybit resubscribes on the same connection) restarts c's tracking without a row. A later snapshot on a connection that is not followed moves nothing.
+- **R9 (D3, instruments).** The window is that of the record's own file date (D−8…D−1 for the carry-in records of D−1), so the 00:00 state equals what D−1's own build saw. When the instrument row of the followed book changes exponents, the book state ends (levels of two exponents never mix).
+- **R10 (D2, read integrity).** A framing error, a truncated tail or a record count different from the manifest's stops the date: nothing is renamed, no gap file, exit 1.
+- **R11 (small).** Gap rows sort with `(l0_file_id, rec_no)` as the last tie-break; two rows with the same key are a build error. D9 checks the audit's `venue` and `date`.
