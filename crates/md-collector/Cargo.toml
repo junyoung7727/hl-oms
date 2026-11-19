@@ -20,6 +20,8 @@ md-core = { path = "../md-core" }
 md-bybit = { path = "../md-bybit" }
 md-feed = { path = "../md-feed" }
 md-lake = { path = "../md-lake" }
+alert-direct = { path = "../alert-direct" }
+obs-push = { path = "../obs-push" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = "1.1.6"
@@ -27,6 +29,7 @@ tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "time", "syn
 rustix = { version = "1.1.5", features = ["fs"] }
 
 [dev-dependencies]
+http-fake = { path = "../http-fake" }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "time", "sync", "macros", "io-util"] }
 tokio-tungstenite = "0.30.0"
 futures-util = { version = "0.3.34", default-features = false, features = ["sink"] }

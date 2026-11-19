@@ -942,11 +942,14 @@ dependencies = [
 name = "md-collector"
 version = "0.1.0"
 dependencies = [
+ "alert-direct",
  "futures-util",
+ "http-fake",
  "md-bybit",
  "md-core",
  "md-feed",
  "md-lake",
+ "obs-push",
  "rustix",
  "serde",
  "serde_json",

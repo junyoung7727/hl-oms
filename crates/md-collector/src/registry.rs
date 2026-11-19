@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use md_core::adapter::{ConnPlan, Instrument, MarketDataAdapter, RestRequest, Route};
-use md_feed::{FeedConfig, FeedHandle, FrameSink};
+use md_feed::{FeedConfig, FeedHandle, FrameSink, MessageSink};
 use md_lake::qraw::{Record, Src};
 use md_lake::seal::Topic;
 
@@ -79,6 +79,7 @@ pub trait Venue: Send + Sync {
         cfg: FeedConfig,
         plans: Vec<ConnPlan>,
         sink: Option<Arc<dyn FrameSink>>,
+        msgs: Option<Arc<dyn MessageSink>>,
     ) -> Result<FeedHandle, String>;
 
     fn market_slot(&self, market: &str) -> Option<u32> {
@@ -244,8 +245,9 @@ impl Venue for Bybit {
         cfg: FeedConfig,
         plans: Vec<ConnPlan>,
         sink: Option<Arc<dyn FrameSink>>,
+        msgs: Option<Arc<dyn MessageSink>>,
     ) -> Result<FeedHandle, String> {
         let a = Arc::new(bybit_adapter(market, instruments, max_topics)?);
-        md_feed::Feed::start(a, cfg, plans, sink)
+        md_feed::Feed::start_with(a, cfg, plans, sink, msgs)
     }
 }

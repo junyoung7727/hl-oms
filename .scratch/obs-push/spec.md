@@ -50,7 +50,7 @@ Two new library crates and the wiring in md-collector:
 
 ### D3. md-feed: book updates to the message sink (additive)
 
-- `MessageSink` gets a default method `fn book(&self, conn_id: u32, u: &BookUpdate) {}`, called after a book snapshot or delta is **applied** on an active connection (same `active` rule as `forward`). Existing implementors are unchanged. The collector uses it only for `md_recv_lag_ms` of book topics (frames are counted in the frame sink).
+- `MessageSink` gets a default method `fn book_msg(&self, conn_id: u32, key: &StreamKey, venue_ts_ns: i64, recv_ns: i64) {}`, called for every book snapshot or delta that arrives on an active connection (same `active` rule as `forward`), **before** the book's lock is taken (R6; as built in ticket 03: the lag is of the message received, applied or not). Existing implementors are unchanged. The collector uses it only for `md_recv_lag_ms` of book topics (frames are counted in the frame sink).
 - `Venue::start_feed` in the registry gets a `msgs: Option<Arc<dyn MessageSink>>` argument (Bybit passes it to `Feed::start_with`).
 
 ### D4. Collector telemetry model (`crates/md-collector/src/telemetry.rs`)
@@ -158,7 +158,7 @@ One Opus reviewer, 6 MUST and 6 SHOULD; all accepted. These override the section
 - **R5 (60 s quiet venue).** One real 60 s test (`quiet_venue_keeps_heartbeat_60s`) is allowed as the single exception to the 3 s rule; it runs in parallel with the other tests.
 - **R6 (lock order).** `MessageSink::book` is called after the topic's book lock is released. The summary copies what it needs from the telemetry shard, releases it, then calls `read_book`; it never holds a shard lock while reading a book, and the sink never holds a book lock while taking a shard lock.
 - **R7 (frame topic, error kind).** Per-topic frame counts use the `Route::Stream(key)` that `Ingest::dest` computes (WebSocket `RawFrame.topic` is `None`). The writer keeps the OS error code with its error (`ENOSPC`, `EIO`, `EDQUOT`, else the io kind) for the alert text.
-- **R8 (reconnects).** `md_reconnects_total` counts `Disconnected` of a connection that was not retired by a day-change switch: conn ids named in `SwitchDone.from_conn_id` or `SwitchFailed.conn_id` are not counted.
+- **R8 (reconnects).** `md_reconnects_total` counts the end of a slot's **active** connection. As built (ticket 03, because md-feed emits a failed candidate's `Disconnected` before its `SwitchFailed`): per slot, the first `Connected` while no connection is active makes it active, `SwitchDone` moves it to `to_conn_id`, and a `Disconnected` of the active one counts one reconnect for every topic of the slot and leaves none active. Candidates and failed connect attempts are never active, so a day-change switch counts nothing and an outage with many retries counts one.
 - **R9 (conn label, first message).** The `conn` label of `md_msgs`, `md_bytes` and `md_queue_bytes` is the plan slot (`conn_index`), stable across reconnects. `md_last_msg_age_s` before the first frame is the age since the topic's group started.
 - **R10 (notify socket).** The notify socket is non-blocking; `WouldBlock` and other send errors are ignored (counted).
 - **R11 (permanent rejects, heartbeat first).** obs-push treats 400, 413 and 422 as permanent: the batch is dropped and counted `rejected`, one stderr line. A small priority queue (1,000 lines) is sent before the main queue; the heartbeat and the self metrics use it.

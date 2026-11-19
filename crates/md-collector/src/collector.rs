@@ -294,6 +294,7 @@ impl Inner {
             self.feed_config(m),
             group.plans.clone(),
             Some(sink.clone() as Arc<dyn FrameSink>),
+            None,
         )?;
         let events = handle.take_events().map(|mut rx| {
             let (counters, market) = (self.counters.clone(), group.market.clone());
