@@ -4,11 +4,11 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Test helper `golden_lake(dir)`: day files from golden segments (one zstd frame per segment), manifest lines with `sessions` from `session_runs.json`, sidecars, plus the synthetic 2026-01-01 instruments response.
-- [ ] Test `day_sealed_rules`: a `.partial` file, an open file, a sealed file without a manifest line or sidecar, a size mismatch, a cut manifest line each make the date not day-sealed; the golden dates are day-sealed.
-- [ ] Test `record_connections_from_sessions`: every record of the golden order book day file of 2026-01-02 gets the session of `session_runs.json`; the restart date gives three connections with `conn_id` 1.
-- [ ] Test `pass1_lifetimes`: first/last `recv_ns` per connection include control records of the collector's session file; the trade-only connection of session 2 carries only `publicTrade`.
-- [ ] Test `instrument_in_effect`: latest at or before; earliest of the window when none before; none in D−7…D → parse error; a response of D+1 is never used.
-- [ ] Test `refusals`: `by_connection` manifest line and `contract_ver` 2 → refusal error.
+- [x] Test helper `golden_lake(dir)`: day files from golden segments (one zstd frame per segment), manifest lines with `sessions` from `session_runs.json`, sidecars, plus the synthetic 2026-01-01 instruments response.
+- [x] Test `day_sealed_rules`: a `.partial` file, an open file, a sealed file without a manifest line or sidecar, a size mismatch, a cut manifest line each make the date not day-sealed; the golden dates are day-sealed.
+- [x] Test `record_connections_from_sessions`: every record of the golden order book day file of 2026-01-02 gets the session of `session_runs.json`; the restart date gives three connections with `conn_id` 1.
+- [x] Test `pass1_lifetimes`: first/last `recv_ns` per connection include control records of the collector's session file; the trade-only connection of session 2 carries only `publicTrade`.
+- [x] Test `instrument_in_effect`: latest at or before; earliest of the window when none before; none in D−7…D → parse error; a response of D+1 is never used.
+- [x] Test `refusals`: `by_connection` manifest line and `contract_ver` 2 → refusal error.

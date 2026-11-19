@@ -20,3 +20,8 @@ parquet = { version = "60.1.0", default-features = false, features = ["zstd"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+hex = "0.4.3"
+sha2 = "0.11.0"
+zstd = "0.13.5"

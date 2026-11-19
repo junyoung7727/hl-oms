@@ -2,6 +2,8 @@
 //! `CARGO_TARGET_TMPDIR` (as md-lake): never `std::env::temp_dir()`.
 #![allow(dead_code)]
 
+pub mod lake;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

@@ -1,6 +1,7 @@
 //! md-archiver: the L1 Parquet tables of the lake contract (section 3), built
 //! from sealed L0 files with the same venue parser as the live path (U7).
 
+pub mod input;
 pub mod parquet_out;
 pub mod table;
 
