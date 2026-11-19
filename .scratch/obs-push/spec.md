@@ -146,3 +146,20 @@ Unknown keys refused as in U5b. `fast_ms` ≥ 100, `slow_ms` ≥ `fast_ms`. A no
 
 - The heartbeat is pushed every 10 s by the telemetry task, but its value is set only by the writer loop: a stuck writer freezes the value while pushes continue, which is what vmalert needs (`time() - md_collector_heartbeat_ts > 30`).
 - The design note "summaries to VM" (§5.4.5 resolution column) says 10 s for gaps, reconnects and last-message age; here they follow the topic's period (1 s for traded topics). That is finer, not coarser, and keeps one emission path (judgement).
+
+## Review decisions (spec review, 2026-11-19)
+
+One Opus reviewer, 6 MUST and 6 SHOULD; all accepted. These override the sections above where they differ.
+
+- **R1 (token in logs).** Every send error is written with reqwest `without_url()` (the URL holds the token); tests check `state().last_errors` and the error texts. Done in ticket 01.
+- **R2 (blocked first route).** Each route has a connect timeout of 3 s, separate from the 10 s request timeout. Exit paths flush for 20 s (D8, D9), which covers a blocked first route plus the pinned one. The collector's watchdog (30 s) is not reached: detection ≤ 1 s + 20 s.
+- **R3 (repeat rule across restarts).** alert-direct can keep the repeat state in a JSON file (`AlertConfig.state_file`), written after every change (write temp, fsync, rename). The collector uses `[alert] state_file`, default `$RUNTIME_DIRECTORY/alert-state.json` when that variable is set; the template sets `RuntimeDirectory=md-collector-%i` and `RuntimeDirectoryPreserve=restart` (not on the lake's file system). The L0 write failure becomes the condition `l0_write` (set at failure; cleared by the first beat of the next session), so a restart loop under ENOSPC sends start, every 5 min, and clear — not one message per restart. Without a state file the rule holds only within one process (warn log at start).
+- **R4 (token file path, refused file).** Templates use an absolute path (`/etc/hl-oms/telegram.json`, `Environment=TELEGRAM=`), never `%h`. A configured file that cannot be loaded (mode, symlink, repository, format) is a configuration error: `md-collector check`/`run` exit 2, `md-lake seal` exits 2 before touching the lake.
+- **R5 (60 s quiet venue).** One real 60 s test (`quiet_venue_keeps_heartbeat_60s`) is allowed as the single exception to the 3 s rule; it runs in parallel with the other tests.
+- **R6 (lock order).** `MessageSink::book` is called after the topic's book lock is released. The summary copies what it needs from the telemetry shard, releases it, then calls `read_book`; it never holds a shard lock while reading a book, and the sink never holds a book lock while taking a shard lock.
+- **R7 (frame topic, error kind).** Per-topic frame counts use the `Route::Stream(key)` that `Ingest::dest` computes (WebSocket `RawFrame.topic` is `None`). The writer keeps the OS error code with its error (`ENOSPC`, `EIO`, `EDQUOT`, else the io kind) for the alert text.
+- **R8 (reconnects).** `md_reconnects_total` counts `Disconnected` of a connection that was not retired by a day-change switch: conn ids named in `SwitchDone.from_conn_id` or `SwitchFailed.conn_id` are not counted.
+- **R9 (conn label, first message).** The `conn` label of `md_msgs`, `md_bytes` and `md_queue_bytes` is the plan slot (`conn_index`), stable across reconnects. `md_last_msg_age_s` before the first frame is the age since the topic's group started.
+- **R10 (notify socket).** The notify socket is non-blocking; `WouldBlock` and other send errors are ignored (counted).
+- **R11 (permanent rejects, heartbeat first).** obs-push treats 400, 413 and 422 as permanent: the batch is dropped and counted `rejected`, one stderr line. A small priority queue (1,000 lines) is sent before the main queue; the heartbeat and the self metrics use it.
+- **R12 (seal error path).** md-lake gets `Sealer::seal_into(&mut SealReport)`; `seal` calls it. The binary alerts on the hours in the report even when the run then fails, before exiting 1. Ticket 05 adds a dead port (connection refused) to the "store never blocks ingest" test.
