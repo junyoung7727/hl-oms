@@ -36,13 +36,15 @@ pub enum Cell<'a> {
 pub struct WriteSettings {
     /// A row group is closed when its buffered values reach about this many
     /// bytes, so that the memory of one open file is bounded (judgement).
+    /// The count includes each string's heap block and the levels (final
+    /// review F3). Up to 24 hour files of a channel are open at once.
     pub row_group_bytes: usize,
 }
 
 impl Default for WriteSettings {
     fn default() -> Self {
         Self {
-            row_group_bytes: 64 * 1024 * 1024,
+            row_group_bytes: 16 * 1024 * 1024,
         }
     }
 }
@@ -246,23 +248,24 @@ impl FileWriter {
                     r.push(0);
                 }
                 (Buf::Bytes(v, d), Cell::Str(s)) => {
-                    self.bytes += s.len() + 4;
+                    // The string, its ByteArray (24) and heap block header, a level.
+                    self.bytes += s.len() + 24 + 16 + 2;
                     v.push(ByteArray::from(s.as_bytes().to_vec()));
                     d.push(def);
                 }
                 (Buf::Bool(v, d), Cell::Bool(b)) => {
-                    self.bytes += 1;
+                    self.bytes += 3;
                     v.push(*b);
                     d.push(def);
                 }
                 (Buf::I32(v, d), Cell::Int(i)) => {
-                    self.bytes += 4;
+                    self.bytes += 6;
                     // Range checked above.
                     v.push(*i as i32);
                     d.push(def);
                 }
                 (Buf::I64(v, d), Cell::Int(i)) => {
-                    self.bytes += 8;
+                    self.bytes += 10;
                     v.push(*i);
                     d.push(def);
                 }
@@ -279,7 +282,7 @@ impl FileWriter {
                             r.push(i16::from(k > 0));
                         }
                     }
-                    self.bytes += 8 * items.len() + 4;
+                    self.bytes += 12 * items.len().max(1);
                 }
                 _ => unreachable!("cells are checked above"),
             }

@@ -146,3 +146,13 @@ These replace the sections they name where they differ.
 - **R9 (D3, instruments).** The window is that of the record's own file date (D−8…D−1 for the carry-in records of D−1), so the 00:00 state equals what D−1's own build saw. When the instrument row of the followed book changes exponents, the book state ends (levels of two exponents never mix).
 - **R10 (D2, read integrity).** A framing error, a truncated tail or a record count different from the manifest's stops the date: nothing is renamed, no gap file, exit 1.
 - **R11 (small).** Gap rows sort with `(l0_file_id, rec_no)` as the last tie-break; two rows with the same key are a build error. D9 checks the audit's `venue` and `date`.
+
+## Final review decisions (code review, 2026-11-19)
+
+- **F1 (R2 corrected).** The chain of overlaps goes on only through a pending handover: a connection alive at the end that has sent nothing of the topic yet. A message of the topic on another connection after the followed one ended, before a snapshot moved replay, ends the book state. (R2 let a connection whose deltas were never applied keep the book alive, so checkpoints froze while rows went missing.)
+- **F2.** Instruments in effect are indexed per symbol by `recv_ns`: one binary search per record.
+- **F3.** Row-group byte counts include each string's heap block and the levels; default cut 16 MiB. Measured peak memory is in the operations doc; a shared budget across open writers and streaming hour buckets are follow-ups.
+- **F4.** The archiver opens the lake read-only (`ReadOnlyFs`); the unit template sets `ReadOnlyPaths` for `crypto/l0` and `crypto/audit`.
+- **F5.** New L1 folders are created with an fsync of each new folder's parent.
+- **F6.** The disk floor is also checked every 100,000 rows written.
+- **F7.** The checkpoint reference test checks `update_id`, `venue_seq`, `venue_ts_ns`, `rec_no`, `frame_no`; the memory test asserts a budget.

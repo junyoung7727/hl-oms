@@ -281,3 +281,29 @@ fn threads_do_not_change_the_bytes() {
     }
     assert_eq!(parquet_files(&one), parquet_files(&many));
 }
+
+/// Final review F4: the run works with L0 read-only for this user.
+#[test]
+fn runs_with_l0_read_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = common::test_dir("l0_read_only");
+    golden_lake(&dir);
+    let set = |mode_dir: u32, mode_file: u32| {
+        fn walk(d: &Path, md: u32, mf: u32) {
+            for e in fs::read_dir(d).expect("read_dir") {
+                let p = e.expect("entry").path();
+                if p.is_dir() {
+                    walk(&p, md, mf);
+                    fs::set_permissions(&p, fs::Permissions::from_mode(md)).expect("chmod");
+                } else {
+                    fs::set_permissions(&p, fs::Permissions::from_mode(mf)).expect("chmod");
+                }
+            }
+        }
+        walk(&dir.join("crypto/l0"), mode_dir, mode_file);
+    };
+    set(0o555, 0o444);
+    let r = run(&args(&dir));
+    set(0o755, 0o644);
+    assert_eq!(r.expect("run").built.len(), 3);
+}

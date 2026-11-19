@@ -370,6 +370,9 @@ fn checkpoint_equals_reference_replay() {
         reference.insert((false, *p), *q);
     }
     let mut want: BTreeMap<i64, Sides> = BTreeMap::new();
+    // The last record applied before each hour: (update_id, recv_ns, rec_no).
+    let mut last_applied: BTreeMap<i64, (i64, i64, i64)> = BTreeMap::new();
+    let mut last = (1i64, t0() + SEC_NS, 0i64);
     let n = 6000i64;
     let mut next_hour = 1;
     for k in 1..=n {
@@ -392,6 +395,7 @@ fn checkpoint_equals_reference_replay() {
             let (bp, bq) = side(true);
             let (ap, aq) = side(false);
             want.insert(next_hour, (bp, bq, ap, aq));
+            last_applied.insert(next_hour, last);
             next_hour += 1;
         }
         let bid = rnd(2) == 0;
@@ -409,6 +413,7 @@ fn checkpoint_equals_reference_replay() {
         let l = [(px, qty)];
         let (b, a): (Levels, Levels) = if bid { (&l, &[]) } else { (&[], &l) };
         recs.push(ws(t, 1, 1 + k as u64, book_frame("delta", t, 1 + k, b, a)));
+        last = (1 + k, t, k);
     }
     s.topic("orderbook.50", S, recs);
     s.write(&dir);
@@ -434,6 +439,17 @@ fn checkpoint_equals_reference_replay() {
         assert_eq!(&ints(&row["ask_px"]), ap, "hour {h} ask_px");
         assert_eq!(&ints(&row["ask_qty"]), aq, "hour {h} ask_qty");
         assert_eq!(row["recv_ns"], t0() + h * H_NS);
+        // Final review F7: the lineage and ids of the last record applied.
+        let (u, t, rec) = last_applied[&h];
+        assert_eq!(row["update_id"], u, "hour {h} update_id");
+        assert_eq!(row["venue_seq"], 1000 + u, "hour {h} venue_seq");
+        assert_eq!(
+            row["venue_ts_ns"],
+            (t / 1_000_000 - 3) * 1_000_000,
+            "hour {h} venue_ts_ns"
+        );
+        assert_eq!(row["rec_no"], rec, "hour {h} rec_no");
+        assert_eq!(row["frame_no"], rec + 1, "hour {h} frame_no");
     }
 }
 
@@ -655,10 +671,11 @@ fn exponent_change_ends_the_book_state() {
     );
 }
 
-/// R2: when the followed connection ends while another connection that
-/// carries the topic is alive, the book state lasts until that one ends.
+/// Final review F1: when the followed connection ends while another
+/// connection already sends the topic (its deltas are not applied to this
+/// book), the book state ends; a book never freezes while rows go missing.
 #[test]
-fn state_lasts_along_the_chain_of_overlaps() {
+fn state_ends_when_the_other_connection_already_sends() {
     let dir = common::test_dir("chain_of_overlaps");
     let mut s = base();
     let t = |m: i64| t0() + m * MIN_NS;
@@ -676,8 +693,8 @@ fn state_lasts_along_the_chain_of_overlaps() {
             book_frame("delta", t(1 + k), 1 + k, &[(4200, k)], &[]),
         ));
     }
-    // conn 2 starts at 00:20 with deltas only (no snapshot) and ends at 02:30.
-    for k in 0..=130i64 {
+    // conn 2 sends deltas only (no snapshot) from 00:20 to 00:25.
+    for k in 0..=5i64 {
         recs.push(ws(
             t(20 + k),
             2,
@@ -687,13 +704,60 @@ fn state_lasts_along_the_chain_of_overlaps() {
     }
     recs.sort_by_key(|r| (r.recv_ns, r.conn_id));
     s.topic("orderbook.50", S, recs);
+    // conn 2 stays alive (pongs in the session file) until 02:30, but its
+    // deltas of 00:20–00:25 were never applied to conn 1's book.
+    let pongs = (0..=12)
+        .map(|n| {
+            ws(
+                t(30 + 10 * n),
+                2,
+                200 + n as u64,
+                br#"{"op":"pong"}"#.to_vec(),
+            )
+        })
+        .collect();
+    s.session(D, "md1", S, pongs);
     s.write(&dir);
     let all = build(&dir, &[D]);
     let cp = checkpoints(&all);
     let hours: Vec<&str> = cp.iter().map(|(h, _)| h.as_str()).collect();
-    assert_eq!(hours, ["hour=01.parquet", "hour=02.parquet"]);
-    assert!(
-        cp.iter().all(|(_, r)| r["conn_id"] == 1),
-        "the book is still conn 1's"
-    );
+    assert!(hours.is_empty(), "no frozen checkpoint: {hours:?}");
+}
+
+/// Final review F1: a pending connection that sends a delta before any
+/// snapshot ends the book state (the book would miss that message).
+#[test]
+fn delta_on_pending_connection_ends_the_state() {
+    let dir = common::test_dir("pending_delta");
+    let mut s = base();
+    let t = |m: i64| t0() + m * MIN_NS;
+    let mut recs = vec![ws(
+        t(1),
+        1,
+        1,
+        book_frame("snapshot", t(1), 1, &[(4200, 1)], &[(4201, 1)]),
+    )];
+    for k in 1..30i64 {
+        recs.push(ws(
+            t(1 + k),
+            1,
+            1 + k as u64,
+            book_frame("delta", t(1 + k), 1 + k, &[(4200, k)], &[]),
+        ));
+    }
+    for k in 0..=120i64 {
+        recs.push(ws(
+            t(31 + k),
+            2,
+            2 + k as u64,
+            book_frame("delta", t(31 + k), 900 + k, &[], &[(4201, k)]),
+        ));
+    }
+    s.topic("orderbook.50", S, recs);
+    let ans = br#"{"success":true,"op":"subscribe"}"#.to_vec();
+    s.session(D, "md1", S, vec![ws(t(20), 2, 1, ans)]);
+    s.write(&dir);
+    let all = build(&dir, &[D]);
+    let hours: Vec<String> = checkpoints(&all).into_iter().map(|(h, _)| h).collect();
+    assert!(hours.is_empty(), "no frozen checkpoint: {hours:?}");
 }

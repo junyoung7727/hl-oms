@@ -563,17 +563,32 @@ pub struct Response {
     pub rows: Vec<Instrument>,
 }
 
-/// The instruments responses of one market over D−7 … D, by `recv_ns`
-/// (spec D3).
+/// The instruments responses of one market over D−7 … D, indexed per
+/// symbol by `recv_ns` (spec D3; final review F2: one binary search per
+/// record, not a scan of every response).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InstrumentsInEffect {
-    responses: Vec<Response>,
+    /// Per symbol: `(recv_ns, file, rec_no, row)`, ascending.
+    by_symbol: BTreeMap<String, Vec<(i64, String, u64, Instrument)>>,
 }
 
 impl InstrumentsInEffect {
-    pub fn new(mut responses: Vec<Response>) -> Self {
-        responses.sort_by(|a, b| a.at.cmp(&b.at));
-        Self { responses }
+    pub fn new(responses: Vec<Response>) -> Self {
+        let mut by_symbol: BTreeMap<String, Vec<(i64, String, u64, Instrument)>> = BTreeMap::new();
+        for r in responses {
+            for i in r.rows {
+                by_symbol.entry(i.symbol.clone()).or_default().push((
+                    r.at.recv_ns,
+                    r.at.l0_file_id.clone(),
+                    r.at.rec_no,
+                    i,
+                ));
+            }
+        }
+        for v in by_symbol.values_mut() {
+            v.sort_by(|a, b| (a.0, &a.1, a.2).cmp(&(b.0, &b.1, b.2)));
+        }
+        Self { by_symbol }
     }
 
     /// The row of `symbol` in effect at `recv_ns`: from the latest response
@@ -581,26 +596,15 @@ impl InstrumentsInEffect {
     /// earliest response that names it. The window holds no later date than
     /// the one being built, so the answer does not depend on when the run is.
     pub fn row(&self, symbol: &str, recv_ns: i64) -> Option<&Instrument> {
-        let named = |r: &&Response| r.rows.iter().any(|i| i.symbol == symbol);
-        let pick = self
-            .responses
-            .iter()
-            .filter(named)
-            .take_while(|r| r.at.recv_ns <= recv_ns)
-            .last()
-            .or_else(|| self.responses.iter().find(named))?;
-        pick.rows.iter().find(|i| i.symbol == symbol)
+        let v = self.by_symbol.get(symbol)?;
+        let n = v.partition_point(|x| x.0 <= recv_ns);
+        v.get(n.saturating_sub(1)).map(|x| &x.3)
     }
 
     /// Every symbol named by any response, with its rows in effect at `recv_ns`.
     pub fn rows_at(&self, recv_ns: i64) -> Vec<Instrument> {
-        let symbols: BTreeSet<&str> = self
-            .responses
-            .iter()
-            .flat_map(|r| r.rows.iter().map(|i| i.symbol.as_str()))
-            .collect();
-        symbols
-            .into_iter()
+        self.by_symbol
+            .keys()
             .filter_map(|s| self.row(s, recv_ns).cloned())
             .collect()
     }

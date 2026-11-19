@@ -7,6 +7,7 @@ pub mod input;
 pub mod parquet_out;
 pub mod registry;
 pub mod retain;
+pub mod ro;
 pub mod rows;
 pub mod run;
 pub mod table;

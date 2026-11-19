@@ -28,6 +28,10 @@ use crate::table::Table;
 /// the seven before (spec D3).
 pub const INSTRUMENT_LOOKBACK_DAYS: i64 = 7;
 
+/// Rows written between two disk-floor checks (judgement: about every
+/// 30 MB of L1).
+pub const DISK_CHECK_ROWS: u64 = 100_000;
+
 /// Called before each new file: `Err` stops the build (spec R7).
 #[derive(Clone)]
 pub struct DiskCheck(pub std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync>);
@@ -262,23 +266,33 @@ impl Ctx<'_> {
     }
 
     /// When the book of `topic` on followed connection `f` ends because no
-    /// connection that carries it is left (spec R2): `f`'s last record, moved
-    /// on along every topic-carrying connection alive at that time.
+    /// connection can carry it on (spec R2, final review F1): `f`'s last
+    /// record, moved on only through a pending handover, that is a
+    /// connection alive at that time that has sent nothing of the topic yet
+    /// (its first record of the topic is later). A connection that already
+    /// sends the topic is not applied to this book, so following it would
+    /// freeze the book while rows go missing.
     fn chain_end(&self, topic: &Topic, f: &ConnKey) -> i64 {
         let mut seen: BTreeSet<&ConnKey> = BTreeSet::from([f]);
         let mut e = self.conn(f).last_ns;
         loop {
-            let mut next = e;
-            let alive: Vec<&ConnKey> = self
+            let pending: Vec<&ConnKey> = self
                 .alive_other(topic, f, e)
                 .into_iter()
                 .filter(|c| !seen.contains(*c))
+                .filter(|c| {
+                    self.conn(c)
+                        .topics
+                        .get(topic)
+                        .is_some_and(|r| r.recv_ns > e)
+                })
                 .collect();
-            for c in &alive {
-                next = next.max(self.conn(c).last_ns);
-                seen.insert(c);
-            }
-            if alive.is_empty() || next == e {
+            let next = pending
+                .iter()
+                .map(|c| self.conn(c).last_ns)
+                .fold(e, i64::max);
+            seen.extend(pending.iter().copied());
+            if pending.is_empty() || next == e {
                 return e;
             }
             e = next;
@@ -866,6 +880,13 @@ impl<'c, 'a> BookReplay<'c, 'a> {
                 self.book = None;
             }
         }
+        // A message of the topic on another connection after the followed
+        // one ended, before any snapshot moved replay: the book missed it.
+        if let Some(f) = self.followed.clone() {
+            if &f != c && self.book.is_some() && self.ctx.conn(&f).last_ns < t {
+                self.book = None;
+            }
+        }
         if !broke && run.is_some() && self.followed.as_ref() == Some(c) {
             if let Some(b) = &mut self.book {
                 if (b.last.px_exp, b.last.qty_exp) != (row.px_exp, row.qty_exp) {
@@ -1166,6 +1187,7 @@ struct Out<'a> {
     parser_ver: &'a str,
     write: WriteSettings,
     disk_check: Option<DiskCheck>,
+    pushed: u64,
     open: BTreeMap<String, (FileWriter, u64, Option<i64>, Option<i64>)>,
     done: Vec<BuiltFile>,
 }
@@ -1205,7 +1227,7 @@ impl Out<'_> {
             }
             let file = self.file(&path);
             if let Some(dir) = file.parent() {
-                std::fs::create_dir_all(dir)?;
+                crate::ro::create_dirs_synced(dir)?;
             }
             let w = FileWriter::create(&file, table, self.parser_ver, self.write)?;
             self.open.insert(path.clone(), (w, 0, None, None));
@@ -1224,6 +1246,14 @@ impl Out<'_> {
             let c = cells(r, &common, schema).map_err(BuildError::Defect)?;
             w.push(&c)?;
             *n += 1;
+            // Final review F6: the collector writes to the same disk, so
+            // the floor is checked while a file grows too.
+            self.pushed += 1;
+            if self.pushed % DISK_CHECK_ROWS == 0 {
+                if let Some(DiskCheck(check)) = &self.disk_check {
+                    check().map_err(BuildError::Disk)?;
+                }
+            }
             if let Some(u) = update_ids(r) {
                 first.get_or_insert(u);
                 *last = Some(u);
@@ -1375,6 +1405,7 @@ pub fn build_date(
         parser_ver: venue.parser_ver(),
         write: settings.write,
         disk_check: settings.disk_check.clone(),
+        pushed: 0,
         open: BTreeMap::new(),
         done: Vec::new(),
     };
@@ -1498,7 +1529,7 @@ pub fn build_date(
     let path = out.path(Table::Gap, "", "", "day.parquet");
     let file = out.file(&path);
     if let Some(dir) = file.parent() {
-        std::fs::create_dir_all(dir)?;
+        crate::ro::create_dirs_synced(dir)?;
     }
     let w = FileWriter::create(&file, Table::Gap, venue.parser_ver(), settings.write)?;
     out.open.insert(path.clone(), (w, 0, None, None));

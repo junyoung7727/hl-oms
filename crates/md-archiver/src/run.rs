@@ -7,7 +7,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use md_lake::fs::RealFs;
 use md_lake::time::{DAY_NS, date, date_start};
 use serde_json::json;
 
@@ -114,7 +113,7 @@ pub fn run(args: &RunArgs) -> Result<RunReport, RunError> {
         Some((a, b)) => Some(range(a, b).ok_or_else(|| err(2, format!("bad --rebuild {a}..{b}")))?),
         None => None,
     };
-    let fs = RealFs::new(&args.lake);
+    let fs = crate::ro::ReadOnlyFs::new(&args.lake);
     // Refusals first, so that a refused run writes nothing (not even the lock).
     let dates = l0_dates(fs.as_ref(), venue.name()).map_err(|e| err(1, e.to_string()))?;
     for d in &dates {

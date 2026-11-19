@@ -2,7 +2,7 @@
 //! release mode and recorded in the PR; not part of the gate:
 //!
 //! ```text
-//! MD_ARCHIVER_RSS_ROWS=3200000 cargo test --release -p md-archiver --test memory -- --ignored --nocapture
+//! MD_ARCHIVER_RSS_ROWS=3200000 MD_ARCHIVER_RSS_BUDGET_MB=4096 cargo test --release -p md-archiver --test memory -- --ignored --nocapture
 //! ```
 
 mod common;
@@ -75,4 +75,13 @@ fn large_book_day_peak_rss() {
         .find_map(|v| v["peak_rss_kb"].as_u64())
         .expect("peak_rss_kb");
     eprintln!("rows {rows}: peak RSS {} MB", peak / 1024);
+    let budget_mb: u64 = std::env::var("MD_ARCHIVER_RSS_BUDGET_MB")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(4096);
+    assert!(
+        peak / 1024 <= budget_mb,
+        "peak {} MB over the budget {budget_mb} MB",
+        peak / 1024
+    );
 }
