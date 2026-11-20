@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `649bedcf18b8770b`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `f69411157b7d94f7`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
-주장 72건: 통과 0, 실패 0, 미실행 5, 이전 버전 결과 67.
+주장 74건: 통과 0, 실패 0, 미실행 7, 이전 버전 결과 67.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -79,6 +79,8 @@
 | V-WIRE-ID-1 | 고객 주문번호 형식 Base32Pair는 VenueClientId와 일대일이고 27자(36자 이하, 0-9a-v와 -)이며 같은 입력에 같은 문자열을 내고, 서로 다른 100만 개 주문에 서로 다른 100만 개 문자열을 낸다. 해석은 그 형식이 쓴 문자열만 받는다(대문자·다른 길이·다른 구분자·64비트 초과·16진수 형식은 None). Hex128은 to_hex와 같은 문자열을 내고 소문자 16진수만 해석하며, 가상 거래소와 Hyperliquid 게이트웨이는 Hex128을 선언하고 보내는 번호를 그 형식으로 만든다 | 단위 | 미실행 | `cargo test -p oms-core --lib ids::tests && cargo test -p oms-node --lib venue::tests` |
 | V-VENUE-EXEC-1 | 펀딩 입력은 포지션·주문·예약·체결 수를 바꾸지 않고 한 번만 기록된다. 거래소 포지션 변경은 부호 있는 수량을 계좌와 미귀속 장부에 더하고 VenuePositionChange 불일치로 일반 주문을 막으며(감소 전용은 통과) 재생 뒤에도 남는다. 분류 못 한 실행은 기장 없이 UnclassifiedExecution 불일치로 막는다. 변경 뒤 그보다 늦게 물은 현재 세션의 포지션 응답 중 그 종목에 열린 주문과 대기 체결이 없을 때의 첫 응답이 다르면 PositionAdjusted(snapshot_after_venue_change) 한 건으로 맞추고 같으면 VenueChangeSettled만 남기며(열린 주문이 있는 동안은 맞추지 않아 오는 중인 체결을 두 번 세지 않는다), 저널만으로 계산한 포지션이 거래소 값과 같다. 분류 못 한 실행의 키는 같은 키로 나중에 온 체결의 기장을 막지 않는다. 운영자 조정은 reason 없이 스키마 1과 같은 바이트로 쓰인다 | 단위 | 미실행 | `cargo test -p oms-core --test venue_changes` |
 | V-SCHEMA-2-1 | 이 빌드는 기록 스키마 2를 쓰고 1과 2를 읽는다. 기록 스키마 1로 쓴 저널(체결, 운영자 조정, 정지 포함)을 복구하면 실시간 코어와 같은 상태(다이제스트 포함)가 되고, 그 뒤에 스키마 2로 이어 쓴 기록은 새 세그먼트에 들어가며, 두 세그먼트를 함께 복구해도 실시간 상태와 같고 --re-decide 검사도 통과한다 | 통합 | 미실행 | `cargo test -p oms-node --test record_schema` |
+| V-ABSENCE-N-1 | absence_not_found_needed가 2이면 결과 불명 주문은 expires_at + absence_margin 뒤에 보낸 조회의 "없음"을 서로 다른(더 늦은) 조회로 두 번 받아야 NotPlaced로 닫히고, 첫 번째는 AbsenceNoted로만 기록되며 예약은 그대로다. 만료 + 여유 전의 "없음"과 같은 조회의 두 번째 답은 세지 않고, 셈은 재생 뒤에도 같다. 기본값 1에서는 AbsenceNoted 없이 예전처럼 한 번에 닫히고, 기본값은 직렬화하지 않으며, 0은 설정 오류다 | 단위 | 미실행 | `cargo test -p oms-core --test absence_and_market_ref` |
+| V-MARKET-REF-1 | 새 주문은 판단에 쓴 호가창 상태(market_ref)를 실을 수 있고, 그 값은 OrderAccepted.request로 저널 기록에 들어가 직렬화와 해석을 거쳐도 같다. market_ref가 없는 요청은 예전과 같은 바이트로 쓰인다. 같은 요청이 다른 market_ref로 다시 오면 duplicate다. 이름은 64자 이하의 [A-Za-z0-9_.:-]만 받고 거래 API는 형식이 틀린 market_ref를 해석 단계에서 거절한다 | 단위 | 미실행 | `cargo test -p oms-core --test absence_and_market_ref && cargo test -p oms-api --lib` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -1675,4 +1677,47 @@
 |---|---|---|
 | `node-unit/this_build_writes_schema_2_and_reads_1_and_2` | 미실행 |  |
 | `node-unit/a_schema_1_journal_and_a_schema_2_tail_replay_to_the_live_state` | 미실행 |  |
+
+## V-ABSENCE-N-1 — absence_not_found_needed가 2이면 결과 불명 주문은 expires_at + absence_margin 뒤에 보낸 조회의 "없음"을 서로 다른(더 늦은) 조회로 두 번 받아야 NotPlaced로 닫히고, 첫 번째는 AbsenceNoted로만 기록되며 예약은 그대로다. 만료 + 여유 전의 "없음"과 같은 조회의 두 번째 답은 세지 않고, 셈은 재생 뒤에도 같다. 기본값 1에서는 AbsenceNoted 없이 예전처럼 한 번에 닫히고, 기본값은 직렬화하지 않으며, 0은 설정 오류다
+
+- 상태: **미실행**
+- 왜 중요한가: Bybit 열린 주문 조회가 닫힌 주문을 최근 500건까지만 들고 있어도 한 번의 "없음"으로 예약을 풀지 않는다는 전제. Hyperliquid 동작은 그대로다
+- 수준: 단위
+- 전제와 범위: 결과 불명 주문 하나, 시험 4개
+- 실제 구성요소: oms-core 판단과 적용, 설정 검증, 재생
+- 모의·시뮬레이션: 거래소 입력(시험이 직접 만든 StatusNotFound)
+- 주입한 장애: 만료 전 조회, 같은 조회의 중복 답
+- 판정 기준과 근거: 이벤트 이름 목록, 주문 단계와 종결 사유, 계좌 매수 예약, 재생한 코어와 실시간 코어의 같음, 설정 검증 오류, 직렬화 문자열
+- 재현: `cargo test -p oms-core --test absence_and_market_ref`
+- 뒷받침하는 것: C-DOUBT
+- 확인하지 않은 범위: Bybit가 recv window 밖의 요청을 실제로 거절하는지, 게이트웨이의 요청 시각 + recv_window + 1초 ≤ expires_at 검사(Bybit 게이트웨이가 아직 없다, U16·U17), 주문 내역 조회도 닫힌 주문을 잃는지
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/two_answers_after_expiry_plus_margin_are_needed_when_the_policy_asks_for_two` | 미실행 |  |
+| `core/one_answer_is_enough_by_default_and_writes_no_new_event` | 미실행 |  |
+| `core/the_policy_refuses_zero_answers` | 미실행 |  |
+| `core/a_policy_at_its_default_writes_no_new_key` | 미실행 |  |
+
+## V-MARKET-REF-1 — 새 주문은 판단에 쓴 호가창 상태(market_ref)를 실을 수 있고, 그 값은 OrderAccepted.request로 저널 기록에 들어가 직렬화와 해석을 거쳐도 같다. market_ref가 없는 요청은 예전과 같은 바이트로 쓰인다. 같은 요청이 다른 market_ref로 다시 오면 duplicate다. 이름은 64자 이하의 [A-Za-z0-9_.:-]만 받고 거래 API는 형식이 틀린 market_ref를 해석 단계에서 거절한다
+
+- 상태: **미실행**
+- 왜 중요한가: 주문을 시세 레이크의 호가창 상태와 이을 수 있고, 재시도가 conflict로 바뀌지 않는다는 전제
+- 수준: 단위
+- 전제와 범위: 시험 5개
+- 실제 구성요소: oms-core 판단, Record 직렬화, oms-api 요청 해석
+- 모의·시뮬레이션: 없음
+- 주입한 장애: 다른 market_ref의 재시도, 형식이 틀린 이름
+- 판정 기준과 근거: 다시 읽은 기록의 market_ref, 직렬화 문자열, 응답 종류, 해석 오류
+- 재현: `cargo test -p oms-core --test absence_and_market_ref && cargo test -p oms-api --lib`
+- 뒷받침하는 것: C-NEW
+- 확인하지 않은 범위: 전략이 md-feed의 MarketRef를 실제로 채워 보내는 경로(전략 쪽 코드는 이 저장소에 없다), 시세 레이크와의 결합(U15)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/market_ref_round_trips_through_the_journal` | 미실행 |  |
+| `core/a_request_without_market_ref_keeps_its_bytes` | 미실행 |  |
+| `core/a_repeated_request_with_another_market_ref_is_a_duplicate` | 미실행 |  |
+| `core/market_ref_names_are_validated` | 미실행 |  |
+| `api/tests::a_new_order_line_may_carry_a_market_ref` | 미실행 |  |
 

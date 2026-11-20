@@ -1268,9 +1268,15 @@ impl Tx<'_> {
                 return Ok(());
             }
         }
-        let evidence = format!(
-            "not found by client id {needed} time(s); last queried at {queried_at}, after send expiry {expires_at} plus margin {margin}"
-        );
+        // With one answer the text stays as it was, so the journal of a
+        // Hyperliquid run keeps its bytes.
+        let evidence = if needed > 1 {
+            format!(
+                "not found by client id {needed} times; last queried at {queried_at}, after send expiry {expires_at} plus margin {margin}"
+            )
+        } else {
+            format!("not found by client id; queried at {queried_at}, after send expiry {expires_at} plus margin {margin}")
+        };
         self.emit(Event::OrderClosed {
             order_id: id,
             reason: CloseReason::NotPlaced { evidence },

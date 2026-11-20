@@ -94,8 +94,10 @@ fn the_policy_refuses_zero_answers() {
 fn a_policy_at_its_default_writes_no_new_key() {
     let json = serde_json::to_string(&Policy::default()).unwrap();
     assert!(!json.contains("absence_not_found_needed"), "{json}");
-    let mut p = Policy::default();
-    p.absence_not_found_needed = 2;
+    let p = Policy {
+        absence_not_found_needed: 2,
+        ..Policy::default()
+    };
     let json = serde_json::to_string(&p).unwrap();
     let back: Policy = serde_json::from_str(&json).unwrap();
     assert_eq!(back, p);
