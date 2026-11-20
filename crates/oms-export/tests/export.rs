@@ -779,6 +779,18 @@ fn a_second_run_while_one_holds_the_lake_lock_stops() {
     }
     assert!(!dir.join("orders").exists());
     drop(held);
+    // A child process another test forks at this moment shares the lock's
+    // open file until it execs: wait until the lock is free.
+    let probe = fs::File::open(dir.join(".oms-export.lock")).unwrap();
+    let t0 = std::time::Instant::now();
+    while probe.try_lock().is_err() {
+        assert!(
+            t0.elapsed() < std::time::Duration::from_secs(5),
+            "the lock stays held"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    drop(probe);
     export(&settings(&root), &mut alive(h.log.len() as u64)).unwrap();
 }
 
