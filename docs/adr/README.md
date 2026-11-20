@@ -32,3 +32,4 @@
 | [ADR-022](ADR-022-wire-id-form.md) | 거래소마다 고객 주문번호 형식(16진수 32자리, base32 27자)을 따로 두고 상태 API도 그 형식으로 | 거래소 |
 | [ADR-023](ADR-023-venue-made-executions.md) | 펀딩·거래소가 만든 포지션 변경·분류 못 한 실행을 저널에 따로 기록하고 불일치로 막음, 기록 스키마 2 | 거래소 |
 | [ADR-024](ADR-024-absence-count-and-market-ref.md) | 부재 판정의 "없음" 횟수(Bybit 2), Bybit 만료는 게이트웨이가 recv window로 강제, 새 주문의 market_ref | 거래소 |
+| [ADR-025](ADR-025-journal-tail.md) | OMS 밖에서 저널을 읽는 법: 잠금 없이 내구화 번호까지, 이벤트 필드 표를 시험으로 인코더와 맞춤 | 운영 |

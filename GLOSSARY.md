@@ -26,6 +26,10 @@ _Avoid_: exchange, HL (in rule text)
 The part of the OMS that talks to one venue. It implements the `VenueGateway` trait (send an order, send a cancel, answer a query, start its long-running tasks); one driver runs its command and query loops (ADR-021).
 _Avoid_: connector, adapter (adapter is the market-data term)
 
+**Tail** (꼬리 읽기):
+A read-only follower of the journal for programs outside the OMS (projector, watcher). It never takes `LOCK` and never returns a record above the durable sequence its caller gives; `peek_beyond` shows later valid frames without moving, for a reader that knows the OMS is dead (ADR-025, C-TAIL).
+_Avoid_: subscriber, stream
+
 **Market ref** (시세 참조):
 The order book state a strategy decided an order on: venue, market, symbol, channel, the last applied `update_id`, venue time and receive time. Carried by a new order, journaled with `OrderAccepted`, never read by the core and not part of idempotency (ADR-024).
 _Avoid_: snapshot id, book ref

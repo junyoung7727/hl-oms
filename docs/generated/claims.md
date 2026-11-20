@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `e9b690594e79fbdc`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `abc9f55fd3569997`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
-주장 74건: 통과 0, 실패 0, 미실행 7, 이전 버전 결과 67.
+주장 76건: 통과 0, 실패 0, 미실행 9, 이전 버전 결과 67.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -81,6 +81,8 @@
 | V-SCHEMA-2-1 | 이 빌드는 기록 스키마 2를 쓰고 1과 2를 읽는다. 기록 스키마 1로 쓴 저널(체결, 운영자 조정, 정지 포함)을 복구하면 실시간 코어와 같은 상태(다이제스트 포함)가 되고, 그 뒤에 스키마 2로 이어 쓴 기록은 새 세그먼트에 들어가며, 두 세그먼트를 함께 복구해도 실시간 상태와 같고 --re-decide 검사도 통과한다 | 통합 | 미실행 | `cargo test -p oms-node --test record_schema` |
 | V-ABSENCE-N-1 | absence_not_found_needed가 2이면 결과 불명 주문은 expires_at + absence_margin 뒤에 보낸 조회의 "없음"을 absence_margin 이상 떨어진 두 조회로 받아야 NotPlaced로 닫히고, 첫 번째는 AbsenceNoted로만 기록되며 예약은 그대로다. 만료 + 여유 전의 "없음", 같은 조회의 두 번째 답, 앞에 센 답보다 여유 시간 안쪽의 답은 세지 않고, 셈은 재생 뒤에도 같다. 기본값 1에서는 AbsenceNoted 없이 예전처럼 한 번에 닫히고, 기본값은 직렬화하지 않으며, 0은 설정 오류다 | 단위 | 미실행 | `cargo test -p oms-core --test absence_and_market_ref` |
 | V-MARKET-REF-1 | 새 주문은 판단에 쓴 호가창 상태(market_ref)를 실을 수 있고, 그 값은 OrderAccepted.request로 저널 기록에 들어가 직렬화와 해석을 거쳐도 같다. market_ref가 없는 요청은 예전과 같은 바이트로 쓰인다. 같은 요청이 다른 market_ref로 다시 오면 duplicate다. 이름은 64자 이하의 [A-Za-z0-9_.:-]만 받고 거래 API는 형식이 틀린 market_ref를 해석 단계에서 거절한다 | 단위 | 미실행 | `cargo test -p oms-core --test absence_and_market_ref && cargo test -p oms-api --lib` |
+| V-TAIL-1 | 꼬리 읽기는 디스크에 더 많은 기록이 있어도 호출자가 준 내구화 번호보다 큰 기록을 돌려주지 않고, 작은 세그먼트로 회전한 저널을 끊김 없이 순서대로 읽으며, 커서 다음 번호부터 다시 시작한다. 쓰는 쪽이 잠금을 쥔 동안에도 읽고, 읽는 동안 새 쓰는 쪽이 잠금을 잡을 수 있다(잠금을 잡지 않는다). 상한 이하의 손상된 프레임이나 번호가 튀는 프레임에서는 그 앞 기록을 돌려준 뒤 오류를 내고 위치를 움직이지 않으며, 커서 앞의 손상도 오류로 알린다(끝에서 쓰는 중인 프레임은 기다린다). 기록 스키마가 바뀌어 열린 새 세그먼트와, 헤더만 있다가 새 스키마 헤더로 다시 쓰인 세그먼트를 따라가고 기록마다 스키마를 알려 준다. 엿보기는 상한 너머의 유효한 프레임을 위치를 움직이지 않고 보여 주며 잘린 마지막 프레임에서 오류 없이 멈춘다 | 단위 | 미실행 | `cargo test -p oms-journal --test tail` |
+| V-TAIL-2 | 모든 이벤트 종류(43가지)의 인스턴스를 선택 필드까지 채워 직렬화하면, 인코더가 쓰는 모든 필드 경로가 docs/contracts/tail.md의 필드 표에 있고, 표의 모든 행은 실제로 쓰이는 필드이며 타입 열이 실제 JSON 값의 종류(문자열, 정수, 불, 목록, 열거형, 객체, null 허용)와 맞는다. 통째로 읽는 행은 설정 하나와 열거형 값뿐이다. 이벤트 종류가 늘면 시험이 컴파일되지 않는다 | 소스 검사 | 미실행 | `cargo test -p oms-core --test event_fields` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -1720,4 +1722,50 @@
 | `core/a_repeated_request_with_another_market_ref_is_a_duplicate` | 미실행 |  |
 | `core/market_ref_names_are_validated` | 미실행 |  |
 | `api/tests::a_new_order_line_may_carry_a_market_ref` | 미실행 |  |
+
+## V-TAIL-1 — 꼬리 읽기는 디스크에 더 많은 기록이 있어도 호출자가 준 내구화 번호보다 큰 기록을 돌려주지 않고, 작은 세그먼트로 회전한 저널을 끊김 없이 순서대로 읽으며, 커서 다음 번호부터 다시 시작한다. 쓰는 쪽이 잠금을 쥔 동안에도 읽고, 읽는 동안 새 쓰는 쪽이 잠금을 잡을 수 있다(잠금을 잡지 않는다). 상한 이하의 손상된 프레임이나 번호가 튀는 프레임에서는 그 앞 기록을 돌려준 뒤 오류를 내고 위치를 움직이지 않으며, 커서 앞의 손상도 오류로 알린다(끝에서 쓰는 중인 프레임은 기다린다). 기록 스키마가 바뀌어 열린 새 세그먼트와, 헤더만 있다가 새 스키마 헤더로 다시 쓰인 세그먼트를 따라가고 기록마다 스키마를 알려 준다. 엿보기는 상한 너머의 유효한 프레임을 위치를 움직이지 않고 보여 주며 잘린 마지막 프레임에서 오류 없이 멈춘다
+
+- 상태: **미실행**
+- 왜 중요한가: 프로젝터와 감시자가 OMS를 방해하지 않고, 아직 내구화되지 않아 복구가 다시 쓸 수 있는 기록을 확정된 것처럼 내보내지 않는다는 전제
+- 수준: 단위
+- 전제와 범위: 기록 최대 90개, 세그먼트 256바이트(회전 3개 이상)와 1 MiB, 스키마 1→2, 시험 9개
+- 실제 구성요소: oms-journal Writer와 Tail, 실제 파일
+- 모의·시뮬레이션: 손상(바이트 뒤집기), 잘린 꼬리(파일 길이 줄이기)
+- 주입한 장애: 체크섬 손상, 잘린 마지막 프레임, 번호가 튀는 유효 프레임, 커서 앞 손상, 쓰는 쪽 교체, 스키마 변경, 헤더만 있는 세그먼트
+- 판정 기준과 근거: 돌려준 번호 목록과 payload, 오류 종류, next_seq, 세그먼트 수
+- 재현: `cargo test -p oms-journal --test tail`
+- 뒷받침하는 것: C-TAIL
+- 확인하지 않은 범위: 실행 중인 OMS 프로세스와 함께 읽는 것(프로세스 수준은 U14b 프로젝터 시험), 헤더를 다시 쓰는 rename 순간의 경합, 네트워크 파일 시스템, 복구가 마지막 세그먼트를 fsync한다는 것(페이지 캐시 유실은 흉내 낼 수 없다)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `journal/the_tail_never_returns_a_record_above_the_durable_cap` | 미실행 |  |
+| `journal/the_tail_follows_segment_rotation_and_starts_after_a_cursor` | 미실행 |  |
+| `journal/the_tail_never_takes_the_lock` | 미실행 |  |
+| `journal/a_damaged_durable_frame_stops_the_tail_without_moving_it` | 미실행 |  |
+| `journal/peek_beyond_shows_valid_frames_past_the_cap_without_moving` | 미실행 |  |
+| `journal/a_frame_with_the_wrong_sequence_comes_after_the_good_records` | 미실행 |  |
+| `journal/damage_before_the_cursor_is_an_error` | 미실행 |  |
+| `journal/the_tail_follows_a_schema_change_to_a_new_segment` | 미실행 |  |
+| `journal/the_tail_reads_a_header_only_segment_rewritten_with_a_new_schema` | 미실행 |  |
+
+## V-TAIL-2 — 모든 이벤트 종류(43가지)의 인스턴스를 선택 필드까지 채워 직렬화하면, 인코더가 쓰는 모든 필드 경로가 docs/contracts/tail.md의 필드 표에 있고, 표의 모든 행은 실제로 쓰이는 필드이며 타입 열이 실제 JSON 값의 종류(문자열, 정수, 불, 목록, 열거형, 객체, null 허용)와 맞는다. 통째로 읽는 행은 설정 하나와 열거형 값뿐이다. 이벤트 종류가 늘면 시험이 컴파일되지 않는다
+
+- 상태: **미실행**
+- 왜 중요한가: 감시자(U19a)를 OMS 코드 없이 이 표만으로 만들 수 있다는 전제
+- 수준: 소스 검사
+- 전제와 범위: 이벤트 43종, 필드 경로 172개(설정은 통째로 한 행)
+- 실제 구성요소: oms-core 이벤트 직렬화, 문서 파일
+- 모의·시뮬레이션: 없음
+- 주입한 장애: 없음
+- 판정 기준과 근거: 표에 없는 필드 0개, 쓰이지 않는 행 0개, 이벤트 종류 43
+- 재현: `cargo test -p oms-core --test event_fields`
+- 뒷받침하는 것: C-TAIL
+- 확인하지 않은 범위: 뜻 열의 정확성은 사람이 읽어 확인한다. 열거형 값의 목록(통째로 읽는 행)은 표에 적은 것과 코드가 같은지 시험하지 않는다. 입력(input) 쪽 필드는 표에 없다(읽는 쪽은 events만 해석한다)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/the_field_table_lists_every_field_the_encoder_writes` | 미실행 |  |
+| `core/every_row_of_the_table_is_a_field_the_encoder_writes` | 미실행 |  |
+| `core/only_the_configuration_and_enums_are_read_as_a_whole` | 미실행 |  |
 
