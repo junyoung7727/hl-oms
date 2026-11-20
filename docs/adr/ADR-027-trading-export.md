@@ -61,10 +61,11 @@ B. 크레이트 `crates/oms-export`(라이브러리 + `oms-export --config <file
 
 | 단계 | 입력 | 처리 | 출력 | 실패하면 |
 |---|---|---|---|---|
-| E1 상한 | `/api/status` | `core.instance_id`가 저널의 `INSTANCE`와 같은 답만 쓴다(`oms_projector::probe`) | `durable_seq`, `wire_id_form` | 답 없음·다른 인스턴스·`instance_id` 없음 → 아무것도 쓰지 않고 종료 코드 3 |
-| E2 읽기 | 저널(잠금 없음) | 1번 기록부터 `Tail::read(durable_seq)`, 기록 스키마 1·2 | 기록 | 손상·모르는 스키마 → 종료 코드 1, 쓴 파일 없음 |
-| E3 행 | 기록 | `rows::Mapper`(아래) | 날짜별 세 테이블의 행 | 계약에 안 맞는 행 → 종료 코드 1 |
-| E4 쓰기 | 완결된 날짜의 행 | 같은 디렉터리의 임시 파일 → fsync → 기존 파일과 바이트 비교 → 다르면 rename → 디렉터리 fsync, 같으면 임시 파일 삭제 | `day.parquet` | 쓰기 실패 → 종료 코드 1, 이미 바꾼 파일은 완전한 파일 |
+| E1 상한 | `/api/status` | `core.instance_id`가 저널의 `INSTANCE`와 같은 답만 쓴다(`oms_projector::probe`). `node.venue`가 설정의 `venue`이거나 `<venue>:mainnet`이어야 한다 | `durable_seq`, `wire_id_form` | 답 없음·다른 인스턴스·`instance_id`나 `node.venue` 없음 → 종료 코드 3. 다른 거래소·testnet·sim → 종료 코드 1. 둘 다 아무것도 쓰지 않음 |
+| E1b 잠금 | `<lake>/crypto/trading/.oms-export.lock` | `flock`(기다리지 않음), 실행 끝까지 | — | 다른 실행이 잡고 있음 → 종료 코드 1 |
+| E2 읽기 | 저널(잠금 없음) | 1번 기록부터 `Tail::read(durable_seq)`, 기록 스키마 1·2. 한 번에 100만 기록(세그먼트 하나를 한 번에 읽음) | 기록 | 손상·모르는 스키마 → 종료 코드 1. 끝까지 읽었는데 `durable_seq`보다 짧음 → 종료 코드 1. 그 전에 완결된 날짜는 이미 썼을 수 있다(완전한 파일) |
+| E3 행 | 기록 | `rows::Mapper`(아래). 열린 날짜 하나의 행만 메모리에 둔다 | 날짜별 세 테이블의 행 | 계약에 안 맞는 행 → 종료 코드 1 |
+| E4 쓰기 | 완결된 날짜의 행(뒤 날짜의 기록이 나오는 순간) | 그 날짜의 세 테이블 임시 파일을 모두 만들고(fsync) 나서, 기존 파일과 바이트가 다른 것만 rename → 디렉터리 fsync, 같으면 임시 파일 삭제 | `day.parquet` | 행 거절·쓰기 실패 → 종료 코드 1. 임시 파일을 다 만들기 전이면 그 날짜는 그대로 |
 | E5 요약 | — | JSON 한 줄: `durable_seq`, `read_to_seq`, `open_date`, `written`, `unchanged`, `rows` | 표준 출력 | — |
 
 결정과 이유:
@@ -75,7 +76,7 @@ B. 크레이트 `crates/oms-export`(라이브러리 + `oms-export --config <file
 - **거래소·시장 이름은 설정에서:** OMS 하나는 거래소 하나에서 거래한다. `symbol`은 저널의 `instrument`다.
 - **행 규칙**(`crates/oms-export/src/rows.rs`):
   - `orders`: `order_accepted`마다 한 행. `order_id`는 u64의 10진 문자열. `tif` gtc → `GTC`, ioc → `IOC`, alo → `PostOnly`. `px`는 늘 값이 있다(OMS에 시장가 주문이 없음). `wire_id` = `WireIdForm::encode(instance_id, order_id)`, 형식은 상태 답에서(없으면 null).
-  - `fills`: `fill_booked`마다 한 행. 종목과 방향은 그 주문의 `order_accepted`에서. `exec_id` = `key`, `venue_ts_ns` = `venue_ts` × 1000. `is_maker`, `recv_ns`는 null(U16이 저널에 넣는다). 우리 주문이 아닌 체결(`external_fill_booked`), 대기 체결, 거래소 위치 변경은 `events`에만 있다.
+  - `fills`: `fill_booked`마다 한 행. 종목과 방향은 그 주문의 `order_accepted`에서. `exec_id`: Bybit 게이트웨이의 체결 키는 `<symbol>:<execId>`(C-GW G-8)이므로 bybit면 그 접두어를 뗀 `execId`, 다른 모양이면 종료 코드 1. 다른 거래소는 키 그대로(검토 2026-11-20). `venue_ts_ns` = `venue_ts` × 1000. `is_maker`, `recv_ns`는 null(U16이 저널에 넣는다). 우리 주문이 아닌 체결(`external_fill_booked`), 대기 체결, 거래소 위치 변경은 `events`에만 있다.
   - `events`: 이벤트마다 한 행. `kind` = `Event::name()`, `order_id` = `Event::order_id()`. `symbol`은 이벤트의 종목 필드(`rows::INSTRUMENT_PATHS`, 시험이 C-TAIL 표와 맞춤), 없으면 그 주문의 종목. 목록 필드(`report.positions[].instrument`)는 종목 하나가 아니므로 쓰지 않는다. `venue`는 `symbol`이 있을 때만. `payload`는 이벤트의 필드 객체를 키 정렬, 공백 없이.
   - 소수 문자열과 `payload`는 저널에 있는 JSON 그대로 쓴다(형식 있는 값으로 다시 쓰지 않음).
 - **계약 변경(qdp U15a, PR #32):** `fills.is_maker`, `fills.recv_ns`를 null 허용으로 바꿨다. 계약 golden 거래 행은 이 단위의 시험 저널을 내보낸 것으로 바꿨다. 실제 L0 파일이 아직 없어 초안 1판 규칙(계약 6)이므로 `contract_ver`는 1 그대로다.
@@ -86,14 +87,18 @@ B. 크레이트 `crates/oms-export`(라이브러리 + `oms-export --config <file
 - 포기: 오늘 데이터. 하루가 끝나고 다음 날의 기록이 내구화된 뒤 실행해야 그날이 나온다.
 - 포기: OMS가 꺼져 있을 때의 내보내기. 마지막 날은 OMS를 한 번 켜야(복구가 내구화를 확정) 나온다.
 - 위험: 실행 시간이 저널 길이에 비례해 는다.
+- 위험: 한 날짜의 세 파일 교체는 rename 세 번이다. 그 사이에 멈추면 그 날짜의 테이블 일부만 새 판이다(모두 완전한 파일, 다음 실행이 나머지를 바꾼다).
+- 위험: 행 거절 뒤에도 앞 테이블의 파일을 남기지 않는 동작(E4)은 시험이 없다. 유효한 저널로는 거절되는 행을 만들 수 없다.
+- 가정: OMS의 `node.venue`는 `<venue>` 또는 `<venue>:<network>`다(지금 `sim`, `hyperliquid:testnet|mainnet`; Bybit 게이트웨이는 U16에서 같은 모양으로 정한다).
 - 위험: `payload`의 키 정렬은 `serde_json`의 기본 맵이 이미 정렬하므로 `rows::sorted`를 빼도 시험이 실패하지 않는다. 의존성이 `preserve_order`를 켜는 경우를 위한 보호다.
 - 위험: golden 행은 이 코드가 만든 것을 사람이 계약 문장과 대조해 확정했다. 계약과 이 코드가 같은 실수를 하면 시험이 잡지 못한다.
 - 가정: 같은 기록의 행은 같은 `at_us`이고 날짜도 같다.
 
 ## 9. 근거
 
-- 시험: `crates/oms-export/tests/export.rs` 13개. 시험 저널 → 내보내기 → Parquet을 다시 읽은 행 = 계약 golden 행(세 테이블). 메타데이터와 열 형식, 두 번째 실행은 파일을 바꾸지 않음, 바뀐 파일은 교체, 열린 날짜를 쓰지 않음, 상한 너머를 읽지 않음, 다른 인스턴스·`instance_id` 없음·무응답이면 아무것도 쓰지 않음, 앞 날짜 주문의 체결, 스키마 1 저널, 잠금을 잡은 저널을 바꾸지 않음, C-TAIL의 종목 필드 목록, 설정 거절, 바이너리 종료 코드 3.
-- 이 단위는 코드를 시험보다 먼저 썼다. 대신 결함 8가지를 일부러 넣어 시험이 모두 잡는 것을 확인했다(2026-11-20, Linux PC): `PostOnly` 이름, 완결 날짜 경계, 인스턴스 확인, 같은 바이트도 다시 씀, 체결 방향, 내구화 상한, 종목 없는 이벤트의 `venue`, ns 변환.
+- 시험: `crates/oms-export/tests/export.rs` 17개. 시험 저널 → 내보내기 → Parquet을 다시 읽은 행 = 계약 golden 행(세 테이블). 메타데이터와 열 형식, 두 번째 실행은 파일을 바꾸지 않음, 바뀐 파일은 교체, 열린 날짜를 쓰지 않음, 상한 너머를 읽지 않음, 다른 인스턴스·`instance_id` 없음·무응답이면 아무것도 쓰지 않음, 앞 날짜 주문의 체결, 스키마 1 저널, 잠금을 잡은 저널을 바꾸지 않음, C-TAIL의 종목 필드 목록, 설정 거절, 바이너리 종료 코드 3, Bybit 체결 키의 접두어와 다른 모양, 다른 거래소·testnet·sim·`node.venue` 없음 거절, 레이크 잠금, 내구화 번호보다 짧은 저널.
+- 이 단위는 코드를 시험보다 먼저 썼다. 대신 결함 8가지를 일부러 넣어 시험이 모두 잡는 것을 확인했다(2026-11-20, Linux PC): `PostOnly` 이름, 완결 날짜 경계, 인스턴스 확인, 같은 바이트도 다시 씀, 체결 방향, 내구화 상한, 종목 없는 이벤트의 `venue`, ns 변환. 검토 반영분의 결함 5가지도 각각 그 시험이 잡았다: 잠금 없음, 거래소 확인 없음, testnet 통과, 짧은 저널 통과, 체결 키 그대로.
+- 독립 검토(2026-11-20): 꼭 고칠 것 2개(Bybit 체결 키, 겹친 실행의 임시 파일)와 고칠 것 4개(거래소 확인, 세그먼트 반복 읽기와 메모리, 짧은 저널, 날짜 단위 교체)를 반영했다. 체결 키 때문에 계약 golden의 events payload가 바뀌었다(qdp PR #33).
 - 설계 TN(암호화폐 거래 통합 설계 v1.0), `pr_plan.json` U15. 저장소 밖 문서다.
 - 운영 문서: [docs/operations/oms-export.md](../operations/oms-export.md).
 

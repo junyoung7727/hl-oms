@@ -25,8 +25,11 @@ pub struct Config {
 fn default_timeout_ms() -> u64 {
     2_000
 }
+/// Records per tail read. Each read scans its segment from the position
+/// to the end, so a batch at least as large as a segment's record count
+/// (64 MiB of ~300-byte records ≈ 220 000) reads each segment once.
 fn default_batch() -> usize {
-    1000
+    1_000_000
 }
 
 impl Config {

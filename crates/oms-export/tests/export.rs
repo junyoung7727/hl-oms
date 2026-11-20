@@ -71,6 +71,7 @@ fn alive(durable_seq: u64) -> St {
         as_of_us: DAY1,
         wire_id_form: Some(WireIdForm::Base32Pair),
         instance_id: Some(INSTANCE),
+        venue: Some("bybit:mainnet".into()),
     }))
 }
 
@@ -154,7 +155,29 @@ fn order(
     }
 }
 
-fn fill(h: &mut H, id: Option<OrderId>, key: &str, side: Side, qty: &str, price: &str, fee: &str) {
+/// A fill with execution id `exec_id`, keyed as the Bybit gateway keys
+/// fills (C-GW G-8: `<symbol>:<execId>`).
+fn fill(
+    h: &mut H,
+    id: Option<OrderId>,
+    exec_id: &str,
+    side: Side,
+    qty: &str,
+    price: &str,
+    fee: &str,
+) {
+    fill_keyed(h, id, &format!("BTCUSDT:{exec_id}"), side, qty, price, fee);
+}
+
+fn fill_keyed(
+    h: &mut H,
+    id: Option<OrderId>,
+    key: &str,
+    side: Side,
+    qty: &str,
+    price: &str,
+    fee: &str,
+) {
     let venue_ts = h.now - 2_000;
     let venue_oid = id.and_then(|i| h.order(i).venue_oid.clone());
     h.venue(VenueInput::Fill(FillIn {
@@ -517,6 +540,7 @@ fn without_an_answer_of_the_owning_oms_nothing_is_written() {
         as_of_us: DAY1,
         wire_id_form: Some(WireIdForm::Base32Pair),
         instance_id: Some(INSTANCE + 1),
+        venue: Some("bybit:mainnet".into()),
     }));
     let no_id = St(Some(OmsStatus {
         instance_id: None,
@@ -677,4 +701,92 @@ fn the_binary_exits_3_when_the_oms_does_not_answer() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(!root.join("lake").exists());
+}
+
+#[test]
+fn a_bybit_fill_key_gives_the_exec_id_and_another_shape_stops_the_run() {
+    let root = tmp("execid");
+    let mut h = h_at(DAY1);
+    let o = order(&mut h, "k", Side::Buy, "0.002", "42000.0", Tif::Gtc, None);
+    h.placed_open(o, "v");
+    fill_keyed(
+        &mut h,
+        Some(o),
+        "ETHUSDT:x1",
+        Side::Buy,
+        "0.001",
+        "42000.0",
+        "0",
+    );
+    at(&mut h, DAY1 + DAY + SEC);
+    h.ref_price("BTCUSDT", "42000.0");
+    let _w = journal(&root.join("data"), &h.log, 2);
+    match export(&settings(&root), &mut alive(h.log.len() as u64)) {
+        Err(ExportError::Failed(e)) => assert!(e.contains("is not BTCUSDT:<execId>"), "{e}"),
+        other => panic!("expected a failure, got {other:?}"),
+    }
+    assert!(!root.join("lake/crypto/trading/fills").exists());
+    assert_eq!(
+        oms_export::rows::exec_id("bybit", "BTCUSDT", "BTCUSDT:abc").unwrap(),
+        "abc"
+    );
+    assert!(oms_export::rows::exec_id("bybit", "BTCUSDT", "BTCUSDT:").is_err());
+    assert_eq!(
+        oms_export::rows::exec_id("hyperliquid", "BTC", "1:BTC:2:3").unwrap(),
+        "1:BTC:2:3"
+    );
+}
+
+#[test]
+fn a_journal_of_another_network_or_venue_is_refused() {
+    let root = tmp("venue");
+    let h = golden_day();
+    let _w = journal(&root.join("data"), &h.log, 2);
+    let n = h.log.len() as u64;
+    for venue in [
+        Some("bybit:testnet"),
+        Some("sim"),
+        Some("hyperliquid:mainnet"),
+        None,
+    ] {
+        let mut st = St(Some(OmsStatus {
+            venue: venue.map(str::to_string),
+            ..alive(n).0.unwrap()
+        }));
+        let r = export(&settings(&root), &mut st);
+        assert!(r.is_err(), "{venue:?}: {r:?}");
+    }
+    assert!(!root.join("lake").exists());
+    assert!(oms_export::venue_matches("bybit", "bybit"));
+    assert!(oms_export::venue_matches("bybit:mainnet", "bybit"));
+    assert!(!oms_export::venue_matches("bybit:testnet", "bybit"));
+}
+
+#[test]
+fn a_second_run_while_one_holds_the_lake_lock_stops() {
+    let root = tmp("lock");
+    let h = golden_day();
+    let _w = journal(&root.join("data"), &h.log, 2);
+    let dir = root.join("lake/crypto/trading");
+    fs::create_dir_all(&dir).unwrap();
+    let held = fs::File::create(dir.join(".oms-export.lock")).unwrap();
+    held.lock().unwrap();
+    match export(&settings(&root), &mut alive(h.log.len() as u64)) {
+        Err(ExportError::Failed(e)) => assert!(e.contains("another oms-export run"), "{e}"),
+        other => panic!("expected a failure, got {other:?}"),
+    }
+    assert!(!dir.join("orders").exists());
+    drop(held);
+    export(&settings(&root), &mut alive(h.log.len() as u64)).unwrap();
+}
+
+#[test]
+fn a_journal_shorter_than_the_durable_sequence_is_an_error() {
+    let root = tmp("short");
+    let h = golden_day();
+    let _w = journal(&root.join("data"), &h.log, 2);
+    match export(&settings(&root), &mut alive(h.log.len() as u64 + 5)) {
+        Err(ExportError::Failed(e)) => assert!(e.contains("records are missing"), "{e}"),
+        other => panic!("expected a failure, got {other:?}"),
+    }
 }

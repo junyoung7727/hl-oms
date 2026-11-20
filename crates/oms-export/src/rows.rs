@@ -133,6 +133,19 @@ fn str_at<'a>(fields: &'a Map<String, Value>, path: &str) -> Result<&'a str, Str
         .ok_or_else(|| format!("{path} is not a string"))
 }
 
+/// The venue's execution id in a fill key (C-GW G-8). The Bybit gateway's
+/// key is `<symbol>:<execId>` (`docs/contracts/gateway.md`); the contract
+/// column is the `execId`. Other venues' keys are the column as they are.
+pub fn exec_id(venue: &str, symbol: &str, key: &str) -> Result<String, String> {
+    if venue != "bybit" {
+        return Ok(key.to_string());
+    }
+    match key.strip_prefix(symbol).and_then(|r| r.strip_prefix(':')) {
+        Some(id) if !id.is_empty() => Ok(id.to_string()),
+        _ => Err(format!("Bybit fill key {key:?} is not {symbol}:<execId>")),
+    }
+}
+
 /// The value with the keys of every object sorted (contract 4.3).
 pub fn sorted(v: &Value) -> Value {
     match v {
@@ -324,7 +337,14 @@ impl Mapper {
             vec![
                 ("venue", V::Str(self.venue.clone())),
                 ("symbol", V::Str(info.instrument.clone())),
-                ("exec_id", V::Str(str_at(fields, "key")?.to_string())),
+                (
+                    "exec_id",
+                    V::Str(exec_id(
+                        &self.venue,
+                        &info.instrument,
+                        str_at(fields, "key")?,
+                    )?),
+                ),
                 ("order_id", V::Str(order_id.0.to_string())),
                 ("seq", V::Int(int(rec.seq, "seq")?)),
                 ("event_idx", V::Int(int(i as u64, "event index")?)),

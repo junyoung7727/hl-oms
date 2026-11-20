@@ -10,7 +10,6 @@ pub mod config;
 pub mod rows;
 pub mod tables;
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -89,6 +88,14 @@ fn date_of(at_us: u64) -> Result<String, ExportError> {
 /// Rows of one date, per table in the order of [`tables::all`].
 type DateRows = [Vec<Row>; 3];
 
+/// Whether the OMS's `node.venue` (`sim`, `hyperliquid:testnet`, …) is the
+/// configured lake venue on its live network: the venue alone or
+/// `<venue>:mainnet`. A testnet or simulated journal is not the venue's
+/// trading.
+pub fn venue_matches(node_venue: &str, venue: &str) -> bool {
+    node_venue == venue || node_venue.strip_suffix(":mainnet") == Some(venue)
+}
+
 pub fn export(s: &Settings, status: &mut dyn StatusSource) -> Result<Summary, ExportError> {
     let instance_id = read_instance_id(&s.data_dir).map_err(ExportError::Failed)?;
     let st = status
@@ -100,13 +107,25 @@ pub fn export(s: &Settings, status: &mut dyn StatusSource) -> Result<Summary, Ex
             st.instance_id.map(|i| format!("{i:016x}"))
         )));
     }
+    let node_venue = st
+        .venue
+        .as_deref()
+        .ok_or_else(|| ExportError::NoReadLimit("the status answer has no node.venue".into()))?;
+    if !venue_matches(node_venue, &s.venue) {
+        return Err(failed(format!(
+            "the OMS runs on {node_venue}, the configuration says {}: refusing to write it as that venue's trading",
+            s.venue
+        )));
+    }
+    let _lock = lock(&s.lake_root).map_err(failed)?;
     let mut sum = Summary {
         durable_seq: st.durable_seq,
         ..Summary::default()
     };
     let mut mapper = Mapper::new(&s.venue, &s.market, instance_id, st.wire_id_form);
-    let mut by_date: BTreeMap<String, DateRows> = BTreeMap::new();
-    let mut last_at = None;
+    // Only the open date's rows are held: record times never go back
+    // (oms-node `core_loop`), so a record on a later date completes it.
+    let mut open: Option<(String, DateRows)> = None;
     let mut tail = Tail::new(&s.data_dir, 0);
     loop {
         let batch = tail
@@ -132,40 +151,89 @@ pub fn export(s: &Settings, status: &mut dyn StatusSource) -> Result<Summary, Ex
             let rr = mapper
                 .record(&rec, &raw, tr.record_schema)
                 .map_err(failed)?;
-            let day = by_date.entry(date_of(rec.at)?).or_default();
-            day[0].extend(rr.orders);
-            day[1].extend(rr.fills);
-            day[2].extend(rr.events);
+            let date = date_of(rec.at)?;
+            match &open {
+                Some((d, _)) if *d == date => {}
+                Some((d, _)) if *d > date => {
+                    return Err(failed(format!(
+                        "record {} is on {date}, after a record on {d}: record times went back",
+                        rec.seq
+                    )));
+                }
+                _ => {
+                    if let Some((d, day)) = open.take() {
+                        write_date(&s.lake_root, &d, &day, &mut sum).map_err(failed)?;
+                    }
+                    open = Some((date, DateRows::default()));
+                }
+            }
+            if let Some((_, day)) = open.as_mut() {
+                day[0].extend(rr.orders);
+                day[1].extend(rr.fills);
+                day[2].extend(rr.events);
+            }
             sum.read_to_seq = rec.seq;
-            last_at = Some(rec.at);
         }
     }
-    let Some(last_at) = last_at else {
-        return Ok(sum);
-    };
-    let open = date_of(last_at)?;
-    for (date, day) in &by_date {
-        // A date at or after the last record's is not complete. Record
-        // times never go back (oms-node `core_loop`), so no later record
-        // falls on an earlier date.
-        if *date >= open {
+    if sum.read_to_seq != st.durable_seq {
+        return Err(failed(format!(
+            "the journal holds records up to {}, the OMS reports {} durable: records are missing",
+            sum.read_to_seq, st.durable_seq
+        )));
+    }
+    sum.open_date = open.map(|(d, _)| d);
+    Ok(sum)
+}
+
+/// Holds `<lake>/crypto/trading/.oms-export.lock` for the run: two runs
+/// would write the same temporary files.
+fn lock(lake_root: &Path) -> Result<fs::File, String> {
+    let dir = lake_root.join("crypto/trading");
+    fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+    let path = dir.join(".oms-export.lock");
+    let f = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .map_err(|e| format!("open {}: {e}", path.display()))?;
+    match f.try_lock() {
+        Ok(()) => Ok(f),
+        Err(fs::TryLockError::WouldBlock) => {
+            Err(format!("another oms-export run holds {}", path.display()))
+        }
+        Err(fs::TryLockError::Error(e)) => Err(format!("lock {}: {e}", path.display())),
+    }
+}
+
+/// Writes the files of a complete date. Every table's file is built first;
+/// only then are the changed ones renamed into place, so a refused row
+/// leaves the date as it was.
+fn write_date(
+    lake_root: &Path,
+    date: &str,
+    day: &DateRows,
+    sum: &mut Summary,
+) -> Result<(), String> {
+    let mut built = Vec::new();
+    for (k, (schema, rows)) in tables::all().into_iter().zip(day).enumerate() {
+        if rows.is_empty() {
             continue;
         }
-        for (k, (schema, rows)) in tables::all().into_iter().zip(day).enumerate() {
-            if rows.is_empty() {
-                continue;
-            }
-            let rel = format!("crypto/trading/{}/date={date}/day.parquet", schema.name);
-            sum.rows[k] += rows.len();
-            if write_if_changed(&s.lake_root.join(&rel), schema, rows).map_err(failed)? {
-                sum.written.push(rel);
-            } else {
-                sum.unchanged += 1;
-            }
+        let rel = format!("crypto/trading/{}/date={date}/day.parquet", schema.name);
+        let path = lake_root.join(&rel);
+        let tmp = build(&path, schema, rows)?;
+        sum.rows[k] += rows.len();
+        built.push((rel, path, tmp));
+    }
+    for (rel, path, tmp) in built {
+        if replace_if_changed(&tmp, &path)? {
+            sum.written.push(rel);
+        } else {
+            sum.unchanged += 1;
         }
     }
-    sum.open_date = Some(open);
-    Ok(sum)
+    Ok(())
 }
 
 fn cell(v: &V) -> Cell<'_> {
@@ -197,13 +265,9 @@ fn sync_dir(dir: &Path) -> io::Result<()> {
     fs::File::open(dir)?.sync_all()
 }
 
-/// Writes `rows` to a temporary file next to `path`; replaces `path` only
-/// when the bytes differ. True when `path` was (re)written.
-fn write_if_changed(
-    path: &Path,
-    schema: &'static TableSchema,
-    rows: &[Row],
-) -> Result<bool, String> {
+/// Writes `rows` to the temporary file next to `path` (fsynced) and
+/// returns its path.
+fn build(path: &Path, schema: &'static TableSchema, rows: &[Row]) -> Result<PathBuf, String> {
     let dir = path
         .parent()
         .ok_or_else(|| format!("{}: no parent", path.display()))?;
@@ -218,20 +282,26 @@ fn write_if_changed(
     }
     w.finish(Vec::new())
         .map_err(|e| format!("{}: {e}", tmp.display()))?;
-    let new = fs::read(&tmp).map_err(|e| format!("read {}: {e}", tmp.display()))?;
-    match fs::read(path) {
-        Ok(old) if old == new => {
-            fs::remove_file(&tmp).map_err(|e| format!("remove {}: {e}", tmp.display()))?;
-            Ok(false)
-        }
-        Ok(_) => replace(&tmp, path, dir),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => replace(&tmp, path, dir),
-        Err(e) => Err(format!("read {}: {e}", path.display())),
-    }
+    Ok(tmp)
 }
 
-fn replace(tmp: &Path, path: &Path, dir: &Path) -> Result<bool, String> {
+/// Replaces `path` by `tmp` when the bytes differ (rename, then directory
+/// fsync); otherwise removes `tmp`. True when `path` was (re)written.
+fn replace_if_changed(tmp: &Path, path: &Path) -> Result<bool, String> {
+    let new = fs::read(tmp).map_err(|e| format!("read {}: {e}", tmp.display()))?;
+    let same = match fs::read(path) {
+        Ok(old) => old == new,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => false,
+        Err(e) => return Err(format!("read {}: {e}", path.display())),
+    };
+    if same {
+        fs::remove_file(tmp).map_err(|e| format!("remove {}: {e}", tmp.display()))?;
+        return Ok(false);
+    }
     fs::rename(tmp, path).map_err(|e| format!("rename to {}: {e}", path.display()))?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| format!("{}: no parent", path.display()))?;
     sync_dir(dir).map_err(|e| format!("fsync {}: {e}", dir.display()))?;
     Ok(true)
 }
