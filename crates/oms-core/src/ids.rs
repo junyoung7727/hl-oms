@@ -106,6 +106,14 @@ string_id!(
     "fill key must be 1..=96 chars of [A-Za-z0-9_.:-]"
 );
 
+string_id!(
+    /// A name in a `market_ref` (venue, market, symbol, channel), as the
+    /// market-data side writes it, e.g. "orderbook.50".
+    RefName,
+    64,
+    "market ref name must be 1..=64 chars of [A-Za-z0-9_.:-]"
+);
+
 /// Order identifier assigned by the core, strictly increasing, never reused.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]

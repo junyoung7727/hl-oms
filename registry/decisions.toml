@@ -209,3 +209,13 @@ alternatives = ["게이트웨이가 펀딩은 버리고 나머지는 외부 체�
 chosen = "Funding, PositionChange, UnclassifiedExecution 입력과 FundingBooked, VenuePositionChanged, UnclassifiedExecutionNoted, VenueChangeSettled 이벤트. 차단은 불일치 차단. 다음 포지션 응답이 포지션을 정하고 차이를 PositionAdjusted(reason snapshot_after_venue_change)로 기록. RECORD_SCHEMA 2, 스키마 1과 2를 읽음"
 gives_up = "R5의 차단 이름으로 원인을 바로 보는 것"
 revisit = "testnet에서 이런 실행의 모양이 문서와 다를 때(T15), 불일치 종류로는 원인 구별이 어렵다고 할 때"
+
+[[adr]]
+id = "ADR-024"
+title = "부재 판정에 필요한 없음 횟수, Bybit의 만료, 주문의 market_ref"
+file = "docs/adr/ADR-024-absence-count-and-market-ref.md"
+problem = "Bybit에는 만료 필드가 없어 결과 불명 주문을 운영자가 닫아야 하고, 열린 주문 조회가 닫힌 주문을 500건까지만 들고 있어 한 번의 없음은 얇은 근거이며, 저널에 주문을 낸 호가창 상태가 없다"
+alternatives = ["Bybit는 venue_enforces_expiry = false", "게이트웨이가 recv window로 만료를 강제하고 없음 횟수를 설정으로", "코어가 전송 시각과 recv window로 판정"]
+chosen = "게이트웨이는 요청 시각 + recv_window + 1초 ≤ expires_at일 때만 보낸다. 정책 absence_not_found_needed(기본 1, Bybit 2)와 AbsenceNoted. NewOrderReq.market_ref(선택, 멱등성 비교에서 뺌)"
+gives_up = "전송 시각 + recv window로 더 일찍 푸는 것"
+revisit = "testnet에서 recv window 밖 요청이 거절되지 않을 때, 주문 내역 조회도 닫힌 주문을 잃을 때"

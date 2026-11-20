@@ -128,6 +128,7 @@ impl Rig {
             tif: Tif::Gtc,
             reduce_only: false,
             expires_at: oms_node::util::wall_us() + 30_000_000,
+            market_ref: None,
         })
     }
 

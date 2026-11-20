@@ -247,6 +247,7 @@ pub fn core_bench_case(orders: u64, margin: bool) -> Result<CoreBenchCase, Strin
             tif: Tif::Gtc,
             reduce_only: false,
             expires_at: at + 5_000_000,
+            market_ref: None,
         };
         let input = Input::NewOrder(req);
         let (out, ns) = go(&mut core, &mut at, input.clone());
@@ -385,6 +386,7 @@ mod tests {
             tif: Tif::Gtc,
             reduce_only: false,
             expires_at: at + 5_000_000,
+            market_ref: None,
         })
     }
 

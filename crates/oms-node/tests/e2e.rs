@@ -144,6 +144,7 @@ fn a_repeated_request_never_creates_a_second_order() {
         tif,
         reduce_only,
         expires_at,
+        market_ref: None,
     };
     assert_eq!(c.new_order(other).unwrap(), NewOrderReply::Conflict { order_id: *order_id });
 

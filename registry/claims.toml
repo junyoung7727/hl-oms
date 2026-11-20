@@ -1082,3 +1082,33 @@ tests = ["node-unit/this_build_writes_schema_2_and_reads_1_and_2", "node-unit/a_
 repro = "cargo test -p oms-node --test record_schema"
 supports = "C-JOURNAL"
 not_covered = "스키마 1 저널은 이 빌드가 스키마 번호 1로 쓴 것이다. main의 옛 바이너리가 쓴 저널을 직접 읽어 보지는 않았다(옛 기록과 바이트가 같다는 것은 직렬화 시험과 코드 검토로만 본다). 옛 바이너리로 되돌리기는 안 된다(runbook §9)"
+
+[[claim]]
+id = "V-ABSENCE-N-1"
+statement = "absence_not_found_needed가 2이면 결과 불명 주문은 expires_at + absence_margin 뒤에 보낸 조회의 \"없음\"을 서로 다른(더 늦은) 조회로 두 번 받아야 NotPlaced로 닫히고, 첫 번째는 AbsenceNoted로만 기록되며 예약은 그대로다. 만료 + 여유 전의 \"없음\"과 같은 조회의 두 번째 답은 세지 않고, 셈은 재생 뒤에도 같다. 기본값 1에서는 AbsenceNoted 없이 예전처럼 한 번에 닫히고, 기본값은 직렬화하지 않으며, 0은 설정 오류다"
+why = "Bybit 열린 주문 조회가 닫힌 주문을 최근 500건까지만 들고 있어도 한 번의 \"없음\"으로 예약을 풀지 않는다는 전제. Hyperliquid 동작은 그대로다"
+level = "단위"
+scope = "결과 불명 주문 하나, 시험 4개"
+real = "oms-core 판단과 적용, 설정 검증, 재생"
+simulated = "거래소 입력(시험이 직접 만든 StatusNotFound)"
+faults = "만료 전 조회, 같은 조회의 중복 답"
+criterion = "이벤트 이름 목록, 주문 단계와 종결 사유, 계좌 매수 예약, 재생한 코어와 실시간 코어의 같음, 설정 검증 오류, 직렬화 문자열"
+tests = ["core/two_answers_after_expiry_plus_margin_are_needed_when_the_policy_asks_for_two", "core/one_answer_is_enough_by_default_and_writes_no_new_event", "core/the_policy_refuses_zero_answers", "core/a_policy_at_its_default_writes_no_new_key"]
+repro = "cargo test -p oms-core --test absence_and_market_ref"
+supports = "C-DOUBT"
+not_covered = "Bybit가 recv window 밖의 요청을 실제로 거절하는지, 게이트웨이의 요청 시각 + recv_window + 1초 ≤ expires_at 검사(Bybit 게이트웨이가 아직 없다, U16·U17), 주문 내역 조회도 닫힌 주문을 잃는지"
+
+[[claim]]
+id = "V-MARKET-REF-1"
+statement = "새 주문은 판단에 쓴 호가창 상태(market_ref)를 실을 수 있고, 그 값은 OrderAccepted.request로 저널 기록에 들어가 직렬화와 해석을 거쳐도 같다. market_ref가 없는 요청은 예전과 같은 바이트로 쓰인다. 같은 요청이 다른 market_ref로 다시 오면 duplicate다. 이름은 64자 이하의 [A-Za-z0-9_.:-]만 받고 거래 API는 형식이 틀린 market_ref를 해석 단계에서 거절한다"
+why = "주문을 시세 레이크의 호가창 상태와 이을 수 있고, 재시도가 conflict로 바뀌지 않는다는 전제"
+level = "단위"
+scope = "시험 5개"
+real = "oms-core 판단, Record 직렬화, oms-api 요청 해석"
+simulated = "없음"
+faults = "다른 market_ref의 재시도, 형식이 틀린 이름"
+criterion = "다시 읽은 기록의 market_ref, 직렬화 문자열, 응답 종류, 해석 오류"
+tests = ["core/market_ref_round_trips_through_the_journal", "core/a_request_without_market_ref_keeps_its_bytes", "core/a_repeated_request_with_another_market_ref_is_a_duplicate", "core/market_ref_names_are_validated", "api/tests::a_new_order_line_may_carry_a_market_ref"]
+repro = "cargo test -p oms-core --test absence_and_market_ref && cargo test -p oms-api --lib"
+supports = "C-NEW"
+not_covered = "전략이 md-feed의 MarketRef를 실제로 채워 보내는 경로(전략 쪽 코드는 이 저장소에 없다), 시세 레이크와의 결합(U15)"

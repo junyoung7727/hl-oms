@@ -1254,9 +1254,22 @@ impl Tx<'_> {
         if queried_at < threshold {
             return Ok(());
         }
+        let needed = policy.absence_not_found_needed;
+        let margin = policy.absence_margin_us;
+        let (expires_at, absence) = (o.expires_at, o.absence);
+        if needed > 1 {
+            // Each counted answer must be asked later than the one before:
+            // two answers to one query are one answer.
+            if absence.is_some_and(|a| queried_at <= a.last_queried_at) {
+                return Ok(());
+            }
+            self.emit(Event::AbsenceNoted { order_id: id, queried_at })?;
+            if absence.map_or(0, |a| a.count) + 1 < needed {
+                return Ok(());
+            }
+        }
         let evidence = format!(
-            "not found by client id; queried at {queried_at}, after send expiry {} plus margin {}",
-            o.expires_at, policy.absence_margin_us
+            "not found by client id {needed} time(s); last queried at {queried_at}, after send expiry {expires_at} plus margin {margin}"
         );
         self.emit(Event::OrderClosed {
             order_id: id,

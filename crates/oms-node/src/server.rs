@@ -393,6 +393,7 @@ async fn dispatch(
             tif,
             reduce_only,
             expires_at,
+            market_ref,
         } => {
             let Some(strategy) = s.strategy.clone() else {
                 return Some(Response::err(id, ErrorCode::Forbidden, "orders need a strategy connection"));
@@ -410,6 +411,7 @@ async fn dispatch(
                 tif,
                 reduce_only,
                 expires_at,
+                market_ref,
             });
             submit(s, ctx, Lane::Orders, id, input, permit)
         }

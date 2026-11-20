@@ -384,6 +384,7 @@ pub fn order_op(key: &str, side: Side, qty: &str, px: &str, tif: Tif, ttl_ms: u6
         tif,
         reduce_only: false,
         expires_at: now_us() + ttl_ms * 1000,
+        market_ref: None,
     }
 }
 
@@ -454,7 +455,7 @@ pub fn rest(env: &mut Env, c: &mut Client, key: &str, side: Side, px: &str, redu
         else {
             unreachable!()
         };
-        let op = Op::NewOrder { client_order_id, instrument, side, qty, px, tif, reduce_only, expires_at };
+        let op = Op::NewOrder { client_order_id, instrument, side, qty, px, tif, reduce_only, expires_at, market_ref: None };
         match c.new_order(op).unwrap() {
             NewOrderReply::Accepted { order_id } => return order_id,
             NewOrderReply::Rejected { reasons }

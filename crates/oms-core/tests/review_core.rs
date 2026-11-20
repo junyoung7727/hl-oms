@@ -106,6 +106,7 @@ fn fuzz_input(r: &mut Rng, core: &Core, now: Ts, unique_oids: bool) -> Input {
             tif: Tif::Gtc,
             reduce_only: false,
             expires_at: now + (1 + r.below(8)) * SEC,
+            market_ref: None,
         }),
         18..=23 => Input::Cancel(CancelReq {
             actor: if r.chance(30) {

@@ -147,6 +147,7 @@ fn connection(cfg: &LoadCfg, index: u64, start: Instant, per_conn: u64, interval
                 tif: Tif::Gtc,
                 reduce_only: false,
                 expires_at: now_us() + cfg.ttl_ms * 1000,
+                market_ref: None,
             },
         };
         let mut bytes = serde_json::to_vec(&req).map_err(|e| e.to_string())?;

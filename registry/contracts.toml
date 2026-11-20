@@ -20,7 +20,7 @@ summary = "검사와 예약이 한 입력 안에서 일어난다. 거절은 사�
 events = ["order_accepted", "request_rejected"]
 adr = ["ADR-008", "ADR-009"]
 code = ["crates/oms-core/src/decide.rs"]
-claims = ["V-NEW-1", "V-NEW-2"]
+claims = ["V-NEW-1", "V-NEW-2", "V-MARKET-REF-1"]
 
 [[contract]]
 id = "C-IDEM"
@@ -49,10 +49,10 @@ title = "결과 불명의 해소"
 file = "docs/contracts/order-lifecycle.md"
 anchor = "c-doubt-결과-불명의-해소"
 summary = "불명 동안 예약 유지와 신규 주문 차단. 존재 증거, 만료 뒤 부재 확인, 운영자 종결 중 하나로 해소"
-events = ["order_in_doubt"]
+events = ["order_in_doubt", "absence_noted"]
 adr = ["ADR-005"]
 code = ["crates/oms-core/src/decide.rs"]
-claims = ["V-DOUBT-1", "V-DOUBT-2", "V-DOUBT-3"]
+claims = ["V-DOUBT-1", "V-DOUBT-2", "V-DOUBT-3", "V-ABSENCE-N-1"]
 
 [[contract]]
 id = "C-FILL"

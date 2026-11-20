@@ -35,6 +35,25 @@ pub struct NewOrderReq {
     pub tif: Tif,
     pub reduce_only: bool,
     pub expires_at: Ts,
+    /// The order book state the strategy decided on, for joining the order
+    /// to the market-data lake (U13c). The core does not read it, and it is
+    /// not part of the idempotency comparison: a repeated request keeps the
+    /// first one. Not written when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub market_ref: Option<MarketRef>,
+}
+
+/// The fields of the last applied message of the book an order was decided
+/// on (the lake contract's order-to-market join key; `md_feed::MarketRef`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketRef {
+    pub venue: RefName,
+    pub market: RefName,
+    pub symbol: RefName,
+    pub channel: RefName,
+    pub update_id: Option<i64>,
+    pub venue_ts_ns: i64,
+    pub recv_ns: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
