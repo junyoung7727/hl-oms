@@ -168,6 +168,12 @@ pub fn run(cfg: NodeConfig) -> i32 {
                     }
                 }
             }
+            VenueConfig::Bybit(_) => {
+                // The gateway is built in parts (ADR-028); the stream and the
+                // node wiring come with U16d.
+                error!("the Bybit gateway cannot run yet: its private stream is not built (U16d)");
+                return 3;
+            }
         };
         let pace = venue::reconciler::Pace {
             round: Duration::from_millis(cfg.runtime.reconcile_ms),

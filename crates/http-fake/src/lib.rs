@@ -56,6 +56,8 @@ impl Request {
 struct State {
     script: VecDeque<Answer>,
     default: Option<Answer>,
+    /// Per path: answers in order, then the last one again.
+    routes: Vec<(String, VecDeque<Answer>)>,
     requests: Vec<Request>,
 }
 
@@ -127,6 +129,17 @@ impl FakeHttp {
         }
     }
 
+    /// Answers for requests whose path is exactly `path`, in order; the last
+    /// one is repeated. A routed path never uses the script or the default,
+    /// so concurrent requests to several paths get their own answers.
+    pub fn route(&self, path: &str, answers: impl IntoIterator<Item = Answer>) {
+        if let Ok(mut s) = self.state.lock() {
+            let answers: VecDeque<Answer> = answers.into_iter().collect();
+            s.routes.retain(|(p, _)| p != path);
+            s.routes.push((path.to_string(), answers));
+        }
+    }
+
     pub fn set_default(&self, a: Answer) {
         if let Ok(mut s) = self.state.lock() {
             s.default = Some(a);
@@ -183,7 +196,15 @@ fn next_answer(st: &Mutex<State>, req: Request) -> Answer {
     let Ok(mut s) = st.lock() else {
         return Answer::Close;
     };
+    let path = req.path().to_string();
     s.requests.push(req);
+    if let Some((_, answers)) = s.routes.iter_mut().find(|(p, _)| *p == path) {
+        return match answers.len() {
+            0 => Answer::Close,
+            1 => answers[0].clone(),
+            _ => answers.pop_front().unwrap_or(Answer::Close),
+        };
+    }
     match s.script.pop_front() {
         Some(a) => a,
         None => s.default.clone().unwrap_or(Answer::Close),
