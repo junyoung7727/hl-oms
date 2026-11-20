@@ -46,7 +46,11 @@ fn positions(h: &mut H, queried_at: Ts, qty: &str) -> Output {
 }
 
 fn unattributed(h: &H) -> SQty {
-    h.core.unattributed.get(&iid("X")).map(|b| b.pos).unwrap_or_default()
+    h.core
+        .unattributed
+        .get(&iid("X"))
+        .map(|b| b.pos)
+        .unwrap_or_default()
 }
 
 /// The position a reader of the journal alone computes: the signed sum of
@@ -86,7 +90,10 @@ fn a_funding_payment_is_cash_only_and_booked_once() {
     assert_eq!(h.acct(), acct, "no position, open quantity or fee changes");
     assert_eq!(h.book("a"), book);
     assert_eq!(h.order(id), &order, "no order or reservation changes");
-    assert_eq!(h.core.stats.fills_booked, fills, "a funding payment is not a fill");
+    assert_eq!(
+        h.core.stats.fills_booked, fills,
+        "a funding payment is not a fill"
+    );
     assert_eq!(h.core.holds(None), vec![], "funding holds nothing");
 
     let again = h.venue(funding("f1", "0.25", ts));
@@ -103,17 +110,33 @@ fn a_venue_position_change_is_booked_flagged_and_holds_plain_orders() {
 
     let ts = h.now;
     let out = h.venue(change("adl1", VenueChangeKind::Adl, "-0.5", ts));
-    assert_eq!(names(&out), vec!["venue_position_changed", "mismatch_raised"]);
+    assert_eq!(
+        names(&out),
+        vec!["venue_position_changed", "mismatch_raised"]
+    );
     assert_eq!(h.acct().pos, sq("1.5"));
-    assert_eq!(h.book("a").pos, sq("2"), "the strategy ledger did not make it");
+    assert_eq!(
+        h.book("a").pos,
+        sq("2"),
+        "the strategy ledger did not make it"
+    );
     assert_eq!(unattributed(&h), sq("-0.5"));
-    assert_eq!(h.unacked_mismatches(), vec![MismatchKind::VenuePositionChange]);
+    assert_eq!(
+        h.unacked_mismatches(),
+        vec![MismatchKind::VenuePositionChange]
+    );
     assert!(h.core.holds(None).contains(&HoldReason::Mismatch));
 
     h.report_margin("1000");
-    assert!(h.reject("a", "k2", Side::Buy, "0.1", "100").contains(&RejectReason::Hold(HoldReason::Mismatch)));
+    assert!(
+        h.reject("a", "k2", Side::Buy, "0.1", "100")
+            .contains(&RejectReason::Hold(HoldReason::Mismatch))
+    );
     let r = h.reduce_only_req("a", "k3", Side::Sell, "0.5", "100");
-    assert!(matches!(h.new_order(r), NewOrderReply::Accepted { .. }), "a reduce-only order passes");
+    assert!(
+        matches!(h.new_order(r), NewOrderReply::Accepted { .. }),
+        "a reduce-only order passes"
+    );
 
     let again = h.venue(change("adl1", VenueChangeKind::Adl, "-0.5", ts));
     assert!(again.events.is_empty(), "a re-delivery is ignored");
@@ -134,8 +157,14 @@ fn an_unclassified_execution_holds_plain_orders() {
         detail: "execType SomethingNew, execQty 1".into(),
         venue_ts: ts,
     });
-    assert_eq!(names(&out), vec!["unclassified_execution_noted", "mismatch_raised"]);
-    assert_eq!(h.unacked_mismatches(), vec![MismatchKind::UnclassifiedExecution]);
+    assert_eq!(
+        names(&out),
+        vec!["unclassified_execution_noted", "mismatch_raised"]
+    );
+    assert_eq!(
+        h.unacked_mismatches(),
+        vec![MismatchKind::UnclassifiedExecution]
+    );
     assert!(h.core.holds(None).contains(&HoldReason::Mismatch));
     assert_eq!(h.acct().pos, SQty::ZERO, "nothing is booked");
     assert_eq!(h.rebuilt(), h.core);
@@ -165,14 +194,28 @@ fn the_next_positions_answer_after_a_change_is_the_position_of_record() {
         .collect();
     assert_eq!(adjusted.len(), 1);
     let Event::PositionAdjusted {
-        ledger, delta, reason, ..
+        ledger,
+        delta,
+        reason,
+        ..
     } = adjusted[0]
     else {
         unreachable!()
     };
-    assert_eq!((ledger, *delta, *reason), (&Ledger::Unattributed, sq("-0.3"), AdjustReason::SnapshotAfterVenueChange));
+    assert_eq!(
+        (ledger, *delta, *reason),
+        (
+            &Ledger::Unattributed,
+            sq("-0.3"),
+            AdjustReason::SnapshotAfterVenueChange
+        )
+    );
     assert_eq!(h.acct().pos, sq("2.7"));
-    assert_eq!(journal_position(&h), sq("2.7").0, "the journal alone gives the position");
+    assert_eq!(
+        journal_position(&h),
+        sq("2.7").0,
+        "the journal alone gives the position"
+    );
     assert_eq!(h.rebuilt(), h.core);
 
     // The wait is over: a later answer is range-checked as before, not set.

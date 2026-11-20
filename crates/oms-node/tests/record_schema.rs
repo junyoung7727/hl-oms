@@ -80,7 +80,9 @@ impl Run {
 /// Inputs whose events all exist in record schema 1: boot, configuration,
 /// link and sync, an order with a fill, an operator adjustment and a halt.
 fn schema_1_history(run: &mut Run) {
-    run.input(Input::Boot { binary: "test".into() });
+    run.input(Input::Boot {
+        binary: "test".into(),
+    });
     run.input(Input::Config(Box::new(config())));
     run.venue(VenueInput::Link {
         up: true,
@@ -88,7 +90,10 @@ fn schema_1_history(run: &mut Run) {
         reason: "test".into(),
     });
     let t = run.at;
-    run.venue(VenueInput::FillsSynced { session: 1, up_to: t });
+    run.venue(VenueInput::FillsSynced {
+        session: 1,
+        up_to: t,
+    });
     run.venue(VenueInput::OpenOrders {
         session: 1,
         queried_at: t,
@@ -155,7 +160,8 @@ fn write(dir: &std::path::Path, record_schema: u16, records: &[Record]) {
     let after = records.first().map(|r| r.seq - 1).unwrap_or(0);
     let (mut w, _) = oms_journal::recover(dir, &opts, after, |_, _, _| Ok(())).unwrap();
     for rec in records {
-        w.append(rec.seq, &serde_json::to_vec(rec).unwrap()).unwrap();
+        w.append(rec.seq, &serde_json::to_vec(rec).unwrap())
+            .unwrap();
     }
     w.sync(1).unwrap();
 }
@@ -179,12 +185,19 @@ fn a_schema_1_journal_and_a_schema_2_tail_replay_to_the_live_state() {
     let v1 = run.take();
     for rec in &v1 {
         let text = serde_json::to_string(rec).unwrap();
-        assert!(!text.contains("\"reason\":\"snapshot_after_venue_change\""), "{text}");
+        assert!(
+            !text.contains("\"reason\":\"snapshot_after_venue_change\""),
+            "{text}"
+        );
     }
     write(&dir, 1, &v1);
 
     let recovered = oms_node::recovery::recover(&dir, 1 << 30, "test").unwrap();
-    assert_eq!(recovered.core.digest(), run.core.digest(), "schema 1 replays to the live state");
+    assert_eq!(
+        recovered.core.digest(),
+        run.core.digest(),
+        "schema 1 replays to the live state"
+    );
     assert_eq!(recovered.core, run.core);
     drop(recovered);
 
@@ -209,12 +222,23 @@ fn a_schema_1_journal_and_a_schema_2_tail_replay_to_the_live_state() {
         }],
     });
     let v2 = run.take();
-    assert!(v2.iter().any(|r| r.events.iter().any(|e| e.name() == "position_adjusted")));
+    assert!(
+        v2.iter()
+            .any(|r| r.events.iter().any(|e| e.name() == "position_adjusted"))
+    );
     write(&dir, 2, &v2);
-    assert_eq!(oms_journal::list_segments(&dir).unwrap().len(), 2, "one segment per schema");
+    assert_eq!(
+        oms_journal::list_segments(&dir).unwrap().len(),
+        2,
+        "one segment per schema"
+    );
 
     let recovered = oms_node::recovery::recover(&dir, 1 << 30, "test").unwrap();
-    assert_eq!(recovered.core.digest(), run.core.digest(), "both schemas replay to the live state");
+    assert_eq!(
+        recovered.core.digest(),
+        run.core.digest(),
+        "both schemas replay to the live state"
+    );
     drop(recovered);
     let report = oms_node::recovery::verify(&dir, true).unwrap();
     assert_eq!(report.records, (v1.len() + v2.len()) as u64);
