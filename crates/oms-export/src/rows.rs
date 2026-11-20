@@ -107,7 +107,7 @@ fn int(v: u64, what: &str) -> Result<i64, String> {
 }
 
 /// The field object of the `i`-th event of a record's JSON.
-fn raw_fields<'a>(raw: &'a Value, i: usize) -> Result<(&'a str, &'a Map<String, Value>), String> {
+fn raw_fields(raw: &Value, i: usize) -> Result<(&str, &Map<String, Value>), String> {
     let ev = raw
         .get("events")
         .and_then(|e| e.get(i))
@@ -123,7 +123,11 @@ fn raw_fields<'a>(raw: &'a Value, i: usize) -> Result<(&'a str, &'a Map<String, 
 fn str_at<'a>(fields: &'a Map<String, Value>, path: &str) -> Result<&'a str, String> {
     let mut v: Option<&Value> = None;
     for (k, part) in path.split('.').enumerate() {
-        v = if k == 0 { fields.get(part) } else { v.and_then(|x| x.get(part)) };
+        v = if k == 0 {
+            fields.get(part)
+        } else {
+            v.and_then(|x| x.get(part))
+        };
     }
     v.and_then(Value::as_str)
         .ok_or_else(|| format!("{path} is not a string"))
@@ -147,7 +151,12 @@ pub fn sorted(v: &Value) -> Value {
 }
 
 impl Mapper {
-    pub fn new(venue: &str, market: &str, instance_id: u64, wire_id_form: Option<WireIdForm>) -> Mapper {
+    pub fn new(
+        venue: &str,
+        market: &str,
+        instance_id: u64,
+        wire_id_form: Option<WireIdForm>,
+    ) -> Mapper {
         Mapper {
             venue: venue.to_string(),
             market: market.to_string(),
@@ -158,15 +167,26 @@ impl Mapper {
     }
 
     /// The rows of `rec`, whose JSON as the journal holds it is `raw`.
-    pub fn record(&mut self, rec: &Record, raw: &Value, record_schema: u16) -> Result<RecordRows, String> {
+    pub fn record(
+        &mut self,
+        rec: &Record,
+        raw: &Value,
+        record_schema: u16,
+    ) -> Result<RecordRows, String> {
         let mut out = RecordRows::default();
         for (i, ev) in rec.events.iter().enumerate() {
             let (name, fields) = raw_fields(raw, i)?;
             if name != ev.name() {
-                return Err(format!("record {}: event {i} is {name} in the JSON and {} typed", rec.seq, ev.name()));
+                return Err(format!(
+                    "record {}: event {i} is {name} in the JSON and {} typed",
+                    rec.seq,
+                    ev.name()
+                ));
             }
             match ev {
-                Event::OrderAccepted { order_id, request, .. } => {
+                Event::OrderAccepted {
+                    order_id, request, ..
+                } => {
                     self.orders.insert(
                         *order_id,
                         OrderInfo {
@@ -174,14 +194,26 @@ impl Mapper {
                             side: request.side,
                         },
                     );
-                    out.orders.push(self.order_row(rec, *order_id, request.tif, request.reduce_only, request.side, fields, record_schema)?);
+                    out.orders.push(self.order_row(
+                        rec,
+                        *order_id,
+                        request.tif,
+                        request.reduce_only,
+                        request.side,
+                        fields,
+                        record_schema,
+                    )?);
                 }
-                Event::FillBooked { order_id, venue_ts, .. } => {
-                    out.fills.push(self.fill_row(rec, i, *order_id, *venue_ts, fields)?);
+                Event::FillBooked {
+                    order_id, venue_ts, ..
+                } => {
+                    out.fills
+                        .push(self.fill_row(rec, i, *order_id, *venue_ts, fields)?);
                 }
                 _ => {}
             }
-            out.events.push(self.event_row(rec, i, ev, name, fields, record_schema)?);
+            out.events
+                .push(self.event_row(rec, i, ev, name, fields, record_schema)?);
         }
         Ok(out)
     }
@@ -237,11 +269,20 @@ impl Mapper {
                 ("order_id", V::Str(order_id.0.to_string())),
                 ("seq", V::Int(int(rec.seq, "seq")?)),
                 ("at_us", V::Int(int(rec.at, "record time")?)),
-                ("strategy", V::Str(str_at(fields, "request.strategy")?.to_string())),
-                ("client_order_id", V::Str(str_at(fields, "request.client_order_id")?.to_string())),
+                (
+                    "strategy",
+                    V::Str(str_at(fields, "request.strategy")?.to_string()),
+                ),
+                (
+                    "client_order_id",
+                    V::Str(str_at(fields, "request.client_order_id")?.to_string()),
+                ),
                 ("venue", V::Str(self.venue.clone())),
                 ("market", V::Str(self.market.clone())),
-                ("symbol", V::Str(str_at(fields, "request.instrument")?.to_string())),
+                (
+                    "symbol",
+                    V::Str(str_at(fields, "request.instrument")?.to_string()),
+                ),
                 ("side", side_cell(side)),
                 ("qty", V::Str(str_at(fields, "request.qty")?.to_string())),
                 ("px", V::Str(str_at(fields, "request.px")?.to_string())),
@@ -268,10 +309,12 @@ impl Mapper {
         venue_ts: u64,
         fields: &Map<String, Value>,
     ) -> Result<Row, String> {
-        let info = self
-            .orders
-            .get(&order_id)
-            .ok_or_else(|| format!("record {}: fill of order {} the journal never accepted", rec.seq, order_id.0))?;
+        let info = self.orders.get(&order_id).ok_or_else(|| {
+            format!(
+                "record {}: fill of order {} the journal never accepted",
+                rec.seq, order_id.0
+            )
+        })?;
         let venue_ts_ns = venue_ts
             .checked_mul(1000)
             .ok_or_else(|| format!("venue_ts {venue_ts} µs overflows ns"))?;
@@ -309,9 +352,11 @@ impl Mapper {
     ) -> Result<Row, String> {
         let order_id = ev.order_id();
         let own = INSTRUMENT_PATHS.iter().find_map(|p| str_at(fields, p).ok());
-        let symbol = own
-            .map(str::to_string)
-            .or_else(|| order_id.and_then(|o| self.orders.get(&o)).map(|o| o.instrument.clone()));
+        let symbol = own.map(str::to_string).or_else(|| {
+            order_id
+                .and_then(|o| self.orders.get(&o))
+                .map(|o| o.instrument.clone())
+        });
         let venue = symbol.as_ref().map(|_| self.venue.as_str());
         let payload = serde_json::to_string(&sorted(&Value::Object(fields.clone())))
             .map_err(|e| format!("payload: {e}"))?;
@@ -323,7 +368,10 @@ impl Mapper {
                 ("event_idx", V::Int(int(i as u64, "event index")?)),
                 ("at_us", V::Int(int(rec.at, "record time")?)),
                 ("kind", V::Str(name.to_string())),
-                ("order_id", V::opt_str(order_id.map(|o| o.0.to_string()).as_deref())),
+                (
+                    "order_id",
+                    V::opt_str(order_id.map(|o| o.0.to_string()).as_deref()),
+                ),
                 ("venue", V::opt_str(venue)),
                 ("symbol", V::opt_str(symbol.as_deref())),
                 ("payload", V::Str(payload)),

@@ -31,8 +31,11 @@ fn run() -> Result<String, (i32, String)> {
     };
     let text = std::fs::read_to_string(path).map_err(|e| (1, format!("read {path}: {e}")))?;
     let cfg = Config::parse(&text).map_err(|e| (1, e))?;
-    let mut status = HttpStatus::new(&cfg.status_url, Duration::from_millis(cfg.status_timeout_ms))
-        .map_err(|e| (1, e))?;
+    let mut status = HttpStatus::new(
+        &cfg.status_url,
+        Duration::from_millis(cfg.status_timeout_ms),
+    )
+    .map_err(|e| (1, e))?;
     let s = Settings {
         data_dir: cfg.data_dir,
         lake_root: cfg.lake_root,

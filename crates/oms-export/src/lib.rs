@@ -129,7 +129,9 @@ pub fn export(s: &Settings, status: &mut dyn StatusSource) -> Result<Summary, Ex
             if rec.seq != tr.seq {
                 return Err(failed(format!("frame {} holds record {}", tr.seq, rec.seq)));
             }
-            let rr = mapper.record(&rec, &raw, tr.record_schema).map_err(failed)?;
+            let rr = mapper
+                .record(&rec, &raw, tr.record_schema)
+                .map_err(failed)?;
             let day = by_date.entry(date_of(rec.at)?).or_default();
             day[0].extend(rr.orders);
             day[1].extend(rr.fills);
@@ -197,7 +199,11 @@ fn sync_dir(dir: &Path) -> io::Result<()> {
 
 /// Writes `rows` to a temporary file next to `path`; replaces `path` only
 /// when the bytes differ. True when `path` was (re)written.
-fn write_if_changed(path: &Path, schema: &'static TableSchema, rows: &[Row]) -> Result<bool, String> {
+fn write_if_changed(
+    path: &Path,
+    schema: &'static TableSchema,
+    rows: &[Row],
+) -> Result<bool, String> {
     let dir = path
         .parent()
         .ok_or_else(|| format!("{}: no parent", path.display()))?;
@@ -207,7 +213,8 @@ fn write_if_changed(path: &Path, schema: &'static TableSchema, rows: &[Row]) -> 
         .map_err(|e| format!("{}: {e}", tmp.display()))?;
     for r in rows {
         let cells: Vec<Cell> = r.cells.iter().map(cell).collect();
-        w.push(&cells).map_err(|e| format!("{}: {e}", path.display()))?;
+        w.push(&cells)
+            .map_err(|e| format!("{}: {e}", path.display()))?;
     }
     w.finish(Vec::new())
         .map_err(|e| format!("{}: {e}", tmp.display()))?;

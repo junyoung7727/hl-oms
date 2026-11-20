@@ -51,7 +51,8 @@ fn journal(dir: &Path, log: &[Record], record_schema: u16) -> Writer {
     fs::write(dir.join("INSTANCE"), format!("{INSTANCE:016x}\n")).unwrap();
     let (mut w, _) = recover(dir, &opts(record_schema), 0, |_, _, _| Ok(())).unwrap();
     for rec in log {
-        w.append(rec.seq, &serde_json::to_vec(rec).unwrap()).unwrap();
+        w.append(rec.seq, &serde_json::to_vec(rec).unwrap())
+            .unwrap();
         w.sync(rec.at).unwrap();
     }
     w
@@ -106,7 +107,9 @@ fn at(h: &mut H, at: u64) {
 fn h_at(start: u64) -> H {
     let mut h = H::new();
     h.now = start;
-    h.inp(Input::Boot { binary: "test".into() });
+    h.inp(Input::Boot {
+        binary: "test".into(),
+    });
     h.inp(Input::Config(Box::new(btc_config())));
     h.link_up_and_sync();
     h
@@ -124,7 +127,15 @@ fn mref(update_id: Option<i64>, venue_ts_ns: i64, recv_ns: i64) -> MarketRef {
     }
 }
 
-fn order(h: &mut H, key: &str, side: Side, qty: &str, price: &str, tif: Tif, market_ref: Option<MarketRef>) -> OrderId {
+fn order(
+    h: &mut H,
+    key: &str,
+    side: Side,
+    qty: &str,
+    price: &str,
+    tif: Tif,
+    market_ref: Option<MarketRef>,
+) -> OrderId {
     let r = NewOrderReq {
         strategy: sid("golden"),
         client_order_id: cid(key),
@@ -167,7 +178,15 @@ fn fill(h: &mut H, id: Option<OrderId>, key: &str, side: Side, qty: &str, price:
 fn golden_day() -> H {
     let mut h = h_at(DAY1);
     at(&mut h, DAY1 + 5 * SEC);
-    let o1 = order(&mut h, "c-0001", Side::Buy, "0.010", "41990.0", Tif::Gtc, None);
+    let o1 = order(
+        &mut h,
+        "c-0001",
+        Side::Buy,
+        "0.010",
+        "41990.0",
+        Tif::Gtc,
+        None,
+    );
     at(&mut h, DAY1 + 5_200_000);
     h.placed_open(o1, "v-0001");
     at(&mut h, DAY1 + 7_100_000);
@@ -178,12 +197,24 @@ fn golden_day() -> H {
         "0.010",
         "42000.2",
         Tif::Ioc,
-        Some(mref(Some(106), 1_767_312_006_997_000_000, 1_767_312_007_000_000_000)),
+        Some(mref(
+            Some(106),
+            1_767_312_006_997_000_000,
+            1_767_312_007_000_000_000,
+        )),
     );
     at(&mut h, DAY1 + 7_200_000);
     h.placed_open(o2, "v-0002");
     at(&mut h, DAY1 + 7_300_000);
-    fill(&mut h, Some(o2), "e-0001", Side::Buy, "0.010", "42000.2", "0.0042");
+    fill(
+        &mut h,
+        Some(o2),
+        "e-0001",
+        Side::Buy,
+        "0.010",
+        "42000.2",
+        "0.0042",
+    );
     at(&mut h, DAY1 + 7_400_000);
     h.status(o2, VenueStatus::Filled, Some("0.010"));
     at(&mut h, DAY1 + 10_200_200_000);
@@ -194,16 +225,36 @@ fn golden_day() -> H {
         "0.005",
         "41999.9",
         Tif::Alo,
-        Some(mref(None, 1_767_322_199_997_000_000, 1_767_322_200_000_000_000)),
+        Some(mref(
+            None,
+            1_767_322_199_997_000_000,
+            1_767_322_200_000_000_000,
+        )),
     );
     at(&mut h, DAY1 + 10_200_300_000);
     h.placed_open(o3, "v-0003");
     at(&mut h, DAY1 + 10_200_400_000);
-    fill(&mut h, Some(o3), "e-0002", Side::Sell, "0.005", "41999.9", "-0.0010");
+    fill(
+        &mut h,
+        Some(o3),
+        "e-0002",
+        Side::Sell,
+        "0.005",
+        "41999.9",
+        "-0.0010",
+    );
     at(&mut h, DAY1 + 10_200_500_000);
     h.status(o3, VenueStatus::Filled, Some("0.005"));
     at(&mut h, DAY1 + 10_800_000_000);
-    fill(&mut h, None, "e-0099", Side::Buy, "0.001", "42010.0", "0.0004");
+    fill(
+        &mut h,
+        None,
+        "e-0099",
+        Side::Buy,
+        "0.001",
+        "42010.0",
+        "0.0004",
+    );
     at(&mut h, DAY1 + DAY + 60 * SEC);
     h.ref_price("BTCUSDT", "42100.0");
     h
@@ -252,12 +303,18 @@ fn lake(root: &Path) -> BTreeMap<String, Vec<Map<String, Value>>> {
     let base = root.join("lake");
     for table in ["orders", "fills", "events"] {
         let dir = base.join("crypto/trading").join(table);
-        let Ok(dates) = fs::read_dir(&dir) else { continue };
+        let Ok(dates) = fs::read_dir(&dir) else {
+            continue;
+        };
         for d in dates {
             let d = d.unwrap().path();
             for f in fs::read_dir(&d).unwrap() {
                 let f = f.unwrap().path();
-                let rel = f.strip_prefix(&base).unwrap().to_string_lossy().into_owned();
+                let rel = f
+                    .strip_prefix(&base)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
                 out.insert(rel, read_rows(&f));
             }
         }
@@ -277,7 +334,10 @@ fn tree_bytes(dir: &Path) -> BTreeMap<String, Vec<u8>> {
         .unwrap()
         .map(|e| {
             let p = e.unwrap().path();
-            (p.file_name().unwrap().to_string_lossy().into_owned(), fs::read(&p).unwrap())
+            (
+                p.file_name().unwrap().to_string_lossy().into_owned(),
+                fs::read(&p).unwrap(),
+            )
         })
         .collect()
 }
@@ -291,7 +351,11 @@ fn the_golden_day_exports_as_the_contract_golden_rows() {
     assert_eq!(sum.open_date.as_deref(), Some("2026-01-03"));
     let got = lake(&root);
     // Kept for comparing by hand when the golden rows change.
-    fs::write(root.join("actual.json"), serde_json::to_vec_pretty(&got).unwrap()).unwrap();
+    fs::write(
+        root.join("actual.json"),
+        serde_json::to_vec_pretty(&got).unwrap(),
+    )
+    .unwrap();
     for table in ["orders", "fills", "events"] {
         let want = golden(table);
         let mine: BTreeMap<_, _> = got
@@ -299,7 +363,12 @@ fn the_golden_day_exports_as_the_contract_golden_rows() {
             .filter(|(k, _)| k.starts_with(&format!("crypto/trading/{table}/")))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        assert_eq!(mine, want, "{table} (actual rows in {})", root.join("actual.json").display());
+        assert_eq!(
+            mine,
+            want,
+            "{table} (actual rows in {})",
+            root.join("actual.json").display()
+        );
     }
 }
 
@@ -314,8 +383,16 @@ fn every_file_carries_the_contract_metadata_and_types() {
         let table = rel.split('/').nth(2).unwrap();
         let path = root.join("lake").join(rel);
         let m = metadata(&path);
-        assert_eq!(m.get("contract_ver").map(String::as_str), Some("1"), "{rel}");
-        assert_eq!(m.get("export_ver").map(String::as_str), Some("oms-export-1"), "{rel}");
+        assert_eq!(
+            m.get("contract_ver").map(String::as_str),
+            Some("1"),
+            "{rel}"
+        );
+        assert_eq!(
+            m.get("export_ver").map(String::as_str),
+            Some("oms-export-1"),
+            "{rel}"
+        );
         assert_eq!(m.get("table").map(String::as_str), Some(table), "{rel}");
         let r = SerializedFileReader::new(fs::File::open(&path).unwrap()).unwrap();
         let cols: Vec<(String, bool)> = r
@@ -336,7 +413,12 @@ fn every_file_carries_the_contract_metadata_and_types() {
             .as_array()
             .unwrap()
             .iter()
-            .map(|c| (c["name"].as_str().unwrap().to_string(), c["nullable"].as_bool().unwrap()))
+            .map(|c| {
+                (
+                    c["name"].as_str().unwrap().to_string(),
+                    c["nullable"].as_bool().unwrap(),
+                )
+            })
             .collect();
         assert_eq!(cols, want, "{rel}");
     }
@@ -353,7 +435,10 @@ fn a_second_run_changes_no_file() {
         .iter()
         .map(|r| {
             let p = root.join("lake").join(r);
-            (fs::read(&p).unwrap(), fs::metadata(&p).unwrap().modified().unwrap())
+            (
+                fs::read(&p).unwrap(),
+                fs::metadata(&p).unwrap().modified().unwrap(),
+            )
         })
         .collect();
     let second = export(&settings(&root), &mut alive(h.log.len() as u64)).unwrap();
@@ -365,7 +450,12 @@ fn a_second_run_changes_no_file() {
         assert_eq!(fs::read(&p).unwrap(), bytes, "{r}");
         assert_eq!(fs::metadata(&p).unwrap().modified().unwrap(), mtime, "{r}");
         let leftovers: Vec<_> = fs::read_dir(p.parent().unwrap()).unwrap().collect();
-        assert_eq!(leftovers.len(), 1, "only day.parquet in {}", p.parent().unwrap().display());
+        assert_eq!(
+            leftovers.len(),
+            1,
+            "only day.parquet in {}",
+            p.parent().unwrap().display()
+        );
     }
 }
 
@@ -448,7 +538,15 @@ fn a_fill_finds_its_order_from_an_earlier_date() {
     let o = order(&mut h, "k", Side::Sell, "0.002", "42000.0", Tif::Gtc, None);
     h.placed_open(o, "v");
     at(&mut h, DAY1 + DAY + SEC);
-    fill(&mut h, Some(o), "late", Side::Sell, "0.002", "42000.0", "0.0001");
+    fill(
+        &mut h,
+        Some(o),
+        "late",
+        Side::Sell,
+        "0.002",
+        "42000.0",
+        "0.0001",
+    );
     at(&mut h, DAY1 + 2 * DAY + SEC);
     h.ref_price("BTCUSDT", "42000.0");
     let _w = journal(&root.join("data"), &h.log, 2);
@@ -494,7 +592,10 @@ fn the_journal_is_read_without_its_lock_and_left_unchanged() {
 
 #[test]
 fn the_instrument_paths_cover_every_instrument_field_of_c_tail() {
-    let doc = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/contracts/tail.md")).unwrap();
+    let doc = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/contracts/tail.md"),
+    )
+    .unwrap();
     let mut seen = std::collections::BTreeSet::new();
     for line in doc.lines() {
         let cols: Vec<&str> = line.split('|').map(str::trim).collect();
@@ -513,16 +614,34 @@ fn the_instrument_paths_cover_every_instrument_field_of_c_tail() {
     }
     assert!(!seen.is_empty());
     for p in &seen {
-        assert!(INSTRUMENT_PATHS.contains(&p.as_str()), "C-TAIL field {p} is not in INSTRUMENT_PATHS");
+        assert!(
+            INSTRUMENT_PATHS.contains(&p.as_str()),
+            "C-TAIL field {p} is not in INSTRUMENT_PATHS"
+        );
     }
 }
 
 #[test]
 fn the_config_refuses_a_remote_status_url_and_unknown_keys() {
     let base = "data_dir = \"/d\"\nlake_root = \"/l\"\nvenue = \"bybit\"\nmarket = \"linear\"\n";
-    assert!(Config::parse(&format!("{base}status_url = \"http://127.0.0.1:9/api/status\"\n")).is_ok());
-    assert!(Config::parse(&format!("{base}status_url = \"http://10.0.0.2:9/api/status\"\n")).is_err());
-    assert!(Config::parse(&format!("{base}status_url = \"http://127.0.0.1:9/\"\nextra = 1\n")).is_err());
+    assert!(
+        Config::parse(&format!(
+            "{base}status_url = \"http://127.0.0.1:9/api/status\"\n"
+        ))
+        .is_ok()
+    );
+    assert!(
+        Config::parse(&format!(
+            "{base}status_url = \"http://10.0.0.2:9/api/status\"\n"
+        ))
+        .is_err()
+    );
+    assert!(
+        Config::parse(&format!(
+            "{base}status_url = \"http://127.0.0.1:9/\"\nextra = 1\n"
+        ))
+        .is_err()
+    );
 }
 
 #[test]
@@ -531,7 +650,11 @@ fn the_binary_exits_3_when_the_oms_does_not_answer() {
     let h = golden_day();
     let _w = journal(&root.join("data"), &h.log, 2);
     // A port nobody listens on.
-    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
     let cfg = root.join("export.toml");
     fs::write(
         &cfg,
@@ -547,6 +670,11 @@ fn the_binary_exits_3_when_the_oms_does_not_answer() {
         .arg(&cfg)
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(3), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(!root.join("lake").exists());
 }
