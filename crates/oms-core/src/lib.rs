@@ -23,6 +23,7 @@ mod margin_view;
 pub mod model;
 pub mod needs;
 pub mod num;
+pub mod rate;
 pub mod record;
 
 pub use crate::core::{Core, CoreFault};
@@ -35,4 +36,5 @@ pub use margin_view::{AccountModeView, MarginView, VenueSettingView};
 pub use model::*;
 pub use needs::Need;
 pub use num::{Amount, Px, Qty, Ratio, SQty};
+pub use rate::{RateBudget, RateClass};
 pub use record::Record;

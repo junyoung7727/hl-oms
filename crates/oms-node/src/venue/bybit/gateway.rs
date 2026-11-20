@@ -1,6 +1,6 @@
-//! The Bybit gateway behind `VenueGateway` (ADR-028 §7c, U16d): the boot
-//! checks and the IP loop, the private stream, the queries, and the pause
-//! after an IP ban. Orders and cancels are not sent before U17.
+//! The Bybit gateway behind `VenueGateway` (ADR-028 §7c–§7d): the boot
+//! checks and the IP loop, the private stream, the queries, the pause after
+//! an IP ban, and orders and cancels over REST (`orders`).
 //!
 //! The link is up only while a stream is authenticated and subscribed and
 //! `Health` has no block. Every reconnect is a new link session, so the
@@ -18,7 +18,8 @@ use futures_util::{SinkExt, StreamExt};
 use oms_core::*;
 use tokio_tungstenite::tungstenite::Message;
 
-use super::checks::{self, Block, Expected, Health};
+use super::checks::{self, Block, Expected, Health, SymbolSpec};
+use super::orders::{self, Create, Effect, Orders};
 use super::query::{Queries, QueryFail};
 use super::rest::{Credentials, IP_BAN_PAUSE, Rest, RestError};
 use super::{Endpoints, exec, stream};
@@ -78,6 +79,7 @@ pub struct Wiring {
 
 pub(crate) struct Gateway {
     rest: Rest,
+    orders: Orders,
     queries: Queries,
     echo: reqwest::Client,
     wiring: Wiring,
@@ -118,7 +120,7 @@ impl Gateway {
         cfg: &BybitConfig,
         creds: Arc<Credentials>,
         wiring: Wiring,
-        symbols: Vec<String>,
+        symbols: Vec<SymbolSpec>,
         input: VenueInputTx,
         instance_id: u64,
         timing: Timing,
@@ -133,13 +135,14 @@ impl Gateway {
         )));
         Ok(Gateway {
             queries: Queries::new(rest()?, instance_id, cfg.fills_lag_ms),
+            orders: Orders::new(rest()?),
             rest: rest()?,
             echo: checks::echo_client(timeout)?,
             expected: Expected {
                 sub_account_uid: cfg.sub_account_uid,
                 symbols: symbols.clone(),
             },
-            symbols: symbols.into_iter().collect(),
+            symbols: symbols.into_iter().map(|s| s.name).collect(),
             recv_window_ms: cfg.recv_window_ms,
             wiring,
             creds,
@@ -559,29 +562,80 @@ impl Gateway {
 
     // ---- commands -------------------------------------------------------------------
 
+    /// Whether a request may leave now: no block of any kind.
+    fn allowed(&self) -> Result<(), String> {
+        if self.quiet() {
+            return Err(self
+                .health
+                .block()
+                .map_or_else(|| "requests are paused".to_string(), |b| b.to_string()));
+        }
+        match self.health.block() {
+            Some(b) => Err(b.to_string()),
+            None => Ok(()),
+        }
+    }
+
+    fn apply(&self, fx: Effect) {
+        match fx {
+            Effect::None => {}
+            Effect::Ban(why) => self.ban(why),
+            Effect::RejectKey(why) => {
+                error!("the venue rejected the key; no request goes out until the restart", "error": why.clone());
+                self.health.reject_auth(why);
+            }
+        }
+    }
+
     async fn send_order(&self, cmd: VenueCommand) {
         let VenueCommand::SendOrder {
             order_id,
             instance_id,
-            ..
+            instrument,
+            side,
+            qty,
+            px,
+            tif,
+            reduce_only,
+            expires_at,
         } = cmd
         else {
             return;
         };
-        let at = wall_us();
+        let started_at = wall_us();
+        let wire_id = exec::WIRE_ID.encode(VenueClientId {
+            instance_id,
+            order_id,
+        });
+        let (outcome, fx) = if self.symbols.contains(instrument.as_str()) {
+            let c = Create {
+                symbol: instrument.as_str(),
+                side,
+                qty,
+                px,
+                tif,
+                reduce_only,
+                link: &wire_id,
+                expires_at,
+            };
+            self.orders.create(&c, || self.allowed()).await
+        } else {
+            (
+                SendOutcome::NotSent {
+                    reason: format!("{instrument} is not a traded symbol of this gateway"),
+                },
+                Effect::None,
+            )
+        };
+        self.apply(fx);
         self.input
             .send(VenueInput::SendResult {
                 order_id,
-                outcome: SendOutcome::NotSent {
-                    reason: "the Bybit gateway sends no orders before U17".into(),
-                },
+                outcome,
                 timing: GatewayTiming {
-                    started_at: at,
-                    finished_at: at,
-                    wire_id: exec::WIRE_ID.encode(VenueClientId {
-                        instance_id,
-                        order_id,
-                    }),
+                    started_at,
+                    finished_at: wall_us(),
+                    wire_id,
                 },
             })
             .await;
@@ -592,26 +646,31 @@ impl Gateway {
             order_id,
             instance_id,
             attempt,
+            instrument,
             ..
         } = cmd
         else {
             return;
         };
-        let at = wall_us();
+        let started_at = wall_us();
+        let wire_id = exec::WIRE_ID.encode(VenueClientId {
+            instance_id,
+            order_id,
+        });
+        let (outcome, fx) = self
+            .orders
+            .cancel(instrument.as_str(), &wire_id, || self.allowed())
+            .await;
+        self.apply(fx);
         self.input
             .send(VenueInput::CancelResult {
                 order_id,
                 attempt,
-                outcome: CancelOutcome::NotSent {
-                    reason: "the Bybit gateway sends no cancels before U17".into(),
-                },
+                outcome,
                 timing: GatewayTiming {
-                    started_at: at,
-                    finished_at: at,
-                    wire_id: exec::WIRE_ID.encode(VenueClientId {
-                        instance_id,
-                        order_id,
-                    }),
+                    started_at,
+                    finished_at: wall_us(),
+                    wire_id,
                 },
             })
             .await;
@@ -647,7 +706,7 @@ pub type BlockView = Arc<dyn Fn() -> Option<String> + Send + Sync>;
 /// once, here.
 pub fn spawn(
     cfg: BybitConfig,
-    symbols: Vec<String>,
+    symbols: Vec<SymbolSpec>,
     ports: GatewayPorts,
     max_concurrent: usize,
 ) -> Result<(String, BlockView), String> {
@@ -667,7 +726,7 @@ pub(crate) fn spawn_with(
     cfg: BybitConfig,
     creds: Arc<Credentials>,
     wiring: Wiring,
-    symbols: Vec<String>,
+    symbols: Vec<SymbolSpec>,
     ports: GatewayPorts,
     max_concurrent: usize,
     timing: Option<Timing>,
@@ -736,7 +795,8 @@ mod tests {
         );
         api.route(
             "/v5/market/instruments-info",
-            [ok(json!({"category": "linear", "list": [{"symbol": "BTCUSDT", "settleCoin": "USDT", "status": "Trading"}], "nextPageCursor": ""}))],
+            [ok(json!({"category": "linear", "list": [{"symbol": "BTCUSDT", "settleCoin": "USDT", "status": "Trading",
+                "priceFilter": {"tickSize": "0.10"}, "lotSizeFilter": {"qtyStep": "0.001"}}], "nextPageCursor": ""}))],
         );
         api.route("/v5/position/list", [positions()]);
         api.route("/ip", [Http::Reply(200, "127.0.0.1\n".into())]);
@@ -1010,7 +1070,11 @@ mod tests {
                 &cfg(),
                 Arc::new(Credentials::new("KEY", "SECRET")),
                 wiring,
-                vec!["BTCUSDT".into()],
+                vec![SymbolSpec {
+                    name: "BTCUSDT".into(),
+                    px_tick: Px::parse("0.1").unwrap(),
+                    qty_step: Qty::parse("0.001").unwrap(),
+                }],
                 VenueInputTx::new(queues.clone()),
                 INSTANCE,
                 timing,
@@ -1535,27 +1599,56 @@ mod tests {
         assert_eq!(ws.accepted(), 1);
     }
 
+    fn order_cmd(order: u64, symbol: &str) -> VenueCommand {
+        VenueCommand::SendOrder {
+            order_id: OrderId(order),
+            instance_id: INSTANCE,
+            instrument: InstrumentId::new(symbol).unwrap(),
+            side: Side::Buy,
+            qty: Qty::parse("0.001").unwrap(),
+            px: Px::parse("30000").unwrap(),
+            tif: Tif::Gtc,
+            reduce_only: false,
+            expires_at: u64::MAX,
+        }
+    }
+
+    fn results(r: &Rig) -> Vec<VenueInput> {
+        r.inputs()
+            .into_iter()
+            .filter(|i| {
+                matches!(
+                    i,
+                    VenueInput::SendResult { .. } | VenueInput::CancelResult { .. }
+                )
+            })
+            .collect()
+    }
+
+    fn posts(api: &FakeHttp) -> Vec<String> {
+        api.requests()
+            .iter()
+            .filter(|q| q.method == "POST")
+            .map(|q| q.path().to_string())
+            .collect()
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn orders_and_cancels_are_answered_not_sent_once_each() {
+    async fn an_order_and_a_cancel_each_go_out_once_over_rest_and_get_one_result() {
         let api = rest_venue("REGULAR_MARGIN");
+        api.route(
+            orders::CREATE_PATH,
+            [ok(json!({"orderId": "o-5", "orderLinkId": link(5)}))],
+        );
+        api.route(
+            orders::CANCEL_PATH,
+            [ok(json!({"orderId": "o-5", "orderLinkId": link(5)}))],
+        );
         let ws = FakeWs::start(GOOD).await;
         let r = rig(&api, &ws);
         r.until("link up", up).await;
-        let reads = api.requests().len();
-        r.commands
-            .send(VenueCommand::SendOrder {
-                order_id: OrderId(5),
-                instance_id: INSTANCE,
-                instrument: InstrumentId::new("BTCUSDT").unwrap(),
-                side: Side::Buy,
-                qty: Qty(1),
-                px: Px(1),
-                tif: Tif::Gtc,
-                reduce_only: false,
-                expires_at: u64::MAX,
-            })
-            .await
-            .unwrap();
+        r.commands.send(order_cmd(5, "BTCUSDT")).await.unwrap();
+        r.until("the send result", |r| results(r).len() == 1).await;
         r.commands
             .send(VenueCommand::SendCancel {
                 order_id: OrderId(5),
@@ -1566,59 +1659,80 @@ mod tests {
             })
             .await
             .unwrap();
-        r.until("two results", |r| {
-            r.inputs()
-                .iter()
-                .filter(|i| {
-                    matches!(
-                        i,
-                        VenueInput::SendResult { .. } | VenueInput::CancelResult { .. }
-                    )
-                })
-                .count()
-                == 2
-        })
-        .await;
+        r.until("two results", |r| results(r).len() == 2).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
-        let results: Vec<VenueInput> = r
-            .inputs()
-            .into_iter()
-            .filter(|i| {
-                matches!(
-                    i,
-                    VenueInput::SendResult { .. } | VenueInput::CancelResult { .. }
-                )
-            })
-            .collect();
-        assert_eq!(results.len(), 2);
-        // The two run as their own tasks, in either order.
-        assert!(results.iter().any(|i| matches!(i, VenueInput::SendResult { outcome: SendOutcome::NotSent { .. }, timing, .. } if timing.wire_id == link(5))), "{results:?}");
+        let res = results(&r);
+        assert_eq!(res.len(), 2, "{res:?}");
         assert!(
-            results.iter().any(|i| matches!(
-                i,
+            matches!(&res[0], VenueInput::SendResult { order_id: OrderId(5), outcome: SendOutcome::Placed { venue_oid, .. }, timing }
+                if venue_oid.as_str() == "o-5" && timing.wire_id == link(5) && timing.started_at <= timing.finished_at),
+            "{res:?}"
+        );
+        assert!(
+            matches!(
+                &res[1],
                 VenueInput::CancelResult {
-                    outcome: CancelOutcome::NotSent { .. },
+                    outcome: CancelOutcome::Confirmed,
                     attempt: 1,
                     ..
                 }
-            )),
-            "{results:?}"
+            ),
+            "{res:?}"
         );
-        let order_paths = api
+        assert_eq!(posts(&api), [orders::CREATE_PATH, orders::CANCEL_PATH]);
+        let create = api
             .requests()
-            .iter()
-            .skip(reads)
-            .filter(|q| q.method != "GET")
-            .count();
-        assert_eq!(order_paths, 0, "nothing but reads");
+            .into_iter()
+            .find(|q| q.path() == orders::CREATE_PATH)
+            .unwrap();
+        assert!(create.body_str().contains(&format!("\"orderLinkId\":\"{}\"", link(5))));
         assert_eq!(
             ws.texts(0)
                 .iter()
                 .filter(|t| !t.contains("\"ping\""))
                 .count(),
             2,
-            "auth and subscribe only"
+            "auth and subscribe only on the private stream"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn nothing_goes_out_while_blocked_or_for_an_untraded_symbol() {
+        let api = rest_venue("REGULAR_MARGIN");
+        api.route(
+            orders::CREATE_PATH,
+            [Http::Reply(403, "access too frequent".into())],
+        );
+        let ws = FakeWs::start(GOOD).await;
+        let r = rig(&api, &ws);
+        r.until("link up", up).await;
+        r.commands.send(order_cmd(6, "ETHUSDT")).await.unwrap();
+        r.until("one result", |r| results(r).len() == 1).await;
+        assert!(matches!(&results(&r)[0], VenueInput::SendResult { outcome: SendOutcome::NotSent { .. }, .. }));
+        assert!(posts(&api).is_empty(), "an untraded symbol went out");
+        // A 403 on a create: the answer is unknown, and the pause starts.
+        r.commands.send(order_cmd(7, "BTCUSDT")).await.unwrap();
+        r.until("two results", |r| results(r).len() == 2).await;
+        assert!(matches!(&results(&r)[1], VenueInput::SendResult { outcome: SendOutcome::Unknown { .. }, .. }));
+        assert!(r.block().is_some_and(|b| b.starts_with("ip_banned:")), "{:?}", r.block());
+        r.commands.send(order_cmd(8, "BTCUSDT")).await.unwrap();
+        r.commands
+            .send(VenueCommand::SendCancel {
+                order_id: OrderId(7),
+                instance_id: INSTANCE,
+                attempt: 1,
+                instrument: InstrumentId::new("BTCUSDT").unwrap(),
+                venue_oid: None,
+            })
+            .await
+            .unwrap();
+        r.until("four results", |r| results(r).len() == 4).await;
+        let res = results(&r);
+        assert!(res[2..].iter().all(|i| matches!(i,
+            VenueInput::SendResult { outcome: SendOutcome::NotSent { reason }, .. }
+            | VenueInput::CancelResult { outcome: CancelOutcome::NotSent { reason }, .. } if reason.starts_with("ip_banned:"))),
+            "{res:?}");
+        assert_eq!(posts(&api), [orders::CREATE_PATH], "only the first create left");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

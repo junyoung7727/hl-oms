@@ -7,6 +7,7 @@ use std::net::IpAddr;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use oms_core::{Px, Qty};
 use serde_json::Value;
 
 use super::rest::{Rest, RestError};
@@ -130,7 +131,15 @@ pub struct Expected {
     /// The sub-account the key must belong to (`userID` of query-api).
     pub sub_account_uid: u64,
     /// The traded symbols (category linear).
-    pub symbols: Vec<String>,
+    pub symbols: Vec<SymbolSpec>,
+}
+
+/// A traded symbol and the steps the core rounds its orders to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SymbolSpec {
+    pub name: String,
+    pub px_tick: Px,
+    pub qty_step: Qty,
 }
 
 /// The settle coin every traded symbol must have: the kill scope of
@@ -228,8 +237,12 @@ pub async fn check_account(rest: &Rest) -> Result<(), Block> {
     Ok(())
 }
 
-/// One-way position mode and the settle coin, per symbol.
-pub async fn check_symbol(rest: &Rest, symbol: &str) -> Result<(), Block> {
+/// One-way position mode, the settle coin, and the steps, per symbol. The
+/// configured price tick and quantity step must be multiples of the
+/// venue's (`priceFilter.tickSize`, `lotSizeFilter.qtyStep`): what the venue
+/// does with an order off its steps is not documented.
+pub async fn check_symbol(rest: &Rest, spec: &SymbolSpec) -> Result<(), Block> {
+    let symbol = spec.name.as_str();
     let params = [
         ("category", "linear".to_string()),
         ("symbol", symbol.to_string()),
@@ -247,6 +260,20 @@ pub async fn check_symbol(rest: &Rest, symbol: &str) -> Result<(), Block> {
     if settle != SETTLE_COIN {
         return Err(Block::Account(format!(
             "{symbol} settles in {settle:?}; the kill scope is {SETTLE_COIN}"
+        )));
+    }
+    let read = |ptr: &str| row.pointer(ptr).and_then(Value::as_str).unwrap_or("");
+    let (tick, step) = (read("/priceFilter/tickSize"), read("/lotSizeFilter/qtyStep"));
+    let (Ok(venue_tick), Ok(venue_step)) = (Px::parse(tick), Qty::parse(step)) else {
+        return Err(Block::Unchecked(format!(
+            "{symbol}: tickSize {tick:?} or qtyStep {step:?} cannot be read"
+        )));
+    };
+    let multiple = |ours: i64, venue: i64| venue > 0 && ours % venue == 0;
+    if !multiple(spec.px_tick.0, venue_tick.0) || !multiple(spec.qty_step.0, venue_step.0) {
+        return Err(Block::Account(format!(
+            "{symbol}: px_tick {} and qty_step {} must be multiples of the venue's tickSize {venue_tick} and qtyStep {venue_step}",
+            spec.px_tick, spec.qty_step
         )));
     }
     let pos = rest.get("/v5/position/list", &params).await?;
@@ -370,7 +397,8 @@ mod tests {
     }
 
     fn instrument(symbol: &str, settle: &str) -> Value {
-        serde_json::json!({"category": "linear", "list": [{"symbol": symbol, "settleCoin": settle, "status": "Trading"}], "nextPageCursor": ""})
+        serde_json::json!({"category": "linear", "list": [{"symbol": symbol, "settleCoin": settle, "status": "Trading",
+            "priceFilter": {"tickSize": "0.10"}, "lotSizeFilter": {"qtyStep": "0.001"}}], "nextPageCursor": ""})
     }
 
     fn positions(idx: &[i64]) -> Value {
@@ -406,14 +434,26 @@ mod tests {
         )
     }
 
+    fn spec(tick: &str, step: &str) -> SymbolSpec {
+        SymbolSpec {
+            name: "BTCUSDT".into(),
+            px_tick: Px::parse(tick).unwrap(),
+            qty_step: Qty::parse(step).unwrap(),
+        }
+    }
+
     fn want() -> Expected {
         Expected {
             sub_account_uid: 4242,
-            symbols: vec!["BTCUSDT".into()],
+            symbols: vec![spec("0.5", "0.001")],
         }
     }
 
     async fn run(v: &Venue) -> Result<(), Block> {
+        run_with(v, &want()).await
+    }
+
+    async fn run_with(v: &Venue, want: &Expected) -> Result<(), Block> {
         let rest = Rest::new(
             &v.api.url(),
             Arc::new(Credentials::new("K", "S")),
@@ -422,7 +462,24 @@ mod tests {
         )
         .unwrap();
         let echo = echo_client(Duration::from_millis(500)).unwrap();
-        boot(&rest, &echo, &v.echo.url(), &want()).await
+        boot(&rest, &echo, &v.echo.url(), want).await
+    }
+
+    #[tokio::test]
+    async fn steps_off_the_venue_steps_block_and_unreadable_steps_are_unchecked() {
+        for (tick, step, ok) in [("0.1", "0.001", true), ("1", "0.01", true), ("0.05", "0.001", false), ("0.5", "0.0005", false)] {
+            let v = good();
+            let want = Expected { symbols: vec![spec(tick, step)], ..want() };
+            let r = run_with(&v, &want).await;
+            if ok {
+                assert_eq!(r, Ok(()), "{tick} {step}");
+            } else {
+                assert!(matches!(&r, Err(Block::Account(e)) if e.contains("multiples")), "{tick} {step}: {r:?}");
+            }
+        }
+        let bare = serde_json::json!({"category": "linear", "list": [{"symbol": "BTCUSDT", "settleCoin": "USDT", "status": "Trading"}], "nextPageCursor": ""});
+        let v = venue(key(json!({})), account("REGULAR_MARGIN", 5), bare, positions(&[0]), "127.0.0.1");
+        assert!(matches!(run(&v).await, Err(Block::Unchecked(e)) if e.contains("cannot be read")));
     }
 
     #[tokio::test]
