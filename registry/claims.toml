@@ -1085,18 +1085,18 @@ not_covered = "스키마 1 저널은 이 빌드가 스키마 번호 1로 쓴 것
 
 [[claim]]
 id = "V-ABSENCE-N-1"
-statement = "absence_not_found_needed가 2이면 결과 불명 주문은 expires_at + absence_margin 뒤에 보낸 조회의 \"없음\"을 서로 다른(더 늦은) 조회로 두 번 받아야 NotPlaced로 닫히고, 첫 번째는 AbsenceNoted로만 기록되며 예약은 그대로다. 만료 + 여유 전의 \"없음\"과 같은 조회의 두 번째 답은 세지 않고, 셈은 재생 뒤에도 같다. 기본값 1에서는 AbsenceNoted 없이 예전처럼 한 번에 닫히고, 기본값은 직렬화하지 않으며, 0은 설정 오류다"
-why = "Bybit 열린 주문 조회가 닫힌 주문을 최근 500건까지만 들고 있어도 한 번의 \"없음\"으로 예약을 풀지 않는다는 전제. Hyperliquid 동작은 그대로다"
+statement = "absence_not_found_needed가 2이면 결과 불명 주문은 expires_at + absence_margin 뒤에 보낸 조회의 \"없음\"을 absence_margin 이상 떨어진 두 조회로 받아야 NotPlaced로 닫히고, 첫 번째는 AbsenceNoted로만 기록되며 예약은 그대로다. 만료 + 여유 전의 \"없음\", 같은 조회의 두 번째 답, 앞에 센 답보다 여유 시간 안쪽의 답은 세지 않고, 셈은 재생 뒤에도 같다. 기본값 1에서는 AbsenceNoted 없이 예전처럼 한 번에 닫히고, 기본값은 직렬화하지 않으며, 0은 설정 오류다"
+why = "Bybit 조회 사본의 짧은 불일치로 한 번 \"없음\"이 나와도 예약을 풀지 않는다는 전제. 500건 한도·서비스 재시작은 이 횟수가 아니라 게이트웨이의 주문 내역 확인이 막는다. Hyperliquid 동작은 그대로다"
 level = "단위"
 scope = "결과 불명 주문 하나, 시험 4개"
 real = "oms-core 판단과 적용, 설정 검증, 재생"
 simulated = "거래소 입력(시험이 직접 만든 StatusNotFound)"
-faults = "만료 전 조회, 같은 조회의 중복 답"
+faults = "만료 전 조회, 같은 조회의 중복 답, 1마이크로초와 여유 시간 직전의 두 번째 조회"
 criterion = "이벤트 이름 목록, 주문 단계와 종결 사유, 계좌 매수 예약, 재생한 코어와 실시간 코어의 같음, 설정 검증 오류, 직렬화 문자열"
 tests = ["core/two_answers_after_expiry_plus_margin_are_needed_when_the_policy_asks_for_two", "core/one_answer_is_enough_by_default_and_writes_no_new_event", "core/the_policy_refuses_zero_answers", "core/a_policy_at_its_default_writes_no_new_key"]
 repro = "cargo test -p oms-core --test absence_and_market_ref"
 supports = "C-DOUBT"
-not_covered = "Bybit가 recv window 밖의 요청을 실제로 거절하는지, 게이트웨이의 요청 시각 + recv_window + 1초 ≤ expires_at 검사(Bybit 게이트웨이가 아직 없다, U16·U17), 주문 내역 조회도 닫힌 주문을 잃는지"
+not_covered = "Bybit가 recv window 밖의 요청을 실제로 거절하는지, 게이트웨이의 요청 시각 + recv_window + 1초 ≤ expires_at 검사(Bybit 게이트웨이가 아직 없다, U16·U17), 주문 내역 조회도 닫힌 주문을 잃는지. 게이트웨이가 realtime과 주문 내역 둘 다 본 뒤에만 없음을 보낸다는 것(U16 요구 사항)"
 
 [[claim]]
 id = "V-MARKET-REF-1"

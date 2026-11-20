@@ -77,7 +77,7 @@
 | G-8 | `t<tid>` | `<time>:<coin>:<tid>:<oid>` |
 | G-11 | 채움(가상 거래소는 정확하다) | 비움(`sz`의 의미가 문서에서 엇갈린다) |
 
-Bybit 게이트웨이의 G-4(아직 없음, [ADR-024](../adr/ADR-024-absence-count-and-market-ref.md)): Bybit에는 만료 필드가 없고, 요청 시각(`X-BAPI-TIMESTAMP`) + `X-BAPI-RECV-WINDOW`가 서버 시각보다 이르면 요청을 거절한다. 게이트웨이는 요청 시각을 보내는 순간의 로컬 시각으로 하고 `요청 시각 + recv_window + 1초 ≤ expires_at`일 때만 보낸다. 아니면 보내지 않고 `NotSent`. 1초는 Bybit가 받아 주는 로컬 시계 앞섬의 한도다. 이 조건으로 거래소가 만료를 강제하므로 Bybit 설정은 `venue_enforces_expiry = true`, `absence_not_found_needed = 2`를 쓴다(열린 주문 조회가 닫힌 주문을 최근 500건까지만 들고 있어서).
+Bybit 게이트웨이의 G-4(아직 없음, [ADR-024](../adr/ADR-024-absence-count-and-market-ref.md)): Bybit에는 만료 필드가 없고, 요청 시각(`X-BAPI-TIMESTAMP`) + `X-BAPI-RECV-WINDOW`가 서버 시각보다 이르면 요청을 거절한다. 게이트웨이는 요청 시각을 보내는 순간의 로컬 시각으로 하고 `요청 시각 + recv_window + 1초 ≤ expires_at`일 때만 보낸다. 아니면 보내지 않고 `NotSent`. 1초는 Bybit가 받아 주는 로컬 시계 앞섬의 한도다. 이 조건으로 거래소가 만료를 강제하므로 Bybit 설정은 `venue_enforces_expiry = true`, `absence_not_found_needed = 2`를 쓴다. 횟수는 조회 사본의 짧은 불일치만 막는다. realtime 조회는 닫힌 주문을 최근 500건까지만 들고 있고 서비스 재시작 때 비우므로, 게이트웨이는 realtime과 주문 내역(`/v5/order/history`) 모두에서 없을 때만 `StatusNotFound`를 보낸다(필수).
 
 고객 주문번호의 형식은 게이트웨이 상수 `WIRE_ID`다([ADR-022](../adr/ADR-022-wire-id-form.md)). 가상 거래소와 Hyperliquid는 `Hex128`(`0x` + 32 hex). Bybit 게이트웨이(아직 없음)는 `Base32Pair`(27자)를 쓰고, G-8 체결 키는 `<symbol>:<execId>`(69자 이하)로 정해 두었다. `execId`의 전역 유일성은 문서에 없어 종목을 앞에 붙인다.
 

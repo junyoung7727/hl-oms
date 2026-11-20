@@ -63,8 +63,15 @@ fn two_answers_after_expiry_plus_margin_are_needed_when_the_policy_asks_for_two(
     // The rebuilt core keeps the count.
     assert_eq!(h.rebuilt(), h.core);
 
-    // The second counted answer closes it.
-    let out = not_found(&mut h, a, expires_at + 11 * SEC);
+    // Review 2026-11-20: an answer sooner than the absence margin after
+    // the counted one may see the same short-lived state; it does not count.
+    let out = not_found(&mut h, a, expires_at + 10 * SEC + 1);
+    assert!(out.events.is_empty());
+    let out = not_found(&mut h, a, expires_at + 20 * SEC - 1);
+    assert!(out.events.is_empty());
+
+    // The second counted answer, a margin later, closes it.
+    let out = not_found(&mut h, a, expires_at + 20 * SEC);
     assert_eq!(names(&out), vec!["absence_noted", "order_closed"]);
     assert!(matches!(
         h.order(a).close.as_ref().unwrap().reason,

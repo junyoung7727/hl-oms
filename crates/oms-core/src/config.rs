@@ -78,9 +78,9 @@ pub struct Policy {
     /// Margin added to the expiry before absence is accepted as proof.
     pub absence_margin_us: u64,
     /// How many "not found" answers, each to a query sent after expiry plus
-    /// margin and later than the one before, close an in-doubt order (U13c).
-    /// One for Hyperliquid; two for Bybit, whose open-order list drops old
-    /// closed orders. Not written while one.
+    /// margin and at least the margin after the one before, close an
+    /// in-doubt order (U13c). One for Hyperliquid; two for Bybit, against a
+    /// short-lived inconsistency of its query. Not written while one.
     #[serde(skip_serializing_if = "is_one")]
     pub absence_not_found_needed: u32,
     pub cancel_retry_backoff_us: u64,

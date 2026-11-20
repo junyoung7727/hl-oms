@@ -73,7 +73,7 @@ stateDiagram-v2
 | 변경 | 불명인 동안 없음. 예약은 `qty − cum_qty` 그대로 |
 | 차단 | 계좌 전체에 `InDoubt` |
 | 해소 1 | 주문의 존재 증거(상태 조회, 스트림 통보, 열린 주문 목록, 체결) → `OrderAcked` |
-| 해소 2 | `StatusNotFound { queried_at }`이고 `queried_at ≥ expires_at + absence_margin`이며 `venue_enforces_expiry` → `OrderClosed(NotPlaced)`. `absence_not_found_needed`(기본 1)가 2 이상이면 그런 "없음"을 그 수만큼 모아야 한다. 하나씩 `AbsenceNoted`로 기록하고, 앞의 것보다 늦게 보낸 조회만 센다. 마지막 것과 같은 입력에서 `OrderClosed(NotPlaced)`([ADR-024](../adr/ADR-024-absence-count-and-market-ref.md)) |
+| 해소 2 | `StatusNotFound { queried_at }`이고 `queried_at ≥ expires_at + absence_margin`이며 `venue_enforces_expiry` → `OrderClosed(NotPlaced)`. `absence_not_found_needed`(기본 1)가 2 이상이면 그런 "없음"을 그 수만큼 모아야 한다. 하나씩 `AbsenceNoted`로 기록하고, 앞에 센 것보다 `absence_margin` 이상 뒤에 보낸 조회만 센다. 마지막 것과 같은 입력에서 `OrderClosed(NotPlaced)`([ADR-024](../adr/ADR-024-absence-count-and-market-ref.md)) |
 | 해소 3 | 운영자의 `resolve` 명령 → `OrderClosed(Manual)` |
 
 | 상황 | 동작 |

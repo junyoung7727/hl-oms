@@ -1258,9 +1258,11 @@ impl Tx<'_> {
         let margin = policy.absence_margin_us;
         let (expires_at, absence) = (o.expires_at, o.absence);
         if needed > 1 {
-            // Each counted answer must be asked later than the one before:
-            // two answers to one query are one answer.
-            if absence.is_some_and(|a| queried_at <= a.last_queried_at) {
+            // Each counted answer must be asked at least the absence margin
+            // after the one before: two answers to one query, or to two
+            // queries a moment apart, may see one short-lived state of the
+            // venue and are one answer.
+            if absence.is_some_and(|a| queried_at < a.last_queried_at.saturating_add(margin)) {
                 return Ok(());
             }
             self.emit(Event::AbsenceNoted { order_id: id, queried_at })?;
