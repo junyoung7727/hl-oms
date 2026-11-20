@@ -1,6 +1,6 @@
 # Spec: oms-export (unit U15)
 
-Status: ready-for-agent
+Status: done (U15a qdp PR #32 merged ec37751; U15b this branch)
 
 Design source: `RESEARCH/CRYPTO_TRADING_INTEGRATED_TN_20261118/10_DESIGN_DRAFT.md` and `pr_plan.json` unit U15 (outside this repository). Lake contract section 4 (vendored under `contracts/lake/`, tables `trading/*.table.json`). C-TAIL for the journal side. Decision record: ADR-027.
 
@@ -46,7 +46,7 @@ The golden rows are produced by this unit's fixture journal, checked by hand aga
 
 ## Testing Decisions
 
-`crates/oms-export/tests/export.rs`: fixture journal → export → read the Parquet back → equals the vendored golden rows (all three tables); metadata `contract_ver`, `export_ver`, `table`; rerun leaves bytes and mtimes unchanged; open date not written; nothing past the read limit; another instance's answer refused (exit 3, no files); `alo` → `PostOnly`; schema-1 and schema-2 records; fill of an order accepted on an earlier date; external fill only in events; the journal directory unchanged (bytes) and its lock never taken. Writer unit tests in md-archiver for the new constructor.
+`crates/oms-export/tests/export.rs`: fixture journal → export → read the Parquet back → equals the vendored golden rows (all three tables); metadata `contract_ver`, `export_ver`, `table`; rerun leaves bytes and mtimes unchanged; open date not written; nothing past the read limit; another instance's answer refused (exit 3, no files); `alo` → `PostOnly`; schema-1 and schema-2 records; fill of an order accepted on an earlier date; external fill only in events; the journal directory unchanged (bytes) and its lock never taken. The new `SchemaWriter` is exercised through these tests; the L1 `FileWriter` keeps its own tests in md-archiver. The code was written before the tests: eight deliberate faults were each caught (ADR-027 §9).
 
 ## Out of Scope
 
