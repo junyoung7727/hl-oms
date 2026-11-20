@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `64d7745de2068b92`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `e9a615b68627b060`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 주장 79건: 통과 0, 실패 0, 미실행 12, 이전 버전 결과 67.
 
@@ -1852,10 +1852,10 @@
 - 상태: **미실행**
 - 왜 중요한가: 결과를 모르는 주문을 거부로 보거나 다시 보내 두 번 놓지 않고, 만료 뒤에 처리될 수 있는 주문을 보내지 않으며, 거래소 요청 한도를 넘어 IP 차단을 부르지 않는다는 전제
 - 수준: 통합
-- 전제와 범위: loopback 가짜 HTTP 서버(경로별 응답: 답, 끊김, 무응답, 오류 상태), 고정한 시계, 오류 문서의 코드 번호 목록(2026-11-21), 시각을 입력으로 받는 한도 규칙, 시험 26개
+- 전제와 범위: loopback 가짜 HTTP 서버(경로별 응답: 답, 끊김, 무응답, 오류 상태), 고정한 시계, 오류 문서의 코드 번호 목록(2026-11-21), 시각을 입력으로 받는 한도 규칙, 시험 27개
 - 실제 구성요소: oms-core::rate, venue::bybit::{answer, orders, rest, checks, gateway}, venue::start(명령 반복)
 - 모의·시뮬레이션: Bybit REST(문서 모양의 손으로 쓴 JSON), 시간(창 시험은 시각 입력, 9번째 주문 시험은 실제 1초)
-- 주입한 장애: 응답 없음(무응답, 끊김, 502, 읽을 수 없는 본문), 접속 거부, 만료가 1µs 모자람, 기다린 뒤 생긴 막힘, 잔고 부족 거부, orderLinkId 중복, IP 불일치 코드, HTTP 401, HTTP 403, orderId 없는 접수, 취소 대상 없음, 거래하지 않는 종목, 1초에 9번째 주문, 0.3초 걸린 응답 8개, 접속 거부 20번, 거꾸로 간 시계, 앞선 로컬 시계, 느린 시계 응답(252ms), 시계 막힘 중의 취소, 읽을 수 없는 거래소 시각, 10018, 거래소 단위보다 촘촘한 설정 단위, 읽을 수 없는 단위
+- 주입한 장애: 응답 없음(무응답, 끊김, 502, 읽을 수 없는 본문), 접속 거부, 만료가 1µs 모자람, 기다린 뒤 생긴 막힘, 잔고 부족 거부, orderLinkId 중복, IP 불일치 코드, HTTP 401, HTTP 403, orderId 없는 접수, 취소 대상 없음, 거래하지 않는 종목, 1초에 9번째 주문, 0.3초 걸린 응답 8개, 접속 거부 20번, 거꾸로 간 시계, 앞선 로컬 시계, 느린 시계 응답(252ms), 시계 막힘 중의 취소, 시계 확인의 403, 읽을 수 없는 거래소 시각, 10018, 거래소 단위보다 촘촘한 설정 단위, 읽을 수 없는 단위
 - 판정 기준과 근거: 코어에 간 결과(종류, 이유, venue_oid, 상태), 가짜 서버가 받은 요청의 경로·개수·본문·서명 머리글, 막힘 이유, 한도 규칙이 돌려준 시각, 지연(0–0.4초)과 임의 도착의 일정 2만 번에서 도착 기준 어느 1초든 주문 ≤ 8·전체 ≤ 10
 - 재현: `cargo test -p oms-core --lib rate && cargo test -p oms-node --lib venue::bybit`
 - 뒷받침하는 것: C-GW(Bybit 열: G-1, G-2, G-3, G-4, G-5, 요청 한도), ADR-028 §7d
@@ -1886,6 +1886,7 @@
 | `node-unit/venue::bybit::checks::tests::a_slow_clock_answer_proves_nothing` | 미실행 |  |
 | `node-unit/venue::bybit::checks::tests::the_clock_slot_blocks_creates_only` | 미실행 |  |
 | `node-unit/venue::bybit::gateway::tests::a_local_clock_ahead_of_the_venue_keeps_orders_home_but_not_cancels_or_the_link` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::a_ban_met_by_the_clock_check_ends_the_round` | 미실행 |  |
 | `node-unit/venue::bybit::gateway::tests::an_order_and_a_cancel_each_go_out_once_over_rest_and_get_one_result` | 미실행 |  |
 | `node-unit/venue::bybit::gateway::tests::nothing_goes_out_while_blocked_or_for_an_untraded_symbol` | 미실행 |  |
 | `node-unit/venue::bybit::checks::tests::steps_off_the_venue_steps_block_and_unreadable_steps_are_unchecked` | 미실행 |  |

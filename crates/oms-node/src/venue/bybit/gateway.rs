@@ -273,7 +273,9 @@ impl Gateway {
                 }
                 ip_due = tokio::time::Instant::now() + self.timing.ip_check;
             }
-            let wait = if booted && self.health.clock().is_none() {
+            // During a pause no check ran and `ip_due` may be past: wait the
+            // short round, not zero.
+            let wait = if booted && self.health.clock().is_none() && !self.quiet() {
                 ip_due.saturating_duration_since(tokio::time::Instant::now())
             } else {
                 self.timing.boot_retry
@@ -1608,6 +1610,22 @@ mod tests {
             .await;
         assert!(banned_at.elapsed() >= Duration::from_millis(500));
         assert_eq!(r.block(), None);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_ban_met_by_the_clock_check_ends_the_round() {
+        let api = rest_venue("REGULAR_MARGIN");
+        let ws = FakeWs::start(GOOD).await;
+        let r = rig(&api, &ws);
+        r.until("link up", up).await;
+        api.route("/v5/market/time", [Http::Reply(403, "access too frequent".into())]);
+        r.until("the ban", |r| r.block().is_some_and(|b| b.starts_with("ip_banned:")))
+            .await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(r.block().is_some_and(|b| b.starts_with("ip_banned:")), "still in the pause");
+        let reqs = api.requests();
+        let last = reqs.last().unwrap();
+        assert_eq!(last.path(), "/v5/market/time", "a request followed the ban");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
