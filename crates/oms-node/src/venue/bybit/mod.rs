@@ -1,12 +1,14 @@
 //! The Bybit v5 gateway (ADR-028), unified trading account, category
 //! `linear`, USDT settled, one-way mode, cross margin.
 //!
-//! Built in parts. U16b (this): signing, the REST client, the boot checks
-//! and the public-IP check, cancel-all. U16c: the queries and the
-//! execution table. U16d: the private stream and the node wiring. Orders
-//! are sent from U17 on.
+//! Built in parts. U16b: signing, the REST client, the boot checks and the
+//! public-IP check, cancel-all. U16c: the queries (`query`) and the
+//! execution table (`exec`). U16d: the private stream and the node wiring.
+//! Orders are sent from U17 on.
 
 pub mod checks;
+pub mod exec;
+pub mod query;
 pub mod rest;
 pub mod sign;
 

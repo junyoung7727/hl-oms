@@ -416,6 +416,11 @@ impl NodeConfig {
             if m.isolated {
                 return Err("[core.policy.margin] Bybit trades cross margin: set isolated = false".into());
             }
+            // The gateway passes `marginMode` on as the account mode
+            // (ADR-028 U16c); only cross margin keeps the rules meaningful.
+            if m.account_modes_allowed.iter().any(|a| a != "REGULAR_MARGIN") {
+                return Err("[core.policy.margin] Bybit allows only the account mode REGULAR_MARGIN".into());
+            }
         }
         Ok(())
     }
@@ -680,6 +685,10 @@ max = "10"
     fn a_bybit_configuration_loads_and_each_unsafe_value_is_refused() {
         assert_eq!(check_bybit(&bybit("testnet", ""), None), Ok(()));
         assert_eq!(check_bybit(&bybit("mainnet", "mainnet_confirmed = true"), Some("isolated = false")), Ok(()));
+        assert_eq!(
+            check_bybit(&bybit("testnet", ""), Some("isolated = false\naccount_modes_allowed = [\"REGULAR_MARGIN\"]")),
+            Ok(())
+        );
         let cases = [
             (bybit("mainnet", ""), None, "mainnet_confirmed"),
             (bybit("mainnet", "mainnet_confirmed = true"), None, "requires [core.policy.margin]"),
@@ -691,6 +700,7 @@ max = "10"
             (bybit("testnet", "").replace("https://ip.example/", "http://ip.example/"), None, "https"),
             (bybit("testnet", "ip_check_secs = 5"), None, "ip_check_secs"),
             (bybit("testnet", "recv_window_ms = 60000"), None, "recv_window_ms"),
+            (bybit("testnet", ""), Some("isolated = false\naccount_modes_allowed = [\"REGULAR_MARGIN\", \"PORTFOLIO_MARGIN\"]"), "only the account mode REGULAR_MARGIN"),
         ];
         for (venue, margin, because) in cases {
             match check_bybit(&venue, margin) {

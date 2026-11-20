@@ -1,6 +1,6 @@
 # ADR-028 Bybit 게이트웨이
 
-상태: 만드는 중. U16b(이 판): 설정, 서명, REST 클라이언트, 시작 확인, IP 확인, cancel-all. U16c: 조회와 체결 분류표, 증거금 보고. U16d: 비공개 스트림과 노드 연결. 주문 전송은 U17. 노드는 U16d 전까지 `kind = "bybit"`로 시작하지 않는다.
+상태: 만드는 중. U16b: 설정, 서명, REST 클라이언트, 시작 확인, IP 확인, cancel-all. U16c(이 판): 조회 일곱 가지와 실행 분류표, 증거금 보고. U16d: 비공개 스트림과 노드 연결. 주문 전송은 U17. 노드는 U16d 전까지 `kind = "bybit"`로 시작하지 않는다.
 
 [ADR-017](ADR-017-hyperliquid-gateway.md)의 틀을 따른다.
 
@@ -83,6 +83,44 @@
 - `credentials_file`은 `..`를 담지 않고, 심볼릭 링크와 상대 데이터 디렉터리를 풀어 비교해도 데이터 디렉터리 밖이어야 한다.
 - 자격 파일은 한 번 열어 그 핸들로 검사하고 읽는다: 일반 파일, 심볼릭 링크 아님(`O_NOFOLLOW`), OMS를 돌리는 사용자 소유, 그룹·기타 권한 없음.
 
+## 7b. 조회와 실행 분류표 (U16c)
+
+`venue/bybit/query.rs`(`Queries::answer`가 `QueryReq` 하나에 입력 목록 `Answer`를 돌려준다. 노드 연결은 U16d), `venue/bybit/exec.rs`(실행 행 하나 → 입력 하나, 스트림도 같은 함수를 쓴다).
+
+| 조회 | 요청 | 처리 | 출력 | 못 읽으면 |
+|---|---|---|---|---|
+| Status | `GET /v5/order/realtime`, 없으면 `GET /v5/order/history`(category linear, settleCoin USDT, 우리 `orderLinkId`) | 우리 `orderLinkId`의 행만 본다. 상태표: `New`·`PartiallyFilled` = 열림, `Filled`, `Cancelled`(사유 `cancelType`), `Rejected`(사유 `rejectReason`). `cum` = `cumExecQty`, 시각 = `updatedTime` | `OrderStatus` 또는 둘 다 없을 때 `StatusNotFound`(첫 요청 전 시각) | 입력 없음 |
+| Fills | `GET /v5/execution/list`(linear, USDT, limit 100, cursor) | `since`부터 지금 − `fills_lag_ms`까지 7일 이하 창. 창 시작은 1ms 앞에서(경계 포함 여부가 문서에 없다). 행마다 분류표, 같은 키는 한 번 | 창마다 실행 입력들 + `FillsSynced { up_to: 창 끝 − 1µs }` | 그 창부터 멈춤(앞 창의 선언은 남는다) |
+| OpenOrders | `GET /v5/order/realtime`(linear, USDT, limit 50, 모든 쪽) | 열린 상태의 행만. `remaining` = `leavesQty` | `OpenOrders` | 입력 없음 |
+| Positions | `GET /v5/position/list`(linear, USDT, limit 200, 모든 쪽) | 단방향 행만, 수량 = `side` 부호 × `size` | `Positions` | 입력 없음 |
+| Margin | `wallet-balance`(UNIFIED), `account/info`, `position/list`(모든 쪽), 처음 보는 종목은 `instruments-info` | 계좌 가치 `totalEquity`, 포지션마다 `positionValue`, 증거금 `positionIM`, 레버리지 정수, 증거금 모드 = 계좌의 `marginMode`, `maxLeverage` | `MarginReport` | `MarginReportInvalid`(응답 없음이면 입력 없음) |
+| VenueSetting | `account/info`, `position/list`(symbol) | 행 하나, 단방향, 그 종목. 격리 = `ISOLATED_MARGIN` | `VenueSetting` | 입력 없음 |
+| AccountMode | `account/info` | `marginMode` 그대로(64자 이하) | `AccountMode` | 입력 없음 |
+
+실행 분류표(`exec::classify`):
+
+| `execType` | 입력 |
+|---|---|
+| `Trade` | `Fill`. `orderLinkId`가 이 인스턴스의 `Base32Pair`이면 그 주문, 아니면 `order_id` 없음(외부 체결, 코어는 `orderId`로도 찾는다). `fee` = `execFee`, `is_maker` = `isMaker`, 조회 행의 `recv_ns`는 비움 |
+| `Funding` | `Funding`. 금액 = `execFee`(양수 = 계좌가 냄, F20 Q9.5) |
+| `AdlTrade`, `BustTrade`, `Delivery`, `Settle` | `PositionChange`(adl, takeover, delivery, settle). 수량 = `side` 부호 × `execQty`, 가격 = `execPrice` |
+| 그 밖, 없음 | `UnclassifiedExecution`(종류 32자, 행의 주요 값) |
+
+체결 키는 `<symbol>:<execId>`. 행을 읽을 수 없으면(키·종목·시각·수량·가격·수수료) 입력이 아니라 오류다: 조회는 그 창을 완료로 선언하지 않고, 스트림(U16d)은 끊고 다시 붙는다(G-9).
+
+| 결정 | 대안 | 고른 것과 이유 |
+|---|---|---|
+| 마지막 쪽 | 빈 커서 = 끝, 빈 커서 + 덜 찬 쪽 = 끝 | 둘 다일 때만 끝. 빈 커서의 뜻은 이 엔드포인트들의 문서에 없다(F20 Q9.9). 다 찬 쪽에 커서가 없으면 스냅숏은 넘기지 않고, 체결 창은 반으로 나눠 다시 읽는다 |
+| 상태 조회의 정산 범위 | 주문의 종목, `settleCoin` | `settleCoin=USDT`. linear는 셋 중 하나가 필요하고(F20 Q10.4), `orderLinkId`가 우선한다. `QueryReq::Status`에 종목이 없다 |
+| `cum` | 비움(Hyperliquid), 채움 | 채움. `cumExecQty`의 뜻이 문서에 하나다(Hyperliquid의 `sz`는 두 뜻으로 적혀 있어 비웠다). 코어는 체결 합이 그 값과 같으면 닫고, 모자라면 체결 동기화 뒤 `MissingFills` 불일치를 낸다. 거래소가 종결 상태를 최종 수량보다 먼저 낮은 값으로 말하면 일찍 닫힌다(가정: 종결 상태의 `cumExecQty`는 최종이다) |
+| 조건부·스팟 상태 | 열림·닫힘으로 번역, 결론 없음 | 결론 없음(`Untriggered`, `Triggered`, `Deactivated`, `PartiallyFilledCanceled`). OMS는 그런 주문을 내지 않는다(G-13). 열린 주문 목록에는 `Untriggered`도 넣는다(남의 주문이라도 걸려 있다) |
+| 계좌 가치 | `totalEquity`, `totalMarginBalance` | `totalEquity`(모든 자산의 USD 합). 하루 손실 규칙이 보는 계좌 전체 값이다(판단) |
+| 포지션의 증거금 모드 | 포지션 필드, 계좌 모드 | 계좌 모드(`account/info`). 통합 계좌는 모드가 계좌 하나에 하나이고 포지션의 `tradeMode`는 폐기되었다(F18 §6). 그래서 증거금 보고마다 요청이 셋이다 |
+| 소수 레버리지 | 내림, 거절 | 거절. 보고 전체가 `MarginReportInvalid`, 설정은 모름으로 남는다(코어가 일반 주문을 막는 쪽). 문서는 0.01 단위를 허용하는 것으로 보인다(F20 Q8.5) |
+| `maxLeverage` | 보고마다 읽음, 프로세스당 한 번 | 한 번(종목마다 캐시). 유지증거금 규칙은 격리 포지션에만 쓰고 이 계좌는 교차다. 보고에는 0이 아닌 값이 있어야 한다 |
+| 계좌 모드 허용 목록 | 아무 값, `REGULAR_MARGIN`만 | 설정 검증이 `REGULAR_MARGIN` 밖의 값을 거절한다 |
+| 체결 한 번의 일 | 끝까지, 쪽 수 상한 | 30쪽. 다 읽은 창은 `FillsSynced`로 선언했으므로 다음 조회가 거기서 잇는다(400일 공백은 여러 번에 나눠 읽는다) |
+
 ## 8. 포기한 장점, 남은 위험, 가정
 
 - 위험: 교차 계좌에는 유지증거금 여유 규칙(C-MARGIN)이 걸리지 않는다(격리 포지션에만 있다). 주문을 보내는 U17 전에 정할 일이다(소유자 질문).
@@ -94,12 +132,18 @@
 - 확인하지 않음: 실제 Bybit 응답(이 단위의 시험은 loopback 가짜 서버만 쓴다).
 - 확인하지 않음: 다른 사용자 소유 파일의 거절(시험에 root가 필요하다).
 - 위험: `api.bybit.com`이 IPv6로만 닿는 경우는 생각하지 않았다. IPv4만 쓰므로 그때는 연결이 안 되어 막힌다(안전한 쪽).
+- 위험(U16c): 숫자가 소수 9자리 이상이면(코어는 1e-8 단위) 그 응답은 못 읽은 것이 된다. 증거금 보고면 보고 전체가 무효라 일반 주문이 막힌다(안전한 쪽). 실제 자릿수는 testnet에서 본다.
+- 위험(U16c): 같은 밀리초에 쪽 한도(100)의 배수만큼 실행이 있고 거래소가 마지막 다 찬 쪽에 빈 커서를 주면, 1ms 창까지 나눠도 끝을 알 수 없어 동기화가 멈춘다(오류 기록, 주문이 닫히지 않는 쪽).
+- 가정(U16c): `execFee`는 Trade에서 양수 = 비용이다. maker 리베이트의 부호는 문서에 없다(F20 Q9.5).
+- 가정(U16c): ADL·청산 인수 행의 `side`는 우리 포지션이 움직인 쪽이다(T15 전까지).
+- 확인하지 않음(U16c): 펀딩·ADL 행이 실행 목록에 실제로 실리는지, maker 체결에 `orderLinkId`가 있는지(F20 Q9.6, Q14).
 
 ## 9. 근거
 
 - 시험(U16b, Linux PC): `venue::bybit::{sign,rest,checks}`, `venue::bybit::tests`와 `config::tests`의 새 시험 19개. 문서의 서명할 문자열, RFC 4231, Python 값, 보낸 바이트에 대한 서명(GET 질의, POST 본문), 거부 코드마다 요청 한 번, 응답 종류별 분류, 자격 파일 권한과 비밀 비출력, 시작 확인이 모두 맞을 때 읽기 요청 넷, 어긋나는 사실 12가지 각각, 묶이지 않은 IP, IP 변경과 풀리지 않는 막힘, 설정 거절 12가지.
 - 결함 10가지를 일부러 넣어 시험이 모두 잡았다: 거부 코드 분류, 서명 대상, 마스터 키, IP 미바인딩, 헤지 모드, 정산 코인, 막힘 해제, 자격 파일 권한, ADR-024 값, https.
 - 독립 검토(꼭 고칠 것 1, 고칠 것 5) 반영 뒤 결함 8가지를 더 넣어 모두 잡았다: IP 칸이 시작 칸을 덮음, cancel-all `success` 무시, 403을 한도로 봄, 데이터 디렉터리 글자 비교, 심볼릭 링크 따라감, 일반 파일 아님, IPv4 대응 주소, 500건 표시.
+- 시험(U16c, Linux PC): `venue::bybit::exec::tests` 6개, `venue::bybit::query::tests` 16개, `config::tests`의 Bybit 시험에 계좌 모드 거절 추가(주장 V-BYBIT-READ-1). 가짜 서버(경로별 응답)로 보낸 요청의 경로·질의·순서와 만든 입력 전체를 본다.
 
 ## 10. 재검토 조건
 

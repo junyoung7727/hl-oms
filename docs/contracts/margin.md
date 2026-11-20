@@ -225,6 +225,31 @@ Hyperliquid 게이트웨이는 세 조회를 `/info`로 보내고 응답을 코�
 
 확인하지 않은 것: 실제 응답이 문서의 예와 같은지, `marginUsed`가 격리 자산인지(T1), 계좌 가치가 격리 자산을 포함하는지(T2), 어느 `userAbstraction` 값이 표준 모드인지(T10), 포지션이 없을 때 `activeAssetData`가 레버리지를 주는지(T11).
 
+### Bybit 조회
+
+Bybit 게이트웨이([ADR-028](../adr/ADR-028-bybit-gateway.md) §7b)는 세 조회를 서명한 REST GET으로 보낸다. 읽기만 한다. 응답이 없으면(시간 초과, HTTP 오류, 한도) 입력이 없다. 노드에 연결되는 것은 U16d이고, 요청 한도 예산은 아직 없다(U17).
+
+| 조회 | 요청 | 응답 → 입력 |
+|---|---|---|
+| 증거금 보고 | `wallet-balance?accountType=UNIFIED`, `account/info`, `position/list?category=linear&settleCoin=USDT`(모든 쪽), 처음 보는 종목은 `instruments-info` | `MarginReport` 또는 `MarginReportInvalid { reason }` |
+| 거래소 설정 | `account/info`, `position/list?category=linear&symbol=종목` | `VenueSetting` 또는 없음 |
+| 계좌 모드 | `account/info` | `AccountMode { mode: marginMode }` 또는 없음 |
+
+| 입력의 값 | 응답의 필드 |
+|---|---|
+| `account_value` | `accountType = UNIFIED`인 계좌 하나의 `totalEquity`(USD, 모든 자산) |
+| `instrument` | `symbol` |
+| `szi` | `side`(`Buy` +, `Sell` −) × `size`. `positionIdx`가 0이 아니면 못 읽음 |
+| `position_value` | `positionValue` |
+| `margin_used` | `positionIM` |
+| `leverage_type` | 계좌의 `marginMode`: `REGULAR_MARGIN` = 교차, `ISOLATED_MARGIN` = 격리, 그 밖은 보고 전체가 무효 |
+| `leverage_value` | `leverage`(문자열). 0보다 큰 정수여야 한다. `2.5`는 무효 |
+| `max_leverage` | `instruments-info`의 `leverageFilter.maxLeverage`(`"100.00"` = 100). 종목마다 프로세스에서 한 번 읽는다 |
+
+- Hyperliquid와 같이 하나라도 못 읽으면 응답 전체가 `MarginReportInvalid`이고 아무것도 기본값으로 채우지 않는다. `settleCoin=USDT` 밖의 포지션(USDC 등)은 보고에 없다. 계좌 가치에는 들어 있다.
+- 교차 계좌라 유지증거금 여유 규칙은 어떤 포지션에도 걸리지 않는다(격리 포지션에만 있다). 교차 계좌용 규칙은 U17 전에 정한다(소유자 질문).
+- 거래소 설정의 격리 여부는 계좌 모드에서 온다(통합 계좌는 종목별 모드가 없다). 설정 검증은 Bybit에서 `isolated = false`와 `account_modes_allowed`에 `REGULAR_MARGIN`만 받는다.
+
 ### 변형 입력
 
 | 상황 | 동작 |
@@ -290,6 +315,7 @@ Hyperliquid 게이트웨이는 세 조회를 `/info`로 보내고 응답을 코�
 | Hyperliquid 조회(거래소 설정, 계좌 모드, 요청 본문) | V-MARGIN-10 | `wire::tests::documented_active_asset_data_parses_leverage_and_mode`, `user_abstraction_values_parse_and_an_unknown_value_stays_unknown`, `margin_and_setting_request_json` (oms-node 단위). 변이 M74~M76 |
 | Hyperliquid 조회(조회 weight 예산, 예제 설정) | V-CFG-1 | `config::tests::steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused`, `example_config_with_a_margin_policy_loads` (oms-node 단위). 변이 M77, M78 |
 | Hyperliquid 조회(취소 폭주 뒤의 요청 예산) | V-MARGIN-10 | `venue::hyperliquid::tests::a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time` (oms-node 단위). 변이 M79 |
+| Bybit 조회(증거금 보고, 거래소 설정, 계좌 모드의 번역) | V-BYBIT-READ-1 | `venue::bybit::query::tests::the_margin_report_maps_the_unified_account`, `a_margin_answer_that_cannot_be_read_as_a_whole_is_refused_as_a_whole`, `the_venue_setting_and_the_account_mode_are_read_as_they_are`, `config::tests::a_bybit_configuration_loads_and_each_unsafe_value_is_refused` (oms-node 단위) |
 | 차단 표(거래소 설정, 계좌 모드) | V-MARGIN-9 | `margin::reduce_only_order_passes_the_venue_setting_and_account_mode_holds`. 변이 M50 |
 | 설정(`runtime.venue_setting_poll_ms`) | V-CFG-1 | `config::tests::mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused` (oms-node 단위) |
 | 해제와 기준 재설정 | V-MARGIN-6 | `margin::clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing`, `clear_reduce_rebases_the_day_and_a_further_loss_latches_again`, `rebase_day_sets_the_base_and_leaves_the_latch_alone`, `a_withdrawal_without_rebase_reads_as_a_loss`. 변이 M51~M57 |
