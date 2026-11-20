@@ -116,27 +116,33 @@ payload 하나는 JSON 객체 하나다: `{"seq": u64, "at": u64 µs(기록 시�
 | `status_noted` | `venue_ts` | u64 µs | 거래소 시각 |
 | `order_recheck` | `order_id` | u64 | 주문 번호(코어가 1부터 매김) |
 | `fill_booked` | `fee` | decimal string | 수수료, 양수는 비용 |
+| `fill_booked` | `is_maker` | bool | 거래소의 maker 표시(Bybit `isMaker`). 게이트웨이가 모르면 쓰지 않음 |
 | `fill_booked` | `key` | string | 체결 키(게이트웨이가 정함, C-GW G-8) |
 | `fill_booked` | `order_id` | u64 | 주문 번호(코어가 1부터 매김) |
 | `fill_booked` | `px` | decimal string | 가격 |
 | `fill_booked` | `qty` | decimal string | 수량(0 이상) |
+| `fill_booked` | `recv_ns` | i64 ns | 게이트웨이가 체결 통보를 받은 시각. 모르면 쓰지 않음 |
 | `fill_booked` | `venue_ts` | u64 µs | 거래소 시각 |
 | `fill_parked` | `fill.fee` | decimal string | 체결 통보의 수수료, 양수는 비용 |
 | `fill_parked` | `fill.instrument` | string | 체결 통보의 종목 |
+| `fill_parked` | `fill.is_maker` | bool | 체결 통보의 maker 표시. 모르면 쓰지 않음 |
 | `fill_parked` | `fill.key` | string | 체결 통보의 체결 키(게이트웨이가 정함, C-GW G-8) |
 | `fill_parked` | `fill.order_id` | u64 또는 null | 게이트웨이가 클라이언트 ID에서 복원한 주문 번호(없으면 null) |
 | `fill_parked` | `fill.px` | decimal string | 체결 통보의 가격 |
 | `fill_parked` | `fill.qty` | decimal string | 체결 통보의 수량(0 이상) |
+| `fill_parked` | `fill.recv_ns` | i64 ns | 체결 통보를 받은 시각. 모르면 쓰지 않음 |
 | `fill_parked` | `fill.side` | enum buy/sell | 체결 통보의 방향 |
 | `fill_parked` | `fill.venue_oid` | string 또는 null | 체결 통보의 거래소 주문 번호 |
 | `fill_parked` | `fill.venue_ts` | u64 µs | 체결 통보의 거래소 시각 |
 | `fill_unparked` | `key` | string | 체결 키(게이트웨이가 정함, C-GW G-8) |
 | `external_fill_booked` | `fill.fee` | decimal string | 체결 통보의 수수료, 양수는 비용 |
 | `external_fill_booked` | `fill.instrument` | string | 체결 통보의 종목 |
+| `external_fill_booked` | `fill.is_maker` | bool | 체결 통보의 maker 표시. 모르면 쓰지 않음 |
 | `external_fill_booked` | `fill.key` | string | 체결 통보의 체결 키(게이트웨이가 정함, C-GW G-8) |
 | `external_fill_booked` | `fill.order_id` | u64 또는 null | 게이트웨이가 클라이언트 ID에서 복원한 주문 번호(없으면 null) |
 | `external_fill_booked` | `fill.px` | decimal string | 체결 통보의 가격 |
 | `external_fill_booked` | `fill.qty` | decimal string | 체결 통보의 수량(0 이상) |
+| `external_fill_booked` | `fill.recv_ns` | i64 ns | 체결 통보를 받은 시각. 모르면 쓰지 않음 |
 | `external_fill_booked` | `fill.side` | enum buy/sell | 체결 통보의 방향 |
 | `external_fill_booked` | `fill.venue_oid` | string 또는 null | 체결 통보의 거래소 주문 번호 |
 | `external_fill_booked` | `fill.venue_ts` | u64 µs | 체결 통보의 거래소 시각 |

@@ -284,6 +284,8 @@ pub fn core_bench_case(orders: u64, margin: bool) -> Result<CoreBenchCase, Strin
                 px: o.px,
                 fee: Amount(1000),
                 venue_ts: at,
+                is_maker: None,
+                recv_ns: None,
             }));
             let (out, ns) = go(&mut core, &mut at, input.clone());
             t_fill.push(ns);

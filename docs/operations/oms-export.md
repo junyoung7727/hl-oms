@@ -47,7 +47,7 @@ market = "linear"                              # 모든 주문 행의 market
 | `symbol` | 저널의 `instrument` |
 | `fills.exec_id` | 체결 키. Bybit 키 `<symbol>:<execId>`에서는 `execId` |
 | `wire_id` | 주문 번호와 인스턴스 번호를 상태 답의 `node.wire_id_form`으로 쓴 것(Bybit `orderLinkId`). 답에 형식이 없으면 null |
-| `fills.is_maker`, `fills.recv_ns` | 아직 null(저널에 없음, U16) |
+| `fills.is_maker`, `fills.recv_ns` | 저널 체결의 `is_maker`, `recv_ns`(게이트웨이가 아는 경우, U16a). 없으면 null |
 | `fills.venue_ts_ns` | 저널의 `venue_ts`(µs) × 1000 |
 | `events.payload` | 이벤트의 필드 객체, 키 정렬 |
 

@@ -143,6 +143,8 @@ fn schema_1_history(run: &mut Run) {
         px: Px::parse("100").unwrap(),
         fee: Amount::ZERO,
         venue_ts: ts,
+        is_maker: None,
+        recv_ns: None,
     }));
     run.input(Input::Operator(OperatorCmd::AdjustPosition {
         instrument: iid("X"),

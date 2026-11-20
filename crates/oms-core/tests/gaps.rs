@@ -19,6 +19,8 @@ fn fill_for(key: &str, order_id: Option<OrderId>, oid: Option<&str>, instrument:
         px: px("100"),
         fee: Amount::ZERO,
         venue_ts: ts,
+        is_maker: None,
+        recv_ns: None,
     }
 }
 

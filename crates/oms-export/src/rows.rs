@@ -353,10 +353,22 @@ impl Mapper {
                 ("px", V::Str(str_at(fields, "px")?.to_string())),
                 ("qty", V::Str(str_at(fields, "qty")?.to_string())),
                 ("fee", V::Str(str_at(fields, "fee")?.to_string())),
-                // Not in the journal before U16 (contract 4.2: nullable).
-                ("is_maker", V::Null),
+                // Null in journals written before U16a (contract 4.2).
+                (
+                    "is_maker",
+                    fields
+                        .get("is_maker")
+                        .and_then(Value::as_bool)
+                        .map_or(V::Null, V::Bool),
+                ),
                 ("venue_ts_ns", V::Int(int(venue_ts_ns, "venue_ts_ns")?)),
-                ("recv_ns", V::Null),
+                (
+                    "recv_ns",
+                    fields
+                        .get("recv_ns")
+                        .and_then(Value::as_i64)
+                        .map_or(V::Null, V::Int),
+                ),
             ],
         )
     }

@@ -448,6 +448,8 @@ impl H {
             px: px(price),
             fee: Amount::ZERO,
             venue_ts: self.now,
+            is_maker: None,
+            recv_ns: None,
         }))
     }
 

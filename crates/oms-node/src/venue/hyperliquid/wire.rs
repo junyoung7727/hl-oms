@@ -341,6 +341,8 @@ pub fn fill_input(f: &HlFill, instance_id: u64) -> Option<FillIn> {
         px: Px::parse(&f.px).ok()?,
         fee: f.fee.as_deref().and_then(|s| Amount::parse(s).ok()).unwrap_or(Amount::ZERO),
         venue_ts: f.time.saturating_mul(1000),
+        is_maker: None,
+        recv_ns: None,
     })
 }
 

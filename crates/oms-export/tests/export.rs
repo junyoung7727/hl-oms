@@ -190,6 +190,8 @@ fn fill_keyed(
         px: px(price),
         fee: amt(fee),
         venue_ts,
+        is_maker: None,
+        recv_ns: None,
     }));
 }
 
@@ -413,7 +415,7 @@ fn every_file_carries_the_contract_metadata_and_types() {
         );
         assert_eq!(
             m.get("export_ver").map(String::as_str),
-            Some("oms-export-1"),
+            Some("oms-export-2"),
             "{rel}"
         );
         assert_eq!(m.get("table").map(String::as_str), Some(table), "{rel}");
@@ -789,4 +791,41 @@ fn a_journal_shorter_than_the_durable_sequence_is_an_error() {
         Err(ExportError::Failed(e)) => assert!(e.contains("records are missing"), "{e}"),
         other => panic!("expected a failure, got {other:?}"),
     }
+}
+
+#[test]
+fn a_fill_with_the_maker_flag_and_receive_time_exports_them() {
+    let root = tmp("maker");
+    let mut h = h_at(DAY1);
+    let o = order(&mut h, "k", Side::Buy, "0.002", "42000.0", Tif::Gtc, None);
+    h.placed_open(o, "v");
+    let venue_ts = h.now;
+    h.venue(VenueInput::Fill(FillIn {
+        key: fkey("BTCUSDT:x1"),
+        order_id: Some(o),
+        venue_oid: Some(void("v")),
+        instrument: iid("BTCUSDT"),
+        side: Side::Buy,
+        qty: q("0.001"),
+        px: px("42000.0"),
+        fee: amt("-0.0001"),
+        venue_ts,
+        is_maker: Some(true),
+        recv_ns: Some(1_767_312_000_123_456_789),
+    }));
+    fill(&mut h, Some(o), "x2", Side::Buy, "0.001", "42000.0", "0");
+    at(&mut h, DAY1 + DAY + SEC);
+    h.ref_price("BTCUSDT", "42000.0");
+    let _w = journal(&root.join("data"), &h.log, 2);
+    export(&settings(&root), &mut alive(h.log.len() as u64)).unwrap();
+    let fills = &lake(&root)["crypto/trading/fills/date=2026-01-02/day.parquet"];
+    assert_eq!(fills.len(), 2);
+    assert_eq!(fills[0]["is_maker"], true);
+    assert_eq!(fills[0]["recv_ns"], 1_767_312_000_123_456_789_i64);
+    assert_eq!(
+        fills[1]["is_maker"],
+        Value::Null,
+        "a report without them stays null"
+    );
+    assert_eq!(fills[1]["recv_ns"], Value::Null);
 }

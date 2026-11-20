@@ -88,6 +88,12 @@ pub enum Event {
         px: Px,
         fee: Amount,
         venue_ts: Ts,
+        /// From the fill report (`FillIn::is_maker`). Not written when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        is_maker: Option<bool>,
+        /// From the fill report (`FillIn::recv_ns`). Not written when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        recv_ns: Option<i64>,
     },
     FillParked {
         fill: FillIn,

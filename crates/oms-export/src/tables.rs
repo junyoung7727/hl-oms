@@ -8,7 +8,7 @@ use md_archiver::table::{TableSchema, parse_vendored};
 /// The exporter's version (contract 6): raised when the same journal would
 /// give different rows. Every file carries it, so a rise rewrites every
 /// date.
-pub const EXPORT_VER: &str = "oms-export-1";
+pub const EXPORT_VER: &str = "oms-export-2";
 
 pub const ORDERS_JSON: &str = include_str!("../../../contracts/lake/trading/orders.table.json");
 pub const FILLS_JSON: &str = include_str!("../../../contracts/lake/trading/fills.table.json");

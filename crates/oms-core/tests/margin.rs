@@ -2163,6 +2163,8 @@ fn an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing() {
         px: px("95"),
         fee: Amount::ZERO,
         venue_ts,
+        is_maker: None,
+        recv_ns: None,
     }));
     assert_eq!(h.unacked_mismatches(), vec![MismatchKind::ExternalFill]);
     assert_eq!(h.acct().pos, sq("0"));
