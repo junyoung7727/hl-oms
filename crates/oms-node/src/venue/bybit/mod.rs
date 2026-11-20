@@ -3,14 +3,16 @@
 //!
 //! Built in parts. U16b: signing, the REST client, the boot checks and the
 //! public-IP check, cancel-all. U16c: the queries (`query`) and the
-//! execution table (`exec`). U16d: the private stream and the node wiring.
-//! Orders are sent from U17 on.
+//! execution table (`exec`). U16d: the private stream (`stream`) and the
+//! gateway behind `VenueGateway` (`gateway`). Orders are sent from U17 on.
 
 pub mod checks;
 pub mod exec;
+pub mod gateway;
 pub mod query;
 pub mod rest;
 pub mod sign;
+pub mod stream;
 
 use serde_json::Value;
 

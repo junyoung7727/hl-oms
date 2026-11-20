@@ -1,6 +1,6 @@
 # Spec: Bybit gateway, part 1 (unit U16, PRs U16b–U16d)
 
-Status: in progress (U16a merged 0181f6f: fill maker flag and receive time; U16b merged b10e994)
+Status: in progress (U16a merged 0181f6f: fill maker flag and receive time; U16b merged b10e994; U16c merged 65e4d17; U16d this PR)
 
 Design source: `pr_plan.json` U16 and the design TN (outside this repository). Facts: `RESEARCH/BYBIT_V5_PRIVATE_API_FACTS_20261118.md`, `RESEARCH/BYBIT_V5_GATEWAY_FACTS_20261120.md` (outside; cited as F18 §n, F20 Qn.m). Decision record: ADR-028.
 
@@ -48,6 +48,17 @@ Loopback `http-fake` only. Signing: doc strings, RFC 4231, Python vector, header
 ## Testing Decisions (U16c)
 
 Loopback `http-fake` with per-path answers. Every exec type row; status table; realtime → history → not found; other-order rows; paging (two pages with a venue-style cursor, full page without cursor, stuck cursor, endless cursor, 10016 mid-way); positions sign and hedge row; margin mapping and each whole-report refusal; venue setting and account mode; fill windows, overlap, de-duplication, unreadable row, split, page budget; a source scan for order requests.
+
+## U16d decisions
+
+- `venue/bybit/stream.rs`: auth (`GET/realtime` + expires, expires = now + `recv_window_ms`), subscribe `order.linear` and `execution.linear` (not `position`/`wallet`: a push names one symbol, the core takes whole snapshots), ping `{"op":"ping"}`; both pong shapes; `order_input` through `query::order_status`.
+- `venue/bybit/gateway.rs`: `VenueGateway` (Base32Pair, 4 queries). Boot checks until they pass (every 10 s), then the IP loop (`ip_check_secs`; no answer keeps the last result). Connect only with no block; auth confirmed, then subscribe confirmed, then `Link` up with a new session per connection. Ping every `ping_interval_ms` (5000, 1000–20000); no pong by the next ping = down. Health polled every 250 ms while up. Refused auth = auth rejected until restart; refused subscribe = retry. HTTP 403 from any request = pause REST and stream for `IP_BAN_PAUSE`. Orders and cancels: `NotSent` (U17). Rows of untraded symbols are not passed on.
+- Reconnect re-read: the core's `Resync` (new session) drives fills, open orders and positions over the queries; the gateway does none of its own.
+- Status API: `gateway.block`. Node: `node.venue = bybit:<network>`. Ref price: U17.
+
+## Testing Decisions (U16d)
+
+Loopback fake WebSocket (scripted auth/subscribe/pong answers, pushed frames, drop) and `http-fake` (REST + IP echo), shortened timing. Link up after checks/auth/subscribe and rows to inputs; no connect while a boot check fails; missing pong; unreadable row and dropped socket; refused auth; refused subscribe; IP change while up; 403 pause; query auth code; orders and cancels NotSent. Six mutations caught.
 
 ## Out of Scope
 
