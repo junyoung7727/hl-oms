@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/oms-core", "crates/oms-journal", "crates/oms-sim", "crates/oms-api", "crates/oms-node", "crates/xtask", "crates/md-core", "crates/md-bybit", "crates/md-lake", "crates/md-feed", "crates/md-collector", "crates/http-fake", "crates/alert-direct", "crates/obs-push", "crates/md-archiver"]
+members = ["crates/oms-core", "crates/oms-journal", "crates/oms-sim", "crates/oms-api", "crates/oms-node", "crates/xtask", "crates/md-core", "crates/md-bybit", "crates/md-lake", "crates/md-feed", "crates/md-collector", "crates/http-fake", "crates/alert-direct", "crates/obs-push", "crates/md-archiver", "crates/oms-projector"]
 
 [workspace.package]
 version = "0.1.0"

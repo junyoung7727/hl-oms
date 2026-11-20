@@ -33,3 +33,4 @@
 | [ADR-023](ADR-023-venue-made-executions.md) | 펀딩·거래소가 만든 포지션 변경·분류 못 한 실행을 저널에 따로 기록하고 불일치로 막음, 기록 스키마 2 | 거래소 |
 | [ADR-024](ADR-024-absence-count-and-market-ref.md) | 부재 판정의 "없음" 횟수(Bybit 2), Bybit 만료는 게이트웨이가 recv window로 강제, 새 주문의 market_ref | 거래소 |
 | [ADR-025](ADR-025-journal-tail.md) | OMS 밖에서 저널을 읽는 법: 잠금 없이 내구화 번호까지, 이벤트 필드 표를 시험으로 인코더와 맞춤 | 운영 |
+| [ADR-026](ADR-026-observability-projector.md) | 저널을 따라 읽어 VictoriaMetrics·VictoriaLogs로 내보내는 별도 프로젝터, 저장소가 받은 줄까지만 커서, 죽은 OMS의 미확정 줄(ADR-016 §8을 대신함) | 운영 |
