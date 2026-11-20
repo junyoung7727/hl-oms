@@ -302,10 +302,13 @@ impl Gateway {
                 tokio::time::sleep(self.timing.health_poll).await;
                 continue;
             }
-            let before = connection;
-            let end = self.run_stream(boot, &mut connection).await;
-            if connection != before {
-                // The link was up: the waits start over.
+            let mut alive = false;
+            let end = self.run_stream(boot, &mut connection, &mut alive).await;
+            if alive {
+                // The link was up and answered a ping: the waits start over.
+                // A link that fails before its first pong keeps them growing,
+                // so a fault that recurs on every connection does not
+                // reconnect every half second.
                 backoff = self.timing.backoff_min;
             }
             match end {
@@ -362,9 +365,9 @@ impl Gateway {
     }
 
     /// One connection, from the upgrade to its end. `connection` grows only
-    /// when the link came up.
-    async fn run_stream(&self, boot: u32, connection: &mut u32) -> End {
-        match self.stream_once(boot, connection).await {
+    /// when the link came up; `alive` is set at the first pong.
+    async fn run_stream(&self, boot: u32, connection: &mut u32, alive: &mut bool) -> End {
+        match self.stream_once(boot, connection, alive).await {
             Ok(never) => match never {},
             Err(e) => e,
         }
@@ -374,6 +377,7 @@ impl Gateway {
         &self,
         boot: u32,
         connection: &mut u32,
+        alive: &mut bool,
     ) -> Result<std::convert::Infallible, End> {
         let ws = tokio::time::timeout(self.timing.handshake, self.connect())
             .await
@@ -445,6 +449,9 @@ impl Gateway {
         let reason = loop {
             let due = pong_due.unwrap_or_else(tokio::time::Instant::now);
             let msg = tokio::select! {
+                // What the socket already holds is read before the deadline
+                // is judged: a pong waiting in the buffer is not missing.
+                biased;
                 m = read.next() => match m {
                     None => break "closed by the venue".to_string(),
                     Some(Err(e)) => break format!("read failed: {e}"),
@@ -480,6 +487,7 @@ impl Gateway {
             let delivered = match frame {
                 stream::Frame::Pong => {
                     pong_due = None;
+                    *alive = true;
                     Ok(())
                 }
                 stream::Frame::Orders(rows) => self.orders(&rows, session).await,
@@ -749,6 +757,8 @@ mod tests {
         pong: bool,
         /// Answer the upgrade with HTTP 403.
         forbid: bool,
+        /// Send a frame that is not JSON right after confirming subscribe.
+        garbage: bool,
     }
 
     /// What one fake connection received.
@@ -768,6 +778,8 @@ mod tests {
         conns: Arc<Mutex<Vec<ConnLog>>>,
         /// TCP connections, upgraded or not.
         attempts: Arc<AtomicU64>,
+        /// Pings that got no pong.
+        unanswered: Arc<AtomicU64>,
         push: Arc<Mutex<Option<mpsc::UnboundedSender<Ctl>>>>,
     }
 
@@ -780,10 +792,11 @@ mod tests {
                 mode: Arc::new(Mutex::new(mode)),
                 conns: Arc::default(),
                 attempts: Arc::default(),
+                unanswered: Arc::default(),
                 push: Arc::default(),
             };
             let (mode, conns, push) = (fake.mode.clone(), fake.conns.clone(), fake.push.clone());
-            let attempts = fake.attempts.clone();
+            let (attempts, unanswered) = (fake.attempts.clone(), fake.unanswered.clone());
             tokio::spawn(async move {
                 while let Ok((tcp, _)) = listener.accept().await {
                     attempts.fetch_add(1, Ordering::SeqCst);
@@ -803,7 +816,7 @@ mod tests {
                     conns.lock().unwrap().push(log.clone());
                     let (tx, rx) = mpsc::unbounded_channel();
                     *push.lock().unwrap() = Some(tx);
-                    tokio::spawn(serve(ws, mode.clone(), log, rx));
+                    tokio::spawn(serve(ws, mode.clone(), log, rx, unanswered.clone()));
                 }
             });
             fake
@@ -819,6 +832,10 @@ mod tests {
 
         fn attempts(&self) -> u64 {
             self.attempts.load(Ordering::SeqCst)
+        }
+
+        fn unanswered(&self) -> u64 {
+            self.unanswered.load(Ordering::SeqCst)
         }
 
         fn texts(&self, i: usize) -> Vec<String> {
@@ -845,6 +862,7 @@ mod tests {
         mode: Arc<Mutex<Mode>>,
         log: Arc<Mutex<Vec<String>>>,
         mut ctl: mpsc::UnboundedReceiver<Ctl>,
+        unanswered: Arc<AtomicU64>,
     ) {
         let (mut write, mut read) = ws.split();
         loop {
@@ -858,10 +876,19 @@ mod tests {
                         Some("auth") if m.auth != Reply::Silent => Some(json!({"success": m.auth == Reply::Ok, "ret_msg": if m.auth == Reply::Ok { "" } else { "error sign" }, "op": "auth", "conn_id": "c"})),
                         Some("subscribe") if m.subscribe != Reply::Silent => Some(json!({"success": m.subscribe == Reply::Ok, "ret_msg": "", "op": "subscribe", "conn_id": "c"})),
                         Some("ping") if m.pong => Some(json!({"req_id": v["req_id"], "op": "pong", "args": ["1"], "conn_id": "c"})),
+                        Some("ping") => {
+                            unanswered.fetch_add(1, Ordering::SeqCst);
+                            None
+                        }
                         _ => None,
                     };
                     if let Some(a) = answer {
                         if write.send(Message::text(a.to_string())).await.is_err() {
+                            return;
+                        }
+                    }
+                    if v["op"] == "subscribe" && m.subscribe == Reply::Ok && m.garbage {
+                        if write.send(Message::text("not json")).await.is_err() {
                             return;
                         }
                     }
@@ -883,6 +910,7 @@ mod tests {
         subscribe: Reply::Ok,
         pong: true,
         forbid: false,
+        garbage: false,
     };
 
     fn cfg() -> BybitConfig {
@@ -1379,24 +1407,17 @@ mod tests {
         let ws = FakeWs::start(GOOD).await;
         let r = rig_with(&api, &ws, timing(), 1);
         r.until("link up", up).await;
-        let pings = |ws: &FakeWs| {
-            ws.texts(0)
-                .iter()
-                .filter(|t| t.contains("\"ping\""))
-                .count()
-        };
         // The next ping is not answered by the fake. Rows come that the
         // gateway cannot deliver while the core holds, longer than the
         // ping interval; the test answers the ping just after the hold.
         ws.set(|m| m.pong = false);
-        let n = pings(&ws);
         for _ in 0..100 {
-            if pings(&ws) > n {
+            if ws.unanswered() > 0 {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(2)).await;
         }
-        assert!(pings(&ws) > n);
+        assert_eq!(ws.unanswered(), 1);
         r.hold.store(true, Ordering::SeqCst);
         let row: Value = serde_json::from_str::<Value>(&order_msg("BTCUSDT", &link(42), "New"))
             .unwrap()["data"][0]
@@ -1445,6 +1466,13 @@ mod tests {
         assert!(ws.accepted() >= 7);
         ws.set(|m| m.subscribe = Reply::Ok);
         r.until("link up", up).await;
+        r.until("a pong", |_| {
+            ws.texts(ws.accepted() - 1)
+                .iter()
+                .any(|t| t.contains("\"ping\""))
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
         ws.drop_conn();
         let dropped = Instant::now();
         r.until("up again", |r| r.links().len() >= 3 && up(r)).await;
@@ -1588,6 +1616,44 @@ mod tests {
                 .count(),
             2,
             "auth and subscribe only"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_link_that_fails_before_its_first_pong_keeps_the_waits_growing() {
+        let api = rest_venue("REGULAR_MARGIN");
+        let ws = FakeWs::start(Mode {
+            garbage: true,
+            ..GOOD
+        })
+        .await;
+        let t = Timing {
+            backoff_max: Duration::from_millis(1000),
+            ..timing()
+        };
+        let r = rig_with(&api, &ws, t, 256);
+        r.until("link up", up).await;
+        let first = Instant::now();
+        for _ in 0..300 {
+            if ws.accepted() >= 6 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(ws.accepted() >= 6);
+        // Waits of 20, 40, 80, 160, 320 ms between the six links.
+        assert!(
+            first.elapsed() >= Duration::from_millis(500),
+            "six links in {:?}: the waits started over each time",
+            first.elapsed()
+        );
+        assert!(
+            r.links()
+                .iter()
+                .filter(|l| !l.0)
+                .all(|l| l.2.contains("could not be read")),
+            "{:?}",
+            r.links()
         );
     }
 }
