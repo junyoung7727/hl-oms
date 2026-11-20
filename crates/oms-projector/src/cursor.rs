@@ -1,4 +1,4 @@
-//! The cursor file: the last record whose log lines the store took.
+//! The cursor file: the last record whose log lines the store processed.
 //!
 //! Format: one JSON object `{"instance_id": "<16 hex>", "seq": <u64>}`. It is
 //! written to a temporary file, synced, renamed over the old one, and the
@@ -45,7 +45,9 @@ pub fn store(path: &Path, instance_id: u64, seq: u64) -> Result<(), String> {
         seq,
     })
     .map_err(|e| e.to_string())?;
-    let tmp = path.with_extension("tmp");
+    let mut tmp_name = path.as_os_str().to_os_string();
+    tmp_name.push(".tmp");
+    let tmp = std::path::PathBuf::from(tmp_name);
     let mut f = OpenOptions::new()
         .create(true)
         .truncate(true)

@@ -15,9 +15,11 @@ Crate `crates/oms-projector` (library + binary `oms-projector --config <file>`).
 ## Decisions
 
 - Cursor follows log lines only; metrics are gauges recomputed each step.
-- Processed = `sent + rejected + dropped` of the VL endpoint (only projector lines go there). A rise in `dropped`: confirm nothing, read nothing until the queue is empty, then rewind (replay from 1, emit after the cursor), sending the records that were pending one at a time.
-- Backpressure: no reading while pending lines ≥ `max_pending_lines`; config requires `queue_lines > max_pending_lines`.
-- Replay from record 1 at start (snapshot payload is an oms-node type).
+- Only a status answer whose `core.instance_id` equals the journal's `INSTANCE` is used (review MUST, 2026-11-20).
+- Processed = `sent + rejected + dropped` of the VL endpoint (only projector lines go there). `rejected` is permanent: counted as processed, logged, `projector_rejected_lines`.
+- Read records wait in memory; they are pushed in order while pushed-not-taken lines ≤ `max_pending_lines` (one record alone may pass); no reading while waiting lines ≥ it. Config requires `queue_lines ≥ 2 × max_pending_lines`.
+- A rise in `dropped`: confirm nothing, push nothing until the queue is empty, then push every pending record again within the same limit.
+- Replay from record 1 at start (snapshot payload is an oms-node type), up to the cursor for 0.3 s per step; no `oms_*` state series until the replay first reaches the read limit (`projector_caught_up`).
 - PnL by average cost in the projector (OMS books have no cost basis).
 - `/proc/locks` matched by inode only (btrfs device numbers differ; a false "held" only hides unconfirmed lines).
 - `oms_rate_tokens` left out (U17).
@@ -25,7 +27,7 @@ Crate `crates/oms-projector` (library + binary `oms-projector --config <file>`).
 
 ## Testing Decisions
 
-`crates/oms-projector/tests/projector.rs` (12): exact VL and VM line shapes against loopback fakes; nothing past the durable cap while the lock is held; dead OMS unconfirmed lines then confirmed re-emission across rotated segments; crash resume from the cursor with the same seqs; refusing store keeps the cursor; CRC damage stops without moving the cursor; the projector never takes the lock (a writer can lock while it runs; real `/proc/locks` probe); `/proc/locks` parsing; HTTP status source; foreign cursor refused; config refusals; dropped lines re-sent with one rewind. `src/pnl.rs` (2). Seven deliberate faults each caught by a test (ADR-026 §9).
+`crates/oms-projector/tests/projector.rs` (17): exact VL and VM line shapes against loopback fakes; nothing past the durable cap while the lock is held; dead OMS unconfirmed lines then confirmed re-emission across rotated segments; crash resume from the cursor with the same seqs; refusing store keeps the cursor; CRC damage stops without moving the cursor; the projector never takes the lock (a writer can lock while it runs; real `/proc/locks` probe); `/proc/locks` parsing; HTTP status source; foreign cursor refused; config refusals; dropped lines re-sent with one rewind; another instance's answer ignored; no state series before catch-up; replay to the cursor in one step; limit distances with an open order and a margin report; venue change and adjustment in the average cost. `src/pnl.rs` (2). Eleven deliberate faults each caught by a test (ADR-026 §9).
 
 ## Out of Scope
 

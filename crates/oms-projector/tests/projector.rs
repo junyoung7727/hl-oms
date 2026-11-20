@@ -106,6 +106,7 @@ impl Fakes {
             durable_seq,
             as_of_us: 1_700_000_000_000_000,
             wire_id_form: Some(WireIdForm::Base32Pair),
+            instance_id: Some(7),
         });
     }
     fn silent(&self) {
@@ -150,8 +151,12 @@ fn settings(root: &Path) -> Settings {
 }
 
 fn projector(root: &Path, f: &Fakes, o: Option<ObsHandle>, now: u64) -> Projector {
+    projector_with(settings(root), f, o, now)
+}
+
+fn projector_with(s: Settings, f: &Fakes, o: Option<ObsHandle>, now: u64) -> Projector {
     Projector::new(
-        settings(root),
+        s,
         Box::new(St(f.status.clone())),
         Box::new(Lk(f.held.clone(), f.lock_probes.clone())),
         Box::new(Dk(f.free.clone())),
@@ -196,7 +201,7 @@ fn last_value(s: &Stores, name: &str, labels: &[(&str, &str)]) -> Option<f64> {
     vm_lines(s)
         .iter()
         .map(|l| serde_json::from_str::<Value>(l).unwrap())
-        .filter(|v| {
+        .rfind(|v| {
             let m = v["metric"].as_object().unwrap();
             m["__name__"] == name
                 && m.len() == labels.len() + 2
@@ -204,7 +209,6 @@ fn last_value(s: &Stores, name: &str, labels: &[(&str, &str)]) -> Option<f64> {
                     .iter()
                     .all(|(k, val)| m.get(*k).and_then(Value::as_str) == Some(*val))
         })
-        .last()
         .map(|v| v["values"][0].as_f64().unwrap())
 }
 
@@ -620,7 +624,7 @@ fn the_lock_probe_reads_proc_locks_by_inode() {
 fn the_http_status_source_reads_the_oms_status_answer() {
     let fake = FakeHttp::start(Answer::Reply(
         200,
-        r#"{"as_of":1700000000000001,"node":{"wire_id_form":"base32_pair"},"journal":{"durable_seq":42}}"#.into(),
+        r#"{"as_of":1700000000000001,"node":{"wire_id_form":"base32_pair"},"core":{"instance_id":"0000000000000007"},"journal":{"durable_seq":42}}"#.into(),
     ));
     let mut src = HttpStatus::new(
         &format!("{}/api/status", fake.url()),
@@ -633,6 +637,7 @@ fn the_http_status_source_reads_the_oms_status_answer() {
             durable_seq: 42,
             as_of_us: 1_700_000_000_000_001,
             wire_id_form: Some(WireIdForm::Base32Pair),
+            instance_id: Some(7),
         })
     );
     fake.set_default(Answer::Reply(500, "{}".into()));
@@ -704,34 +709,253 @@ fn lines_the_push_queue_dropped_are_pushed_again_before_the_cursor_moves() {
     let last = h.log.len() as u64;
     let (f, s) = (Fakes::default(), stores());
     s.vl.set_default(Answer::Reply(503, String::new()));
-    f.alive(last);
-    // A queue of 4 lines: the first pass overflows it while the store
-    // refuses.
+    f.alive(2);
+    // At most 3 lines pushed and not taken; a queue of 6.
     let mut c = ObsConfig::new(Some(s.vm.url()), Some(s.vl.url()));
-    c.queue_lines = 4;
-    // (Below the pending limit on purpose: a config refuses that.)
+    c.queue_lines = 6;
     c.flush_every = Duration::from_millis(10);
     c.backoff_min = Duration::from_millis(10);
     c.backoff_max = Duration::from_millis(20);
     c.timeout = Duration::from_millis(300);
     let o = ObsPush::start(c).unwrap();
+    let mut st = settings(&root);
+    st.max_pending_lines = 3;
     let mut now = 1_800_000_000_000_000;
-    let mut p = projector(&root, &f, Some(o), now);
-    p.step(now);
+    let mut p = projector_with(st, &f, Some(o), now);
+    for _ in 0..3 {
+        p.step(now);
+        now += 100 * MS;
+    }
+    // The OMS dies while the store refuses: the unconfirmed lines overflow
+    // the queue and push out the confirmed lines of records 1 and 2.
+    f.silent();
+    now += 10_000 * MS;
+    assert!(p.step(now).unconfirmed_lines > 6);
     std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(p.cursor(), 0);
+    // Store and OMS are back.
     s.vl.set_default(Answer::Reply(200, String::new()));
+    f.alive(last);
     step_until(&mut p, &mut now, |p| p.cursor() == last);
-    // Every record reached the store at least once.
-    let got = seqs_of(&vl_lines(&s));
-    let mut uniq = got.clone();
+    std::thread::sleep(Duration::from_millis(50));
+    // Every record reached the store confirmed at least once.
+    let confirmed: Vec<Value> = vl_lines(&s)
+        .into_iter()
+        .filter(|l| l["service"] == "oms" && l.get("unconfirmed").is_none())
+        .collect();
+    let mut uniq = seqs_of(&confirmed);
     uniq.sort_unstable();
     uniq.dedup();
     assert_eq!(uniq, (1..=last).collect::<Vec<_>>());
-    // One rewind: after it the records go one at a time and the queue does
-    // not overflow again.
+    // One rewind: after it the pushes stay within the limit and the queue
+    // does not overflow again.
     let rewinds = vl_lines(&s)
         .into_iter()
         .filter(|l| l["service"] == "oms-projector" && l["level"] == "warn")
         .count();
     assert_eq!(rewinds, 1);
+}
+
+#[test]
+fn an_answer_of_another_oms_instance_is_ignored() {
+    let root = tmp("instance");
+    let (h, _, _) = trades();
+    let _w = journal(&root.join("data"), &h, 1 << 20);
+    let (f, s) = (Fakes::default(), stores());
+    // The other OMS on this host has a longer journal.
+    *f.status.lock().unwrap() = Some(OmsStatus {
+        durable_seq: 1_000,
+        as_of_us: 1,
+        wire_id_form: None,
+        instance_id: Some(8),
+    });
+    let mut now = 1_800_000_000_000_000;
+    let mut p = projector(&root, &f, Some(obs(&s)), now);
+    for _ in 0..3 {
+        let rep = p.step(now);
+        assert!(!rep.dead);
+        now += 100 * MS;
+    }
+    assert_eq!(
+        p.applied_seq(),
+        0,
+        "read with another journal's durable sequence"
+    );
+    std::thread::sleep(Duration::from_millis(100));
+    let errors: Vec<Value> = vl_lines(&s)
+        .into_iter()
+        .filter(|l| l["service"] == "oms-projector")
+        .collect();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        errors[0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("instance 0000000000000008")
+    );
+    assert_eq!(last_value(&s, "oms_up", &[]), Some(0.0));
+    assert_eq!(last_value(&s, "oms_journal_durable_seq", &[]), Some(0.0));
+}
+
+#[test]
+fn state_series_wait_until_the_replay_reaches_the_durable_sequence() {
+    let root = tmp("catchup");
+    let (h, _, _) = trades();
+    let _w = journal(&root.join("data"), &h, 1 << 20);
+    let last = h.log.len() as u64;
+    let (f, s) = (Fakes::default(), stores());
+    f.alive(last);
+    let mut st = settings(&root);
+    st.max_records = 1;
+    let mut now = 1_800_000_000_000_000;
+    let mut p = projector_with(st, &f, Some(obs(&s)), now);
+    p.step(now);
+    assert_eq!(p.applied_seq(), 1);
+    std::thread::sleep(Duration::from_millis(100));
+    // A prefix of the journal: no position, no limit, no hold is shown.
+    assert_eq!(last_value(&s, "projector_caught_up", &[]), Some(0.0));
+    assert_eq!(last_value(&s, "oms_position_qty", &[("symbol", "X")]), None);
+    assert_eq!(last_value(&s, "oms_halt", &[]), None);
+    assert_eq!(
+        last_value(&s, "projector_lag_records", &[]),
+        Some((last - 1) as f64)
+    );
+    step_until(&mut p, &mut now, |p| p.applied_seq() == last);
+    p.step(now);
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(last_value(&s, "projector_caught_up", &[]), Some(1.0));
+    assert_eq!(
+        last_value(&s, "oms_position_qty", &[("symbol", "X")]),
+        Some(1.0)
+    );
+}
+
+#[test]
+fn records_up_to_the_cursor_are_replayed_in_one_step() {
+    let root = tmp("replay");
+    let (h, _, _) = trades();
+    let _w = journal(&root.join("data"), &h, 1 << 20);
+    let last = h.log.len() as u64;
+    oms_projector::cursor::store(&root.join("cursor"), 7, last - 1).unwrap();
+    let (f, s) = (Fakes::default(), stores());
+    f.alive(last);
+    let mut st = settings(&root);
+    st.max_records = 1;
+    let now = 1_800_000_000_000_000;
+    let mut p = projector_with(st, &f, Some(obs(&s)), now);
+    let rep = p.step(now);
+    // The whole replay up to the cursor, then one new record.
+    assert_eq!(p.applied_seq(), last);
+    assert_eq!(rep.lines, h.log[(last - 1) as usize].events.len());
+}
+
+/// A resting buy of 2, a margin policy, and a margin report with one
+/// isolated position.
+fn margin_case() -> H {
+    let mut h = H::ready_with(config_with_margin());
+    h.report_margin("1000");
+    h.ref_price("X", "100");
+    let id = h.accept("a", "k1", Side::Buy, "2", "100");
+    h.placed_open(id, "v1");
+    h.margin_seq += 1;
+    let (session, seq, queried_at) = (h.session, h.margin_seq, h.now);
+    h.venue(VenueInput::MarginReport(MarginReport {
+        session,
+        seq,
+        queried_at,
+        account_value: amt("960"),
+        positions: vec![MarginPosition {
+            instrument: iid("X"),
+            qty: sq("0"),
+            position_value: amt("100"),
+            margin_used: amt("10"),
+            leverage_type: LeverageType::Isolated,
+            leverage_value: 2,
+            max_leverage: 50,
+        }],
+    }));
+    assert_eq!(
+        h.core.margin.report.as_ref().unwrap().account_value,
+        amt("960")
+    );
+    h
+}
+
+#[test]
+fn limit_distances_follow_the_core_rules() {
+    let root = tmp("limits");
+    let h = margin_case();
+    let _w = journal(&root.join("data"), &h, 1 << 20);
+    let last = h.log.len() as u64;
+    let (f, s) = (Fakes::default(), stores());
+    f.alive(last);
+    let mut now = 1_800_000_000_000_000;
+    let mut p = projector(&root, &f, Some(obs(&s)), now);
+    step_until(&mut p, &mut now, |p| p.cursor() == last);
+    std::thread::sleep(Duration::from_millis(100));
+    let d = |kind: &str, sym: Option<&str>| {
+        let mut l = vec![("kind", kind)];
+        if let Some(x) = sym {
+            l.push(("symbol", x));
+        }
+        (
+            last_value(&s, "oms_limit", &l).unwrap(),
+            last_value(&s, "oms_limit_distance", &l).unwrap(),
+        )
+    };
+    // Position 0 with an open buy of 2 within [-10, 10].
+    assert_eq!(d("position_max", Some("X")), (10.0, 8.0));
+    assert_eq!(d("position_min", Some("X")), (-10.0, 10.0));
+    assert_eq!(d("open_orders", None), (500.0, 499.0));
+    // Leverage 2 × 960; exposure: the buy of 2 at 100.
+    assert_eq!(d("leverage", None), (1920.0, 1720.0));
+    // 5 % of the day base 1000 may be lost; 40 is.
+    assert_eq!(d("daily_loss", None), (50.0, 10.0));
+    // 100 × (1 / (2 × 50) + 25 bps) = 1.25; margin 10.
+    let (line, room) = d("mm_buffer", Some("X"));
+    assert!(
+        (line - 1.25).abs() < 1e-9 && (room - 8.75).abs() < 1e-9,
+        "{line} {room}"
+    );
+    assert_eq!(last_value(&s, "oms_account_value", &[]), Some(960.0));
+    assert_eq!(
+        last_value(&s, "oms_margin_ratio", &[("symbol", "X")]),
+        Some(0.1)
+    );
+    assert_eq!(last_value(&s, "oms_open_orders", &[]), Some(1.0));
+}
+
+#[test]
+fn venue_changes_and_adjustments_move_the_average_cost_position() {
+    let root = tmp("pnlpaths");
+    let (mut h, _, _) = trades();
+    // Long 1 at 100. The venue takes 1 away at 120 (ADL): +20 realised.
+    h.venue(VenueInput::PositionChange(VenuePositionChangeIn {
+        key: fkey("adl1"),
+        kind: VenueChangeKind::Adl,
+        instrument: iid("X"),
+        qty: sq("-1"),
+        px: px("120"),
+        venue_ts: h.now,
+    }));
+    // The operator books 2 more without a price.
+    h.op(OperatorCmd::AdjustPosition {
+        instrument: iid("X"),
+        ledger: Ledger::Unattributed,
+        delta: sq("2"),
+        note: "manual trade on venue UI".into(),
+    })
+    .unwrap();
+    let _w = journal(&root.join("data"), &h, 1 << 20);
+    let last = h.log.len() as u64;
+    let f = Fakes::default();
+    f.alive(last);
+    let mut now = 1_800_000_000_000_000;
+    let mut p = projector(&root, &f, None, now);
+    step_until(&mut p, &mut now, |p| p.cursor() == last);
+    let x = &p.pnl()["X"];
+    assert_eq!(x.pos, 2 * 100_000_000);
+    assert!((x.realized - 30.0).abs() < 1e-9, "{}", x.realized);
+    assert_eq!(x.avg, None, "an adjustment from flat has no price");
+    assert_eq!(p.core().account_book(&iid("X")).pos, sq("2"));
 }

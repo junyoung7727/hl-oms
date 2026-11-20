@@ -17,6 +17,9 @@ pub struct OmsStatus {
     pub as_of_us: u64,
     /// `node.wire_id_form`: how the started gateway writes client ids.
     pub wire_id_form: Option<WireIdForm>,
+    /// `core.instance_id` (16 hex digits): which data directory the OMS
+    /// runs on. The projector ignores an answer of another instance.
+    pub instance_id: Option<u64>,
 }
 
 impl OmsStatus {
@@ -30,6 +33,10 @@ impl OmsStatus {
                 .pointer("/node/wire_id_form")
                 .and_then(serde_json::Value::as_str)
                 .and_then(wire_id_form),
+            instance_id: v
+                .pointer("/core/instance_id")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|h| u64::from_str_radix(h, 16).ok()),
         })
     }
 }

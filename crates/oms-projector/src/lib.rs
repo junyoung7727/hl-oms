@@ -7,7 +7,8 @@
 //! - It replays every record into its own [`oms_core::Core`] and pushes the
 //!   `oms_*` and `projector_*` metrics of that state, and one VictoriaLogs
 //!   line per journal event, through `obs-push`.
-//! - It keeps a cursor file: the last record whose log lines the store took.
+//! - It keeps a cursor file: the last record whose log lines the store
+//!   processed (took, or refused for good; see ADR-026).
 //!   After a restart it replays up to the cursor without emitting and emits
 //!   from the next record (at least once; a duplicate has the same `seq`).
 //! - When the OMS is dead (no status answer for `dead_after_ms` and no

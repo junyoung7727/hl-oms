@@ -236,6 +236,6 @@ title = "관측 저장소로 내보내는 별도 프로젝터"
 file = "docs/adr/ADR-026-observability-projector.md"
 problem = "포지션·손익·한도 거리와 주문·체결 순서를 VictoriaMetrics·VictoriaLogs에서 봐야 하는데, OMS를 바꾸지 않고, 내구화되지 않은 기록을 확정으로 내보내지 않고, 재시작에도 줄을 빠뜨리지 않아야 한다"
 alternatives = ["OMS 안에서 obs-push로 직접", "/api/status만 읽어 지표로", "저널을 꼬리 읽기로 따라가며 자기 코어에 재생"]
-chosen = "oms-projector: 상태의 durable_seq까지 Tail로 읽어 Core::replay, 지표와 이벤트마다 한 줄. VL이 처리한 줄까지만 커서(fsync). 줄이 버려지면 큐가 빈 뒤 커서부터 한 기록씩 다시. OMS가 10초 무응답이고 LOCK 보유자가 없으면 상한 너머를 unconfirmed=true로"
+chosen = "oms-projector: 같은 인스턴스의 상태 답의 durable_seq까지 Tail로 읽어 Core::replay, 지표와 이벤트마다 한 줄. VL이 처리한 줄까지만 커서(fsync), 보낸 뒤 처리 안 된 줄은 max_pending_lines 이하. 줄이 버려지면 큐가 빈 뒤 대기 기록을 다시. OMS가 10초 무응답이고 LOCK 보유자가 없으면 상한 너머를 unconfirmed=true로"
 gives_up = "스냅샷부터의 빠른 시작(처음부터 재생), oms_rate_tokens(U17)"
 revisit = "시작 재생이 10초를 넘을 때, U17, 실제 VL에서 중복이 조회를 방해할 때"

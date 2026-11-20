@@ -45,10 +45,15 @@ pub struct StepReport {
 struct Pending {
     seq: u64,
     lines: Vec<LogLine>,
-    /// Lines pushed in this run when the last line of this record was
-    /// pushed. The record is taken when the store has processed that many.
-    end_mark: u64,
+    /// `None` until the lines are pushed. Then: lines pushed in this run
+    /// when the last line of this record was pushed; the record is taken
+    /// when the store has processed that many.
+    end_mark: Option<u64>,
 }
+
+/// Longest time one step spends replaying records an earlier run emitted
+/// (judgement: the step period is 1 s).
+const REPLAY_BUDGET: std::time::Duration = std::time::Duration::from_millis(300);
 
 pub struct Projector {
     s: Settings,
@@ -68,14 +73,23 @@ pub struct Projector {
     emit_after: u64,
     applied: u64,
     durable: u64,
+    /// The replay has reached the read limit once: from then on the state
+    /// series show the durable journal, not a prefix of it.
+    caught_up: bool,
     up: bool,
     last_answer_us: u64,
     heartbeat_us: Option<u64>,
     wire_id_form: Option<WireIdForm>,
+    /// Records after the cursor, in order: pushed ones first, then the
+    /// ones waiting to be pushed.
     pending: VecDeque<Pending>,
+    /// Lines of every pending record.
     pending_lines: usize,
+    /// Lines of the pushed pending records.
+    outstanding_lines: usize,
     pushed: u64,
     seen_dropped: u64,
+    seen_rejected: u64,
     tail_error: Option<String>,
     fatal: Option<String>,
     /// Highest sequence shown unconfirmed in the current dead period.
@@ -84,12 +98,11 @@ pub struct Projector {
     holds_seen: BTreeSet<String>,
     last_disk_us: Option<u64>,
     lock_probe_error: Option<String>,
-    /// The push queue dropped lines: rewind to the cursor once it is empty.
+    status_error: Option<String>,
+    warned_cursor_ahead: bool,
+    /// The push queue dropped lines: push the pending records again once
+    /// the queue is empty.
     rewind_wanted: bool,
-    /// After a rewind, records up to this one are emitted one at a time,
-    /// each after the store took the one before, so the queue cannot
-    /// overflow again on the same records.
-    careful_until: u64,
 }
 
 /// Reads the instance id of a data directory (`INSTANCE`, 16 hex digits).
@@ -126,14 +139,17 @@ impl Projector {
             emit_after: cursor,
             applied: 0,
             durable: 0,
+            caught_up: false,
             up: false,
             last_answer_us: now_us,
             heartbeat_us: None,
             wire_id_form: None,
             pending: VecDeque::new(),
             pending_lines: 0,
+            outstanding_lines: 0,
             pushed: 0,
             seen_dropped: 0,
+            seen_rejected: 0,
             tail_error: None,
             fatal: None,
             unconfirmed_max: 0,
@@ -141,8 +157,9 @@ impl Projector {
             holds_seen: BTreeSet::new(),
             last_disk_us: None,
             lock_probe_error: None,
+            status_error: None,
+            warned_cursor_ahead: false,
             rewind_wanted: false,
-            careful_until: 0,
             s,
         })
     }
@@ -166,9 +183,11 @@ impl Projector {
     /// One pass. Call it every `poll_ms`.
     pub fn step(&mut self, now_us: u64) -> StepReport {
         let mut rep = StepReport::default();
-        // P1: the durable sequence.
-        match self.status.poll() {
-            Some(st) => {
+        // P1: the durable sequence, from the OMS of this journal only.
+        self.up = false;
+        if let Some(st) = self.status.poll() {
+            if st.instance_id == Some(self.instance_id) {
+                self.status_error = None;
                 self.up = true;
                 self.last_answer_us = now_us;
                 self.heartbeat_us = Some(st.as_of_us);
@@ -176,8 +195,34 @@ impl Projector {
                 if st.wire_id_form.is_some() {
                     self.wire_id_form = st.wire_id_form;
                 }
+                if st.durable_seq < self.cursor && !self.warned_cursor_ahead {
+                    self.warned_cursor_ahead = true;
+                    let mut f = serde_json::Map::new();
+                    f.insert("cursor".into(), self.cursor.into());
+                    f.insert("durable_seq".into(), st.durable_seq.into());
+                    self.own_log(now_us, "warn", "the cursor is past the durable sequence of the journal; records up to the cursor are replayed without lines", f);
+                }
+            } else {
+                // Another OMS (or none that says which): its durable
+                // sequence says nothing about this journal.
+                let text = format!(
+                    "status_url answers for instance {}, the journal is instance {:016x}",
+                    st.instance_id
+                        .map_or("unknown".to_string(), |i| format!("{i:016x}")),
+                    self.instance_id
+                );
+                if self.status_error.as_deref() != Some(text.as_str()) {
+                    let mut f = serde_json::Map::new();
+                    f.insert("error".into(), text.clone().into());
+                    self.own_log(
+                        now_us,
+                        "error",
+                        "status answer ignored: not the OMS of this journal",
+                        f,
+                    );
+                }
+                self.status_error = Some(text);
             }
-            None => self.up = false,
         }
         let dead = !self.up
             && now_us.saturating_sub(self.last_answer_us) >= self.s.dead_after_us
@@ -185,48 +230,26 @@ impl Projector {
         rep.dead = dead;
         // P2–P4: confirmed records.
         let cap = self.durable.max(self.emit_after);
-        let next = self.tail.next_seq();
-        let careful = next > self.emit_after && next <= self.careful_until;
-        let (read_cap, read_max, may_read) = if next <= self.emit_after {
-            // Replay of what an earlier pass emitted: no lines.
-            (self.emit_after, self.s.max_records, true)
-        } else if careful {
-            (cap, 1, self.pending_lines == 0)
-        } else {
-            (
-                cap,
-                self.s.max_records,
-                self.pending_lines < self.s.max_pending_lines,
-            )
-        };
-        if self.fatal.is_none() && !self.rewind_wanted && may_read {
-            match self.tail.read(read_cap, read_max) {
-                Ok(recs) => {
-                    if self.tail_error.take().is_some() {
-                        self.own_log(
-                            now_us,
-                            "info",
-                            "journal tail readable again",
-                            serde_json::Map::new(),
-                        );
-                    }
-                    for tr in recs {
-                        if let Err(e) = self.take(&tr, &mut rep) {
-                            self.fail(now_us, e);
-                            break;
-                        }
-                    }
+        if self.fatal.is_none() {
+            // Records an earlier run emitted: replayed without lines, as
+            // many as fit in the budget.
+            let started = std::time::Instant::now();
+            while self.fatal.is_none()
+                && self.tail.next_seq() <= self.emit_after
+                && started.elapsed() < REPLAY_BUDGET
+            {
+                if !self.read_once(now_us, self.emit_after, &mut rep) {
+                    break;
                 }
-                Err(e) => {
-                    let text = e.to_string();
-                    if self.tail_error.as_deref() != Some(text.as_str()) {
-                        let mut f = serde_json::Map::new();
-                        f.insert("error".into(), text.clone().into());
-                        f.insert("next_seq".into(), self.tail.next_seq().into());
-                        self.own_log(now_us, "error", "journal tail stopped on damage at or below the durable sequence; the cursor stays", f);
-                    }
-                    self.tail_error = Some(text);
-                }
+            }
+            if self.fatal.is_none()
+                && self.tail.next_seq() > self.emit_after
+                && self.pending_lines < self.s.max_pending_lines
+            {
+                self.read_once(now_us, cap, &mut rep);
+            }
+            if self.tail_error.is_none() && self.tail.next_seq() > cap {
+                self.caught_up = true;
             }
         }
         // Past the durable sequence, only while the OMS is dead.
@@ -236,13 +259,50 @@ impl Projector {
             self.unconfirmed_max = 0;
             self.unconfirmed_count = 0;
         }
-        // P5: the cursor.
+        // P5: the cursor, then the next lines.
         self.confirm(now_us);
+        self.send_pending();
         self.push_metrics(now_us);
         rep.cursor = self.cursor;
         rep.tail_error = self.tail_error.clone();
         rep.fatal = self.fatal.clone();
         rep
+    }
+
+    /// One `Tail::read` up to `cap`. `false` when it returned nothing or
+    /// stopped on an error.
+    fn read_once(&mut self, now_us: u64, cap: u64, rep: &mut StepReport) -> bool {
+        match self.tail.read(cap, self.s.max_records) {
+            Ok(recs) => {
+                if self.tail_error.take().is_some() {
+                    self.own_log(
+                        now_us,
+                        "info",
+                        "journal tail readable again",
+                        serde_json::Map::new(),
+                    );
+                }
+                let any = !recs.is_empty();
+                for tr in recs {
+                    if let Err(e) = self.take(&tr, rep) {
+                        self.fail(now_us, e);
+                        return false;
+                    }
+                }
+                any
+            }
+            Err(e) => {
+                let text = e.to_string();
+                if self.tail_error.as_deref() != Some(text.as_str()) {
+                    let mut f = serde_json::Map::new();
+                    f.insert("error".into(), text.clone().into());
+                    f.insert("next_seq".into(), self.tail.next_seq().into());
+                    self.own_log(now_us, "error", "journal tail stopped on damage at or below the durable sequence; the cursor stays", f);
+                }
+                self.tail_error = Some(text);
+                false
+            }
+        }
     }
 
     fn lock_is_free(&mut self) -> bool {
@@ -307,20 +367,18 @@ impl Projector {
         let out = lines::record_lines(&ctx, &rec, Some(&self.core), &infos, false);
         rep.lines += out.len();
         if self.s.logs_on {
-            for l in &out {
-                self.push_line(l.clone());
-            }
             self.pending_lines += out.len();
             self.pending.push_back(Pending {
                 seq: rec.seq,
                 lines: out,
-                end_mark: self.pushed,
+                end_mark: None,
             });
         } else {
+            // No store: taken at once.
             self.pending.push_back(Pending {
                 seq: rec.seq,
                 lines: Vec::new(),
-                end_mark: 0,
+                end_mark: Some(0),
             });
         }
         Ok(())
@@ -444,11 +502,29 @@ impl Projector {
         let processed = match (&self.obs, self.s.logs_on) {
             (Some(obs), true) => {
                 let st = obs.state().vl;
+                if st.rejected > self.seen_rejected {
+                    // Refused for good (400, 413, 422): sending again gets
+                    // the same answer. Counted as processed, so the cursor
+                    // passes them; the loss is logged and counted.
+                    let mut f = serde_json::Map::new();
+                    f.insert(
+                        "rejected_lines".into(),
+                        (st.rejected - self.seen_rejected).into(),
+                    );
+                    f.insert("rejected_total".into(), st.rejected.into());
+                    self.seen_rejected = st.rejected;
+                    self.own_log(
+                        now_us,
+                        "error",
+                        "the log store refused lines for good; they are not sent again",
+                        f,
+                    );
+                }
                 if st.dropped > self.seen_dropped {
                     // A line the cursor waits for may be among the dropped.
                     // Which ones is not known: nothing is taken until the
-                    // queue is empty, then everything after the cursor is
-                    // emitted again (duplicates are told apart by seq).
+                    // queue is empty, then every pending record is pushed
+                    // again (duplicates are told apart by seq).
                     self.seen_dropped = st.dropped;
                     self.rewind_wanted = true;
                 }
@@ -465,10 +541,11 @@ impl Projector {
         while self
             .pending
             .front()
-            .is_some_and(|p| p.end_mark <= processed)
+            .is_some_and(|p| p.end_mark.is_some_and(|m| m <= processed))
         {
             if let Some(p) = self.pending.pop_front() {
                 self.pending_lines -= p.lines.len();
+                self.outstanding_lines -= p.lines.len();
                 self.cursor = p.seq;
             }
         }
@@ -489,33 +566,58 @@ impl Projector {
         }
     }
 
-    /// Starts over from the first record, emitting after the cursor, as a
-    /// restart does. Records that were pending are then emitted one at a
-    /// time.
+    /// Pushes waiting records in order while the pushed-but-not-taken lines
+    /// stay within `max_pending_lines` (one record alone may pass it). So
+    /// the push queue, which holds more than that, does not drop them.
+    fn send_pending(&mut self) {
+        if self.rewind_wanted || !self.s.logs_on {
+            return;
+        }
+        let mut i = self
+            .pending
+            .iter()
+            .position(|p| p.end_mark.is_none())
+            .unwrap_or(self.pending.len());
+        while i < self.pending.len() {
+            let n = self.pending[i].lines.len();
+            if self.outstanding_lines > 0 && self.outstanding_lines + n > self.s.max_pending_lines {
+                break;
+            }
+            let lines = self.pending[i].lines.clone();
+            for l in lines {
+                self.push_line(l);
+            }
+            self.pending[i].end_mark = Some(self.pushed);
+            self.outstanding_lines += n;
+            i += 1;
+        }
+    }
+
+    /// The queue dropped lines and is now empty: every pending record is
+    /// pushed again, within the same limit as the first time.
     fn rewind(&mut self, now_us: u64) {
-        let last_pending = self.pending.back().map_or(self.applied, |p| p.seq);
-        self.careful_until = self.careful_until.max(last_pending).max(self.applied);
-        self.core = Core::new(self.instance_id);
-        self.pnl.clear();
-        self.tail = Tail::new(&self.s.data_dir, 0);
-        self.emit_after = self.cursor;
-        self.applied = 0;
-        self.pending.clear();
-        self.pending_lines = 0;
+        for p in self.pending.iter_mut() {
+            p.end_mark = None;
+        }
+        self.outstanding_lines = 0;
         self.rewind_wanted = false;
         let mut f = serde_json::Map::new();
         f.insert("cursor".into(), self.cursor.into());
-        f.insert("careful_until".into(), self.careful_until.into());
+        f.insert("pending_records".into(), (self.pending.len() as u64).into());
         self.own_log(
             now_us,
             "warn",
-            "the push queue dropped log lines; emitting again from the cursor",
+            "the push queue dropped log lines; pushing the records after the cursor again",
             f,
         );
     }
 
     fn push_metrics(&mut self, now_us: u64) {
-        let holds = metrics::holds_now(&self.core);
+        let holds = if self.caught_up {
+            metrics::holds_now(&self.core)
+        } else {
+            BTreeSet::new()
+        };
         let mut out = metrics::samples(&View {
             core: &self.core,
             pnl: &self.pnl,
@@ -530,6 +632,8 @@ impl Projector {
             unconfirmed: self.unconfirmed_count,
             tail_error: self.tail_error.is_some() || self.fatal.is_some(),
             holds_seen: &self.holds_seen,
+            caught_up: self.caught_up,
+            rejected_lines: self.seen_rejected,
         });
         self.holds_seen.extend(holds);
         if self

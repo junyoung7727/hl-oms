@@ -19,8 +19,14 @@
 //! | `oms_margin_ratio{symbol}` | margin used ÷ position value of the last margin report |
 //! | `oms_limit`, `oms_limit_distance` | see [`limits`] |
 //! | `projector_lag_records` | durable sequence − last applied record |
-//! | `projector_cursor_seq`, `projector_pending_lines`, `projector_unconfirmed_records`, `projector_tail_error` | the projector's own state |
+//! | `projector_cursor_seq`, `projector_pending_lines`, `projector_unconfirmed_records`, `projector_tail_error`, `projector_caught_up`, `projector_rejected_lines` | the projector's own state |
 //! | `journal_disk_free_bytes` | `statvfs` of the journal file system, every `disk_every_ms` |
+//!
+//! Until the replay first reaches the read limit (`projector_caught_up` = 0)
+//! only `oms_up`, `oms_heartbeat_ts`, `oms_journal_durable_seq`, the
+//! `projector_*` series and `journal_disk_free_bytes` are pushed: the state
+//! is then a prefix of the journal and would show, for example, a flat
+//! position.
 //!
 //! `oms_rate_tokens` is not here: the OMS has no venue rate budget yet (U17).
 
@@ -46,6 +52,11 @@ pub struct View<'a> {
     pub tail_error: bool,
     /// Hold reasons seen in this run (a reason that went away is pushed as 0).
     pub holds_seen: &'a BTreeSet<String>,
+    /// The replay has reached the read limit. Before that the state is a
+    /// prefix of the journal and no `oms_*` state series is pushed.
+    pub caught_up: bool,
+    /// Lines the log store refused for good in this run.
+    pub rejected_lines: u64,
 }
 
 fn dec(v: i64) -> f64 {
@@ -109,6 +120,20 @@ pub fn samples(v: &View<'_>) -> Vec<Sample> {
         o.push("oms_heartbeat_ts", &[], hb as f64 / 1e6);
     }
     o.push("oms_journal_durable_seq", &[], v.durable_seq as f64);
+    o.push(
+        "projector_lag_records",
+        &[],
+        v.durable_seq.saturating_sub(v.applied_seq) as f64,
+    );
+    o.push("projector_cursor_seq", &[], v.cursor as f64);
+    o.push("projector_pending_lines", &[], v.pending_lines as f64);
+    o.push("projector_unconfirmed_records", &[], v.unconfirmed as f64);
+    o.push("projector_tail_error", &[], b(v.tail_error));
+    o.push("projector_caught_up", &[], b(v.caught_up));
+    o.push("projector_rejected_lines", &[], v.rejected_lines as f64);
+    if !v.caught_up {
+        return o.v;
+    }
     let holds = holds_now(core);
     o.push("oms_halt", &[], b(!holds.is_empty()));
     for reason in v.holds_seen.union(&holds) {
@@ -179,15 +204,6 @@ pub fn samples(v: &View<'_>) -> Vec<Sample> {
         o.push("oms_limit", &labels, l.limit);
         o.push("oms_limit_distance", &labels, l.distance);
     }
-    o.push(
-        "projector_lag_records",
-        &[],
-        v.durable_seq.saturating_sub(v.applied_seq) as f64,
-    );
-    o.push("projector_cursor_seq", &[], v.cursor as f64);
-    o.push("projector_pending_lines", &[], v.pending_lines as f64);
-    o.push("projector_unconfirmed_records", &[], v.unconfirmed as f64);
-    o.push("projector_tail_error", &[], b(v.tail_error));
     o.v
 }
 
@@ -201,7 +217,8 @@ pub struct Limit {
     pub distance: f64,
 }
 
-/// The limits the OMS enforces, as the projector can compute them:
+/// The account-level limits the OMS enforces (per-strategy limits are not
+/// shown), as the projector can compute them:
 ///
 /// | kind | limit | distance |
 /// |---|---|---|

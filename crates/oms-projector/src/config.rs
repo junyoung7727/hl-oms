@@ -38,8 +38,9 @@ pub struct Config {
     /// Records read in one step.
     #[serde(default = "default_max_records")]
     pub max_records: usize,
-    /// Log lines pushed but not yet taken by the store above which the
-    /// projector stops reading the journal until the store catches up.
+    /// Log lines pushed but not yet taken by the store: no more are pushed
+    /// above it (one record alone may pass it), and the journal is not read
+    /// further while this many lines wait.
     #[serde(default = "default_max_pending_lines")]
     pub max_pending_lines: usize,
 }
@@ -109,8 +110,11 @@ impl Config {
             return Err("max_records and max_pending_lines must be positive".into());
         }
         if let Some(t) = &self.telemetry {
-            if t.queue_lines <= self.max_pending_lines {
-                return Err("telemetry.queue_lines must be above max_pending_lines, or the queue drops lines the cursor waits for".into());
+            // At most max_pending_lines are pushed and not taken (one record
+            // alone may pass it); the rest of the queue is room for
+            // unconfirmed lines and the projector's own lines.
+            if t.queue_lines < 2 * self.max_pending_lines {
+                return Err("telemetry.queue_lines must be at least twice max_pending_lines, or the queue can drop lines the cursor waits for".into());
             }
         }
         Ok(())
