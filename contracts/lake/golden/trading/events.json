@@ -118,7 +118,7 @@
    "order_id": "2",
    "venue": "bybit",
    "symbol": "BTCUSDT",
-   "payload": "{\"fee\":\"0.0042\",\"key\":\"e-0001\",\"order_id\":2,\"px\":\"42000.2\",\"qty\":\"0.01\",\"venue_ts\":1767312007297000}",
+   "payload": "{\"fee\":\"0.0042\",\"key\":\"BTCUSDT:e-0001\",\"order_id\":2,\"px\":\"42000.2\",\"qty\":\"0.01\",\"venue_ts\":1767312007297000}",
    "record_schema": 2
   },
   {
@@ -173,7 +173,7 @@
    "order_id": "3",
    "venue": "bybit",
    "symbol": "BTCUSDT",
-   "payload": "{\"fee\":\"-0.001\",\"key\":\"e-0002\",\"order_id\":3,\"px\":\"41999.9\",\"qty\":\"0.005\",\"venue_ts\":1767322200397000}",
+   "payload": "{\"fee\":\"-0.001\",\"key\":\"BTCUSDT:e-0002\",\"order_id\":3,\"px\":\"41999.9\",\"qty\":\"0.005\",\"venue_ts\":1767322200397000}",
    "record_schema": 2
   },
   {
@@ -206,7 +206,7 @@
    "order_id": null,
    "venue": "bybit",
    "symbol": "BTCUSDT",
-   "payload": "{\"fill\":{\"fee\":\"0.0004\",\"instrument\":\"BTCUSDT\",\"key\":\"e-0099\",\"order_id\":null,\"px\":\"42010\",\"qty\":\"0.001\",\"side\":\"buy\",\"venue_oid\":null,\"venue_ts\":1767322799997000}}",
+   "payload": "{\"fill\":{\"fee\":\"0.0004\",\"instrument\":\"BTCUSDT\",\"key\":\"BTCUSDT:e-0099\",\"order_id\":null,\"px\":\"42010\",\"qty\":\"0.001\",\"side\":\"buy\",\"venue_oid\":null,\"venue_ts\":1767322799997000}}",
    "record_schema": 2
   },
   {
@@ -217,7 +217,7 @@
    "order_id": null,
    "venue": null,
    "symbol": null,
-   "payload": "{\"detail\":\"fill for an order this instance does not know: Buy 0.001 BTCUSDT @ 42010 (fill e-0099; later external fills on this instrument are booked without a new entry)\",\"id\":1,\"kind\":\"external_fill\",\"subject\":\"instrument:BTCUSDT\"}",
+   "payload": "{\"detail\":\"fill for an order this instance does not know: Buy 0.001 BTCUSDT @ 42010 (fill BTCUSDT:e-0099; later external fills on this instrument are booked without a new entry)\",\"id\":1,\"kind\":\"external_fill\",\"subject\":\"instrument:BTCUSDT\"}",
    "record_schema": 2
   }
  ]
