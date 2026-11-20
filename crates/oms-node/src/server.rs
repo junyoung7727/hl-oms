@@ -57,6 +57,8 @@ pub struct ApiCtx {
     pub shared: Arc<Shared>,
     pub info: status::NodeInfo,
     pub own_uid: u32,
+    /// Why the gateway keeps the link down, if it says (Bybit only).
+    pub gateway_block: Option<crate::venue::bybit::gateway::BlockView>,
     connections: Arc<Semaphore>,
     admin_connections: Arc<Semaphore>,
     buckets: Mutex<HashMap<(StrategyId, bool), Bucket>>,
@@ -65,8 +67,16 @@ pub struct ApiCtx {
 }
 
 impl ApiCtx {
-    pub fn new(cfg: ApiConfig, limits: IngressLimits, shared: Arc<Shared>, info: status::NodeInfo, own_uid: u32) -> ApiCtx {
+    pub fn new(
+        cfg: ApiConfig,
+        limits: IngressLimits,
+        shared: Arc<Shared>,
+        info: status::NodeInfo,
+        own_uid: u32,
+        gateway_block: Option<crate::venue::bybit::gateway::BlockView>,
+    ) -> ApiCtx {
         ApiCtx {
+            gateway_block,
             connections: Arc::new(Semaphore::new(cfg.max_connections)),
             admin_connections: Arc::new(Semaphore::new(cfg.admin_max_connections)),
             cfg,

@@ -64,18 +64,41 @@ pub struct Health {
 #[derive(Default)]
 struct Slots {
     auth: Option<Block>,
+    ban: Option<Block>,
     boot: Option<Block>,
     ip: Option<Block>,
 }
 
 impl Health {
-    /// The block that keeps the link down: auth first, then boot, then IP.
+    /// The block that keeps the link down: auth first, then an IP ban,
+    /// then boot, then IP.
     pub fn block(&self) -> Option<Block> {
         let g = self.slots.lock().unwrap_or_else(|e| e.into_inner());
         g.auth
             .clone()
+            .or_else(|| g.ban.clone())
             .or_else(|| g.boot.clone())
             .or_else(|| g.ip.clone())
+    }
+
+    /// The key was rejected (by any request, or by the stream's auth).
+    pub fn reject_auth(&self, why: String) {
+        self.set(Some(Block::AuthRejected(why)), |s| &mut s.auth);
+    }
+
+    /// The pause after HTTP 403 began (`Some`) or ended (`None`). The
+    /// gateway owns the pause; this slot only keeps the link down meanwhile.
+    pub fn set_ban(&self, b: Option<Block>) {
+        self.slots.lock().unwrap_or_else(|e| e.into_inner()).ban = b;
+    }
+
+    /// The key was rejected: no request may go out until the restart.
+    pub fn auth_rejected(&self) -> bool {
+        self.slots
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .auth
+            .is_some()
     }
 
     /// The result of a boot check run.

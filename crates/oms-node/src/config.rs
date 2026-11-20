@@ -234,6 +234,14 @@ pub struct BybitConfig {
     /// How far in the past a fill query ends (as for Hyperliquid).
     #[serde(default = "default_fills_lag_ms")]
     pub fills_lag_ms: u64,
+    /// The private stream sends a ping this often; no pong within the same
+    /// time means the stream is down.
+    #[serde(default = "default_ping_interval_ms")]
+    pub ping_interval_ms: u64,
+}
+
+fn default_ping_interval_ms() -> u64 {
+    5_000
 }
 
 fn default_ip_check_secs() -> u64 {
@@ -401,6 +409,10 @@ impl NodeConfig {
         }
         if !(1_000..=20_000).contains(&b.recv_window_ms) {
             return Err("[venue] recv_window_ms must be between 1000 and 20000".into());
+        }
+        // The venue recommends a ping every 20 s (F20 Q2.11).
+        if !(1_000..=20_000).contains(&b.ping_interval_ms) {
+            return Err("[venue] ping_interval_ms must be between 1000 and 20000".into());
         }
         // ADR-024: Bybit enforces expiry through the receive window, and
         // its realtime query can miss an order for a moment.
@@ -700,6 +712,7 @@ max = "10"
             (bybit("testnet", "").replace("https://ip.example/", "http://ip.example/"), None, "https"),
             (bybit("testnet", "ip_check_secs = 5"), None, "ip_check_secs"),
             (bybit("testnet", "recv_window_ms = 60000"), None, "recv_window_ms"),
+            (bybit("testnet", "ping_interval_ms = 500"), None, "ping_interval_ms"),
             (bybit("testnet", ""), Some("isolated = false\naccount_modes_allowed = [\"REGULAR_MARGIN\", \"PORTFOLIO_MARGIN\"]"), "only the account mode REGULAR_MARGIN"),
         ];
         for (venue, margin, because) in cases {

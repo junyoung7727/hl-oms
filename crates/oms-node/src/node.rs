@@ -136,7 +136,7 @@ pub fn run(cfg: NodeConfig) -> i32 {
             instance_id,
             boot,
         };
-        let (venue_name, wire_id_form) = match &cfg.venue {
+        let (venue_name, wire_id_form, gateway_block): (String, WireIdForm, Option<venue::bybit::gateway::BlockView>) = match &cfg.venue {
             VenueConfig::Sim {
                 socket,
                 request_timeout_ms,
@@ -152,7 +152,7 @@ pub fn run(cfg: NodeConfig) -> i32 {
                     ports,
                     policy.max_inflight_sends as usize + 16,
                 );
-                ("sim".to_string(), <venue::simnet::Gateway as VenueGateway>::WIRE_ID)
+                ("sim".to_string(), <venue::simnet::Gateway as VenueGateway>::WIRE_ID, None)
             }
             VenueConfig::Hyperliquid(h) => {
                 match venue::hyperliquid::spawn(
@@ -161,18 +161,22 @@ pub fn run(cfg: NodeConfig) -> i32 {
                     ports,
                     policy.max_inflight_sends as usize + 16,
                 ) {
-                    Ok(name) => (name, <venue::hyperliquid::Gateway as VenueGateway>::WIRE_ID),
+                    Ok(name) => (name, <venue::hyperliquid::Gateway as VenueGateway>::WIRE_ID, None),
                     Err(e) => {
                         error!("cannot start the Hyperliquid gateway", "error": e);
                         return 3;
                     }
                 }
             }
-            VenueConfig::Bybit(_) => {
-                // The gateway is built in parts (ADR-028); the stream and the
-                // node wiring come with U16d.
-                error!("the Bybit gateway cannot run yet: its private stream is not built (U16d)");
-                return 3;
+            VenueConfig::Bybit(b) => {
+                let symbols = cfg.core.instruments.keys().map(|i| i.to_string()).collect();
+                match venue::bybit::gateway::spawn(b.clone(), symbols, ports, policy.max_inflight_sends as usize + 16) {
+                    Ok((name, block)) => (name, <venue::bybit::gateway::Gateway as VenueGateway>::WIRE_ID, Some(block)),
+                    Err(e) => {
+                        error!("cannot start the Bybit gateway", "error": e);
+                        return 3;
+                    }
+                }
             }
         };
         let pace = venue::reconciler::Pace {
@@ -234,6 +238,7 @@ pub fn run(cfg: NodeConfig) -> i32 {
             shared.clone(),
             node_info,
             own_uid,
+            gateway_block,
         ));
         let trading_mode = if cfg.api.allowed_uids.is_empty() { 0o600 } else { 0o666 };
         let trading = match server::bind(&cfg.socket_path(), trading_mode) {

@@ -79,7 +79,7 @@
 
 ### Bybit 게이트웨이(만드는 중, [ADR-028](../adr/ADR-028-bybit-gateway.md))
 
-U16c까지 있는 것: 서명, REST 클라이언트, 시작 확인, IP 확인, cancel-all, 조회 일곱 가지(`query.rs`), 실행 분류표(`exec.rs`). 주문 전송(U17), 스트림과 노드 연결(U16d)은 아직 없다. 그래서 노드는 `kind = "bybit"`로 시작하지 않는다(종료 코드 3).
+U16d까지 있는 것: 서명, REST 클라이언트, 시작 확인, IP 확인, cancel-all, 조회 일곱 가지(`query.rs`), 실행 분류표(`exec.rs`), 비공개 스트림(`stream.rs`), `VenueGateway` 구현과 노드 연결(`gateway.rs`, `node.venue = bybit:<network>`). 주문 전송과 참조 가격은 U17이다. 그때까지 주문과 취소는 `NotSent`로 답하고, 참조 가격이 없으므로 코어가 일반 주문을 거절한다.
 
 | 의무·규칙 | Bybit 게이트웨이 |
 |---|---|
@@ -97,6 +97,13 @@ U16c까지 있는 것: 서명, REST 클라이언트, 시작 확인, IP 확인, c
 | 실행 분류표 | `Trade` → 체결(우리 `orderLinkId`가 아니면 외부 체결), `Funding` → 펀딩, `AdlTrade`·`BustTrade`·`Delivery`·`Settle` → 거래소 포지션 변경(adl, takeover, delivery, settle), 그 밖 → 분류 못 한 실행([ADR-023](../adr/ADR-023-venue-made-executions.md)). 스트림과 조회가 같은 함수를 쓴다 |
 | 부재(StatusNotFound) | realtime, 기간 없는 주문 내역(최근 7일), 코어가 주문을 받은 시각(`accepted_at`) − 1분부터 7일의 주문 내역 셋 다에서 우리 `orderLinkId`가 없을 때만. 시각은 첫 요청 직전. 취소·거부된 주문은 내역에 24시간만 남는다 |
 | 정리 범위(kill scope) | `category=linear`, `settleCoin=USDT`. cancel-all 요청 하나(U18b가 부른다). `result.success = "1"`일 때만 성공이고, 500건을 취소했으면 남은 주문이 있을 수 있다고 알린다 |
+| G-1, G-5(U16d) | 주문·취소 명령마다 `NotSent` 하나. 요청을 보내지 않는다(U17) |
+| G-6 연결 | 시작 확인이 모두 통과하고 막힘(키 거부, IP 차단 멈춤, 시작 확인, IP 확인)이 없을 때만 접속한다. `auth`가 확인되고 `subscribe`(`order.linear`, `execution.linear`)가 확인된 뒤에만 `Link` 올림. 세션 번호는 부팅 번호 + 연결 번호로 접속마다 커진다. 연결 중 막힘이 생기면 내린다. 재연결 뒤의 다시 읽기는 코어의 `Resync`가 조회로 한다 |
+| 생존 확인 | `ping_interval_ms`(기본 5초)마다 ping. 다음 ping 때까지 pong이 없거나 소켓이 닫히면 끊김 |
+| G-9(스트림) | 읽을 수 없는 메시지, `data` 목록이 없는 토픽 메시지, 읽을 수 없는 주문·실행 행, 연결 중의 인증·구독 응답은 끊고 다시 붙는 사유다. 앞서 읽은 행은 넘긴다. 설정한 종목이 아닌 행은 넘기지 않는다(조회가 정리 범위로 읽는다) |
+| 인증 거부(스트림) | `success: true`가 아닌 `auth` 응답은 키 거부: 재시작까지 다시 붙지 않고 요청도 보내지 않는다 |
+| IP 차단 멈춤 | 어느 요청이든 HTTP 403이면 600초 동안 REST 요청과 스트림 접속을 모두 멈추고 연결을 내린다 |
+| 상태 API | `gateway.block`: 막힘 이유 또는 null |
 
 Bybit 게이트웨이의 G-4(아직 없음, [ADR-024](../adr/ADR-024-absence-count-and-market-ref.md)): Bybit에는 만료 필드가 없고, 요청 시각(`X-BAPI-TIMESTAMP`) + `X-BAPI-RECV-WINDOW`가 서버 시각보다 이르면 요청을 거절한다. 게이트웨이는 요청 시각을 보내는 순간의 로컬 시각으로 하고 `요청 시각 + recv_window + 1초 ≤ expires_at`일 때만 보낸다. 아니면 보내지 않고 `NotSent`. 1초는 Bybit가 받아 주는 로컬 시계 앞섬의 한도다. 이 조건으로 거래소가 만료를 강제하므로 Bybit 설정은 `venue_enforces_expiry = true`, `absence_not_found_needed = 2`를 쓴다. 횟수는 조회 사본의 짧은 불일치만 막는다. realtime 조회는 닫힌 주문을 최근 500건까지만 들고 있고 서비스 재시작 때 비우므로, 게이트웨이는 realtime과 주문 내역(`/v5/order/history`) 모두에서 없을 때만 `StatusNotFound`를 보낸다(필수, U16c에 있음).
 

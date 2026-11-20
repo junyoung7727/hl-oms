@@ -17,7 +17,7 @@ pub struct NodeInfo {
     pub source_digest: String,
     pub pid: u32,
     pub started_at: Ts,
-    /// "sim" or "hyperliquid:testnet" / "hyperliquid:mainnet".
+    /// "sim", "hyperliquid:<network>" or "bybit:<network>".
     pub venue: String,
     /// The started gateway's form of the client order id (ADR-022).
     pub wire_id_form: WireIdForm,
@@ -79,6 +79,10 @@ pub fn status(ctx: &ApiCtx, strategy: Option<&StrategyId>) -> serde_json::Value 
         "source": "published state (durable records only) and process counters",
         "node": ctx.info,
         "fatal": ctx.shared.fatal.reason(),
+        // Why the gateway keeps the link down (Bybit: auth_rejected,
+        // ip_banned, account, unchecked; ADR-028). Null when nothing blocks
+        // it, or when the gateway does not report one.
+        "gateway": {"block": ctx.gateway_block.as_ref().and_then(|f| f())},
         "core": {
             "instance_id": format!("{:016x}", core.instance_id),
             "boot": core.boot,

@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `c5b15bf6af860044`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `376720944bc760bb`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
-주장 77건: 통과 0, 실패 0, 미실행 10, 이전 버전 결과 67.
+주장 78건: 통과 0, 실패 0, 미실행 11, 이전 버전 결과 67.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -84,6 +84,7 @@
 | V-TAIL-1 | 꼬리 읽기는 디스크에 더 많은 기록이 있어도 호출자가 준 내구화 번호보다 큰 기록을 돌려주지 않고, 작은 세그먼트로 회전한 저널을 끊김 없이 순서대로 읽으며, 커서 다음 번호부터 다시 시작한다. 쓰는 쪽이 잠금을 쥔 동안에도 읽고, 읽는 동안 새 쓰는 쪽이 잠금을 잡을 수 있다(잠금을 잡지 않는다). 상한 이하의 손상된 프레임이나 번호가 튀는 프레임에서는 그 앞 기록을 돌려준 뒤 오류를 내고 위치를 움직이지 않으며, 커서 앞의 손상도 오류로 알린다(끝에서 쓰는 중인 프레임은 기다린다). 기록 스키마가 바뀌어 열린 새 세그먼트와, 헤더만 있다가 새 스키마 헤더로 다시 쓰인 세그먼트를 따라가고 기록마다 스키마를 알려 준다. 엿보기는 상한 너머의 유효한 프레임을 위치를 움직이지 않고 보여 주며 잘린 마지막 프레임에서 오류 없이 멈춘다 | 단위 | 미실행 | `cargo test -p oms-journal --test tail` |
 | V-TAIL-2 | 모든 이벤트 종류(43가지)의 인스턴스를 선택 필드까지 채워 직렬화하면, 인코더가 쓰는 모든 필드 경로가 docs/contracts/tail.md의 필드 표에 있고, 표의 모든 행은 실제로 쓰이는 필드이며 타입 열이 실제 JSON 값의 종류(문자열, 정수, 불, 목록, 열거형, 객체, null 허용)와 맞는다. 통째로 읽는 행은 설정 하나와 열거형 값뿐이다. 이벤트 종류가 늘면 시험이 컴파일되지 않는다 | 소스 검사 | 미실행 | `cargo test -p oms-core --test event_fields` |
 | V-BYBIT-READ-1 | Bybit 게이트웨이의 조회 일곱 가지는 읽기만 하고, 통째로 읽을 수 있는 응답만 입력으로 넘긴다. 쪽 넘김은 커서가 비고 쪽이 덜 찼을 때만 끝으로 보고, 다 찬 쪽에 커서가 없거나 커서가 그대로이거나 쪽이 20을 넘으면 스냅숏(열린 주문, 포지션, 증거금 보고)을 넘기지 않는다. 주문 상태는 우리 orderLinkId의 행만 보고 realtime, 기간 없는 주문 내역, 코어가 주문을 받은 시각 − 1분부터 7일의 주문 내역 셋 다에 없을 때만 StatusNotFound(첫 조회 전 시각)를 낸다. 체결은 since − 2분부터 7일 이하의 창으로 읽고(창 사이 1ms 겹침, 중복 키는 한 번), 한 번에 30쪽까지 읽고 다 읽은 창까지만 선언한 채 멈추며(오류 아님), 창을 다 읽은 뒤에만 그 끝 직전까지 FillsSynced를 내며, 끝을 알 수 없는 창은 반으로 나누고, 읽을 수 없는 행에서 멈춘다. 실행 행은 execType 표 하나로 Fill(우리 주문이면 order_id, 아니면 외부 체결), Funding, PositionChange(adl, takeover, delivery, settle), UnclassifiedExecution이 된다. 증거금 보고는 totalEquity, positionIM, 계좌 증거금 모드, 정수 레버리지, maxLeverage로 만들고 한 값이라도 못 읽으면 MarginReportInvalid다. 이 코드에는 주문 생성·정정·단건 취소 요청이 없다. 설정은 Bybit에서 REGULAR_MARGIN 밖의 계좌 모드 허용을 거절한다 | 단위 | 미실행 | `cargo test -p oms-node --lib venue::bybit` |
+| V-BYBIT-STREAM-1 | Bybit 게이트웨이는 시작 확인이 통과하고 막힘이 없을 때만 비공개 스트림에 접속하고, auth(GET/realtime + 만료 시각의 서명, 만료 = 지금 + recv_window)가 확인된 뒤 order.linear·execution.linear를 구독하며, 구독이 확인된 뒤에만 Link를 올린다. 접속마다 세션 번호가 커진다. ping 뒤 다음 ping 때까지 pong이 없거나, 소켓이 닫히거나, 읽을 수 없는 행이 오거나, 연결 중 막힘(IP 변경, 키 거부, IP 차단)이 생기면 Link를 내리고, 키 거부와 IP 변경이 아니면 다시 붙는다. 인증 거부, 조회의 키 거부 코드, IP 변경 뒤에는 재시작까지 접속도 요청도 하지 않는다. HTTP 403 뒤에는 멈춤 시간 동안 REST 요청과 스트림 접속이 없고, 끝나면 다시 붙는다. 구독 거부는 키 거부가 아니라 다시 시도한다. 설정한 종목의 주문 행은 OrderStatus(Stream), 실행 행은 실행 분류표를 거쳐 받은 시각이 실린 입력이 되고 다른 종목의 행은 넘기지 않는다. 주문과 취소는 보내지 않고 NotSent 하나씩으로 답한다 | 통합 | 미실행 | `cargo test -p oms-node --lib venue::bybit` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -1782,7 +1783,7 @@
 - 판정 기준과 근거: 만든 VenueInput 전체(값까지), 보낸 요청의 경로·질의·순서·개수, 창의 시작·끝 시각, 소스에 주문 요청 경로가 없음
 - 재현: `cargo test -p oms-node --lib venue::bybit`
 - 뒷받침하는 것: C-GW(Bybit 열), C-MARGIN, ADR-028
-- 확인하지 않은 범위: 실제 Bybit 응답(문서 예시만 본떴다, testnet은 U-01 허가 뒤). 빈 커서가 마지막 쪽이라는 것, startTime·endTime이 끝값을 포함하는지, maker 체결의 orderLinkId, execFee의 maker 리베이트 부호, 펀딩·ADL 행이 실행 목록에 실리는지(T15)는 문서에 없다. 비공개 스트림과 조회의 노드 연결(U16d), 조회의 요청 한도(U17). maxLeverage는 프로세스당 한 번만 읽는다(교차 계좌에서는 어떤 규칙도 쓰지 않는다). 주문 내역 기간이 생성 시각과 갱신 시각 중 무엇을 거르는지, 2분보다 늦게 실리는 실행 행, 변경 직후의 늦은 포지션 응답(ADR-028 §8)
+- 확인하지 않은 범위: 실제 Bybit 응답(문서 예시만 본떴다, testnet은 U-01 허가 뒤). 빈 커서가 마지막 쪽이라는 것, startTime·endTime이 끝값을 포함하는지, maker 체결의 orderLinkId, execFee의 maker 리베이트 부호, 펀딩·ADL 행이 실행 목록에 실리는지(T15)는 문서에 없다. 조회의 요청 한도(U17). 스트림과 노드 연결은 V-BYBIT-STREAM-1. maxLeverage는 프로세스당 한 번만 읽는다(교차 계좌에서는 어떤 규칙도 쓰지 않는다). 주문 내역 기간이 생성 시각과 갱신 시각 중 무엇을 거르는지, 2분보다 늦게 실리는 실행 행, 변경 직후의 늦은 포지션 응답(ADR-028 §8)
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
@@ -1809,4 +1810,34 @@
 | `node-unit/venue::bybit::query::tests::a_long_gap_is_synced_over_several_queries_within_the_page_budget` | 미실행 |  |
 | `node-unit/venue::bybit::query::tests::the_gateway_has_no_order_request` | 미실행 |  |
 | `node-unit/config::tests::a_bybit_configuration_loads_and_each_unsafe_value_is_refused` | 미실행 |  |
+
+## V-BYBIT-STREAM-1 — Bybit 게이트웨이는 시작 확인이 통과하고 막힘이 없을 때만 비공개 스트림에 접속하고, auth(GET/realtime + 만료 시각의 서명, 만료 = 지금 + recv_window)가 확인된 뒤 order.linear·execution.linear를 구독하며, 구독이 확인된 뒤에만 Link를 올린다. 접속마다 세션 번호가 커진다. ping 뒤 다음 ping 때까지 pong이 없거나, 소켓이 닫히거나, 읽을 수 없는 행이 오거나, 연결 중 막힘(IP 변경, 키 거부, IP 차단)이 생기면 Link를 내리고, 키 거부와 IP 변경이 아니면 다시 붙는다. 인증 거부, 조회의 키 거부 코드, IP 변경 뒤에는 재시작까지 접속도 요청도 하지 않는다. HTTP 403 뒤에는 멈춤 시간 동안 REST 요청과 스트림 접속이 없고, 끝나면 다시 붙는다. 구독 거부는 키 거부가 아니라 다시 시도한다. 설정한 종목의 주문 행은 OrderStatus(Stream), 실행 행은 실행 분류표를 거쳐 받은 시각이 실린 입력이 되고 다른 종목의 행은 넘기지 않는다. 주문과 취소는 보내지 않고 NotSent 하나씩으로 답한다
+
+- 상태: **미실행**
+- 왜 중요한가: Bybit 연결이 확인되지 않은 키·계좌·구독으로 올라오지 않고, 조용히 죽은 연결을 살아 있다고 보지 않으며, 거부된 키나 차단된 IP로 요청을 계속 보내지 않는다는 전제
+- 수준: 통합
+- 전제와 범위: loopback 가짜 웹소켓 서버(auth·subscribe·ping 응답을 시험이 고른다)와 가짜 HTTP 서버(REST, IP 확인), 짧게 줄인 시간, 시험 13개
+- 실제 구성요소: venue::bybit::gateway(시작 확인·IP 반복, 스트림 반복, 조회, 멈춤), stream, checks, query, exec, rest, venue::start(명령·조회 반복), InputQueues
+- 모의·시뮬레이션: Bybit 비공개 스트림과 REST(문서 모양의 손으로 쓴 JSON), 공인 IP 확인 서비스, 시간(ping 150ms, 멈춤 600ms)
+- 주입한 장애: 격리 계좌, pong 없음, 읽을 수 없는 실행 행, 소켓 끊김, 인증 거부, 구독 거부, 연결 중 IP 변경, 조회의 HTTP 403, 조회의 33004, 거래하지 않는 종목의 행
+- 판정 기준과 근거: 코어에 간 입력 전체(Link 순서·세션 번호·사유, 상태·체결 값), 가짜 서버가 받은 메시지와 요청의 순서·개수, 접속 수, 막힘 이유
+- 재현: `cargo test -p oms-node --lib venue::bybit`
+- 뒷받침하는 것: C-GW(Bybit 열), C-LINK, ADR-028
+- 확인하지 않은 범위: 실제 Bybit 스트림(testnet은 U-01 허가 뒤), TLS 접속(시험은 ws://), 인증 실패 응답의 실제 모양(문서에 없다), 재연결 뒤 놓친 메시지를 거래소가 다시 주는지(T4), 비거래 실행이 스트림에 실리는지(T15), 노드 바이너리를 kind = bybit로 띄우는 끝에서 끝까지의 시험(엔드포인트가 네트워크로 정해져 있어 가짜 서버로 돌릴 수 없다; node.rs 연결은 코드 검토만), 상태 API의 gateway.block 출력(코드 검토만), 참조 가격과 주문 전송(U17), 정리 스위치의 10초 규칙(U18b)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `node-unit/venue::bybit::stream::tests::the_sent_messages_have_the_documented_shapes` | 미실행 |  |
+| `node-unit/venue::bybit::stream::tests::frames_are_read_by_their_documented_fields` | 미실행 |  |
+| `node-unit/venue::bybit::stream::tests::an_order_row_becomes_a_stream_status_of_our_order_or_of_a_foreign_one` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::the_link_comes_up_after_the_checks_auth_and_subscribe_and_stream_rows_become_inputs` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::the_stream_does_not_connect_while_a_boot_check_fails` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::a_missing_pong_takes_the_link_down_and_the_reconnect_is_a_new_session` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::an_unreadable_row_or_a_closed_socket_takes_the_link_down_and_it_comes_back` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::a_refused_stream_auth_blocks_until_the_restart_and_nothing_is_sent_after` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::a_refused_subscription_never_brings_the_link_up_and_is_retried` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::an_ip_change_while_up_takes_the_link_down_for_good` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::an_ip_ban_stops_every_request_for_the_pause_then_the_link_comes_back` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::a_key_rejected_by_a_query_takes_the_link_down_for_good` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::orders_and_cancels_are_answered_not_sent_once_each` | 미실행 |  |
 

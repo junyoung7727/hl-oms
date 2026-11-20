@@ -135,7 +135,7 @@ fn signed_size(row: &Value) -> Result<SQty, String> {
 /// concluded. `Untriggered`, `Triggered` and `Deactivated` belong to
 /// conditional orders and `PartiallyFilledCanceled` to spot; the OMS sends
 /// neither, so the row is not read as one of its orders.
-fn order_status(row: &Value) -> Result<Option<StatusIn>, String> {
+pub(super) fn order_status(row: &Value) -> Result<Option<StatusIn>, String> {
     let reason = |names: &[&str]| -> String {
         names
             .iter()
@@ -1637,6 +1637,8 @@ mod tests {
             include_str!("rest.rs"),
             include_str!("checks.rs"),
             include_str!("sign.rs"),
+            include_str!("stream.rs"),
+            include_str!("gateway.rs"),
         ];
         // Built from parts, so that this test does not find itself.
         let mut needles: Vec<String> = [
