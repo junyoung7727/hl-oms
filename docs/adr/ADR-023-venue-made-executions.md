@@ -57,11 +57,11 @@ A는 2의 첫 두 성질을 만족하지 않아 제외했다.
 
 B.
 
-- 입력: `VenueInput::Funding(FundingIn)`, `VenueInput::PositionChange(VenuePositionChangeIn)`(종류 `adl`, `takeover`, `delivery`, `settle`), `VenueInput::UnclassifiedExecution`. 키는 게이트웨이의 체결 키(C-GW G-8)이고 체결과 같은 집합(`seen_fills`, 바닥 시각)에서 중복을 거른다.
+- 입력: `VenueInput::Funding(FundingIn)`, `VenueInput::PositionChange(VenuePositionChangeIn)`(종류 `adl`, `takeover`, `delivery`, `settle`), `VenueInput::UnclassifiedExecution`. 키는 게이트웨이의 체결 키(C-GW G-8)다. 펀딩과 포지션 변경은 체결과 같은 집합(`seen_fills`, 바닥 시각)에서 중복을 거른다. 분류 못 한 실행은 따로 둔 집합(`seen_unclassified`)에서 거른다. 게이트웨이가 나중에 종류를 알게 되어 같은 키를 체결로 보내면 기장되어야 하기 때문이다.
 - 이벤트: `FundingBooked`, `VenuePositionChanged`, `UnclassifiedExecutionNoted`, `VenueChangeSettled`. 불일치 종류: `VenuePositionChange`, `UnclassifiedExecution`.
 - 우리 것이 아닌 주문의 `Trade`는 새 종류(`foreign_order`, 설계 TN R2)를 만들지 않고 기존 외부 체결로 보낸다. 같은 사실에 길이 둘이면 감시자도 둘을 따로 세야 한다.
 - 차단은 기존 불일치 차단이다. 일반 주문만 막고(증거금 정책이 있을 때), 재생 뒤에도 남고, 상태 화면에 미확인 불일치로 나오며(U14가 `[OMS P1]`로 보낸다), 운영자가 사유와 함께 `ack`해야 풀린다. R5의 차단 목록과 `clear_hold`는 그것이 필요한 단위(U18b, U19b)에서 만든다.
-- 거래소 변경 뒤 포지션: 그 종목은 "거래소 포지션 대기"가 된다. 현재 세션에서 변경 기록 시각보다 뒤에 물은 첫 포지션 응답이 포지션을 정한다. 다르면 `PositionAdjusted { ledger: unattributed, reason: snapshot_after_venue_change }`, 같으면 `VenueChangeSettled`. 어느 쪽이든 대기가 끝난다.
+- 거래소 변경 뒤 포지션: 그 종목은 "거래소 포지션 대기"가 된다. 현재 세션에서 변경 기록 시각보다 뒤에 물은 포지션 응답 중, 그 종목에 열린 수량(`buy_open`, `sell_open`)과 대기 체결이 없을 때의 첫 응답이 포지션을 정한다. 우리 주문이 아직 체결될 수 있으면 오는 중인 체결이 응답에 이미 들어 있을 수 있어 두 번 셀 위험이 있다(검토 2026-11-20). 기다리는 동안은 기존 범위 검사를 받는다. 다르면 `PositionAdjusted { ledger: unattributed, reason: snapshot_after_venue_change }`, 같으면 `VenueChangeSettled`. 어느 쪽이든 대기가 끝난다.
 - `PositionAdjusted.reason`은 기본값이 `operator`이고 그 값일 때는 쓰지 않는다. 운영자 조정은 스키마 1과 같은 바이트다.
 - 넘침: 변경을 더하면 포지션이 넘치는 경우 기장하지 않고 불일치만 낸다. 차이가 넘치면 맞추지 않고 기존 범위 검사에 맡긴다. 둘 다 결함(프로세스 중단)으로 만들지 않는다.
 - 기록 스키마: `RECORD_SCHEMA = 2`, 읽는 스키마 `[1, 2]`. 바뀐 것은 열거형 변형 추가와 기본값 있는 필드 하나라서 스키마 1 기록은 변환 없이 해석된다. 상태 스키마는 그대로 1이다. 새 상태 필드(`venue_change_wait`, 통계 두 개)는 비어 있거나 0이면 쓰지 않으므로 옛 스냅샷의 바이트와 다이제스트가 그대로다.
@@ -69,13 +69,14 @@ B.
 ## 8. 포기한 장점, 남은 위험, 가정
 
 - 포기: R5의 차단 이름(`VenueChange`)으로 화면에서 원인을 바로 보는 것. 지금은 불일치 종류로 본다.
+- 위험: 그 종목에 주문이 계속 걸려 있으면 대기가 끝나지 않는다. 불일치 차단이 일반 주문을 막으므로 열린 주문은 줄어들지만, 감소 전용 주문이 계속 걸려 있으면 그동안은 범위 검사만 한다.
 - 위험: 포지션 응답이 변경보다 늦게 물어졌지만 거래소가 변경을 아직 반영하지 않은 값을 주면 코어가 틀린 값으로 맞춘다. 거래소가 응답 시각 기준으로 일관된다는 것은 가정이다(기존 대조와 같은 가정, ADR-014). 감시자 W2가 독립적으로 다시 본다.
 - 위험: 스키마 2 세그먼트가 생긴 저널은 스키마 1만 읽는 옛 바이너리로 되돌릴 수 없다(runbook §9).
 - 가정: 펀딩·변경·분류 못 한 실행의 키가 체결 키와 겹치지 않는다. Bybit는 모두 `execId`를 쓴다(C-GW G-8 Bybit 행).
 
 ## 9. 근거
 
-- 시험: `crates/oms-core/tests/venue_changes.rs` 7개(주장 V-VENUE-EXEC-1), `crates/oms-node/tests/record_schema.rs` 2개(주장 V-SCHEMA-2-1).
+- 시험: `crates/oms-core/tests/venue_changes.rs` 9개(주장 V-VENUE-EXEC-1), `crates/oms-node/tests/record_schema.rs` 2개(주장 V-SCHEMA-2-1).
 - 설계 TN(암호화폐 거래 통합 설계 v1.0) §7.2, §7.5, 수정 R2, R4, R5. 저장소 밖 문서다.
 
 ## 10. 재검토 조건

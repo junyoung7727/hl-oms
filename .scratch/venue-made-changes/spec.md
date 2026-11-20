@@ -44,15 +44,15 @@ The event exists for the operator's `adjust-position`. It gains `reason: AdjustR
 
 ### D4. Which snapshot counts
 
-The core keeps, per waiting instrument, the record time of its last venue change. A `Positions` answer counts only if it belongs to the current link session and `queried_at` is later than that time, and (as today) no fill was booked at or after `queried_at`. A waiting instrument is not range-checked (`PositionOutOfRange`); it is set. Other instruments are checked as today.
+The core keeps, per waiting instrument, the record time of its last venue change. A `Positions` answer counts only if it belongs to the current link session, `queried_at` is later than that time, (as today) no fill was booked at or after `queried_at`, and the instrument has no open quantity (`buy_open`, `sell_open`) and no parked fill: otherwise a fill of ours still on its way would be counted twice (review 2026-11-20). While it waits, the instrument is range-checked as today; once set, the range check passes because the position equals the venue's.
 
 ### D5. Keys
 
-Funding, position changes and unclassified executions use the gateway's fill key (C-GW G-8) and the same de-duplication as fills: a key already seen, or a venue time below the fill floor, is ignored. The keys are purged with fills.
+Funding and position changes use the gateway's fill key (C-GW G-8) and the same de-duplication as fills: a key already seen, or a venue time below the fill floor, is ignored. Unclassified executions keep their keys in a separate set (`seen_unclassified`), so that the same key delivered later as a fill (a gateway that learned the kind) is still booked (review 2026-11-20). All keys are purged with fills.
 
 ### D6. Quantities
 
-`VenuePositionChangeIn.qty` is signed (`SQty`), positive adds to a long. Zero is ignored. Overflow is a `CoreFault`, as for fills.
+`VenuePositionChangeIn.qty` is signed (`SQty`), positive adds to a long. Zero is ignored. A change that would overflow the booked position is not booked; the core raises the `VenuePositionChange` mismatch instead (no `CoreFault`, which would stop the node on a venue input).
 
 ## Testing Decisions
 
@@ -65,6 +65,8 @@ Core tests (`crates/oms-core/tests/venue_changes.rs`, new file, rustfmt-clean):
 - a positions answer equal to the sum journals `VenueChangeSettled` and no `PositionAdjusted`;
 - a positions answer queried before the change, or of an old session, does not end the wait;
 - an operator `PositionAdjusted` serialises without `reason` (schema-1 bytes).
+- (review 2026-11-20) the wait does not end while an order of ours on the instrument is open, so a fill still on its way is not counted twice;
+- (review 2026-11-20) an unclassified key does not block a later fill with the same key.
 
 Node test: a journal written by this build with record schema 1 (`Options.record_schema = 1`) from inputs that produce only schema-1 events recovers with this build to the same state digest as the live core.
 

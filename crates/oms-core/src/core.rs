@@ -78,6 +78,11 @@ pub struct Core {
     /// empty.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub venue_change_wait: BTreeMap<InstrumentId, Ts>,
+    /// Keys of unclassified executions, with their venue time. Kept apart
+    /// from `seen_fills` so that the same key delivered later as a fill is
+    /// booked. Purged with the fill keys. Not serialised while empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub seen_unclassified: BTreeMap<FillKey, Ts>,
 }
 
 impl Core {
@@ -111,6 +116,7 @@ impl Core {
             stats: Stats::default(),
             margin: MarginState::default(),
             venue_change_wait: BTreeMap::new(),
+            seen_unclassified: BTreeMap::new(),
         }
     }
 
@@ -833,6 +839,7 @@ impl Core {
                 self.fill_floor = (*fill_floor).max(self.fill_floor);
                 let floor = self.fill_floor;
                 self.seen_fills.retain(|_, t| *t >= floor);
+                self.seen_unclassified.retain(|_, t| *t >= floor);
                 self.mismatches
                     .retain(|_, m| m.acked.as_ref().is_none_or(|a| a.at >= *cutoff));
                 self.last_purge_at = at;
@@ -920,7 +927,7 @@ impl Core {
                 self.stats.venue_changes += 1;
             }
             Event::UnclassifiedExecutionNoted { key, venue_ts, .. } => {
-                self.seen_fills.insert(key.clone(), *venue_ts);
+                self.seen_unclassified.insert(key.clone(), *venue_ts);
             }
             Event::VenueChangeSettled { instrument } => {
                 self.venue_change_wait.remove(instrument);

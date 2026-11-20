@@ -1358,7 +1358,9 @@ impl Tx<'_> {
         detail: &str,
         venue_ts: Ts,
     ) -> Result<(), CoreFault> {
-        if self.execution_seen(key, venue_ts) {
+        // Its own set: a later delivery of the same key as a fill (a
+        // gateway that learned the kind) must still be booked.
+        if self.core.seen_unclassified.contains_key(key) || venue_ts < self.core.fill_floor {
             return Ok(());
         }
         self.emit(Event::UnclassifiedExecutionNoted {
@@ -1614,11 +1616,19 @@ impl Tx<'_> {
         }
         let mut clean = true;
         // An instrument whose position the venue changed takes the venue's
-        // quantity from the first answer asked after the change.
+        // quantity from the first answer asked after the change while no
+        // fill of ours can still be on its way: no open quantity and no
+        // parked fill on it. Otherwise a fill that arrives after the answer
+        // would be counted twice. Until then it is range-checked below.
         let waiting: Vec<(InstrumentId, Ts)> =
             self.core.venue_change_wait.iter().map(|(i, t)| (i.clone(), *t)).collect();
         for (i, changed_at) in waiting {
             if queried_at <= changed_at {
+                continue;
+            }
+            let book = self.core.account_book(&i);
+            let parked = self.core.parked_fills.iter().any(|p| p.fill.instrument == i);
+            if book.buy_open.0 != 0 || book.sell_open.0 != 0 || parked {
                 continue;
             }
             let venue = positions.iter().find(|p| p.instrument == i).map(|p| p.qty).unwrap_or_default();

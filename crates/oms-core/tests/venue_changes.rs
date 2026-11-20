@@ -270,3 +270,67 @@ fn an_operator_adjustment_is_written_as_in_schema_1() {
     let back: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(back, ev);
 }
+
+/// Review 2026-11-20. A fill of ours that is still on its way when the
+/// positions answer comes must not be counted twice: the wait ends only
+/// on an answer with no open order and no parked fill on the instrument.
+#[test]
+fn the_wait_does_not_end_while_an_order_of_ours_can_still_fill() {
+    let mut h = H::ready();
+    let id = h.accept("a", "k1", Side::Buy, "1", "100");
+    h.placed_open(id, "v1");
+    let ts = h.now;
+    h.venue(change("adl1", VenueChangeKind::Adl, "-0.5", ts));
+    assert_eq!(h.acct().pos, sq("-0.5"));
+
+    // The order filled at the venue; the fill has not arrived. The venue
+    // says 0.5. Setting the position now would book the fill twice.
+    let after = h.now + 1;
+    let out = positions(&mut h, after, "0.5");
+    assert!(
+        !names(&out).contains(&"position_adjusted"),
+        "{:?}",
+        names(&out)
+    );
+    assert!(!h.core.venue_change_wait.is_empty());
+
+    // The fill arrives and closes the order: the journal now says 0.5.
+    h.fill(id, "t1", "1", "100");
+    h.status(id, VenueStatus::Filled, Some("1"));
+    assert_eq!(h.acct().pos, sq("0.5"));
+    let later = h.now + 1;
+    let out = positions(&mut h, later, "0.5");
+    assert!(names(&out).contains(&"venue_change_settled"));
+    assert!(!names(&out).contains(&"position_adjusted"));
+    assert_eq!(journal_position(&h), sq("0.5").0);
+    assert_eq!(h.rebuilt(), h.core);
+}
+
+/// Review 2026-11-20. An execution first sent as unclassified and later
+/// delivered as a fill (a gateway that learned the kind) is still booked.
+#[test]
+fn an_unclassified_key_does_not_block_a_later_fill_with_the_same_key() {
+    let mut h = H::ready();
+    let id = h.accept("a", "k1", Side::Buy, "1", "100");
+    h.placed_open(id, "v1");
+    let ts = h.now;
+    h.venue(VenueInput::UnclassifiedExecution {
+        key: fkey("t1"),
+        instrument: iid("X"),
+        exec_type: "SomethingNew".into(),
+        detail: "".into(),
+        venue_ts: ts,
+    });
+    let again = h.venue(VenueInput::UnclassifiedExecution {
+        key: fkey("t1"),
+        instrument: iid("X"),
+        exec_type: "SomethingNew".into(),
+        detail: "".into(),
+        venue_ts: ts,
+    });
+    assert!(again.events.is_empty(), "a re-delivery is ignored");
+    let out = h.fill(id, "t1", "1", "100");
+    assert!(names(&out).contains(&"fill_booked"), "{:?}", names(&out));
+    assert_eq!(h.acct().pos, sq("1"));
+    assert_eq!(h.rebuilt(), h.core);
+}

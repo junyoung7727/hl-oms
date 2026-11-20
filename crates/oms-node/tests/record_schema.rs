@@ -78,7 +78,8 @@ impl Run {
 }
 
 /// Inputs whose events all exist in record schema 1: boot, configuration,
-/// link and sync, an order with a fill, an operator adjustment and a halt.
+/// link and sync, an order filled in full, an operator adjustment and a
+/// halt.
 fn schema_1_history(run: &mut Run) {
     run.input(Input::Boot {
         binary: "test".into(),
@@ -137,7 +138,7 @@ fn schema_1_history(run: &mut Run) {
         venue_oid: None,
         instrument: iid("X"),
         side: Side::Buy,
-        qty: Qty::parse("0.4").unwrap(),
+        qty: Qty::parse("1").unwrap(),
         px: Px::parse("100").unwrap(),
         fee: Amount::ZERO,
         venue_ts: ts,
@@ -190,7 +191,12 @@ fn a_schema_1_journal_and_a_schema_2_tail_replay_to_the_live_state() {
             "{text}"
         );
     }
-    write(&dir, 1, &v1);
+    // Two writers of schema 1 share one segment, so the second segment
+    // below is opened by the schema change and not by each writer.
+    let (head, tail) = v1.split_at(v1.len() / 2);
+    write(&dir, 1, head);
+    write(&dir, 1, tail);
+    assert_eq!(oms_journal::list_segments(&dir).unwrap().len(), 1);
 
     let recovered = oms_node::recovery::recover(&dir, 1 << 30, "test").unwrap();
     assert_eq!(
@@ -218,7 +224,7 @@ fn a_schema_1_journal_and_a_schema_2_tail_replay_to_the_live_state() {
         queried_at: after,
         positions: vec![VenuePosition {
             instrument: iid("X"),
-            qty: SQty::parse("0.25").unwrap(),
+            qty: SQty::parse("0.85").unwrap(),
         }],
     });
     let v2 = run.take();
