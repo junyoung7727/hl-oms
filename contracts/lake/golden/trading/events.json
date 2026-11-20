@@ -1,92 +1,224 @@
 {
  "crypto/trading/events/date=2026-01-02/day.parquet": [
   {
-   "seq": 10,
+   "seq": 1,
+   "event_idx": 0,
+   "at_us": 1767312000001000,
+   "kind": "booted",
+   "order_id": null,
+   "venue": null,
+   "symbol": null,
+   "payload": "{\"binary\":\"test\",\"boot\":1,\"fill_floor\":1767311990001000}",
+   "record_schema": 2
+  },
+  {
+   "seq": 2,
+   "event_idx": 0,
+   "at_us": 1767312000002000,
+   "kind": "config_activated",
+   "order_id": null,
+   "venue": null,
+   "symbol": null,
+   "payload": "{\"config\":{\"instruments\":{\"BTCUSDT\":{\"account_pos_max\":\"10\",\"account_pos_min\":\"-10\",\"max_order_notional\":\"1000000\",\"max_order_qty\":\"100\",\"min_notional\":\"10\",\"price_band_bps\":null,\"px_max_sig_figs\":null,\"px_tick\":\"0.1\",\"qty_step\":\"0.001\"}},\"policy\":{\"absence_margin_us\":10000000,\"cancel_max_attempts\":5,\"cancel_retry_backoff_us\":1000000,\"closed_retention_us\":3600000000,\"dedup_grace_us\":60000000,\"fill_dedup_retention_us\":86400000000,\"max_expiry_horizon_us\":60000000,\"max_inflight_sends\":64,\"max_open_orders\":500,\"max_orders_in_memory\":100000,\"max_parked_fills\":1024,\"purge_interval_us\":60000000,\"ref_price_max_age_us\":15000000,\"send_result_timeout_us\":30000000,\"unmatched_fill_wait_us\":120000000,\"venue_enforces_expiry\":true},\"strategies\":{\"golden\":{\"enabled\":true,\"limits\":{\"BTCUSDT\":{\"max\":\"10\",\"min\":\"-10\"}},\"max_open_orders\":50}},\"version\":1}}",
+   "record_schema": 2
+  },
+  {
+   "seq": 3,
+   "event_idx": 0,
+   "at_us": 1767312000003000,
+   "kind": "link_changed",
+   "order_id": null,
+   "venue": null,
+   "symbol": null,
+   "payload": "{\"reason\":\"test\",\"session\":1,\"up\":true}",
+   "record_schema": 2
+  },
+  {
+   "seq": 4,
+   "event_idx": 0,
+   "at_us": 1767312000004000,
+   "kind": "fills_synced",
+   "order_id": null,
+   "venue": null,
+   "symbol": null,
+   "payload": "{\"session\":1,\"up_to\":1767312000003000}",
+   "record_schema": 2
+  },
+  {
+   "seq": 5,
+   "event_idx": 0,
+   "at_us": 1767312000005000,
+   "kind": "open_orders_swept",
+   "order_id": null,
+   "venue": null,
+   "symbol": null,
+   "payload": "{\"session\":1}",
+   "record_schema": 2
+  },
+  {
+   "seq": 6,
+   "event_idx": 0,
+   "at_us": 1767312000006000,
+   "kind": "positions_verified",
+   "order_id": null,
+   "venue": null,
+   "symbol": null,
+   "payload": "{\"session\":1}",
+   "record_schema": 2
+  },
+  {
+   "seq": 7,
    "event_idx": 0,
    "at_us": 1767312005000000,
-   "kind": "order_created",
-   "order_id": "o-0001",
+   "kind": "order_accepted",
+   "order_id": "1",
    "venue": "bybit",
    "symbol": "BTCUSDT",
-   "payload": "{\"order_id\":\"o-0001\",\"px\":\"41990.0\",\"qty\":\"0.010\"}",
-   "record_schema": 1
+   "payload": "{\"config_version\":1,\"order_id\":1,\"ref_px\":null,\"request\":{\"client_order_id\":\"c-0001\",\"expires_at\":1767312009999000,\"instrument\":\"BTCUSDT\",\"px\":\"41990\",\"qty\":\"0.01\",\"reduce_only\":false,\"side\":\"buy\",\"strategy\":\"golden\",\"tif\":\"gtc\"}}",
+   "record_schema": 2
+  },
+  {
+   "seq": 8,
+   "event_idx": 0,
+   "at_us": 1767312005200000,
+   "kind": "order_acked",
+   "order_id": "1",
+   "venue": "bybit",
+   "symbol": "BTCUSDT",
+   "payload": "{\"order_id\":1,\"session\":1,\"venue_oid\":\"v-0001\",\"via\":\"send_result\"}",
+   "record_schema": 2
+  },
+  {
+   "seq": 9,
+   "event_idx": 0,
+   "at_us": 1767312007100000,
+   "kind": "order_accepted",
+   "order_id": "2",
+   "venue": "bybit",
+   "symbol": "BTCUSDT",
+   "payload": "{\"config_version\":1,\"order_id\":2,\"ref_px\":null,\"request\":{\"client_order_id\":\"c-0002\",\"expires_at\":1767312012099000,\"instrument\":\"BTCUSDT\",\"market_ref\":{\"channel\":\"orderbook.50\",\"market\":\"linear\",\"recv_ns\":1767312007000000000,\"symbol\":\"BTCUSDT\",\"update_id\":106,\"venue\":\"bybit\",\"venue_ts_ns\":1767312006997000000},\"px\":\"42000.2\",\"qty\":\"0.01\",\"reduce_only\":false,\"side\":\"buy\",\"strategy\":\"golden\",\"tif\":\"ioc\"}}",
+   "record_schema": 2
+  },
+  {
+   "seq": 10,
+   "event_idx": 0,
+   "at_us": 1767312007200000,
+   "kind": "order_acked",
+   "order_id": "2",
+   "venue": "bybit",
+   "symbol": "BTCUSDT",
+   "payload": "{\"order_id\":2,\"session\":1,\"venue_oid\":\"v-0002\",\"via\":\"send_result\"}",
+   "record_schema": 2
   },
   {
    "seq": 11,
    "event_idx": 0,
-   "at_us": 1767312005200000,
-   "kind": "order_acked",
-   "order_id": "o-0001",
-   "venue": "bybit",
-   "symbol": "BTCUSDT",
-   "payload": "{\"order_id\":\"o-0001\",\"venue_order_id\":\"v-0001\"}",
-   "record_schema": 1
-  },
-  {
-   "seq": 20,
-   "event_idx": 0,
-   "at_us": 1767312007100000,
-   "kind": "order_created",
-   "order_id": "o-0002",
-   "venue": "bybit",
-   "symbol": "BTCUSDT",
-   "payload": "{\"order_id\":\"o-0002\",\"px\":\"42000.2\",\"qty\":\"0.010\"}",
-   "record_schema": 1
-  },
-  {
-   "seq": 21,
-   "event_idx": 0,
    "at_us": 1767312007300000,
-   "kind": "fill",
-   "order_id": "o-0002",
+   "kind": "fill_booked",
+   "order_id": "2",
    "venue": "bybit",
    "symbol": "BTCUSDT",
-   "payload": "{\"exec_id\":\"e-0001\",\"order_id\":\"o-0002\",\"px\":\"42000.2\",\"qty\":\"0.010\"}",
-   "record_schema": 1
+   "payload": "{\"fee\":\"0.0042\",\"key\":\"e-0001\",\"order_id\":2,\"px\":\"42000.2\",\"qty\":\"0.01\",\"venue_ts\":1767312007297000}",
+   "record_schema": 2
   },
   {
-   "seq": 21,
+   "seq": 11,
    "event_idx": 1,
    "at_us": 1767312007300000,
-   "kind": "order_filled",
-   "order_id": "o-0002",
+   "kind": "venue_terminal",
+   "order_id": "2",
    "venue": "bybit",
    "symbol": "BTCUSDT",
-   "payload": "{\"order_id\":\"o-0002\"}",
-   "record_schema": 1
+   "payload": "{\"final_cum\":\"0.01\",\"kind\":\"filled\",\"order_id\":2,\"reason\":\"booked fills reached the order quantity\",\"venue_ts\":1767312007297000}",
+   "record_schema": 2
   },
   {
-   "seq": 30,
+   "seq": 11,
+   "event_idx": 2,
+   "at_us": 1767312007300000,
+   "kind": "order_closed",
+   "order_id": "2",
+   "venue": "bybit",
+   "symbol": "BTCUSDT",
+   "payload": "{\"order_id\":2,\"reason\":\"filled\"}",
+   "record_schema": 2
+  },
+  {
+   "seq": 12,
    "event_idx": 0,
    "at_us": 1767322200200000,
-   "kind": "order_created",
-   "order_id": "o-0003",
+   "kind": "order_accepted",
+   "order_id": "3",
    "venue": "bybit",
    "symbol": "BTCUSDT",
-   "payload": "{\"order_id\":\"o-0003\",\"qty\":\"0.005\"}",
-   "record_schema": 1
+   "payload": "{\"config_version\":1,\"order_id\":3,\"ref_px\":null,\"request\":{\"client_order_id\":\"c-0003\",\"expires_at\":1767322205199000,\"instrument\":\"BTCUSDT\",\"market_ref\":{\"channel\":\"orderbook.50\",\"market\":\"linear\",\"recv_ns\":1767322200000000000,\"symbol\":\"BTCUSDT\",\"update_id\":null,\"venue\":\"bybit\",\"venue_ts_ns\":1767322199997000000},\"px\":\"41999.9\",\"qty\":\"0.005\",\"reduce_only\":false,\"side\":\"sell\",\"strategy\":\"golden\",\"tif\":\"alo\"}}",
+   "record_schema": 2
   },
   {
-   "seq": 31,
+   "seq": 13,
+   "event_idx": 0,
+   "at_us": 1767322200300000,
+   "kind": "order_acked",
+   "order_id": "3",
+   "venue": "bybit",
+   "symbol": "BTCUSDT",
+   "payload": "{\"order_id\":3,\"session\":1,\"venue_oid\":\"v-0003\",\"via\":\"send_result\"}",
+   "record_schema": 2
+  },
+  {
+   "seq": 14,
    "event_idx": 0,
    "at_us": 1767322200400000,
-   "kind": "fill",
-   "order_id": "o-0003",
+   "kind": "fill_booked",
+   "order_id": "3",
    "venue": "bybit",
    "symbol": "BTCUSDT",
-   "payload": "{\"exec_id\":\"e-0002\",\"order_id\":\"o-0003\",\"px\":\"41999.9\",\"qty\":\"0.005\"}",
-   "record_schema": 1
+   "payload": "{\"fee\":\"-0.001\",\"key\":\"e-0002\",\"order_id\":3,\"px\":\"41999.9\",\"qty\":\"0.005\",\"venue_ts\":1767322200397000}",
+   "record_schema": 2
   },
   {
-   "seq": 40,
+   "seq": 14,
+   "event_idx": 1,
+   "at_us": 1767322200400000,
+   "kind": "venue_terminal",
+   "order_id": "3",
+   "venue": "bybit",
+   "symbol": "BTCUSDT",
+   "payload": "{\"final_cum\":\"0.005\",\"kind\":\"filled\",\"order_id\":3,\"reason\":\"booked fills reached the order quantity\",\"venue_ts\":1767322200397000}",
+   "record_schema": 2
+  },
+  {
+   "seq": 14,
+   "event_idx": 2,
+   "at_us": 1767322200400000,
+   "kind": "order_closed",
+   "order_id": "3",
+   "venue": "bybit",
+   "symbol": "BTCUSDT",
+   "payload": "{\"order_id\":3,\"reason\":\"filled\"}",
+   "record_schema": 2
+  },
+  {
+   "seq": 15,
    "event_idx": 0,
    "at_us": 1767322800000000,
-   "kind": "heartbeat",
+   "kind": "external_fill_booked",
+   "order_id": null,
+   "venue": "bybit",
+   "symbol": "BTCUSDT",
+   "payload": "{\"fill\":{\"fee\":\"0.0004\",\"instrument\":\"BTCUSDT\",\"key\":\"e-0099\",\"order_id\":null,\"px\":\"42010\",\"qty\":\"0.001\",\"side\":\"buy\",\"venue_oid\":null,\"venue_ts\":1767322799997000}}",
+   "record_schema": 2
+  },
+  {
+   "seq": 15,
+   "event_idx": 1,
+   "at_us": 1767322800000000,
+   "kind": "mismatch_raised",
    "order_id": null,
    "venue": null,
    "symbol": null,
-   "payload": "{\"note\":\"no order\"}",
-   "record_schema": 1
+   "payload": "{\"detail\":\"fill for an order this instance does not know: Buy 0.001 BTCUSDT @ 42010 (fill e-0099; later external fills on this instrument are booked without a new entry)\",\"id\":1,\"kind\":\"external_fill\",\"subject\":\"instrument:BTCUSDT\"}",
+   "record_schema": 2
   }
  ]
 }

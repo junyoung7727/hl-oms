@@ -1,8 +1,8 @@
 {
  "crypto/trading/orders/date=2026-01-02/day.parquet": [
   {
-   "order_id": "o-0001",
-   "seq": 10,
+   "order_id": "1",
+   "seq": 7,
    "at_us": 1767312005000000,
    "strategy": "golden",
    "client_order_id": "c-0001",
@@ -10,11 +10,11 @@
    "market": "linear",
    "symbol": "BTCUSDT",
    "side": 1,
-   "qty": "0.010",
-   "px": "41990.0",
+   "qty": "0.01",
+   "px": "41990",
    "tif": "GTC",
    "reduce_only": false,
-   "wire_id": "w-0001",
+   "wire_id": "0000000000007-0000000000001",
    "market_ref_venue": null,
    "market_ref_market": null,
    "market_ref_symbol": null,
@@ -22,11 +22,11 @@
    "market_ref_update_id": null,
    "market_ref_venue_ts_ns": null,
    "market_ref_recv_ns": null,
-   "record_schema": 1
+   "record_schema": 2
   },
   {
-   "order_id": "o-0002",
-   "seq": 20,
+   "order_id": "2",
+   "seq": 9,
    "at_us": 1767312007100000,
    "strategy": "golden",
    "client_order_id": "c-0002",
@@ -34,11 +34,11 @@
    "market": "linear",
    "symbol": "BTCUSDT",
    "side": 1,
-   "qty": "0.010",
+   "qty": "0.01",
    "px": "42000.2",
    "tif": "IOC",
    "reduce_only": false,
-   "wire_id": "w-0002",
+   "wire_id": "0000000000007-0000000000002",
    "market_ref_venue": "bybit",
    "market_ref_market": "linear",
    "market_ref_symbol": "BTCUSDT",
@@ -46,11 +46,11 @@
    "market_ref_update_id": 106,
    "market_ref_venue_ts_ns": 1767312006997000000,
    "market_ref_recv_ns": 1767312007000000000,
-   "record_schema": 1
+   "record_schema": 2
   },
   {
-   "order_id": "o-0003",
-   "seq": 30,
+   "order_id": "3",
+   "seq": 12,
    "at_us": 1767322200200000,
    "strategy": "golden",
    "client_order_id": "c-0003",
@@ -59,10 +59,10 @@
    "symbol": "BTCUSDT",
    "side": -1,
    "qty": "0.005",
-   "px": null,
-   "tif": "IOC",
+   "px": "41999.9",
+   "tif": "PostOnly",
    "reduce_only": false,
-   "wire_id": "w-0003",
+   "wire_id": "0000000000007-0000000000003",
    "market_ref_venue": "bybit",
    "market_ref_market": "linear",
    "market_ref_symbol": "BTCUSDT",
@@ -70,7 +70,7 @@
    "market_ref_update_id": null,
    "market_ref_venue_ts_ns": 1767322199997000000,
    "market_ref_recv_ns": 1767322200000000000,
-   "record_schema": 1
+   "record_schema": 2
   }
  ]
 }
