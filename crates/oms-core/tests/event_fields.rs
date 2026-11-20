@@ -380,6 +380,51 @@ fn the_field_table_lists_every_field_the_encoder_writes() {
     assert_eq!(kinds.len(), 43, "one instance of every event kind");
 }
 
+/// Whether a JSON value has the kind the type column names. "… 또는 null"
+/// also allows null.
+fn kind_matches(t: &str, v: &Value) -> bool {
+    if v.is_null() {
+        return t.contains("또는 null");
+    }
+    if t.contains("list") {
+        return v.is_array();
+    }
+    if t.starts_with("decimal string") || t.starts_with("string") {
+        return v.is_string();
+    }
+    if t.starts_with("u64") || t.starts_with("u32") || t.starts_with("i64") {
+        return v.is_u64() || v.is_i64();
+    }
+    if t.starts_with("bool") {
+        return v.is_boolean();
+    }
+    if t.starts_with("enum") {
+        // A unit variant, or one key naming the variant.
+        return v.is_string() || v.as_object().is_some_and(|m| m.len() == 1);
+    }
+    if t.starts_with("object") {
+        return v.is_object();
+    }
+    false
+}
+
+/// Review 2026-11-20. A row read as a whole hides every field under it, so
+/// only the configuration and enum values may be one: a row like
+/// `order_accepted | request | object` would let the rows of the request
+/// be dropped.
+#[test]
+fn only_the_configuration_and_enums_are_read_as_a_whole() {
+    for (e, f, t) in table() {
+        if t.starts_with("object") {
+            assert_eq!(
+                (e.as_str(), f.as_str()),
+                ("config_activated", "config"),
+                "{e}.{f} ({t})"
+            );
+        }
+    }
+}
+
 #[test]
 fn every_row_of_the_table_is_a_field_the_encoder_writes() {
     let rows = table();
@@ -399,5 +444,9 @@ fn every_row_of_the_table_is_a_field_the_encoder_writes() {
                     .unwrap_or_else(|| panic!("{e}.{field}: empty list"));
             }
         }
+        assert!(
+            kind_matches(t, v),
+            "{e}.{field}: the table says {t}, the encoder writes {v}"
+        );
     }
 }

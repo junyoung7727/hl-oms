@@ -11,8 +11,9 @@
 | 잠금 | `LOCK`을 잡지 않는다. 파일을 쓰지 않는다. OMS가 실행 중이어도, 꺼져 있어도 읽는다 |
 | 상한 | 상한보다 큰 번호는 절대 돌려주지 않는다. 디스크에 더 있어도 그렇다. 상한을 넘는 프레임은 아직 쓰는 중이거나, 장애 뒤 복구가 잘라 내고 같은 번호에 다른 기록을 쓸 수 있다 |
 | 세그먼트 | 다음 번호로 시작하는 세그먼트가 생기면 넘어간다. 기록 스키마가 바뀌면 새 세그먼트가 열린다([C-JOURNAL](recovery.md)). 헤더만 있는 세그먼트가 새 스키마 헤더로 다시 쓰이는 경우를 위해, 아직 프레임을 읽지 않은 세그먼트는 헤더를 다시 읽는다 |
-| 손상 | 상한 이하의 프레임이 완전하지 않거나 체크섬이 틀리면 오류다. 그 앞의 기록은 먼저 돌려주고, 다음 호출이 오류를 낸다. 위치는 움직이지 않는다(같은 호출이 고칠 때까지 같은 오류) |
+| 손상 | 상한 이하의 프레임이 완전하지 않거나, 체크섬이 틀리거나, 번호가 이어지지 않으면 오류다. 커서 앞의 기록이 손상돼도(뒤에 유효한 프레임이 있으면) 오류다. 그 앞의 기록은 먼저 돌려주고, 다음 호출이 오류를 낸다. 위치는 움직이지 않는다(같은 호출이 고칠 때까지 같은 오류) |
 | 상한 너머 엿보기 | `peek_beyond`: 현재 위치 뒤의 유효한 프레임을 위치를 움직이지 않고 돌려준다. 완전하지 않거나 틀린 첫 프레임에서 멈춘다(오류가 아니다). OMS가 죽었다고 판단한 읽는 쪽만 쓰고, 보여 준 것을 미확정으로 표시한다 |
+| 내구화 번호의 근거 | OMS는 시작할 때 복구가 읽은 마지막 세그먼트를 `fsync`한 뒤에 그 번호를 내구화 번호로 낸다(검토 2026-11-20 전에는 하지 않아, 강제 종료 뒤 페이지 캐시에만 있던 기록이 내구화로 보일 수 있었다) |
 | 커서 | 읽는 쪽이 자기 커서를 따로 저장한다. 다시 시작하면 커서 다음 번호부터 읽는다. 커서는 처리를 마친 기록까지만 올린다(최소 한 번 전달, 중복은 `seq`로 거른다) |
 
 ## 기록 형식
@@ -28,20 +29,22 @@ payload 하나는 JSON 객체 하나다: `{"seq": u64, "at": u64 µs(기록 시�
 
 ## 이벤트가 바꾸는 상태
 
-감시자가 만드는 세 집합: **열린 주문**(주문 번호 → 종목, 방향, 수량, 거래소 주문 번호), **체결**(체결 키 → 수량, 방향, 종목), **포지션**(종목 → 부호 있는 수량).
+감시자가 만드는 것: **주문 정보**(주문 번호 → 종목, 방향, 수량, 거래소 주문 번호; `order_accepted`부터 `purged`까지 유지), 그중 **열린 주문**(아직 `order_closed`가 없는 것), **체결**(체결 키 → 수량, 방향, 종목), **포지션**(종목 → 부호 있는 수량).
+
+닫힌 주문의 정보를 `order_closed`에서 지우면 안 된다. 닫힌 뒤에 그 주문의 `fill_booked`가 올 수 있고(늦은 체결, 불일치 `FillAfterClose`), 그 체결의 방향과 종목은 주문 정보에서만 알 수 있다(검토 2026-11-20).
 
 | 이벤트 | 열린 주문 | 체결 | 포지션 |
 |---|---|---|---|
-| `order_accepted` | 추가: `order_id`, `request.strategy`, `request.instrument`, `request.side`, `request.qty`, `request.client_order_id` | — | — |
+| `order_accepted` | 주문 정보와 열린 주문에 추가: `order_id`, `request.strategy`, `request.instrument`, `request.side`, `request.qty`, `request.client_order_id` | — | — |
 | `order_acked` | `venue_oid`가 있으면 그 주문의 거래소 주문 번호 | — | — |
 | `venue_oid_learned` | 그 주문의 거래소 주문 번호 | — | — |
-| `fill_booked` | 그 주문의 누적 체결 += `qty` | 추가: `key` → `qty`, 방향은 그 주문의 `request.side`, 종목은 그 주문의 `request.instrument` | 그 종목 += 부호 있는 `qty`(매수 +, 매도 −) |
+| `fill_booked` | 그 주문의 누적 체결 += `qty`(닫힌 주문일 수도 있다) | 추가: `key` → `qty`, 방향과 종목은 주문 정보의 `request.side`, `request.instrument` | 그 종목 += 부호 있는 `qty`(매수 +, 매도 −) |
 | `external_fill_booked` | — | 추가: `fill.key` → `fill.qty`, `fill.side`, `fill.instrument` | `fill.instrument` += 부호 있는 `fill.qty` |
-| `order_closed` | 제거 | — | — |
+| `order_closed` | 열린 주문에서 제거. 주문 정보는 남긴다 | — | — |
 | `venue_position_changed` | — | — (체결이 아니다. 감시자 W4는 거래소의 위치 변경 행과 비교한다) | `change.instrument` += `change.qty`(이미 부호 있음) |
 | `position_adjusted` | — | — | `instrument` += `delta`(부호 있음) |
 | `funding_booked` | — | — (현금만. 수량을 바꾸지 않는다) | — |
-| `purged` | 닫힌 주문만 지운다. 열린 주문은 바뀌지 않는다 | `fill_floor`보다 이른 체결 키는 잊어도 된다 | — |
+| `purged` | `order_ids`의 주문 정보를 지운다(모두 닫힌 주문이다). 열린 주문은 바뀌지 않는다 | `fill_floor`보다 이른 체결 키는 잊어도 된다 | — |
 | 그 밖의 이벤트 | — | — | — |
 
 그 밖의 이벤트(링크, 결과 불명, 상태 기록, 취소, 대조, 불일치, 운영자, 저장 공간, 참조 가격, 증거금, 펀딩·변경 대기, 부재 기록)는 세 집합을 바꾸지 않는다. 상태 화면과 알림은 이들을 쓴다. 뜻은 아래 필드 표와 각 계약 문서([C-NEW 등](order-lifecycle.md), [C-MISMATCH](reconciliation.md), [C-MARGIN](margin.md))에 있다.
@@ -233,4 +236,4 @@ payload 하나는 JSON 객체 하나다: `{"seq": u64, "at": u64 µs(기록 시�
 
 ## 검증
 
-`tail::the_tail_never_returns_a_record_above_the_durable_cap`, `tail::the_tail_follows_segment_rotation_and_starts_after_a_cursor`, `tail::the_tail_never_takes_the_lock`, `tail::a_damaged_durable_frame_stops_the_tail_without_moving_it`, `tail::peek_beyond_shows_valid_frames_past_the_cap_without_moving`(주장 V-TAIL-1). 필드 표: 위 두 시험(주장 V-TAIL-2).
+`tail::the_tail_never_returns_a_record_above_the_durable_cap`, `tail::the_tail_follows_segment_rotation_and_starts_after_a_cursor`, `tail::the_tail_never_takes_the_lock`, `tail::a_damaged_durable_frame_stops_the_tail_without_moving_it`, `tail::peek_beyond_shows_valid_frames_past_the_cap_without_moving`, `tail::a_frame_with_the_wrong_sequence_comes_after_the_good_records`, `tail::damage_before_the_cursor_is_an_error`, `tail::the_tail_follows_a_schema_change_to_a_new_segment`, `tail::the_tail_reads_a_header_only_segment_rewritten_with_a_new_schema`(주장 V-TAIL-1). 필드 표: `event_fields`의 세 시험(주장 V-TAIL-2). 복구의 `fsync`는 시험하지 않았다(페이지 캐시 유실을 흉내 낼 수 없다).

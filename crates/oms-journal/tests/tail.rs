@@ -185,3 +185,133 @@ fn peek_beyond_shows_valid_frames_past_the_cap_without_moving() {
     assert!(matches!(t.read(8, 100), Err(Error::Corrupt { .. })));
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// A frame as the journal writes it (frame.rs), with any sequence number.
+fn raw_frame(seq: u64, payload: &[u8]) -> Vec<u8> {
+    let mut h = crc32fast::Hasher::new();
+    h.update(&seq.to_le_bytes());
+    h.update(payload);
+    let mut out = Vec::new();
+    out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    out.extend_from_slice(&h.finalize().to_le_bytes());
+    out.extend_from_slice(&seq.to_le_bytes());
+    out.extend_from_slice(payload);
+    out
+}
+
+/// Review 2026-11-20. A valid frame with the wrong sequence is damage: the
+/// records before it come out first, then the error; a peek stops there.
+#[test]
+fn a_frame_with_the_wrong_sequence_comes_after_the_good_records() {
+    let dir = tmp("seq");
+    let mut w = writer(&dir, 1 << 20);
+    append(&mut w, 1, 3);
+    drop(w);
+    let (_, path) = list_segments(&dir).unwrap().pop().unwrap();
+    let mut bytes = fs::read(&path).unwrap();
+    bytes.extend(raw_frame(9, b"stray"));
+    fs::write(&path, bytes).unwrap();
+    let mut t = Tail::new(&dir, 0);
+    assert_eq!(seqs(&t.peek_beyond(100).unwrap()), vec![1, 2, 3]);
+    assert_eq!(seqs(&t.read(10, 100).unwrap()), vec![1, 2, 3]);
+    assert!(matches!(t.read(10, 100), Err(Error::Corrupt { .. })));
+    assert_eq!(t.next_seq(), 4);
+    assert!(t.peek_beyond(100).unwrap().is_empty());
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Review 2026-11-20. Damage before the cursor is an error, not a wait.
+#[test]
+fn damage_before_the_cursor_is_an_error() {
+    let dir = tmp("before-cursor");
+    let mut w = writer(&dir, 1 << 20);
+    append(&mut w, 1, 10);
+    drop(w);
+    damage(&dir, 3);
+    let mut t = Tail::new(&dir, 5);
+    assert!(matches!(t.read(10, 100), Err(Error::Corrupt { .. })));
+    // A frame being written at the end, before the cursor, is a wait.
+    let dir2 = tmp("before-cursor-torn");
+    let mut w = writer(&dir2, 1 << 20);
+    append(&mut w, 1, 3);
+    drop(w);
+    let (_, path) = list_segments(&dir2).unwrap().pop().unwrap();
+    let len = fs::metadata(&path).unwrap().len();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_len(len - 2)
+        .unwrap();
+    let mut t = Tail::new(&dir2, 4);
+    assert!(t.read(10, 100).unwrap().is_empty());
+    let _ = fs::remove_dir_all(&dir);
+    let _ = fs::remove_dir_all(&dir2);
+}
+
+fn writer_with_schema(dir: &Path, schema: u16) -> Writer {
+    let mut o = opts(1 << 20);
+    o.record_schema = schema;
+    recover(dir, &o, 0, |_, _, _| Ok(())).unwrap().0
+}
+
+/// Review 2026-11-20. A new record schema opens a new segment; the tail
+/// moves to it and reports each record's schema.
+#[test]
+fn the_tail_follows_a_schema_change_to_a_new_segment() {
+    let dir = tmp("schema");
+    let mut w = writer_with_schema(&dir, 1);
+    append(&mut w, 1, 3);
+    drop(w);
+    let mut t = Tail::new(&dir, 0);
+    assert_eq!(seqs(&t.read(3, 100).unwrap()), vec![1, 2, 3]);
+    let mut w = writer_with_schema(&dir, 2);
+    append(&mut w, 4, 6);
+    assert_eq!(list_segments(&dir).unwrap().len(), 2);
+    let got = t.read(6, 100).unwrap();
+    assert_eq!(seqs(&got), vec![4, 5, 6]);
+    assert!(got.iter().all(|r| r.record_schema == 2));
+    let all = Tail::new(&dir, 0).read(6, 100).unwrap();
+    let schemas: Vec<u16> = all.iter().map(|r| r.record_schema).collect();
+    assert_eq!(schemas, vec![1, 1, 1, 2, 2, 2]);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Review 2026-11-20. A segment that holds only its header is rewritten
+/// with the new schema's header (C-JOURNAL); a tail waiting on it reads the
+/// new header.
+#[test]
+fn the_tail_reads_a_header_only_segment_rewritten_with_a_new_schema() {
+    let dir = tmp("header-rewrite");
+    let mut w = writer_with_schema(&dir, 1);
+    append(&mut w, 1, 3);
+    drop(w);
+    // A header-only segment of schema 1 that starts at 4, as rotation
+    // leaves it.
+    let (_, first) = list_segments(&dir).unwrap().pop().unwrap();
+    let bytes = fs::read(&first).unwrap();
+    let header_len = 12 + u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize + 4;
+    let json: serde_json::Value = serde_json::from_slice(&bytes[12..header_len - 4]).unwrap();
+    let mut h = json.clone();
+    h["first_seq"] = 4.into();
+    let hj = serde_json::to_vec(&h).unwrap();
+    let mut header = b"OMSJRNL\x01".to_vec();
+    header.extend_from_slice(&(hj.len() as u32).to_le_bytes());
+    header.extend_from_slice(&hj);
+    header.extend_from_slice(&crc32fast::hash(&hj).to_le_bytes());
+    fs::write(dir.join("journal-00000000000000000004.oj"), header).unwrap();
+    let mut t = Tail::new(&dir, 3);
+    assert!(t.read(3, 100).unwrap().is_empty());
+    // A writer of schema 2 rewrites that header and appends.
+    let mut w = writer_with_schema(&dir, 2);
+    append(&mut w, 4, 5);
+    assert_eq!(
+        list_segments(&dir).unwrap().len(),
+        2,
+        "the header-only segment was reused"
+    );
+    let got = t.read(5, 100).unwrap();
+    assert_eq!(seqs(&got), vec![4, 5]);
+    assert!(got.iter().all(|r| r.record_schema == 2));
+    let _ = fs::remove_dir_all(&dir);
+}

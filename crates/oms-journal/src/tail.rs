@@ -151,6 +151,11 @@ impl Tail {
                 }
                 Decoded::Frame { seq, payload, len } => {
                     if seq != expect {
+                        // As for a damaged frame: the good records come
+                        // first, and past the cap it only ends the scan.
+                        if !strict || !out.is_empty() {
+                            break;
+                        }
                         return Err(Error::Corrupt {
                             segment: pos.path.clone(),
                             offset: pos.offset + off as u64,
@@ -185,14 +190,12 @@ impl Tail {
                     return open_at_start(path).map(Some);
                 }
             }
-            // A header-only segment may have been rewritten with a new
-            // schema (C-JOURNAL): read its header again before any frame.
-            if pos.header.first_seq == self.next_seq {
-                return open_at_start(&pos.path).map(Some);
-            }
             return Ok(Some(pos.clone()));
         }
-        // First call: the last segment that starts at or before next_seq.
+        // First call, or no frame read yet: the last segment that starts at
+        // or before next_seq. Its header is read again each time, so a
+        // header-only segment rewritten with a new schema (C-JOURNAL) is
+        // read with its new header.
         let Some((first, path)) = segments
             .iter()
             .rev()
@@ -213,12 +216,31 @@ impl Tail {
         let mut seq = *first;
         while seq < self.next_seq {
             match frame::decode(&buf[off..]) {
-                Decoded::Frame { len, .. } => {
+                Decoded::Frame { seq: got, len, .. } => {
+                    if got != seq {
+                        return Err(Error::Corrupt {
+                            segment: path.clone(),
+                            offset: off as u64,
+                            detail: format!("record sequence {got} where {seq} was expected"),
+                        });
+                    }
                     off += len;
                     seq += 1;
                 }
-                // Not written yet (or not valid): the reader waits.
-                _ => return Ok(None),
+                Decoded::End => return Ok(None),
+                // Records before the cursor were read once, so they are
+                // durable. A bad frame followed by a valid one is damage;
+                // a bad frame at the end is one being written: wait.
+                Decoded::Bad { why } => {
+                    if frame::find_later_frame(&buf[off..], seq).is_some() {
+                        return Err(Error::Corrupt {
+                            segment: path.clone(),
+                            offset: off as u64,
+                            detail: format!("record {seq}, before the cursor, is not valid: {why}"),
+                        });
+                    }
+                    return Ok(None);
+                }
             }
         }
         pos.offset = off as u64;

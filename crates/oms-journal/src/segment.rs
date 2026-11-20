@@ -474,6 +474,14 @@ where
 
     let writer = match last_good {
         Some((path, len, header)) => {
+            // The records read here may still be only in the page cache: a
+            // process killed before its `fdatasync` leaves them there. They
+            // are reported as durable from now on (the node publishes
+            // `last_seq` as its durable seq, and the tail reader trusts it,
+            // C-TAIL), so they are made durable first.
+            File::open(&path)
+                .and_then(|f| f.sync_all())
+                .map_err(io_err(format!("fsync {}", path.display())))?;
             // A segment holds records of one schema only. If this build
             // writes another schema, the next record opens a new segment.
             let file = if header.record_schema == opts.record_schema {

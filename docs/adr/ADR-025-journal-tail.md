@@ -63,11 +63,13 @@ B. `crates/oms-journal/src/tail.rs`의 `Tail::new(dir, after_seq)`, `read(durabl
 
 - 포기: 읽기마다 파일을 오프셋부터 끝까지 읽는다. 쓰는 중인 큰 세그먼트(최대 `segment_max_bytes`)의 남은 부분을 매번 읽는다. 상한까지만 읽고 멈추는 최적화는 하지 않았다(판단: 1초 주기, 기록 수백 개 규모).
 - 위험: 세그먼트 이름 목록을 읽는 순간과 파일을 여는 순간 사이에 바뀌는 경우는 시험하지 않았다. 저널은 세그먼트를 지우지 않으므로(U-04) 바뀌는 것은 새 세그먼트 추가뿐이다.
+- 기존 결함 수정(검토 2026-11-20): `recover`가 읽은 마지막 세그먼트를 `fsync`하지 않은 채 그 끝 번호를 내구화 번호로 냈다. 강제 종료 직후 재시작하면 페이지 캐시에만 있던 기록이 내구화로 보이고, 그 뒤 전원이 나가면 같은 번호에 다른 기록이 쓰일 수 있었다. 이제 `recover`가 그 세그먼트를 `fsync`한다(시험 없음: 페이지 캐시 유실은 흉내 낼 수 없다).
+- 감시자는 닫힌 주문의 정보(종목·방향)를 `purged`까지 들고 있어야 한다. 닫힌 뒤에 그 주문의 체결이 올 수 있다(C-TAIL, 검토 2026-11-20).
 - 가정: 읽는 쪽이 받은 내구화 번호는 OMS가 낸 값이다. 더 큰 값을 넘기면 내구화되지 않은 기록을 확정으로 받는다.
 
 ## 9. 근거
 
-- 시험: `crates/oms-journal/tests/tail.rs` 5개(주장 V-TAIL-1), `crates/oms-core/tests/event_fields.rs` 2개(주장 V-TAIL-2).
+- 시험: `crates/oms-journal/tests/tail.rs` 9개(주장 V-TAIL-1), `crates/oms-core/tests/event_fields.rs` 3개(주장 V-TAIL-2).
 - 설계 TN(암호화폐 거래 통합 설계 v1.0) §7.5, `pr_plan.json` U14. 저장소 밖 문서다.
 
 ## 10. 재검토 조건

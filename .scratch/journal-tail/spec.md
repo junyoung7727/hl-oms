@@ -22,7 +22,7 @@ The projector and the watcher must read the journal while the OMS writes it, wit
 
 ## Testing Decisions
 
-`crates/oms-journal/tests/tail.rs` (5), `crates/oms-core/tests/event_fields.rs` (2), both new and rustfmt-clean. Claims V-TAIL-1, V-TAIL-2; contract C-TAIL in `registry/contracts.toml`.
+`crates/oms-journal/tests/tail.rs` (9, four added after review), `crates/oms-core/tests/event_fields.rs` (3), both new and rustfmt-clean. Claims V-TAIL-1, V-TAIL-2; contract C-TAIL in `registry/contracts.toml`.
 
 ## Out of Scope
 
