@@ -140,7 +140,7 @@ fn fill_input(f: &WireFill, instance_id: u64) -> Option<VenueInput> {
     }))
 }
 
-struct Gateway {
+pub(crate) struct Gateway {
     requests: Requests,
     input: VenueInputTx,
     instance_id: u64,
@@ -164,7 +164,7 @@ impl Gateway {
             return;
         };
         let started_at = wall_us();
-        let client = VenueClientId { instance_id, order_id }.to_hex();
+        let client = <Self as VenueGateway>::WIRE_ID.encode(VenueClientId { instance_id, order_id });
         let outcome = if started_at >= expires_at {
             SendOutcome::NotSent {
                 reason: "the send window had passed before the gateway could send".into(),
@@ -230,7 +230,7 @@ impl Gateway {
             return;
         };
         let started_at = wall_us();
-        let client = VenueClientId { instance_id, order_id }.to_hex();
+        let client = <Self as VenueGateway>::WIRE_ID.encode(VenueClientId { instance_id, order_id });
         let outcome = match self.requests.call(SimOp::Cancel { client: client.clone() }).await {
             Err(CallError::Connect(e)) => CancelOutcome::NotSent {
                 reason: format!("could not connect: {e}"),
@@ -261,11 +261,10 @@ impl Gateway {
         let queried_at = wall_us();
         match q {
             QueryReq::Status { order_id, .. } => {
-                let client = VenueClientId {
+                let client = <Self as VenueGateway>::WIRE_ID.encode(VenueClientId {
                     instance_id: self.instance_id,
                     order_id,
-                }
-                .to_hex();
+                });
                 let Ok(resp) = self.requests.call(SimOp::Status { client }).await else {
                     return;
                 };
@@ -511,6 +510,7 @@ impl Gateway {
 
 impl VenueGateway for Gateway {
     const QUERY_CONCURRENCY: usize = 8;
+    const WIRE_ID: WireIdForm = WireIdForm::Hex128;
 
     // The paths name the inherent methods, which keep their bodies.
     fn send_order(&self, cmd: VenueCommand) -> impl Future<Output = ()> + Send {

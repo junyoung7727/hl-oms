@@ -189,3 +189,13 @@ alternatives = ["그대로 둔다", "지금 쓰는 네 가지만 담은 trait + 
 chosen = "지금 쓰는 네 가지(send_order, send_cancel, query, spawn_tasks)와 조회 동시 상한 상수. 구동기 venue::start가 루프를 돌린다. 나머지 메서드는 쓰는 단위에서 더한다"
 gives_up = "설계 TN의 trait 전체를 한 번에 정의하는 것"
 revisit = "게이트웨이를 실행 중에 바꾸거나 둘 이상을 동시에 돌려야 할 때, 명령 종류가 늘 때"
+
+[[adr]]
+id = "ADR-022"
+title = "거래소마다 고객 주문번호 형식을 따로 둔다"
+file = "docs/adr/ADR-022-wire-id-form.md"
+problem = "고객 주문번호 형식이 Hyperliquid의 0x+32 hex 하나뿐이라, Bybit 게이트웨이가 다른 형식을 쓰면 상태 API가 거래소가 모르는 번호를 보여 주고 느슨한 해석은 남의 주문을 우리 것으로 읽을 수 있다"
+alternatives = ["Bybit도 0x+32 hex", "형식 목록 WireIdForm + 게이트웨이 상수 WIRE_ID", "게이트웨이마다 자유 함수"]
+chosen = "WireIdForm { Hex128, Base32Pair(27자) }와 엄격한 decode. 게이트웨이가 WIRE_ID를 선언하고 보내는 번호를 그것으로 만들며, 상태 API도 그 형식으로 출력한다"
+gives_up = "사람이 눈으로 읽기 쉬운 주문번호"
+revisit = "testnet에서 orderLinkId 규칙이 문서와 다를 때, 한 노드가 거래소 둘 이상에 주문할 때"

@@ -157,6 +157,88 @@ impl VenueClientId {
     }
 }
 
+/// The form in which a gateway writes a [`VenueClientId`] on the wire
+/// (ADR-022). Each gateway declares one; the status API prints the id in the
+/// same form, so the operator sees what the venue knows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WireIdForm {
+    /// `0x` + 32 lower-case hex digits ([`VenueClientId::to_hex`]):
+    /// Hyperliquid's cloid, also used by the simulated venue.
+    Hex128,
+    /// `instance_id` and `order_id`, each as 13 lower-case base32hex digits
+    /// (`0-9a-v`, RFC 4648 §7), joined by `-`: 27 characters. For Bybit's
+    /// `orderLinkId` (at most 36 characters of digits, letters, `-`, `_`).
+    Base32Pair,
+}
+
+const BASE32HEX: &[u8; 32] = b"0123456789abcdefghijklmnopqrstuv";
+const BASE32_DIGITS: usize = 13;
+
+fn base32_digits(mut v: u64, out: &mut String) {
+    let mut buf = [0u8; BASE32_DIGITS];
+    for slot in buf.iter_mut().rev() {
+        *slot = BASE32HEX[(v & 31) as usize];
+        v >>= 5;
+    }
+    out.extend(buf.iter().map(|&b| b as char));
+}
+
+/// Exactly 13 digits of `0-9a-v`; `None` for anything else or a value above
+/// `u64::MAX` (13 digits hold 65 bits).
+fn parse_base32_digits(s: &str) -> Option<u64> {
+    if s.len() != BASE32_DIGITS {
+        return None;
+    }
+    let mut v: u128 = 0;
+    for b in s.bytes() {
+        let d = match b {
+            b'0'..=b'9' => b - b'0',
+            b'a'..=b'v' => b - b'a' + 10,
+            _ => return None,
+        };
+        v = (v << 5) | u128::from(d);
+    }
+    u64::try_from(v).ok()
+}
+
+impl WireIdForm {
+    pub fn encode(self, id: VenueClientId) -> String {
+        match self {
+            WireIdForm::Hex128 => id.to_hex(),
+            WireIdForm::Base32Pair => {
+                let mut s = String::with_capacity(2 * BASE32_DIGITS + 1);
+                base32_digits(id.instance_id, &mut s);
+                s.push('-');
+                base32_digits(id.order_id.0, &mut s);
+                s
+            }
+        }
+    }
+
+    /// Accepts only the exact form written by [`WireIdForm::encode`]: an id
+    /// in another form or case is foreign, not ours.
+    pub fn decode(self, s: &str) -> Option<VenueClientId> {
+        match self {
+            WireIdForm::Hex128 => {
+                // `parse_hex` also takes upper case and a sign; this does not.
+                let body = s.strip_prefix("0x")?;
+                if !body.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+                    return None;
+                }
+                VenueClientId::parse_hex(s)
+            }
+            WireIdForm::Base32Pair => {
+                let (instance, order) = s.split_once('-')?;
+                Some(VenueClientId {
+                    instance_id: parse_base32_digits(instance)?,
+                    order_id: OrderId(parse_base32_digits(order)?),
+                })
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +264,79 @@ mod tests {
         assert_eq!(VenueClientId::parse_hex(&id.to_hex()), Some(id));
         assert_eq!(VenueClientId::parse_hex("0x12"), None);
         assert_eq!(VenueClientId::parse_hex("0123456789abcdef000000000000002a"), None);
+    }
+
+    fn edge_ids() -> Vec<VenueClientId> {
+        let halves = [0, 1, 31, 32, u64::MAX - 1, u64::MAX];
+        let mut ids = Vec::new();
+        for instance_id in halves {
+            for order in halves {
+                ids.push(VenueClientId { instance_id, order_id: OrderId(order) });
+            }
+        }
+        ids
+    }
+
+    #[test]
+    fn hex128_is_the_hex_form_of_today() {
+        for id in edge_ids() {
+            let s = WireIdForm::Hex128.encode(id);
+            assert_eq!(s, id.to_hex());
+            assert_eq!(WireIdForm::Hex128.decode(&s), Some(id));
+        }
+        assert_eq!(WireIdForm::Hex128.decode("0x12"), None);
+        for bad in ["0x0123456789ABCDEF000000000000002A", "0x+123456789abcdef000000000000002a", "0X0123456789abcdef000000000000002a"] {
+            assert_eq!(WireIdForm::Hex128.decode(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn base32_pair_roundtrips_and_fits_an_order_link_id() {
+        let id = VenueClientId { instance_id: 0x0123_4567_89ab_cdef, order_id: OrderId(42) };
+        assert_eq!(WireIdForm::Base32Pair.encode(id), "028q5cu4qnjff-000000000001a");
+        for id in edge_ids() {
+            let s = WireIdForm::Base32Pair.encode(id);
+            assert_eq!(s.len(), 27);
+            assert!(s.len() <= 36);
+            assert!(s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'v' | b'-')), "{s}");
+            assert_eq!(WireIdForm::Base32Pair.encode(id), s);
+            assert_eq!(WireIdForm::Base32Pair.decode(&s), Some(id));
+        }
+        let max = VenueClientId { instance_id: u64::MAX, order_id: OrderId(u64::MAX) };
+        assert_eq!(WireIdForm::Base32Pair.encode(max), "fvvvvvvvvvvvv-fvvvvvvvvvvvv");
+    }
+
+    #[test]
+    fn base32_pair_gives_a_million_distinct_ids() {
+        let mut seen = std::collections::HashSet::new();
+        for instance_id in [7, 8] {
+            for order in 1..=500_000u64 {
+                let id = VenueClientId { instance_id, order_id: OrderId(order) };
+                assert!(seen.insert(WireIdForm::Base32Pair.encode(id)));
+            }
+        }
+        assert_eq!(seen.len(), 1_000_000);
+    }
+
+    #[test]
+    fn base32_pair_decoding_is_strict() {
+        let good = "028q5cu4qnjff-000000000001a";
+        assert!(WireIdForm::Base32Pair.decode(good).is_some());
+        for bad in [
+            "028Q5CU4QNJFF-000000000001A",
+            "028q5cu4qnjff-00000000001a",
+            "028q5cu4qnjff_000000000001a",
+            "028q5cu4qnjff000000000001a0",
+            "028q5cu4qnjff-000000000001w",
+            "028q5cu4qnjff-000000000001a ",
+            "g000000000000-0000000000000",
+            "0000000000000-g000000000000",
+            "-000000000001a",
+            "",
+            "0x0123456789abcdef000000000000002a",
+        ] {
+            assert_eq!(WireIdForm::Base32Pair.decode(bad), None, "{bad:?}");
+        }
+        assert_eq!(WireIdForm::Hex128.decode(good), None);
     }
 }

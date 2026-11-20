@@ -120,7 +120,7 @@ impl Budget {
     }
 }
 
-struct Gateway {
+pub(crate) struct Gateway {
     cfg: HyperliquidConfig,
     rest: String,
     ws: String,
@@ -306,7 +306,7 @@ impl Gateway {
             return;
         };
         let started_at = wall_us();
-        let cloid = VenueClientId { instance_id, order_id }.to_hex();
+        let cloid = <Self as VenueGateway>::WIRE_ID.encode(VenueClientId { instance_id, order_id });
         let outcome = self
             .place(&cloid, &instrument, side, qty, px, tif, reduce_only, expires_at, started_at)
             .await;
@@ -386,7 +386,7 @@ impl Gateway {
             return;
         };
         let started_at = wall_us();
-        let cloid = VenueClientId { instance_id, order_id }.to_hex();
+        let cloid = <Self as VenueGateway>::WIRE_ID.encode(VenueClientId { instance_id, order_id });
         let outcome = match self.asset(&instrument) {
             None => CancelOutcome::NotSent {
                 reason: "the instrument is not in the venue's universe".into(),
@@ -431,11 +431,10 @@ impl Gateway {
         let queried_at = wall_us();
         match q {
             QueryReq::Status { order_id, .. } => {
-                let cloid = VenueClientId {
+                let cloid = <Self as VenueGateway>::WIRE_ID.encode(VenueClientId {
                     instance_id: self.instance_id,
                     order_id,
-                }
-                .to_hex();
+                });
                 let body = serde_json::json!({"type": "orderStatus", "user": self.account, "oid": cloid});
                 let Some(resp) = self.info(body, f64::from(WEIGHT_ORDER_STATUS_QUERY)).await else { return };
                 match resp.get("status").and_then(|s| s.as_str()) {
@@ -878,6 +877,7 @@ fn placed(oid: u64, reported: Option<Qty>) -> SendOutcome {
 
 impl VenueGateway for Gateway {
     const QUERY_CONCURRENCY: usize = 4;
+    const WIRE_ID: WireIdForm = WireIdForm::Hex128;
 
     // The paths name the inherent methods, which keep their bodies.
     fn send_order(&self, cmd: VenueCommand) -> impl Future<Output = ()> + Send {

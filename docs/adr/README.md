@@ -29,3 +29,4 @@
 | [ADR-019](ADR-019-market-conn-slots.md) | 시세 레코드의 시장은 conn_id 구간으로 정한다(Bybit 프레임에 시장이 없음) | 시세 |
 | [ADR-020](ADR-020-md-archiver-input-rules.md) | 아카이버가 계약에 없는 다섯 곳(종목정보 응답, 전날 상태, 완료 표시, 보존, update_id 메타데이터)을 정하는 방법 | 시세 |
 | [ADR-021](ADR-021-venue-gateway-trait.md) | 게이트웨이 trait 하나와 구동기 하나, 지금 쓰는 네 가지만(동작 변화 없음) | 거래소 |
+| [ADR-022](ADR-022-wire-id-form.md) | 거래소마다 고객 주문번호 형식(16진수 32자리, base32 27자)을 따로 두고 상태 API도 그 형식으로 | 거래소 |

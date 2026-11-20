@@ -77,6 +77,8 @@
 | G-8 | `t<tid>` | `<time>:<coin>:<tid>:<oid>` |
 | G-11 | 채움(가상 거래소는 정확하다) | 비움(`sz`의 의미가 문서에서 엇갈린다) |
 
+고객 주문번호의 형식은 게이트웨이 상수 `WIRE_ID`다([ADR-022](../adr/ADR-022-wire-id-form.md)). 가상 거래소와 Hyperliquid는 `Hex128`(`0x` + 32 hex). Bybit 게이트웨이(아직 없음)는 `Base32Pair`(27자)를 쓰고, G-8 체결 키는 `<symbol>:<execId>`(69자 이하)로 정해 두었다. `execId`의 전역 유일성은 문서에 없어 종목을 앞에 붙인다.
+
 ## 검증
 
 가상 거래소 게이트웨이: `e2e` 전체가 이 구현을 통과한다. 응답 유실(`drop_responses`), 요청 유실(`drop_requests`), 지연(`delay_ms`), 스트림 단절(`kick_streams`)을 가상 거래소에서 주입한다.

@@ -1037,3 +1037,18 @@ tests = ["node-unit/venue::hyperliquid::wire::tests::documented_clearinghouse_st
 repro = "cargo test -p oms-node --lib venue::hyperliquid"
 supports = "C-MARGIN"
 not_covered = "실제 응답이 문서의 예와 같은지, 필드의 뜻이 유도한 것과 같은지(T1, T2). 어느 userAbstraction 값이 표준 모드인지(T10), 포지션이 없을 때 activeAssetData가 레버리지를 주는지(T11). activeAssetData의 응답 예는 저장소의 조사 문서에 없고 문서와 다시 대조하지 않았다. 게이트웨이가 조회를 실제로 보내는 경로(HTTP)는 시험하지 않는다. HTTP 429일 때의 동작. 거래소가 실제로 세는 weight. 요청 예산을 여러 조회가 다투는 순서와 조회 간격만큼 더 길어지는 대기"
+
+[[claim]]
+id = "V-WIRE-ID-1"
+statement = "고객 주문번호 형식 Base32Pair는 VenueClientId와 일대일이고 27자(36자 이하, 0-9a-v와 -)이며 같은 입력에 같은 문자열을 내고, 서로 다른 100만 개 주문에 서로 다른 100만 개 문자열을 낸다. 해석은 그 형식이 쓴 문자열만 받는다(대문자·다른 길이·다른 구분자·64비트 초과·16진수 형식은 None). Hex128은 to_hex와 같은 문자열을 내고 소문자 16진수만 해석하며, 가상 거래소와 Hyperliquid 게이트웨이는 Hex128을 선언하고 보내는 번호를 그 형식으로 만든다"
+why = "Bybit orderLinkId로 낸 주문을 우리 것으로 알아보고 남의 주문을 우리 것으로 잘못 읽지 않으며, 기존 두 거래소의 요청은 바뀌지 않는다는 전제"
+level = "단위"
+scope = "경계값 36쌍, 100만 개 주문(인스턴스 2개 × 50만), 잘못된 문자열 Base32Pair 11개·Hex128 4개"
+real = "WireIdForm::encode, WireIdForm::decode, 두 게이트웨이의 WIRE_ID 상수"
+simulated = "없음"
+faults = "없음"
+criterion = "왕복 일치, 길이 27, 문자 집합, 중복 0, 잘못된 문자열 전부 None, 두 상수가 Hex128"
+tests = ["core/ids::tests::hex128_is_the_hex_form_of_today", "core/ids::tests::base32_pair_roundtrips_and_fits_an_order_link_id", "core/ids::tests::base32_pair_gives_a_million_distinct_ids", "core/ids::tests::base32_pair_decoding_is_strict", "node-unit/venue::tests::the_gateways_of_today_write_the_hex_form"]
+repro = "cargo test -p oms-core --lib ids::tests && cargo test -p oms-node --lib venue::tests"
+supports = "C-GW"
+not_covered = "Bybit가 이 형식을 실제로 받는지, orderLinkId 재사용·유일성 범위(설계 TN의 testnet 항목 T1, ADR-018의 T1과 다름). Bybit 게이트웨이는 아직 없다. 상태 API의 venue_client_id가 Base32Pair로 출력되는 경로는 Bybit 게이트웨이가 생길 때 시험한다(지금은 두 게이트웨이 모두 Hex128이라 출력이 전과 같다). 게이트웨이가 거래소 응답을 읽을 때 쓰는 parse_hex는 대문자도 받는다(바꾸지 않음)"

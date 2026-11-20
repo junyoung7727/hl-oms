@@ -24,7 +24,7 @@ use crate::queues::{CoreMsg, InputQueues, Lane};
 use crate::server::{self, ApiCtx};
 use crate::status::NodeInfo;
 use crate::util::{Fatal, wall_us};
-use crate::venue::{self, GatewayPorts, VenueInputTx};
+use crate::venue::{self, GatewayPorts, VenueGateway, VenueInputTx};
 use crate::{error, info, recovery, warn};
 use oms_core::*;
 use oms_journal::SnapshotInfo;
@@ -136,7 +136,7 @@ pub fn run(cfg: NodeConfig) -> i32 {
             instance_id,
             boot,
         };
-        let venue_name = match &cfg.venue {
+        let (venue_name, wire_id_form) = match &cfg.venue {
             VenueConfig::Sim {
                 socket,
                 request_timeout_ms,
@@ -152,7 +152,7 @@ pub fn run(cfg: NodeConfig) -> i32 {
                     ports,
                     policy.max_inflight_sends as usize + 16,
                 );
-                "sim".to_string()
+                ("sim".to_string(), <venue::simnet::Gateway as VenueGateway>::WIRE_ID)
             }
             VenueConfig::Hyperliquid(h) => {
                 match venue::hyperliquid::spawn(
@@ -161,7 +161,7 @@ pub fn run(cfg: NodeConfig) -> i32 {
                     ports,
                     policy.max_inflight_sends as usize + 16,
                 ) {
-                    Ok(name) => name,
+                    Ok(name) => (name, <venue::hyperliquid::Gateway as VenueGateway>::WIRE_ID),
                     Err(e) => {
                         error!("cannot start the Hyperliquid gateway", "error": e);
                         return 3;
@@ -217,6 +217,7 @@ pub fn run(cfg: NodeConfig) -> i32 {
             pid: std::process::id(),
             started_at: wall_us(),
             venue: venue_name,
+            wire_id_form,
             data_dir: cfg.data_dir.display().to_string(),
             recovery: serde_json::to_value(&report).unwrap_or_default(),
         };
