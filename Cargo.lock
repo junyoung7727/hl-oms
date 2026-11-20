@@ -1223,6 +1223,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "oms-projector"
+version = "0.1.0"
+dependencies = [
+ "http-fake",
+ "obs-push",
+ "oms-core",
+ "oms-journal",
+ "reqwest",
+ "rustix",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "oms-sim"
 version = "0.1.0"
 dependencies = [
