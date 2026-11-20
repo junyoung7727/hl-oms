@@ -26,6 +26,9 @@ pub enum Block {
     /// The venue banned this IP for too many requests (HTTP 403). No
     /// request may go out for `rest::IP_BAN_PAUSE`; then retried.
     IpBanned(String),
+    /// The local clock may be ahead of the venue's by more than
+    /// `MAX_CLOCK_LEAD_MS`. Rechecked on the IP timer.
+    Clock(String),
 }
 
 impl std::fmt::Display for Block {
@@ -35,6 +38,7 @@ impl std::fmt::Display for Block {
             Block::Account(e) => write!(f, "account: {e}"),
             Block::Unchecked(e) => write!(f, "unchecked: {e}"),
             Block::IpBanned(e) => write!(f, "ip_banned: {e}"),
+            Block::Clock(e) => write!(f, "clock: {e}"),
         }
     }
 }
@@ -68,11 +72,12 @@ struct Slots {
     ban: Option<Block>,
     boot: Option<Block>,
     ip: Option<Block>,
+    clock: Option<Block>,
 }
 
 impl Health {
     /// The block that keeps the link down: auth first, then an IP ban,
-    /// then boot, then IP.
+    /// then boot, then IP, then the clock.
     pub fn block(&self) -> Option<Block> {
         let g = self.slots.lock().unwrap_or_else(|e| e.into_inner());
         g.auth
@@ -80,6 +85,7 @@ impl Health {
             .or_else(|| g.ban.clone())
             .or_else(|| g.boot.clone())
             .or_else(|| g.ip.clone())
+            .or_else(|| g.clock.clone())
     }
 
     /// The key was rejected (by any request, or by the stream's auth).
@@ -110,6 +116,11 @@ impl Health {
     /// The result of an IP recheck.
     pub fn set_ip(&self, b: Option<Block>) {
         self.set(b, |s| &mut s.ip);
+    }
+
+    /// The result of a clock check.
+    pub fn set_clock(&self, b: Option<Block>) {
+        self.set(b, |s| &mut s.clock);
     }
 
     fn set(&self, b: Option<Block>, slot: fn(&mut Slots) -> &mut Option<Block>) {
@@ -353,6 +364,34 @@ pub async fn boot(
     Ok(())
 }
 
+/// How far the local clock may be ahead of the venue's. The send-time rule
+/// (G-4, `orders::fits_expiry`) relies on the venue refusing requests stamped
+/// more than 1 s ahead; this keeps our lead well inside that (judgment).
+pub const MAX_CLOCK_LEAD_MS: i64 = 500;
+
+/// The local clock's lead over the venue's, bounded from above: local time
+/// after the answer minus the venue's time in it (`/v5/market/time`,
+/// `timeNano`). The bound adds the round trip, so a slow answer can block
+/// too (the safe side). Only a lead blocks: a clock behind makes the venue
+/// refuse requests (10002), which sends nothing in doubt.
+pub async fn check_clock(rest: &Rest) -> Result<(), Block> {
+    let t = rest.get("/v5/market/time", &[]).await?;
+    let after = rest.now_ms() as i64;
+    let venue_ms = t
+        .get("timeNano")
+        .and_then(Value::as_str)
+        .and_then(|n| n.parse::<i128>().ok())
+        .map(|ns| (ns / 1_000_000) as i64)
+        .ok_or_else(|| Block::Unchecked(format!("market/time has no readable timeNano: {t}")))?;
+    let lead = after - venue_ms;
+    if lead > MAX_CLOCK_LEAD_MS {
+        return Err(Block::Clock(format!(
+            "the local clock may be {lead} ms ahead of the venue's (at most {MAX_CLOCK_LEAD_MS})"
+        )));
+    }
+    Ok(())
+}
+
 /// One IP check of the loop: re-reads the key's IPs and the public IP.
 pub async fn recheck_ip(
     rest: &Rest,
@@ -463,6 +502,42 @@ mod tests {
         .unwrap();
         let echo = echo_client(Duration::from_millis(500)).unwrap();
         boot(&rest, &echo, &v.echo.url(), want).await
+    }
+
+    const CLOCK_MS: u64 = 1_700_000_000_000;
+
+    fn fixed() -> u64 {
+        CLOCK_MS
+    }
+
+    #[tokio::test]
+    async fn a_local_clock_ahead_by_more_than_half_a_second_blocks() {
+        for (venue_ms, want) in [
+            (CLOCK_MS, Ok(())),
+            (CLOCK_MS - 500, Ok(())),
+            (CLOCK_MS + 60_000, Ok(())),
+            (CLOCK_MS - 501, Err("clock")),
+        ] {
+            let api = FakeHttp::start(Answer::Reply(404, "{}".into()));
+            api.route(
+                "/v5/market/time",
+                [ok(json!({"timeSecond": (venue_ms / 1000).to_string(), "timeNano": (u128::from(venue_ms) * 1_000_000 + 999_999).to_string()}))],
+            );
+            let rest = Rest::new(&api.url(), Arc::new(Credentials::new("K", "S")), 5000, Duration::from_millis(500))
+                .unwrap()
+                .with_clock(fixed);
+            let r = check_clock(&rest).await;
+            match want {
+                Ok(()) => assert_eq!(r, Ok(()), "{venue_ms}"),
+                Err(_) => assert!(matches!(&r, Err(Block::Clock(e)) if e.contains("501 ms ahead")), "{venue_ms}: {r:?}"),
+            }
+        }
+        let api = FakeHttp::start(Answer::Reply(404, "{}".into()));
+        api.route("/v5/market/time", [ok(json!({"timeSecond": "1"}))]);
+        let rest = Rest::new(&api.url(), Arc::new(Credentials::new("K", "S")), 5000, Duration::from_millis(500))
+            .unwrap()
+            .with_clock(fixed);
+        assert!(matches!(check_clock(&rest).await, Err(Block::Unchecked(_))));
     }
 
     #[tokio::test]

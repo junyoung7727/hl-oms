@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `11efb6a4b8e225ee`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `84a5954f187d4d55`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 주장 79건: 통과 0, 실패 0, 미실행 12, 이전 버전 결과 67.
 
@@ -85,7 +85,7 @@
 | V-TAIL-2 | 모든 이벤트 종류(43가지)의 인스턴스를 선택 필드까지 채워 직렬화하면, 인코더가 쓰는 모든 필드 경로가 docs/contracts/tail.md의 필드 표에 있고, 표의 모든 행은 실제로 쓰이는 필드이며 타입 열이 실제 JSON 값의 종류(문자열, 정수, 불, 목록, 열거형, 객체, null 허용)와 맞는다. 통째로 읽는 행은 설정 하나와 열거형 값뿐이다. 이벤트 종류가 늘면 시험이 컴파일되지 않는다 | 소스 검사 | 미실행 | `cargo test -p oms-core --test event_fields` |
 | V-BYBIT-READ-1 | Bybit 게이트웨이의 조회 일곱 가지는 읽기만 하고, 통째로 읽을 수 있는 응답만 입력으로 넘긴다. 쪽 넘김은 커서가 비고 쪽이 덜 찼을 때만 끝으로 보고, 다 찬 쪽에 커서가 없거나 커서가 그대로이거나 쪽이 20을 넘으면 스냅숏(열린 주문, 포지션, 증거금 보고)을 넘기지 않는다. 주문 상태는 우리 orderLinkId의 행만 보고 realtime, 기간 없는 주문 내역, 코어가 주문을 받은 시각 − 1분부터 7일의 주문 내역 셋 다에 없을 때만 StatusNotFound(첫 조회 전 시각)를 낸다. 체결은 since − 2분부터 7일 이하의 창으로 읽고(창 사이 1ms 겹침, 중복 키는 한 번), 한 번에 30쪽까지 읽고 다 읽은 창까지만 선언한 채 멈추며(오류 아님), 창을 다 읽은 뒤에만 그 끝 직전까지 FillsSynced를 내며, 끝을 알 수 없는 창은 반으로 나누고, 읽을 수 없는 행에서 멈춘다. 실행 행은 execType 표 하나로 Fill(우리 주문이면 order_id, 아니면 외부 체결), Funding, PositionChange(adl, takeover, delivery, settle), UnclassifiedExecution이 된다. 증거금 보고는 totalEquity, positionIM, 계좌 증거금 모드, 정수 레버리지, maxLeverage로 만들고 한 값이라도 못 읽으면 MarginReportInvalid다. 이 코드에는 주문 생성·정정·단건 취소 요청이 없다. 설정은 Bybit에서 REGULAR_MARGIN 밖의 계좌 모드 허용을 거절한다 | 단위 | 미실행 | `cargo test -p oms-node --lib venue::bybit` |
 | V-BYBIT-STREAM-1 | Bybit 게이트웨이는 시작 확인이 통과하고 막힘이 없을 때만 비공개 스트림에 접속하고, auth(GET/realtime + 만료 시각의 서명, 만료 = 지금 + recv_window)가 확인된 뒤 order.linear·execution.linear를 구독하며, 구독이 확인된 뒤에만 Link를 올린다. 접속마다 세션 번호가 커진다. ping 뒤 ping 간격 안에 pong이 없거나(코어 입력 큐를 기다린 시간은 빼고), 소켓이 닫히거나, 읽을 수 없는 행이나 symbol 없는 행이 오거나, 연결 중 막힘(IP 변경, 키 거부, IP 차단)이 생기면 Link를 내리고, 키 거부와 IP 변경이 아니면 다시 붙는다. 인증 거부, 조회의 키 거부 코드, IP 변경 뒤에는 재시작까지 접속도 요청도 하지 않는다. HTTP 403(REST든 스트림 업그레이드든) 뒤에는 멈춤 시간 동안 REST 요청과 스트림 접속이 없고, 끝나면 다시 붙는다. 구독 거부와 응답 없는 인증은 키 거부가 아니라 다시 시도하고, 인증 응답 전에는 구독을 보내지 않는다. 연결이 올라가 첫 pong을 받았으면 재연결 기다림은 처음 값으로 돌아가고, pong 전에 끊기면 기다림이 계속 는다. 설정한 종목의 주문 행은 OrderStatus(Stream), 실행 행은 실행 분류표를 거쳐 받은 시각이 실린 입력이 되고 다른 종목의 행은 넘기지 않는다. 주문과 취소는 V-BYBIT-ORDERS-1 | 통합 | 미실행 | `cargo test -p oms-node --lib venue::bybit` |
-| V-BYBIT-ORDERS-1 | Bybit 게이트웨이는 주문과 취소마다 결과 하나를 돌려주고 REST 요청을 많아야 하나 보내며 다시 보내지 않는다. 생성은 orderLinkId = 우리 고객 주문번호, category linear, Limit, 단방향(positionIdx 0)으로 보내고 보낸 본문에 서명한다. 요청 시각 + recv_window + 1초가 expires_at보다 늦거나, 막힘이 있거나, 거래하지 않는 종목이거나, 접속이 되지 않으면 보내지 않고 NotSent다. retCode 0은 생성이면 orderId가 있을 때만 Placed(Open, 누적 수량 없음), 취소면 Confirmed. 오류 문서의 0 아닌 코드는 UNKNOWN_CODES가 아니면 Rejected, 그 밖의 모든 응답(문서에 없는 코드, 2xx가 아닌 HTTP, 시간 초과, 끊김, 읽을 수 없는 본문)은 Unknown이다. HTTP 403은 IP 차단 멈춤을, HTTP 401과 키 거부 retCode는 키 거부를 건다. 어느 1초든 주문은 8개, 주문과 취소는 합쳐 10개를 넘지 않고, 주문이 8개를 다 써도 취소는 바로 나가며, 차면 기다린다(버리지 않는다). 시작 확인은 설정의 px_tick·qty_step이 거래소 tickSize·qtyStep의 배수가 아니면 막는다 | 통합 | 미실행 | `cargo test -p oms-core --lib rate && cargo test -p oms-node --lib venue::bybit` |
+| V-BYBIT-ORDERS-1 | Bybit 게이트웨이는 주문과 취소마다 결과 하나를 돌려주고 REST 요청을 많아야 하나 보내며 다시 보내지 않는다. 생성은 orderLinkId = 우리 고객 주문번호, category linear, Limit, 단방향(positionIdx 0)으로 보내고 보낸 본문에 서명한다. 요청 시각 + recv_window + 1초가 expires_at보다 늦거나, 막힘이 있거나, 거래하지 않는 종목이거나, 접속이 되지 않으면 보내지 않고 NotSent다. retCode 0은 생성이면 orderId가 있을 때만 Placed(Open, 누적 수량 없음), 취소면 Confirmed. 오류 문서의 0 아닌 코드는 UNKNOWN_CODES가 아니면 Rejected, 그 밖의 모든 응답(문서에 없는 코드, 2xx가 아닌 HTTP, 시간 초과, 끊김, 읽을 수 없는 본문)은 Unknown이다. HTTP 403과 retCode 10018은 IP 차단 멈춤을, HTTP 401과 키 거부 retCode는 키 거부를 건다. 요청은 자리를 잡은 때부터 응답 + 1초까지 세므로 보낸 때와 응답 사이 어디에 도착하든 어느 1초에도 주문은 8개, 주문과 취소는 합쳐 10개를 넘지 않고, 주문이 8개를 다 써도 취소는 바로 나가며, 차면 기다린다(버리지 않는다). 아무 바이트도 나가지 않은 요청은 자리를 바로 돌려준다. 시작 확인은 설정의 px_tick·qty_step이 거래소 tickSize·qtyStep의 배수가 아니면 막고, 로컬 시계가 거래소보다 500ms 넘게 앞설 수 있으면(시작 확인 전과 IP 확인 주기마다) 막는다 | 통합 | 미실행 | `cargo test -p oms-core --lib rate && cargo test -p oms-node --lib venue::bybit` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -1847,19 +1847,19 @@
 | `node-unit/venue::bybit::gateway::tests::the_reconnect_waits_start_over_after_a_link_that_came_up` | 미실행 |  |
 | `node-unit/venue::bybit::gateway::tests::a_link_that_fails_before_its_first_pong_keeps_the_waits_growing` | 미실행 |  |
 
-## V-BYBIT-ORDERS-1 — Bybit 게이트웨이는 주문과 취소마다 결과 하나를 돌려주고 REST 요청을 많아야 하나 보내며 다시 보내지 않는다. 생성은 orderLinkId = 우리 고객 주문번호, category linear, Limit, 단방향(positionIdx 0)으로 보내고 보낸 본문에 서명한다. 요청 시각 + recv_window + 1초가 expires_at보다 늦거나, 막힘이 있거나, 거래하지 않는 종목이거나, 접속이 되지 않으면 보내지 않고 NotSent다. retCode 0은 생성이면 orderId가 있을 때만 Placed(Open, 누적 수량 없음), 취소면 Confirmed. 오류 문서의 0 아닌 코드는 UNKNOWN_CODES가 아니면 Rejected, 그 밖의 모든 응답(문서에 없는 코드, 2xx가 아닌 HTTP, 시간 초과, 끊김, 읽을 수 없는 본문)은 Unknown이다. HTTP 403은 IP 차단 멈춤을, HTTP 401과 키 거부 retCode는 키 거부를 건다. 어느 1초든 주문은 8개, 주문과 취소는 합쳐 10개를 넘지 않고, 주문이 8개를 다 써도 취소는 바로 나가며, 차면 기다린다(버리지 않는다). 시작 확인은 설정의 px_tick·qty_step이 거래소 tickSize·qtyStep의 배수가 아니면 막는다
+## V-BYBIT-ORDERS-1 — Bybit 게이트웨이는 주문과 취소마다 결과 하나를 돌려주고 REST 요청을 많아야 하나 보내며 다시 보내지 않는다. 생성은 orderLinkId = 우리 고객 주문번호, category linear, Limit, 단방향(positionIdx 0)으로 보내고 보낸 본문에 서명한다. 요청 시각 + recv_window + 1초가 expires_at보다 늦거나, 막힘이 있거나, 거래하지 않는 종목이거나, 접속이 되지 않으면 보내지 않고 NotSent다. retCode 0은 생성이면 orderId가 있을 때만 Placed(Open, 누적 수량 없음), 취소면 Confirmed. 오류 문서의 0 아닌 코드는 UNKNOWN_CODES가 아니면 Rejected, 그 밖의 모든 응답(문서에 없는 코드, 2xx가 아닌 HTTP, 시간 초과, 끊김, 읽을 수 없는 본문)은 Unknown이다. HTTP 403과 retCode 10018은 IP 차단 멈춤을, HTTP 401과 키 거부 retCode는 키 거부를 건다. 요청은 자리를 잡은 때부터 응답 + 1초까지 세므로 보낸 때와 응답 사이 어디에 도착하든 어느 1초에도 주문은 8개, 주문과 취소는 합쳐 10개를 넘지 않고, 주문이 8개를 다 써도 취소는 바로 나가며, 차면 기다린다(버리지 않는다). 아무 바이트도 나가지 않은 요청은 자리를 바로 돌려준다. 시작 확인은 설정의 px_tick·qty_step이 거래소 tickSize·qtyStep의 배수가 아니면 막고, 로컬 시계가 거래소보다 500ms 넘게 앞설 수 있으면(시작 확인 전과 IP 확인 주기마다) 막는다
 
 - 상태: **미실행**
 - 왜 중요한가: 결과를 모르는 주문을 거부로 보거나 다시 보내 두 번 놓지 않고, 만료 뒤에 처리될 수 있는 주문을 보내지 않으며, 거래소 요청 한도를 넘어 IP 차단을 부르지 않는다는 전제
 - 수준: 통합
-- 전제와 범위: loopback 가짜 HTTP 서버(경로별 응답: 답, 끊김, 무응답, 오류 상태), 고정한 시계, 오류 문서의 코드 번호 목록(2026-11-21), 시각을 입력으로 받는 한도 규칙, 시험 20개
+- 전제와 범위: loopback 가짜 HTTP 서버(경로별 응답: 답, 끊김, 무응답, 오류 상태), 고정한 시계, 오류 문서의 코드 번호 목록(2026-11-21), 시각을 입력으로 받는 한도 규칙, 시험 24개
 - 실제 구성요소: oms-core::rate, venue::bybit::{answer, orders, rest, checks, gateway}, venue::start(명령 반복)
 - 모의·시뮬레이션: Bybit REST(문서 모양의 손으로 쓴 JSON), 시간(창 시험은 시각 입력, 9번째 주문 시험은 실제 1초)
-- 주입한 장애: 응답 없음(무응답, 끊김, 502, 읽을 수 없는 본문), 접속 거부, 만료가 1µs 모자람, 기다린 뒤 생긴 막힘, 잔고 부족 거부, orderLinkId 중복, IP 불일치 코드, HTTP 401, HTTP 403, orderId 없는 접수, 취소 대상 없음, 거래하지 않는 종목, 1초에 9번째 주문, 거꾸로 간 시계, 거래소 단위보다 촘촘한 설정 단위, 읽을 수 없는 단위
-- 판정 기준과 근거: 코어에 간 결과(종류, 이유, venue_oid, 상태), 가짜 서버가 받은 요청의 경로·개수·본문·서명 머리글, 막힘 이유, 한도 규칙이 돌려준 시각, 임의 일정 2만 번에서 어느 1초든 주문 ≤ 8·전체 ≤ 10
+- 주입한 장애: 응답 없음(무응답, 끊김, 502, 읽을 수 없는 본문), 접속 거부, 만료가 1µs 모자람, 기다린 뒤 생긴 막힘, 잔고 부족 거부, orderLinkId 중복, IP 불일치 코드, HTTP 401, HTTP 403, orderId 없는 접수, 취소 대상 없음, 거래하지 않는 종목, 1초에 9번째 주문, 0.3초 걸린 응답 8개, 접속 거부 20번, 거꾸로 간 시계, 앞선 로컬 시계, 읽을 수 없는 거래소 시각, 10018, 거래소 단위보다 촘촘한 설정 단위, 읽을 수 없는 단위
+- 판정 기준과 근거: 코어에 간 결과(종류, 이유, venue_oid, 상태), 가짜 서버가 받은 요청의 경로·개수·본문·서명 머리글, 막힘 이유, 한도 규칙이 돌려준 시각, 지연(0–0.4초)과 임의 도착의 일정 2만 번에서 도착 기준 어느 1초든 주문 ≤ 8·전체 ≤ 10
 - 재현: `cargo test -p oms-core --lib rate && cargo test -p oms-node --lib venue::bybit`
 - 뒷받침하는 것: C-GW(Bybit 열: G-1, G-2, G-3, G-4, G-5, 요청 한도), ADR-028 §7d
-- 확인하지 않은 범위: 실제 Bybit 주문 응답과 코드의 실제 뜻(T6, testnet은 U-01 허가 뒤), WS Trade와 REST의 한도 공유(T8), WS Trade 경로(U17b), 참조 가격과 노드 끝에서 끝까지(U17c), 저널 flush 실패 때 요청 0(U17c, 커밋 단계가 명령을 내구화 뒤에만 넘기는 것은 V-COMMIT 계열이 가상 거래소로 보인다), 감시자·다른 프로세스가 같은 UID로 보내는 요청(세지 않는다), 접속 단계 오류가 바이트를 내보내지 않았다는 가정(A-08)
+- 확인하지 않은 범위: 실제 Bybit 주문 응답과 코드의 실제 뜻(T6, testnet은 U-01 허가 뒤), WS Trade와 REST의 한도 공유(T8), WS Trade 경로(U17b), 참조 가격과 노드 끝에서 끝까지(U17c), 저널 flush 실패 때 요청 0(U17c, 커밋 단계가 명령을 내구화 뒤에만 넘기는 것은 V-COMMIT 계열이 가상 거래소로 보인다), 감시자·다른 프로세스가 같은 UID로 보내는 요청(세지 않는다), 접속 단계 오류가 바이트를 내보내지 않았다는 가정(A-08), 접수된 취소가 적용되지 않는 경우(U18b·U19), 운영 중 틱·수량 단위 변경
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
@@ -1867,7 +1867,8 @@
 | `core/rate::tests::the_window_slides_with_each_request` | 미실행 |  |
 | `core/rate::tests::cancels_may_take_the_reserve_and_then_block_orders_too` | 미실행 |  |
 | `core/rate::tests::a_clock_that_goes_back_does_not_free_a_slot` | 미실행 |  |
-| `core/rate::tests::no_rolling_second_holds_more_than_the_limits` | 미실행 |  |
+| `core/rate::tests::a_request_counts_until_one_window_after_it_finished` | 미실행 |  |
+| `core/rate::tests::no_rolling_second_of_arrivals_holds_more_than_the_limits` | 미실행 |  |
 | `node-unit/venue::bybit::answer::tests::every_documented_code_has_exactly_one_class` | 미실행 |  |
 | `node-unit/venue::bybit::answer::tests::anything_but_a_documented_refusal_is_unknown` | 미실행 |  |
 | `node-unit/venue::bybit::answer::tests::code_zero_is_accepted_with_its_object_from_rest_or_ws` | 미실행 |  |
@@ -1880,6 +1881,9 @@
 | `node-unit/venue::bybit::orders::tests::a_cancel_goes_by_client_id_and_has_the_same_classes` | 미실행 |  |
 | `node-unit/venue::bybit::orders::tests::the_ninth_create_in_a_second_waits_while_a_cancel_goes_out` | 미실행 |  |
 | `node-unit/venue::bybit::orders::tests::the_send_time_rule_is_exact_at_the_bound` | 미실행 |  |
+| `node-unit/venue::bybit::orders::tests::a_slot_counts_until_one_second_after_the_answer` | 미실행 |  |
+| `node-unit/venue::bybit::checks::tests::a_local_clock_ahead_by_more_than_half_a_second_blocks` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::a_local_clock_ahead_of_the_venue_keeps_the_link_down_and_orders_home` | 미실행 |  |
 | `node-unit/venue::bybit::gateway::tests::an_order_and_a_cancel_each_go_out_once_over_rest_and_get_one_result` | 미실행 |  |
 | `node-unit/venue::bybit::gateway::tests::nothing_goes_out_while_blocked_or_for_an_untraded_symbol` | 미실행 |  |
 | `node-unit/venue::bybit::checks::tests::steps_off_the_venue_steps_block_and_unreadable_steps_are_unchecked` | 미실행 |  |

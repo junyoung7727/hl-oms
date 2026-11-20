@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use super::answer::{self, Answer};
 use super::rest::{AUTH_CODES, Rest, RestError};
 
+
 pub const CREATE_PATH: &str = "/v5/order/create";
 pub const CANCEL_PATH: &str = "/v5/order/cancel";
 
@@ -18,7 +19,7 @@ pub const CANCEL_PATH: &str = "/v5/order/cancel";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
     None,
-    /// HTTP 403: pause every request (`IP_BAN_PAUSE`).
+    /// HTTP 403 or retCode 10018: pause every request (`IP_BAN_PAUSE`).
     Ban(String),
     /// HTTP 401 or an auth retCode: no request until the restart.
     RejectKey(String),
@@ -76,6 +77,10 @@ pub fn fits_expiry(ts_ms: u64, recv_window_ms: u64, expires_at: Ts) -> bool {
 pub fn effect(status: u16, a: &Answer) -> Effect {
     match (status, a) {
         (403, _) => Effect::Ban(format!("HTTP 403 on the order path: {a:?}")),
+        // "Exceeded the IP Rate Limit": the retCode form of the IP limit.
+        (_, Answer::Rejected { code: 10018, msg }) => {
+            Effect::Ban(format!("IP rate limit (10018) on the order path: {msg}"))
+        }
         (401, _) => Effect::RejectKey("HTTP 401 on the order path".into()),
         (_, Answer::Rejected { code, msg }) if AUTH_CODES.contains(code) => {
             Effect::RejectKey(format!("key rejected ({code}): {msg}"))
@@ -161,19 +166,24 @@ impl Orders {
         self.epoch.elapsed().as_micros() as u64
     }
 
+    fn budget(&self) -> std::sync::MutexGuard<'_, RateBudget> {
+        self.budget.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Waits until the budget lets one request of `class` out, and takes
     /// the slot. Nothing is dropped; the wait has no limit (an order that
     /// waited too long fails the send-time rule after it).
-    pub async fn take(&self, class: RateClass) {
+    async fn take(&self, class: RateClass) -> Held<'_> {
         loop {
             let now = self.mono_us();
-            let r = self
-                .budget
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .take(class, now);
+            let r = self.budget().take(class, now);
             match r {
-                Ok(()) => return,
+                Ok(slot) => {
+                    return Held {
+                        orders: self,
+                        slot: Some(slot),
+                    };
+                }
                 Err(at) => tokio::time::sleep(Duration::from_micros(at.saturating_sub(now))).await,
             }
         }
@@ -182,13 +192,15 @@ impl Orders {
     /// Sends one create, after the budget. `allowed` is asked after the
     /// wait: a block that appeared meanwhile keeps the request home.
     pub async fn create(&self, c: &Create<'_>, allowed: impl Fn() -> Result<(), String>) -> (SendOutcome, Effect) {
-        self.take(RateClass::Order).await;
+        let held = self.take(RateClass::Order).await;
         if let Err(why) = allowed() {
+            held.release();
             return (SendOutcome::NotSent { reason: why }, Effect::None);
         }
         // One time for the rule and the signature.
         let ts = self.rest.now_ms();
         if !fits_expiry(ts, self.rest.recv_window_ms(), c.expires_at) {
+            held.release();
             return (
                 SendOutcome::NotSent {
                     reason: format!(
@@ -200,8 +212,12 @@ impl Orders {
             );
         }
         let body = create_body(c.symbol, c.side, c.qty, c.px, c.tif, c.reduce_only, c.link);
-        match self.rest.post_raw_at(CREATE_PATH, &body, ts).await {
-            Err(RestError::NotSent(e)) => (SendOutcome::NotSent { reason: e }, Effect::None),
+        let sent = self.rest.post_raw_at(CREATE_PATH, &body, ts).await;
+        match sent {
+            Err(RestError::NotSent(e)) => {
+                held.release();
+                (SendOutcome::NotSent { reason: e }, Effect::None)
+            }
             Err(e) => (SendOutcome::Unknown { reason: e.to_string() }, Effect::None),
             Ok((status, text)) => {
                 let a = answer::classify(status, &text);
@@ -214,19 +230,49 @@ impl Orders {
     /// Sends one cancel by our client id, after the budget (which lets
     /// cancels use the reserve).
     pub async fn cancel(&self, symbol: &str, link: &str, allowed: impl Fn() -> Result<(), String>) -> (CancelOutcome, Effect) {
-        self.take(RateClass::Cancel).await;
+        let held = self.take(RateClass::Cancel).await;
         if let Err(why) = allowed() {
+            held.release();
             return (CancelOutcome::NotSent { reason: why }, Effect::None);
         }
         let ts = self.rest.now_ms();
-        match self.rest.post_raw_at(CANCEL_PATH, &cancel_body(symbol, link), ts).await {
-            Err(RestError::NotSent(e)) => (CancelOutcome::NotSent { reason: e }, Effect::None),
+        let sent = self.rest.post_raw_at(CANCEL_PATH, &cancel_body(symbol, link), ts).await;
+        match sent {
+            Err(RestError::NotSent(e)) => {
+                held.release();
+                (CancelOutcome::NotSent { reason: e }, Effect::None)
+            }
             Err(e) => (CancelOutcome::Unknown { reason: e.to_string() }, Effect::None),
             Ok((status, text)) => {
                 let a = answer::classify(status, &text);
                 let fx = effect(status, &a);
                 (cancel_outcome(a), fx)
             }
+        }
+    }
+}
+
+/// A taken slot. Dropped, it finishes the request now (it may have left:
+/// it counts one more window); `release` frees it when nothing left the
+/// host. A request whose task is cancelled mid-flight still finishes.
+struct Held<'a> {
+    orders: &'a Orders,
+    slot: Option<Slot>,
+}
+
+impl Held<'_> {
+    fn release(mut self) {
+        if let Some(slot) = self.slot.take() {
+            self.orders.budget().release(slot);
+        }
+    }
+}
+
+impl Drop for Held<'_> {
+    fn drop(&mut self) {
+        if let Some(slot) = self.slot.take() {
+            let now = self.orders.mono_us();
+            self.orders.budget().finish(slot, now);
         }
     }
 }
@@ -377,6 +423,7 @@ mod tests {
             (Http::Reply(200, r#"{"retCode":10010,"retMsg":"Unmatched IP"}"#.into()), "rejected", Effect::RejectKey("key rejected (10010): Unmatched IP".into())),
             (Http::Reply(401, "".into()), "unknown", Effect::RejectKey("HTTP 401 on the order path".into())),
             (Http::Reply(403, "too frequent".into()), "unknown", Effect::Ban(String::new())),
+            (Http::Reply(200, r#"{"retCode":10018,"retMsg":"Exceeded the IP Rate Limit."}"#.into()), "rejected", Effect::Ban(String::new())),
             (Http::Reply(200, r#"{"retCode":0,"result":{"orderLinkId":"LINKID"}}"#.into()), "unknown", Effect::None),
         ];
         for (a, class, want) in cases {
@@ -444,6 +491,55 @@ mod tests {
         assert!(done >= Duration::from_secs(1), "the ninth went out after {done:?}");
         let creates = api.requests().iter().filter(|r| r.path() == CREATE_PATH).count();
         assert_eq!(creates, 9);
+    }
+
+    /// A slow answer keeps its slot until one window after it came: eight
+    /// creates that each took 0.3 s let the ninth go only 1.3 s after the
+    /// start, not 1 s. A create refused at connect frees its slot at once.
+    #[tokio::test]
+    async fn a_slot_counts_until_one_second_after_the_answer() {
+        let api = FakeHttp::start(Http::Reply(404, "{}".into()));
+        api.route(CREATE_PATH, [Http::Hang]);
+        let rest = Rest::new(
+            &api.url(),
+            Arc::new(Credentials::new("KEY", "SECRET")),
+            5000,
+            Duration::from_millis(300),
+        )
+        .unwrap()
+        .with_clock(clock);
+        let o = Arc::new(Orders::new(rest));
+        let start = Instant::now();
+        let tasks: Vec<_> = (0..8)
+            .map(|_| {
+                let o = o.clone();
+                tokio::spawn(async move { o.create(&create(LATER), yes).await })
+            })
+            .collect();
+        for t in tasks {
+            assert!(matches!(t.await.unwrap().0, SendOutcome::Unknown { .. }));
+        }
+        api.route(CREATE_PATH, [placed("o-9")]);
+        assert!(matches!(o.create(&create(LATER), yes).await.0, SendOutcome::Placed { .. }));
+        let ninth = start.elapsed();
+        assert!(ninth >= Duration::from_millis(1_300), "the ninth went out after {ninth:?}");
+        // Refused at connect: nothing left, nothing counts.
+        let held = tokio::net::TcpSocket::new_v4().unwrap();
+        held.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let dead = Rest::new(
+            &format!("http://{}", held.local_addr().unwrap()),
+            Arc::new(Credentials::new("KEY", "SECRET")),
+            5000,
+            Duration::from_millis(300),
+        )
+        .unwrap()
+        .with_clock(clock);
+        let d = Orders::new(dead);
+        let t0 = Instant::now();
+        for _ in 0..20 {
+            assert!(matches!(d.create(&create(LATER), yes).await.0, SendOutcome::NotSent { .. }));
+        }
+        assert!(t0.elapsed() < Duration::from_millis(900), "refused creates held slots: {:?}", t0.elapsed());
     }
 
     #[test]

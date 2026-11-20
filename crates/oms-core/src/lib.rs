@@ -36,5 +36,5 @@ pub use margin_view::{AccountModeView, MarginView, VenueSettingView};
 pub use model::*;
 pub use needs::Need;
 pub use num::{Amount, Px, Qty, Ratio, SQty};
-pub use rate::{RateBudget, RateClass};
+pub use rate::{RateBudget, RateClass, Slot};
 pub use record::Record;

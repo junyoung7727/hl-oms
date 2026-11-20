@@ -19,7 +19,7 @@ use oms_core::*;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::checks::{self, Block, Expected, Health, SymbolSpec};
-use super::orders::{self, Create, Effect, Orders};
+use super::orders::{Create, Effect, Orders};
 use super::query::{Queries, QueryFail};
 use super::rest::{Credentials, IP_BAN_PAUSE, Rest, RestError};
 use super::{Endpoints, exec, stream};
@@ -213,7 +213,8 @@ impl Gateway {
 
     // ---- checks ---------------------------------------------------------------
 
-    /// The boot checks until they pass, then the IP check on its timer.
+    /// The boot checks until they pass, then the IP check on its timer; the
+    /// clock check on both.
     /// Stops for good once the key is rejected.
     async fn checks_loop(self: Arc<Self>) {
         let mut booted = false;
@@ -222,6 +223,16 @@ impl Gateway {
                 return;
             }
             if !self.quiet() {
+                // The clock first: its slot is set before a passing boot run
+                // clears the boot slot, so the link never comes up unchecked.
+                // Before the boot checks pass a missing answer blocks; after,
+                // the last result stands (as for the IP).
+                match checks::check_clock(&self.rest).await {
+                    Err(Block::Unchecked(e)) if booted => {
+                        warn!("the clock check got no answer; the last result stands", "error": e)
+                    }
+                    r => self.record(r, Health::set_clock),
+                }
                 if booted {
                     match checks::recheck_ip(
                         &self.rest,
@@ -752,6 +763,7 @@ pub(crate) fn spawn_with(
 mod tests {
     use super::*;
     use crate::queues::{CoreMsg, InputQueues};
+    use crate::venue::bybit::orders;
     use http_fake::{Answer as Http, FakeHttp};
     use serde_json::{Value, json};
     use tokio::net::TcpListener;
@@ -799,6 +811,12 @@ mod tests {
                 "priceFilter": {"tickSize": "0.10"}, "lotSizeFilter": {"qtyStep": "0.001"}}], "nextPageCursor": ""}))],
         );
         api.route("/v5/position/list", [positions()]);
+        // A venue clock far ahead (year 2096): the local clock is behind, so
+        // the clock check passes whenever the test runs.
+        api.route(
+            "/v5/market/time",
+            [ok(json!({"timeSecond": "4000000000", "timeNano": "4000000000000000000"}))],
+        );
         api.route("/ip", [Http::Reply(200, "127.0.0.1\n".into())]);
         api
     }
@@ -1166,15 +1184,16 @@ mod tests {
         assert_eq!(session, session_number(BOOT, 1));
         assert_eq!(r.block(), None);
 
-        // The boot checks ran before the stream: four reads, then the stream.
+        // The clock and the boot checks ran before the stream.
         let paths: Vec<String> = api
             .requests()
             .iter()
             .map(|q| q.path().to_string())
             .collect();
         assert_eq!(
-            &paths[..5],
+            &paths[..6],
             [
+                "/v5/market/time",
                 "/v5/user/query-api",
                 "/ip",
                 "/v5/account/info",
@@ -1694,6 +1713,27 @@ mod tests {
             2,
             "auth and subscribe only on the private stream"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_local_clock_ahead_of_the_venue_keeps_the_link_down_and_orders_home() {
+        let api = rest_venue("REGULAR_MARGIN");
+        // The venue says 2023: the local clock is years ahead.
+        api.route(
+            "/v5/market/time",
+            [ok(json!({"timeSecond": "1700000000", "timeNano": "1700000000000000000"}))],
+        );
+        api.route(orders::CREATE_PATH, [ok(json!({"orderId": "o-1"}))]);
+        let ws = FakeWs::start(GOOD).await;
+        let r = rig(&api, &ws);
+        r.until("the clock block", |r| r.block().is_some_and(|b| b.starts_with("clock:"))).await;
+        r.commands.send(order_cmd(9, "BTCUSDT")).await.unwrap();
+        r.until("one result", |r| results(r).len() == 1).await;
+        assert!(matches!(&results(&r)[0], VenueInput::SendResult { outcome: SendOutcome::NotSent { reason }, .. } if reason.starts_with("clock:")));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!up(&r), "the link came up with the clock ahead");
+        assert_eq!(ws.attempts(), 0);
+        assert!(posts(&api).is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
