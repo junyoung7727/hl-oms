@@ -43,6 +43,9 @@ pub struct Timing {
     pub ban_pause: Duration,
     /// How often an established stream looks at `Health`.
     pub health_poll: Duration,
+    /// The first wait before a reconnect, and the wait again after a link
+    /// that came up.
+    pub backoff_min: Duration,
     /// Longest wait between reconnects.
     pub backoff_max: Duration,
 }
@@ -58,6 +61,7 @@ impl Timing {
             ip_check: Duration::from_secs(cfg.ip_check_secs),
             ban_pause: IP_BAN_PAUSE,
             health_poll: Duration::from_millis(250),
+            backoff_min: Duration::from_millis(500),
             backoff_max: Duration::from_secs(10),
         }
     }
@@ -101,10 +105,12 @@ fn wall_ns() -> i64 {
         .unwrap_or(0)
 }
 
-/// Why a stream ended. `Rejected` stops the reconnects.
+/// Why a stream ended. `Rejected` stops the reconnects; `IpBanned` starts
+/// the pause.
 enum End {
     Retry(String),
     Rejected(String),
+    IpBanned(String),
 }
 
 impl Gateway {
@@ -285,7 +291,7 @@ impl Gateway {
 
     async fn stream_loop(self: Arc<Self>, boot: u32) {
         let mut connection = 0u32;
-        let mut backoff = Duration::from_millis(500);
+        let mut backoff = self.timing.backoff_min;
         loop {
             if self.health.auth_rejected() {
                 warn!("the private stream stays closed: the key was rejected");
@@ -296,14 +302,21 @@ impl Gateway {
                 tokio::time::sleep(self.timing.health_poll).await;
                 continue;
             }
-            match self.run_stream(boot, &mut connection).await {
-                Ok(()) => backoff = Duration::from_millis(500),
-                Err(End::Retry(e)) => warn!("the private stream ended", "error": e),
-                Err(End::Rejected(e)) => {
+            let before = connection;
+            let end = self.run_stream(boot, &mut connection).await;
+            if connection != before {
+                // The link was up: the waits start over.
+                backoff = self.timing.backoff_min;
+            }
+            match end {
+                End::Retry(e) => warn!("the private stream ended", "error": e),
+                End::Rejected(e) => {
                     error!("the private stream's auth was refused; no request goes out until the restart", "error": e.clone());
                     self.health.reject_auth(format!("private stream auth: {e}"));
                     return;
                 }
+                // The upgrade is an HTTP request too (§7c).
+                End::IpBanned(e) => self.ban(format!("private stream upgrade: {e}")),
             }
             tokio::time::sleep(backoff).await;
             backoff = (backoff * 2).min(self.timing.backoff_max);
@@ -311,39 +324,60 @@ impl Gateway {
     }
 
     /// Connects over IPv4, as every other request does (`LOCAL_ADDRESS`).
+    /// An upgrade answered with HTTP 403 is an IP ban.
     async fn connect(
         &self,
     ) -> Result<
         tokio_tungstenite::WebSocketStream<
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
         >,
-        String,
+        End,
     > {
-        let url = reqwest::Url::parse(&self.wiring.private_ws).map_err(|e| e.to_string())?;
-        let host = url.host_str().ok_or("the stream URL has no host")?;
+        let retry = |e: String| End::Retry(e);
+        let url = reqwest::Url::parse(&self.wiring.private_ws).map_err(|e| retry(e.to_string()))?;
+        let host = url
+            .host_str()
+            .ok_or_else(|| retry("the stream URL has no host".into()))?;
         let port = url
             .port_or_known_default()
-            .ok_or("the stream URL has no port")?;
+            .ok_or_else(|| retry("the stream URL has no port".into()))?;
         let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host, port))
             .await
-            .map_err(|e| e.to_string())?
+            .map_err(|e| retry(e.to_string()))?
             .filter(SocketAddr::is_ipv4)
             .collect();
-        let addr = addrs.first().ok_or("the stream host has no IPv4 address")?;
+        let addr = addrs
+            .first()
+            .ok_or_else(|| retry("the stream host has no IPv4 address".into()))?;
         let tcp = tokio::net::TcpStream::connect(addr)
             .await
-            .map_err(|e| e.to_string())?;
-        let (ws, _) = tokio_tungstenite::client_async_tls(self.wiring.private_ws.as_str(), tcp)
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(ws)
+            .map_err(|e| retry(e.to_string()))?;
+        match tokio_tungstenite::client_async_tls(self.wiring.private_ws.as_str(), tcp).await {
+            Ok((ws, _)) => Ok(ws),
+            Err(tokio_tungstenite::tungstenite::Error::Http(r)) if r.status().as_u16() == 403 => {
+                Err(End::IpBanned("HTTP 403 on the upgrade".into()))
+            }
+            Err(e) => Err(retry(e.to_string())),
+        }
     }
 
-    async fn run_stream(&self, boot: u32, connection: &mut u32) -> Result<(), End> {
+    /// One connection, from the upgrade to its end. `connection` grows only
+    /// when the link came up.
+    async fn run_stream(&self, boot: u32, connection: &mut u32) -> End {
+        match self.stream_once(boot, connection).await {
+            Ok(never) => match never {},
+            Err(e) => e,
+        }
+    }
+
+    async fn stream_once(
+        &self,
+        boot: u32,
+        connection: &mut u32,
+    ) -> Result<std::convert::Infallible, End> {
         let ws = tokio::time::timeout(self.timing.handshake, self.connect())
             .await
-            .map_err(|_| End::Retry("connect timed out".into()))?
-            .map_err(End::Retry)?;
+            .map_err(|_| End::Retry("connect timed out".into()))??;
         let (mut write, mut read) = ws.split();
         let send = |m: String| Message::text(m);
 
@@ -384,11 +418,11 @@ impl Gateway {
             }
         }
 
-        *connection += 1;
-        let session = session_number(boot, *connection);
         if let Some(b) = self.health.block() {
             return Err(End::Retry(format!("blocked before the link came up: {b}")));
         }
+        *connection += 1;
+        let session = session_number(boot, *connection);
         self.session.store(session, Ordering::SeqCst);
         info!("the private stream is subscribed", "session": session);
         self.input
@@ -404,25 +438,29 @@ impl Gateway {
         ping.tick().await;
         let mut health = tokio::time::interval(self.timing.health_poll);
         let mut pings = 0u64;
-        let mut awaiting_pong = false;
+        // When the pong to the last ping is due. Time spent waiting on the
+        // core's queue moves it on: a pong read late because the gateway
+        // was waiting is not missing.
+        let mut pong_due: Option<tokio::time::Instant> = None;
         let reason = loop {
+            let due = pong_due.unwrap_or_else(tokio::time::Instant::now);
             let msg = tokio::select! {
                 m = read.next() => match m {
                     None => break "closed by the venue".to_string(),
                     Some(Err(e)) => break format!("read failed: {e}"),
                     Some(Ok(m)) => m,
                 },
-                _ = ping.tick() => {
-                    // A quiet stream and a half-open connection look the
-                    // same; only the pong tells them apart.
-                    if awaiting_pong {
-                        break format!("no pong within {} ms of a ping", self.timing.ping.as_millis());
-                    }
+                // A quiet stream and a half-open connection look the same;
+                // only the pong tells them apart.
+                _ = tokio::time::sleep_until(due), if pong_due.is_some() => {
+                    break format!("no pong within {} ms of a ping", self.timing.ping.as_millis());
+                }
+                _ = ping.tick(), if pong_due.is_none() => {
                     pings += 1;
                     if let Err(e) = write.send(send(stream::ping_message(pings))).await {
                         break format!("ping failed: {e}");
                     }
-                    awaiting_pong = true;
+                    pong_due = Some(tokio::time::Instant::now() + self.timing.ping);
                     continue;
                 }
                 _ = health.tick() => {
@@ -438,22 +476,24 @@ impl Gateway {
                 Ok(f) => f,
                 Err(e) => break format!("a stream message could not be read: {e}"),
             };
-            match frame {
-                stream::Frame::Pong => awaiting_pong = false,
-                stream::Frame::Orders(rows) => {
-                    if let Err(e) = self.orders(&rows, session).await {
-                        break e;
-                    }
+            let delivering = tokio::time::Instant::now();
+            let delivered = match frame {
+                stream::Frame::Pong => {
+                    pong_due = None;
+                    Ok(())
                 }
-                stream::Frame::Executions(rows) => {
-                    if let Err(e) = self.executions(&rows, recv_ns).await {
-                        break e;
-                    }
-                }
+                stream::Frame::Orders(rows) => self.orders(&rows, session).await,
+                stream::Frame::Executions(rows) => self.executions(&rows, recv_ns).await,
                 stream::Frame::Auth(_) | stream::Frame::Subscribe(Err(_)) => {
-                    break "an unexpected auth or subscribe answer".to_string();
+                    Err("an unexpected auth or subscribe answer".to_string())
                 }
-                stream::Frame::Subscribe(Ok(())) | stream::Frame::Other => {}
+                stream::Frame::Subscribe(Ok(())) | stream::Frame::Other => Ok(()),
+            };
+            if let Some(d) = pong_due.as_mut() {
+                *d += delivering.elapsed();
+            }
+            if let Err(e) = delivered {
+                break e;
             }
         };
         self.input
@@ -466,14 +506,21 @@ impl Gateway {
         Err(End::Retry(reason))
     }
 
-    fn traded(&self, row: &serde_json::Value) -> bool {
-        stream::symbol(row).is_some_and(|s| self.symbols.contains(s))
+    /// Whether a row is about a traded symbol. A row without a symbol
+    /// cannot be placed, and ends the stream like any unreadable row.
+    fn traded(&self, row: &serde_json::Value) -> Result<bool, String> {
+        stream::symbol(row)
+            .map(|s| self.symbols.contains(s))
+            .ok_or_else(|| "a row has no symbol".to_string())
     }
 
     /// Delivers the readable rows; an unreadable row ends the stream (the
     /// queries after the reconnect read what it held, G-9).
     async fn orders(&self, rows: &[serde_json::Value], session: u64) -> Result<(), String> {
-        for row in rows.iter().filter(|r| self.traded(r)) {
+        for row in rows {
+            if !self.traded(row)? {
+                continue;
+            }
             match stream::order_input(row, session, self.instance_id) {
                 Ok(Some(i)) => {
                     self.input.send(i).await;
@@ -488,7 +535,10 @@ impl Gateway {
     }
 
     async fn executions(&self, rows: &[serde_json::Value], recv_ns: i64) -> Result<(), String> {
-        for row in rows.iter().filter(|r| self.traded(r)) {
+        for row in rows {
+            if !self.traded(row)? {
+                continue;
+            }
             match exec::classify(row, self.instance_id, Some(recv_ns)) {
                 Ok(i) => {
                     self.input.send(i).await;
@@ -639,6 +689,8 @@ mod tests {
     use serde_json::{Value, json};
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
+    use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request};
+    use tokio_tungstenite::tungstenite::http::StatusCode;
 
     const INSTANCE: u64 = 7;
     const BOOT: u32 = 3;
@@ -687,6 +739,7 @@ mod tests {
     enum Reply {
         Ok,
         Refuse,
+        Silent,
     }
 
     #[derive(Clone, Copy)]
@@ -694,7 +747,12 @@ mod tests {
         auth: Reply,
         subscribe: Reply,
         pong: bool,
+        /// Answer the upgrade with HTTP 403.
+        forbid: bool,
     }
+
+    /// What one fake connection received.
+    type ConnLog = Arc<Mutex<Vec<String>>>;
 
     enum Ctl {
         Text(String),
@@ -707,7 +765,9 @@ mod tests {
     struct FakeWs {
         url: String,
         mode: Arc<Mutex<Mode>>,
-        conns: Arc<Mutex<Vec<Arc<Mutex<Vec<String>>>>>>,
+        conns: Arc<Mutex<Vec<ConnLog>>>,
+        /// TCP connections, upgraded or not.
+        attempts: Arc<AtomicU64>,
         push: Arc<Mutex<Option<mpsc::UnboundedSender<Ctl>>>>,
     }
 
@@ -719,12 +779,24 @@ mod tests {
                 url,
                 mode: Arc::new(Mutex::new(mode)),
                 conns: Arc::default(),
+                attempts: Arc::default(),
                 push: Arc::default(),
             };
             let (mode, conns, push) = (fake.mode.clone(), fake.conns.clone(), fake.push.clone());
+            let attempts = fake.attempts.clone();
             tokio::spawn(async move {
                 while let Ok((tcp, _)) = listener.accept().await {
-                    let Ok(ws) = tokio_tungstenite::accept_async(tcp).await else {
+                    attempts.fetch_add(1, Ordering::SeqCst);
+                    let forbid = mode.lock().unwrap().forbid;
+                    let answer = move |_: &Request, resp| {
+                        if forbid {
+                            let mut r = ErrorResponse::new(Some("forbidden".into()));
+                            *r.status_mut() = StatusCode::FORBIDDEN;
+                            return Err(r);
+                        }
+                        Ok(resp)
+                    };
+                    let Ok(ws) = tokio_tungstenite::accept_hdr_async(tcp, answer).await else {
                         continue;
                     };
                     let log: Arc<Mutex<Vec<String>>> = Arc::default();
@@ -743,6 +815,10 @@ mod tests {
 
         fn accepted(&self) -> usize {
             self.conns.lock().unwrap().len()
+        }
+
+        fn attempts(&self) -> u64 {
+            self.attempts.load(Ordering::SeqCst)
         }
 
         fn texts(&self, i: usize) -> Vec<String> {
@@ -779,8 +855,8 @@ mod tests {
                     let v: Value = serde_json::from_str(t.as_str()).unwrap_or_default();
                     let m = *mode.lock().unwrap();
                     let answer = match v["op"].as_str() {
-                        Some("auth") => Some(json!({"success": m.auth == Reply::Ok, "ret_msg": if m.auth == Reply::Ok { "" } else { "error sign" }, "op": "auth", "conn_id": "c"})),
-                        Some("subscribe") => Some(json!({"success": m.subscribe == Reply::Ok, "ret_msg": "", "op": "subscribe", "conn_id": "c"})),
+                        Some("auth") if m.auth != Reply::Silent => Some(json!({"success": m.auth == Reply::Ok, "ret_msg": if m.auth == Reply::Ok { "" } else { "error sign" }, "op": "auth", "conn_id": "c"})),
+                        Some("subscribe") if m.subscribe != Reply::Silent => Some(json!({"success": m.subscribe == Reply::Ok, "ret_msg": "", "op": "subscribe", "conn_id": "c"})),
                         Some("ping") if m.pong => Some(json!({"req_id": v["req_id"], "op": "pong", "args": ["1"], "conn_id": "c"})),
                         _ => None,
                     };
@@ -806,6 +882,7 @@ mod tests {
         auth: Reply::Ok,
         subscribe: Reply::Ok,
         pong: true,
+        forbid: false,
     };
 
     fn cfg() -> BybitConfig {
@@ -831,6 +908,7 @@ mod tests {
             ip_check: Duration::from_millis(50),
             ban_pause: Duration::from_millis(600),
             health_poll: Duration::from_millis(10),
+            backoff_min: Duration::from_millis(20),
             backoff_max: Duration::from_millis(50),
         }
     }
@@ -842,6 +920,8 @@ mod tests {
         commands: mpsc::Sender<VenueCommand>,
         queries: mpsc::Sender<QueryReq>,
         queues: Arc<InputQueues>,
+        /// While set, the core takes nothing from the queues.
+        hold: Arc<std::sync::atomic::AtomicBool>,
     }
 
     impl Drop for Rig {
@@ -885,7 +965,11 @@ mod tests {
     }
 
     fn rig(api: &FakeHttp, ws: &FakeWs) -> Rig {
-        let queues = Arc::new(InputQueues::new(256, 256, 256));
+        rig_with(api, ws, timing(), 256)
+    }
+
+    fn rig_with(api: &FakeHttp, ws: &FakeWs, timing: Timing, venue_lane: usize) -> Rig {
+        let queues = Arc::new(InputQueues::new(venue_lane, 256, 256));
         let wiring = Wiring {
             rest: api.url(),
             private_ws: ws.url.clone(),
@@ -899,7 +983,7 @@ mod tests {
                 vec!["BTCUSDT".into()],
                 VenueInputTx::new(queues.clone()),
                 INSTANCE,
-                timing(),
+                timing,
             )
             .unwrap(),
         );
@@ -917,10 +1001,17 @@ mod tests {
             8,
         );
         let inputs: Arc<Mutex<Vec<VenueInput>>> = Arc::default();
-        let (q, sink) = (queues.clone(), inputs.clone());
+        let hold: Arc<std::sync::atomic::AtomicBool> = Arc::default();
+        let (q, sink, held) = (queues.clone(), inputs.clone(), hold.clone());
         std::thread::spawn(move || {
             let mut batch: Vec<CoreMsg> = Vec::new();
-            while q.pop_batch(64, &mut batch) {
+            loop {
+                while held.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                if !q.pop_batch(1, &mut batch) {
+                    return;
+                }
                 for m in batch.drain(..) {
                     if let Input::Venue(v) = m.input {
                         sink.lock().unwrap().push(v);
@@ -934,6 +1025,7 @@ mod tests {
             commands: cmd_tx,
             queries: q_tx,
             queues,
+            hold,
         }
     }
 
@@ -1197,10 +1289,170 @@ mod tests {
         api.route("/ip", [Http::Reply(200, "198.51.100.9\n".into())]);
         r.until("link down", |r| r.links().len() >= 2).await;
         assert!(r.links()[1].2.contains("auth_rejected"), "{:?}", r.links());
+        let sent = api.requests().len();
         api.route("/ip", [Http::Reply(200, "127.0.0.1\n".into())]);
+        r.queries.send(QueryReq::Positions).await.unwrap();
         tokio::time::sleep(Duration::from_millis(400)).await;
         assert_eq!(r.links().len(), 2, "the right IP again does not lift it");
         assert_eq!(ws.accepted(), 1);
+        assert_eq!(
+            api.requests().len(),
+            sent,
+            "no IP check and no query after the change"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_403_on_the_stream_upgrade_pauses_every_request_then_the_link_comes_up() {
+        let api = rest_venue("REGULAR_MARGIN");
+        let ws = FakeWs::start(Mode {
+            forbid: true,
+            ..GOOD
+        })
+        .await;
+        let r = rig(&api, &ws);
+        r.until("the ban", |r| {
+            r.block().is_some_and(|b| b.starts_with("ip_banned:"))
+        })
+        .await;
+        let banned_at = Instant::now();
+        ws.set(|m| m.forbid = false);
+        let sent = api.requests().len();
+        r.queries.send(QueryReq::Positions).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert!(banned_at.elapsed() < timing().ban_pause);
+        assert_eq!(ws.attempts(), 1, "no upgrade during the pause");
+        assert_eq!(api.requests().len(), sent, "no request during the pause");
+        assert!(r.links().is_empty());
+        r.until("link up after the pause", up).await;
+        assert!(banned_at.elapsed() >= Duration::from_millis(500));
+        assert_eq!(r.block(), None);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn no_subscription_goes_out_before_the_auth_answer_and_a_silent_auth_is_retried() {
+        let api = rest_venue("REGULAR_MARGIN");
+        let ws = FakeWs::start(Mode {
+            auth: Reply::Silent,
+            ..GOOD
+        })
+        .await;
+        let r = rig(&api, &ws);
+        for _ in 0..300 {
+            if ws.accepted() >= 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(ws.accepted() >= 2, "an unanswered auth is retried");
+        let first = ws.texts(0);
+        assert_eq!(first.len(), 1, "auth only: {first:?}");
+        assert!(first[0].contains("\"auth\""));
+        assert!(r.links().is_empty());
+        assert_eq!(r.block(), None, "silence is not a refusal");
+        ws.set(|m| m.auth = Reply::Ok);
+        r.until("link up", up).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_row_without_a_symbol_takes_the_link_down() {
+        let api = rest_venue("REGULAR_MARGIN");
+        let ws = FakeWs::start(GOOD).await;
+        let r = rig(&api, &ws);
+        r.until("link up", up).await;
+        let mut msg: Value = serde_json::from_str(&order_msg("BTCUSDT", &link(42), "New")).unwrap();
+        msg["data"][0].as_object_mut().unwrap().remove("symbol");
+        ws.send(msg.to_string());
+        r.until("link down", |r| r.links().len() >= 2).await;
+        assert!(r.links()[1].2.contains("no symbol"), "{:?}", r.links());
+        assert!(
+            !r.inputs()
+                .iter()
+                .any(|i| matches!(i, VenueInput::OrderStatus(_))),
+            "nothing delivered from the row"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn time_spent_waiting_on_a_full_core_queue_does_not_count_against_the_pong() {
+        let api = rest_venue("REGULAR_MARGIN");
+        let ws = FakeWs::start(GOOD).await;
+        let r = rig_with(&api, &ws, timing(), 1);
+        r.until("link up", up).await;
+        let pings = |ws: &FakeWs| {
+            ws.texts(0)
+                .iter()
+                .filter(|t| t.contains("\"ping\""))
+                .count()
+        };
+        // The next ping is not answered by the fake. Rows come that the
+        // gateway cannot deliver while the core holds, longer than the
+        // ping interval; the test answers the ping just after the hold.
+        ws.set(|m| m.pong = false);
+        let n = pings(&ws);
+        for _ in 0..100 {
+            if pings(&ws) > n {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        assert!(pings(&ws) > n);
+        r.hold.store(true, Ordering::SeqCst);
+        let row: Value = serde_json::from_str::<Value>(&order_msg("BTCUSDT", &link(42), "New"))
+            .unwrap()["data"][0]
+            .clone();
+        ws.send(
+            json!({"id": "1", "topic": "order.linear", "creationTime": 1, "data": vec![row; 6]})
+                .to_string(),
+        );
+        tokio::time::sleep(timing().ping * 3).await;
+        ws.set(|m| m.pong = true);
+        r.hold.store(false, Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        ws.send(json!({"req_id": "late", "op": "pong", "args": ["1"], "conn_id": "c"}).to_string());
+        r.until("the rows", |r| {
+            r.inputs()
+                .iter()
+                .filter(|i| matches!(i, VenueInput::OrderStatus(_)))
+                .count()
+                == 6
+        })
+        .await;
+        tokio::time::sleep(timing().ping * 2).await;
+        assert_eq!(r.links().len(), 1, "the link stays up: {:?}", r.links());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_reconnect_waits_start_over_after_a_link_that_came_up() {
+        let api = rest_venue("REGULAR_MARGIN");
+        let ws = FakeWs::start(Mode {
+            subscribe: Reply::Refuse,
+            ..GOOD
+        })
+        .await;
+        let t = Timing {
+            backoff_max: Duration::from_millis(1000),
+            ..timing()
+        };
+        let r = rig_with(&api, &ws, t, 256);
+        // 20, 40, … 640 ms: the next wait is the longest.
+        for _ in 0..300 {
+            if ws.accepted() >= 7 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(ws.accepted() >= 7);
+        ws.set(|m| m.subscribe = Reply::Ok);
+        r.until("link up", up).await;
+        ws.drop_conn();
+        let dropped = Instant::now();
+        r.until("up again", |r| r.links().len() >= 3 && up(r)).await;
+        assert!(
+            dropped.elapsed() < Duration::from_millis(500),
+            "waited {:?} after a link that came up",
+            dropped.elapsed()
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
