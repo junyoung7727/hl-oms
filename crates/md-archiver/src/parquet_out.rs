@@ -161,12 +161,7 @@ pub fn parquet_schema(schema: &TableSchema) -> Result<Type, ParquetError> {
 /// An open L1 file. Push rows in the file's sort order, then `finish`.
 pub struct FileWriter {
     table: Table,
-    schema: &'static TableSchema,
-    writer: SerializedFileWriter<BufWriter<File>>,
-    bufs: Vec<Buf>,
-    rows: usize,
-    bytes: usize,
-    settings: WriteSettings,
+    inner: SchemaWriter,
 }
 
 impl FileWriter {
@@ -179,19 +174,66 @@ impl FileWriter {
         settings: WriteSettings,
     ) -> Result<Self, WriteError> {
         let schema = table.schema();
+        let metadata = vec![
+            ("contract_ver".to_string(), schema.contract_ver.to_string()),
+            ("parser_ver".to_string(), parser_ver.to_string()),
+            ("table".to_string(), schema.name.clone()),
+        ];
+        Ok(Self {
+            table,
+            inner: SchemaWriter::create(path, schema, metadata, settings)?,
+        })
+    }
+
+    pub fn table(&self) -> Table {
+        self.table
+    }
+
+    /// Appends one row. On an error nothing of the row is buffered.
+    pub fn push(&mut self, row: &[Cell]) -> Result<(), WriteError> {
+        self.inner.push(row)
+    }
+
+    /// Writes the last row group, the table-specific metadata (for
+    /// `book_msg`: `first_update_id`, `last_update_id`) and the footer, and
+    /// fsyncs the file.
+    pub fn finish(self, extra: Vec<(String, String)>) -> Result<(), WriteError> {
+        self.inner.finish(extra)
+    }
+}
+
+/// An open file of any contract table (L1 or trading export): the
+/// key-value metadata is given whole, in the contract's order.
+pub struct SchemaWriter {
+    schema: &'static TableSchema,
+    writer: SerializedFileWriter<BufWriter<File>>,
+    bufs: Vec<Buf>,
+    rows: usize,
+    bytes: usize,
+    settings: WriteSettings,
+}
+
+impl SchemaWriter {
+    /// Creates (truncates) `path` with this key-value metadata.
+    pub fn create(
+        path: &Path,
+        schema: &'static TableSchema,
+        metadata: Vec<(String, String)>,
+        settings: WriteSettings,
+    ) -> Result<Self, WriteError> {
         let props = WriterProperties::builder()
             .set_compression(Compression::ZSTD(ZstdLevel::try_new(9)?))
-            .set_key_value_metadata(Some(vec![
-                KeyValue::new("contract_ver".into(), schema.contract_ver.to_string()),
-                KeyValue::new("parser_ver".into(), parser_ver.to_string()),
-                KeyValue::new("table".into(), schema.name.clone()),
-            ]))
+            .set_key_value_metadata(Some(
+                metadata
+                    .into_iter()
+                    .map(|(k, v)| KeyValue::new(k, v))
+                    .collect(),
+            ))
             .build();
         let file = BufWriter::new(File::create(path)?);
         let writer =
             SerializedFileWriter::new(file, Arc::new(parquet_schema(schema)?), Arc::new(props))?;
         Ok(Self {
-            table,
             schema,
             writer,
             bufs: schema.columns.iter().map(|c| Buf::new(c.ty)).collect(),
@@ -199,10 +241,6 @@ impl FileWriter {
             bytes: 0,
             settings,
         })
-    }
-
-    pub fn table(&self) -> Table {
-        self.table
     }
 
     /// Appends one row. On an error nothing of the row is buffered.
@@ -340,8 +378,7 @@ impl FileWriter {
         Ok(())
     }
 
-    /// Writes the last row group, the table-specific metadata (for
-    /// `book_msg`: `first_update_id`, `last_update_id`) and the footer, and
+    /// Writes the last row group, the extra metadata and the footer, and
     /// fsyncs the file.
     pub fn finish(mut self, extra: Vec<(String, String)>) -> Result<(), WriteError> {
         self.flush_row_group()?;

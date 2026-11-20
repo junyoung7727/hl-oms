@@ -1190,6 +1190,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "oms-export"
+version = "0.1.0"
+dependencies = [
+ "http-fake",
+ "md-archiver",
+ "md-lake",
+ "oms-core",
+ "oms-journal",
+ "oms-projector",
+ "parquet",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
 name = "oms-journal"
 version = "0.1.0"
 dependencies = [
