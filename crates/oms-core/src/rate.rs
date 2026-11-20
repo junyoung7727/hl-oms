@@ -173,9 +173,14 @@ mod tests {
     #[test]
     fn a_request_counts_until_one_window_after_it_finished() {
         let mut b = RateBudget::bybit();
-        let slots: Vec<Slot> = (0..8).map(|_| b.take(RateClass::Order, 0).unwrap()).collect();
+        let slots: Vec<Slot> = (0..8)
+            .map(|_| b.take(RateClass::Order, 0).unwrap())
+            .collect();
         // All eight in flight: no end is known, so the answer is a short poll.
-        assert_eq!(b.take(RateClass::Order, 5 * S).map(|_| ()), Err(5 * S + IN_FLIGHT_POLL_US));
+        assert_eq!(
+            b.take(RateClass::Order, 5 * S).map(|_| ()),
+            Err(5 * S + IN_FLIGHT_POLL_US)
+        );
         let mut slots = slots.into_iter();
         b.finish(slots.next().unwrap(), 300_000);
         // One finished at 0.3 s: free at 1.3 s, not at 1 s.
@@ -230,7 +235,11 @@ mod tests {
                 }
             }
             flying = still;
-            let class = if next() % 3 == 0 { RateClass::Cancel } else { RateClass::Order };
+            let class = if next() % 3 == 0 {
+                RateClass::Cancel
+            } else {
+                RateClass::Order
+            };
             match b.take(class, now) {
                 Ok(slot) => {
                     let end = now + next() % 400_000;
@@ -252,8 +261,15 @@ mod tests {
                 total += 1;
                 orders += usize::from(*c == RateClass::Order);
             }
-            assert!(total <= 10 && orders <= 8, "{total} requests, {orders} orders from {t}");
+            assert!(
+                total <= 10 && orders <= 8,
+                "{total} requests, {orders} orders from {t}"
+            );
         }
-        assert!(held > 1_000 && arrivals.len() > 5_000, "held {held}, sent {}", arrivals.len());
+        assert!(
+            held > 1_000 && arrivals.len() > 5_000,
+            "held {held}, sent {}",
+            arrivals.len()
+        );
     }
 }

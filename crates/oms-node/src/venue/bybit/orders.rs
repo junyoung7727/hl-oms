@@ -11,7 +11,6 @@ use serde_json::{Value, json};
 use super::answer::{self, Answer};
 use super::rest::{AUTH_CODES, Rest, RestError};
 
-
 pub const CREATE_PATH: &str = "/v5/order/create";
 pub const CANCEL_PATH: &str = "/v5/order/cancel";
 
@@ -191,7 +190,11 @@ impl Orders {
 
     /// Sends one create, after the budget. `allowed` is asked after the
     /// wait: a block that appeared meanwhile keeps the request home.
-    pub async fn create(&self, c: &Create<'_>, allowed: impl Fn() -> Result<(), String>) -> (SendOutcome, Effect) {
+    pub async fn create(
+        &self,
+        c: &Create<'_>,
+        allowed: impl Fn() -> Result<(), String>,
+    ) -> (SendOutcome, Effect) {
         let held = self.take(RateClass::Order).await;
         if let Err(why) = allowed() {
             held.release();
@@ -218,7 +221,12 @@ impl Orders {
                 held.release();
                 (SendOutcome::NotSent { reason: e }, Effect::None)
             }
-            Err(e) => (SendOutcome::Unknown { reason: e.to_string() }, Effect::None),
+            Err(e) => (
+                SendOutcome::Unknown {
+                    reason: e.to_string(),
+                },
+                Effect::None,
+            ),
             Ok((status, text)) => {
                 let a = answer::classify(status, &text);
                 let fx = effect(status, &a);
@@ -229,20 +237,33 @@ impl Orders {
 
     /// Sends one cancel by our client id, after the budget (which lets
     /// cancels use the reserve).
-    pub async fn cancel(&self, symbol: &str, link: &str, allowed: impl Fn() -> Result<(), String>) -> (CancelOutcome, Effect) {
+    pub async fn cancel(
+        &self,
+        symbol: &str,
+        link: &str,
+        allowed: impl Fn() -> Result<(), String>,
+    ) -> (CancelOutcome, Effect) {
         let held = self.take(RateClass::Cancel).await;
         if let Err(why) = allowed() {
             held.release();
             return (CancelOutcome::NotSent { reason: why }, Effect::None);
         }
         let ts = self.rest.now_ms();
-        let sent = self.rest.post_raw_at(CANCEL_PATH, &cancel_body(symbol, link), ts).await;
+        let sent = self
+            .rest
+            .post_raw_at(CANCEL_PATH, &cancel_body(symbol, link), ts)
+            .await;
         match sent {
             Err(RestError::NotSent(e)) => {
                 held.release();
                 (CancelOutcome::NotSent { reason: e }, Effect::None)
             }
-            Err(e) => (CancelOutcome::Unknown { reason: e.to_string() }, Effect::None),
+            Err(e) => (
+                CancelOutcome::Unknown {
+                    reason: e.to_string(),
+                },
+                Effect::None,
+            ),
             Ok((status, text)) => {
                 let a = answer::classify(status, &text);
                 let fx = effect(status, &a);
@@ -339,7 +360,11 @@ mod tests {
             out,
             SendOutcome::Placed {
                 venue_oid: VenueOrderId::new("o-77").unwrap(),
-                status: StatusIn { status: VenueStatus::Open, cum: None, venue_ts: NOW_MS * 1000 },
+                status: StatusIn {
+                    status: VenueStatus::Open,
+                    cum: None,
+                    venue_ts: NOW_MS * 1000
+                },
             }
         );
         assert_eq!(fx, Effect::None);
@@ -352,9 +377,18 @@ mod tests {
                    "qty": "0.002", "price": "30000.5", "timeInForce": "PostOnly", "orderLinkId": "LINKID",
                    "reduceOnly": true, "positionIdx": 0})
         );
-        assert_eq!(reqs[0].header("x-bapi-timestamp"), Some(NOW_MS.to_string().as_str()));
+        assert_eq!(
+            reqs[0].header("x-bapi-timestamp"),
+            Some(NOW_MS.to_string().as_str())
+        );
         assert_eq!(reqs[0].header("x-bapi-recv-window"), Some("5000"));
-        let sig = crate::venue::bybit::sign::rest_signature("SECRET", NOW_MS, "KEY", 5000, &reqs[0].body_str());
+        let sig = crate::venue::bybit::sign::rest_signature(
+            "SECRET",
+            NOW_MS,
+            "KEY",
+            5000,
+            &reqs[0].body_str(),
+        );
         assert_eq!(reqs[0].header("x-bapi-sign"), Some(sig.as_str()));
     }
 
@@ -374,10 +408,24 @@ mod tests {
     async fn a_block_after_the_wait_sends_nothing() {
         let api = FakeHttp::start(placed("o-1"));
         let o = orders(&api);
-        let (out, _) = o.create(&create(LATER), || Err("ip_banned: x".into())).await;
-        assert_eq!(out, SendOutcome::NotSent { reason: "ip_banned: x".into() });
-        let (out, _) = o.cancel("BTCUSDT", "LINKID", || Err("auth_rejected: y".into())).await;
-        assert_eq!(out, CancelOutcome::NotSent { reason: "auth_rejected: y".into() });
+        let (out, _) = o
+            .create(&create(LATER), || Err("ip_banned: x".into()))
+            .await;
+        assert_eq!(
+            out,
+            SendOutcome::NotSent {
+                reason: "ip_banned: x".into()
+            }
+        );
+        let (out, _) = o
+            .cancel("BTCUSDT", "LINKID", || Err("auth_rejected: y".into()))
+            .await;
+        assert_eq!(
+            out,
+            CancelOutcome::NotSent {
+                reason: "auth_rejected: y".into()
+            }
+        );
         assert!(api.requests().is_empty());
     }
 
@@ -385,11 +433,19 @@ mod tests {
     /// again (G-3): the core resolves it by a query.
     #[tokio::test]
     async fn no_answer_is_unknown_and_nothing_is_sent_twice() {
-        for silent in [Http::Hang, Http::Close, Http::Reply(502, "".into()), Http::Reply(200, "{".into())] {
+        for silent in [
+            Http::Hang,
+            Http::Close,
+            Http::Reply(502, "".into()),
+            Http::Reply(200, "{".into()),
+        ] {
             let api = FakeHttp::start(Http::Reply(404, "{}".into()));
             api.route(CREATE_PATH, [silent.clone()]);
             let (out, fx) = orders(&api).create(&create(LATER), yes).await;
-            assert!(matches!(out, SendOutcome::Unknown { .. }), "{silent:?}: {out:?}");
+            assert!(
+                matches!(out, SendOutcome::Unknown { .. }),
+                "{silent:?}: {out:?}"
+            );
             assert_eq!(fx, Effect::None);
             tokio::time::sleep(Duration::from_millis(400)).await;
             assert_eq!(api.requests().len(), 1, "{silent:?}");
@@ -418,13 +474,53 @@ mod tests {
     #[tokio::test]
     async fn refusals_are_rejected_and_the_key_and_ip_answers_have_their_effects() {
         let cases = [
-            (Http::Reply(200, r#"{"retCode":110007,"retMsg":"Available balance is insufficient"}"#.into()), "rejected", Effect::None),
-            (Http::Reply(200, r#"{"retCode":110072,"retMsg":"OrderLinkedID is duplicate"}"#.into()), "unknown", Effect::None),
-            (Http::Reply(200, r#"{"retCode":10010,"retMsg":"Unmatched IP"}"#.into()), "rejected", Effect::RejectKey("key rejected (10010): Unmatched IP".into())),
-            (Http::Reply(401, "".into()), "unknown", Effect::RejectKey("HTTP 401 on the order path".into())),
-            (Http::Reply(403, "too frequent".into()), "unknown", Effect::Ban(String::new())),
-            (Http::Reply(200, r#"{"retCode":10018,"retMsg":"Exceeded the IP Rate Limit."}"#.into()), "rejected", Effect::Ban(String::new())),
-            (Http::Reply(200, r#"{"retCode":0,"result":{"orderLinkId":"LINKID"}}"#.into()), "unknown", Effect::None),
+            (
+                Http::Reply(
+                    200,
+                    r#"{"retCode":110007,"retMsg":"Available balance is insufficient"}"#.into(),
+                ),
+                "rejected",
+                Effect::None,
+            ),
+            (
+                Http::Reply(
+                    200,
+                    r#"{"retCode":110072,"retMsg":"OrderLinkedID is duplicate"}"#.into(),
+                ),
+                "unknown",
+                Effect::None,
+            ),
+            (
+                Http::Reply(200, r#"{"retCode":10010,"retMsg":"Unmatched IP"}"#.into()),
+                "rejected",
+                Effect::RejectKey("key rejected (10010): Unmatched IP".into()),
+            ),
+            (
+                Http::Reply(401, "".into()),
+                "unknown",
+                Effect::RejectKey("HTTP 401 on the order path".into()),
+            ),
+            (
+                Http::Reply(403, "too frequent".into()),
+                "unknown",
+                Effect::Ban(String::new()),
+            ),
+            (
+                Http::Reply(
+                    200,
+                    r#"{"retCode":10018,"retMsg":"Exceeded the IP Rate Limit."}"#.into(),
+                ),
+                "rejected",
+                Effect::Ban(String::new()),
+            ),
+            (
+                Http::Reply(
+                    200,
+                    r#"{"retCode":0,"result":{"orderLinkId":"LINKID"}}"#.into(),
+                ),
+                "unknown",
+                Effect::None,
+            ),
         ];
         for (a, class, want) in cases {
             let api = FakeHttp::start(Http::Reply(404, "{}".into()));
@@ -449,20 +545,37 @@ mod tests {
         api.route(
             CANCEL_PATH,
             [
-                Http::Reply(200, r#"{"retCode":0,"result":{"orderId":"o-1","orderLinkId":"LINKID"}}"#.into()),
-                Http::Reply(200, r#"{"retCode":110001,"retMsg":"Order does not exist"}"#.into()),
+                Http::Reply(
+                    200,
+                    r#"{"retCode":0,"result":{"orderId":"o-1","orderLinkId":"LINKID"}}"#.into(),
+                ),
+                Http::Reply(
+                    200,
+                    r#"{"retCode":110001,"retMsg":"Order does not exist"}"#.into(),
+                ),
                 Http::Hang,
             ],
         );
         let o = orders(&api);
-        assert_eq!(o.cancel("BTCUSDT", "LINKID", yes).await.0, CancelOutcome::Confirmed);
         assert_eq!(
             o.cancel("BTCUSDT", "LINKID", yes).await.0,
-            CancelOutcome::Rejected { reason: "bybit 110001: Order does not exist".into() }
+            CancelOutcome::Confirmed
         );
-        assert!(matches!(o.cancel("BTCUSDT", "LINKID", yes).await.0, CancelOutcome::Unknown { .. }));
+        assert_eq!(
+            o.cancel("BTCUSDT", "LINKID", yes).await.0,
+            CancelOutcome::Rejected {
+                reason: "bybit 110001: Order does not exist".into()
+            }
+        );
+        assert!(matches!(
+            o.cancel("BTCUSDT", "LINKID", yes).await.0,
+            CancelOutcome::Unknown { .. }
+        ));
         let body: Value = serde_json::from_slice(&api.requests()[0].body).unwrap();
-        assert_eq!(body, json!({"category": "linear", "symbol": "BTCUSDT", "orderLinkId": "LINKID"}));
+        assert_eq!(
+            body,
+            json!({"category": "linear", "symbol": "BTCUSDT", "orderLinkId": "LINKID"})
+        );
     }
 
     /// The ninth create within a second waits for the window while a
@@ -471,7 +584,10 @@ mod tests {
     async fn the_ninth_create_in_a_second_waits_while_a_cancel_goes_out() {
         let api = FakeHttp::start(Http::Reply(404, "{}".into()));
         api.route(CREATE_PATH, [placed("o-1")]);
-        api.route(CANCEL_PATH, [Http::Reply(200, r#"{"retCode":0,"result":{}}"#.into())]);
+        api.route(
+            CANCEL_PATH,
+            [Http::Reply(200, r#"{"retCode":0,"result":{}}"#.into())],
+        );
         let o = Arc::new(orders(&api));
         let start = Instant::now();
         for _ in 0..8 {
@@ -482,14 +598,27 @@ mod tests {
             tokio::spawn(async move { o.create(&create(LATER), yes).await })
         };
         tokio::time::sleep(Duration::from_millis(100)).await;
-        assert_eq!(o.cancel("BTCUSDT", "LINKID", yes).await.0, CancelOutcome::Confirmed);
+        assert_eq!(
+            o.cancel("BTCUSDT", "LINKID", yes).await.0,
+            CancelOutcome::Confirmed
+        );
         let cancel_at = start.elapsed();
         assert!(!ninth.is_finished(), "the ninth create did not wait");
         assert!(matches!(ninth.await.unwrap().0, SendOutcome::Placed { .. }));
         let done = start.elapsed();
-        assert!(cancel_at < Duration::from_millis(900), "the cancel waited: {cancel_at:?}");
-        assert!(done >= Duration::from_secs(1), "the ninth went out after {done:?}");
-        let creates = api.requests().iter().filter(|r| r.path() == CREATE_PATH).count();
+        assert!(
+            cancel_at < Duration::from_millis(900),
+            "the cancel waited: {cancel_at:?}"
+        );
+        assert!(
+            done >= Duration::from_secs(1),
+            "the ninth went out after {done:?}"
+        );
+        let creates = api
+            .requests()
+            .iter()
+            .filter(|r| r.path() == CREATE_PATH)
+            .count();
         assert_eq!(creates, 9);
     }
 
@@ -520,9 +649,15 @@ mod tests {
             assert!(matches!(t.await.unwrap().0, SendOutcome::Unknown { .. }));
         }
         api.route(CREATE_PATH, [placed("o-9")]);
-        assert!(matches!(o.create(&create(LATER), yes).await.0, SendOutcome::Placed { .. }));
+        assert!(matches!(
+            o.create(&create(LATER), yes).await.0,
+            SendOutcome::Placed { .. }
+        ));
         let ninth = start.elapsed();
-        assert!(ninth >= Duration::from_millis(1_300), "the ninth went out after {ninth:?}");
+        assert!(
+            ninth >= Duration::from_millis(1_300),
+            "the ninth went out after {ninth:?}"
+        );
         // Refused at connect: nothing left, nothing counts.
         let held = tokio::net::TcpSocket::new_v4().unwrap();
         held.bind("127.0.0.1:0".parse().unwrap()).unwrap();
@@ -537,9 +672,16 @@ mod tests {
         let d = Orders::new(dead);
         let t0 = Instant::now();
         for _ in 0..20 {
-            assert!(matches!(d.create(&create(LATER), yes).await.0, SendOutcome::NotSent { .. }));
+            assert!(matches!(
+                d.create(&create(LATER), yes).await.0,
+                SendOutcome::NotSent { .. }
+            ));
         }
-        assert!(t0.elapsed() < Duration::from_millis(900), "refused creates held slots: {:?}", t0.elapsed());
+        assert!(
+            t0.elapsed() < Duration::from_millis(900),
+            "refused creates held slots: {:?}",
+            t0.elapsed()
+        );
     }
 
     #[test]
