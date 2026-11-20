@@ -151,7 +151,7 @@ async fn api_order(State(app): State<App>, Path(id): Path<u64>) -> Response {
         "source": "published state; trace entries are journal records plus what the commit stage observed when it released them",
         "durable_seq": p.durable_seq,
         "order": order,
-        "venue_client_id": VenueClientId { instance_id: p.core.instance_id, order_id: id }.to_hex(),
+        "venue_client_id": ctx.info.wire_id.encode(VenueClientId { instance_id: p.core.instance_id, order_id: id }),
         "trace": trace.map(|t| &t.entries),
         "trace_truncated": trace.map(|t| t.truncated).unwrap_or(false),
     }))

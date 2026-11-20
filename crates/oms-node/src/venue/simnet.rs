@@ -140,7 +140,7 @@ fn fill_input(f: &WireFill, instance_id: u64) -> Option<VenueInput> {
     }))
 }
 
-struct Gateway {
+pub(crate) struct Gateway {
     requests: Requests,
     input: VenueInputTx,
     instance_id: u64,
@@ -511,6 +511,7 @@ impl Gateway {
 
 impl VenueGateway for Gateway {
     const QUERY_CONCURRENCY: usize = 8;
+    const WIRE_ID: WireIdForm = WireIdForm::Hex128;
 
     // The paths name the inherent methods, which keep their bodies.
     fn send_order(&self, cmd: VenueCommand) -> impl Future<Output = ()> + Send {

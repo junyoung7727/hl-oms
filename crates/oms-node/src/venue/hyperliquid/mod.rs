@@ -120,7 +120,7 @@ impl Budget {
     }
 }
 
-struct Gateway {
+pub(crate) struct Gateway {
     cfg: HyperliquidConfig,
     rest: String,
     ws: String,
@@ -878,6 +878,7 @@ fn placed(oid: u64, reported: Option<Qty>) -> SendOutcome {
 
 impl VenueGateway for Gateway {
     const QUERY_CONCURRENCY: usize = 4;
+    const WIRE_ID: WireIdForm = WireIdForm::Hex128;
 
     // The paths name the inherent methods, which keep their bodies.
     fn send_order(&self, cmd: VenueCommand) -> impl Future<Output = ()> + Send {

@@ -10,6 +10,7 @@
 | `order_id` | u64 | 코어. 1부터 증가 | 인스턴스(데이터 디렉터리) | 저널에 영구 | 저널이 온전하면 없음. **과거 시점의 저널 사본으로 거래를 재개하면 사본 이후의 번호를 다시 쓴다**(가정 A-12) |
 | `instance_id` | u64, 0이 아님 | 데이터 디렉터리를 처음 쓸 때 `/dev/urandom` | 전역(확률적) | 디렉터리의 수명 | 없음 |
 | 거래소 클라이언트 ID(cloid) | `0x` + 32 hex = `instance_id`(상위) ‖ `order_id`(하위) | 파생 | 계좌(확률적) | 주문과 같다 | `order_id`와 같다. 다시 쓰이면 조회가 옛 주문의 상태를 새 주문의 것으로 돌려줄 수 있다 |
+| 거래소 클라이언트 ID, `Base32Pair` 형식 | `instance_id` 13자리 ‖ `-` ‖ `order_id` 13자리, 소문자 base32hex(`0-9a-v`), 27자. Bybit `orderLinkId`용([ADR-022](../adr/ADR-022-wire-id-form.md)) | 파생 | 계좌(확률적) | 주문과 같다 | 위와 같다 |
 | 거래소 주문 ID(oid) | 거래소가 정한다. 문자열로 보관 | 거래소 | 거래소 | 거래소 | 거래소 |
 | 체결 키 | 게이트웨이가 구성. Hyperliquid는 `시각:코인:tid:oid` | 게이트웨이 | 계좌 | 체결 동기화 시점 − 24시간까지 기억 | — |
 | 저널 순번 `seq` | u64, 1부터 빈틈 없이 | 코어 스레드 | 인스턴스 | 영구 | 없음 |
@@ -30,5 +31,5 @@
 
 ## 검증
 
-`ids::tests::rejects_invalid_identifiers`, `ids::tests::venue_client_id_roundtrip`, `scenarios::the_key_scope_is_per_strategy`,
+`ids::tests::rejects_invalid_identifiers`, `ids::tests::venue_client_id_roundtrip`, `ids::tests::base32_pair_roundtrips_and_fits_an_order_link_id`, `ids::tests::base32_pair_decoding_is_strict`, `scenarios::the_key_scope_is_per_strategy`,
 `journal::a_journal_of_another_instance_is_refused`, `e2e::only_one_node_can_own_a_data_directory`.

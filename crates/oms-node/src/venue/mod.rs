@@ -73,6 +73,10 @@ pub trait VenueGateway: Send + Sync + 'static {
     /// How many queries run at the same time.
     const QUERY_CONCURRENCY: usize;
 
+    /// The form of the client order id on the wire (ADR-022). The status API
+    /// prints the id in this form.
+    const WIRE_ID: WireIdForm;
+
     /// Handles one `VenueCommand::SendOrder`. Delivers exactly one
     /// `SendResult` (G-1).
     fn send_order(&self, cmd: VenueCommand) -> impl Future<Output = ()> + Send;
@@ -201,6 +205,7 @@ mod tests {
 
     impl VenueGateway for Fake {
         const QUERY_CONCURRENCY: usize = 2;
+        const WIRE_ID: WireIdForm = WireIdForm::Base32Pair;
 
         async fn send_order(&self, cmd: VenueCommand) {
             let VenueCommand::SendOrder { order_id, .. } = cmd else {
@@ -334,5 +339,13 @@ mod tests {
         gw.gate.add_permits(6);
         until("six queries done", || gw.done.load(Ordering::SeqCst) == 16).await;
         assert_eq!(gw.log().len(), 1 + 16, "nothing was dropped");
+    }
+
+    /// Both gateways of today keep the hex form they always wrote, so no
+    /// Hyperliquid or simulated-venue request changes (ADR-022).
+    #[test]
+    fn the_gateways_of_today_write_the_hex_form() {
+        assert_eq!(<super::simnet::Gateway as VenueGateway>::WIRE_ID, WireIdForm::Hex128);
+        assert_eq!(<super::hyperliquid::Gateway as VenueGateway>::WIRE_ID, WireIdForm::Hex128);
     }
 }
