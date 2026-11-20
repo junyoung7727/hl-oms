@@ -1464,6 +1464,8 @@ impl Tx<'_> {
             px: f.px,
             fee: f.fee,
             venue_ts: f.venue_ts,
+            is_maker: f.is_maker,
+            recv_ns: f.recv_ns,
         })?;
         if identified {
             // Fills that named only this venue order id were waiting for it.

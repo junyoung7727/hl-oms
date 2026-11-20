@@ -527,6 +527,8 @@ fn fill_before_send_result_acknowledges_the_order() {
         px: px("100"),
         fee: amt("0.05"),
         venue_ts: h.now,
+        is_maker: None,
+        recv_ns: None,
     }));
     assert_eq!(h.order(a).phase, Phase::Working);
     assert_eq!(h.order(a).venue_oid, Some(void("v1")));
@@ -559,6 +561,8 @@ fn fill_by_venue_id_before_the_id_is_known_is_parked_then_booked() {
         px: px("100"),
         fee: Amount::ZERO,
         venue_ts: h.now,
+        is_maker: None,
+        recv_ns: None,
     }));
     assert_eq!(h.core.parked_fills.len(), 1);
     assert_eq!(h.acct().pos, sq("0"));
@@ -583,6 +587,8 @@ fn unidentified_fill_is_booked_as_external_after_the_wait_and_holds_trading() {
         px: px("100"),
         fee: Amount::ZERO,
         venue_ts: h.now,
+        is_maker: None,
+        recv_ns: None,
     }));
     assert_eq!(h.core.parked_fills.len(), 1);
     h.advance(121 * SEC);
@@ -620,6 +626,8 @@ fn a_parked_fill_is_external_once_no_order_can_own_it() {
         px: px("100"),
         fee: Amount::ZERO,
         venue_ts: h.now,
+        is_maker: None,
+        recv_ns: None,
     }));
     assert_eq!(h.core.parked_fills.len(), 1);
     h.tick();
@@ -1361,6 +1369,8 @@ fn reduce_only_order_is_still_bound_by_the_strategy_position_limit() {
         px: px("100"),
         fee: Amount::ZERO,
         venue_ts: h.now,
+        is_maker: None,
+        recv_ns: None,
     }));
     assert_eq!(h.acct().pos, sq("1"));
     assert_eq!(h.core.unattributed[&iid("X")].pos, sq("1"));

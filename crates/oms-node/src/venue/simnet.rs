@@ -137,6 +137,8 @@ fn fill_input(f: &WireFill, instance_id: u64) -> Option<VenueInput> {
         px: f.px,
         fee: f.fee,
         venue_ts: f.ts,
+        is_maker: None,
+        recv_ns: None,
     }))
 }
 

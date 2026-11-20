@@ -243,6 +243,9 @@ pub struct HlFill {
     pub fee: Option<String>,
     #[serde(default)]
     pub cloid: Option<String>,
+    /// True when the fill took liquidity (Hyperliquid `crossed`).
+    #[serde(default)]
+    pub crossed: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -341,6 +344,8 @@ pub fn fill_input(f: &HlFill, instance_id: u64) -> Option<FillIn> {
         px: Px::parse(&f.px).ok()?,
         fee: f.fee.as_deref().and_then(|s| Amount::parse(s).ok()).unwrap_or(Amount::ZERO),
         venue_ts: f.time.saturating_mul(1000),
+        is_maker: f.crossed.map(|taker| !taker),
+        recv_ns: None,
     })
 }
 
@@ -966,6 +971,7 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(fill_input(&f, 7).unwrap().instrument.as_str(), "_107");
+        assert_eq!(fill_input(&f, 7).unwrap().is_maker, None, "no crossed field: unknown");
     }
 
     #[test]
@@ -983,6 +989,7 @@ mod tests {
         assert_eq!((i.side, i.qty, i.px), (Side::Buy, Qty::parse("0.001").unwrap(), Px::parse("70000.5").unwrap()));
         assert_eq!(i.fee, Amount::parse("0.0315").unwrap());
         assert_eq!(i.venue_ts, 1_700_000_000_123_000);
+        assert_eq!(i.is_maker, Some(false), "crossed = took liquidity");
 
         // A client id of this instance is recognised; another instance's is not.
         let ours = VenueClientId { instance_id: 7, order_id: OrderId(42) }.to_hex();

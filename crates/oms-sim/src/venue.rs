@@ -467,5 +467,7 @@ pub fn fill_in(f: &SimFill, instance_id: u64, with_client_id: bool) -> FillIn {
         px: f.px,
         fee: f.fee,
         venue_ts: f.ts,
+        is_maker: None,
+        recv_ns: None,
     }
 }

@@ -76,7 +76,7 @@ B. 크레이트 `crates/oms-export`(라이브러리 + `oms-export --config <file
 - **거래소·시장 이름은 설정에서:** OMS 하나는 거래소 하나에서 거래한다. `symbol`은 저널의 `instrument`다.
 - **행 규칙**(`crates/oms-export/src/rows.rs`):
   - `orders`: `order_accepted`마다 한 행. `order_id`는 u64의 10진 문자열. `tif` gtc → `GTC`, ioc → `IOC`, alo → `PostOnly`. `px`는 늘 값이 있다(OMS에 시장가 주문이 없음). `wire_id` = `WireIdForm::encode(instance_id, order_id)`, 형식은 상태 답에서(없으면 null).
-  - `fills`: `fill_booked`마다 한 행. 종목과 방향은 그 주문의 `order_accepted`에서. `exec_id`: Bybit 게이트웨이의 체결 키는 `<symbol>:<execId>`(C-GW G-8)이므로 bybit면 그 접두어를 뗀 `execId`, 다른 모양이면 종료 코드 1. 다른 거래소는 키 그대로(검토 2026-11-20). `venue_ts_ns` = `venue_ts` × 1000. `is_maker`, `recv_ns`는 null(U16이 저널에 넣는다). 우리 주문이 아닌 체결(`external_fill_booked`), 대기 체결, 거래소 위치 변경은 `events`에만 있다.
+  - `fills`: `fill_booked`마다 한 행. 종목과 방향은 그 주문의 `order_accepted`에서. `exec_id`: Bybit 게이트웨이의 체결 키는 `<symbol>:<execId>`(C-GW G-8)이므로 bybit면 그 접두어를 뗀 `execId`, 다른 모양이면 종료 코드 1. 다른 거래소는 키 그대로(검토 2026-11-20). `venue_ts_ns` = `venue_ts` × 1000. `is_maker`, `recv_ns`는 저널 체결의 같은 이름 필드(U16a부터, 게이트웨이가 아는 경우), 없으면 null. 우리 주문이 아닌 체결(`external_fill_booked`), 대기 체결, 거래소 위치 변경은 `events`에만 있다.
   - `events`: 이벤트마다 한 행. `kind` = `Event::name()`, `order_id` = `Event::order_id()`. `symbol`은 이벤트의 종목 필드(`rows::INSTRUMENT_PATHS`, 시험이 C-TAIL 표와 맞춤), 없으면 그 주문의 종목. 목록 필드(`report.positions[].instrument`)는 종목 하나가 아니므로 쓰지 않는다. `venue`는 `symbol`이 있을 때만. `payload`는 이벤트의 필드 객체를 키 정렬, 공백 없이.
   - 소수 문자열과 `payload`는 저널에 있는 JSON 그대로 쓴다(형식 있는 값으로 다시 쓰지 않음).
 - **계약 변경(qdp U15a, PR #32):** `fills.is_maker`, `fills.recv_ns`를 null 허용으로 바꿨다. 계약 golden 거래 행은 이 단위의 시험 저널을 내보낸 것으로 바꿨다. 실제 L0 파일이 아직 없어 초안 1판 규칙(계약 6)이므로 `contract_ver`는 1 그대로다.
@@ -105,5 +105,5 @@ B. 크레이트 `crates/oms-export`(라이브러리 + `oms-export --config <file
 ## 10. 재검토 조건
 
 - 한 번 실행이 60초를 넘을 때(판단): 날짜별 주문 정보를 저장해 이어 읽기.
-- U16이 `FillIn`·`FillBooked`에 maker 표시와 수신 시각을 넣을 때: `fills`의 두 열을 채우고 `export_ver`를 올린다.
+- ~~U16이 `FillIn`·`FillBooked`에 maker 표시와 수신 시각을 넣을 때~~: U16a에서 넣었고 `fills`의 두 열을 채운다. `export_ver`는 `oms-export-2`.
 - 오늘 데이터가 필요해질 때: 최종 경로와 다른 곳에 열린 날짜를 쓰기.

@@ -34,6 +34,8 @@ fn every_event() -> Vec<Event> {
         px: px("100"),
         fee: amt("0.01"),
         venue_ts: 5,
+        is_maker: Some(true),
+        recv_ns: Some(6),
     };
     let report = MarginReport {
         session: 1,
@@ -104,6 +106,8 @@ fn every_event() -> Vec<Event> {
             px: px("100"),
             fee: amt("0.01"),
             venue_ts: 5,
+            is_maker: Some(false),
+            recv_ns: Some(6),
         },
         Event::FillParked { fill: fill.clone() },
         Event::FillUnparked { key: fkey("t1") },

@@ -543,6 +543,7 @@ impl Core {
                 px,
                 fee,
                 venue_ts,
+                ..
             } => {
                 let o = self.order_mut(*order_id)?;
                 o.cum_qty = o

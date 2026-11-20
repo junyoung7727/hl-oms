@@ -193,6 +193,8 @@ fn fuzz_input(r: &mut Rng, core: &Core, now: Ts, unique_oids: bool) -> Input {
                 px: px("100"),
                 fee: Amount::ZERO,
                 venue_ts: now.saturating_sub(r.below(3) * SEC),
+                is_maker: if r.chance(50) { Some(r.chance(50)) } else { None },
+                recv_ns: if r.chance(50) { Some(now as i64 * 1000) } else { None },
             };
             r.1.push(f.clone());
             Input::Venue(VenueInput::Fill(f))
@@ -479,6 +481,8 @@ fn fill_in(key: &str, order_id: Option<OrderId>, oid: &str, side: Side, qty: &st
         px: px(price),
         fee: Amount::ZERO,
         venue_ts: ts,
+        is_maker: None,
+        recv_ns: None,
     }
 }
 

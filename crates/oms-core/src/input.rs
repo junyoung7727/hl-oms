@@ -347,6 +347,14 @@ pub struct FillIn {
     /// Positive is a cost, negative a rebate.
     pub fee: Amount,
     pub venue_ts: Ts,
+    /// The venue's maker flag, when the gateway knows it (Bybit `isMaker`).
+    /// Not written when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_maker: Option<bool>,
+    /// When the gateway received the fill, ns since the Unix epoch. Not
+    /// written when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recv_ns: Option<i64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
