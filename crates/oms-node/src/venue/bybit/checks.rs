@@ -22,6 +22,9 @@ pub enum Block {
     Account(String),
     /// A check could not be done (no answer, rate limit). Retried.
     Unchecked(String),
+    /// The venue banned this IP for too many requests (HTTP 403). No
+    /// request may go out for `rest::IP_BAN_PAUSE`; then retried.
+    IpBanned(String),
 }
 
 impl std::fmt::Display for Block {
@@ -30,6 +33,7 @@ impl std::fmt::Display for Block {
             Block::AuthRejected(e) => write!(f, "auth_rejected: {e}"),
             Block::Account(e) => write!(f, "account: {e}"),
             Block::Unchecked(e) => write!(f, "unchecked: {e}"),
+            Block::IpBanned(e) => write!(f, "ip_banned: {e}"),
         }
     }
 }
@@ -39,33 +43,60 @@ impl From<RestError> for Block {
         match e {
             RestError::Auth { .. } => Block::AuthRejected(e.to_string()),
             RestError::Refused { .. } => Block::Account(e.to_string()),
+            RestError::IpBanned(_) => Block::IpBanned(e.to_string()),
             _ => Block::Unchecked(e.to_string()),
         }
     }
 }
 
 /// The gateway's block, shared by the boot checks, the IP loop and the
-/// stream (which may report the link up only while it is `None`).
+/// stream (which may report the link up only while `block` is `None`).
+///
+/// Each source owns its slot, so a passing IP recheck cannot lift a failed
+/// boot check and a passing boot rerun cannot lift an IP mismatch. An auth
+/// block from any source moves to its own slot and stays until the process
+/// restarts: the gateway never retries a rejected key (ADR-028).
 #[derive(Default)]
 pub struct Health {
-    block: Mutex<Option<Block>>,
+    slots: Mutex<Slots>,
+}
+
+#[derive(Default)]
+struct Slots {
+    auth: Option<Block>,
+    boot: Option<Block>,
+    ip: Option<Block>,
 }
 
 impl Health {
+    /// The block that keeps the link down: auth first, then boot, then IP.
     pub fn block(&self) -> Option<Block> {
-        self.block.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        let g = self.slots.lock().unwrap_or_else(|e| e.into_inner());
+        g.auth
+            .clone()
+            .or_else(|| g.boot.clone())
+            .or_else(|| g.ip.clone())
     }
 
-    pub fn set(&self, b: Option<Block>) {
-        *self.block.lock().unwrap_or_else(|e| e.into_inner()) = b;
+    /// The result of a boot check run.
+    pub fn set_boot(&self, b: Option<Block>) {
+        self.set(b, |s| &mut s.boot);
     }
 
-    /// An auth block stays until the process restarts: the gateway never
-    /// retries a rejected key (ADR-028).
-    pub fn set_unless_auth(&self, b: Option<Block>) {
-        let mut g = self.block.lock().unwrap_or_else(|e| e.into_inner());
-        if !matches!(*g, Some(Block::AuthRejected(_))) {
-            *g = b;
+    /// The result of an IP recheck.
+    pub fn set_ip(&self, b: Option<Block>) {
+        self.set(b, |s| &mut s.ip);
+    }
+
+    fn set(&self, b: Option<Block>, slot: fn(&mut Slots) -> &mut Option<Block>) {
+        let mut g = self.slots.lock().unwrap_or_else(|e| e.into_inner());
+        match b {
+            Some(Block::AuthRejected(e)) => {
+                if g.auth.is_none() {
+                    g.auth = Some(Block::AuthRejected(e));
+                }
+            }
+            other => *slot(&mut g) = other,
         }
     }
 }
@@ -91,8 +122,9 @@ fn field<'a>(v: &'a Value, name: &str, what: &str) -> Result<&'a Value, Block> {
 
 /// Whether the key's bound IPs hold `ip`. An empty list or `*` means the
 /// key is bound to no IP: refused (F20 Q4: such a key also expires in 90
-/// days).
+/// days). IPv4-mapped IPv6 addresses compare as IPv4.
 pub fn ip_bound(ips: &[String], ip: IpAddr) -> Result<(), Block> {
+    let ip = ip.to_canonical();
     if ips.is_empty() || ips.iter().any(|s| s.trim() == "*") {
         return Err(Block::Account(
             "the API key is bound to no IP address; bind it to this host's address".into(),
@@ -100,7 +132,7 @@ pub fn ip_bound(ips: &[String], ip: IpAddr) -> Result<(), Block> {
     }
     if ips
         .iter()
-        .any(|s| s.trim().parse::<IpAddr>().ok() == Some(ip))
+        .any(|s| s.trim().parse::<IpAddr>().ok().map(|a| a.to_canonical()) == Some(ip))
     {
         Ok(())
     } else {
@@ -243,9 +275,11 @@ pub async fn public_ip(http: &reqwest::Client, url: &str) -> Result<IpAddr, Bloc
     })
 }
 
-/// An HTTP client for the echo service.
+/// An HTTP client for the echo service. IPv4 only, like the REST client
+/// (`rest::LOCAL_ADDRESS`), so the echo sees the address Bybit sees.
 pub fn echo_client(timeout: Duration) -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
+        .local_address(super::rest::LOCAL_ADDRESS)
         .timeout(timeout)
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy()
@@ -532,6 +566,42 @@ mod tests {
         assert!(matches!(run(&v).await, Err(Block::AuthRejected(e)) if e.contains("198.51.100.9")));
     }
 
+    #[test]
+    fn an_ipv4_mapped_address_is_its_ipv4_address() {
+        let ips = vec!["203.0.113.7".to_string()];
+        ip_bound(&ips, "::ffff:203.0.113.7".parse().unwrap()).unwrap();
+        let mapped = vec!["::ffff:203.0.113.7".to_string()];
+        ip_bound(&mapped, "203.0.113.7".parse().unwrap()).unwrap();
+        assert!(matches!(
+            ip_bound(&ips, "2001:db8::7".parse().unwrap()),
+            Err(Block::AuthRejected(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_unified_status_outside_3_to_6_or_missing_blocks() {
+        for (acct, want_account) in [
+            (account("REGULAR_MARGIN", 7), true),
+            (account("REGULAR_MARGIN", 2), true),
+            (json!({"marginMode": "REGULAR_MARGIN"}), false),
+        ] {
+            let v = venue(
+                key(json!({})),
+                acct,
+                instrument("BTCUSDT", "USDT"),
+                positions(&[0]),
+                "127.0.0.1",
+            );
+            match run(&v).await {
+                Err(Block::Account(e)) if want_account => assert!(e.contains("unified"), "{e}"),
+                Err(Block::Unchecked(e)) if !want_account => {
+                    assert!(e.contains("unifiedMarginStatus"), "{e}")
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+    }
+
     #[tokio::test]
     async fn a_rejected_key_is_an_auth_block_and_an_unanswered_check_is_unchecked() {
         let v = good();
@@ -565,17 +635,37 @@ mod tests {
         .unwrap();
         let echo = echo_client(Duration::from_millis(500)).unwrap();
         let h = Health::default();
-        h.set_unless_auth(recheck_ip(&rest, &echo, &v.echo.url(), &want()).await.err());
+        h.set_ip(recheck_ip(&rest, &echo, &v.echo.url(), &want()).await.err());
         assert_eq!(h.block(), None);
         v.echo
             .set_default(Answer::Reply(200, "198.51.100.9".into()));
-        h.set_unless_auth(recheck_ip(&rest, &echo, &v.echo.url(), &want()).await.err());
+        h.set_ip(recheck_ip(&rest, &echo, &v.echo.url(), &want()).await.err());
         assert!(matches!(h.block(), Some(Block::AuthRejected(_))));
         v.echo.set_default(Answer::Reply(200, "127.0.0.1".into()));
-        h.set_unless_auth(recheck_ip(&rest, &echo, &v.echo.url(), &want()).await.err());
+        h.set_ip(recheck_ip(&rest, &echo, &v.echo.url(), &want()).await.err());
+        h.set_boot(None);
         assert!(
             matches!(h.block(), Some(Block::AuthRejected(_))),
             "never lifted by a later pass"
         );
+    }
+
+    #[test]
+    fn a_passing_ip_recheck_does_not_lift_a_failed_boot_check() {
+        let h = Health::default();
+        h.set_boot(Some(Block::Account("BTCUSDT is in hedge mode".into())));
+        h.set_ip(None);
+        assert!(matches!(h.block(), Some(Block::Account(_))));
+        h.set_boot(Some(Block::Unchecked("position/list: HTTP 500".into())));
+        h.set_ip(None);
+        assert!(matches!(h.block(), Some(Block::Unchecked(_))));
+        h.set_ip(Some(Block::Unchecked("IP echo: HTTP 500".into())));
+        h.set_boot(None);
+        assert!(
+            matches!(h.block(), Some(Block::Unchecked(e)) if e.contains("echo")),
+            "a passing boot rerun does not lift the IP slot"
+        );
+        h.set_ip(None);
+        assert_eq!(h.block(), None);
     }
 }

@@ -40,20 +40,40 @@ impl Credentials {
         }
     }
 
-    /// Reads `api_key` and `api_secret` (TOML). The file must be readable
-    /// and writable by its owner only (mode 0600 or 0400).
+    /// Reads `api_key` and `api_secret` (TOML). The file must be a regular
+    /// file owned by this process's user and readable and writable by its
+    /// owner only (mode 0600 or 0400). The checks and the read use one
+    /// open handle, so the file cannot be swapped between them.
     pub fn load(path: &Path) -> Result<Credentials, String> {
-        use std::os::unix::fs::PermissionsExt;
-        let meta = std::fs::metadata(path)
-            .map_err(|e| format!("credentials file {}: {e}", path.display()))?;
-        if meta.permissions().mode() & 0o077 != 0 {
+        use std::io::Read;
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+        let err = |e: std::io::Error| format!("credentials file {}: {e}", path.display());
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .open(path)
+            .map_err(err)?;
+        let meta = file.metadata().map_err(err)?;
+        if !meta.file_type().is_file() {
+            return Err(format!(
+                "credentials file {} is not a regular file",
+                path.display()
+            ));
+        }
+        if meta.uid() != rustix::process::geteuid().as_raw() {
+            return Err(format!(
+                "credentials file {} must be owned by the user the OMS runs as",
+                path.display()
+            ));
+        }
+        if meta.mode() & 0o077 != 0 {
             return Err(format!(
                 "credentials file {} must not be readable by group or others (chmod 600)",
                 path.display()
             ));
         }
-        let text = std::fs::read_to_string(path)
-            .map_err(|e| format!("credentials file {}: {e}", path.display()))?;
+        let mut text = String::new();
+        file.read_to_string(&mut text).map_err(err)?;
         let f: CredentialsFile = toml::from_str(&text).map_err(|_| {
             format!(
                 "credentials file {} is not api_key and api_secret",
@@ -80,6 +100,16 @@ impl Credentials {
 /// (permission) and 10007 (authentication failed) do not heal either.
 pub const AUTH_CODES: [i64; 6] = [10003, 10004, 10005, 10007, 10010, 33004];
 
+/// The local address of every Bybit and IP-echo connection: IPv4 only, so
+/// the address the echo service sees is the address Bybit sees (a
+/// dual-stack host could otherwise reach one over IPv6 and the other over
+/// IPv4).
+pub const LOCAL_ADDRESS: std::net::IpAddr = std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED);
+
+/// How long no request may go out after HTTP 403 (F18 L186: "wait for at
+/// least 10 minutes").
+pub const IP_BAN_PAUSE: Duration = Duration::from_secs(600);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RestError {
     /// The connection was not established: no byte of the request left.
@@ -89,8 +119,11 @@ pub enum RestError {
     NoAnswer(String),
     /// The key is not accepted (`AUTH_CODES`, HTTP 401). Never retried.
     Auth { code: i64, msg: String },
-    /// retCode 10006, HTTP 403 or 429.
+    /// retCode 10006 or HTTP 429.
     RateLimited(String),
+    /// HTTP 403 "access too frequent": the venue bans this IP. Every HTTP
+    /// session must stop for at least `IP_BAN_PAUSE` (F18 L186).
+    IpBanned(String),
     /// retCode 10002: our timestamp is outside the venue's window.
     Clock(String),
     /// Any other non-zero retCode.
@@ -104,6 +137,7 @@ impl std::fmt::Display for RestError {
             RestError::NoAnswer(e) => write!(f, "no answer: {e}"),
             RestError::Auth { code, msg } => write!(f, "key rejected ({code}): {msg}"),
             RestError::RateLimited(e) => write!(f, "rate limited: {e}"),
+            RestError::IpBanned(e) => write!(f, "IP banned for too many requests: {e}"),
             RestError::Clock(e) => write!(f, "timestamp outside the venue's window: {e}"),
             RestError::Refused { code, msg } => write!(f, "refused ({code}): {msg}"),
         }
@@ -132,7 +166,8 @@ pub fn classify(status: u16, body: &str) -> Result<Value, RestError> {
                 msg: short,
             });
         }
-        403 | 429 => return Err(RestError::RateLimited(format!("HTTP {status}: {short}"))),
+        403 => return Err(RestError::IpBanned(format!("HTTP 403: {short}"))),
+        429 => return Err(RestError::RateLimited(format!("HTTP 429: {short}"))),
         _ => return Err(RestError::NoAnswer(format!("HTTP {status}: {short}"))),
     }
     let v: Value = serde_json::from_str(body)
@@ -178,6 +213,7 @@ impl Rest {
         timeout: Duration,
     ) -> Result<Rest, String> {
         let http = reqwest::Client::builder()
+            .local_address(LOCAL_ADDRESS)
             .connect_timeout(Duration::from_secs(3))
             .timeout(timeout)
             // A redirect would re-send a signed request. Nothing here follows one.
@@ -360,7 +396,7 @@ mod tests {
         let cases = [
             (code(10006), "rate"),
             (Answer::Reply(429, "".into()), "rate"),
-            (Answer::Reply(403, "".into()), "rate"),
+            (Answer::Reply(403, "".into()), "banned"),
             (code(10002), "clock"),
             (code(10016), "noanswer"),
             (Answer::Reply(500, "x".into()), "noanswer"),
@@ -376,6 +412,7 @@ mod tests {
                 .unwrap_err();
             let got = match e {
                 RestError::RateLimited(_) => "rate",
+                RestError::IpBanned(_) => "banned",
                 RestError::Clock(_) => "clock",
                 RestError::NoAnswer(_) => "noanswer",
                 RestError::Refused { code: 110001, .. } => "refused",
@@ -410,8 +447,19 @@ mod tests {
         let c = Credentials::load(&p).unwrap();
         assert_eq!(c.api_key, "K1");
         assert!(!format!("{c:?}").contains("S1"));
+        let link = dir.join("link.toml");
+        std::os::unix::fs::symlink(&p, &link).unwrap();
+        assert!(
+            Credentials::load(&link).is_err(),
+            "a symlink to a good file is refused"
+        );
         std::fs::write(&p, "api_key = \"K1\"\n").unwrap();
         assert!(Credentials::load(&p).is_err());
+        assert!(
+            Credentials::load(&dir)
+                .unwrap_err()
+                .contains("regular file")
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

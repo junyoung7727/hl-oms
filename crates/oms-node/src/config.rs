@@ -256,6 +256,42 @@ fn default_key_env() -> String {
     "HL_AGENT_PRIVATE_KEY".into()
 }
 
+/// `p` as an absolute path with `.` and `..` folded and, where the path
+/// exists, symlinks followed. Compares paths by where they point.
+fn resolved(p: &Path) -> PathBuf {
+    if let Ok(c) = p.canonicalize() {
+        return c;
+    }
+    let abs = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
+    let mut out = PathBuf::new();
+    for c in abs.components() {
+        match c {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::CurDir => {}
+            c => out.push(c),
+        }
+    }
+    // The longest existing prefix may itself be a symlink.
+    let mut head = out.clone();
+    let mut tail = Vec::new();
+    while !head.exists() {
+        match head.file_name() {
+            Some(n) => tail.push(n.to_os_string()),
+            None => return out,
+        }
+        if !head.pop() {
+            return out;
+        }
+    }
+    let mut r = head.canonicalize().unwrap_or(head);
+    for n in tail.into_iter().rev() {
+        r.push(n);
+    }
+    r
+}
+
 impl NodeConfig {
     pub fn load(path: &Path) -> Result<NodeConfig, String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
@@ -343,7 +379,14 @@ impl NodeConfig {
         if !b.credentials_file.is_absolute() {
             return Err("[venue] credentials_file must be an absolute path".into());
         }
-        if b.credentials_file.starts_with(&self.data_dir) {
+        if b
+            .credentials_file
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+        {
+            return Err("[venue] credentials_file must not hold `..`".into());
+        }
+        if resolved(&b.credentials_file).starts_with(resolved(&self.data_dir)) {
             return Err("[venue] credentials_file must be outside the data directory".into());
         }
         if b.sub_account_uid == 0 {
@@ -655,6 +698,25 @@ max = "10"
                 Err(e) => assert!(e.contains(because), "{because}: {e}"),
             }
         }
+        // `..`, a symlinked directory and a relative data directory do not
+        // hide a credentials file inside the data directory.
+        assert!(check_bybit(&bybit("testnet", "").replace("/etc/hl-oms/bybit.toml", "/srv/x/../../var/lib/hl-oms/data/k.toml"), None)
+            .unwrap_err()
+            .contains("`..`"));
+        let tmp = std::env::temp_dir().join(format!("bybit-cfg-{}", std::process::id()));
+        let data = tmp.join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        std::os::unix::fs::symlink(&data, tmp.join("alias")).unwrap();
+        let mut cfg = parse(&bybit("testnet", "").replace("/etc/hl-oms/bybit.toml", &tmp.join("alias/k.toml").display().to_string()), "", None, 1).unwrap();
+        cfg.data_dir = data.clone();
+        cfg.core.policy.absence_not_found_needed = 2;
+        assert!(cfg.validate().unwrap_err().contains("outside the data directory"), "symlinked directory");
+        let cwd = std::env::current_dir().unwrap();
+        let mut cfg = parse(&bybit("testnet", "").replace("/etc/hl-oms/bybit.toml", &cwd.join("d/k.toml").display().to_string()), "", None, 1).unwrap();
+        cfg.data_dir = "d".into();
+        cfg.core.policy.absence_not_found_needed = 2;
+        assert!(cfg.validate().unwrap_err().contains("outside the data directory"), "relative data directory");
+        let _ = std::fs::remove_dir_all(&tmp);
         // Without the ADR-024 absence count.
         let mut cfg = parse(&bybit("testnet", ""), "", None, 1).unwrap();
         cfg.data_dir = "/var/lib/hl-oms/data".into();
