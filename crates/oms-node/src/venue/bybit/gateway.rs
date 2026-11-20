@@ -801,6 +801,8 @@ mod tests {
                 while let Ok((tcp, _)) = listener.accept().await {
                     attempts.fetch_add(1, Ordering::SeqCst);
                     let forbid = mode.lock().unwrap().forbid;
+                    // The handshake callback's error type is tungstenite's (not ours).
+                    #[allow(clippy::result_large_err)]
                     let answer = move |_: &Request, resp| {
                         if forbid {
                             let mut r = ErrorResponse::new(Some("forbidden".into()));
