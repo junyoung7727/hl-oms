@@ -1,8 +1,13 @@
 # C-GW 게이트웨이 계약
 
 게이트웨이는 OMS 안에서 거래소와 통신하는 부분이다. 구현마다 다른 것은 프로토콜이고, 아래 계약은 같다.
-설계 근거: [ADR-005](../adr/ADR-005-unknown-outcome.md), [ADR-014](../adr/ADR-014-reconciliation.md), [ADR-017](../adr/ADR-017-hyperliquid-gateway.md).
-구현: `crates/oms-node/src/venue/mod.rs`(채널), `simnet.rs`(가상 거래소), `hyperliquid/`(Hyperliquid).
+설계 근거: [ADR-005](../adr/ADR-005-unknown-outcome.md), [ADR-014](../adr/ADR-014-reconciliation.md), [ADR-017](../adr/ADR-017-hyperliquid-gateway.md), [ADR-021](../adr/ADR-021-venue-gateway-trait.md).
+구현: `crates/oms-node/src/venue/mod.rs`(채널, `VenueGateway` trait, 구동기 `start`), `simnet.rs`(가상 거래소), `hyperliquid/`(Hyperliquid).
+
+## trait과 구동기
+
+게이트웨이는 `VenueGateway`를 구현한다: `send_order`, `send_cancel`, `query`, `spawn_tasks`(스트림 등 상시 작업, 한 번), 상수 `QUERY_CONCURRENCY`.
+`venue::start`가 상시 작업 → 명령 루프 → 조회 루프 순으로 시작한다. 명령과 조회는 하나씩 별도 작업으로 돌고, 동시에 도는 수는 명령 `max_concurrent`(진행 중 전송 상한 + 16), 조회 `QUERY_CONCURRENCY`(가상 거래소 8, Hyperliquid 4)로 묶인다. 넘치는 것은 기다리고 버리지 않는다(V-GW-SEAM-1).
 
 ## 채널
 

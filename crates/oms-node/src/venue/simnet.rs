@@ -5,7 +5,7 @@
 //! orders, cancels and queries. Timeouts and connection losses here are real.
 
 use super::simproto::*;
-use super::{GatewayPorts, QueryReq, VenueInputTx, session_number};
+use super::{GatewayPorts, QueryReq, VenueGateway, VenueInputTx, session_number, start};
 use crate::util::wall_us;
 use crate::{info, warn};
 use oms_core::*;
@@ -17,7 +17,7 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio::net::unix::OwnedWriteHalf;
-use tokio::sync::{Mutex, Semaphore, oneshot};
+use tokio::sync::{Mutex, oneshot};
 
 /// Why an exchange with the venue produced no answer.
 enum CallError {
@@ -509,11 +509,32 @@ impl Gateway {
     }
 }
 
+impl VenueGateway for Gateway {
+    const QUERY_CONCURRENCY: usize = 8;
+
+    // The paths name the inherent methods, which keep their bodies.
+    fn send_order(&self, cmd: VenueCommand) -> impl Future<Output = ()> + Send {
+        Gateway::send_order(self, cmd)
+    }
+
+    fn send_cancel(&self, cmd: VenueCommand) -> impl Future<Output = ()> + Send {
+        Gateway::send_cancel(self, cmd)
+    }
+
+    fn query(&self, q: QueryReq) -> impl Future<Output = ()> + Send {
+        Gateway::query(self, q)
+    }
+
+    fn spawn_tasks(self: &Arc<Self>, boot: u32) {
+        tokio::spawn(self.clone().stream_loop(boot, self.requests.socket.clone()));
+    }
+}
+
 /// Starts the gateway tasks.
-pub fn spawn(socket: PathBuf, timeout: Duration, mut ports: GatewayPorts, max_concurrent: usize) {
+pub fn spawn(socket: PathBuf, timeout: Duration, ports: GatewayPorts, max_concurrent: usize) {
     let gw = Arc::new(Gateway {
         requests: Requests {
-            socket: socket.clone(),
+            socket,
             timeout,
             conn: Mutex::new(None),
             next_id: AtomicU64::new(1),
@@ -522,42 +543,5 @@ pub fn spawn(socket: PathBuf, timeout: Duration, mut ports: GatewayPorts, max_co
         instance_id: ports.instance_id,
         session: AtomicU64::new(0),
     });
-
-    tokio::spawn(gw.clone().stream_loop(ports.boot, socket));
-
-    // Commands: each runs as its own task, at most `max_concurrent` at once.
-    // The core already bounds outstanding sends; the semaphore bounds tasks
-    // even if that sizing were wrong.
-    let cmd_gw = gw.clone();
-    tokio::spawn(async move {
-        let permits = Arc::new(Semaphore::new(max_concurrent));
-        while let Some(cmd) = ports.commands.recv().await {
-            let Ok(permit) = permits.clone().acquire_owned().await else {
-                return;
-            };
-            let gw = cmd_gw.clone();
-            tokio::spawn(async move {
-                match &cmd {
-                    VenueCommand::SendOrder { .. } => gw.send_order(cmd).await,
-                    VenueCommand::SendCancel { .. } => gw.send_cancel(cmd).await,
-                }
-                drop(permit);
-            });
-        }
-    });
-
-    let q_gw = gw;
-    tokio::spawn(async move {
-        let permits = Arc::new(Semaphore::new(8));
-        while let Some(q) = ports.queries.recv().await {
-            let Ok(permit) = permits.clone().acquire_owned().await else {
-                return;
-            };
-            let gw = q_gw.clone();
-            tokio::spawn(async move {
-                gw.query(q).await;
-                drop(permit);
-            });
-        }
-    });
+    start(gw, ports, max_concurrent);
 }

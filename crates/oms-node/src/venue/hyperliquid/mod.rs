@@ -13,7 +13,7 @@
 pub mod sign;
 pub mod wire;
 
-use super::{GatewayPorts, QueryReq, VenueInputTx, session_number};
+use super::{GatewayPorts, QueryReq, VenueGateway, VenueInputTx, session_number, start};
 use crate::config::HyperliquidConfig;
 use crate::util::wall_us;
 use crate::{error, info, warn};
@@ -25,7 +25,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant};
-use tokio::sync::Semaphore;
 use tokio_tungstenite::tungstenite::Message;
 use wire::*;
 
@@ -877,6 +876,28 @@ fn placed(oid: u64, reported: Option<Qty>) -> SendOutcome {
     }
 }
 
+impl VenueGateway for Gateway {
+    const QUERY_CONCURRENCY: usize = 4;
+
+    // The paths name the inherent methods, which keep their bodies.
+    fn send_order(&self, cmd: VenueCommand) -> impl Future<Output = ()> + Send {
+        Gateway::send_order(self, cmd)
+    }
+
+    fn send_cancel(&self, cmd: VenueCommand) -> impl Future<Output = ()> + Send {
+        Gateway::send_cancel(self, cmd)
+    }
+
+    fn query(&self, q: QueryReq) -> impl Future<Output = ()> + Send {
+        Gateway::query(self, q)
+    }
+
+    fn spawn_tasks(self: &Arc<Self>, boot: u32) {
+        tokio::spawn(self.clone().stream_loop(boot));
+        tokio::spawn(self.clone().dead_man_switch());
+    }
+}
+
 /// Starts the gateway, taking the signing key from the environment variable
 /// named in the configuration. Fails if it is missing or unusable.
 pub fn spawn(
@@ -895,7 +916,7 @@ pub fn spawn_with_key(
     cfg: HyperliquidConfig,
     key: &str,
     instruments: BTreeMap<InstrumentId, InstrumentSpec>,
-    mut ports: GatewayPorts,
+    ports: GatewayPorts,
     max_concurrent: usize,
 ) -> Result<String, String> {
     let mainnet = cfg.network == "mainnet";
@@ -937,42 +958,9 @@ pub fn spawn_with_key(
     });
     info!("hyperliquid gateway starting", "network": gw.cfg.network.clone(), "account": gw.account.clone(), "agent": agent.clone());
 
-    tokio::spawn(gw.clone().stream_loop(ports.boot));
-    tokio::spawn(gw.clone().dead_man_switch());
-
-    let cmd_gw = gw.clone();
-    tokio::spawn(async move {
-        let permits = Arc::new(Semaphore::new(max_concurrent));
-        while let Some(cmd) = ports.commands.recv().await {
-            let Ok(permit) = permits.clone().acquire_owned().await else {
-                return;
-            };
-            let gw = cmd_gw.clone();
-            tokio::spawn(async move {
-                match &cmd {
-                    VenueCommand::SendOrder { .. } => gw.send_order(cmd).await,
-                    VenueCommand::SendCancel { .. } => gw.send_cancel(cmd).await,
-                }
-                drop(permit);
-            });
-        }
-    });
-
-    let q_gw = gw.clone();
-    tokio::spawn(async move {
-        let permits = Arc::new(Semaphore::new(4));
-        while let Some(q) = ports.queries.recv().await {
-            let Ok(permit) = permits.clone().acquire_owned().await else {
-                return;
-            };
-            let gw = q_gw.clone();
-            tokio::spawn(async move {
-                gw.query(q).await;
-                drop(permit);
-            });
-        }
-    });
-    Ok(format!("hyperliquid:{}", gw.cfg.network))
+    let name = format!("hyperliquid:{}", gw.cfg.network);
+    start(gw, ports, max_concurrent);
+    Ok(name)
 }
 
 #[cfg(test)]

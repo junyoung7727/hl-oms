@@ -188,11 +188,11 @@ claims = ["V-API-1", "V-API-2", "V-API-3", "V-DASH-1"]
 id = "C-GW"
 title = "게이트웨이 계약"
 file = "docs/contracts/gateway.md"
-summary = "게이트웨이가 지켜야 하는 의무 12가지와 중단 지점"
+summary = "게이트웨이가 지켜야 하는 의무 13가지와 중단 지점"
 events = []
-adr = ["ADR-005", "ADR-014", "ADR-017"]
+adr = ["ADR-005", "ADR-014", "ADR-017", "ADR-021"]
 code = ["crates/oms-node/src/venue/mod.rs", "crates/oms-node/src/venue/simnet.rs", "crates/oms-node/src/venue/hyperliquid/mod.rs"]
-claims = ["V-HL-1", "V-HL-2", "V-HL-3", "V-SLICE-1"]
+claims = ["V-HL-1", "V-HL-2", "V-HL-3", "V-SLICE-1", "V-GW-SEAM-1"]
 
 # 구현됨(티켓 01~12, .scratch/margin-rules/issues/). 실제 거래소에서는 확인하지 않았다.
 [[contract]]
