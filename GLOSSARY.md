@@ -26,6 +26,10 @@ _Avoid_: exchange, HL (in rule text)
 The part of the OMS that talks to one venue. It implements the `VenueGateway` trait (send an order, send a cancel, answer a query, start its long-running tasks); one driver runs its command and query loops (ADR-021).
 _Avoid_: connector, adapter (adapter is the market-data term)
 
+**Market ref** (시세 참조):
+The order book state a strategy decided an order on: venue, market, symbol, channel, the last applied `update_id`, venue time and receive time. Carried by a new order, journaled with `OrderAccepted`, never read by the core and not part of idempotency (ADR-024).
+_Avoid_: snapshot id, book ref
+
 **Venue-made execution** (거래소가 만든 실행):
 An execution the venue reports in the same stream as fills that is not a fill of an order of ours: a funding payment (cash only), a venue position change (auto-deleveraging, takeover of a liquidated position, delivery, settlement) or an execution the gateway could not classify. A trade of someone else's order is not one: it is an external fill (ADR-023).
 _Avoid_: system trade, non-trade fill

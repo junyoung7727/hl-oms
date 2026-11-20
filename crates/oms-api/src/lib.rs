@@ -55,6 +55,10 @@ pub enum Op {
         /// Absolute, so that a repeated request is byte-for-byte the same
         /// request. The send is not placed after this time.
         expires_at: Ts,
+        /// The order book state the strategy decided on (U13c). Journaled
+        /// with the order; not part of the idempotency comparison.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        market_ref: Option<MarketRef>,
     },
     Cancel {
         #[serde(default)]
@@ -216,5 +220,19 @@ mod tests {
         let json = serde_json::to_string(&ServerMsg::Response(resp.clone())).unwrap();
         assert_eq!(json, r#"{"id":7,"ok":true,"result":{"accepted":{"order_id":3}}}"#);
         assert_eq!(serde_json::from_str::<ServerMsg>(&json).unwrap(), ServerMsg::Response(resp));
+    }
+
+    /// U13c. A new order may carry the order book state it was decided on;
+    /// a line without it parses as before, and a bad name is refused.
+    #[test]
+    fn a_new_order_line_may_carry_a_market_ref() {
+        let line = r#"{"id":8,"op":"new_order","client_order_id":"k1","instrument":"BTC","side":"buy","qty":"0.001","px":"70000","tif":"gtc","expires_at":1700000005000000,"market_ref":{"venue":"bybit","market":"linear","symbol":"BTCUSDT","channel":"orderbook.50","update_id":42,"venue_ts_ns":1,"recv_ns":2}}"#;
+        let r: Request = serde_json::from_str(line).unwrap();
+        let Op::NewOrder { market_ref: Some(m), .. } = r.op else {
+            panic!("{:?}", r.op)
+        };
+        assert_eq!((m.channel.as_str(), m.update_id), ("orderbook.50", Some(42)));
+        let bad = line.replace(r#""symbol":"BTCUSDT""#, r#""symbol":"BTC USDT""#);
+        assert!(serde_json::from_str::<Request>(&bad).is_err());
     }
 }

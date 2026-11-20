@@ -1,15 +1,15 @@
 # 계약 추적표
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `649bedcf18b8770b`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `e9b690594e79fbdc`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 | 계약 | 제목 | 상태 전이(이벤트) | 설계 결정 | 코드 | 주장 |
 |---|---|---|---|---|---|
 | [C-COMMIT](../../docs/contracts/commit.md) | 기록·내구화·적용·응답·전송의 순서 |  | ADR-003, ADR-004, ADR-012 | `crates/oms-node/src/pipeline.rs` | V-COMMIT-1(이전 버전 결과), V-COMMIT-2(이전 버전 결과), V-COMMIT-3(이전 버전 결과), V-COMMIT-4(이전 버전 결과), V-COMMIT-5(이전 버전 결과) |
-| [C-NEW](../../docs/contracts/order-lifecycle.md) | 신규 주문 수용과 예약 | `order_accepted` `request_rejected` | ADR-008, ADR-009 | `crates/oms-core/src/decide.rs` | V-NEW-1(이전 버전 결과), V-NEW-2(이전 버전 결과) |
+| [C-NEW](../../docs/contracts/order-lifecycle.md) | 신규 주문 수용과 예약 | `order_accepted` `request_rejected` | ADR-008, ADR-009 | `crates/oms-core/src/decide.rs` | V-NEW-1(이전 버전 결과), V-NEW-2(이전 버전 결과), V-MARKET-REF-1(미실행) |
 | [C-IDEM](../../docs/contracts/idempotency.md) | 멱등성 | `purged` | ADR-006 | `crates/oms-core/src/decide.rs` | V-IDEM-1(이전 버전 결과), V-IDEM-2(이전 버전 결과), V-IDEM-3(이전 버전 결과) |
 | [C-SEND](../../docs/contracts/order-lifecycle.md) | 전송 결과 | `order_acked` `venue_oid_learned` `order_in_doubt` | ADR-005, ADR-007 | `crates/oms-core/src/decide.rs` | V-DOUBT-1(이전 버전 결과), V-BOOT-1(이전 버전 결과) |
-| [C-DOUBT](../../docs/contracts/order-lifecycle.md) | 결과 불명의 해소 | `order_in_doubt` | ADR-005 | `crates/oms-core/src/decide.rs` | V-DOUBT-1(이전 버전 결과), V-DOUBT-2(이전 버전 결과), V-DOUBT-3(이전 버전 결과) |
+| [C-DOUBT](../../docs/contracts/order-lifecycle.md) | 결과 불명의 해소 | `order_in_doubt` `absence_noted` | ADR-005 | `crates/oms-core/src/decide.rs` | V-DOUBT-1(이전 버전 결과), V-DOUBT-2(이전 버전 결과), V-DOUBT-3(이전 버전 결과), V-ABSENCE-N-1(미실행) |
 | [C-FILL](../../docs/contracts/order-lifecycle.md) | 체결 기장 | `fill_booked` `fill_parked` `fill_unparked` `external_fill_booked` `funding_booked` `venue_position_changed` `unclassified_execution_noted` | ADR-007 | `crates/oms-core/src/decide.rs`<br>`crates/oms-core/src/core.rs` | V-FILL-1(이전 버전 결과), V-EXT-1(이전 버전 결과), V-MIS-1(이전 버전 결과), V-FUZZ-1(이전 버전 결과), V-VENUE-EXEC-1(미실행) |
 | [C-CANCEL](../../docs/contracts/order-lifecycle.md) | 취소 | `cancel_requested` `cancel_sent` `cancel_outcome_noted` | ADR-005, ADR-007 | `crates/oms-core/src/decide.rs` | V-CANCEL-1(이전 버전 결과) |
 | [C-TERM](../../docs/contracts/order-lifecycle.md) | 종결 | `venue_terminal` `order_closed` `missing_fills_flagged` `status_noted` `order_recheck` | ADR-007 | `crates/oms-core/src/decide.rs` | V-TERM-1(이전 버전 결과) |

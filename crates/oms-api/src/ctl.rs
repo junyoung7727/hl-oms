@@ -76,6 +76,7 @@ fn build(cmd: &str, args: &[String]) -> Result<Op, String> {
                 tif,
                 reduce_only: args.iter().any(|a| a == "--reduce-only"),
                 expires_at: now_us() + ttl_ms * 1000,
+                market_ref: None,
             }
         }
         "cancel" => {

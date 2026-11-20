@@ -1254,10 +1254,31 @@ impl Tx<'_> {
         if queried_at < threshold {
             return Ok(());
         }
-        let evidence = format!(
-            "not found by client id; queried at {queried_at}, after send expiry {} plus margin {}",
-            o.expires_at, policy.absence_margin_us
-        );
+        let needed = policy.absence_not_found_needed;
+        let margin = policy.absence_margin_us;
+        let (expires_at, absence) = (o.expires_at, o.absence);
+        if needed > 1 {
+            // Each counted answer must be asked at least the absence margin
+            // after the one before: two answers to one query, or to two
+            // queries a moment apart, may see one short-lived state of the
+            // venue and are one answer.
+            if absence.is_some_and(|a| queried_at < a.last_queried_at.saturating_add(margin)) {
+                return Ok(());
+            }
+            self.emit(Event::AbsenceNoted { order_id: id, queried_at })?;
+            if absence.map_or(0, |a| a.count) + 1 < needed {
+                return Ok(());
+            }
+        }
+        // With one answer the text stays as it was, so the journal of a
+        // Hyperliquid run keeps its bytes.
+        let evidence = if needed > 1 {
+            format!(
+                "not found by client id {needed} times; last queried at {queried_at}, after send expiry {expires_at} plus margin {margin}"
+            )
+        } else {
+            format!("not found by client id; queried at {queried_at}, after send expiry {expires_at} plus margin {margin}")
+        };
         self.emit(Event::OrderClosed {
             order_id: id,
             reason: CloseReason::NotPlaced { evidence },

@@ -115,6 +115,7 @@ fn schema_1_history(run: &mut Run) {
         tif: Tif::Gtc,
         reduce_only: false,
         expires_at: run.at + 10 * SEC,
+        market_ref: None,
     }));
     let Some(Reply::NewOrder(NewOrderReply::Accepted { order_id })) = out.reply else {
         panic!("not accepted: {:?}", out.reply)

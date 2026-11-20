@@ -253,6 +253,13 @@ pub enum Event {
         detail: String,
         venue_ts: Ts,
     },
+    /// A "not found" answer to a query sent after expiry plus margin was
+    /// counted for an in-doubt order (U13c). Only written when the policy
+    /// asks for more than one answer.
+    AbsenceNoted {
+        order_id: OrderId,
+        queried_at: Ts,
+    },
     /// The venue's position after a venue change equals the journal's; the
     /// wait ends without an adjustment (U13b).
     VenueChangeSettled {
@@ -386,7 +393,8 @@ impl Event {
             | Event::OrderClosed { order_id, .. }
             | Event::CancelRequested { order_id, .. }
             | Event::CancelSent { order_id, .. }
-            | Event::CancelOutcomeNoted { order_id, .. } => Some(*order_id),
+            | Event::CancelOutcomeNoted { order_id, .. }
+            | Event::AbsenceNoted { order_id, .. } => Some(*order_id),
             _ => None,
         }
     }
@@ -437,6 +445,7 @@ impl Event {
             Event::VenuePositionChanged { .. } => "venue_position_changed",
             Event::UnclassifiedExecutionNoted { .. } => "unclassified_execution_noted",
             Event::VenueChangeSettled { .. } => "venue_change_settled",
+            Event::AbsenceNoted { .. } => "absence_noted",
         }
     }
 }

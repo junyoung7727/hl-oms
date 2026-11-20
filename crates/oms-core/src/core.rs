@@ -434,6 +434,7 @@ impl Core {
                     send_session: self.link.session,
                     phase: Phase::PendingSend,
                     doubt: None,
+                    absence: None,
                     venue_oid: None,
                     cum_qty: Qty::ZERO,
                     cum_notional: Amount::ZERO,
@@ -931,6 +932,14 @@ impl Core {
             }
             Event::VenueChangeSettled { instrument } => {
                 self.venue_change_wait.remove(instrument);
+            }
+            Event::AbsenceNoted { order_id, queried_at } => {
+                let o = self.order_mut(*order_id)?;
+                let count = o.absence.map_or(0, |a| a.count).saturating_add(1);
+                o.absence = Some(Absence {
+                    count,
+                    last_queried_at: *queried_at,
+                });
             }
         }
         Ok(())

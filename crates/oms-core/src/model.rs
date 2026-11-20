@@ -153,6 +153,15 @@ impl CancelState {
     }
 }
 
+/// The "not found" answers counted so far for an in-doubt order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Absence {
+    pub count: u32,
+    /// `queried_at` of the last counted answer. A later answer counts only
+    /// if it was asked later.
+    pub last_queried_at: Ts,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Order {
     pub id: OrderId,
@@ -178,6 +187,10 @@ pub struct Order {
     pub send_session: u64,
     pub phase: Phase,
     pub doubt: Option<Doubt>,
+    /// "Not found" answers counted towards `absence_not_found_needed`
+    /// (U13c). Not written while none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub absence: Option<Absence>,
     pub venue_oid: Option<VenueOrderId>,
     /// Sum of booked fills.
     pub cum_qty: Qty,

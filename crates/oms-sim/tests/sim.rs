@@ -365,6 +365,7 @@ fn a_loss_made_only_of_fees_and_funding_enters_reducing() {
         tif: oms_core::Tif::Gtc,
         reduce_only: false,
         expires_at: w.now + 5_000_000,
+        market_ref: None,
     })
     .unwrap();
     assert_eq!(w.stats.accepted, 1, "the plain order is accepted");

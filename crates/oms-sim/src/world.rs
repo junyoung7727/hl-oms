@@ -1455,6 +1455,7 @@ impl World {
             tif,
             reduce_only,
             expires_at: self.now + self.rng.range(800_000, 5_000_000),
+            market_ref: None,
         };
         self.stats.requests += 1;
         if self.sent.len() < 400 {

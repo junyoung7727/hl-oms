@@ -332,6 +332,7 @@ impl H {
             tif: Tif::Gtc,
             reduce_only: false,
             expires_at: self.now + 5 * SEC,
+            market_ref: None,
         }
     }
 

@@ -77,6 +77,12 @@ pub struct Policy {
     pub venue_enforces_expiry: bool,
     /// Margin added to the expiry before absence is accepted as proof.
     pub absence_margin_us: u64,
+    /// How many "not found" answers, each to a query sent after expiry plus
+    /// margin and at least the margin after the one before, close an
+    /// in-doubt order (U13c). One for Hyperliquid; two for Bybit, against a
+    /// short-lived inconsistency of its query. Not written while one.
+    #[serde(skip_serializing_if = "is_one")]
+    pub absence_not_found_needed: u32,
     pub cancel_retry_backoff_us: u64,
     pub cancel_max_attempts: u32,
     /// Longest a fill that names only an unknown venue order id waits for one
@@ -138,6 +144,10 @@ impl Default for MarginPolicy {
     }
 }
 
+fn is_one(v: &u32) -> bool {
+    *v == 1
+}
+
 impl Default for Policy {
     fn default() -> Self {
         Policy {
@@ -151,6 +161,7 @@ impl Default for Policy {
             send_result_timeout_us: 30_000_000,
             venue_enforces_expiry: true,
             absence_margin_us: 10_000_000,
+            absence_not_found_needed: 1,
             cancel_retry_backoff_us: 1_000_000,
             cancel_max_attempts: 5,
             unmatched_fill_wait_us: 120_000_000,
@@ -232,6 +243,9 @@ impl CoreConfig {
         }
         if p.cancel_max_attempts == 0 {
             errs.push("policy: cancel_max_attempts must be positive".to_string());
+        }
+        if p.absence_not_found_needed == 0 {
+            errs.push("policy: absence_not_found_needed must be positive".to_string());
         }
         for (name, v) in [
             ("send_result_timeout_us", p.send_result_timeout_us),
