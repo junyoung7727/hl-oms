@@ -242,7 +242,7 @@ Bybit 게이트웨이([ADR-028](../adr/ADR-028-bybit-gateway.md) §7b)는 세 �
 | `szi` | `side`(`Buy` +, `Sell` −) × `size`. `positionIdx`가 0이 아니면 못 읽음 |
 | `position_value` | `positionValue` |
 | `margin_used` | `positionIM` |
-| `leverage_type` | 계좌의 `marginMode`: `REGULAR_MARGIN` = 교차, `ISOLATED_MARGIN` = 격리, 그 밖은 보고 전체가 무효 |
+| `leverage_type` | 계좌의 `marginMode`: `REGULAR_MARGIN` = 교차, `ISOLATED_MARGIN` = 격리, 그 밖은 보고 전체가 무효. 격리로 읽혀도 `margin_used`가 개시증거금(`positionIM`)이라 유지증거금 여유 규칙에 맞는 값이 아니다. Bybit 설정은 격리를 받지 않는다(설정 검증) |
 | `leverage_value` | `leverage`(문자열). 0보다 큰 정수여야 한다. `2.5`는 무효 |
 | `max_leverage` | `instruments-info`의 `leverageFilter.maxLeverage`(`"100.00"` = 100). 종목마다 프로세스에서 한 번 읽는다 |
 

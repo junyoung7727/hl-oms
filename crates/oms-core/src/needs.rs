@@ -19,6 +19,10 @@ pub enum Need {
     OrderStatus {
         order_id: OrderId,
         venue_oid: Option<VenueOrderId>,
+        /// When the core accepted the order (record time). The venue cannot
+        /// have created it earlier; a gateway whose history is searched by
+        /// time windows uses it (Bybit, ADR-028 §7b).
+        accepted_at: Ts,
         why: NeedReason,
     },
     /// Fills since the given venue time.
@@ -63,6 +67,7 @@ impl Core {
                 out.push(Need::OrderStatus {
                     order_id: *id,
                     venue_oid: o.venue_oid.clone(),
+                    accepted_at: o.accepted_at,
                     why,
                 });
             }

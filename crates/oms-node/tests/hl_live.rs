@@ -120,7 +120,7 @@ ref_price_interval_ms = 1000
     let mut got = first;
     for _round in 0..4 {
         for q in [
-            QueryReq::Status { order_id: OrderId(1), venue_oid: None },
+            QueryReq::Status { order_id: OrderId(1), venue_oid: None, accepted_at: 0 },
             QueryReq::OpenOrders,
             QueryReq::Positions,
             QueryReq::Fills { since: oms_node::util::wall_us() - 3_600_000_000 },

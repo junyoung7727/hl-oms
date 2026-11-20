@@ -77,6 +77,13 @@ const WEEK_MS: u64 = 7 * 24 * 3600 * 1000;
 /// Each window starts 1 ms before the end of the last: whether the venue's
 /// bounds are inclusive is not documented. The fill keys de-duplicate.
 const OVERLAP_MS: u64 = 1;
+/// How far before its acceptance an order's history is searched: the node's
+/// clock and the venue's may differ.
+const ORDER_TIME_MARGIN_MS: u64 = 60_000;
+/// How far before `since` each fill query starts again. A row the venue
+/// lists late (its endpoints warn of delays, F20 Q10.7, Q12.9) is read on
+/// a later query; the keys de-duplicate (judgment: 2 minutes).
+const FILL_LOOKBACK_MS: u64 = 120_000;
 /// Longest margin mode passed on (journaled, so bounded).
 const ACCOUNT_MODE_MAX_LEN: usize = 64;
 
@@ -195,9 +202,14 @@ impl Queries {
     pub async fn answer(&self, q: QueryReq, session: u64) -> Answer {
         let queried_at = (self.now_us)();
         match q {
-            QueryReq::Status { order_id, .. } => {
-                Answer::of(self.status(session, order_id, queried_at).await)
-            }
+            QueryReq::Status {
+                order_id,
+                accepted_at,
+                ..
+            } => Answer::of(
+                self.status(session, order_id, accepted_at, queried_at)
+                    .await,
+            ),
             QueryReq::Fills { since } => self.fills(session, since).await,
             QueryReq::OpenOrders => Answer::of(self.open_orders(session, queried_at).await),
             QueryReq::Positions => Answer::of(self.positions(session, queried_at).await),
@@ -272,6 +284,7 @@ impl Queries {
         &self,
         session: u64,
         order_id: OrderId,
+        accepted_at: Ts,
         queried_at: Ts,
     ) -> Result<Vec<VenueInput>, QueryFail> {
         let link = exec::WIRE_ID.encode(VenueClientId {
@@ -280,8 +293,23 @@ impl Queries {
         });
         let mut params = linear();
         params.push(("orderLinkId", link.clone()));
-        for path in ["/v5/order/realtime", "/v5/order/history"] {
-            let (rows, _) = self.page(path, &params, None).await?;
+        // The history answers 7 days, the last 7 by default (F20 Q10.7). An
+        // order older than that is searched from when the core accepted it
+        // (less a margin for the clocks), so a long outage cannot hide a
+        // filled order. The docs do not say which time the window filters.
+        let from = (accepted_at / 1000).saturating_sub(ORDER_TIME_MARGIN_MS);
+        let to = (from + WEEK_MS).min(queried_at / 1000);
+        let mut since_accepted = params.clone();
+        since_accepted.push(("startTime", from.to_string()));
+        since_accepted.push(("endTime", to.max(from).to_string()));
+        let lookups = [
+            ("/v5/order/realtime", params.clone()),
+            ("/v5/order/history", params),
+            ("/v5/order/history", since_accepted),
+        ];
+        for (path, params) in &lookups {
+            let path = *path;
+            let (rows, _) = self.page(path, params, None).await?;
             let mine: Vec<&Value> = rows
                 .iter()
                 .filter(|r| r.get("orderLinkId").and_then(Value::as_str) == Some(link.as_str()))
@@ -595,11 +623,11 @@ impl Queries {
     /// whose last page cannot be told is split in two and read again.
     async fn fills(&self, session: u64, since: Ts) -> Answer {
         let end = ((self.now_us)() / 1000).saturating_sub(self.fills_lag_ms);
-        let start = since / 1000;
         let mut out = Answer::default();
-        if end <= start {
+        if end <= since / 1000 {
             return out;
         }
+        let start = (since / 1000).saturating_sub(FILL_LOOKBACK_MS);
         let mut windows: VecDeque<(u64, u64)> = VecDeque::new();
         let mut from = start;
         while from < end {
@@ -707,6 +735,8 @@ mod tests {
     const NOW_MS: u64 = 1_673_308_800_000;
     const LAG_MS: u64 = 2_000;
     const DAY_MS: u64 = 24 * 3600 * 1000;
+    /// When the core accepted the order of the status tests: 30 days ago.
+    const ACCEPTED_US: u64 = (NOW_MS - 30 * DAY_MS) * 1000;
 
     fn now_us() -> u64 {
         NOW_MS * 1000
@@ -774,6 +804,7 @@ mod tests {
                 QueryReq::Status {
                     order_id: OrderId(42),
                     venue_oid: None,
+                    accepted_at: ACCEPTED_US,
                 },
                 SESSION,
             )
@@ -815,6 +846,7 @@ mod tests {
                 QueryReq::Status {
                     order_id: OrderId(42),
                     venue_oid: None,
+                    accepted_at: ACCEPTED_US,
                 },
                 SESSION,
             )
@@ -847,6 +879,7 @@ mod tests {
                 QueryReq::Status {
                     order_id: OrderId(42),
                     venue_oid: None,
+                    accepted_at: ACCEPTED_US,
                 },
                 SESSION,
             )
@@ -859,7 +892,48 @@ mod tests {
                 queried_at: now_us()
             }]
         );
-        assert_eq!(fake.requests().len(), 2);
+        // The open-order view, the last 7 days of the history and 7 days
+        // from when the order was accepted (less a minute for the clocks).
+        let from = ACCEPTED_US / 1000 - 60_000;
+        let base = format!("category=linear&orderLinkId={}&settleCoin=USDT", link(42));
+        assert_eq!(
+            targets(&fake),
+            vec![
+                format!("/v5/order/realtime?{base}"),
+                format!("/v5/order/history?{base}"),
+                format!(
+                    "/v5/order/history?category=linear&endTime={}&orderLinkId={}&settleCoin=USDT&startTime={from}",
+                    from + 7 * DAY_MS,
+                    link(42)
+                ),
+            ]
+        );
+
+        // An order older than the history's default window is found from
+        // the time it was accepted.
+        let fake = venue();
+        fake.route("/v5/order/realtime", [ok(list(vec![], ""))]);
+        fake.route(
+            "/v5/order/history",
+            [
+                ok(list(vec![], "")),
+                ok(list(vec![order(&link(42), "Filled", "0.003")], "")),
+            ],
+        );
+        let a = queries(&fake)
+            .answer(
+                QueryReq::Status {
+                    order_id: OrderId(42),
+                    venue_oid: None,
+                    accepted_at: ACCEPTED_US,
+                },
+                SESSION,
+            )
+            .await;
+        let [VenueInput::OrderStatus(s)] = a.inputs.as_slice() else {
+            panic!("{a:?}")
+        };
+        assert_eq!(s.status.status, VenueStatus::Filled);
 
         // The history cannot be read: no conclusion.
         let fake = venue();
@@ -870,6 +944,7 @@ mod tests {
                 QueryReq::Status {
                     order_id: OrderId(42),
                     venue_oid: None,
+                    accepted_at: ACCEPTED_US,
                 },
                 SESSION,
             )
@@ -902,6 +977,7 @@ mod tests {
                     QueryReq::Status {
                         order_id: OrderId(42),
                         venue_oid: None,
+                        accepted_at: ACCEPTED_US,
                     },
                     SESSION,
                 )
@@ -1385,7 +1461,10 @@ mod tests {
                 "synced"
             ]
         );
-        let w1_end = since_ms + WEEK_MS - OVERLAP_MS;
+        // Each query starts FILL_LOOKBACK_MS before `since`: a row the
+        // venue lists late is read again.
+        let start = since_ms - FILL_LOOKBACK_MS;
+        let w1_end = start + WEEK_MS - OVERLAP_MS;
         assert_eq!(
             a.inputs[2],
             VenueInput::FillsSynced {
@@ -1411,7 +1490,7 @@ mod tests {
             ),
             ("linear", "USDT", "100")
         );
-        assert_eq!(p1["startTime"], (since_ms - 1).to_string());
+        assert_eq!(p1["startTime"], (start - 1).to_string());
         assert_eq!(p1["endTime"], w1_end.to_string());
         assert_eq!(p2["startTime"], (w1_end - 1).to_string());
         assert_eq!(p2["endTime"], end.to_string());
@@ -1493,7 +1572,8 @@ mod tests {
         let reqs = fake.requests();
         assert_eq!(reqs.len(), 4);
         assert_eq!(params(&reqs[1])["cursor"], "next%3A1");
-        let mid = since_ms + (end - since_ms) / 2;
+        let start = since_ms - FILL_LOOKBACK_MS;
+        let mid = start + (end - start) / 2;
         assert_eq!(params(&reqs[2])["endTime"], mid.to_string());
         assert_eq!(params(&reqs[3])["startTime"], (mid - 1).to_string());
         let synced: Vec<Ts> = a
@@ -1534,7 +1614,8 @@ mod tests {
         };
         assert_eq!(
             *up_to,
-            (since_ms + MAX_FILL_PAGES as u64 * (WEEK_MS - OVERLAP_MS)) * 1000 - 1
+            (since_ms - FILL_LOOKBACK_MS + MAX_FILL_PAGES as u64 * (WEEK_MS - OVERLAP_MS)) * 1000
+                - 1
         );
         // Nothing to read yet.
         let fake = venue();

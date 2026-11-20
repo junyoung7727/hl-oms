@@ -133,12 +133,12 @@ pub async fn run(published: Arc<Published>, queries: mpsc::Sender<QueryReq>, pac
         let mut still_needed: Vec<OrderId> = Vec::new();
         for need in needs {
             match need {
-                Need::OrderStatus { order_id, venue_oid, .. } => {
+                Need::OrderStatus { order_id, venue_oid, accepted_at, .. } => {
                     still_needed.push(order_id);
                     let (attempts, last) = asked.get(&order_id).copied().unwrap_or((0, now));
                     if attempts == 0 || now.duration_since(last) >= backoff(attempts) {
                         asked.insert(order_id, (attempts + 1, now));
-                        wanted.push(QueryReq::Status { order_id, venue_oid });
+                        wanted.push(QueryReq::Status { order_id, venue_oid, accepted_at });
                     }
                 }
                 // Account-level queries are paced at one per second each.

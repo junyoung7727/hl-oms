@@ -89,8 +89,8 @@
 
 | 조회 | 요청 | 처리 | 출력 | 못 읽으면 |
 |---|---|---|---|---|
-| Status | `GET /v5/order/realtime`, 없으면 `GET /v5/order/history`(category linear, settleCoin USDT, 우리 `orderLinkId`) | 우리 `orderLinkId`의 행만 본다. 상태표: `New`·`PartiallyFilled` = 열림, `Filled`, `Cancelled`(사유 `cancelType`), `Rejected`(사유 `rejectReason`). `cum` = `cumExecQty`, 시각 = `updatedTime` | `OrderStatus` 또는 둘 다 없을 때 `StatusNotFound`(첫 요청 전 시각) | 입력 없음 |
-| Fills | `GET /v5/execution/list`(linear, USDT, limit 100, cursor) | `since`부터 지금 − `fills_lag_ms`까지 7일 이하 창. 창 시작은 1ms 앞에서(경계 포함 여부가 문서에 없다). 행마다 분류표, 같은 키는 한 번 | 창마다 실행 입력들 + `FillsSynced { up_to: 창 끝 − 1µs }` | 그 창부터 멈춤(앞 창의 선언은 남는다) |
+| Status | `GET /v5/order/realtime`, 없으면 `GET /v5/order/history` 두 번: 기간 없이(최근 7일)와 코어가 주문을 받은 시각 − 1분부터 7일(category linear, settleCoin USDT, 우리 `orderLinkId`) | 우리 `orderLinkId`의 행만 본다. 상태표: `New`·`PartiallyFilled` = 열림, `Filled`, `Cancelled`(사유 `cancelType`), `Rejected`(사유 `rejectReason`). `cum` = `cumExecQty`, 시각 = `updatedTime` | `OrderStatus` 또는 셋 다 없을 때 `StatusNotFound`(첫 요청 전 시각) | 입력 없음 |
+| Fills | `GET /v5/execution/list`(linear, USDT, limit 100, cursor) | `since` − 2분부터 지금 − `fills_lag_ms`까지 7일 이하 창(2분은 늦게 실리는 행을 다음 조회가 다시 읽게 한다. 같은 키는 코어가 거른다). 창 시작은 1ms 앞에서(경계 포함 여부가 문서에 없다). 행마다 분류표, 같은 키는 한 번 | 창마다 실행 입력들 + `FillsSynced { up_to: 창 끝 − 1µs }` | 그 창부터 멈춤(앞 창의 선언은 남는다) |
 | OpenOrders | `GET /v5/order/realtime`(linear, USDT, limit 50, 모든 쪽) | 열린 상태의 행만. `remaining` = `leavesQty` | `OpenOrders` | 입력 없음 |
 | Positions | `GET /v5/position/list`(linear, USDT, limit 200, 모든 쪽) | 단방향 행만, 수량 = `side` 부호 × `size` | `Positions` | 입력 없음 |
 | Margin | `wallet-balance`(UNIFIED), `account/info`, `position/list`(모든 쪽), 처음 보는 종목은 `instruments-info` | 계좌 가치 `totalEquity`, 포지션마다 `positionValue`, 증거금 `positionIM`, 레버리지 정수, 증거금 모드 = 계좌의 `marginMode`, `maxLeverage` | `MarginReport` | `MarginReportInvalid`(응답 없음이면 입력 없음) |
@@ -119,6 +119,8 @@
 | 소수 레버리지 | 내림, 거절 | 거절. 보고 전체가 `MarginReportInvalid`, 설정은 모름으로 남는다(코어가 일반 주문을 막는 쪽). 문서는 0.01 단위를 허용하는 것으로 보인다(F20 Q8.5) |
 | `maxLeverage` | 보고마다 읽음, 프로세스당 한 번 | 한 번(종목마다 캐시). 유지증거금 규칙은 격리 포지션에만 쓰고 이 계좌는 교차다. 보고에는 0이 아닌 값이 있어야 한다 |
 | 계좌 모드 허용 목록 | 아무 값, `REGULAR_MARGIN`만 | 설정 검증이 `REGULAR_MARGIN` 밖의 값을 거절한다 |
+| 주문 내역의 기간 | 기간 없이, 접수 시각부터 | 둘 다. 기간이 없으면 최근 7일만 답한다(F20 Q10.7). 오래 꺼져 있다 켜면 체결된 옛 주문이 realtime(닫힌 주문 500건, 거래소 재시작 때 비움)과 최근 7일 내역 모두에 없어 `StatusNotFound`가 되고, 코어가 `NotPlaced`로 닫아 예약을 일찍 푼다(독립 검토가 찾음). 그래서 코어가 `Need::OrderStatus`와 `QueryReq::Status`에 주문을 받은 시각(`accepted_at`)을 싣고, 게이트웨이는 그 시각 − 1분부터 7일을 따로 묻는다. 기간이 생성 시각을 거르는지 갱신 시각을 거르는지는 문서에 없어 두 요청을 다 한다 |
+| 체결 다시 읽기 | `since`부터, 앞으로 당겨서 | `since` − 2분부터(판단). 끝을 지금 − 2초로만 잡으면 거래소가 늦게 싣는 행(펀딩·ADL·외부 체결)은 `FillsSynced` 뒤에 나타나 다시 읽히지 않는다. 우리 주문은 `cum` 검사가 `MissingFills`로 드러내지만 나머지는 아무것도 잡지 않는다(독립 검토가 찾음). 2분보다 늦은 행은 여전히 놓친다 |
 | 체결 한 번의 일 | 끝까지, 쪽 수 상한 | 30쪽. 다 읽은 창은 `FillsSynced`로 선언했으므로 다음 조회가 거기서 잇는다(400일 공백은 여러 번에 나눠 읽는다) |
 
 ## 8. 포기한 장점, 남은 위험, 가정
@@ -132,6 +134,10 @@
 - 확인하지 않음: 실제 Bybit 응답(이 단위의 시험은 loopback 가짜 서버만 쓴다).
 - 확인하지 않음: 다른 사용자 소유 파일의 거절(시험에 root가 필요하다).
 - 위험: `api.bybit.com`이 IPv6로만 닿는 경우는 생각하지 않았다. IPv4만 쓰므로 그때는 연결이 안 되어 막힌다(안전한 쪽).
+- 위험(U16c): 거래소 변경(ADL 등) 직후의 포지션 응답이 거래소 쪽에서 늦은 값이면(문서가 변동이 클 때 `position/list`의 지연을 경고한다, F20 Q12.9) 코어가 변경을 되돌리는 `PositionAdjusted`를 쓴다. ADR-023 §8의 가정(응답 시각 기준 일관성)과 같은 위험이고 감시자 W2가 다시 본다. 포지션 행의 `seq`·`updatedTime`으로 변경보다 오래된 응답을 거르는 것은 코어 입력을 바꾸는 일이라 하지 않았다.
+- 위험(U16c): 취소·거부된 주문은 주문 내역에 24시간만 남는다(F18 §1.7). 체결 없이 닫힌 주문을 하루 뒤에 물으면 "없음"이 된다. 체결이 없으므로 예약을 푸는 결과는 같지만 열려 있던 주문이면 상태 불일치가 날 수 있다.
+- 위험(U16c): `totalEquity`는 담보로 쓰지 않는 자산까지 더한다. 그런 자산이 있으면 계좌 레버리지 상한과 하루 손실이 실제 담보보다 넉넉하게 계산된다. 서브계정에 USDT만 둔다는 운영 가정이다.
+- 위험(U16c): 같은 `execTime`의 행은 정렬이 흔들릴 수 있다고 문서가 쓴다. 커서가 그런 행을 건너뛰지 않는다는 보장은 없다(중복은 걸러도 빠진 행은 못 찾는다).
 - 위험(U16c): 숫자가 소수 9자리 이상이면(코어는 1e-8 단위) 그 응답은 못 읽은 것이 된다. 증거금 보고면 보고 전체가 무효라 일반 주문이 막힌다(안전한 쪽). 실제 자릿수는 testnet에서 본다.
 - 위험(U16c): 같은 밀리초에 쪽 한도(100)의 배수만큼 실행이 있고 거래소가 마지막 다 찬 쪽에 빈 커서를 주면, 1ms 창까지 나눠도 끝을 알 수 없어 동기화가 멈춘다(오류 기록, 주문이 닫히지 않는 쪽).
 - 가정(U16c): `execFee`는 Trade에서 양수 = 비용이다. maker 리베이트의 부호는 문서에 없다(F20 Q9.5).
@@ -143,7 +149,8 @@
 - 시험(U16b, Linux PC): `venue::bybit::{sign,rest,checks}`, `venue::bybit::tests`와 `config::tests`의 새 시험 19개. 문서의 서명할 문자열, RFC 4231, Python 값, 보낸 바이트에 대한 서명(GET 질의, POST 본문), 거부 코드마다 요청 한 번, 응답 종류별 분류, 자격 파일 권한과 비밀 비출력, 시작 확인이 모두 맞을 때 읽기 요청 넷, 어긋나는 사실 12가지 각각, 묶이지 않은 IP, IP 변경과 풀리지 않는 막힘, 설정 거절 12가지.
 - 결함 10가지를 일부러 넣어 시험이 모두 잡았다: 거부 코드 분류, 서명 대상, 마스터 키, IP 미바인딩, 헤지 모드, 정산 코인, 막힘 해제, 자격 파일 권한, ADR-024 값, https.
 - 독립 검토(꼭 고칠 것 1, 고칠 것 5) 반영 뒤 결함 8가지를 더 넣어 모두 잡았다: IP 칸이 시작 칸을 덮음, cancel-all `success` 무시, 403을 한도로 봄, 데이터 디렉터리 글자 비교, 심볼릭 링크 따라감, 일반 파일 아님, IPv4 대응 주소, 500건 표시.
-- 시험(U16c, Linux PC): `venue::bybit::exec::tests` 6개, `venue::bybit::query::tests` 16개, `config::tests`의 Bybit 시험에 계좌 모드 거절 추가(주장 V-BYBIT-READ-1). 가짜 서버(경로별 응답)로 보낸 요청의 경로·질의·순서와 만든 입력 전체를 본다.
+- 시험(U16c, Linux PC): `venue::bybit::exec::tests` 6개, `venue::bybit::query::tests` 16개, `config::tests`의 Bybit 시험에 계좌 모드 거절 추가(주장 V-BYBIT-READ-1). 코어 `Need::OrderStatus`에 `accepted_at`(시나리오 시험 두 곳이 값을 본다).
+- 독립 검토(꼭 고칠 것 0, 고칠 것 3, 참고 5): 주문 내역 기간과 체결 다시 읽기는 고쳤고, 늦은 포지션 응답·`totalEquity`·정렬은 위험으로 적었다. 가짜 서버(경로별 응답)로 보낸 요청의 경로·질의·순서와 만든 입력 전체를 본다.
 
 ## 10. 재검토 조건
 

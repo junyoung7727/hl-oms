@@ -351,6 +351,7 @@ fn unknown_send_outcome_keeps_the_reservation_and_blocks_new_exposure() {
     assert_eq!(h.core.needs(), vec![Need::OrderStatus {
         order_id: a,
         venue_oid: None,
+        accepted_at: h.core.order(a).unwrap().accepted_at,
         why: needs::NeedReason::InDoubt
     }]);
 }
@@ -895,6 +896,7 @@ fn link_loss_blocks_new_orders_and_resync_is_required_after_it_returns() {
     assert!(needs.contains(&Need::OrderStatus {
         order_id: a,
         venue_oid: Some(void("v1")),
+        accepted_at: h.core.order(a).unwrap().accepted_at,
         why: needs::NeedReason::StaleEvidence
     }));
     assert!(needs.contains(&Need::OpenOrders));

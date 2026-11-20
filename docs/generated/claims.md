@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `362e5c50fdf0673e`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `c5b15bf6af860044`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 주장 77건: 통과 0, 실패 0, 미실행 10, 이전 버전 결과 67.
 
@@ -83,7 +83,7 @@
 | V-MARKET-REF-1 | 새 주문은 판단에 쓴 호가창 상태(market_ref)를 실을 수 있고, 그 값은 OrderAccepted.request로 저널 기록에 들어가 직렬화와 해석을 거쳐도 같다. market_ref가 없는 요청은 예전과 같은 바이트로 쓰인다. 같은 요청이 다른 market_ref로 다시 오면 duplicate다. 이름은 64자 이하의 [A-Za-z0-9_.:-]만 받고 거래 API는 형식이 틀린 market_ref를 해석 단계에서 거절한다 | 단위 | 미실행 | `cargo test -p oms-core --test absence_and_market_ref && cargo test -p oms-api --lib` |
 | V-TAIL-1 | 꼬리 읽기는 디스크에 더 많은 기록이 있어도 호출자가 준 내구화 번호보다 큰 기록을 돌려주지 않고, 작은 세그먼트로 회전한 저널을 끊김 없이 순서대로 읽으며, 커서 다음 번호부터 다시 시작한다. 쓰는 쪽이 잠금을 쥔 동안에도 읽고, 읽는 동안 새 쓰는 쪽이 잠금을 잡을 수 있다(잠금을 잡지 않는다). 상한 이하의 손상된 프레임이나 번호가 튀는 프레임에서는 그 앞 기록을 돌려준 뒤 오류를 내고 위치를 움직이지 않으며, 커서 앞의 손상도 오류로 알린다(끝에서 쓰는 중인 프레임은 기다린다). 기록 스키마가 바뀌어 열린 새 세그먼트와, 헤더만 있다가 새 스키마 헤더로 다시 쓰인 세그먼트를 따라가고 기록마다 스키마를 알려 준다. 엿보기는 상한 너머의 유효한 프레임을 위치를 움직이지 않고 보여 주며 잘린 마지막 프레임에서 오류 없이 멈춘다 | 단위 | 미실행 | `cargo test -p oms-journal --test tail` |
 | V-TAIL-2 | 모든 이벤트 종류(43가지)의 인스턴스를 선택 필드까지 채워 직렬화하면, 인코더가 쓰는 모든 필드 경로가 docs/contracts/tail.md의 필드 표에 있고, 표의 모든 행은 실제로 쓰이는 필드이며 타입 열이 실제 JSON 값의 종류(문자열, 정수, 불, 목록, 열거형, 객체, null 허용)와 맞는다. 통째로 읽는 행은 설정 하나와 열거형 값뿐이다. 이벤트 종류가 늘면 시험이 컴파일되지 않는다 | 소스 검사 | 미실행 | `cargo test -p oms-core --test event_fields` |
-| V-BYBIT-READ-1 | Bybit 게이트웨이의 조회 일곱 가지는 읽기만 하고, 통째로 읽을 수 있는 응답만 입력으로 넘긴다. 쪽 넘김은 커서가 비고 쪽이 덜 찼을 때만 끝으로 보고, 다 찬 쪽에 커서가 없거나 커서가 그대로이거나 쪽이 20(체결 30)을 넘으면 스냅숏을 넘기지 않는다. 주문 상태는 우리 orderLinkId의 행만 보고 realtime과 주문 내역 둘 다에 없을 때만 StatusNotFound(첫 조회 전 시각)를 낸다. 체결은 7일 이하의 창으로 읽고(창 사이 1ms 겹침, 중복 키는 한 번), 창을 다 읽은 뒤에만 그 끝 직전까지 FillsSynced를 내며, 끝을 알 수 없는 창은 반으로 나누고, 읽을 수 없는 행에서 멈춘다. 실행 행은 execType 표 하나로 Fill(우리 주문이면 order_id, 아니면 외부 체결), Funding, PositionChange(adl, takeover, delivery, settle), UnclassifiedExecution이 된다. 증거금 보고는 totalEquity, positionIM, 계좌 증거금 모드, 정수 레버리지, maxLeverage로 만들고 한 값이라도 못 읽으면 MarginReportInvalid다. 이 코드에는 주문 생성·정정·단건 취소 요청이 없다. 설정은 Bybit에서 REGULAR_MARGIN 밖의 계좌 모드 허용을 거절한다 | 단위 | 미실행 | `cargo test -p oms-node --lib venue::bybit` |
+| V-BYBIT-READ-1 | Bybit 게이트웨이의 조회 일곱 가지는 읽기만 하고, 통째로 읽을 수 있는 응답만 입력으로 넘긴다. 쪽 넘김은 커서가 비고 쪽이 덜 찼을 때만 끝으로 보고, 다 찬 쪽에 커서가 없거나 커서가 그대로이거나 쪽이 20을 넘으면 스냅숏(열린 주문, 포지션, 증거금 보고)을 넘기지 않는다. 주문 상태는 우리 orderLinkId의 행만 보고 realtime, 기간 없는 주문 내역, 코어가 주문을 받은 시각 − 1분부터 7일의 주문 내역 셋 다에 없을 때만 StatusNotFound(첫 조회 전 시각)를 낸다. 체결은 since − 2분부터 7일 이하의 창으로 읽고(창 사이 1ms 겹침, 중복 키는 한 번), 한 번에 30쪽까지 읽고 다 읽은 창까지만 선언한 채 멈추며(오류 아님), 창을 다 읽은 뒤에만 그 끝 직전까지 FillsSynced를 내며, 끝을 알 수 없는 창은 반으로 나누고, 읽을 수 없는 행에서 멈춘다. 실행 행은 execType 표 하나로 Fill(우리 주문이면 order_id, 아니면 외부 체결), Funding, PositionChange(adl, takeover, delivery, settle), UnclassifiedExecution이 된다. 증거금 보고는 totalEquity, positionIM, 계좌 증거금 모드, 정수 레버리지, maxLeverage로 만들고 한 값이라도 못 읽으면 MarginReportInvalid다. 이 코드에는 주문 생성·정정·단건 취소 요청이 없다. 설정은 Bybit에서 REGULAR_MARGIN 밖의 계좌 모드 허용을 거절한다 | 단위 | 미실행 | `cargo test -p oms-node --lib venue::bybit` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -1770,7 +1770,7 @@
 | `core/every_row_of_the_table_is_a_field_the_encoder_writes` | 미실행 |  |
 | `core/only_the_configuration_and_enums_are_read_as_a_whole` | 미실행 |  |
 
-## V-BYBIT-READ-1 — Bybit 게이트웨이의 조회 일곱 가지는 읽기만 하고, 통째로 읽을 수 있는 응답만 입력으로 넘긴다. 쪽 넘김은 커서가 비고 쪽이 덜 찼을 때만 끝으로 보고, 다 찬 쪽에 커서가 없거나 커서가 그대로이거나 쪽이 20(체결 30)을 넘으면 스냅숏을 넘기지 않는다. 주문 상태는 우리 orderLinkId의 행만 보고 realtime과 주문 내역 둘 다에 없을 때만 StatusNotFound(첫 조회 전 시각)를 낸다. 체결은 7일 이하의 창으로 읽고(창 사이 1ms 겹침, 중복 키는 한 번), 창을 다 읽은 뒤에만 그 끝 직전까지 FillsSynced를 내며, 끝을 알 수 없는 창은 반으로 나누고, 읽을 수 없는 행에서 멈춘다. 실행 행은 execType 표 하나로 Fill(우리 주문이면 order_id, 아니면 외부 체결), Funding, PositionChange(adl, takeover, delivery, settle), UnclassifiedExecution이 된다. 증거금 보고는 totalEquity, positionIM, 계좌 증거금 모드, 정수 레버리지, maxLeverage로 만들고 한 값이라도 못 읽으면 MarginReportInvalid다. 이 코드에는 주문 생성·정정·단건 취소 요청이 없다. 설정은 Bybit에서 REGULAR_MARGIN 밖의 계좌 모드 허용을 거절한다
+## V-BYBIT-READ-1 — Bybit 게이트웨이의 조회 일곱 가지는 읽기만 하고, 통째로 읽을 수 있는 응답만 입력으로 넘긴다. 쪽 넘김은 커서가 비고 쪽이 덜 찼을 때만 끝으로 보고, 다 찬 쪽에 커서가 없거나 커서가 그대로이거나 쪽이 20을 넘으면 스냅숏(열린 주문, 포지션, 증거금 보고)을 넘기지 않는다. 주문 상태는 우리 orderLinkId의 행만 보고 realtime, 기간 없는 주문 내역, 코어가 주문을 받은 시각 − 1분부터 7일의 주문 내역 셋 다에 없을 때만 StatusNotFound(첫 조회 전 시각)를 낸다. 체결은 since − 2분부터 7일 이하의 창으로 읽고(창 사이 1ms 겹침, 중복 키는 한 번), 한 번에 30쪽까지 읽고 다 읽은 창까지만 선언한 채 멈추며(오류 아님), 창을 다 읽은 뒤에만 그 끝 직전까지 FillsSynced를 내며, 끝을 알 수 없는 창은 반으로 나누고, 읽을 수 없는 행에서 멈춘다. 실행 행은 execType 표 하나로 Fill(우리 주문이면 order_id, 아니면 외부 체결), Funding, PositionChange(adl, takeover, delivery, settle), UnclassifiedExecution이 된다. 증거금 보고는 totalEquity, positionIM, 계좌 증거금 모드, 정수 레버리지, maxLeverage로 만들고 한 값이라도 못 읽으면 MarginReportInvalid다. 이 코드에는 주문 생성·정정·단건 취소 요청이 없다. 설정은 Bybit에서 REGULAR_MARGIN 밖의 계좌 모드 허용을 거절한다
 
 - 상태: **미실행**
 - 왜 중요한가: Bybit 계좌를 대조할 때 반쯤 읽은 응답으로 포지션·열린 주문을 틀리게 보거나, 닫힌 주문을 500건 한도·서비스 재시작 때문에 없다고 보거나, 펀딩·ADL을 체결로 기장하지 않는다는 전제
@@ -1782,7 +1782,7 @@
 - 판정 기준과 근거: 만든 VenueInput 전체(값까지), 보낸 요청의 경로·질의·순서·개수, 창의 시작·끝 시각, 소스에 주문 요청 경로가 없음
 - 재현: `cargo test -p oms-node --lib venue::bybit`
 - 뒷받침하는 것: C-GW(Bybit 열), C-MARGIN, ADR-028
-- 확인하지 않은 범위: 실제 Bybit 응답(문서 예시만 본떴다, testnet은 U-01 허가 뒤). 빈 커서가 마지막 쪽이라는 것, startTime·endTime이 끝값을 포함하는지, maker 체결의 orderLinkId, execFee의 maker 리베이트 부호, 펀딩·ADL 행이 실행 목록에 실리는지(T15)는 문서에 없다. 비공개 스트림과 조회의 노드 연결(U16d), 조회의 요청 한도(U17). maxLeverage는 프로세스당 한 번만 읽는다(교차 계좌에서는 어떤 규칙도 쓰지 않는다)
+- 확인하지 않은 범위: 실제 Bybit 응답(문서 예시만 본떴다, testnet은 U-01 허가 뒤). 빈 커서가 마지막 쪽이라는 것, startTime·endTime이 끝값을 포함하는지, maker 체결의 orderLinkId, execFee의 maker 리베이트 부호, 펀딩·ADL 행이 실행 목록에 실리는지(T15)는 문서에 없다. 비공개 스트림과 조회의 노드 연결(U16d), 조회의 요청 한도(U17). maxLeverage는 프로세스당 한 번만 읽는다(교차 계좌에서는 어떤 규칙도 쓰지 않는다). 주문 내역 기간이 생성 시각과 갱신 시각 중 무엇을 거르는지, 2분보다 늦게 실리는 실행 행, 변경 직후의 늦은 포지션 응답(ADR-028 §8)
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
