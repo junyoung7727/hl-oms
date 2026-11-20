@@ -118,7 +118,7 @@ fn encode_header(h: &SegmentHeader) -> Vec<u8> {
 
 /// Returns the header and the offset of the first frame, or a description of
 /// what is wrong.
-fn decode_header(buf: &[u8]) -> Result<(SegmentHeader, usize), &'static str> {
+pub(crate) fn decode_header(buf: &[u8]) -> Result<(SegmentHeader, usize), &'static str> {
     if buf.len() < 12 {
         return Err("incomplete segment header");
     }

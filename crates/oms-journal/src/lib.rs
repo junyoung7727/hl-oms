@@ -22,10 +22,12 @@
 mod frame;
 mod segment;
 mod snapshot;
+mod tail;
 
 pub use frame::{FRAME_HEADER_LEN, MAX_PAYLOAD};
 pub use segment::{Options, Recovery, SegmentHeader, TornTail, Writer, list_segments, recover, verify_all};
 pub use snapshot::{SnapshotInfo, list_snapshots, load_latest_snapshot, load_snapshot_where, write_snapshot};
+pub use tail::{Tail, TailRecord};
 
 use std::fmt;
 use std::io;

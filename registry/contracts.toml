@@ -194,6 +194,16 @@ adr = ["ADR-005", "ADR-014", "ADR-017", "ADR-021"]
 code = ["crates/oms-node/src/venue/mod.rs", "crates/oms-node/src/venue/simnet.rs", "crates/oms-node/src/venue/hyperliquid/mod.rs"]
 claims = ["V-HL-1", "V-HL-2", "V-HL-3", "V-SLICE-1", "V-GW-SEAM-1"]
 
+[[contract]]
+id = "C-TAIL"
+title = "저널 꼬리 읽기와 이벤트 필드 표"
+file = "docs/contracts/tail.md"
+summary = "잠금 없이 내구화 번호까지만 읽는다. 감시자가 이 문서만으로 열린 주문·체결·포지션을 만든다"
+events = []
+adr = ["ADR-025"]
+code = ["crates/oms-journal/src/tail.rs", "crates/oms-core/src/event.rs"]
+claims = ["V-TAIL-1", "V-TAIL-2"]
+
 # 구현됨(티켓 01~12, .scratch/margin-rules/issues/). 실제 거래소에서는 확인하지 않았다.
 [[contract]]
 id = "C-MARGIN"

@@ -219,3 +219,13 @@ alternatives = ["Bybit는 venue_enforces_expiry = false", "게이트웨이가 re
 chosen = "게이트웨이는 요청 시각 + recv_window + 1초 ≤ expires_at일 때만 보낸다. 정책 absence_not_found_needed(기본 1, Bybit 2)와 AbsenceNoted. NewOrderReq.market_ref(선택, 멱등성 비교에서 뺌)"
 gives_up = "전송 시각 + recv window로 더 일찍 푸는 것"
 revisit = "testnet에서 recv window 밖 요청이 거절되지 않을 때, 주문 내역 조회도 닫힌 주문을 잃을 때"
+
+[[adr]]
+id = "ADR-025"
+title = "OMS 밖에서 저널을 읽는 방법"
+file = "docs/adr/ADR-025-journal-tail.md"
+problem = "프로젝터와 감시자가 OMS를 방해하지 않고, 내구화되지 않은 기록을 확정으로 내보내지 않고, OMS 코드 없이 저널을 해석해야 한다"
+alternatives = ["verify_all을 주기적으로 다시 부른다", "oms-journal의 Tail(위치 기억, 상한까지 읽기, 엿보기 별도)", "OMS가 이벤트를 소켓으로 민다"]
+chosen = "Tail::new/read(durable_seq, max)/peek_beyond. 잠금·쓰기 없음. 상한 이하 손상은 오류, 위치 고정. 이벤트 필드 표(docs/contracts/tail.md)를 시험이 인코더와 맞춘다"
+gives_up = "쓰는 중인 세그먼트의 남은 부분을 매번 읽는 비용을 줄이는 최적화"
+revisit = "읽기 비용이 관측에서 보일 때, 감시자 구현 중 표로 부족할 때"
