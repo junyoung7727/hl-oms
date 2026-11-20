@@ -11,7 +11,7 @@
 ## 2. 일반적으로 만족해야 하는 성질
 
 - 한 형식 안에서 `VenueClientId`와 문자열이 일대일이다. 주문번호가 다시 쓰이지 않으면(C-ID) 거래소에 보내는 번호도 다시 쓰이지 않는다.
-- 해석은 그 형식이 쓴 문자열만 받는다. 나머지는 모두 "남의 주문"이다.
+- `WireIdForm::decode`는 그 형식이 쓴 문자열만 받는다. 나머지는 모두 "남의 주문"이다.
 - 상태 API는 게이트웨이가 실제로 쓰는 형식으로 보여 준다.
 
 ## 3. 제약
@@ -19,7 +19,7 @@
 | 사실 | 출처 |
 |---|---|
 | Bybit `orderLinkId`: 36자 이하, 숫자·영문 대소문자·`-`·`_` | Bybit v5 문서, 설계 TN 근거 파일 05 §3 |
-| Bybit `orderLinkId`의 유일성 기간·범위는 문서에 없다 | 같은 곳(미확인, testnet 항목 T1) |
+| Bybit `orderLinkId`의 유일성 기간·범위는 문서에 없다 | 같은 곳(미확인. 설계 TN의 testnet 항목 T1이며, 이 저장소 ADR-018의 T1과는 다른 항목이다) |
 | `instance_id`, `order_id`는 각각 u64 | `crates/oms-core/src/ids.rs` |
 | base32 13자리는 65비트, 12자리는 60비트 | 계산 |
 | Hyperliquid cloid와 가상 거래소는 `0x` + 32 hex | `hyperliquid/mod.rs`, `simproto.rs` |
@@ -42,7 +42,7 @@
 | 기준 | A | B | C |
 |---|---|---|---|
 | 길이 | 34자 | 27자 | 구현마다 |
-| 상태 API가 실제 형식을 앎 | 형식이 하나라 자명 | `NodeInfo.wire_id`로 | 게이트웨이 객체가 필요 |
+| 상태 API가 실제 형식을 앎 | 형식이 하나라 자명 | `NodeInfo.wire_id_form`으로 | 게이트웨이 객체가 필요 |
 | 형식 시험 | 기존 시험 | `oms-core`에서 한 번 | 구현마다 |
 | 앞자리 `0x`가 Bybit에서 뜻을 가질 위험 | 없다고 보지만 확인 안 함 | 없음 | 구현마다 |
 
@@ -54,14 +54,16 @@ B. `crates/oms-core/src/ids.rs`의 `WireIdForm { Hex128, Base32Pair }`, `crates/
 
 - `Base32Pair`는 두 반쪽을 항상 13자리로 쓴다. 고정 폭이라 일대일이고 해석이 엄격하다. 설계 TN §7.3의 "instance_id 12자"는 60비트밖에 못 담아 13자로 고쳤다.
 - 소문자 base32hex(`0-9a-v`, RFC 4648 §7)만 쓴다. 대문자, 다른 길이, 구분자 없음, 64비트를 넘는 13자리(맨 앞이 `g` 이상)는 해석하지 않는다.
-- 가상 거래소와 Hyperliquid는 `Hex128`을 선언한다. 둘의 요청 코드는 `to_hex`를 그대로 부른다(바꾸지 않음).
-- `node.rs`가 띄운 게이트웨이의 `WIRE_ID`를 `NodeInfo.wire_id`에 넣고 상태 API가 그것으로 출력한다.
+- 가상 거래소와 Hyperliquid는 `Hex128`을 선언하고, 주문·취소·상태 조회에 넣는 번호를 `<Self as VenueGateway>::WIRE_ID.encode`로 만든다. 선언한 형식과 실제로 보내는 형식이 한 곳에서 나온다. `Hex128.encode`는 `to_hex`와 같으므로 보내는 바이트는 그대로다.
+- `Hex128.decode`는 소문자 16진수만 받는다. 기존 `parse_hex`는 대문자와 부호(`+`)도 받는다(`u128::from_str_radix`). 게이트웨이가 거래소 응답을 읽는 곳(`hyperliquid/wire.rs`, `simnet.rs`)은 `parse_hex`를 그대로 쓴다. 바꾸면 Hyperliquid 응답 해석이 바뀌므로 이번 단위에서 하지 않았다.
+- `node.rs`가 띄운 게이트웨이의 `WIRE_ID`를 `NodeInfo.wire_id_form`에 넣고 상태 API가 그것으로 출력한다.
 - 체결 키는 이미 게이트웨이가 정한다(C-GW G-8). Bybit 행 `<symbol>:<execId>`(69자 이하)를 C-GW에 미리 적고 구현은 Bybit 게이트웨이 단위가 한다.
 
 ## 8. 포기한 장점, 남은 위험, 가정
 
 - 포기: 사람이 읽기 쉬운 형식(예: 10진수). 27자 base32는 눈으로 `order_id`를 읽기 어렵다. 상태 API가 둘을 나란히 보여 준다.
-- 위험: Bybit가 같은 `orderLinkId`를 일정 기간 거절하거나 다른 하위 계정과 범위를 공유하는지 모른다(T1). 형식은 재사용을 하지 않으므로 영향은 "과거 저널 사본으로 재개" 경우(가정 A-12)에 한정된다.
+- 위험: Bybit가 같은 `orderLinkId`를 일정 기간 거절하거나 다른 하위 계정과 범위를 공유하는지 모른다(설계 TN T1).
+- 위험: Hyperliquid 응답 해석은 여전히 `parse_hex`라 대문자로 돌아온 cloid도 우리 것으로 읽는다. Hyperliquid가 cloid를 우리가 보낸 대로(소문자) 돌려준다는 것은 기존 가정이다. 형식은 재사용을 하지 않으므로 영향은 "과거 저널 사본으로 재개" 경우(가정 A-12)에 한정된다.
 - 가정: 하나의 노드는 게이트웨이 하나만 띄운다. 형식은 노드 수명 동안 바뀌지 않는다.
 
 ## 9. 근거
@@ -71,5 +73,5 @@ B. `crates/oms-core/src/ids.rs`의 `WireIdForm { Hex128, Base32Pair }`, `crates/
 
 ## 10. 재검토 조건
 
-- testnet에서 `orderLinkId`의 문자 집합·길이·재사용 규칙이 문서와 다르게 나올 때(T1).
+- testnet에서 `orderLinkId`의 문자 집합·길이·재사용 규칙이 문서와 다르게 나올 때(설계 TN T1).
 - 한 노드가 거래소 둘 이상에 주문을 내게 될 때.

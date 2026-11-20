@@ -220,7 +220,14 @@ impl WireIdForm {
     /// in another form or case is foreign, not ours.
     pub fn decode(self, s: &str) -> Option<VenueClientId> {
         match self {
-            WireIdForm::Hex128 => VenueClientId::parse_hex(s),
+            WireIdForm::Hex128 => {
+                // `parse_hex` also takes upper case and a sign; this does not.
+                let body = s.strip_prefix("0x")?;
+                if !body.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+                    return None;
+                }
+                VenueClientId::parse_hex(s)
+            }
             WireIdForm::Base32Pair => {
                 let (instance, order) = s.split_once('-')?;
                 Some(VenueClientId {
@@ -278,6 +285,9 @@ mod tests {
             assert_eq!(WireIdForm::Hex128.decode(&s), Some(id));
         }
         assert_eq!(WireIdForm::Hex128.decode("0x12"), None);
+        for bad in ["0x0123456789ABCDEF000000000000002A", "0x+123456789abcdef000000000000002a", "0X0123456789abcdef000000000000002a"] {
+            assert_eq!(WireIdForm::Hex128.decode(bad), None, "{bad:?}");
+        }
     }
 
     #[test]

@@ -164,7 +164,7 @@ impl Gateway {
             return;
         };
         let started_at = wall_us();
-        let client = VenueClientId { instance_id, order_id }.to_hex();
+        let client = <Self as VenueGateway>::WIRE_ID.encode(VenueClientId { instance_id, order_id });
         let outcome = if started_at >= expires_at {
             SendOutcome::NotSent {
                 reason: "the send window had passed before the gateway could send".into(),
@@ -230,7 +230,7 @@ impl Gateway {
             return;
         };
         let started_at = wall_us();
-        let client = VenueClientId { instance_id, order_id }.to_hex();
+        let client = <Self as VenueGateway>::WIRE_ID.encode(VenueClientId { instance_id, order_id });
         let outcome = match self.requests.call(SimOp::Cancel { client: client.clone() }).await {
             Err(CallError::Connect(e)) => CancelOutcome::NotSent {
                 reason: format!("could not connect: {e}"),
@@ -261,11 +261,10 @@ impl Gateway {
         let queried_at = wall_us();
         match q {
             QueryReq::Status { order_id, .. } => {
-                let client = VenueClientId {
+                let client = <Self as VenueGateway>::WIRE_ID.encode(VenueClientId {
                     instance_id: self.instance_id,
                     order_id,
-                }
-                .to_hex();
+                });
                 let Ok(resp) = self.requests.call(SimOp::Status { client }).await else {
                     return;
                 };

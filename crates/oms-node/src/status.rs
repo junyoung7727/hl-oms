@@ -20,7 +20,7 @@ pub struct NodeInfo {
     /// "sim" or "hyperliquid:testnet" / "hyperliquid:mainnet".
     pub venue: String,
     /// The started gateway's form of the client order id (ADR-022).
-    pub wire_id: WireIdForm,
+    pub wire_id_form: WireIdForm,
     pub data_dir: String,
     pub recovery: serde_json::Value,
 }

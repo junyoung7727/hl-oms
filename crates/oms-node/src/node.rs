@@ -136,7 +136,7 @@ pub fn run(cfg: NodeConfig) -> i32 {
             instance_id,
             boot,
         };
-        let (venue_name, wire_id) = match &cfg.venue {
+        let (venue_name, wire_id_form) = match &cfg.venue {
             VenueConfig::Sim {
                 socket,
                 request_timeout_ms,
@@ -217,7 +217,7 @@ pub fn run(cfg: NodeConfig) -> i32 {
             pid: std::process::id(),
             started_at: wall_us(),
             venue: venue_name,
-            wire_id,
+            wire_id_form,
             data_dir: cfg.data_dir.display().to_string(),
             recovery: serde_json::to_value(&report).unwrap_or_default(),
         };

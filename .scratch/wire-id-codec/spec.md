@@ -42,7 +42,7 @@ The fill key is already chosen by each gateway (C-GW G-8). The Bybit row (`<symb
 
 ### D5. What does not change
 
-`to_hex`, `parse_hex` and all their callers (both gateways, `simvenue`, `oms-sim`) stay. No journal record, event or test expectation changes. `NodeInfo` gains a field; it is built only in `node.rs`.
+`to_hex` and `parse_hex` stay. The two gateways build the id they send with `<Self as VenueGateway>::WIRE_ID.encode` (the same string as `to_hex`), so the declared form and the sent form come from one place; their response parsing (`parse_hex`), `simvenue` and `oms-sim` stay. `Hex128.decode` is stricter than `parse_hex` (lower case only; review 2026-11-20). No journal record, event or test expectation changes. `NodeInfo` gains a field; it is built only in `node.rs`.
 
 ## Testing Decisions
 
