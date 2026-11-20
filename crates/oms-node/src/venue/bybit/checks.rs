@@ -27,7 +27,9 @@ pub enum Block {
     /// request may go out for `rest::IP_BAN_PAUSE`; then retried.
     IpBanned(String),
     /// The local clock may be ahead of the venue's by more than
-    /// `MAX_CLOCK_LEAD_MS`. Rechecked on the IP timer.
+    /// `MAX_CLOCK_LEAD_MS`. Blocks new orders only (`Health::create_block`):
+    /// the send-time rule is a rule for creates. Rechecked every
+    /// `boot_retry` while it lasts.
     Clock(String),
 }
 
@@ -56,6 +58,8 @@ impl From<RestError> for Block {
 
 /// The gateway's block, shared by the boot checks, the IP loop and the
 /// stream (which may report the link up only while `block` is `None`).
+/// The clock slot is apart: it keeps new orders home (`create_block`), not
+/// cancels or the link.
 ///
 /// Each source owns its slot, so a passing IP recheck cannot lift a failed
 /// boot check and a passing boot rerun cannot lift an IP mismatch. An auth
@@ -76,8 +80,8 @@ struct Slots {
 }
 
 impl Health {
-    /// The block that keeps the link down: auth first, then an IP ban,
-    /// then boot, then IP, then the clock.
+    /// The block that keeps the link down and every request home: auth
+    /// first, then an IP ban, then boot, then IP.
     pub fn block(&self) -> Option<Block> {
         let g = self.slots.lock().unwrap_or_else(|e| e.into_inner());
         g.auth
@@ -85,7 +89,20 @@ impl Health {
             .or_else(|| g.ban.clone())
             .or_else(|| g.boot.clone())
             .or_else(|| g.ip.clone())
-            .or_else(|| g.clock.clone())
+    }
+
+    /// The block that keeps a new order home: `block`, then the clock.
+    pub fn create_block(&self) -> Option<Block> {
+        self.block().or_else(|| self.clock())
+    }
+
+    /// The clock slot alone.
+    pub fn clock(&self) -> Option<Block> {
+        self.slots
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clock
+            .clone()
     }
 
     /// The key was rejected (by any request, or by the stream's auth).
@@ -369,14 +386,26 @@ pub async fn boot(
 /// more than 1 s ahead; this keeps our lead well inside that (judgment).
 pub const MAX_CLOCK_LEAD_MS: i64 = 500;
 
+/// The slowest answer the clock check judges by. The bound below adds the
+/// round trip; a slower answer could block a clock that is fine, so it
+/// proves nothing (`Unchecked`) and the last result stands (judgment).
+pub const MAX_CLOCK_RTT_MS: i64 = 250;
+
 /// The local clock's lead over the venue's, bounded from above: local time
 /// after the answer minus the venue's time in it (`/v5/market/time`,
-/// `timeNano`). The bound adds the round trip, so a slow answer can block
-/// too (the safe side). Only a lead blocks: a clock behind makes the venue
-/// refuse requests (10002), which sends nothing in doubt.
+/// `timeNano`). The bound adds the round trip (at most `MAX_CLOCK_RTT_MS`).
+/// Only a lead blocks: a clock behind makes the venue refuse requests
+/// (10002), which sends nothing in doubt.
 pub async fn check_clock(rest: &Rest) -> Result<(), Block> {
+    let before = rest.now_ms() as i64;
     let t = rest.get("/v5/market/time", &[]).await?;
     let after = rest.now_ms() as i64;
+    if after - before > MAX_CLOCK_RTT_MS {
+        return Err(Block::Unchecked(format!(
+            "the clock answer took {} ms (at most {MAX_CLOCK_RTT_MS} is judged)",
+            after - before
+        )));
+    }
     let venue_ms = t
         .get("timeNano")
         .and_then(Value::as_str)
@@ -538,6 +567,48 @@ mod tests {
             .unwrap()
             .with_clock(fixed);
         assert!(matches!(check_clock(&rest).await, Err(Block::Unchecked(_))));
+    }
+
+    #[tokio::test]
+    async fn a_slow_clock_answer_proves_nothing() {
+        use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
+        // The local clock moves `STEP` ms at each reading. The check reads
+        // it three times (before, to sign, after): the answer takes two
+        // steps. The venue's time equals the last reading (no lead).
+        static T: AtomicU64 = AtomicU64::new(0);
+        static STEP: AtomicU64 = AtomicU64::new(0);
+        fn ticking() -> u64 {
+            T.fetch_add(STEP.load(SeqCst), SeqCst)
+        }
+        for (step, judged) in [(125, true), (126, false)] {
+            T.store(CLOCK_MS, SeqCst);
+            STEP.store(step, SeqCst);
+            let api = FakeHttp::start(Answer::Reply(404, "{}".into()));
+            let venue_ns = u128::from(CLOCK_MS + 2 * step) * 1_000_000;
+            api.route("/v5/market/time", [ok(json!({"timeSecond": "1", "timeNano": venue_ns.to_string()}))]);
+            let rest = Rest::new(&api.url(), Arc::new(Credentials::new("K", "S")), 5000, Duration::from_millis(500))
+                .unwrap()
+                .with_clock(ticking);
+            let r = check_clock(&rest).await;
+            if judged {
+                assert_eq!(r, Ok(()), "{step}");
+            } else {
+                assert!(matches!(&r, Err(Block::Unchecked(e)) if e.contains("252 ms")), "{r:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_clock_slot_blocks_creates_only() {
+        let h = Health::default();
+        h.set_clock(Some(Block::Clock("ahead".into())));
+        assert_eq!(h.block(), None, "the link and cancels stay");
+        assert!(matches!(h.create_block(), Some(Block::Clock(_))));
+        h.set_boot(Some(Block::Account("hedge".into())));
+        assert!(matches!(h.create_block(), Some(Block::Account(_))), "the general block comes first");
+        h.set_boot(None);
+        h.set_clock(None);
+        assert_eq!(h.create_block(), None);
     }
 
     #[tokio::test]

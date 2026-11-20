@@ -65,11 +65,13 @@ pub fn cancel_body(symbol: &str, link: &str) -> Value {
 /// ahead. So a request sent at `ts_ms` is processed by `expires_at` only if
 /// `ts + recv_window + 1 s ≤ expires_at`.
 pub fn fits_expiry(ts_ms: u64, recv_window_ms: u64, expires_at: Ts) -> bool {
-    let last_us = ts_ms
-        .saturating_add(recv_window_ms)
-        .saturating_add(1_000)
-        .saturating_mul(1_000);
-    last_us <= expires_at
+    last_taken_ms(ts_ms, recv_window_ms).saturating_mul(1_000) <= expires_at
+}
+
+/// The latest local time (ms) the venue can still take a request stamped
+/// `ts_ms`, under the same rule as `fits_expiry`.
+pub fn last_taken_ms(ts_ms: u64, recv_window_ms: u64) -> u64 {
+    ts_ms.saturating_add(recv_window_ms).saturating_add(1_000)
 }
 
 /// What the gateway learns from an HTTP answer besides its class.
@@ -221,12 +223,15 @@ impl Orders {
                 held.release();
                 (SendOutcome::NotSent { reason: e }, Effect::None)
             }
-            Err(e) => (
-                SendOutcome::Unknown {
-                    reason: e.to_string(),
-                },
-                Effect::None,
-            ),
+            Err(e) => {
+                held.unanswered(last_taken_ms(ts, self.rest.recv_window_ms()));
+                (
+                    SendOutcome::Unknown {
+                        reason: e.to_string(),
+                    },
+                    Effect::None,
+                )
+            }
             Ok((status, text)) => {
                 let a = answer::classify(status, &text);
                 let fx = effect(status, &a);
@@ -258,12 +263,15 @@ impl Orders {
                 held.release();
                 (CancelOutcome::NotSent { reason: e }, Effect::None)
             }
-            Err(e) => (
-                CancelOutcome::Unknown {
-                    reason: e.to_string(),
-                },
-                Effect::None,
-            ),
+            Err(e) => {
+                held.unanswered(last_taken_ms(ts, self.rest.recv_window_ms()));
+                (
+                    CancelOutcome::Unknown {
+                        reason: e.to_string(),
+                    },
+                    Effect::None,
+                )
+            }
             Ok((status, text)) => {
                 let a = answer::classify(status, &text);
                 let fx = effect(status, &a);
@@ -275,7 +283,8 @@ impl Orders {
 
 /// A taken slot. Dropped, it finishes the request now (it may have left:
 /// it counts one more window); `release` frees it when nothing left the
-/// host. A request whose task is cancelled mid-flight still finishes.
+/// host; `unanswered` finishes it at the request's last possible arrival.
+/// A request whose task is cancelled mid-flight still finishes.
 struct Held<'a> {
     orders: &'a Orders,
     slot: Option<Slot>,
@@ -285,6 +294,19 @@ impl Held<'_> {
     fn release(mut self) {
         if let Some(slot) = self.slot.take() {
             self.orders.budget().release(slot);
+        }
+    }
+
+    /// The request left and no answer came (a timeout, a dropped
+    /// connection): it may still reach the venue until `last_ms` on the
+    /// local clock (`last_taken_ms`), so it finishes then, not now.
+    fn unanswered(mut self, last_ms: u64) {
+        if let Some(slot) = self.slot.take() {
+            let wait_us = last_ms
+                .saturating_sub(self.orders.rest.now_ms())
+                .saturating_mul(1_000);
+            let end = self.orders.mono_us().saturating_add(wait_us);
+            self.orders.budget().finish(slot, end);
         }
     }
 }
@@ -622,17 +644,19 @@ mod tests {
         assert_eq!(creates, 9);
     }
 
-    /// A slow answer keeps its slot until one window after it came: eight
-    /// creates that each took 0.3 s let the ninth go only 1.3 s after the
-    /// start, not 1 s. A create refused at connect frees its slot at once.
+    /// A request with no answer may still arrive until its stamp plus the
+    /// receive window plus 1 s, and counts one window after that: eight
+    /// creates that timed out after 0.3 s, with a 0.1 s receive window and
+    /// a clock that stands still, let the ninth go only 0.3 + 1.1 + 1 s
+    /// after the start. A create refused at connect frees its slot at once.
     #[tokio::test]
-    async fn a_slot_counts_until_one_second_after_the_answer() {
+    async fn a_slot_without_an_answer_counts_until_its_last_arrival_plus_a_second() {
         let api = FakeHttp::start(Http::Reply(404, "{}".into()));
         api.route(CREATE_PATH, [Http::Hang]);
         let rest = Rest::new(
             &api.url(),
             Arc::new(Credentials::new("KEY", "SECRET")),
-            5000,
+            100,
             Duration::from_millis(300),
         )
         .unwrap()
@@ -655,7 +679,7 @@ mod tests {
         ));
         let ninth = start.elapsed();
         assert!(
-            ninth >= Duration::from_millis(1_300),
+            ninth >= Duration::from_millis(2_400),
             "the ninth went out after {ninth:?}"
         );
         // Refused at connect: nothing left, nothing counts.

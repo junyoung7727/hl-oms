@@ -23,6 +23,8 @@ The Bybit gateway answers every order and cancel with `NotSent` (U16d). The OMS 
 - Cancel: by `orderLinkId` (the wire id); `orderId` when known is not needed. Codes 110001/110008/110010 = `Rejected` (the core asks for the status).
 - Boot check: the configured `px_tick` and `qty_step` must be multiples of the venue's `tickSize` and `qtyStep` (else `account` block): what the venue does with an order off its steps is undocumented.
 - Clock (review): `/v5/market/time` before the boot checks and on the IP timer; a possible local lead over 500 ms (round trip counted as lead) blocks (`clock`). G-4 relies on it.
+- Clock (re-review): a round trip over 250 ms is not judged (`Unchecked`); the clock block keeps creates home only (G-4 is a create rule), not cancels or the link; rechecked every `boot_retry` while it blocks; a ban met by the clock check ends the round.
+- Budget (re-review): a request sent with no answer counts until `ts + recv_window + 1 s` (its last possible arrival, local clock) plus the window.
 - 10018 (IP rate limit) = `Rejected` plus the ban pause (review).
 
 ## Testing Decisions (U17a)

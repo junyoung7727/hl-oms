@@ -36,7 +36,8 @@ pub struct Timing {
     pub ping: Duration,
     /// Auth and subscribe must both be confirmed within this time.
     pub handshake: Duration,
-    /// Boot checks that did not pass are run again this often.
+    /// Boot checks that did not pass, and a clock check that blocks, are
+    /// run again this often.
     pub boot_retry: Duration,
     /// The IP check (`ip_check_secs`).
     pub ip_check: Duration,
@@ -214,25 +215,29 @@ impl Gateway {
     // ---- checks ---------------------------------------------------------------
 
     /// The boot checks until they pass, then the IP check on its timer; the
-    /// clock check on both.
+    /// clock check on both, and every `boot_retry` while it blocks.
     /// Stops for good once the key is rejected.
     async fn checks_loop(self: Arc<Self>) {
         let mut booted = false;
+        let mut ip_due = tokio::time::Instant::now();
         loop {
             if self.health.auth_rejected() {
                 return;
             }
             if !self.quiet() {
                 // The clock first: its slot is set before a passing boot run
-                // clears the boot slot, so the link never comes up unchecked.
-                // Before the boot checks pass a missing answer blocks; after,
-                // the last result stands (as for the IP).
+                // clears the boot slot, so no order leaves unchecked.
+                // Before the boot checks pass a missing or slow answer
+                // blocks; after, the last result stands (as for the IP).
                 match checks::check_clock(&self.rest).await {
                     Err(Block::Unchecked(e)) if booted => {
-                        warn!("the clock check got no answer; the last result stands", "error": e)
+                        warn!("the clock check proved nothing; the last result stands", "error": e)
                     }
                     r => self.record(r, Health::set_clock),
                 }
+            }
+            // A ban met by the clock check ends this round.
+            if !self.quiet() && (!booted || tokio::time::Instant::now() >= ip_due) {
                 if booted {
                     match checks::recheck_ip(
                         &self.rest,
@@ -266,9 +271,10 @@ impl Gateway {
                     }
                     self.record(r, Health::set_boot);
                 }
+                ip_due = tokio::time::Instant::now() + self.timing.ip_check;
             }
-            let wait = if booted {
-                self.timing.ip_check
+            let wait = if booted && self.health.clock().is_none() {
+                ip_due.saturating_duration_since(tokio::time::Instant::now())
             } else {
                 self.timing.boot_retry
             };
@@ -573,7 +579,7 @@ impl Gateway {
 
     // ---- commands -------------------------------------------------------------------
 
-    /// Whether a request may leave now: no block of any kind.
+    /// Whether a cancel may leave now: no block (the clock does not count).
     fn allowed(&self) -> Result<(), String> {
         if self.quiet() {
             return Err(self
@@ -582,6 +588,15 @@ impl Gateway {
                 .map_or_else(|| "requests are paused".to_string(), |b| b.to_string()));
         }
         match self.health.block() {
+            Some(b) => Err(b.to_string()),
+            None => Ok(()),
+        }
+    }
+
+    /// Whether a new order may leave now: `allowed`, and the clock.
+    fn create_allowed(&self) -> Result<(), String> {
+        self.allowed()?;
+        match self.health.create_block() {
             Some(b) => Err(b.to_string()),
             None => Ok(()),
         }
@@ -629,7 +644,7 @@ impl Gateway {
                 link: &wire_id,
                 expires_at,
             };
-            self.orders.create(&c, || self.allowed()).await
+            self.orders.create(&c, || self.create_allowed()).await
         } else {
             (
                 SendOutcome::NotSent {
@@ -754,7 +769,7 @@ pub(crate) fn spawn_with(
     )?);
     info!("bybit gateway starting", "network": cfg.network.clone(), "sub_account_uid": cfg.sub_account_uid);
     let health = gw.health();
-    let view: BlockView = Arc::new(move || health.block().map(|b| b.to_string()));
+    let view: BlockView = Arc::new(move || health.create_block().map(|b| b.to_string()));
     start(gw, ports, max_concurrent);
     Ok((format!("bybit:{}", cfg.network), view))
 }
@@ -1632,6 +1647,16 @@ mod tests {
         }
     }
 
+    fn cancel_cmd(order: u64, symbol: &str) -> VenueCommand {
+        VenueCommand::SendCancel {
+            order_id: OrderId(order),
+            instance_id: INSTANCE,
+            attempt: 1,
+            instrument: InstrumentId::new(symbol).unwrap(),
+            venue_oid: None,
+        }
+    }
+
     fn results(r: &Rig) -> Vec<VenueInput> {
         r.inputs()
             .into_iter()
@@ -1716,7 +1741,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_local_clock_ahead_of_the_venue_keeps_the_link_down_and_orders_home() {
+    async fn a_local_clock_ahead_of_the_venue_keeps_orders_home_but_not_cancels_or_the_link() {
         let api = rest_venue("REGULAR_MARGIN");
         // The venue says 2023: the local clock is years ahead.
         api.route(
@@ -1724,16 +1749,31 @@ mod tests {
             [ok(json!({"timeSecond": "1700000000", "timeNano": "1700000000000000000"}))],
         );
         api.route(orders::CREATE_PATH, [ok(json!({"orderId": "o-1"}))]);
+        api.route(orders::CANCEL_PATH, [ok(json!({}))]);
         let ws = FakeWs::start(GOOD).await;
-        let r = rig(&api, &ws);
-        r.until("the clock block", |r| r.block().is_some_and(|b| b.starts_with("clock:"))).await;
+        // The IP timer is long: the clock recheck runs on its own.
+        let slow_ip = Timing {
+            ip_check: Duration::from_secs(60),
+            ..timing()
+        };
+        let r = rig_with(&api, &ws, slow_ip, 256);
+        r.until("the link", up).await;
+        assert!(r.gw.health().clock().is_some(), "the clock blocks");
         r.commands.send(order_cmd(9, "BTCUSDT")).await.unwrap();
         r.until("one result", |r| results(r).len() == 1).await;
         assert!(matches!(&results(&r)[0], VenueInput::SendResult { outcome: SendOutcome::NotSent { reason }, .. } if reason.starts_with("clock:")));
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        assert!(!up(&r), "the link came up with the clock ahead");
-        assert_eq!(ws.attempts(), 0);
         assert!(posts(&api).is_empty());
+        r.commands.send(cancel_cmd(9, "BTCUSDT")).await.unwrap();
+        r.until("the cancel result", |r| results(r).len() == 2).await;
+        assert!(matches!(&results(&r)[1], VenueInput::CancelResult { outcome: CancelOutcome::Confirmed, .. }));
+        assert_eq!(posts(&api), vec![orders::CANCEL_PATH.to_string()]);
+        // Rechecked every boot_retry while it blocks.
+        let reads = || api.requests().iter().filter(|q| q.path() == "/v5/market/time").count();
+        let n = reads();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(reads() >= n + 3, "{} → {}", n, reads());
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(up(&r), "the link stays up with the clock ahead");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
