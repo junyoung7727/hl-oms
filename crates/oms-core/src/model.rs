@@ -250,6 +250,24 @@ pub enum Scope {
     Strategy(StrategyId),
 }
 
+/// Why a position was adjusted. Not written for `Operator`, so an operator
+/// adjustment keeps the bytes of record schema 1.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdjustReason {
+    /// The operator's `adjust-position`.
+    #[default]
+    Operator,
+    /// The core took the venue's position after a venue-made change.
+    SnapshotAfterVenueChange,
+}
+
+impl AdjustReason {
+    pub fn is_operator(&self) -> bool {
+        *self == AdjustReason::Operator
+    }
+}
+
 /// Which ledger a position adjustment or an external fill is booked to.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -325,6 +343,11 @@ pub enum MismatchKind {
     StatusConflict,
     CancelStuck,
     ParkedFillOverflow,
+    /// The venue moved a position on its own: auto-deleveraging, takeover
+    /// of a liquidated position, delivery or settlement (U13b).
+    VenuePositionChange,
+    /// The gateway got an execution it could not classify (U13b).
+    UnclassifiedExecution,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -517,4 +540,15 @@ pub struct Stats {
     pub external_fills: u64,
     pub closed: u64,
     pub purged: u64,
+    /// Funding payments booked (U13b). Not written while zero, so the
+    /// state of a run without them keeps its bytes and its digest.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub funding_payments: u64,
+    /// Position changes made by the venue (U13b). Not written while zero.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub venue_changes: u64,
+}
+
+fn is_zero(v: &u64) -> bool {
+    *v == 0
 }

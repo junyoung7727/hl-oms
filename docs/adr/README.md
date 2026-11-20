@@ -30,3 +30,4 @@
 | [ADR-020](ADR-020-md-archiver-input-rules.md) | 아카이버가 계약에 없는 다섯 곳(종목정보 응답, 전날 상태, 완료 표시, 보존, update_id 메타데이터)을 정하는 방법 | 시세 |
 | [ADR-021](ADR-021-venue-gateway-trait.md) | 게이트웨이 trait 하나와 구동기 하나, 지금 쓰는 네 가지만(동작 변화 없음) | 거래소 |
 | [ADR-022](ADR-022-wire-id-form.md) | 거래소마다 고객 주문번호 형식(16진수 32자리, base32 27자)을 따로 두고 상태 API도 그 형식으로 | 거래소 |
+| [ADR-023](ADR-023-venue-made-executions.md) | 펀딩·거래소가 만든 포지션 변경·분류 못 한 실행을 저널에 따로 기록하고 불일치로 막음, 기록 스키마 2 | 거래소 |

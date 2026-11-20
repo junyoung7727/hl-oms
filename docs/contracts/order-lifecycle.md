@@ -127,6 +127,20 @@ stateDiagram-v2
 코어에 들어온 체결 통보가 기장되지 않는 경우는 셋뿐이다: 수량이 0 이하인 것, 이미 기장됐거나 대기 중인 키, 바닥 아래의 재전달(`the_three_ways_a_fill_input_changes_nothing`).
 게이트웨이가 코어로 넘기지 않는 체결이 하나 있다: 같은 계좌의 spot 체결처럼 perp 종목 목록에 없는 것. 경고 로그만 남는다([C-GW](gateway.md)).
 
+### 우리 주문의 체결이 아닌 실행([ADR-023](../adr/ADR-023-venue-made-executions.md))
+
+거래소는 체결과 같은 흐름으로 다른 실행도 보낸다(Bybit `execType`). 게이트웨이가 분류해 아래 입력으로 넘긴다. 키는 체결 키와 같은 집합에서 중복을 거른다(이미 본 키, 바닥 아래의 시각은 무시).
+
+| 입력 | 이벤트 | 변경 | 차단 |
+|---|---|---|---|
+| `Funding { key, instrument, amount, rate, venue_ts }`(현금만, `amount` 양수 = 계좌가 냄) | `FundingBooked` | 키 등록, 통계. 포지션·주문·예약·체결 수는 그대로 | 없음 |
+| `PositionChange { key, kind: adl\|takeover\|delivery\|settle, instrument, qty(부호 있음), px, venue_ts }` | `VenuePositionChanged` + `VenuePositionChange` 불일치 | 계좌와 미귀속 장부의 포지션에 `qty`를 더함, 키 등록, 그 종목을 "거래소 포지션 대기"로 표시 | 불일치 차단(감소 전용은 통과, 증거금 정책이 있을 때) |
+| `UnclassifiedExecution { key, instrument, exec_type, detail, venue_ts }` | `UnclassifiedExecutionNoted` + `UnclassifiedExecution` 불일치 | 키를 따로 둔 집합에 등록(같은 키가 나중에 체결로 오면 기장된다). 기장하지 않음 | 같음 |
+
+거래소 포지션 대기 중인 종목은, 현재 링크 세션의 포지션 응답 중 변경 기록 시각보다 뒤에 물은 응답이면서 그 종목에 열린 수량과 대기 체결이 없을 때의 첫 응답이 포지션을 정한다(조회 시각 이후 체결이 없을 때. 기존 규칙). 우리 주문이 아직 체결될 수 있는 동안 맞추면 오는 중인 체결을 두 번 센다. 그동안은 기존 범위 검사를 받는다. 다르면 `PositionAdjusted { ledger: unattributed, delta, reason: snapshot_after_venue_change }`, 같으면 `VenueChangeSettled`. 어느 쪽이든 대기가 끝난다. 그래서 저널만 읽어도 포지션 = 기장된 체결 + 외부 체결 + `VenuePositionChanged` + `PositionAdjusted` 수량의 합이다.
+
+우리 주문이 아닌 주문의 체결(Bybit `Trade` + 모르는 `orderLinkId`)은 이 표가 아니라 위 7(외부 체결)로 간다.
+
 ## C-CANCEL 취소
 
 | 항목 | 내용 |

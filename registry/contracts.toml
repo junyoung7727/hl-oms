@@ -60,10 +60,10 @@ title = "체결 기장"
 file = "docs/contracts/order-lifecycle.md"
 anchor = "c-fill-체결-기장"
 summary = "체결 키로 한 번만 기장한다. 주인을 모르는 체결은 대기시키고, 버리지 않는다"
-events = ["fill_booked", "fill_parked", "fill_unparked", "external_fill_booked"]
+events = ["fill_booked", "fill_parked", "fill_unparked", "external_fill_booked", "funding_booked", "venue_position_changed", "unclassified_execution_noted"]
 adr = ["ADR-007"]
 code = ["crates/oms-core/src/decide.rs", "crates/oms-core/src/core.rs"]
-claims = ["V-FILL-1", "V-EXT-1", "V-MIS-1", "V-FUZZ-1"]
+claims = ["V-FILL-1", "V-EXT-1", "V-MIS-1", "V-FUZZ-1", "V-VENUE-EXEC-1"]
 
 [[contract]]
 id = "C-CANCEL"
@@ -96,7 +96,7 @@ summary = "스냅샷 + 이후 기록의 이벤트 적용. 외부 효과 없음. 
 events = []
 adr = ["ADR-003", "ADR-011", "ADR-013"]
 code = ["crates/oms-node/src/recovery.rs", "crates/oms-journal/src/segment.rs"]
-claims = ["V-JRN-1", "V-JRN-2", "V-JRN-3", "V-JRN-5", "V-REPLAY-1", "V-BOOT-2"]
+claims = ["V-JRN-1", "V-JRN-2", "V-JRN-3", "V-JRN-5", "V-REPLAY-1", "V-BOOT-2", "V-SCHEMA-2-1"]
 
 [[contract]]
 id = "C-SNAP"
@@ -148,10 +148,10 @@ title = "불일치와 조정"
 file = "docs/contracts/reconciliation.md"
 anchor = "c-mismatch-불일치"
 summary = "차이는 기록되고 신규 주문을 막는다. 운영자가 건별로 확인하고 명시적으로 조정한다"
-events = ["mismatch_raised", "mismatch_acked", "position_adjusted"]
+events = ["mismatch_raised", "mismatch_acked", "position_adjusted", "venue_change_settled"]
 adr = ["ADR-014"]
 code = ["crates/oms-core/src/decide.rs"]
-claims = ["V-RECON-1", "V-EXT-1", "V-MIS-1"]
+claims = ["V-RECON-1", "V-EXT-1", "V-MIS-1", "V-VENUE-EXEC-1"]
 
 [[contract]]
 id = "C-OVERLOAD"

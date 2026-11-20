@@ -26,6 +26,10 @@ _Avoid_: exchange, HL (in rule text)
 The part of the OMS that talks to one venue. It implements the `VenueGateway` trait (send an order, send a cancel, answer a query, start its long-running tasks); one driver runs its command and query loops (ADR-021).
 _Avoid_: connector, adapter (adapter is the market-data term)
 
+**Venue-made execution** (거래소가 만든 실행):
+An execution the venue reports in the same stream as fills that is not a fill of an order of ours: a funding payment (cash only), a venue position change (auto-deleveraging, takeover of a liquidated position, delivery, settlement) or an execution the gateway could not classify. A trade of someone else's order is not one: it is an external fill (ADR-023).
+_Avoid_: system trade, non-trade fill
+
 **Wire id form** (고객 주문번호 형식):
 How a gateway writes the client order id (`instance_id` with `order_id`) for its venue: `Hex128` (`0x` + 32 hex, Hyperliquid and the simulated venue) or `Base32Pair` (27 characters, Bybit `orderLinkId`). Each gateway declares one as `WIRE_ID`; decoding accepts only that exact form (ADR-022).
 _Avoid_: cloid (Hyperliquid's word for one form), link id

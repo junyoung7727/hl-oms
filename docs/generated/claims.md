@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `a6db4678b200c53e`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `649bedcf18b8770b`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
-주장 70건: 통과 0, 실패 0, 미실행 3, 이전 버전 결과 67.
+주장 72건: 통과 0, 실패 0, 미실행 5, 이전 버전 결과 67.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -77,6 +77,8 @@
 | V-MARGIN-12 | 시뮬레이션의 가상 거래소는 계좌 가치를 자기 모형으로 계산한다: 현금 + 포지션 × 기준 가격. 체결은 낸 값과 수수료만큼, 펀딩은 그 금액만큼 현금을 줄이고, 가격 변화는 포지션 가치를 바꾼다. 손으로 푼 예(입금 100, 100에 0.5 매수와 수수료 0.01, 가격 104, 펀딩 0.1 %)에서 계좌 가치는 99.99, 101.99, 101.938이다. 가격이 움직이지 않아도 수수료와 펀딩만으로 계좌가 기준 금액보다 5 %를 넘게 내려가면 감소 전용 상태로 들어간다(100에서 95.00은 아니고 94.99는 들어간다). 가상 거래소는 포지션을 키우거나 반대쪽으로 넘기는 감소 전용 주문을 거절하고, 걸려 있는 감소 전용 주문은 남은 포지션만큼만 체결한 뒤 나머지를 취소한다. 증거금 정책을 켠 임의 순서의 실행(체결, 가격 변화, 펀딩, 운영자 해제, 그리고 margin_lossy에서는 보고 유실·지연·무응답, 링크 단절, 재시작)의 매 입력 뒤에: 받아들인 일반 주문은 신선한 보고가 있었고 노출이 계좌 가치의 2배 이내이거나 노출을 올리지 않았다. 감소 전용 상태에 들어가면 열려 있는 일반 주문마다 취소 요청이 있고, 그 상태인 동안 일반 주문은 받아들여지지 않는다. 감소 전용 상태는 증거금 보고로만 들어가고 운영자의 해제로만 끝난다(재시작, 새 UTC 날, 회복된 계좌 가치는 끝내지 않는다). 보고가 한도보다 오래 끊긴 뒤의 틱이 끝나면 열려 있는 일반 주문마다 취소 요청이 있다. 증거금 정책이 없는 기존 프로파일 일곱 개는 seed 다섯 개씩 main(84db0f9)에서 기록한 것과 같은 저널을 쓴다. 가상 시간 50시간짜리 실행(margin_days: UTC 자정 1시간 전에 시작해 자정을 세 번 넘고, 그 사이에 재시작, 링크 단절, 손실, 출금과 입금, 운영자의 해제와 기준 재설정이 섞인다)에서도 위 검사가 매 입력 뒤에 성립하고, 기록된 보고가 그 전의 기준 금액보다 5 %를 넘게 낮으면 그 보고가 새 날의 기준을 정하는 보고여도 계좌는 감소 전용 상태가 되고, 저널의 기준 금액은 실행마다 자정을 정확히 세 번 넘고, 재시작과 새 날은 감소 전용 상태를 끝내지 않는다. 정해진 순서 하나(자정을 넘는 20초의 조회 끊김 동안 100에서 6 출금, 재시작, 자정 두 번 더)에서 새 날의 첫 보고 94는 상태를 걸고 나서 기준이 되고, 저널에는 날마다 기준이 하나다(100, 94, 100, 99). 저널의 증거금 기록(입력이 증거금 보고인 기록)은 조회 한 번에 하나를 넘지 않는다: 조용한 하루는 조회 17 280번에 기록 17 280건이고, 50시간 실행에서 기록 수는 조회 수 이하이고 같은 조회의 답은 두 번 기록되지 않는다 | 시뮬레이션 | 이전 버전 결과 | `cargo test -p oms-sim --test sim -- world_ a_loss_made profile_margin margin_journal existing_profiles --nocapture   (실패 시: OMS_SIM_PROFILE=<이름> OMS_SIM_SEED=<n>)` |
 | V-MARGIN-10 | Hyperliquid 게이트웨이는 문서의 clearinghouseState 응답 예를 증거금 보고 입력으로 옮긴다: 계좌 가치는 marginSummary.accountValue, 포지션마다 종목, 부호 있는 수량, 포지션 가치, 사용 증거금, 증거금 방식, 레버리지, 최대 레버리지. 어느 포지션이든 maxLeverage가 없거나 0이거나 정수가 아니면 보고 전체를 사유와 함께 거부 입력(MarginReportInvalid)으로 바꾸고, 멀쩡한 다른 포지션도 보고하지 않는다. 계좌 가치, 수량, 포지션 가치, 사용 증거금, 레버리지 가운데 하나라도 없거나 읽을 수 없을 때, 증거금 방식이 isolated도 cross도 아닐 때, 포지션 목록이 없을 때도 같다. 어떤 값도 0이나 기본값으로 채우지 않고 어떤 포지션도 건너뛰지 않는다. 설정에 없는 종목의 포지션도 보고에 남는다(번역 함수는 설정된 종목을 받지 않는다). activeAssetData 응답 예는 그 종목의 거래소 설정 입력(증거금 방식, 레버리지)이 된다. 방식이 isolated도 cross도 아니거나, 레버리지가 정수가 아니거나, 응답이 다른 종목의 것이면 입력을 만들지 않는다(설정은 모름으로 남아 그 종목이 막힌다). userAbstraction 응답(문자열 하나)은 글자 그대로 계좌 모드 입력이 된다. 문서에 없는 문자열을 문서에 있는 값으로 바꾸지 않고, 문자열이 아니거나 64자를 넘으면 입력을 만들지 않는다. 세 조회의 요청 본문은 문서의 것과 같다(clearinghouseState, activeAssetData, userAbstraction). 게이트웨이의 요청 예산은 취소를 막지 않으므로 취소 500건 뒤에는 조회가 기다린다: 가득 찬 예산(1200)에서는 700이 남아 증거금 조회가 바로 나가고, 시작 직후(600)에는 100이 남아 10.1초, 빈 예산에서는 15.1초를 기다린다 | 단위 | 이전 버전 결과 | `cargo test -p oms-node --lib venue::hyperliquid` |
 | V-WIRE-ID-1 | 고객 주문번호 형식 Base32Pair는 VenueClientId와 일대일이고 27자(36자 이하, 0-9a-v와 -)이며 같은 입력에 같은 문자열을 내고, 서로 다른 100만 개 주문에 서로 다른 100만 개 문자열을 낸다. 해석은 그 형식이 쓴 문자열만 받는다(대문자·다른 길이·다른 구분자·64비트 초과·16진수 형식은 None). Hex128은 to_hex와 같은 문자열을 내고 소문자 16진수만 해석하며, 가상 거래소와 Hyperliquid 게이트웨이는 Hex128을 선언하고 보내는 번호를 그 형식으로 만든다 | 단위 | 미실행 | `cargo test -p oms-core --lib ids::tests && cargo test -p oms-node --lib venue::tests` |
+| V-VENUE-EXEC-1 | 펀딩 입력은 포지션·주문·예약·체결 수를 바꾸지 않고 한 번만 기록된다. 거래소 포지션 변경은 부호 있는 수량을 계좌와 미귀속 장부에 더하고 VenuePositionChange 불일치로 일반 주문을 막으며(감소 전용은 통과) 재생 뒤에도 남는다. 분류 못 한 실행은 기장 없이 UnclassifiedExecution 불일치로 막는다. 변경 뒤 그보다 늦게 물은 현재 세션의 포지션 응답 중 그 종목에 열린 주문과 대기 체결이 없을 때의 첫 응답이 다르면 PositionAdjusted(snapshot_after_venue_change) 한 건으로 맞추고 같으면 VenueChangeSettled만 남기며(열린 주문이 있는 동안은 맞추지 않아 오는 중인 체결을 두 번 세지 않는다), 저널만으로 계산한 포지션이 거래소 값과 같다. 분류 못 한 실행의 키는 같은 키로 나중에 온 체결의 기장을 막지 않는다. 운영자 조정은 reason 없이 스키마 1과 같은 바이트로 쓰인다 | 단위 | 미실행 | `cargo test -p oms-core --test venue_changes` |
+| V-SCHEMA-2-1 | 이 빌드는 기록 스키마 2를 쓰고 1과 2를 읽는다. 기록 스키마 1로 쓴 저널(체결, 운영자 조정, 정지 포함)을 복구하면 실시간 코어와 같은 상태(다이제스트 포함)가 되고, 그 뒤에 스키마 2로 이어 쓴 기록은 새 세그먼트에 들어가며, 두 세그먼트를 함께 복구해도 실시간 상태와 같고 --re-decide 검사도 통과한다 | 통합 | 미실행 | `cargo test -p oms-node --test record_schema` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -1628,4 +1630,49 @@
 | `core/ids::tests::base32_pair_gives_a_million_distinct_ids` | 미실행 |  |
 | `core/ids::tests::base32_pair_decoding_is_strict` | 미실행 |  |
 | `node-unit/venue::tests::the_gateways_of_today_write_the_hex_form` | 미실행 |  |
+
+## V-VENUE-EXEC-1 — 펀딩 입력은 포지션·주문·예약·체결 수를 바꾸지 않고 한 번만 기록된다. 거래소 포지션 변경은 부호 있는 수량을 계좌와 미귀속 장부에 더하고 VenuePositionChange 불일치로 일반 주문을 막으며(감소 전용은 통과) 재생 뒤에도 남는다. 분류 못 한 실행은 기장 없이 UnclassifiedExecution 불일치로 막는다. 변경 뒤 그보다 늦게 물은 현재 세션의 포지션 응답 중 그 종목에 열린 주문과 대기 체결이 없을 때의 첫 응답이 다르면 PositionAdjusted(snapshot_after_venue_change) 한 건으로 맞추고 같으면 VenueChangeSettled만 남기며(열린 주문이 있는 동안은 맞추지 않아 오는 중인 체결을 두 번 세지 않는다), 저널만으로 계산한 포지션이 거래소 값과 같다. 분류 못 한 실행의 키는 같은 키로 나중에 온 체결의 기장을 막지 않는다. 운영자 조정은 reason 없이 스키마 1과 같은 바이트로 쓰인다
+
+- 상태: **미실행**
+- 왜 중요한가: Bybit의 펀딩·ADL·청산 인수가 포지션이나 체결을 틀어지게 하지 않고, 사람이 볼 때까지 노출을 늘리지 않으며, 감시자 W2가 저널 합만으로 포지션을 비교할 수 있다는 전제
+- 수준: 단위
+- 전제와 범위: 종목 하나, 전략 하나, 시험 9개
+- 실제 구성요소: oms-core 판단(decide)과 적용(apply), 재생
+- 모의·시뮬레이션: 거래소 입력(시험이 직접 만든 VenueInput)
+- 주입한 장애: 같은 실행의 재전달, 변경보다 먼저 물은 포지션 응답, 지난 세션의 응답, 아직 도착하지 않은 우리 체결, 분류 못 한 실행 뒤 같은 키의 체결
+- 판정 기준과 근거: 이벤트 이름 목록, 계좌·미귀속·전략 포지션, 미확인 불일치 종류, 차단과 주문 거절 사유, 재생한 코어와 실시간 코어의 같음, 저널 합 = 거래소 포지션, 직렬화 문자열
+- 재현: `cargo test -p oms-core --test venue_changes`
+- 뒷받침하는 것: C-FILL, C-MISMATCH
+- 확인하지 않은 범위: Bybit 실행 행의 실제 모양과 execType 분류표(U16, testnet T15). 게이트웨이는 아직 이 입력을 만들지 않는다. 펀딩 합계는 어떤 한도에도 들어가지 않는다. 불일치가 [OMS P1]로 가는 경로(U14). 거래소가 응답 시각 기준으로 일관된다는 가정
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/a_funding_payment_is_cash_only_and_booked_once` | 미실행 |  |
+| `core/a_venue_position_change_is_booked_flagged_and_holds_plain_orders` | 미실행 |  |
+| `core/an_unclassified_execution_holds_plain_orders` | 미실행 |  |
+| `core/the_next_positions_answer_after_a_change_is_the_position_of_record` | 미실행 |  |
+| `core/a_positions_answer_equal_to_the_journal_settles_without_an_adjustment` | 미실행 |  |
+| `core/a_positions_answer_of_an_old_session_does_not_end_the_wait` | 미실행 |  |
+| `core/an_operator_adjustment_is_written_as_in_schema_1` | 미실행 |  |
+| `core/the_wait_does_not_end_while_an_order_of_ours_can_still_fill` | 미실행 |  |
+| `core/an_unclassified_key_does_not_block_a_later_fill_with_the_same_key` | 미실행 |  |
+
+## V-SCHEMA-2-1 — 이 빌드는 기록 스키마 2를 쓰고 1과 2를 읽는다. 기록 스키마 1로 쓴 저널(체결, 운영자 조정, 정지 포함)을 복구하면 실시간 코어와 같은 상태(다이제스트 포함)가 되고, 그 뒤에 스키마 2로 이어 쓴 기록은 새 세그먼트에 들어가며, 두 세그먼트를 함께 복구해도 실시간 상태와 같고 --re-decide 검사도 통과한다
+
+- 상태: **미실행**
+- 왜 중요한가: 기록 형식을 올려도 그 전에 쓴 저널이 그대로 다시 읽힌다는 전제
+- 수준: 통합
+- 전제와 범위: 기록 스키마 1 세그먼트 하나와 스키마 2 세그먼트 하나, 시험 때 만든 저널(커밋하지 않음)
+- 실제 구성요소: oms-journal 쓰기·복구, oms-node recovery::recover와 verify, oms-core
+- 모의·시뮬레이션: 입력(시험이 직접 만든 Input)
+- 주입한 장애: 없음
+- 판정 기준과 근거: 복구한 코어 = 실시간 코어, 다이제스트 같음, 스키마 1 기록을 두 번 나눠 써도 세그먼트 1개이고 스키마 2를 쓰면 2개, verify 기록 수
+- 재현: `cargo test -p oms-node --test record_schema`
+- 뒷받침하는 것: C-JOURNAL
+- 확인하지 않은 범위: 스키마 1 저널은 이 빌드가 스키마 번호 1로 쓴 것이다. main의 옛 바이너리가 쓴 저널을 직접 읽어 보지는 않았다(옛 기록과 바이트가 같다는 것은 직렬화 시험과 코드 검토로만 본다). 옛 바이너리로 되돌리기는 안 된다(runbook §9)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `node-unit/this_build_writes_schema_2_and_reads_1_and_2` | 미실행 |  |
+| `node-unit/a_schema_1_journal_and_a_schema_2_tail_replay_to_the_live_state` | 미실행 |  |
 

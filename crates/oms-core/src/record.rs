@@ -12,8 +12,16 @@ use crate::input::Input;
 use serde::{Deserialize, Serialize};
 
 /// Version of the record schema written by this build. A record with a
-/// different version is refused by recovery rather than guessed at.
-pub const RECORD_SCHEMA: u16 = 1;
+/// version outside [`READABLE_RECORD_SCHEMAS`] is refused by recovery rather
+/// than guessed at.
+///
+/// Schema 2 (U13b) adds venue inputs and events for funding, venue-made
+/// position changes and unclassified executions, and the defaulted field
+/// `reason` of `PositionAdjusted`. Every schema-1 record parses unchanged.
+pub const RECORD_SCHEMA: u16 = 2;
+
+/// Record schemas this build reads.
+pub const READABLE_RECORD_SCHEMAS: [u16; 2] = [1, 2];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Record {

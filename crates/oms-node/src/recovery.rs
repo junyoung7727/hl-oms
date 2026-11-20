@@ -7,7 +7,7 @@
 //! reconciliation with the venue.
 
 use crate::pipeline::{STATE_SCHEMA, SnapshotState};
-use oms_core::record::RECORD_SCHEMA;
+use oms_core::record::{READABLE_RECORD_SCHEMAS, RECORD_SCHEMA};
 use oms_core::*;
 use oms_journal::{Options, TornTail, Writer};
 use serde::Serialize;
@@ -97,7 +97,7 @@ pub fn journal_options(instance_id: u64, segment_max_bytes: u64, writer: &str) -
         segment_max_bytes,
         truncate_torn_tail: true,
         record_schema: RECORD_SCHEMA,
-        readable_schemas: vec![RECORD_SCHEMA],
+        readable_schemas: READABLE_RECORD_SCHEMAS.to_vec(),
         instance_id,
         writer: writer.to_string(),
     }
@@ -197,7 +197,7 @@ pub fn verify(dir: &Path, re_decide: bool) -> Result<VerifyReport, String> {
     let mut shadow = Core::new(instance);
     let mut records = 0u64;
     let journal = oms_journal::verify_all(dir, |seq, schema, payload| {
-        if schema != RECORD_SCHEMA {
+        if !READABLE_RECORD_SCHEMAS.contains(&schema) {
             return Err(format!("record {seq} has schema {schema}"));
         }
         let rec: Record = serde_json::from_slice(payload).map_err(|e| format!("record {seq} does not parse: {e}"))?;

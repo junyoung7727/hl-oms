@@ -564,6 +564,7 @@ impl Tx<'_> {
                         ledger: ledger.clone(),
                         delta: *delta,
                         note: note.clone(),
+                        reason: AdjustReason::Operator,
                     })?;
                     Ok("adjusted".into())
                 }
@@ -677,6 +678,15 @@ impl Tx<'_> {
                 order_id, queried_at, ..
             } => self.on_not_found(*order_id, *queried_at),
             VenueInput::Fill(f) => self.on_fill(f),
+            VenueInput::Funding(f) => self.on_funding(f),
+            VenueInput::PositionChange(c) => self.on_venue_change(c),
+            VenueInput::UnclassifiedExecution {
+                key,
+                instrument,
+                exec_type,
+                detail,
+                venue_ts,
+            } => self.on_unclassified(key, instrument, exec_type, detail, *venue_ts),
             VenueInput::FillsSynced { session, up_to } => self.on_fills_synced(*session, *up_to),
             VenueInput::OpenOrders {
                 session,
@@ -1294,6 +1304,79 @@ impl Tx<'_> {
         }
     }
 
+    /// Whether an execution key was already recorded, or its venue time is
+    /// below the fill floor (a re-delivery by the fill-sync contract).
+    fn execution_seen(&self, key: &FillKey, venue_ts: Ts) -> bool {
+        self.core.seen_fills.contains_key(key)
+            || self.core.parked_fills.iter().any(|p| &p.fill.key == key)
+            || venue_ts < self.core.fill_floor
+    }
+
+    fn on_funding(&mut self, f: &FundingIn) -> Result<(), CoreFault> {
+        if self.execution_seen(&f.key, f.venue_ts) {
+            return Ok(());
+        }
+        self.emit(Event::FundingBooked { funding: f.clone() })
+    }
+
+    fn on_venue_change(&mut self, c: &VenuePositionChangeIn) -> Result<(), CoreFault> {
+        if c.qty.0 == 0 || self.execution_seen(&c.key, c.venue_ts) {
+            return Ok(());
+        }
+        let after = self.core.account_book(&c.instrument).pos.checked_add(c.qty);
+        let un_after = self
+            .core
+            .unattributed
+            .get(&c.instrument)
+            .map(|b| b.pos)
+            .unwrap_or_default()
+            .checked_add(c.qty);
+        if after.is_none() || un_after.is_none() {
+            // Not booked: the operator has to look, as for any other change.
+            return self.raise(
+                MismatchKind::VenuePositionChange,
+                format!("instrument:{}", c.instrument),
+                format!("the venue changed the position by {} (key {}), which overflows the booked position", c.qty, c.key),
+            );
+        }
+        self.emit(Event::VenuePositionChanged { change: c.clone() })?;
+        self.raise(
+            MismatchKind::VenuePositionChange,
+            format!("instrument:{}", c.instrument),
+            format!(
+                "the venue changed the position by {} ({:?}, key {}); the next positions answer sets it",
+                c.qty, c.kind, c.key
+            ),
+        )
+    }
+
+    fn on_unclassified(
+        &mut self,
+        key: &FillKey,
+        instrument: &InstrumentId,
+        exec_type: &str,
+        detail: &str,
+        venue_ts: Ts,
+    ) -> Result<(), CoreFault> {
+        // Its own set: a later delivery of the same key as a fill (a
+        // gateway that learned the kind) must still be booked.
+        if self.core.seen_unclassified.contains_key(key) || venue_ts < self.core.fill_floor {
+            return Ok(());
+        }
+        self.emit(Event::UnclassifiedExecutionNoted {
+            key: key.clone(),
+            instrument: instrument.clone(),
+            exec_type: exec_type.to_string(),
+            detail: detail.to_string(),
+            venue_ts,
+        })?;
+        self.raise(
+            MismatchKind::UnclassifiedExecution,
+            format!("instrument:{instrument}"),
+            format!("execution {key} of a kind the gateway does not know: {exec_type}; {detail}"),
+        )
+    }
+
     fn book_external(&mut self, f: &FillIn, why: &str) -> Result<(), CoreFault> {
         self.emit(Event::ExternalFillBooked { fill: f.clone() })?;
         // One entry per instrument while it is unacknowledged, however many
@@ -1532,6 +1615,40 @@ impl Tx<'_> {
             return Ok(());
         }
         let mut clean = true;
+        // An instrument whose position the venue changed takes the venue's
+        // quantity from the first answer asked after the change while no
+        // fill of ours can still be on its way: no open quantity and no
+        // parked fill on it. Otherwise a fill that arrives after the answer
+        // would be counted twice. Until then it is range-checked below.
+        let waiting: Vec<(InstrumentId, Ts)> =
+            self.core.venue_change_wait.iter().map(|(i, t)| (i.clone(), *t)).collect();
+        for (i, changed_at) in waiting {
+            if queried_at <= changed_at {
+                continue;
+            }
+            let book = self.core.account_book(&i);
+            let parked = self.core.parked_fills.iter().any(|p| p.fill.instrument == i);
+            if book.buy_open.0 != 0 || book.sell_open.0 != 0 || parked {
+                continue;
+            }
+            let venue = positions.iter().find(|p| p.instrument == i).map(|p| p.qty).unwrap_or_default();
+            let booked = self.core.account_book(&i).pos;
+            // A difference that does not fit is left to the range check.
+            let Some(delta) = venue.0.checked_sub(booked.0).map(SQty) else {
+                continue;
+            };
+            if delta.0 == 0 {
+                self.emit(Event::VenueChangeSettled { instrument: i })?;
+            } else {
+                self.emit(Event::PositionAdjusted {
+                    instrument: i,
+                    ledger: Ledger::Unattributed,
+                    delta,
+                    note: format!("venue position {venue} after a venue change; the journal had {booked}"),
+                    reason: AdjustReason::SnapshotAfterVenueChange,
+                })?;
+            }
+        }
         let mut instruments: Vec<InstrumentId> = self.core.config.instruments.keys().cloned().collect();
         for p in positions {
             if !instruments.contains(&p.instrument) {

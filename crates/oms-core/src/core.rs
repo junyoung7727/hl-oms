@@ -72,6 +72,17 @@ pub struct Core {
     /// of a run without a margin policy keeps its bytes and its digest.
     #[serde(default, skip_serializing_if = "MarginState::is_empty")]
     pub margin: MarginState,
+    /// Instruments whose position the venue changed on its own, with the
+    /// record time of the last such change. The next positions answer
+    /// asked after that time sets the position (U13b). Not serialised while
+    /// empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub venue_change_wait: BTreeMap<InstrumentId, Ts>,
+    /// Keys of unclassified executions, with their venue time. Kept apart
+    /// from `seen_fills` so that the same key delivered later as a fill is
+    /// booked. Purged with the fill keys. Not serialised while empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub seen_unclassified: BTreeMap<FillKey, Ts>,
 }
 
 impl Core {
@@ -104,6 +115,8 @@ impl Core {
             last_purge_at: 0,
             stats: Stats::default(),
             margin: MarginState::default(),
+            venue_change_wait: BTreeMap::new(),
+            seen_unclassified: BTreeMap::new(),
         }
     }
 
@@ -775,8 +788,12 @@ impl Core {
                 instrument,
                 ledger,
                 delta,
+                reason,
                 ..
             } => {
+                if *reason == AdjustReason::SnapshotAfterVenueChange {
+                    self.venue_change_wait.remove(instrument);
+                }
                 let acct = self.account.entry(instrument.clone()).or_default();
                 acct.pos = acct
                     .pos
@@ -822,6 +839,7 @@ impl Core {
                 self.fill_floor = (*fill_floor).max(self.fill_floor);
                 let floor = self.fill_floor;
                 self.seen_fills.retain(|_, t| *t >= floor);
+                self.seen_unclassified.retain(|_, t| *t >= floor);
                 self.mismatches
                     .retain(|_, m| m.acked.as_ref().is_none_or(|a| a.at >= *cutoff));
                 self.last_purge_at = at;
@@ -888,6 +906,31 @@ impl Core {
             }
             Event::ReducingCleared { .. } => {
                 self.margin.reducing = None;
+            }
+            Event::FundingBooked { funding } => {
+                self.seen_fills.insert(funding.key.clone(), funding.venue_ts);
+                self.stats.funding_payments += 1;
+            }
+            Event::VenuePositionChanged { change } => {
+                for b in [
+                    self.account.entry(change.instrument.clone()).or_default(),
+                    self.unattributed.entry(change.instrument.clone()).or_default(),
+                ] {
+                    b.pos = b
+                        .pos
+                        .checked_add(change.qty)
+                        .ok_or_else(|| CoreFault("position overflow".into()))?;
+                }
+                self.seen_fills.insert(change.key.clone(), change.venue_ts);
+                self.venue_change_wait.insert(change.instrument.clone(), at);
+                self.last_fill_at = at;
+                self.stats.venue_changes += 1;
+            }
+            Event::UnclassifiedExecutionNoted { key, venue_ts, .. } => {
+                self.seen_unclassified.insert(key.clone(), *venue_ts);
+            }
+            Event::VenueChangeSettled { instrument } => {
+                self.venue_change_wait.remove(instrument);
             }
         }
         Ok(())
