@@ -162,6 +162,7 @@ pub enum VenueConfig {
         request_timeout_ms: u64,
     },
     Hyperliquid(HyperliquidConfig),
+    Bybit(BybitConfig),
 }
 
 fn default_timeout_ms() -> u64 {
@@ -206,6 +207,43 @@ pub struct HyperliquidConfig {
     pub trust_top_level_error: bool,
 }
 
+/// The Bybit gateway (ADR-028): a unified trading account's sub-account,
+/// category linear, USDT settled, one-way mode, cross margin.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BybitConfig {
+    /// "testnet" or "mainnet".
+    pub network: String,
+    /// TOML file with `api_key` and `api_secret`, owner-only (mode 0600),
+    /// outside the data directory. Absolute path.
+    pub credentials_file: PathBuf,
+    /// The sub-account (UID) the key must belong to.
+    pub sub_account_uid: u64,
+    /// An HTTPS service whose answer body is the caller's public IP. The
+    /// key must be bound to that address.
+    pub ip_echo_url: String,
+    #[serde(default = "default_ip_check_secs")]
+    pub ip_check_secs: u64,
+    #[serde(default = "default_recv_window_ms")]
+    pub recv_window_ms: u64,
+    #[serde(default = "default_timeout_ms")]
+    pub request_timeout_ms: u64,
+    /// Must be true to place orders on mainnet.
+    #[serde(default)]
+    pub mainnet_confirmed: bool,
+    /// How far in the past a fill query ends (as for Hyperliquid).
+    #[serde(default = "default_fills_lag_ms")]
+    pub fills_lag_ms: u64,
+}
+
+fn default_ip_check_secs() -> u64 {
+    60
+}
+
+fn default_recv_window_ms() -> u64 {
+    5_000
+}
+
 fn default_fills_lag_ms() -> u64 {
     2_000
 }
@@ -216,6 +254,42 @@ fn default_ref_price_ms() -> u64 {
 
 fn default_key_env() -> String {
     "HL_AGENT_PRIVATE_KEY".into()
+}
+
+/// `p` as an absolute path with `.` and `..` folded and, where the path
+/// exists, symlinks followed. Compares paths by where they point.
+fn resolved(p: &Path) -> PathBuf {
+    if let Ok(c) = p.canonicalize() {
+        return c;
+    }
+    let abs = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
+    let mut out = PathBuf::new();
+    for c in abs.components() {
+        match c {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::CurDir => {}
+            c => out.push(c),
+        }
+    }
+    // The longest existing prefix may itself be a symlink.
+    let mut head = out.clone();
+    let mut tail = Vec::new();
+    while !head.exists() {
+        match head.file_name() {
+            Some(n) => tail.push(n.to_os_string()),
+            None => return out,
+        }
+        if !head.pop() {
+            return out;
+        }
+    }
+    let mut r = head.canonicalize().unwrap_or(head);
+    for n in tail.into_iter().rev() {
+        r.push(n);
+    }
+    r
 }
 
 impl NodeConfig {
@@ -284,6 +358,63 @@ impl NodeConfig {
                         "[runtime] steady-state query weight {weight} per minute is above {QUERY_WEIGHT_BUDGET}, half of the venue's limit of 1200: use fewer instruments or longer intervals (margin_poll_ms, venue_setting_poll_ms, sweep_ms, ref_price_interval_ms)"
                     ));
                 }
+            }
+        }
+        if let VenueConfig::Bybit(b) = &self.venue {
+            self.validate_bybit(b)?;
+        }
+        Ok(())
+    }
+
+    fn validate_bybit(&self, b: &BybitConfig) -> Result<(), String> {
+        match b.network.as_str() {
+            "testnet" => {}
+            "mainnet" if b.mainnet_confirmed && self.core.policy.margin.is_none() => {
+                return Err("[venue] mainnet requires [core.policy.margin] (the margin rules, C-MARGIN)".into());
+            }
+            "mainnet" if b.mainnet_confirmed => {}
+            "mainnet" => return Err("[venue] mainnet requires mainnet_confirmed = true".into()),
+            other => return Err(format!("[venue] unknown network {other}")),
+        }
+        if !b.credentials_file.is_absolute() {
+            return Err("[venue] credentials_file must be an absolute path".into());
+        }
+        if b
+            .credentials_file
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+        {
+            return Err("[venue] credentials_file must not hold `..`".into());
+        }
+        if resolved(&b.credentials_file).starts_with(resolved(&self.data_dir)) {
+            return Err("[venue] credentials_file must be outside the data directory".into());
+        }
+        if b.sub_account_uid == 0 {
+            return Err("[venue] sub_account_uid must be the sub-account's UID".into());
+        }
+        let echo = reqwest::Url::parse(&b.ip_echo_url).map_err(|e| format!("[venue] ip_echo_url: {e}"))?;
+        if echo.scheme() != "https" {
+            return Err("[venue] ip_echo_url must be https: a forged answer would pass the IP check".into());
+        }
+        if b.ip_check_secs < 10 {
+            return Err("[venue] ip_check_secs must be at least 10".into());
+        }
+        if !(1_000..=20_000).contains(&b.recv_window_ms) {
+            return Err("[venue] recv_window_ms must be between 1000 and 20000".into());
+        }
+        // ADR-024: Bybit enforces expiry through the receive window, and
+        // its realtime query can miss an order for a moment.
+        let p = &self.core.policy;
+        if !p.venue_enforces_expiry || p.absence_not_found_needed != 2 {
+            return Err(
+                "[core.policy] Bybit needs venue_enforces_expiry = true and absence_not_found_needed = 2 (ADR-024)".into(),
+            );
+        }
+        // The account is cross margin (ADR-028); the per-instrument rule
+        // would refuse every order.
+        if let Some(m) = &p.margin {
+            if m.isolated {
+                return Err("[core.policy.margin] Bybit trades cross margin: set isolated = false".into());
             }
         }
         Ok(())
@@ -529,5 +660,68 @@ max = "10"
 
         // The same bad values are refused on mainnet too.
         refused(&hyperliquid("mainnet"), "", Some("daily_loss_bps = 0"), "daily_loss_bps must be greater than 0");
+    }
+
+    fn bybit(network: &str, more: &str) -> String {
+        format!(
+            "kind = \"bybit\"\nnetwork = \"{network}\"\ncredentials_file = \"/etc/hl-oms/bybit.toml\"\nsub_account_uid = 4242\nip_echo_url = \"https://ip.example/\"\n{more}"
+        )
+    }
+
+    /// A Bybit configuration with the ADR-024 policy values set, validated.
+    fn check_bybit(venue: &str, margin: Option<&str>) -> Result<(), String> {
+        let mut cfg = parse(venue, "", margin, 1)?;
+        cfg.data_dir = "/var/lib/hl-oms/data".into();
+        cfg.core.policy.absence_not_found_needed = 2;
+        cfg.validate()
+    }
+
+    #[test]
+    fn a_bybit_configuration_loads_and_each_unsafe_value_is_refused() {
+        assert_eq!(check_bybit(&bybit("testnet", ""), None), Ok(()));
+        assert_eq!(check_bybit(&bybit("mainnet", "mainnet_confirmed = true"), Some("isolated = false")), Ok(()));
+        let cases = [
+            (bybit("mainnet", ""), None, "mainnet_confirmed"),
+            (bybit("mainnet", "mainnet_confirmed = true"), None, "requires [core.policy.margin]"),
+            (bybit("mainnet", "mainnet_confirmed = true"), Some(""), "isolated = false"),
+            (bybit("demo", ""), None, "unknown network"),
+            (bybit("testnet", "").replace("/etc/hl-oms/bybit.toml", "bybit.toml"), None, "absolute"),
+            (bybit("testnet", "").replace("/etc/hl-oms/bybit.toml", "/var/lib/hl-oms/data/k.toml"), None, "outside the data directory"),
+            (bybit("testnet", "").replace("4242", "0"), None, "sub_account_uid"),
+            (bybit("testnet", "").replace("https://ip.example/", "http://ip.example/"), None, "https"),
+            (bybit("testnet", "ip_check_secs = 5"), None, "ip_check_secs"),
+            (bybit("testnet", "recv_window_ms = 60000"), None, "recv_window_ms"),
+        ];
+        for (venue, margin, because) in cases {
+            match check_bybit(&venue, margin) {
+                Ok(()) => panic!("loaded, must be refused ({because})"),
+                Err(e) => assert!(e.contains(because), "{because}: {e}"),
+            }
+        }
+        // `..`, a symlinked directory and a relative data directory do not
+        // hide a credentials file inside the data directory.
+        assert!(check_bybit(&bybit("testnet", "").replace("/etc/hl-oms/bybit.toml", "/srv/x/../../var/lib/hl-oms/data/k.toml"), None)
+            .unwrap_err()
+            .contains("`..`"));
+        let tmp = std::env::temp_dir().join(format!("bybit-cfg-{}", std::process::id()));
+        let data = tmp.join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        std::os::unix::fs::symlink(&data, tmp.join("alias")).unwrap();
+        let mut cfg = parse(&bybit("testnet", "").replace("/etc/hl-oms/bybit.toml", &tmp.join("alias/k.toml").display().to_string()), "", None, 1).unwrap();
+        cfg.data_dir = data.clone();
+        cfg.core.policy.absence_not_found_needed = 2;
+        assert!(cfg.validate().unwrap_err().contains("outside the data directory"), "symlinked directory");
+        let cwd = std::env::current_dir().unwrap();
+        let mut cfg = parse(&bybit("testnet", "").replace("/etc/hl-oms/bybit.toml", &cwd.join("d/k.toml").display().to_string()), "", None, 1).unwrap();
+        cfg.data_dir = "d".into();
+        cfg.core.policy.absence_not_found_needed = 2;
+        assert!(cfg.validate().unwrap_err().contains("outside the data directory"), "relative data directory");
+        let _ = std::fs::remove_dir_all(&tmp);
+        // Without the ADR-024 absence count.
+        let mut cfg = parse(&bybit("testnet", ""), "", None, 1).unwrap();
+        cfg.data_dir = "/var/lib/hl-oms/data".into();
+        assert!(cfg.validate().unwrap_err().contains("absence_not_found_needed = 2"));
+        // An unknown key in the venue table.
+        assert!(parse(&bybit("testnet", "api_secret = \"x\""), "", None, 1).is_err());
     }
 }

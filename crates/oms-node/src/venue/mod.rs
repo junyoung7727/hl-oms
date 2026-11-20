@@ -19,6 +19,7 @@
 //!   up to `up_to` has been delivered.
 //! - Venue input is never dropped: a full input queue makes the gateway wait.
 
+pub mod bybit;
 pub mod hyperliquid;
 pub mod reconciler;
 pub mod simnet;
