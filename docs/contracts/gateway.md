@@ -79,7 +79,7 @@
 
 ### Bybit 게이트웨이(만드는 중, [ADR-028](../adr/ADR-028-bybit-gateway.md))
 
-U16b까지 있는 것: 서명, REST 클라이언트, 시작 확인, IP 확인, cancel-all. 주문 전송(U17), 조회(U16c), 스트림(U16d)은 아직 없다. 그래서 노드는 `kind = "bybit"`로 시작하지 않는다(종료 코드 3).
+U16c까지 있는 것: 서명, REST 클라이언트, 시작 확인, IP 확인, cancel-all, 조회 일곱 가지(`query.rs`), 실행 분류표(`exec.rs`). 주문 전송(U17), 스트림과 노드 연결(U16d)은 아직 없다. 그래서 노드는 `kind = "bybit"`로 시작하지 않는다(종료 코드 3).
 
 | 의무·규칙 | Bybit 게이트웨이 |
 |---|---|
@@ -89,9 +89,16 @@ U16b까지 있는 것: 서명, REST 클라이언트, 시작 확인, IP 확인, c
 | 서명 | `hex(HMAC_SHA256(secret, timestamp + api_key + recv_window + payload))`. GET은 키 순서로 정렬한 질의 문자열, POST는 본문. 보내는 바이트와 서명한 바이트가 같다. 질의 값은 인코딩하지 않고 보내며, 뜻을 바꾸는 문자가 있으면 보내지 않는다 |
 | 시작 확인(읽기만) | 키: 서브계정(`isMaster = false`), 설정의 `sub_account_uid`, 쓰기 가능, `ContractTrade`의 `Order`·`Position`, 바인딩된 IP가 있고 그중에 지금의 공인 IP. 계좌: `REGULAR_MARGIN`, 통합 계좌(`unifiedMarginStatus` 3–6). 종목마다: `settleCoin = USDT`, 단방향(`positionIdx = 0`). 하나라도 어긋나면 막힘(`Block`). 거래소 설정을 바꾸지 않는다 |
 | IP 확인 | 시작할 때와 `ip_check_secs`(60초)마다 공인 IP(`ip_echo_url`, https)와 키의 IP를 비교한다. 다르면 키 거부와 같이 막고, 다시 시작할 때까지 풀지 않는다. IP 확인 통과는 시작 확인의 막힘을 풀지 않는다(막힘은 출처마다 따로). 확인 서비스와 Bybit 요청은 IPv4로만 나간다 |
+| G-7 | 체결은 `since` − 2분부터 7일 이하의 창(창 사이 1ms 겹침)으로 읽는다(늦게 실리는 행을 다음 조회가 다시 읽는다). 창의 모든 쪽을 읽은 뒤에만 `FillsSynced { up_to: 창 끝 − 1µs }`. 끝은 지금 − `fills_lag_ms`. 마지막 쪽은 커서가 비고 쪽이 덜 찼을 때만이다(빈 커서의 뜻은 문서에 없다). 다 찬 쪽에 커서가 없으면 그 창을 반으로 나눠 다시 읽는다. 한 번의 조회는 30쪽까지이고 다음 조회가 선언한 곳부터 잇는다 |
+| G-8 | `<symbol>:<execId>` |
+| G-9(조회) | 읽을 수 없는 실행 행에서 멈추고 그 창을 선언하지 않는다. 스냅숏(열린 주문, 포지션)은 모든 쪽을 읽었을 때만 넘긴다 |
+| G-11 | 채움(`cumExecQty`, 문서에 뜻이 하나) |
+| G-13 | 주문 상태는 `New`·`PartiallyFilled`(열림), `Filled`, `Cancelled`, `Rejected`만 해석한다. 조건부·스팟 상태와 그 밖의 값은 결론을 내지 않는다. 실행 종류(`execType`)는 분류표에 없으면 `UnclassifiedExecution`(코어가 일반 주문을 막는다) |
+| 실행 분류표 | `Trade` → 체결(우리 `orderLinkId`가 아니면 외부 체결), `Funding` → 펀딩, `AdlTrade`·`BustTrade`·`Delivery`·`Settle` → 거래소 포지션 변경(adl, takeover, delivery, settle), 그 밖 → 분류 못 한 실행([ADR-023](../adr/ADR-023-venue-made-executions.md)). 스트림과 조회가 같은 함수를 쓴다 |
+| 부재(StatusNotFound) | realtime, 기간 없는 주문 내역(최근 7일), 코어가 주문을 받은 시각(`accepted_at`) − 1분부터 7일의 주문 내역 셋 다에서 우리 `orderLinkId`가 없을 때만. 시각은 첫 요청 직전. 취소·거부된 주문은 내역에 24시간만 남는다 |
 | 정리 범위(kill scope) | `category=linear`, `settleCoin=USDT`. cancel-all 요청 하나(U18b가 부른다). `result.success = "1"`일 때만 성공이고, 500건을 취소했으면 남은 주문이 있을 수 있다고 알린다 |
 
-Bybit 게이트웨이의 G-4(아직 없음, [ADR-024](../adr/ADR-024-absence-count-and-market-ref.md)): Bybit에는 만료 필드가 없고, 요청 시각(`X-BAPI-TIMESTAMP`) + `X-BAPI-RECV-WINDOW`가 서버 시각보다 이르면 요청을 거절한다. 게이트웨이는 요청 시각을 보내는 순간의 로컬 시각으로 하고 `요청 시각 + recv_window + 1초 ≤ expires_at`일 때만 보낸다. 아니면 보내지 않고 `NotSent`. 1초는 Bybit가 받아 주는 로컬 시계 앞섬의 한도다. 이 조건으로 거래소가 만료를 강제하므로 Bybit 설정은 `venue_enforces_expiry = true`, `absence_not_found_needed = 2`를 쓴다. 횟수는 조회 사본의 짧은 불일치만 막는다. realtime 조회는 닫힌 주문을 최근 500건까지만 들고 있고 서비스 재시작 때 비우므로, 게이트웨이는 realtime과 주문 내역(`/v5/order/history`) 모두에서 없을 때만 `StatusNotFound`를 보낸다(필수).
+Bybit 게이트웨이의 G-4(아직 없음, [ADR-024](../adr/ADR-024-absence-count-and-market-ref.md)): Bybit에는 만료 필드가 없고, 요청 시각(`X-BAPI-TIMESTAMP`) + `X-BAPI-RECV-WINDOW`가 서버 시각보다 이르면 요청을 거절한다. 게이트웨이는 요청 시각을 보내는 순간의 로컬 시각으로 하고 `요청 시각 + recv_window + 1초 ≤ expires_at`일 때만 보낸다. 아니면 보내지 않고 `NotSent`. 1초는 Bybit가 받아 주는 로컬 시계 앞섬의 한도다. 이 조건으로 거래소가 만료를 강제하므로 Bybit 설정은 `venue_enforces_expiry = true`, `absence_not_found_needed = 2`를 쓴다. 횟수는 조회 사본의 짧은 불일치만 막는다. realtime 조회는 닫힌 주문을 최근 500건까지만 들고 있고 서비스 재시작 때 비우므로, 게이트웨이는 realtime과 주문 내역(`/v5/order/history`) 모두에서 없을 때만 `StatusNotFound`를 보낸다(필수, U16c에 있음).
 
 고객 주문번호의 형식은 게이트웨이 상수 `WIRE_ID`다([ADR-022](../adr/ADR-022-wire-id-form.md)). 가상 거래소와 Hyperliquid는 `Hex128`(`0x` + 32 hex). Bybit 게이트웨이(아직 없음)는 `Base32Pair`(27자)를 쓰고, G-8 체결 키는 `<symbol>:<execId>`(69자 이하)로 정해 두었다. `execId`의 전역 유일성은 문서에 없어 종목을 앞에 붙인다.
 

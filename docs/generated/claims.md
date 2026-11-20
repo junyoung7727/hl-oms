@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `b81c8dbf0c9a8e31`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `c5b15bf6af860044`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
-주장 76건: 통과 0, 실패 0, 미실행 9, 이전 버전 결과 67.
+주장 77건: 통과 0, 실패 0, 미실행 10, 이전 버전 결과 67.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -83,6 +83,7 @@
 | V-MARKET-REF-1 | 새 주문은 판단에 쓴 호가창 상태(market_ref)를 실을 수 있고, 그 값은 OrderAccepted.request로 저널 기록에 들어가 직렬화와 해석을 거쳐도 같다. market_ref가 없는 요청은 예전과 같은 바이트로 쓰인다. 같은 요청이 다른 market_ref로 다시 오면 duplicate다. 이름은 64자 이하의 [A-Za-z0-9_.:-]만 받고 거래 API는 형식이 틀린 market_ref를 해석 단계에서 거절한다 | 단위 | 미실행 | `cargo test -p oms-core --test absence_and_market_ref && cargo test -p oms-api --lib` |
 | V-TAIL-1 | 꼬리 읽기는 디스크에 더 많은 기록이 있어도 호출자가 준 내구화 번호보다 큰 기록을 돌려주지 않고, 작은 세그먼트로 회전한 저널을 끊김 없이 순서대로 읽으며, 커서 다음 번호부터 다시 시작한다. 쓰는 쪽이 잠금을 쥔 동안에도 읽고, 읽는 동안 새 쓰는 쪽이 잠금을 잡을 수 있다(잠금을 잡지 않는다). 상한 이하의 손상된 프레임이나 번호가 튀는 프레임에서는 그 앞 기록을 돌려준 뒤 오류를 내고 위치를 움직이지 않으며, 커서 앞의 손상도 오류로 알린다(끝에서 쓰는 중인 프레임은 기다린다). 기록 스키마가 바뀌어 열린 새 세그먼트와, 헤더만 있다가 새 스키마 헤더로 다시 쓰인 세그먼트를 따라가고 기록마다 스키마를 알려 준다. 엿보기는 상한 너머의 유효한 프레임을 위치를 움직이지 않고 보여 주며 잘린 마지막 프레임에서 오류 없이 멈춘다 | 단위 | 미실행 | `cargo test -p oms-journal --test tail` |
 | V-TAIL-2 | 모든 이벤트 종류(43가지)의 인스턴스를 선택 필드까지 채워 직렬화하면, 인코더가 쓰는 모든 필드 경로가 docs/contracts/tail.md의 필드 표에 있고, 표의 모든 행은 실제로 쓰이는 필드이며 타입 열이 실제 JSON 값의 종류(문자열, 정수, 불, 목록, 열거형, 객체, null 허용)와 맞는다. 통째로 읽는 행은 설정 하나와 열거형 값뿐이다. 이벤트 종류가 늘면 시험이 컴파일되지 않는다 | 소스 검사 | 미실행 | `cargo test -p oms-core --test event_fields` |
+| V-BYBIT-READ-1 | Bybit 게이트웨이의 조회 일곱 가지는 읽기만 하고, 통째로 읽을 수 있는 응답만 입력으로 넘긴다. 쪽 넘김은 커서가 비고 쪽이 덜 찼을 때만 끝으로 보고, 다 찬 쪽에 커서가 없거나 커서가 그대로이거나 쪽이 20을 넘으면 스냅숏(열린 주문, 포지션, 증거금 보고)을 넘기지 않는다. 주문 상태는 우리 orderLinkId의 행만 보고 realtime, 기간 없는 주문 내역, 코어가 주문을 받은 시각 − 1분부터 7일의 주문 내역 셋 다에 없을 때만 StatusNotFound(첫 조회 전 시각)를 낸다. 체결은 since − 2분부터 7일 이하의 창으로 읽고(창 사이 1ms 겹침, 중복 키는 한 번), 한 번에 30쪽까지 읽고 다 읽은 창까지만 선언한 채 멈추며(오류 아님), 창을 다 읽은 뒤에만 그 끝 직전까지 FillsSynced를 내며, 끝을 알 수 없는 창은 반으로 나누고, 읽을 수 없는 행에서 멈춘다. 실행 행은 execType 표 하나로 Fill(우리 주문이면 order_id, 아니면 외부 체결), Funding, PositionChange(adl, takeover, delivery, settle), UnclassifiedExecution이 된다. 증거금 보고는 totalEquity, positionIM, 계좌 증거금 모드, 정수 레버리지, maxLeverage로 만들고 한 값이라도 못 읽으면 MarginReportInvalid다. 이 코드에는 주문 생성·정정·단건 취소 요청이 없다. 설정은 Bybit에서 REGULAR_MARGIN 밖의 계좌 모드 허용을 거절한다 | 단위 | 미실행 | `cargo test -p oms-node --lib venue::bybit` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -1647,7 +1648,7 @@
 - 판정 기준과 근거: 이벤트 이름 목록, 계좌·미귀속·전략 포지션, 미확인 불일치 종류, 차단과 주문 거절 사유, 재생한 코어와 실시간 코어의 같음, 저널 합 = 거래소 포지션, 직렬화 문자열
 - 재현: `cargo test -p oms-core --test venue_changes`
 - 뒷받침하는 것: C-FILL, C-MISMATCH
-- 확인하지 않은 범위: Bybit 실행 행의 실제 모양과 execType 분류표(U16, testnet T15). 게이트웨이는 아직 이 입력을 만들지 않는다. 펀딩 합계는 어떤 한도에도 들어가지 않는다. 불일치가 [OMS P1]로 가는 경로(U14). 거래소가 응답 시각 기준으로 일관된다는 가정
+- 확인하지 않은 범위: Bybit 실행 행의 실제 모양(testnet T15). 게이트웨이의 execType 분류표는 V-BYBIT-READ-1이 보고, 분류한 입력을 이 코어에 넣는 끝에서 끝까지의 시험은 없다(두 시험이 같은 VenueInput 모양에서 만난다). 펀딩 합계는 어떤 한도에도 들어가지 않는다. 불일치가 [OMS P1]로 가는 경로(U14). 거래소가 응답 시각 기준으로 일관된다는 가정
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
@@ -1692,7 +1693,7 @@
 - 판정 기준과 근거: 이벤트 이름 목록, 주문 단계와 종결 사유, 계좌 매수 예약, 재생한 코어와 실시간 코어의 같음, 설정 검증 오류, 직렬화 문자열
 - 재현: `cargo test -p oms-core --test absence_and_market_ref`
 - 뒷받침하는 것: C-DOUBT
-- 확인하지 않은 범위: Bybit가 recv window 밖의 요청을 실제로 거절하는지, 게이트웨이의 요청 시각 + recv_window + 1초 ≤ expires_at 검사(Bybit 게이트웨이가 아직 없다, U16·U17), 주문 내역 조회도 닫힌 주문을 잃는지. 게이트웨이가 realtime과 주문 내역 둘 다 본 뒤에만 없음을 보낸다는 것(U16 요구 사항)
+- 확인하지 않은 범위: Bybit가 recv window 밖의 요청을 실제로 거절하는지, 게이트웨이의 요청 시각 + recv_window + 1초 ≤ expires_at 검사(Bybit 게이트웨이가 아직 없다, U16·U17), 주문 내역 조회도 닫힌 주문을 잃는지. 게이트웨이가 realtime과 주문 내역 둘 다 본 뒤에만 없음을 보낸다는 것은 V-BYBIT-READ-1(가짜 서버)
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
@@ -1768,4 +1769,44 @@
 | `core/the_field_table_lists_every_field_the_encoder_writes` | 미실행 |  |
 | `core/every_row_of_the_table_is_a_field_the_encoder_writes` | 미실행 |  |
 | `core/only_the_configuration_and_enums_are_read_as_a_whole` | 미실행 |  |
+
+## V-BYBIT-READ-1 — Bybit 게이트웨이의 조회 일곱 가지는 읽기만 하고, 통째로 읽을 수 있는 응답만 입력으로 넘긴다. 쪽 넘김은 커서가 비고 쪽이 덜 찼을 때만 끝으로 보고, 다 찬 쪽에 커서가 없거나 커서가 그대로이거나 쪽이 20을 넘으면 스냅숏(열린 주문, 포지션, 증거금 보고)을 넘기지 않는다. 주문 상태는 우리 orderLinkId의 행만 보고 realtime, 기간 없는 주문 내역, 코어가 주문을 받은 시각 − 1분부터 7일의 주문 내역 셋 다에 없을 때만 StatusNotFound(첫 조회 전 시각)를 낸다. 체결은 since − 2분부터 7일 이하의 창으로 읽고(창 사이 1ms 겹침, 중복 키는 한 번), 한 번에 30쪽까지 읽고 다 읽은 창까지만 선언한 채 멈추며(오류 아님), 창을 다 읽은 뒤에만 그 끝 직전까지 FillsSynced를 내며, 끝을 알 수 없는 창은 반으로 나누고, 읽을 수 없는 행에서 멈춘다. 실행 행은 execType 표 하나로 Fill(우리 주문이면 order_id, 아니면 외부 체결), Funding, PositionChange(adl, takeover, delivery, settle), UnclassifiedExecution이 된다. 증거금 보고는 totalEquity, positionIM, 계좌 증거금 모드, 정수 레버리지, maxLeverage로 만들고 한 값이라도 못 읽으면 MarginReportInvalid다. 이 코드에는 주문 생성·정정·단건 취소 요청이 없다. 설정은 Bybit에서 REGULAR_MARGIN 밖의 계좌 모드 허용을 거절한다
+
+- 상태: **미실행**
+- 왜 중요한가: Bybit 계좌를 대조할 때 반쯤 읽은 응답으로 포지션·열린 주문을 틀리게 보거나, 닫힌 주문을 500건 한도·서비스 재시작 때문에 없다고 보거나, 펀딩·ADL을 체결로 기장하지 않는다는 전제
+- 수준: 단위
+- 전제와 범위: loopback 가짜 HTTP 서버(http-fake)에 문서 모양의 응답을 경로별로 준비, 시험 23개
+- 실제 구성요소: venue::bybit의 query, exec, rest(서명한 GET), config 검증
+- 모의·시뮬레이션: Bybit REST 응답(문서 예시를 본뜬 손으로 쓴 JSON)
+- 주입한 장애: 남의 주문 행, 조건부 주문 상태, 다 찬 마지막 쪽, 움직이지 않는 커서, 끝없는 커서, 10016·HTTP 500·502, 읽을 수 없는 행·숫자·소수 9자리, 소수 레버리지, PORTFOLIO_MARGIN, maxLeverage 0, 헤지 모드 행, 겹치는 창의 같은 실행
+- 판정 기준과 근거: 만든 VenueInput 전체(값까지), 보낸 요청의 경로·질의·순서·개수, 창의 시작·끝 시각, 소스에 주문 요청 경로가 없음
+- 재현: `cargo test -p oms-node --lib venue::bybit`
+- 뒷받침하는 것: C-GW(Bybit 열), C-MARGIN, ADR-028
+- 확인하지 않은 범위: 실제 Bybit 응답(문서 예시만 본떴다, testnet은 U-01 허가 뒤). 빈 커서가 마지막 쪽이라는 것, startTime·endTime이 끝값을 포함하는지, maker 체결의 orderLinkId, execFee의 maker 리베이트 부호, 펀딩·ADL 행이 실행 목록에 실리는지(T15)는 문서에 없다. 비공개 스트림과 조회의 노드 연결(U16d), 조회의 요청 한도(U17). maxLeverage는 프로세스당 한 번만 읽는다(교차 계좌에서는 어떤 규칙도 쓰지 않는다). 주문 내역 기간이 생성 시각과 갱신 시각 중 무엇을 거르는지, 2분보다 늦게 실리는 실행 행, 변경 직후의 늦은 포지션 응답(ADR-028 §8)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `node-unit/venue::bybit::exec::tests::a_trade_of_our_order_is_a_fill_of_that_order` | 미실행 |  |
+| `node-unit/venue::bybit::exec::tests::a_trade_of_an_order_that_is_not_ours_is_an_external_fill` | 미실행 |  |
+| `node-unit/venue::bybit::exec::tests::a_funding_row_is_cash_and_never_a_fill` | 미실행 |  |
+| `node-unit/venue::bybit::exec::tests::each_venue_made_execution_type_is_a_position_change_of_its_kind` | 미실행 |  |
+| `node-unit/venue::bybit::exec::tests::every_other_execution_type_is_unclassified` | 미실행 |  |
+| `node-unit/venue::bybit::exec::tests::a_row_that_cannot_be_read_is_an_error_not_an_input` | 미실행 |  |
+| `node-unit/venue::bybit::query::tests::the_status_of_our_order_is_read_from_the_open_order_view` | 미실행 |  |
+| `node-unit/venue::bybit::query::tests::an_order_missing_from_the_open_order_view_is_looked_up_in_the_history` | 미실행 |  |
+| `node-unit/venue::bybit::query::tests::an_order_is_not_found_only_when_neither_view_has_it` | 미실행 |  |
+| `node-unit/venue::bybit::query::tests::a_status_answer_about_another_order_or_of_a_kind_we_never_send_concludes_nothing` | 미실행 |  |
+| `node-unit/venue::bybit::query::tests::the_status_table` | 미실행 |  |
+| `node-unit/venue::bybit::query::tests::open_orders_are_read_through_every_page` | 미실행 |  |
+| `node-unit/venue::bybit::query::tests::a_snapshot_whose_last_page_cannot_be_told_gives_no_input` | 미실행 |  |
+| `node-unit/venue::bybit::query::tests::positions_are_signed_by_side` | 미실행 |  |
+| `node-unit/venue::bybit::query::tests::the_margin_report_maps_the_unified_account` | 미실행 |  |
+| `node-unit/venue::bybit::query::tests::a_margin_answer_that_cannot_be_read_as_a_whole_is_refused_as_a_whole` | 미실행 |  |
+| `node-unit/venue::bybit::query::tests::the_venue_setting_and_the_account_mode_are_read_as_they_are` | 미실행 |  |
+| `node-unit/venue::bybit::query::tests::fills_are_read_in_windows_of_at_most_seven_days_each_declared_synced` | 미실행 |  |
+| `node-unit/venue::bybit::query::tests::a_row_that_cannot_be_read_stops_the_sync_before_its_window_is_declared` | 미실행 |  |
+| `node-unit/venue::bybit::query::tests::fills_follow_the_cursor_and_a_window_whose_last_page_cannot_be_told_is_split` | 미실행 |  |
+| `node-unit/venue::bybit::query::tests::a_long_gap_is_synced_over_several_queries_within_the_page_budget` | 미실행 |  |
+| `node-unit/venue::bybit::query::tests::the_gateway_has_no_order_request` | 미실행 |  |
+| `node-unit/config::tests::a_bybit_configuration_loads_and_each_unsafe_value_is_refused` | 미실행 |  |
 

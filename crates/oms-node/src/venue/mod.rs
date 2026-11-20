@@ -35,6 +35,9 @@ pub enum QueryReq {
     Status {
         order_id: OrderId,
         venue_oid: Option<VenueOrderId>,
+        /// `Need::OrderStatus::accepted_at`: the venue created the order no
+        /// earlier than this.
+        accepted_at: Ts,
     },
     Fills {
         since: Ts,
