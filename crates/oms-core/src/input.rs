@@ -154,6 +154,63 @@ pub enum VenueInput {
     /// The venue's answer to the account-mode query: the account-wide
     /// margin scheme, as the venue names it (C-MARGIN).
     AccountMode { session: u64, mode: String },
+    /// A funding payment: cash only. It changes no position and is not a
+    /// fill (U13b).
+    Funding(FundingIn),
+    /// A position change the venue made on its own (U13b).
+    PositionChange(VenuePositionChangeIn),
+    /// An execution the gateway could not classify (U13b). Nothing is
+    /// booked; plain orders are held until the operator looks.
+    UnclassifiedExecution {
+        key: FillKey,
+        instrument: InstrumentId,
+        /// The venue's name for the kind of execution, as it came.
+        exec_type: String,
+        /// What else the gateway could read, for the operator.
+        detail: String,
+        venue_ts: Ts,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FundingIn {
+    /// The gateway's key for the execution (C-GW G-8). De-duplicated with
+    /// the fill keys.
+    pub key: FillKey,
+    pub instrument: InstrumentId,
+    /// Positive is paid by the account, negative received: the sign of
+    /// `FillIn::fee`.
+    pub amount: Amount,
+    /// The funding rate as the venue wrote it. For audit; the core does
+    /// not read it.
+    pub rate: String,
+    pub venue_ts: Ts,
+}
+
+/// Why the venue moved a position (U13b). A trade of an order that is not
+/// ours is not one of these: it is a fill without an order (external fill).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VenueChangeKind {
+    /// Auto-deleveraging.
+    Adl,
+    /// Takeover of a liquidated position.
+    Takeover,
+    Delivery,
+    Settle,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VenuePositionChangeIn {
+    /// The gateway's key for the execution (C-GW G-8). De-duplicated with
+    /// the fill keys.
+    pub key: FillKey,
+    pub kind: VenueChangeKind,
+    pub instrument: InstrumentId,
+    /// Signed: positive adds to a long.
+    pub qty: SQty,
+    pub px: Px,
+    pub venue_ts: Ts,
 }
 
 /// What the venue said about the account's margin at one moment. The whole

@@ -199,3 +199,13 @@ alternatives = ["Bybit도 0x+32 hex", "형식 목록 WireIdForm + 게이트웨�
 chosen = "WireIdForm { Hex128, Base32Pair(27자) }와 엄격한 decode. 게이트웨이가 WIRE_ID를 선언하고 보내는 번호를 그것으로 만들며, 상태 API도 그 형식으로 출력한다"
 gives_up = "사람이 눈으로 읽기 쉬운 주문번호"
 revisit = "testnet에서 orderLinkId 규칙이 문서와 다를 때, 한 노드가 거래소 둘 이상에 주문할 때"
+
+[[adr]]
+id = "ADR-023"
+title = "우리 주문의 체결이 아닌 실행과 기록 스키마 2"
+file = "docs/adr/ADR-023-venue-made-executions.md"
+problem = "Bybit는 펀딩·ADL·청산 인수·인도·정산을 체결과 같은 흐름으로 보내는데 코어는 체결만 알아서, 펀딩은 버리거나 체결로 틀리게 넣고 거래소가 옮긴 포지션은 대조의 범위 불일치로만 보였다"
+alternatives = ["게이트웨이가 펀딩은 버리고 나머지는 외부 체결로", "새 입력 셋과 이벤트 넷, 기존 불일치 차단 재사용, PositionAdjusted에 reason", "여기에 새 차단 이유와 clear_hold 명령"]
+chosen = "Funding, PositionChange, UnclassifiedExecution 입력과 FundingBooked, VenuePositionChanged, UnclassifiedExecutionNoted, VenueChangeSettled 이벤트. 차단은 불일치 차단. 다음 포지션 응답이 포지션을 정하고 차이를 PositionAdjusted(reason snapshot_after_venue_change)로 기록. RECORD_SCHEMA 2, 스키마 1과 2를 읽음"
+gives_up = "R5의 차단 이름으로 원인을 바로 보는 것"
+revisit = "testnet에서 이런 실행의 모양이 문서와 다를 때(T15), 불일치 종류로는 원인 구별이 어렵다고 할 때"

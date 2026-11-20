@@ -176,6 +176,8 @@ pub enum Event {
         ledger: Ledger,
         delta: SQty,
         note: String,
+        #[serde(default, skip_serializing_if = "AdjustReason::is_operator")]
+        reason: AdjustReason,
     },
     /// Closed orders removed from memory after their retention and
     /// idempotency windows passed. External-fill keys and acknowledged
@@ -230,6 +232,31 @@ pub enum Event {
         /// The day base the tripped rule was judged against, if any.
         old_base: Option<Amount>,
         new_base: Amount,
+    },
+    /// A funding payment was recorded (U13b). No position, order or
+    /// reservation changes.
+    FundingBooked {
+        funding: FundingIn,
+    },
+    /// The venue moved a position on its own (U13b). Booked to the account
+    /// and to the unattributed ledger; the instrument waits for the venue's
+    /// position.
+    VenuePositionChanged {
+        change: VenuePositionChangeIn,
+    },
+    /// An execution the gateway could not classify (U13b). Its key is
+    /// recorded; nothing is booked.
+    UnclassifiedExecutionNoted {
+        key: FillKey,
+        instrument: InstrumentId,
+        exec_type: String,
+        detail: String,
+        venue_ts: Ts,
+    },
+    /// The venue's position after a venue change equals the journal's; the
+    /// wait ends without an adjustment (U13b).
+    VenueChangeSettled {
+        instrument: InstrumentId,
     },
 }
 
@@ -406,6 +433,10 @@ impl Event {
             Event::VenueSettingNoted { .. } => "venue_setting_noted",
             Event::AccountModeNoted { .. } => "account_mode_noted",
             Event::ReducingCleared { .. } => "reducing_cleared",
+            Event::FundingBooked { .. } => "funding_booked",
+            Event::VenuePositionChanged { .. } => "venue_position_changed",
+            Event::UnclassifiedExecutionNoted { .. } => "unclassified_execution_noted",
+            Event::VenueChangeSettled { .. } => "venue_change_settled",
         }
     }
 }
@@ -435,6 +466,9 @@ impl Input {
                 VenueInput::MarginReportInvalid { .. } => "venue.margin_report_invalid",
                 VenueInput::VenueSetting { .. } => "venue.venue_setting",
                 VenueInput::AccountMode { .. } => "venue.account_mode",
+                VenueInput::Funding(_) => "venue.funding",
+                VenueInput::PositionChange(_) => "venue.position_change",
+                VenueInput::UnclassifiedExecution { .. } => "venue.unclassified_execution",
             },
         }
     }
