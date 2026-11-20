@@ -90,7 +90,8 @@
   {
    "name": "is_maker",
    "type": "bool",
-   "nullable": false
+   "nullable": true,
+   "description": "the venue's maker flag; null when the journal does not hold it (before the Bybit gateway)"
   },
   {
    "name": "venue_ts_ns",
@@ -101,8 +102,8 @@
   {
    "name": "recv_ns",
    "type": "int64",
-   "nullable": false,
-   "description": "our receive time"
+   "nullable": true,
+   "description": "our receive time; null when the journal does not hold it (before the Bybit gateway)"
   }
  ]
 }

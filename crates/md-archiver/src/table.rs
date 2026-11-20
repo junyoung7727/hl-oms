@@ -104,9 +104,16 @@ impl Table {
     }
 }
 
-#[allow(clippy::expect_used)]
 fn load(table: Table) -> TableSchema {
-    let v: Value = serde_json::from_str(table.contract_json()).expect("vendored table json");
+    parse_vendored(table.contract_json())
+}
+
+/// The schema in a vendored contract table file (L1 or trading export).
+/// The vendored files are checked by the tests, so a file that does not
+/// parse is a build defect and panics.
+#[allow(clippy::expect_used)]
+pub fn parse_vendored(json: &str) -> TableSchema {
+    let v: Value = serde_json::from_str(json).expect("vendored table json");
     let s = |v: &Value| v.as_str().expect("string").to_string();
     TableSchema {
         name: s(&v["table"]),

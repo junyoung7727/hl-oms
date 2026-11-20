@@ -2,5 +2,5 @@
 # newer qdp main commit and change source_commit and index_sha256 here.
 source_repo = "junyoung7727/quant-data-platform"
 source_path = "quant_data/crypto/contract"
-source_commit = "adc117fa30c97ccfed70ef0bf3ee6a72a6eb0fc7"
-index_sha256 = "10b9012a119f2177e97e18409ba130ffafc456ed206e3359eaa53dd268b4ba43"
+source_commit = "d6fe0942b237d3fee8189ca7d0c5f2a8784914a9"
+index_sha256 = "a089efd450590fb7bc3e21b8b0e011eacc159399f3f7e06cb836117c1d436ac9"

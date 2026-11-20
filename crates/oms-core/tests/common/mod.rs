@@ -137,14 +137,16 @@ impl H {
         h.link_up_and_sync();
         // A margin policy that does not list the mode of this venue holds
         // the account.
-        let lists_the_mode = h
-            .core
-            .config
-            .policy
-            .margin
-            .as_ref()
-            .is_none_or(|m| m.account_modes_allowed.iter().any(|mode| mode == STANDARD_MODE));
-        let expected = if lists_the_mode { vec![] } else { vec![HoldReason::AccountMode] };
+        let lists_the_mode = h.core.config.policy.margin.as_ref().is_none_or(|m| {
+            m.account_modes_allowed
+                .iter()
+                .any(|mode| mode == STANDARD_MODE)
+        });
+        let expected = if lists_the_mode {
+            vec![]
+        } else {
+            vec![HoldReason::AccountMode]
+        };
         assert_eq!(h.core.holds(None), expected);
         h
     }
@@ -152,9 +154,15 @@ impl H {
     /// Booted and configured. The link has never been up.
     pub fn configured(cfg: CoreConfig) -> H {
         let mut h = H::new();
-        h.inp(Input::Boot { binary: "test".into() });
+        h.inp(Input::Boot {
+            binary: "test".into(),
+        });
         let out = h.inp(Input::Config(Box::new(cfg)));
-        assert!(matches!(out.reply, Some(Reply::Config(Ok(_)))), "{:?}", out.reply);
+        assert!(
+            matches!(out.reply, Some(Reply::Config(Ok(_)))),
+            "{:?}",
+            out.reply
+        );
         h
     }
 
@@ -201,13 +209,12 @@ impl H {
     /// With a margin policy that lists `STANDARD_MODE`: the venue tells that
     /// mode. Otherwise nothing.
     pub fn tell_account_mode(&mut self) {
-        let listed = self
-            .core
-            .config
-            .policy
-            .margin
-            .as_ref()
-            .and_then(|m| m.account_modes_allowed.iter().find(|mode| *mode == STANDARD_MODE).cloned());
+        let listed = self.core.config.policy.margin.as_ref().and_then(|m| {
+            m.account_modes_allowed
+                .iter()
+                .find(|mode| *mode == STANDARD_MODE)
+                .cloned()
+        });
         if let Some(mode) = listed {
             self.account_mode(&mode);
         }
@@ -260,7 +267,10 @@ impl H {
         for ev in &out.events {
             self.shadow.apply(self.now, ev).expect("apply fault");
         }
-        assert_eq!(self.core, self.shadow, "replayed state differs from live state");
+        assert_eq!(
+            self.core, self.shadow,
+            "replayed state differs from live state"
+        );
         self.core.check_invariants().expect("invariant");
         if !out.events.is_empty() {
             self.log.push(Record {
@@ -280,7 +290,13 @@ impl H {
 
     /// A margin report of link session `session` with number `seq`, asked
     /// for at `queried_at`, with no positions.
-    pub fn margin_report(&mut self, session: u64, seq: u64, queried_at: Ts, account_value: &str) -> Output {
+    pub fn margin_report(
+        &mut self,
+        session: u64,
+        seq: u64,
+        queried_at: Ts,
+        account_value: &str,
+    ) -> Output {
         self.venue(VenueInput::MarginReport(MarginReport {
             session,
             seq,
@@ -321,7 +337,14 @@ impl H {
         self.inp(Input::Tick)
     }
 
-    pub fn req(&self, strategy: &str, key: &str, side: Side, qty: &str, price: &str) -> NewOrderReq {
+    pub fn req(
+        &self,
+        strategy: &str,
+        key: &str,
+        side: Side,
+        qty: &str,
+        price: &str,
+    ) -> NewOrderReq {
         NewOrderReq {
             strategy: sid(strategy),
             client_order_id: cid(key),
@@ -337,8 +360,18 @@ impl H {
     }
 
     /// `req` with the venue's reduce-only flag set.
-    pub fn reduce_only_req(&self, strategy: &str, key: &str, side: Side, qty: &str, price: &str) -> NewOrderReq {
-        NewOrderReq { reduce_only: true, ..self.req(strategy, key, side, qty, price) }
+    pub fn reduce_only_req(
+        &self,
+        strategy: &str,
+        key: &str,
+        side: Side,
+        qty: &str,
+        price: &str,
+    ) -> NewOrderReq {
+        NewOrderReq {
+            reduce_only: true,
+            ..self.req(strategy, key, side, qty, price)
+        }
     }
 
     /// Strategy `strategy` buys `qty` and the venue reports it filled.
@@ -358,7 +391,14 @@ impl H {
     }
 
     /// Submits and returns the id of an accepted order.
-    pub fn accept(&mut self, strategy: &str, key: &str, side: Side, qty: &str, price: &str) -> OrderId {
+    pub fn accept(
+        &mut self,
+        strategy: &str,
+        key: &str,
+        side: Side,
+        qty: &str,
+        price: &str,
+    ) -> OrderId {
         let r = self.req(strategy, key, side, qty, price);
         match self.new_order(r) {
             NewOrderReply::Accepted { order_id } => order_id,
@@ -366,7 +406,14 @@ impl H {
         }
     }
 
-    pub fn reject(&mut self, strategy: &str, key: &str, side: Side, qty: &str, price: &str) -> Vec<RejectReason> {
+    pub fn reject(
+        &mut self,
+        strategy: &str,
+        key: &str,
+        side: Side,
+        qty: &str,
+        price: &str,
+    ) -> Vec<RejectReason> {
         let r = self.req(strategy, key, side, qty, price);
         match self.new_order(r) {
             NewOrderReply::Rejected { reasons } => reasons,
@@ -466,7 +513,9 @@ impl H {
         self.commands
             .iter()
             .filter_map(|c| match c {
-                VenueCommand::SendCancel { order_id, attempt, .. } => Some((*order_id, *attempt)),
+                VenueCommand::SendCancel {
+                    order_id, attempt, ..
+                } => Some((*order_id, *attempt)),
                 _ => None,
             })
             .collect()

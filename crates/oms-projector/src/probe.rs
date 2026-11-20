@@ -20,6 +20,9 @@ pub struct OmsStatus {
     /// `core.instance_id` (16 hex digits): which data directory the OMS
     /// runs on. The projector ignores an answer of another instance.
     pub instance_id: Option<u64>,
+    /// `node.venue`: `sim`, `hyperliquid:testnet`, … (the exporter checks
+    /// it against its configured venue).
+    pub venue: Option<String>,
 }
 
 impl OmsStatus {
@@ -37,6 +40,10 @@ impl OmsStatus {
                 .pointer("/core/instance_id")
                 .and_then(serde_json::Value::as_str)
                 .and_then(|h| u64::from_str_radix(h, 16).ok()),
+            venue: v
+                .pointer("/node/venue")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
         })
     }
 }

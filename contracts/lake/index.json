@@ -119,19 +119,19 @@
     },
     {
       "name": "golden/trading/events.json",
-      "sha256": "62be43e9d5181fdc587200a26668968f09b679826558d3bd3518c2cae82e0665"
+      "sha256": "20f95f40cde6c6332211706798cc4d5fc64a7812ed3da9bbc5a42da88aed6837"
     },
     {
       "name": "golden/trading/fills.json",
-      "sha256": "bc6e143bf3a0e0c6a826f9e5ec7d45297523d9c48c890d869a91a8538070bec7"
+      "sha256": "62f3792334b0638d660f0e093f1c8a7a9e8bbccfa5fbeac8297394cf79d88cc2"
     },
     {
       "name": "golden/trading/order_joins.json",
-      "sha256": "42c22926aa2cf441cc28d3ce55d323a274bb05b30117964d5cf707ece112731b"
+      "sha256": "b7ecc2465a963ea4a41f71223193d812f5b8d44b7e8e52fad568d5fe369e1047"
     },
     {
       "name": "golden/trading/orders.json",
-      "sha256": "dd41a9266732d0e250416c258a483ee67c582eedfb9e0a9271954449f1cfb3f2"
+      "sha256": "124551367983a16f3a30f5eeb7605790779735b6e219db95be2761f1c57dd416"
     },
     {
       "name": "golden/xrepo/audit_clean.json",
@@ -219,7 +219,7 @@
     },
     {
       "name": "trading/fills.table.json",
-      "sha256": "0177738dd6d352752f1aa33c6ec99c6d22d13c866455d62791148527b68f8f01"
+      "sha256": "98b37699602740955e5762a5b2e0491ee816f3b9afd76ffbd097be1392faa789"
     },
     {
       "name": "trading/orders.table.json",

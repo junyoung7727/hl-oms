@@ -30,6 +30,7 @@ LMAX의 원칙 가운데 **단일 writer의 결정적 코어 + 입력 저널**�
 | 성능 측정 조건과 결과 | [docs/performance/](docs/performance/README.md) |
 | 배포, 복구, 버전 올리기, 상황별 절차 | [docs/operations/runbook.md](docs/operations/runbook.md) |
 | 저널을 VictoriaMetrics·VictoriaLogs로 내보내는 프로젝터 | [docs/operations/oms-projector.md](docs/operations/oms-projector.md) |
+| 저널을 레이크 거래 테이블(Parquet)로 내보내기 | [docs/operations/oms-export.md](docs/operations/oms-export.md) |
 | 외부에 기대는 가정 | [generated/assumptions.md](docs/generated/assumptions.md) |
 | 사용자가 정해야 하는 것 | [generated/user-decisions.md](docs/generated/user-decisions.md) |
 | 질문 → 결정 → 계약 → 코드 → 시험의 연결표 | [generated/traceability.md](docs/generated/traceability.md) |

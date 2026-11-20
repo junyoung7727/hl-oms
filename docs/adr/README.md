@@ -34,3 +34,4 @@
 | [ADR-024](ADR-024-absence-count-and-market-ref.md) | 부재 판정의 "없음" 횟수(Bybit 2), Bybit 만료는 게이트웨이가 recv window로 강제, 새 주문의 market_ref | 거래소 |
 | [ADR-025](ADR-025-journal-tail.md) | OMS 밖에서 저널을 읽는 법: 잠금 없이 내구화 번호까지, 이벤트 필드 표를 시험으로 인코더와 맞춤 | 운영 |
 | [ADR-026](ADR-026-observability-projector.md) | 저널을 따라 읽어 VictoriaMetrics·VictoriaLogs로 내보내는 별도 프로젝터, 저장소가 받은 줄까지만 커서, 죽은 OMS의 미확정 줄(ADR-016 §8을 대신함) | 운영 |
+| [ADR-027](ADR-027-trading-export.md) | 저널에서 레이크 거래 테이블(orders·fills·events)을 내구화된 기록, 완결된 날짜만, 바뀐 파일만 쓰기 | 운영 |

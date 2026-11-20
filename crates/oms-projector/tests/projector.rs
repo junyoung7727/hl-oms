@@ -107,6 +107,7 @@ impl Fakes {
             as_of_us: 1_700_000_000_000_000,
             wire_id_form: Some(WireIdForm::Base32Pair),
             instance_id: Some(7),
+            venue: None,
         });
     }
     fn silent(&self) {
@@ -624,7 +625,7 @@ fn the_lock_probe_reads_proc_locks_by_inode() {
 fn the_http_status_source_reads_the_oms_status_answer() {
     let fake = FakeHttp::start(Answer::Reply(
         200,
-        r#"{"as_of":1700000000000001,"node":{"wire_id_form":"base32_pair"},"core":{"instance_id":"0000000000000007"},"journal":{"durable_seq":42}}"#.into(),
+        r#"{"as_of":1700000000000001,"node":{"venue":"bybit:mainnet","wire_id_form":"base32_pair"},"core":{"instance_id":"0000000000000007"},"journal":{"durable_seq":42}}"#.into(),
     ));
     let mut src = HttpStatus::new(
         &format!("{}/api/status", fake.url()),
@@ -638,6 +639,7 @@ fn the_http_status_source_reads_the_oms_status_answer() {
             as_of_us: 1_700_000_000_000_001,
             wire_id_form: Some(WireIdForm::Base32Pair),
             instance_id: Some(7),
+            venue: Some("bybit:mainnet".into()),
         })
     );
     fake.set_default(Answer::Reply(500, "{}".into()));
@@ -768,6 +770,7 @@ fn an_answer_of_another_oms_instance_is_ignored() {
         as_of_us: 1,
         wire_id_form: None,
         instance_id: Some(8),
+        venue: None,
     });
     let mut now = 1_800_000_000_000_000;
     let mut p = projector(&root, &f, Some(obs(&s)), now);
