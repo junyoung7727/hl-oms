@@ -48,6 +48,25 @@ Fake HTTP (`http-fake`) only. Prove: 9th order in one second waits while a cance
 
 Fake WS Trade server (answer, refuse, stay silent, drop after the request, stop answering pings). Prove: a create goes over WS when up and over REST when down, then back to WS; a silent server makes every unanswered request `Unknown` within ping + timeout and nothing is resent (count of creates on both fakes = 1 per order); a connection that drops after reading the request = `Unknown`; NotWritten falls back to REST only before the write; 20006 / 10019 = `Unknown`; auth refused = key rejected; the ninth create within a second waits across both paths.
 
+## U17c decisions
+
+- Endpoint: `public_ws` = `wss://stream.bybit.com/v5/public/linear` (mainnet), `wss://stream-testnet.bybit.com/v5/public/linear` (testnet), in `Endpoints` and `Wiring`; tests give loopback.
+- `venue/bybit/ticker.rs`: one public connection task. Subscribes `tickers.<symbol>` for every traded symbol, at most 10 args per subscribe request (the spot limit, used for every market as in md-bybit); every subscribe answer must say `success: true`, else the connection is retried. IPv4 `connect` as the other two; 403 on the upgrade = ban. Ping every `ping_interval_ms`, the same liveness and backoff rules as the private stream (reset only after the first pong); both pong shapes (F20 2.10: the public linear pong is `op = "ping"`, `ret_msg = "pong"`). Connects only when the private stream would (no block, not quiet). Does not drive `Link`.
+- Price: `markPrice` (judgment: the venue's own fair price, not moved by one trade; Hyperliquid uses the mid). Linear sends a snapshot, then deltas with the changed fields only: a delta without `markPrice` means the mark is unchanged as of its `ts`. A delta before the snapshot of this connection is ignored. The state is per connection and starts empty after a reconnect.
+- Emission: `VenueInput::RefPrice { instrument, px = mark, venue_ts = frame ts (ms → µs) }` on a ticker frame, at most once per `ref_price_interval_ms` per symbol. No timer re-sends a held price: a symbol the venue stops sending goes stale in the core (`ref_price_max_age_us`), and creates with a price band are refused (the safe side).
+- An unreadable ticker frame (not JSON, bad type, bad `markPrice`, bad `ts`) ends the connection (reconnect). A frame for a symbol not traded is ignored.
+- Config: `ref_price_interval_ms` (default 5000) in the Bybit section. Must be ≥ 1000 and ≤ half of `core.policy.ref_price_max_age_us` (judgment: one lost update does not make the price stale).
+- Node test hook: only in a build with the `failpoints` feature (the shipped binary has none), the node reads `OMS_TEST_BYBIT_WIRING` (JSON: rest, private_ws, trade_ws, public_ws, ip_echo_url) in place of the network's endpoints, and refuses it unless every host is `127.0.0.1`. The configuration file still names a network and an https echo URL.
+
+## Testing Decisions (U17c)
+
+Unit (fake public WS): snapshot then deltas give the mark; a delta without `markPrice` re-emits the held mark after the interval; a delta before any snapshot gives nothing; at most one emission per interval; unreadable frame = reconnect; subscribe refused = retried; missing pong = reconnect; 403 = ban; 10 args per request; config bounds.
+
+Node (`tests/bybit_node.rs`, `--features failpoints`; the node is its own process with the real binary, the fake Bybit servers run in the test process, loopback only):
+1. An order with a price band before any ticker is refused (`RefPriceUnavailable`) and no byte reaches the fakes; after a ticker snapshot the same order is accepted. When the fake WS Trade reads the `order.create`, the journal on disk already holds the record of that order (checked from the fake, by reading the journal files). One create in total.
+2. The journal flush fails (failpoint) for the new order: the node stops, and no create reaches REST or WS Trade. Restarted without the failpoint, the order is resolved by the orderLinkId queries (realtime and history miss twice) as not placed; still no create.
+3. WS Trade reads the create and does not answer: the order becomes in doubt, the realtime query by orderLinkId finds it open, the order is working. Creates over both paths = 1.
+
 ## Out of Scope
 
 Amend (the core issues no amend), cancel-all (U18b), any real venue call, testnet orders.
