@@ -361,6 +361,7 @@ pub fn margin_input(body: &serde_json::Value, session: u64, seq: u64, queried_at
             queried_at,
             account_value,
             positions,
+            account_mm: None,
         }),
         Err(reason) => VenueInput::MarginReportInvalid {
             session,
@@ -585,6 +586,7 @@ mod tests {
                     leverage_value: 20,
                     max_leverage: 50,
                 }],
+                account_mm: None,
             })
         );
     }
@@ -726,6 +728,7 @@ mod tests {
                 queried_at: 9,
                 account_value: Amount(1_310_948_232_800),
                 positions: vec![],
+                account_mm: None,
             })
         );
         // A cross position and a short one are read as they are.

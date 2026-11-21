@@ -303,6 +303,7 @@ impl H {
             queried_at,
             account_value: amt(account_value),
             positions: vec![],
+            account_mm: None,
         }))
     }
 

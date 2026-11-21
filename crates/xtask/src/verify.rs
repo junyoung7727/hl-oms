@@ -53,8 +53,8 @@ pub fn suites(quick: bool, live: bool, extended: Option<&str>) -> Vec<Suite> {
         },
         Suite {
             name: "node-unit",
-            what: "queues, histogram, Hyperliquid signing vectors and message translation; the reconciler task at its ports (pace of the margin, venue-setting and account-mode queries)",
-            args: &["test", "-p", "oms-node", "--lib", "--test", "reconciler"],
+            what: "queues, histogram, Hyperliquid signing vectors and message translation; the reconciler task at its ports (pace of the margin, venue-setting and account-mode queries); the record schema (old journals replay, recovery from disk)",
+            args: &["test", "-p", "oms-node", "--lib", "--test", "reconciler", "--test", "record_schema"],
             env: env(&[]),
         },
         Suite {

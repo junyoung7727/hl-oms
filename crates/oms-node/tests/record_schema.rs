@@ -253,3 +253,70 @@ fn a_schema_1_journal_and_a_schema_2_tail_replay_to_the_live_state() {
     assert_eq!(report.records, (v1.len() + v2.len()) as u64);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// U17d. The account numbers of a margin report (`account_mm`) and the
+/// policy's `account_mm_rate_max_bps` are optional fields that are not
+/// written when absent, so the record schema stays 2: a schema-2 journal
+/// written before them reads unchanged. A journal whose reports carry them
+/// and whose latch is `account_mm` recovers to the live state, beside one
+/// whose reports do not (Hyperliquid), and `verify --re-decide` passes.
+#[test]
+fn margin_reports_with_and_without_account_mm_recover_to_the_live_state() {
+    assert_eq!(RECORD_SCHEMA, 2, "no record schema rise for an optional field");
+    for limit in [None, Some(5000)] {
+        let dir = data_dir(&format!("account-mm-{limit:?}"));
+        let mut run = Run {
+            core: Core::new(INSTANCE),
+            at: 1_000 * SEC,
+            records: Vec::new(),
+            next_seq: 1,
+        };
+        let mut cfg = config();
+        cfg.policy.margin = Some(MarginPolicy {
+            account_mm_rate_max_bps: limit,
+            ..MarginPolicy::default()
+        });
+        run.input(Input::Boot {
+            binary: "test".into(),
+        });
+        run.input(Input::Config(Box::new(cfg)));
+        run.venue(VenueInput::Link {
+            up: true,
+            session: 1,
+            reason: "test".into(),
+        });
+        let numbers = |maintenance: &str| {
+            limit.map(|_| AccountMm {
+                maintenance: Amount::parse(maintenance).unwrap(),
+                margin_balance: Amount::parse("1000").unwrap(),
+            })
+        };
+        for (seq, maintenance) in [(1, "499.99"), (2, "500")] {
+            let queried_at = run.at;
+            run.venue(VenueInput::MarginReport(MarginReport {
+                session: 1,
+                seq,
+                queried_at,
+                account_value: Amount::parse("100").unwrap(),
+                positions: vec![],
+                account_mm: numbers(maintenance),
+            }));
+        }
+        let records = run.take();
+        let text = serde_json::to_string(&records).unwrap();
+        let expected_rule = limit.map(|_| RuleId::AccountMm);
+        assert_eq!(
+            run.core.margin.reducing.as_ref().map(|r| r.rule),
+            expected_rule
+        );
+        assert_eq!(text.contains("account_mm"), limit.is_some(), "{text}");
+        write(&dir, RECORD_SCHEMA, &records);
+        let recovered = oms_node::recovery::recover(&dir, 1 << 30, "test").unwrap();
+        assert_eq!(recovered.core.digest(), run.core.digest());
+        assert_eq!(recovered.core, run.core);
+        drop(recovered);
+        let report = oms_node::recovery::verify(&dir, true).unwrap();
+        assert_eq!(report.records, records.len() as u64);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

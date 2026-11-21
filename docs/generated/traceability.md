@@ -1,7 +1,7 @@
 # 계약 추적표
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `2ceea182920b47b7`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `4b742cb2b7423dc8`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 | 계약 | 제목 | 상태 전이(이벤트) | 설계 결정 | 코드 | 주장 |
 |---|---|---|---|---|---|
@@ -24,6 +24,6 @@
 | [C-API](../../docs/contracts/api.md) | 로컬 API |  | ADR-015 | `crates/oms-api/src/lib.rs`<br>`crates/oms-node/src/server.rs` | V-API-1(이전 버전 결과), V-API-2(이전 버전 결과), V-API-3(이전 버전 결과), V-DASH-1(이전 버전 결과) |
 | [C-GW](../../docs/contracts/gateway.md) | 게이트웨이 계약 |  | ADR-005, ADR-014, ADR-017, ADR-021 | `crates/oms-node/src/venue/mod.rs`<br>`crates/oms-node/src/venue/simnet.rs`<br>`crates/oms-node/src/venue/hyperliquid/mod.rs` | V-HL-1(이전 버전 결과), V-HL-2(이전 버전 결과), V-HL-3(미실행), V-SLICE-1(이전 버전 결과), V-GW-SEAM-1(미실행) |
 | [C-TAIL](../../docs/contracts/tail.md) | 저널 꼬리 읽기와 이벤트 필드 표 |  | ADR-025 | `crates/oms-journal/src/tail.rs`<br>`crates/oms-core/src/event.rs` | V-TAIL-1(미실행), V-TAIL-2(미실행) |
-| [C-MARGIN](../../docs/contracts/margin.md) | 증거금 규칙 | `margin_reported` `margin_report_rejected` `day_base_set` `reducing_entered` `reducing_cleared` `venue_setting_noted` `account_mode_noted` | ADR-008, ADR-018 | `crates/oms-core/src/config.rs`<br>`crates/oms-core/src/decide.rs`<br>`crates/oms-core/src/core.rs`<br>`crates/oms-core/src/exposure.rs`<br>`crates/oms-core/src/model.rs`<br>`crates/oms-node/src/config.rs`<br>`crates/oms-node/src/venue/reconciler.rs`<br>`crates/oms-node/src/venue/simnet.rs`<br>`crates/oms-node/src/venue/hyperliquid/mod.rs`<br>`crates/oms-node/src/venue/hyperliquid/wire.rs`<br>`crates/oms-node/src/status.rs`<br>`crates/oms-node/src/server.rs`<br>`crates/oms-api/src/lib.rs`<br>`crates/oms-api/src/ctl.rs`<br>`crates/oms-sim/src/venue.rs`<br>`crates/oms-sim/src/world.rs` | V-MARGIN-1(이전 버전 결과), V-MARGIN-2(이전 버전 결과), V-MARGIN-3(이전 버전 결과), V-MARGIN-4(이전 버전 결과), V-MARGIN-5(이전 버전 결과), V-MARGIN-6(이전 버전 결과), V-MARGIN-7(이전 버전 결과), V-MARGIN-8(이전 버전 결과), V-MARGIN-9(이전 버전 결과), V-MARGIN-10(이전 버전 결과), V-MARGIN-11(이전 버전 결과), V-MARGIN-12(이전 버전 결과) |
+| [C-MARGIN](../../docs/contracts/margin.md) | 증거금 규칙 | `margin_reported` `margin_report_rejected` `day_base_set` `reducing_entered` `reducing_cleared` `venue_setting_noted` `account_mode_noted` | ADR-008, ADR-018 | `crates/oms-core/src/config.rs`<br>`crates/oms-core/src/decide.rs`<br>`crates/oms-core/src/core.rs`<br>`crates/oms-core/src/exposure.rs`<br>`crates/oms-core/src/model.rs`<br>`crates/oms-core/src/margin_view.rs`<br>`crates/oms-node/src/config.rs`<br>`crates/oms-node/src/venue/bybit/query.rs`<br>`crates/oms-node/src/venue/reconciler.rs`<br>`crates/oms-node/src/venue/simnet.rs`<br>`crates/oms-node/src/venue/hyperliquid/mod.rs`<br>`crates/oms-node/src/venue/hyperliquid/wire.rs`<br>`crates/oms-node/src/status.rs`<br>`crates/oms-node/src/server.rs`<br>`crates/oms-api/src/lib.rs`<br>`crates/oms-api/src/ctl.rs`<br>`crates/oms-sim/src/venue.rs`<br>`crates/oms-sim/src/world.rs` | V-MARGIN-1(이전 버전 결과), V-MARGIN-2(이전 버전 결과), V-MARGIN-3(이전 버전 결과), V-MARGIN-4(이전 버전 결과), V-MARGIN-5(이전 버전 결과), V-MARGIN-6(이전 버전 결과), V-MARGIN-7(이전 버전 결과), V-MARGIN-8(이전 버전 결과), V-MARGIN-9(이전 버전 결과), V-MARGIN-10(이전 버전 결과), V-MARGIN-11(이전 버전 결과), V-MARGIN-12(이전 버전 결과), V-MARGIN-13(미실행) |
 
 모든 저널 이벤트는 위 표의 어느 계약에 속한다(생성기가 확인한다).

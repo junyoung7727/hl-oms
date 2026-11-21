@@ -1,6 +1,6 @@
 # ADR-028 Bybit 게이트웨이
 
-상태: 만드는 중. U16b: 설정, 서명, REST 클라이언트, 시작 확인, IP 확인, cancel-all. U16c: 조회 일곱 가지와 실행 분류표, 증거금 보고. U16d: 비공개 스트림, `VenueGateway` 구현과 노드 연결, 상태 API의 막힘 이유. U17a: REST 주문·취소, 응답 분류표, 요청 한도, 틱·수량 단위 확인. U17b: WS Trade 연결, 주문·취소의 첫 경로(REST는 WS Trade가 아무것도 쓰지 않았을 때만). U17c(이 판): 참조 가격(공개 스트림의 mark price)과 가짜 Bybit 서버에 대한 노드 끝에서 끝까지 시험(저널 flush 실패 포함). 교차 계좌의 유지증거금 규칙은 U17d. 실제 거래소에 나간 주문은 아직 없다(가짜 서버 시험만, U-01).
+상태: 만드는 중. U16b: 설정, 서명, REST 클라이언트, 시작 확인, IP 확인, cancel-all. U16c: 조회 일곱 가지와 실행 분류표, 증거금 보고. U16d: 비공개 스트림, `VenueGateway` 구현과 노드 연결, 상태 API의 막힘 이유. U17a: REST 주문·취소, 응답 분류표, 요청 한도, 틱·수량 단위 확인. U17b: WS Trade 연결, 주문·취소의 첫 경로(REST는 WS Trade가 아무것도 쓰지 않았을 때만). U17c: 참조 가격(공개 스트림의 mark price)과 가짜 Bybit 서버에 대한 노드 끝에서 끝까지 시험(저널 flush 실패 포함). U17d(이 판): 교차 계좌의 유지증거금률 규칙(증거금 보고의 `totalMaintenanceMargin`·`totalMarginBalance`, 코어 규칙 `AccountMm`, 한도 5000 bps). 실제 거래소에 나간 주문은 아직 없다(가짜 서버 시험만, U-01).
 
 [ADR-017](ADR-017-hyperliquid-gateway.md)의 틀을 따른다.
 
@@ -79,7 +79,7 @@
 설정(`[venue] kind = "bybit"`): `network`, `credentials_file`, `sub_account_uid`, `ip_echo_url`(https), `ip_check_secs`(60, 10 이상), `recv_window_ms`(5000, 1000–20000), `request_timeout_ms`, `mainnet_confirmed`, `fills_lag_ms`. 검증:
 - mainnet은 `mainnet_confirmed`와 `[core.policy.margin]`이 있어야 한다(Hyperliquid와 같다).
 - `[core.policy]`는 `venue_enforces_expiry = true`, `absence_not_found_needed = 2`(ADR-024).
-- 증거금 정책이 있으면 `isolated = false`(교차 계좌).
+- 증거금 정책이 있으면 `isolated = false`(교차 계좌)와 `account_mm_rate_max_bps`(1..=9999, 결정값 5000, U17d §7g). 다른 거래소는 그 값을 거부한다.
 - `credentials_file`은 `..`를 담지 않고, 심볼릭 링크와 상대 데이터 디렉터리를 풀어 비교해도 데이터 디렉터리 밖이어야 한다.
 - 자격 파일은 한 번 열어 그 핸들로 검사하고 읽는다: 일반 파일, 심볼릭 링크 아님(`O_NOFOLLOW`), OMS를 돌리는 사용자 소유, 그룹·기타 권한 없음.
 
@@ -234,9 +234,31 @@
 
 노드 시험(`tests/bybit_node.rs`): `failpoints` 기능으로 만든 바이너리만 `OMS_TEST_BYBIT_WIRING`(JSON: `rest`, `private_ws`, `trade_ws`, `public_ws`, `ip_echo_url`)을 네트워크의 엔드포인트 대신 읽고, 주소 다섯 개의 호스트가 모두 `127.0.0.1`이 아니면 시작하지 않는다. 쓰면 `warn`을 남긴다. 설정 파일은 그대로 testnet과 https 확인 서비스를 적는다. 노드는 실제 바이너리로 따로 돌고, 가짜 REST(`http-fake`)와 가짜 웹소켓 셋은 시험 프로세스 안에 있다. flush 실패는 기존 failpoint `OMS_CRASH_AT=sync_error_after_write`(새 주문의 기록을 쓴 뒤 flush가 실패하고 프로세스는 살아서 상태 2로 멈춘다)를 쓴다. 새 failpoint는 없다.
 
+## 7g. 교차 계좌의 유지증거금률 (U17d)
+
+소유자 질문(11-20, "교차 계좌에 규칙을 더할지, X %")에 11-21까지 답이 없어 질문에 적은 기본값을 따랐다: 규칙을 더하고 X = 50 %(판단, 모형이 아니다). 소유자가 규칙을 뺄 수 있다(한도를 없애려면 Bybit 설정 검사도 함께 바꿔야 한다). 규칙의 숫자와 경계는 [C-MARGIN](../contracts/margin.md) "계좌 유지증거금률", 규칙 목록은 [ADR-018](ADR-018-margin-rules.md) §7의 11이다.
+
+| 단계 | 입력 | 처리 | 출력 | 실패하면 |
+|---|---|---|---|---|
+| M1 조회(`query.rs` `margin`) | `wallet-balance?accountType=UNIFIED`의 UNIFIED 계좌 하나 | `totalEquity` → `account_value`, `totalMaintenanceMargin` → `account_mm.maintenance`, `totalMarginBalance` → `account_mm.margin_balance`(셋 다 USD 소수 문자열, 1e-8 단위). `accountMMRate`는 보고마다의 `info` 로그 한 줄(`bybit margin report`)에만 싣는다 | `MarginReport { account_mm: Some(..) }` | 셋 가운데 하나라도 없거나 문자열 소수가 아니면 `MarginReportInvalid`(사유에 필드 이름) |
+| M2 판정(코어) | 받은 보고, `account_mm_rate_max_bps` | `유지증거금 > 0`이고 `유지증거금 × 10 000 ≥ 한도 × 잔고`면 `enter_reducing(AccountMm)`(열린 일반 주문 취소, 감소 전용 주문은 남김). 순서: 유지증거금 여유 → 이것 → 일 손실, 먼저 건 것이 래치에 남는다 | `ReducingEntered { rule: account_mm }`, `CancelRequested { by: Rule(AccountMm) }` | 한도가 있는데 `account_mm`이 없거나 유지증거금이 음수 → `MarginReportRejected` |
+| M3 설정(`config.rs`) | `[core.policy.margin]` | Bybit에서 정책이 있으면 `account_mm_rate_max_bps`가 있어야 하고(1..=9999), Hyperliquid와 가상 거래소는 그 값을 거부한다 | 시작 | 시작 거부 |
+| M4 보기 | `status` | `core.margin.account_mm = {maintenance, margin_balance}`(없으면 키 없음), `core.margin.reducing.rule = account_mm`, `detail`에 숫자 | 운영자 | — |
+
+| 결정 | 대안 | 고른 것과 이유 |
+|---|---|---|
+| 비율의 원천 | `accountMMRate`, `totalMaintenanceMargin / totalMarginBalance` | 두 금액의 비. 둘 다 문서에 정의가 있다(F18 §6, F20 13.2). `accountMMRate`는 비율인지 백분율인지 문서에 없다(F20 13.4). 판정에 쓰면 100배 틀릴 수 있다 |
+| 계산 | 나눗셈, 곱의 비교 | `i128` 곱의 비교. 잔고 0에서 나누지 않고, 반올림이 경계를 바꾸지 않는다 |
+| 잔고 0 이하 | 판정 안 함, 건다 | 유지증거금이 있으면 건다(거래소는 이미 청산 구간이다). 유지증거금이 0이면 걸지 않는다(청산될 것이 없다. 잔고 0·유지증거금 0은 스펙의 "걸지 않음") |
+| 두 숫자가 없는 보고 | 판정 없이 기록, 거부 | 거부(스펙). `max_leverage = 0`과 같다. 마지막 정상 보고가 나이를 먹어 30초 뒤 일반 주문 거절, 60초 뒤 취소 |
+| 음수 유지증거금 | 판정 안 함, 거부 | 거부(판단, 스펙 밖). 규칙이 쓸 수 없는 값이고, 받으면 규칙이 조용히 꺼진다 |
+| 해제 | 조건과 상관없이 받음, 조건이 참이면 거절 | 거절 `account_mm_active`(판단, 스펙 밖). 유지증거금 여유의 `mm_buffer_active`와 같은 원칙이고, 풀어도 다음 보고(5초)가 다시 건다 |
+| 판정 순서 | 맨 앞, 유지증거금 여유와 일 손실 사이, 맨 뒤 | 사이(판단). 청산에 가까운 규칙이 먼저 이름을 남긴다 |
+| 기록 스키마 | 3으로 올림, 2 그대로 | 2 그대로. 없으면 쓰지 않는 선택 필드와 열거형 값 하나를 더한 것이다(U16a `is_maker`, U13c `AbsenceNoted`와 같다). 옛 기록은 바이트가 같고 변환 없이 읽힌다. 한도를 담은 설정 기록(정책은 모르는 키를 거부한다)과 규칙 이름 `account_mm`이 든 기록은 이 판 전의 바이너리가 읽지 못한다. 숫자만 담은 보고 기록은 옛 바이너리가 그 필드를 버리고 읽는다. 그런 기록이 생긴 저널은 옛 바이너리로 되돌리지 않는다(runbook §9 "이벤트에 선택 필드 추가") |
+
 ## 8. 포기한 장점, 남은 위험, 가정
 
-- 위험: 교차 계좌에는 유지증거금 여유 규칙(C-MARGIN)이 걸리지 않는다(격리 포지션에만 있다). 주문을 보내는 U17 전에 정할 일이다(소유자 질문).
+- 위험(U17d로 바뀜): 교차 계좌에는 유지증거금 여유 규칙(C-MARGIN)이 걸리지 않는다(격리 포지션에만 있다). U17d가 계좌 유지증거금률 규칙(§7g)을 더했다.
 - 위험: query-api에서 묶이지 않은 키의 `ips` 모양은 문서에 없다. 빈 목록과 `*`를 둘 다 묶이지 않음으로 본다. 다른 모양(예: `""` 한 칸)은 주소로 읽히지 않아 IP 불일치로 막힌다(안전한 쪽).
 - 위험: 헤지 모드 종목이 행을 둘 주는지는 문서에 없다. 어느 행이든 0이 아니면 막는다.
 - 위험: 서버가 질의 순서를 요구하는지 모른다(정렬해서 보낸다). 실제 응답은 testnet에서 확인한다.
@@ -289,6 +311,13 @@
 - 위험(U17c): 시험용 연결 주소(`OMS_TEST_BYBIT_WIRING`)는 `failpoints` 빌드에만 있다. 배포 바이너리에 그 기능이 켜지면 환경 변수 하나로 거래소 주소가 바뀐다(127.0.0.1만 받으므로 다른 호스트로는 못 간다). 배포 빌드에 기능이 없다는 것은 빌드 절차가 지킨다(코드 검토만).
 - 위험(U17c): 간격 안에 바뀐 mark는 간격이 지난 뒤의 다음 티커 메시지에 실려 간다. 그 메시지가 오지 않으면 코어는 그 전 가격을 `ref_price_max_age_us` 동안 쓴다. 늦음은 많아야 간격 + 메시지 사이 시간이다. 재연결 직후에도 같아서, 새 연결의 스냅숏이 간격 안에 오면 다음 메시지까지 앞 연결이 보낸 마지막 가격으로 판정된다(낡음 한도 안).
 - 가정(U17c): 공개 linear는 구독마다 스냅숏을 한 번 보내고 그 뒤 바뀐 칸만 델타로 보낸다(11-18 수집기 설계, md-bybit). 스냅숏에는 `markPrice`가 있다.
+- 위험(U17d): 50 %(5000 bps)는 판단이다. 너무 낮으면 정상 거래가 자주 멈추고(되돌리려면 해제 또는 한도 변경), 너무 높으면 거래소의 청산과 사이가 좁다. 5초 조회가 급한 가격 변화를 건너뛸 수 있고, 새 보고를 받지 못하는 동안에는 판정하지 않는다. testnet에서 다시 본다.
+- 위험(U17d): 잘못 걸린 래치(예: 거래소의 `totalMaintenanceMargin`이 청산 판정의 숫자가 아님)는 조건이 참으로 읽히는 동안 `clear-reduce`로 풀 수 없다(`account_mm_active`). 운영자는 한도를 바꾼 설정을 켜야 한다. 다만 한도는 1..=9999 bps이고 Bybit 메인넷은 증거금 정책이 필수라, 증거금 잔고가 0 이하로 읽히는 잘못된 보고(유지증거금 > 0)가 이어지면 어떤 설정으로도 풀리지 않고 코드를 고쳐야 한다. 그동안 감소 전용 주문은 나간다(검토 참고).
+- 위험(U17d): 계좌 모드가 `ISOLATED_MARGIN`이면 거래소는 계좌 단위 필드가 맞지 않는다고 한다. 게이트웨이는 모드보다 지갑 필드를 먼저 읽으므로, 그런 계좌의 보고는 지갑 이유의 `MarginReportInvalid`가 된다. 주문은 계좌 모드 확인과 낡은 보고로 이미 막히지만(안전한 쪽), 운영자에게 보이는 이유가 실제 원인(모드)과 다르다.
+- 위험(U17d): 한도를 처음 켠 직후, 마지막으로 기록된 보고가 이 필드 전의 것이면 다음 보고(약 5초)까지 계좌 조건은 거짓으로 읽힌다.
+- 위험(U17d): 잔고가 음수이고 유지증거금이 0인 계좌는 이 규칙이 걸지 않는다(판단). 그런 계좌의 손실은 일 손실 규칙이 계좌 가치로 본다.
+- 가정(U17d): `totalMaintenanceMargin`과 `totalMarginBalance`는 거래소가 교차 계좌의 청산을 판정하는 숫자이고 같은 시각의 값이다(문서의 정의만 읽었다. "All account wide fields are not applicable to isolated margin", F18 §6. 이 계좌는 교차다).
+- 확인하지 않음(U17d): 실제 `wallet-balance` 응답의 두 필드와 `accountMMRate`의 형식(가짜 HTTP 서버만), 노드 프로세스를 거친 진입(Bybit 노드 시험은 증거금 정책 없이 돈다).
 - 확인하지 않음(U17c): 실제 공개 스트림(가짜 서버만), 구독 거부 응답의 실제 모양(`success: false`로 본다), TLS 접속(시험은 ws://), 연결 하나에 둘 수 있는 토픽 수(거래하는 종목 수가 적어 한도에 닿지 않는다고 본다).
 
 ## 9. 근거
@@ -312,11 +341,13 @@
 - 시험(U17c, Linux PC): `venue::bybit::ticker::tests` 5개(구독 요청의 토픽 수, 메시지 해석과 읽을 수 없는 메시지 16가지, 시각을 입력으로 받는 mark 상태와 간격), `venue::bybit::gateway::tests`의 공개 스트림 시험 7개(가짜 공개 웹소켓 서버: 스냅숏과 델타, 읽을 수 없는 메시지 뒤 재연결, 구독 거부, pong 없음과 공개 pong 모양, 업그레이드 403, 막힘, 종목 12개)와 시험용 연결 주소 1개, `mod::tests`의 엔드포인트, `config::tests`의 간격 범위(주장 V-BYBIT-REFPX-1). 노드 시험 `tests/bybit_node.rs` 3개(주장 V-BYBIT-NODE-1). 새 시간 시험을 세 번 돌려 모두 통과. 결함 22가지를 일부러 넣어 모두 잡았다: 간격 규칙 없음, 스냅숏 전 델타 받음, 공개 pong 모양 못 읽음(두 가지), 시험용 주소가 다른 호스트·다른 loopback을 받음, 연결마다 mark를 비우지 않음, 구독 요청에 토픽 11개, 구독 거부 무시, pong 없음 무시, 업그레이드 403을 차단으로 보지 않음, 연결 중 막힘 무시, 막힘 중 접속, 거래하지 않는 종목을 읽음, 읽을 수 없는 메시지 무시, `ts`를 µs로 바꾸지 않음, `markPrice` 없는 스냅숏을 받음, 간격 하한·상한, 커밋 단계가 기록을 쓰기 전·flush 전에 명령을 넘김(노드 시험 2가 잡았다; 시험 1의 저널 확인은 그 차이가 망 왕복보다 짧아 잡지 못했다), 답 없는 WS Trade 생성을 REST로 다시 보냄.
 - 검토(U17c, 꼭 0, 고칠 것 4, 참고 3) 반영: 구독 무응답 시험 2개(요청 하나, 둘 중 둘째)와 첫 pong 전 실패의 대기 시험 1개를 더함(결함 "구독 확인 기한 없음", "접속마다 대기 되돌림"을 넣어 각각 잡음, 새 시험 세 번 통과). 노드 시험 1의 이름에서 "기록 뒤에만 나감"을 빼고(그 순서는 시험 2가 증명), V-BYBIT-REFPX-1의 틀린 문장(재연결 뒤 앞 연결 가격) 고침. 한 종목의 못 읽는 가격이 연결의 모든 종목을 끊는다는 것과 간격 안 변화의 늦음을 §8에 적음. 검토자가 기본 빌드 바이너리에서 `OMS_TEST_BYBIT_WIRING`·`OMS_CRASH_AT` 문자열 0건을 확인했다(손 확인, CI 단계는 없다).
 
+- 시험(U17d, Linux PC): 코어 `tests/account_mm.rs` 11개(한도 바로 아래와 한도, 1 bps, 잔고 0 이하, 유지증거금 0, 가장 큰 금액, 두 숫자 없는 보고와 음수 유지증거금의 거부, 먼저 건 규칙과 판정 순서, 해제 거절, `status`, 저널의 옛 바이트·재생·재결정, 한도 범위), `record_schema::margin_reports_with_and_without_account_mm_recover_to_the_live_state`(디스크 복구와 `verify --re-decide`), `venue::bybit::query::tests`의 증거금 시험 둘 확장과 `the_account_mm_rate_field_is_not_used_for_the_judgment`, `config::tests::the_account_mm_limit_is_required_on_bybit_and_refused_elsewhere`(주장 V-MARGIN-13). 결함 20가지를 일부러 넣어 모두 잡았다: 한도에서 `>`, 잔고 0 이하에서 건너뜀, 유지증거금 0 조건 빠짐, `accountMMRate`를 읽음, 잔고 없음 허용, 게이트웨이가 숫자를 싣지 않음, 한도 아래 숫자 없는 보고 허용, 음수 유지증거금 허용, 나중 규칙이 래치를 바꿈, 판정 순서 둘, 규칙 빠짐, 해제가 조건을 보지 않음, `status`에 숫자 없음, 보고와 정책의 `None`을 씀(둘), 한도 0과 10000 허용, Hyperliquid에서 한도 허용, Bybit에서 한도 없음 허용.
+
 ## 10. 재검토 조건
 
 - testnet(U-01 허가 뒤)에서 응답 모양이 다를 때.
 - 거래소가 포지션 모드를 읽는 엔드포인트를 낼 때.
-- 교차 계좌용 증거금 규칙이 정해질 때(U17 전).
+- 소유자가 계좌 유지증거금률 규칙을 빼거나 한도(5000 bps)를 바꿀 때, 또는 testnet에서 `accountMMRate`의 형식이나 두 필드의 뜻이 가정과 다를 때(U17d).
 - testnet에서 스트림이 재연결 뒤 놓친 메시지를 다시 주거나(T4), 비거래 실행을 싣는 것이 보일 때(T15).
 - testnet에서 주문 응답 코드의 뜻(T6)이나 한도 공유(T8)가 분류·창과 다를 때(U17a).
 - testnet에서 WS Trade의 응답·auth·pong 모양이나 무응답 동작이 다를 때(U17b).

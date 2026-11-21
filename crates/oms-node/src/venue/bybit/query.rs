@@ -467,10 +467,13 @@ impl Queries {
     }
 
     /// The margin report (C-MARGIN). Account value: `totalEquity` of the
-    /// unified account (USD). Positions: every linear USDT position, with
-    /// `positionIM` as the margin used and the account's margin mode as
-    /// each position's (a unified account has one mode for all, F18 §6).
-    /// An answer that cannot be read as a whole is `MarginReportInvalid`.
+    /// unified account (USD). Account maintenance margin and margin
+    /// balance: `totalMaintenanceMargin`, `totalMarginBalance` (USD, U17d).
+    /// `accountMMRate` is only logged: its format is undocumented (F20
+    /// 13.4). Positions: every linear USDT position, with `positionIM` as
+    /// the margin used and the account's margin mode as each position's (a
+    /// unified account has one mode for all, F18 §6). An answer that cannot
+    /// be read as a whole is `MarginReportInvalid`.
     async fn margin(
         &self,
         session: u64,
@@ -507,7 +510,15 @@ impl Queries {
                 accounts.len()
             ));
         };
-        let account_value = match exec::number(account, "totalEquity", Amount::parse) {
+        let read_account = || -> Result<(Amount, AccountMm), String> {
+            let value = exec::number(account, "totalEquity", Amount::parse)?;
+            let account_mm = AccountMm {
+                maintenance: exec::number(account, "totalMaintenanceMargin", Amount::parse)?,
+                margin_balance: exec::number(account, "totalMarginBalance", Amount::parse)?,
+            };
+            Ok((value, account_mm))
+        };
+        let (account_value, account_mm) = match read_account() {
             Ok(v) => v,
             Err(e) => return invalid(format!("wallet-balance: {e}")),
         };
@@ -552,12 +563,21 @@ impl Queries {
             };
             positions.push(p);
         }
+        // For comparison on testnet only: the rule does not read it.
+        crate::info!(
+            "bybit margin report",
+            "seq": seq,
+            "total_maintenance_margin": account_mm.maintenance.to_string(),
+            "total_margin_balance": account_mm.margin_balance.to_string(),
+            "account_mm_rate": account.get("accountMMRate").cloned()
+        );
         Ok(vec![VenueInput::MarginReport(MarginReport {
             session,
             seq,
             queried_at,
             account_value,
             positions,
+            account_mm: Some(account_mm),
         })])
     }
 
@@ -1166,7 +1186,18 @@ mod tests {
     // ---- margin, setting, mode --------------------------------------------
 
     fn wallet(equity: &str) -> Value {
-        json!({"list": [{"accountType": "UNIFIED", "totalEquity": equity, "accountMMRate": "0", "coin": []}]})
+        json!({"list": [{"accountType": "UNIFIED", "totalEquity": equity, "totalMaintenanceMargin": "12.5", "totalMarginBalance": "998.25", "accountMMRate": "0.0125", "coin": []}]})
+    }
+
+    /// `wallet` with one account field replaced, or removed when `None`.
+    fn wallet_with(field: &str, v: Option<Value>) -> Value {
+        let mut w = wallet("1000.5");
+        let a = w["list"][0].as_object_mut().unwrap();
+        match v {
+            Some(v) => a.insert(field.to_string(), v),
+            None => a.remove(field),
+        };
+        w
     }
 
     fn account(mode: &str) -> Value {
@@ -1215,6 +1246,10 @@ mod tests {
                     leverage_value: 10,
                     max_leverage: 100,
                 }],
+                account_mm: Some(AccountMm {
+                    maintenance: Amount::parse("12.5").unwrap(),
+                    margin_balance: Amount::parse("998.25").unwrap(),
+                }),
             })]
         );
         // The maximum leverage is read once per symbol.
@@ -1274,6 +1309,22 @@ mod tests {
             };
             assert!(!reason.is_empty(), "{name}");
         }
+        // The account's maintenance margin and margin balance (U17d):
+        // missing, empty, a JSON number or not a number.
+        for field in ["totalMaintenanceMargin", "totalMarginBalance"] {
+            for bad in [None, Some(json!("")), Some(json!(12.5)), Some(json!("lots"))] {
+                let fake = margin_venue(vec![position("BTCUSDT", "Buy", "0.01", 0)]);
+                fake.route("/v5/account/wallet-balance", [ok(wallet_with(field, bad.clone()))]);
+                let a = queries(&fake)
+                    .answer(QueryReq::Margin { seq: 9 }, SESSION)
+                    .await;
+                let [VenueInput::MarginReportInvalid { seq: 9, reason, .. }] = a.inputs.as_slice()
+                else {
+                    panic!("{field} {bad:?}: {a:?}")
+                };
+                assert!(reason.contains(field), "{field} {bad:?}: {reason}");
+            }
+        }
         // No answer: no input at all (the last report keeps ageing).
         let fake = margin_venue(vec![]);
         fake.route("/v5/position/list", [Http::Reply(502, "".into())]);
@@ -1282,6 +1333,32 @@ mod tests {
             .await;
         assert!(a.inputs.is_empty());
         assert!(matches!(a.failed, Some(QueryFail::Rest(_))));
+    }
+
+    /// U17d. The rule judges `totalMaintenanceMargin / totalMarginBalance`;
+    /// `accountMMRate` is not read for it (its format is undocumented, F20
+    /// 13.4). Whatever it says, or when it is missing, the report is the same.
+    #[tokio::test]
+    async fn the_account_mm_rate_field_is_not_used_for_the_judgment() {
+        let report = |w: Value| async move {
+            let fake = margin_venue(vec![]);
+            fake.route("/v5/account/wallet-balance", [ok(w)]);
+            queries(&fake).answer(QueryReq::Margin { seq: 9 }, SESSION).await.inputs
+        };
+        let base = report(wallet("1000.5")).await;
+        let [VenueInput::MarginReport(r)] = base.as_slice() else {
+            panic!("{base:?}")
+        };
+        assert_eq!(
+            r.account_mm,
+            Some(AccountMm {
+                maintenance: Amount::parse("12.5").unwrap(),
+                margin_balance: Amount::parse("998.25").unwrap(),
+            })
+        );
+        for v in [Some(json!("0.99")), Some(json!("99")), Some(json!("lots")), Some(json!(1)), None] {
+            assert_eq!(report(wallet_with("accountMMRate", v.clone())).await, base, "{v:?}");
+        }
     }
 
     #[tokio::test]

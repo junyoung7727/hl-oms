@@ -98,6 +98,7 @@ fn margin_report_of_the_current_session_is_recorded() {
         queried_at,
         account_value: amt("100"),
         positions: vec![position("X", 40), position("NOT-CONFIGURED", 20)],
+        account_mm: None,
     };
     let out = h.venue(VenueInput::MarginReport(report.clone()));
     // The first report of a run also sets the day base.
@@ -249,6 +250,7 @@ fn invalid_margin_report_is_journaled_and_never_becomes_fresh() {
         queried_at: zero_at,
         account_value: amt("70"),
         positions: vec![position("X", 40), position("Y", 0)],
+        account_mm: None,
     }));
     assert_eq!(
         out.events,
@@ -458,6 +460,7 @@ fn without_a_margin_policy_no_margin_check_runs() {
         queried_at: h.now,
         account_value: amt("100"),
         positions: vec![position("X", 0)],
+        account_mm: None,
     }));
     assert_eq!(names(&out), Vec::<&str>::new());
 
@@ -1431,6 +1434,7 @@ fn margin_events_replay_to_the_same_state() {
         queried_at: last_at,
         account_value: amt("96"),
         positions: vec![position("X", 40)],
+        account_mm: None,
     }));
     // A rejection lasts until the next recorded report: the one before the
     // reports above is gone, this one stays.
@@ -2446,6 +2450,7 @@ fn a_report_position_on_an_unconfigured_instrument_leaves_no_venue_setting() {
         queried_at: h.now,
         account_value: amt("1000"),
         positions: vec![position("X", 40), position("NOT-CONFIGURED", 20)],
+        account_mm: None,
     }));
     let known: Vec<&InstrumentId> = h.core.margin.venue_settings.keys().collect();
     assert_eq!(known, vec![&iid("X")]);
@@ -2473,6 +2478,7 @@ fn report_with_position_on_x(
             leverage_value,
             ..position("X", 40)
         }],
+        account_mm: None,
     }))
 }
 
@@ -3318,6 +3324,7 @@ fn report_positions_asked_at(h: &mut H, queried_at: Ts, positions: Vec<MarginPos
         queried_at,
         account_value: amt("100"),
         positions,
+        account_mm: None,
     }))
 }
 
@@ -3602,6 +3609,7 @@ fn reducing_records_the_rule_that_tripped_first() {
         queried_at: h.now,
         account_value: amt("94"),
         positions: under_the_line(),
+        account_mm: None,
     }));
     assert_eq!(names(&out), vec!["margin_reported", "reducing_entered"]);
     assert_eq!(

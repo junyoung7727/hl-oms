@@ -51,6 +51,7 @@ fn every_event() -> Vec<Event> {
             leverage_value: 10,
             max_leverage: 50,
         }],
+        account_mm: Some(AccountMm { maintenance: amt("1"), margin_balance: amt("90") }),
     };
     let id = OrderId(1);
     vec![

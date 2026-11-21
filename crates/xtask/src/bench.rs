@@ -204,6 +204,7 @@ pub fn core_bench_case(orders: u64, margin: bool) -> Result<CoreBenchCase, Strin
             queried_at,
             account_value: Amount(MARGIN_CASE_ACCOUNT_VALUE * 100_000_000),
             positions: vec![],
+            account_mm: None,
         })));
         let instrument = InstrumentId::new("X").expect("id");
         go(core, at, Input::Venue(VenueInput::RefPrice { instrument, px: Px(100 * 100_000_000), venue_ts: queried_at }));

@@ -1,6 +1,6 @@
 # 증거금 규칙 계약
 
-상태: 채택, 구현됨(2026-11-16, 티켓 01~12). 가상 거래소와 시뮬레이션으로 시험했다. **실제 거래소에서는 아무것도 확인하지 않았다**: 이 계약의 조회는 testnet에도 보낸 적이 없고, 규칙이 읽는 숫자의 뜻은 가정 T1~T11이다("검증"의 끝).
+상태: 채택, 구현됨(2026-11-16, 티켓 01~12. "계좌 유지증거금률"은 2026-11-21, U17d). 가상 거래소와 시뮬레이션으로 시험했다. **실제 거래소에서는 아무것도 확인하지 않았다**: 이 계약의 조회는 testnet에도 보낸 적이 없고, 규칙이 읽는 숫자의 뜻은 가정 T1~T11이다("검증"의 끝).
 모든 절이 코드에 있고, 이벤트와 주장(V-MARGIN-1~12)이 `registry/`에 있다. 티켓별로 들어온 것:
 
 - 선택 구역 `policy.margin`과 그 기본값, "차단 표"의 `Resync`, `InDoubt`, `Mismatch`(티켓 01, V-MARGIN-1).
@@ -13,6 +13,7 @@
 - "유지증거금 여유" 전체: 받은 보고마다의 판정, `Rule(MmBuffer)`로 들어가는 감소 전용 상태와 그 이름의 규칙 취소, 조건이 참일 때의 해제 거절 `MmBufferActive`. `status`의 `core.margin.reducing.rule`은 `mm_buffer`가 된다(티켓 07, V-MARGIN-8, V-MARGIN-4, V-MARGIN-6).
 - "Hyperliquid 조회" 전체: Hyperliquid 게이트웨이의 증거금 조회, 거래소 설정 조회, 계좌 모드 조회와 그 응답의 번역, 조회 weight 예산 검사, 증거금 정책을 담은 Hyperliquid 예제 설정(티켓 09, V-MARGIN-10, V-CFG-1). 실제 거래소에는 한 번도 묻지 않았다.
 - 코드 검토(2026-11-16, 헤드 228373e. 티켓 12의 Comments)에서 고친 것: 정책이 없으면 감소 전용 상태가 주문을 막지 않는다("설정"). 받은 보고가 마지막 거부 사유를 지운다. 설정에 없는 종목의 보고 포지션은 거래소 설정으로 남기지 않는다. 대조기는 답이 없는 거래소 설정·계좌 모드 조회를 `venue_setting_poll_ms`에 많아야 한 번 되묻는다. 게이트웨이의 큐에 자리가 없어 나가지 못한 증거금 조회는 다음 바퀴에 나간다. simvenue의 증거금 응답에 포지션 목록이 없으면 보고를 거부한다. simvenue의 제어 명령 `margin_used`. 변이 M116~M122.
+- "계좌 유지증거금률" 전체(U17d, [ADR-028](../adr/ADR-028-bybit-gateway.md) §7g): 정책 값 `account_mm_rate_max_bps`, 보고의 `account_mm`, `Rule(AccountMm)`으로 들어가는 감소 전용 상태와 그 이름의 규칙 취소, 한도가 있을 때 `account_mm` 없는 보고의 거부, 조건이 참일 때의 해제 거절 `AccountMmActive`, Bybit 게이트웨이의 두 필드 번역, 노드의 설정 검사(Bybit는 반드시, 다른 거래소는 거부). `status`의 `core.margin.account_mm`과 `core.margin.reducing.rule = account_mm`(V-MARGIN-13).
 - 시뮬레이션의 증거금 모형과 검사: 가상 거래소(`oms-sim`의 `SimVenue`. simvenue 프로세스도 같은 것을 쓴다)가 계좌 가치를 자기 모형으로 계산하고(현금 + 포지션 × 기준 가격. 체결 대금과 수수료, 펀딩이 현금에서 나간다), 보고에 포지션(가치, 증거금, 증거금 방식, 레버리지, 최대 레버리지)을 담고, 감소 전용 주문이 포지션을 키우지 못하게 한다. 시뮬레이션 세계는 증거금 프로파일 `margin_calm`, `margin_lossy`에서 증거금 정책을 켜고 매 입력 뒤에 증거금 불변식을 검사한다(티켓 10, V-MARGIN-12, V-SIM-1, V-MARGIN-11). 프로파일 `margin_days`는 같은 검사를 계약 기본값의 증거금 시계로 가상 시간 50시간(UTC 자정 세 번) 동안 돌린다(티켓 11, V-MARGIN-12). 프로파일과 검사의 목록은 [simulation.md](../verification/simulation.md)에 있다.
 
 가상 거래소에 대해 알아 둘 것: 계좌 가치와 포지션의 증거금은 우리가 만든 모형이고 거래소의 산술이 아니다. 포지션의 증거금은 가치 ÷ 레버리지이고 손실이 나도 줄지 않는다(모형은 진입 가격을 기억하지 않는다). 그래서 유지증거금 여유 규칙은 증거금을 일부러 다르게 말하게 할 때만 걸린다(시뮬레이션은 0으로, simvenue 프로세스는 제어 명령 `margin_used`가 정한 값으로). simvenue 프로세스는 참조 가격을 스스로 내지 않고 제어 명령(`ref_price`)을 받았을 때만 낸다(그 가격이 모형의 기준 가격도 된다). 그래서 simvenue에서 `policy.margin`을 켜면 그 명령으로 가격을 준 뒤 15초 동안만 일반 주문을 받는다. simvenue 프로세스의 접수 요청에는 감소 전용 표시가 없어서 프로세스는 모든 주문을 일반 주문으로 다룬다(감소 전용 주문의 거절은 시뮬레이션 세계에서만 일어난다). 가상 거래소는 모든 종목을 격리·레버리지 2로(제어 명령 `venue_setting`으로 바꿀 수 있다), 계좌 모드를 `standard`(가상 거래소가 붙인 이름이고 Hyperliquid의 값이 아니다)로 답한다. 기본 허용 목록은 비어 있으므로 simvenue에서 일반 주문을 내려면 `account_modes_allowed = ["standard"]`를 적어야 한다.
@@ -38,6 +39,7 @@
 | `venue_leverage` | 2 | 종목마다 거래소에 있어야 하는 레버리지 | 1 이상 |
 | `isolated` | true | 종목마다 거래소에 있어야 하는 증거금 방식 | — |
 | `account_modes_allowed` | 비어 있음 | 허용하는 계좌 모드 문자열 목록 | `unifiedAccount`, `portfolioMargin`은 적어도 허용되지 않는다 |
+| `account_mm_rate_max_bps` | 없음(규칙 꺼짐, 쓰지 않음) | 교차 증거금 계좌의 유지증거금이 증거금 잔고의 이만큼(bps)에 닿으면 감소 전용 상태. Bybit의 값은 5000(50 %, 판단) | 있으면 1..=9999. 노드: Bybit에서 `policy.margin`이 있으면 반드시 있어야 하고, Hyperliquid와 가상 거래소는 거부한다(그 보고에는 계좌 숫자가 없다) |
 | `runtime.margin_poll_ms` | 5 000 | 증거금 보고 조회 간격 | 0보다 크다 |
 | `runtime.venue_setting_poll_ms` | 60 000 | 포지션이 없는 종목의 거래소 설정 조회 간격 | 0보다 크다 |
 
@@ -47,18 +49,19 @@
 
 | 입력 | 조건 | 이벤트 | 바뀌는 상태 |
 |---|---|---|---|
-| `MarginReport { session, seq, queried_at, account_value, positions[] }` | 링크가 올라와 있고, `session`이 현재 세션이고, `seq`가 이 세션에서 받은 마지막 보고의 `seq`보다 크다 | `MarginReported` | 마지막 보고(값, 조회 시각, 순번). 마지막 거부 사유를 지운다 |
+| `MarginReport { session, seq, queried_at, account_value, positions[], account_mm? }` | 링크가 올라와 있고, `session`이 현재 세션이고, `seq`가 이 세션에서 받은 마지막 보고의 `seq`보다 크다 | `MarginReported` | 마지막 보고(값, 조회 시각, 순번). 마지막 거부 사유를 지운다 |
 | 같은 입력 | 위 조건이 아니다 | 없음(입력을 버린다) | 없음 |
 | `MarginReportInvalid { session, seq, queried_at, reason }` | 링크가 올라와 있고 현재 세션이다 | `MarginReportRejected { reason }` | 마지막 거부 사유(다음에 받은 보고가 지운다). 마지막 보고는 그대로다 |
 | `MarginReport`인데 어느 포지션의 `max_leverage`가 0 | 첫 행의 조건(링크, 세션, `seq`)이 맞다 | `MarginReportRejected` | 위와 같다. 코어가 직접 거부한다 |
+| `MarginReport`인데 `account_mm_rate_max_bps`가 있고 `account_mm`이 없거나 그 유지증거금이 음수 | 첫 행의 조건이 맞다 | `MarginReportRejected` | 위와 같다. 코어가 직접 거부한다(사유 `account_mm is missing: …`, `account_mm: maintenance margin … is negative`). 한도가 없으면 `account_mm`은 보지 않는다 |
 | `VenueSetting { session, instrument, isolated, leverage }` | 현재 세션 | `VenueSettingNoted` | 그 종목의 거래소 설정 |
 | `AccountMode { session, mode }` | 현재 세션 | `AccountModeNoted` | 계좌 모드 |
 | 운영자 `ClearReduce { note }` | 아래 "해제" | `DayBaseSet { set_by: Operator }`, `ReducingCleared { note, old_base, new_base }` | 기준 금액, 감소 전용 상태 해제 |
 | 운영자 `RebaseDay { note }` | 아래 "기준 재설정" | `DayBaseSet { set_by: Operator }` | 기준 금액 |
 | `Tick` | 아래 "보고 끊김 취소" | `CancelRequested { by: Rule(MarginStale) }` | 주문의 취소 요청 |
 
-`positions[]`의 한 항목: `instrument, szi, position_value, margin_used, leverage_type, leverage_value, max_leverage`. `szi`는 부호 있는 수량이다(코드의 이름은 `qty`. 저널과 `status`의 키는 `szi` 그대로다). 설정에 없는 종목의 포지션도 버리지 않는다.
-받은 보고 하나는 한 입력 안에서 아래 순서로 처리된다: 기록 → 거래소 설정 갱신 → 유지증거금 여유 판정 → 일 손실 판정 → 날짜 넘김.
+`positions[]`의 한 항목: `instrument, szi, position_value, margin_used, leverage_type, leverage_value, max_leverage`. `account_mm = { maintenance, margin_balance }`은 교차 증거금 계좌의 유지증거금과 증거금 잔고(USD)이고 Bybit 게이트웨이만 채운다. 없으면 저널에 쓰지 않는다(Hyperliquid 보고와 이 필드 전의 기록은 바이트가 같다. 기록 스키마는 2 그대로다). `szi`는 부호 있는 수량이다(코드의 이름은 `qty`. 저널과 `status`의 키는 `szi` 그대로다). 설정에 없는 종목의 포지션도 버리지 않는다.
+받은 보고 하나는 한 입력 안에서 아래 순서로 처리된다: 기록 → 거래소 설정 갱신 → 유지증거금 여유 판정 → 계좌 유지증거금률 판정 → 일 손실 판정 → 날짜 넘김.
 규칙 판정은 받은 보고마다 한다. 도착했을 때 이미 30초보다 오래된 보고도 판정한다(값은 거래소가 계산한 것이고 가진 것 중 가장 새것이다).
 
 상태 소유자는 코어다. 모든 변경은 위 이벤트로만 일어나고 저널에서 복원된다. 링크가 바뀌면 거래소 설정과 계좌 모드는 "모름"이 된다. 마지막 보고, 기준 금액, 감소 전용 상태는 링크가 바뀌어도 남는다.
@@ -115,6 +118,19 @@ N_down = max(0, −pos × ref + Σ_매도 예약 × max(지정가, ref))
 - 한 종목에서 걸려도 계좌 전체가 감소 전용 상태가 된다. 걸리는 포지션이 여럿이면 보고에 먼저 적힌 것 하나가 `detail`에 남는다: `position <종목>: isolated margin <증거금> is below the maintenance margin at maximum leverage <최대 레버리지> plus <여유> bps of the position value <가치>`.
 - 도착했을 때 이미 30초보다 오래된 보고도 판정한다. 한 보고가 일 손실과 함께 걸면 이 규칙을 먼저 판정하므로 `MmBuffer`가 남는다.
 
+### 계좌 유지증거금률
+
+교차 증거금 계좌(Bybit)를 위한 규칙이다. 유지증거금 여유 규칙은 격리 포지션만 판정하므로 교차 계좌에서는 걸리지 않는다. 소유자 질문(11-20)에 11-21까지 답이 없어 질문에 적은 기본값(규칙을 더한다, 50 %)을 따랐다. 소유자가 규칙을 뺄 수 있다.
+
+- 조건: `account_mm_rate_max_bps`가 있고, 받은 보고의 `account_mm`이 `maintenance > 0`이고 `maintenance × 10 000 ≥ account_mm_rate_max_bps × margin_balance`. 참이면 감소 전용 상태로 들어간다(`Rule(AccountMm)`).
+- 비율 = 유지증거금 ÷ 증거금 잔고(Bybit `totalMaintenanceMargin / totalMarginBalance`). 나누지 않고 `i128` 곱으로 비교한다(곱 하나는 2^95보다 작아 언제나 들어간다). 정확히 한도와 같으면 건다.
+- 한도 5000에서 잔고 1000: 유지증거금 499.99는 걸리지 않고 500은 건다. 한도 1에서 잔고 100: 0.00999999는 걸리지 않고 0.01은 건다.
+- 잔고가 0 이하이고 유지증거금이 0보다 크면 어느 한도에서도 건다(거래소는 비율 100 %에서 청산한다). 유지증거금이 0이면 잔고가 얼마든 걸지 않는다(청산될 것이 없다. 잔고 0, 유지증거금 0도 걸지 않는다). 음수 유지증거금은 보고 전체의 거부다(위 "입력, 상태, 이벤트").
+- `detail`: `account maintenance margin <유지증거금> is at or above <한도> bps of the margin balance <잔고>`.
+- 한 보고가 여러 규칙을 걸면 위 순서대로 판정하므로 유지증거금 여유, 계좌 유지증거금률, 일 손실 순으로 먼저 건 것이 남는다. 이미 감소 전용 상태이면 아무것도 내지 않는다.
+- 거래소의 `accountMMRate`는 읽지 않는다: 그 값이 비율인지 백분율인지 문서에 없다(F20 13.4). 게이트웨이는 보고마다의 로그 한 줄에만 남긴다(testnet에서 비교).
+- 도착했을 때 이미 30초보다 오래된 보고도 판정한다(다른 규칙과 같다).
+
 ### 감소 전용 상태
 
 - 상태: `reducing = { rule, detail, since }` 또는 없음. `ReducingEntered`로 켜고 `ReducingCleared`로 끈다. 차단 사유 `Reducing`은 이 상태에서 계산한다.
@@ -127,15 +143,16 @@ N_down = max(0, −pos × ref + Σ_매도 예약 × max(지정가, ref))
 
 | 명령 | 받는 조건 | 거절 사유 |
 |---|---|---|
-| `clear-reduce --note` | 감소 전용 상태다. 보고가 신선하다. 그 보고에서 유지증거금 여유 조건이 거짓이다. 사유가 비어 있지 않다 | `NotReducing`, `MarginUnavailable`, `MmBufferActive`, `NoteRequired` |
+| `clear-reduce --note` | 감소 전용 상태다. 보고가 신선하다. 그 보고에서 유지증거금 여유 조건이 거짓이다. 그 보고에서 계좌 유지증거금률 조건이 거짓이다. 사유가 비어 있지 않다 | `NotReducing`, `MarginUnavailable`, `MmBufferActive`, `AccountMmActive`, `NoteRequired` |
 | `rebase-day --note` | 보고가 신선하다. 사유가 비어 있지 않다 | `MarginUnavailable`, `NoteRequired` |
 
 - 둘 다 운영자 소켓에서만 받는다. 전략 소켓에서는 거절한다(`forbidden`. 코어에 닿지 않는다).
-- 거절은 아무것도 기록하지 않는다. 응답 문자열은 사유 코드로 시작한다: `not_reducing`, `margin_unavailable`, `mm_buffer_active`, `note_required`. 조건이 여럿 어긋나면 이 순서로 처음 것 하나를 답한다(기준 재설정은 `margin_unavailable`, `note_required` 순). 공백뿐인 사유는 빈 것으로 본다.
+- 거절은 아무것도 기록하지 않는다. 응답 문자열은 사유 코드로 시작한다: `not_reducing`, `margin_unavailable`, `mm_buffer_active`, `account_mm_active`, `note_required`. 조건이 여럿 어긋나면 이 순서로 처음 것 하나를 답한다(기준 재설정은 `margin_unavailable`, `note_required` 순). 공백뿐인 사유는 빈 것으로 본다.
 - 받아들인 해제는 한 입력 안에서 `DayBaseSet { set_by: Operator }`, `ReducingCleared { note, old_base, new_base }` 순서로 낸다. 기준 재설정의 사유는 이벤트가 아니라 같은 저널 기록의 입력에 남는다.
 - `policy.margin`이 없으면 보고가 신선할 수 없으므로 둘 다 `margin_unavailable`이다(감소 전용 상태가 아니면 해제는 `not_reducing`).
 - 해제는 현재 계좌 가치를 새 기준 금액으로 삼는다. 날짜는 그 보고의 날짜로 둔다(앞선 날짜라도 그대로 쓴다). 그 뒤 새 기준에서 5 %를 넘게 잃으면 다시 걸린다(기준 94에서 89.30은 걸리지 않고 89.29는 걸린다).
 - 기준 재설정은 감소 전용 상태를 건드리지 않는다. 날짜는 그 보고의 날짜로 둔다(앞선 날짜라도 그대로 쓴다).
+- 계좌 유지증거금률 조건이 참으로 읽히는 동안에도 해제할 수 없다(`account_mm_active`, U17d의 판단: 스펙은 말하지 않는다. 풀어도 다음 보고가 다시 건다). 한도가 없거나 마지막 보고에 `account_mm`이 없으면 이 조건은 거짓이다.
 - `--force`는 없다. 유지증거금 여유 조건이 참으로 읽히는 동안에는 해제할 수 없다(`mm_buffer_active`). 조건은 마지막으로 받은 보고에서, 규칙과 같은 계산으로 읽는다. 어느 규칙으로 감소 전용 상태에 들어왔는지는 보지 않는다. 기준 재설정은 이 조건을 보지 않는다.
 
 ### 보고 끊김 취소
@@ -238,6 +255,8 @@ Bybit 게이트웨이([ADR-028](../adr/ADR-028-bybit-gateway.md) §7b)는 세 �
 | 입력의 값 | 응답의 필드 |
 |---|---|
 | `account_value` | `accountType = UNIFIED`인 계좌 하나의 `totalEquity`(USD, 모든 자산) |
+| `account_mm.maintenance` | 같은 계좌의 `totalMaintenanceMargin`(USD, "∑ Asset Total Maintenance Margin", F18 §6) |
+| `account_mm.margin_balance` | 같은 계좌의 `totalMarginBalance`(USD, "totalWalletBalance + totalPerpUPL", F20 13.2) |
 | `instrument` | `symbol` |
 | `szi` | `side`(`Buy` +, `Sell` −) × `size`. `positionIdx`가 0이 아니면 못 읽음 |
 | `position_value` | `positionValue` |
@@ -247,7 +266,7 @@ Bybit 게이트웨이([ADR-028](../adr/ADR-028-bybit-gateway.md) §7b)는 세 �
 | `max_leverage` | `instruments-info`의 `leverageFilter.maxLeverage`(`"100.00"` = 100). 종목마다 프로세스에서 한 번 읽는다 |
 
 - Hyperliquid와 같이 하나라도 못 읽으면 응답 전체가 `MarginReportInvalid`이고 아무것도 기본값으로 채우지 않는다. `settleCoin=USDT` 밖의 포지션(USDC 등)은 보고에 없다. 계좌 가치에는 들어 있다.
-- 교차 계좌라 유지증거금 여유 규칙은 어떤 포지션에도 걸리지 않는다(격리 포지션에만 있다). 교차 계좌용 규칙은 U17 전에 정한다(소유자 질문).
+- 교차 계좌라 유지증거금 여유 규칙은 어떤 포지션에도 걸리지 않는다(격리 포지션에만 있다). 교차 계좌는 "계좌 유지증거금률"이 판정한다(U17d). 게이트웨이는 두 필드를 언제나 채우고, 없거나 문자열 소수가 아니면 응답 전체가 `MarginReportInvalid`다. `accountMMRate`는 판정에 쓰지 않는다.
 - 거래소 설정의 격리 여부는 계좌 모드에서 온다(통합 계좌는 종목별 모드가 없다). 설정 검증은 Bybit에서 `isolated = false`와 `account_modes_allowed`에 `REGULAR_MARGIN`만 받는다.
 
 ### 변형 입력
@@ -273,7 +292,7 @@ Bybit 게이트웨이([ADR-028](../adr/ADR-028-bybit-gateway.md) §7b)는 세 �
 | `DayBaseSet`이 내구화되기 전 | 기준은 이전 값이다. 다음 보고가 다시 정한다 |
 | 재생 | 이벤트만 적용한다. 판정을 다시 하지 않고 외부 효과가 없다. 상태 다이제스트가 같다 |
 
-누가 언제 보는가: 이벤트가 내구화된 뒤 `status`에 나타난다. `status`는 감소 전용 상태(규칙, 시각), 기준 금액, 마지막 보고의 계좌 가치와 나이, 계좌 노출, 종목별 거래소 설정, 계좌 모드, 마지막 보고 거부 사유(그 뒤에 받은 보고가 없는 동안)를 보여 준다. `policy.margin`이 없으면 `core.margin`은 null이다(남아 있는 감소 전용 상태도 보이지 않는다).
+누가 언제 보는가: 이벤트가 내구화된 뒤 `status`에 나타난다. `status`는 감소 전용 상태(규칙, 시각), 기준 금액, 마지막 보고의 계좌 가치와 나이, 마지막 보고의 계좌 유지증거금과 증거금 잔고(`core.margin.account_mm`, 보고에 없으면 키가 없다), 계좌 노출, 종목별 거래소 설정, 계좌 모드, 마지막 보고 거부 사유(그 뒤에 받은 보고가 없는 동안)를 보여 준다. `policy.margin`이 없으면 `core.margin`은 null이다(남아 있는 감소 전용 상태도 보이지 않는다).
 
 자원 상한: 보고는 5초에 하나이므로 저널에 하루 최대 17 280건을 더한다(링크 세션이 새로 시작하면 그 세션의 첫 조회가 바로 나가므로 세션마다 한 건이 더 있을 수 있다). 시뮬레이션이 건수로 확인한다(`sim::margin_journal_records_stay_within_one_per_poll`). 디스크 바이트는 재지 않았고 저널은 지워지지 않는다(U-04). 노출 계산은 열린 주문 수(상한 500)에 비례한다. 감소 전용 상태 진입이 내는 취소는 열린 주문 상한 이하이고 명령 채널 용량 안에 있다.
 
@@ -335,6 +354,10 @@ Bybit 게이트웨이([ADR-028](../adr/ADR-028-bybit-gateway.md) §7b)는 세 �
 | 거래소 설정과 계좌 모드(보고의 포지션 가운데 설정에 있는 종목만) | V-MARGIN-9 | `margin::a_report_position_on_an_unconfigured_instrument_leaves_no_venue_setting`. 변이 M118 |
 | 거래소 설정과 계좌 모드, 조회(대조기의 조회 간격) | V-MARGIN-11 | `reconciler::a_margin_query_the_gateway_had_no_room_for_goes_out_on_the_next_round`, `reconciler::an_unanswered_setting_or_mode_query_is_repeated_at_the_setting_period_only` (대조기 태스크의 두 포트, 곧 공개된 상태와 조회 채널에서 실제 시계로. 묶음 `node-unit`). 변이 M120~M122 |
 | 유지증거금 여유(프로세스: 진입) | V-MARGIN-11 | `e2e::venue_process_states_the_margin_a_control_sets_and_the_mm_rule_latches_on_it` |
+| 계좌 유지증거금률(한도, 잔고 0 이하, 유지증거금 0, 정확한 곱) | V-MARGIN-13 | `account_mm::rate_just_below_the_limit_does_not_latch_and_at_the_limit_latches_with_the_cancels`, `the_limit_is_judged_exactly_at_one_basis_point`, `a_margin_balance_of_zero_or_below_with_maintenance_latches`, `no_maintenance_margin_latches_nothing_whatever_the_balance`, `the_comparison_is_exact_at_the_largest_amounts`. U17d 변이 |
+| 계좌 유지증거금률(보고의 거부, 먼저 건 규칙, 해제, `status`) | V-MARGIN-13 | `account_mm::a_report_without_account_mm_is_rejected_under_the_limit_and_recorded_without_it`, `the_latch_is_not_replaced_by_a_later_rule`, `clear_reduce_is_refused_while_the_account_rate_is_at_or_above_the_limit`, `status_shows_the_account_numbers_and_the_rule` |
+| 계좌 유지증거금률(저널: 옛 바이트, 재생, 복구) | V-MARGIN-13 | `account_mm::journals_with_and_without_account_mm_replay_to_the_live_state`, `record_schema::margin_reports_with_and_without_account_mm_recover_to_the_live_state` |
+| 계좌 유지증거금률(설정, Bybit 번역) | V-MARGIN-13, V-BYBIT-READ-1 | `account_mm::the_limit_is_one_to_9999_bps`, `config::tests::the_account_mm_limit_is_required_on_bybit_and_refused_elsewhere`, `venue::bybit::query::tests::the_margin_report_maps_the_unified_account`, `a_margin_answer_that_cannot_be_read_as_a_whole_is_refused_as_a_whole`, `the_account_mm_rate_field_is_not_used_for_the_judgment` (oms-node 단위) |
 
 보고 수신과 신선도의 시험이 보이지 않는 것: 새 보고를 받지 못하는 동안에는 어떤 규칙도 판정하지 않는다(판정은 받은 보고마다 한 번이다). 거래소의 계좌 가치가 격리 포지션의 자산을 포함하는지(T2). 기본 간격 5초 그대로의 실행(프로세스 시험은 100 ms로 줄였다).
 
@@ -345,6 +368,8 @@ Bybit 게이트웨이([ADR-028](../adr/ADR-028-bybit-gateway.md) §7b)는 세 �
 해제, 기준 재설정, 중단 지점의 시험이 보이지 않는 것: 운영자의 판단이 옳은 것. 입금이 가린 손실(100, 입금 10, 손실 14는 걸리지 않는다. `a_withdrawal_without_rebase_reads_as_a_loss`가 그대로 보여 준다). 디스크 유실과 전원 장애(중단은 프로세스 `abort()`와 SIGKILL이다. 운영체제는 살아 있다). `omsctl` 실행 파일의 `main`(인자 수집, 출력, 종료 코드. 시험은 그 실행 파일이 부르는 `oms_api::ctl::run`을 부른다). 가상 거래소에는 요청 예산이 없으므로 취소 300건 뒤에 Hyperliquid 게이트웨이의 조회가 얼마나 밀리는지(예산의 산술만 "Hyperliquid 조회"의 표에 고정했다). `policy.margin`을 없앤 설정이 켜진 동안에는 해제할 수 없다(`margin_unavailable`). 정책을 다시 켜야 한다.
 
 유지증거금 여유의 시험이 보이지 않는 것: 거래소의 격리 포지션 `marginUsed`가 그 포지션의 자산(미실현 손익 포함)이라는 것(T1). 틀리면 규칙은 양쪽으로 틀릴 수 있고, 잘못 걸린 래치에서 나가는 길은 없다(조건이 참으로 읽히는 동안 `clear-reduce`는 `mm_buffer_active`다). 증거금 구간(T9. 유지증거금률은 보고의 `max_leverage` 하나로만 계산한다). 규칙은 청산 가격의 0.13~0.37 % 앞에서 걸리고(BTC, 거래소 2배) 5초 간격의 조회가 그 사이를 건너뛸 수 있다. 새 보고를 받지 못하는 동안에는 판정하지 않는다. 프로세스 수준의 시험은 진입 하나다(`e2e::venue_process_states_the_margin_a_control_sets_and_the_mm_rule_latches_on_it`: simvenue의 제어 명령 `margin_used`로 증거금을 선 위의 1.5, 선 아래의 1.49로 말하게 하고 `status`의 `mm_buffer`를 본다). `omsctl`의 `mm_buffer_active` 응답은 프로세스에서 시험하지 않았다. 임의 순서의 실행에서는 `sim::profile_margin_lossy`가 본다(가상 거래소가 증거금을 0으로 말하는 동안).
+
+계좌 유지증거금률의 시험이 보이지 않는 것: 실제 Bybit 응답의 두 필드(가짜 HTTP 서버에 문서 모양의 응답만 준다. testnet은 U-01 허가 뒤). `totalMaintenanceMargin`이 거래소의 청산 판정과 같은 숫자라는 것(문서의 정의만 읽었다). 5000 bps가 적당하다는 것(판단이고 모형이 아니다. testnet에서 다시 본다). 5초 간격의 조회가 급한 가격 변화를 건너뛸 수 있다. 새 보고를 받지 못하는 동안에는 판정하지 않는다. 노드 프로세스를 거친 진입(Bybit 노드 시험은 증거금 정책 없이 돈다). `omsctl`의 `account_mm_active` 응답은 프로세스에서 시험하지 않았다. 잔고가 음수이고 유지증거금이 0인 계좌는 걸지 않는다(판단. 일 손실 규칙이 계좌 가치를 본다).
 
 보고 끊김 취소의 시험이 보이지 않는 것: 포지션은 그대로 남는다(OMS는 닫지 않는다). 감소 전용 주문은 남는다. 링크가 내려가 있는 동안에는 아무것도 취소하지 않는다(취소를 보낼 수 없다. 링크가 돌아오면 그 세션이 올라온 시각부터 다시 60초를 잰다). 취소가 체결보다 먼저 닿는다는 것(취소는 체결에 질 수 있고, 그때는 체결을 기장한다). 취소 시도가 다 된 주문은 다시 요청하지 않는다(운영자가 `CancelStuck` 불일치로 본다). 틱이 오는 간격만큼 늦을 수 있다. 노드 프로세스를 거친 동작(이 규칙의 프로세스 시험은 없다. 무작위로 섞인 실행은 `sim::profile_margin_lossy`가 본다).
 

@@ -127,6 +127,11 @@ pub struct MarginPolicy {
     /// Account modes accepted besides none. `unifiedAccount` and
     /// `portfolioMargin` are never accepted, also when listed.
     pub account_modes_allowed: Vec<String>,
+    /// The account's maintenance margin may not reach this many basis
+    /// points of its margin balance (cross margin, Bybit). Absent means the
+    /// rule is off; an absent value is not written.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_mm_rate_max_bps: Option<u32>,
 }
 
 impl Default for MarginPolicy {
@@ -140,6 +145,7 @@ impl Default for MarginPolicy {
             venue_leverage: 2,
             isolated: true,
             account_modes_allowed: Vec::new(),
+            account_mm_rate_max_bps: None,
         }
     }
 }
@@ -282,6 +288,9 @@ impl CoreConfig {
             }
             if m.venue_leverage == 0 {
                 errs.push("policy.margin: venue_leverage must be at least 1".to_string());
+            }
+            if m.account_mm_rate_max_bps.is_some_and(|b| b == 0 || b >= 10_000) {
+                errs.push("policy.margin: account_mm_rate_max_bps must be 1..=9999".to_string());
             }
         }
         if errs.is_empty() { Ok(()) } else { Err(errs) }
