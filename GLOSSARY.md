@@ -122,6 +122,10 @@ _Avoid_: MMR (in owner-facing text), liquidation ratio
 The distance, in percentage points of position value, that the OMS adds on top of the maintenance margin rate to act before liquidation.
 _Avoid_: safety margin, cushion
 
+**Account maintenance-margin rate** (계좌 유지증거금률):
+For a cross-margin account (Bybit), the account's maintenance margin divided by its margin balance; the venue liquidates at 100 %. The OMS latches REDUCING at `account_mm_rate_max_bps` (U17d).
+_Avoid_: account MM rate (the venue field `accountMMRate`, which the OMS does not read), margin ratio
+
 **UTC day** (UTC 하루):
 The period from 00:00 UTC to the next 00:00 UTC.
 _Avoid_: trading day, session
