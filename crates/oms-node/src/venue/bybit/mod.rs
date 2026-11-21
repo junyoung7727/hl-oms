@@ -7,7 +7,9 @@
 //! gateway behind `VenueGateway` (`gateway`). U17a: orders and cancels over
 //! REST (`orders`) and the answer table (`answer`). U17b: WS Trade
 //! (`trade`), the first path for orders and cancels. U17c: the reference
-//! price from the public stream (`ticker`).
+//! price from the public stream (`ticker`). U17d: the account's maintenance
+//! margin and margin balance in the margin report (`query`), judged by the
+//! core's account maintenance-margin rule.
 
 pub mod answer;
 pub mod checks;

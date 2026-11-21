@@ -374,6 +374,10 @@ impl NodeConfig {
         }
         if let VenueConfig::Bybit(b) = &self.venue {
             self.validate_bybit(b)?;
+        } else if self.core.policy.margin.as_ref().is_some_and(|m| m.account_mm_rate_max_bps.is_some()) {
+            // The other venues report isolated positions and no account
+            // numbers: the rule would refuse every report (U17d).
+            return Err("[core.policy.margin] account_mm_rate_max_bps is for a cross-margin account (Bybit) only".into());
         }
         Ok(())
     }
@@ -443,6 +447,11 @@ impl NodeConfig {
             // (ADR-028 U16c); only cross margin keeps the rules meaningful.
             if m.account_modes_allowed.iter().any(|a| a != "REGULAR_MARGIN") {
                 return Err("[core.policy.margin] Bybit allows only the account mode REGULAR_MARGIN".into());
+            }
+            // The MM-buffer rule judges isolated positions only; the cross
+            // account is judged as a whole (C-MARGIN, U17d).
+            if m.account_mm_rate_max_bps.is_none() {
+                return Err("[core.policy.margin] Bybit needs account_mm_rate_max_bps (the account maintenance-margin limit; the decided value is 5000)".into());
             }
         }
         Ok(())
@@ -691,6 +700,37 @@ max = "10"
         refused(&hyperliquid("mainnet"), "", Some("daily_loss_bps = 0"), "daily_loss_bps must be greater than 0");
     }
 
+    /// U17d. With a margin policy Bybit needs the account maintenance-margin
+    /// limit, 1..=9999 bps; every other venue refuses it (Hyperliquid and
+    /// the simulated venue judge isolated positions; their reports carry no
+    /// account numbers, so every report would be refused).
+    #[test]
+    fn the_account_mm_limit_is_required_on_bybit_and_refused_elsewhere() {
+        let cross = "isolated = false\naccount_modes_allowed = [\"REGULAR_MARGIN\"]";
+        let with = |limit: &str| format!("{cross}\naccount_mm_rate_max_bps = {limit}");
+        for limit in ["1", "5000", "9999"] {
+            assert_eq!(check_bybit(&bybit("testnet", ""), Some(&with(limit))), Ok(()), "{limit}");
+        }
+        for (margin, because) in [
+            (cross.to_string(), "Bybit needs account_mm_rate_max_bps"),
+            (with("0"), "account_mm_rate_max_bps must be 1..=9999"),
+            (with("10000"), "account_mm_rate_max_bps must be 1..=9999"),
+        ] {
+            match check_bybit(&bybit("testnet", ""), Some(&margin)) {
+                Ok(()) => panic!("loaded, must be refused ({because}): {margin}"),
+                Err(e) => assert!(e.contains(because), "{because}: {e}"),
+            }
+        }
+        // Without a margin policy there is nothing to require.
+        assert_eq!(check_bybit(&bybit("testnet", ""), None), Ok(()));
+
+        let because = "account_mm_rate_max_bps is for a cross-margin account (Bybit) only";
+        refused(&hyperliquid("testnet"), "", Some("account_mm_rate_max_bps = 5000"), because);
+        refused(&hyperliquid("mainnet"), "", Some("account_mm_rate_max_bps = 5000"), because);
+        refused(SIM, "", Some("account_mm_rate_max_bps = 5000"), because);
+        assert_eq!(check(&hyperliquid("testnet"), "", Some("")), Ok(()));
+    }
+
     fn bybit(network: &str, more: &str) -> String {
         format!(
             "kind = \"bybit\"\nnetwork = \"{network}\"\ncredentials_file = \"/etc/hl-oms/bybit.toml\"\nsub_account_uid = 4242\nip_echo_url = \"https://ip.example/\"\n{more}"
@@ -708,9 +748,9 @@ max = "10"
     #[test]
     fn a_bybit_configuration_loads_and_each_unsafe_value_is_refused() {
         assert_eq!(check_bybit(&bybit("testnet", ""), None), Ok(()));
-        assert_eq!(check_bybit(&bybit("mainnet", "mainnet_confirmed = true"), Some("isolated = false")), Ok(()));
+        assert_eq!(check_bybit(&bybit("mainnet", "mainnet_confirmed = true"), Some("isolated = false\naccount_mm_rate_max_bps = 5000")), Ok(()));
         assert_eq!(
-            check_bybit(&bybit("testnet", ""), Some("isolated = false\naccount_modes_allowed = [\"REGULAR_MARGIN\"]")),
+            check_bybit(&bybit("testnet", ""), Some("isolated = false\naccount_modes_allowed = [\"REGULAR_MARGIN\"]\naccount_mm_rate_max_bps = 5000")),
             Ok(())
         );
         let cases = [
@@ -725,7 +765,7 @@ max = "10"
             (bybit("testnet", "ip_check_secs = 5"), None, "ip_check_secs"),
             (bybit("testnet", "recv_window_ms = 60000"), None, "recv_window_ms"),
             (bybit("testnet", "ping_interval_ms = 500"), None, "ping_interval_ms"),
-            (bybit("testnet", ""), Some("isolated = false\naccount_modes_allowed = [\"REGULAR_MARGIN\", \"PORTFOLIO_MARGIN\"]"), "only the account mode REGULAR_MARGIN"),
+            (bybit("testnet", ""), Some("isolated = false\naccount_modes_allowed = [\"REGULAR_MARGIN\", \"PORTFOLIO_MARGIN\"]\naccount_mm_rate_max_bps = 5000"), "only the account mode REGULAR_MARGIN"),
         ];
         for (venue, margin, because) in cases {
             match check_bybit(&venue, margin) {
