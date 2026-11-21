@@ -9,11 +9,13 @@
 //! | `server`    | local socket API for strategies and operators                |
 //! | `venue`     | gateways and the reconciler                                  |
 //! | `status`    | operational status document                                  |
+//! | `alerts`    | trading-safety alerts read from the published state (C-ALERT) |
 //! | `http`      | read-only dashboard over loopback HTTP                       |
 //! | `node`      | wiring, startup and shutdown                                 |
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+pub mod alerts;
 pub mod config;
 pub mod http;
 pub mod node;

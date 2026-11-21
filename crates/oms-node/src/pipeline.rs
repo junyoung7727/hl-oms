@@ -79,12 +79,14 @@ pub struct Shared {
 /// Test-only: whether this item of a batch is the one the failpoint waits
 /// for. `OMS_CRASH_ON` names it: unset or `new_order` is a newly accepted
 /// order whose send is released; `reducing_entered` and `day_base_set` are a
-/// margin report whose record holds that event (C-MARGIN, 중단과 재실행).
+/// margin report whose record holds that event (C-MARGIN, 중단과 재실행);
+/// `boot` is the Boot record, the first flush after a start (C-ALERT).
 #[cfg(feature = "failpoints")]
 fn crash_trigger(record: Option<&Record>, has_commands: bool) -> bool {
     let Some(rec) = record else { return false };
     match std::env::var("OMS_CRASH_ON").as_deref() {
         Ok("new_order") | Err(_) => has_commands && matches!(rec.input, Input::NewOrder(_)),
+        Ok("boot") => matches!(rec.input, Input::Boot { .. }),
         Ok(event) => matches!(rec.input, Input::Venue(VenueInput::MarginReport(_))) && rec.events.iter().any(|e| e.name() == event),
     }
 }

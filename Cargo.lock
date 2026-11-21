@@ -1220,6 +1220,7 @@ dependencies = [
 name = "oms-node"
 version = "0.1.0"
 dependencies = [
+ "alert-direct",
  "axum",
  "futures-util",
  "hex",

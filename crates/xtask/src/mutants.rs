@@ -1126,6 +1126,28 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "oms-node", "--test", "reconciler", "an_unanswered_setting_or_mode_query_is_repeated_at_the_setting_period_only"],
         guards: "C-MARGIN / query weight budget",
     },
+    // U18a2: the node's direct alerts (C-ALERT).
+    Mutant {
+        id: "M123-alert-grace-ignored",
+        what: "a passing state's alert starts at once, without waiting for its grace",
+        file: "crates/oms-node/src/alerts.rs",
+        find: "            if now_ms - since >= c.grace_ms {",
+        replace: "            if true {",
+        test: &["-p", "oms-node", "--test", "alerts", "grace_hides_a_short_link_down_and_reports_a_long_one"],
+        guards: "C-ALERT / grace",
+    },
+    Mutant {
+        id: "M124-alert-fatal-checked-after-the-evaluation",
+        // The thread's own check before `tick` and this re-check guard the
+        // same rule, so moving either one alone is masked by the other; the
+        // lib test calls `tick` with the latch already tripped (review N1).
+        what: "an evaluation sets its conditions and the start notice before it looks at the fatal latch again, so a trip seen mid-evaluation is followed by starts",
+        file: "crates/oms-node/src/alerts.rs",
+        find: "        if self.common.fatal.is_tripped() {\n            return;\n        }\n        self.last_seq = Some(seq);\n        self.last_eval_ms = now_ms;\n        self.last_eval_at = Instant::now();\n        let handle = &self.common.handle;\n        let mut seen = BTreeSet::new();\n        let mut starts = Vec::new();\n        let mut pending = 0usize;\n        for c in conds {\n            let since = *self.since.entry(c.key.clone()).or_insert(now_ms);\n            if now_ms - since >= c.grace_ms {\n                starts.push((c.key.clone(), c.text));\n            } else {\n                pending += 1;\n            }\n            seen.insert(c.key);\n        }\n        // Counts the conditions whose start goes out now, and apart those\n        // still inside their grace (review N4).\n        if !self.started {\n            self.started = true;\n            handle.once(&format!(\n                \"OMS 시작 (boot {boot}, config {version}). 활성 조건 {}개(유예 중 {pending}개)\",\n                starts.len()\n            ));\n        }\n        for (key, text) in starts {\n            handle.set(&key, Some(text));\n        }\n",
+        replace: "        self.last_seq = Some(seq);\n        self.last_eval_ms = now_ms;\n        self.last_eval_at = Instant::now();\n        let handle = &self.common.handle;\n        let mut seen = BTreeSet::new();\n        let mut starts = Vec::new();\n        let mut pending = 0usize;\n        for c in conds {\n            let since = *self.since.entry(c.key.clone()).or_insert(now_ms);\n            if now_ms - since >= c.grace_ms {\n                starts.push((c.key.clone(), c.text));\n            } else {\n                pending += 1;\n            }\n            seen.insert(c.key);\n        }\n        // Counts the conditions whose start goes out now, and apart those\n        // still inside their grace (review N4).\n        if !self.started {\n            self.started = true;\n            handle.once(&format!(\n                \"OMS 시작 (boot {boot}, config {version}). 활성 조건 {}개(유예 중 {pending}개)\",\n                starts.len()\n            ));\n        }\n        for (key, text) in starts {\n            handle.set(&key, Some(text));\n        }\n        if self.common.fatal.is_tripped() {\n            return;\n        }\n",
+        test: &["-p", "oms-node", "--lib", "alerts::tests::a_fatal_trip_during_an_evaluation_sets_nothing"],
+        guards: "C-ALERT / fatal stop",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {

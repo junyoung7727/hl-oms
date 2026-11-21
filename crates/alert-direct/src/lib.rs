@@ -9,13 +9,17 @@
 //! The sender runs on its own thread: [`AlertHandle::set`] and
 //! [`AlertHandle::once`] only take a lock, so the caller never waits for the
 //! network. The token is never written to an error, a log or `Debug`.
+//!
+//! A [`SecondChannel`] (U18a1, design §7.7), when configured, gets a copy of
+//! every message through its own bounded outbox and thread, and a notice
+//! when Telegram has failed for longer than `second_after_ms`.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use reqwest::Url;
@@ -30,6 +34,10 @@ pub const TELEGRAM_BASE: &str = "https://api.telegram.org/";
 pub const TELEGRAM_HOST: &str = "api.telegram.org";
 /// The fallback route when DNS or the usual path to Telegram is blocked (PR #3).
 pub const TELEGRAM_FALLBACK_IP: [u8; 4] = [149, 154, 167, 220];
+/// Telegram failing this long is told on the second channel (design §7.7).
+pub const SECOND_AFTER_MS: i64 = 60 * 1000;
+/// The condition key of the Telegram-down notice (second channel only).
+pub const TELEGRAM_DOWN: &str = "telegram_down";
 
 /// Milliseconds since the Unix epoch.
 pub trait Clock: Send + Sync {
@@ -546,7 +554,16 @@ fn parse_base(s: &str) -> Result<Url, String> {
 
 // ---------------------------------------------------------------- sender
 
-#[derive(Debug, Clone)]
+/// A channel used besides Telegram, for when Telegram cannot be reached
+/// (design §7.7; which service is owner decision D3).
+pub trait SecondChannel: Send + Sync {
+    fn name(&self) -> &str;
+    /// Blocking; called only on the `alert-second` thread. Err = keep the part and retry.
+    /// The error text is logged: it must not hold a secret.
+    fn send(&self, text: &str) -> Result<(), String>;
+}
+
+#[derive(Clone)]
 pub struct AlertConfig {
     pub telegram: TelegramConfig,
     /// `[MD P1]`, `[OMS P1]`, `[WATCH P1]`.
@@ -565,6 +582,33 @@ pub struct AlertConfig {
     /// Where the repeat state is kept across restarts (spec R3); `None`:
     /// only within this process.
     pub state_file: Option<std::path::PathBuf>,
+    /// Gets a copy of every message, and the Telegram-down notice; `None`:
+    /// no second thread and no copy.
+    pub second: Option<Arc<dyn SecondChannel>>,
+    /// Telegram failing for longer than this starts the Telegram-down notice.
+    pub second_after_ms: i64,
+}
+
+impl fmt::Debug for AlertConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AlertConfig")
+            .field("telegram", &self.telegram)
+            .field("prefix", &self.prefix)
+            .field("venue", &self.venue)
+            .field("routes", &self.routes)
+            .field("timeout", &self.timeout)
+            .field("flush_every", &self.flush_every)
+            .field("outbox_limit", &self.outbox_limit)
+            .field("repeat_ms", &self.repeat_ms)
+            .field("connect_timeout", &self.connect_timeout)
+            .field("state_file", &self.state_file)
+            .field(
+                "second",
+                &self.second.as_ref().map(|s| s.name().to_string()),
+            )
+            .field("second_after_ms", &self.second_after_ms)
+            .finish()
+    }
 }
 
 impl AlertConfig {
@@ -580,6 +624,8 @@ impl AlertConfig {
             repeat_ms: REPEAT_MS,
             connect_timeout: Duration::from_secs(3),
             state_file: None,
+            second: None,
+            second_after_ms: SECOND_AFTER_MS,
         }
     }
 }
@@ -599,6 +645,22 @@ pub struct AlertState {
     pub route_order: Vec<usize>,
     /// Conditions that hold now.
     pub active: Vec<String>,
+    /// The clock time of the first failed attempt since Telegram last
+    /// answered (delivered or refused); `None` while it answers.
+    pub failing_since_ms: Option<i64>,
+    pub second: Option<SecondState>,
+}
+
+/// What the second channel's sender has done.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SecondState {
+    pub name: String,
+    pub queued: usize,
+    pub delivered: u64,
+    /// Parts dropped by overflow.
+    pub dropped_total: u64,
+    /// Failed sends.
+    pub failures: u64,
 }
 
 struct Inner {
@@ -610,6 +672,71 @@ struct Inner {
     last_errors: VecDeque<String>,
     route_order: Vec<usize>,
     wake: bool,
+    failing_since_ms: Option<i64>,
+    second: Option<Second>,
+}
+
+/// The second channel's side: its own outbox, and the repeat rule of the
+/// Telegram-down notice.
+struct Second {
+    name: String,
+    outbox: Outbox,
+    repeat: Repeat,
+    in_flight: bool,
+    delivered: u64,
+    failures: u64,
+    wake: bool,
+}
+
+impl Inner {
+    /// Queues a message for Telegram and, whole, for the second channel.
+    fn add(&mut self, msg: &str) {
+        self.outbox.add(msg);
+        self.wake = true;
+        if let Some(s) = self.second.as_mut() {
+            s.outbox.add(msg);
+            s.wake = true;
+        }
+    }
+
+    /// Both outboxes are empty and nothing is being sent.
+    fn settled(&self) -> bool {
+        self.outbox.settled()
+            && !self.in_flight
+            && self
+                .second
+                .as_ref()
+                .is_none_or(|s| s.outbox.settled() && !s.in_flight)
+    }
+
+    /// The Telegram-down condition at `now`: it holds while Telegram has
+    /// failed for more than `after_ms`; start, repeat and clear go to the
+    /// second channel only. `true` when a notice was queued.
+    fn telegram_down(&mut self, now: i64, after_ms: i64, prefix: &str, venue: &str) -> bool {
+        if self.second.is_none() {
+            return false;
+        }
+        let text = match self.failing_since_ms {
+            Some(t) if now - t > after_ms => Some(format!(
+                "Telegram 전송이 {}초째 실패함. 대기 {}개. 마지막 오류: {}",
+                (now - t) / 1000,
+                self.outbox.len(),
+                self.last_errors.back().map(String::as_str).unwrap_or("")
+            )),
+            _ => None,
+        };
+        let Some(s) = self.second.as_mut() else {
+            return false;
+        };
+        match s.repeat.set(TELEGRAM_DOWN, text.as_deref(), now) {
+            Some(body) => {
+                s.outbox.add(&message(prefix, venue, now, &body));
+                s.wake = true;
+                true
+            }
+            None => false,
+        }
+    }
 }
 
 struct Shared {
@@ -667,6 +794,16 @@ impl AlertDirect {
                 last_errors: VecDeque::new(),
                 route_order: (0..clients.len()).collect(),
                 wake: false,
+                failing_since_ms: None,
+                second: cfg.second.as_ref().map(|c| Second {
+                    name: c.name().to_string(),
+                    outbox: Outbox::new(cfg.outbox_limit),
+                    repeat: Repeat::new(cfg.repeat_ms),
+                    in_flight: false,
+                    delivered: 0,
+                    failures: 0,
+                    wake: false,
+                }),
             }),
             cv: Condvar::new(),
             stop: AtomicBool::new(false),
@@ -676,15 +813,31 @@ impl AlertDirect {
             .build()
             .map_err(|e| format!("cannot start the alert runtime: {e}"))?;
         let s = shared.clone();
-        let (chat, prefix, every) = (
-            cfg.telegram.chat_id.clone(),
-            cfg.prefix.clone(),
-            cfg.flush_every,
-        );
+        let sender = Sender {
+            clients,
+            chat: cfg.telegram.chat_id.clone(),
+            prefix: cfg.prefix.clone(),
+            venue: cfg.venue.clone(),
+            every: cfg.flush_every,
+            second_after_ms: cfg.second_after_ms,
+            clock: clock.clone(),
+        };
         std::thread::Builder::new()
             .name("alert-direct".into())
-            .spawn(move || run(rt, s, clients, chat, prefix, every))
+            .spawn(move || run(rt, s, sender))
             .map_err(|e| format!("cannot start the alert thread: {e}"))?;
+        if let Some(channel) = cfg.second.clone() {
+            let s = shared.clone();
+            let (prefix, every) = (cfg.prefix.clone(), cfg.flush_every);
+            let spawned = std::thread::Builder::new()
+                .name("alert-second".into())
+                .spawn(move || run_second(s, channel, prefix, every));
+            if let Err(e) = spawned {
+                shared.stop.store(true, Ordering::SeqCst);
+                shared.cv.notify_all();
+                return Err(format!("cannot start the second alert thread: {e}"));
+            }
+        }
         Ok(AlertHandle {
             shared,
             clock,
@@ -717,26 +870,29 @@ pub fn kst(ms: i64) -> String {
     )
 }
 
+/// `{prefix} {venue} {KST}\n{body}`.
+fn message(prefix: &str, venue: &str, now_ms: i64, body: &str) -> String {
+    format!("{prefix} {venue} {}\n{body}", kst(now_ms))
+}
+
 impl AlertHandle {
     fn wake(&self, inner: &mut Inner) {
         inner.wake = true;
+        if let Some(s) = inner.second.as_mut() {
+            s.wake = true;
+        }
         self.shared.cv.notify_all();
     }
 
     fn message(&self, body: &str) -> String {
-        format!(
-            "{} {} {}\n{body}",
-            self.prefix,
-            self.venue,
-            kst(self.clock.now_ms())
-        )
+        message(&self.prefix, &self.venue, self.clock.now_ms(), body)
     }
 
     /// Queues one message without a condition key.
     pub fn once(&self, body: &str) {
         let msg = self.message(body);
         if let Ok(mut i) = self.shared.inner.lock() {
-            i.outbox.add(&msg);
+            i.add(&msg);
             self.wake(&mut i);
         }
     }
@@ -749,7 +905,7 @@ impl AlertHandle {
         if let Ok(mut i) = self.shared.inner.lock() {
             if let Some(body) = i.repeat.set(key, text.as_deref(), now) {
                 let msg = self.message(&body);
-                i.outbox.add(&msg);
+                i.add(&msg);
                 self.wake(&mut i);
                 if self.state_file.is_some() {
                     changed = Some(i.repeat.to_json());
@@ -784,7 +940,7 @@ impl AlertHandle {
     }
 
     /// Waits until everything is delivered (or the time is up); `true` when
-    /// nothing is left to send.
+    /// nothing is left to send, to Telegram and to the second channel.
     pub fn flush_for(&self, d: Duration) -> bool {
         let end = Instant::now() + d;
         let Ok(mut i) = self.shared.inner.lock() else {
@@ -792,7 +948,7 @@ impl AlertHandle {
         };
         self.wake(&mut i);
         loop {
-            if i.outbox.settled() && !i.in_flight {
+            if i.settled() {
                 return true;
             }
             let now = Instant::now();
@@ -816,6 +972,14 @@ impl AlertHandle {
                 last_errors: i.last_errors.iter().cloned().collect(),
                 route_order: i.route_order.clone(),
                 active: i.repeat.active(),
+                failing_since_ms: i.failing_since_ms,
+                second: i.second.as_ref().map(|s| SecondState {
+                    name: s.name.clone(),
+                    queued: s.outbox.len(),
+                    delivered: s.delivered,
+                    dropped_total: s.outbox.dropped_total(),
+                    failures: s.failures,
+                }),
             },
             Err(_) => AlertState::default(),
         }
@@ -829,27 +993,53 @@ impl Drop for AlertHandle {
     }
 }
 
-fn run(
-    rt: tokio::runtime::Runtime,
-    shared: Arc<Shared>,
+/// What the Telegram sender thread needs.
+struct Sender {
     clients: Vec<(reqwest::Client, Url)>,
     chat: String,
     prefix: String,
+    venue: String,
     every: Duration,
-) {
+    second_after_ms: i64,
+    clock: Arc<dyn Clock>,
+}
+
+/// Waits until `woken` holds, the handle is dropped, or `every` passed.
+/// Other notifies on the shared condvar (the other thread's sends,
+/// `flush_for`) do not end the wait early.
+fn wait_for_work<'a>(
+    shared: &'a Shared,
+    mut i: MutexGuard<'a, Inner>,
+    every: Duration,
+    woken: impl Fn(&Inner) -> bool,
+) -> Option<MutexGuard<'a, Inner>> {
+    let end = Instant::now() + every;
+    while !woken(&i) && !shared.stop.load(Ordering::SeqCst) {
+        let now = Instant::now();
+        if now >= end {
+            break;
+        }
+        i = shared.cv.wait_timeout(i, end - now).ok()?.0;
+    }
+    Some(i)
+}
+
+fn run(rt: tokio::runtime::Runtime, shared: Arc<Shared>, s: Sender) {
     loop {
         // Wait for work or the retry period.
         {
-            let Ok(mut i) = shared.inner.lock() else {
+            let Ok(i) = shared.inner.lock() else {
                 return;
             };
-            if !i.wake {
-                match shared.cv.wait_timeout(i, every) {
-                    Ok((g, _)) => i = g,
-                    Err(_) => return,
-                }
-            }
+            let Some(mut i) = wait_for_work(&shared, i, s.every, |i| i.wake) else {
+                return;
+            };
             i.wake = false;
+            // Every wake looks at how long Telegram has been failing.
+            let now = s.clock.now_ms();
+            if i.telegram_down(now, s.second_after_ms, &s.prefix, &s.venue) {
+                shared.cv.notify_all();
+            }
         }
         if shared.stop.load(Ordering::SeqCst) {
             return;
@@ -860,7 +1050,7 @@ fn run(
                 let Ok(mut i) = shared.inner.lock() else {
                     return;
                 };
-                match i.outbox.next(&prefix) {
+                match i.outbox.next(&s.prefix) {
                     Some(p) => {
                         i.in_flight = true;
                         (p, i.route_order.clone())
@@ -868,7 +1058,9 @@ fn run(
                     None => break,
                 }
             };
-            let (outcome, errors, good) = rt.block_on(send(&clients, &order, &chat, &part.text));
+            let started = s.clock.now_ms();
+            let (outcome, errors, good) =
+                rt.block_on(send(&s.clients, &order, &s.chat, &part.text));
             let Ok(mut i) = shared.inner.lock() else {
                 return;
             };
@@ -888,10 +1080,93 @@ fn run(
                 i.route_order.retain(|&r| r != g);
                 i.route_order.insert(0, g);
             }
-            if outcome == SendOutcome::Delivered {
-                i.delivered += 1;
+            match outcome {
+                SendOutcome::Delivered => {
+                    i.delivered += 1;
+                    i.failing_since_ms = None;
+                }
+                // Telegram answered: it is reachable.
+                SendOutcome::Refused(_) => i.failing_since_ms = None,
+                SendOutcome::Retry(_) => {
+                    if i.failing_since_ms.is_none() {
+                        i.failing_since_ms = Some(started);
+                    }
+                }
             }
             let go_on = i.outbox.done(&part, &outcome);
+            let now = s.clock.now_ms();
+            i.telegram_down(now, s.second_after_ms, &s.prefix, &s.venue);
+            shared.cv.notify_all();
+            if !go_on || shared.stop.load(Ordering::SeqCst) {
+                break;
+            }
+        }
+    }
+}
+
+/// The second channel's thread: flushes its outbox on notify and every
+/// `every`; an error keeps the part and ends the flush.
+fn run_second(
+    shared: Arc<Shared>,
+    channel: Arc<dyn SecondChannel>,
+    prefix: String,
+    every: Duration,
+) {
+    let woken = |i: &Inner| i.second.as_ref().is_some_and(|s| s.wake);
+    loop {
+        {
+            let Ok(i) = shared.inner.lock() else {
+                return;
+            };
+            let Some(mut i) = wait_for_work(&shared, i, every, woken) else {
+                return;
+            };
+            let Some(s) = i.second.as_mut() else {
+                return;
+            };
+            s.wake = false;
+        }
+        if shared.stop.load(Ordering::SeqCst) {
+            return;
+        }
+        loop {
+            let part = {
+                let Ok(mut i) = shared.inner.lock() else {
+                    return;
+                };
+                let Some(s) = i.second.as_mut() else {
+                    return;
+                };
+                match s.outbox.next(&prefix) {
+                    Some(p) => {
+                        s.in_flight = true;
+                        p
+                    }
+                    None => break,
+                }
+            };
+            let outcome = match channel.send(&part.text) {
+                Ok(()) => SendOutcome::Delivered,
+                Err(e) => SendOutcome::Retry(e),
+            };
+            let Ok(mut i) = shared.inner.lock() else {
+                return;
+            };
+            let Some(s) = i.second.as_mut() else {
+                return;
+            };
+            s.in_flight = false;
+            match &outcome {
+                SendOutcome::Retry(e) => {
+                    s.failures += 1;
+                    eprintln!(
+                        "{}",
+                        serde_json::json!({"level": "warn", "msg": "second channel send failed", "fields": {"channel": s.name, "error": e}})
+                    );
+                }
+                _ => s.delivered += 1,
+            }
+            let go_on = s.outbox.done(&part, &outcome);
             shared.cv.notify_all();
             if !go_on || shared.stop.load(Ordering::SeqCst) {
                 break;
