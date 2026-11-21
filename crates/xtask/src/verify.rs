@@ -53,8 +53,8 @@ pub fn suites(quick: bool, live: bool, extended: Option<&str>) -> Vec<Suite> {
         },
         Suite {
             name: "node-unit",
-            what: "queues, histogram, Hyperliquid signing vectors and message translation; the reconciler task at its ports (pace of the margin, venue-setting and account-mode queries); the record schema (old journals replay, recovery from disk)",
-            args: &["test", "-p", "oms-node", "--lib", "--test", "reconciler", "--test", "record_schema"],
+            what: "queues, histogram, Hyperliquid signing vectors and message translation; the reconciler task at its ports (pace of the margin, venue-setting and account-mode queries); the record schema (old journals replay, recovery from disk); the direct alerts in-process (conditions, grace, repeat, fatal, durable only; loopback fake Telegram)",
+            args: &["test", "-p", "oms-node", "--lib", "--test", "reconciler", "--test", "record_schema", "--test", "alerts"],
             env: env(&[]),
         },
         Suite {
@@ -65,7 +65,7 @@ pub fn suites(quick: bool, live: bool, extended: Option<&str>) -> Vec<Suite> {
         },
         Suite {
             name: "pipeline",
-            what: "commit gate with an injected flush failure (real threads, real file); the process stopped at each commit boundary; the Bybit node against fake venue servers",
+            what: "commit gate with an injected flush failure (real threads, real file); the process stopped at each commit boundary; the Bybit node against fake venue servers; the direct alerts at a failed flush, a fatal exit and a clean stop (loopback fake Telegram)",
             args: &[
                 "test", "-p", "oms-node", "--features", "failpoints", "--test", "pipeline", "--test", "crash_points", "--test", "bybit_node", "--",
                 "--nocapture",

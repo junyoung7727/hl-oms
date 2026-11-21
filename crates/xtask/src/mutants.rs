@@ -1126,6 +1126,25 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "oms-node", "--test", "reconciler", "an_unanswered_setting_or_mode_query_is_repeated_at_the_setting_period_only"],
         guards: "C-MARGIN / query weight budget",
     },
+    // U18a2: the node's direct alerts (C-ALERT).
+    Mutant {
+        id: "M123-alert-grace-ignored",
+        what: "a passing state's alert starts at once, without waiting for its grace",
+        file: "crates/oms-node/src/alerts.rs",
+        find: "            if now_ms - since >= c.grace_ms {",
+        replace: "            if true {",
+        test: &["-p", "oms-node", "--test", "alerts", "grace_hides_a_short_link_down_and_reports_a_long_one"],
+        guards: "C-ALERT / grace",
+    },
+    Mutant {
+        id: "M124-alert-fatal-checked-after-the-evaluation",
+        what: "the alert thread evaluates the conditions before it looks at the fatal latch, so starts and clears follow a fatal stop",
+        file: "crates/oms-node/src/alerts.rs",
+        find: "        if ev.common.fatal_notice() {\n            continue;\n        }\n        ev.tick();",
+        replace: "        ev.tick();\n        if ev.common.fatal_notice() {\n            continue;\n        }",
+        test: &["-p", "oms-node", "--test", "alerts", "after_a_fatal_stop_only_the_fatal_message_is_sent"],
+        guards: "C-ALERT / fatal stop",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
