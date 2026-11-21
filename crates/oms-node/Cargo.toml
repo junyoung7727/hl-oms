@@ -34,8 +34,10 @@ sha2 = "0.11.0"
 workspace = true
 
 [features]
-# Compiles in the journal-failure hook used by tests/pipeline.rs. Never
-# enabled for the binary that is deployed.
+# Compiles in the journal-failure hook used by tests/pipeline.rs and
+# tests/crash_points.rs, and the Bybit endpoint hook OMS_TEST_BYBIT_WIRING
+# used by tests/bybit_node.rs. Never enabled for the binary that is
+# deployed.
 failpoints = []
 
 [[test]]
@@ -44,6 +46,10 @@ required-features = ["failpoints"]
 
 [[test]]
 name = "crash_points"
+required-features = ["failpoints"]
+
+[[test]]
+name = "bybit_node"
 required-features = ["failpoints"]
 
 [dev-dependencies]
