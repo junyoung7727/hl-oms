@@ -356,7 +356,48 @@ fn stopped_around_a_day_base_set_the_base_is_set_exactly_once() {
     }
 }
 
-// ---- C-ALERT: the fatal message ------------------------------------------------
+// ---- C-ALERT: the fatal message and the stop notice ---------------------------
+
+/// Writes a token file into the test directory, the `[alert]` table that
+/// names it, and points the node's alerts at the loopback fake
+/// (`OMS_TEST_TELEGRAM_API`, failpoints builds only).
+fn with_alerts(env: &mut Env, f: &http_fake::FakeHttp) {
+    let token = env.dir.join("telegram.json");
+    std::fs::write(&token, r#"{"token":"123456:ABCdef_ghi-JKL","chat_id":"42"}"#).unwrap();
+    std::fs::set_permissions(&token, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+    env.extra_tables = format!("[alert]\ntelegram = \"{}\"\n", token.display());
+    env.node_env.push(("OMS_TEST_TELEGRAM_API".into(), f.url()));
+}
+
+fn telegram_texts(f: &http_fake::FakeHttp) -> Vec<String> {
+    f.requests()
+        .iter()
+        .map(|r| serde_json::from_slice::<serde_json::Value>(&r.body).unwrap()["text"].as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+/// C-ALERT. A clean stop (SIGTERM, exit 0) sends the stop notice with the
+/// number of orders left at the venue, after the start notice and before
+/// the exit.
+#[test]
+fn a_clean_stop_sends_the_stop_notice_with_the_open_orders() {
+    let f = http_fake::FakeHttp::start(http_fake::Answer::Reply(200, r#"{"ok":true,"result":{}}"#.into()));
+    let mut env = Env::new("alert-stop");
+    with_alerts(&mut env, &f);
+    env.start_node();
+    env.wait_ready();
+    let mut c = env.client("a");
+    rest(&mut env, &mut c, "left", Side::Buy, "90", false);
+    assert!(env.wait(Duration::from_secs(5), || env.status()["core"]["working"] == 1));
+    drop(c);
+    assert!(env.wait(Duration::from_secs(5), || !telegram_texts(&f).is_empty()));
+    assert_eq!(env.stop_node(), 0, "{}", env.log_tail(10));
+    let all = telegram_texts(&f);
+    assert_eq!(all.len(), 2, "{all:?}");
+    assert!(all[0].contains("OMS 시작 (boot 1, config 1). 활성 조건 "), "{}", all[0]);
+    assert!(all[1].starts_with("[OMS P1] sim ") && all[1].ends_with("\nOMS 정상 종료. 걸린 주문 1개는 거래소에 남음"), "{}", all[1]);
+    assert!(env.log_tail(10).contains("alerts delivered before the exit"), "{}", env.log_tail(10));
+}
 
 /// C-ALERT, done criterion. The flush of the record that enters REDUCING
 /// fails (two plain orders rest, the margin report breaches the daily
@@ -371,12 +412,8 @@ fn a_flush_failure_sends_one_fatal_alert_and_nothing_of_the_batch() {
     let f = http_fake::FakeHttp::start(ok());
     f.script([ok(), http_fake::Answer::Reply(500, r#"{"ok":false,"description":"down"}"#.into())]);
     let mut env = Env::new("alert-fatal");
-    let token = env.dir.join("telegram.json");
-    std::fs::write(&token, r#"{"token":"123456:ABCdef_ghi-JKL","chat_id":"42"}"#).unwrap();
-    std::fs::set_permissions(&token, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
-    env.extra_tables = format!("[alert]\ntelegram = \"{}\"\n", token.display());
-    env.node_env = crash_on("sync_error_after_write", "reducing_entered");
-    env.node_env.push(("OMS_TEST_TELEGRAM_API".into(), f.url()));
+    with_alerts(&mut env, &f);
+    env.node_env.extend(crash_on("sync_error_after_write", "reducing_entered"));
     env.extra_runtime = "margin_poll_ms = 100".into();
     env.extra_policy = "\n[core.policy.margin]\naccount_modes_allowed = [\"standard\"]\n".into();
     env.ctl(json!({"account_value": {"value": "100"}}));
@@ -384,12 +421,7 @@ fn a_flush_failure_sends_one_fatal_alert_and_nothing_of_the_batch() {
     env.wait_ready();
     wait_margin(&env, "the account value", |m| m["account_value"] == "100");
     two_resting_plain_orders(&mut env);
-    let texts = || -> Vec<String> {
-        f.requests()
-            .iter()
-            .map(|r| serde_json::from_slice::<serde_json::Value>(&r.body).unwrap()["text"].as_str().unwrap_or_default().to_string())
-            .collect()
-    };
+    let texts = || telegram_texts(&f);
     assert!(env.wait(Duration::from_secs(5), || texts().len() == 1), "{:?}", texts());
     assert!(texts()[0].contains("[OMS P1] sim ") && texts()[0].contains("OMS 시작 (boot 1, config 1)"), "{:?}", texts());
     let st = env.status();
