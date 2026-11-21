@@ -304,6 +304,18 @@ fn an_unremovable_marker_is_reported_and_latches_the_next_boot() {
     );
     assert!(marker.exists());
     wait_holds(&env, json!([]));
+    // A second clear is refused not_held and leaves the marker as well.
+    let (code, why) = admin_call(
+        &env,
+        Op::ClearHold {
+            reason: HoldKind::Kill,
+            note: "again".into(),
+        },
+    )
+    .unwrap_err();
+    assert_eq!(code, ErrorCode::BadRequest);
+    assert!(why.starts_with("not_held"), "{why}");
+    assert!(marker.exists());
 
     assert_eq!(env.stop_node(), 0);
     env.start_node();
