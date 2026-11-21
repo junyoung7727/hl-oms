@@ -1,7 +1,7 @@
-//! The Bybit gateway behind `VenueGateway` (ADR-028 §7c–§7e): the boot
+//! The Bybit gateway behind `VenueGateway` (ADR-028 §7c–§7f): the boot
 //! checks and the IP loop, the private stream, the queries, the pause after
-//! an IP ban, and orders and cancels (`orders`) over WS Trade (`trade`) or
-//! REST.
+//! an IP ban, orders and cancels (`orders`) over WS Trade (`trade`) or
+//! REST, and the reference price from the public stream (`ticker`).
 //!
 //! The link is up only while a stream is authenticated and subscribed and
 //! `Health` has no block. Every reconnect is a new link session, so the
@@ -23,6 +23,7 @@ use super::checks::{self, Block, Expected, Health, SymbolSpec};
 use super::orders::{Create, Effect, Orders};
 use super::query::{Queries, QueryFail};
 use super::rest::{Credentials, IP_BAN_PAUSE, Rest, RestError};
+use super::ticker;
 use super::trade::{self, Trade};
 use super::{Endpoints, exec, stream};
 use crate::config::BybitConfig;
@@ -55,6 +56,9 @@ pub struct Timing {
     /// A request written to WS Trade with no answer within this time is
     /// unknown (`request_timeout_ms`, as on REST).
     pub request: Duration,
+    /// At most one reference price per symbol this often
+    /// (`ref_price_interval_ms`).
+    pub ref_price: Duration,
 }
 
 impl Timing {
@@ -71,6 +75,7 @@ impl Timing {
             backoff_min: Duration::from_millis(500),
             backoff_max: Duration::from_secs(10),
             request: Duration::from_millis(cfg.request_timeout_ms),
+            ref_price: Duration::from_millis(cfg.ref_price_interval_ms),
         }
     }
 }
@@ -82,8 +87,70 @@ pub struct Wiring {
     pub rest: String,
     pub private_ws: String,
     pub trade_ws: String,
+    pub public_ws: String,
     pub ip_echo_url: String,
 }
+
+impl Wiring {
+    /// The endpoints of the network, and the configured IP echo service.
+    pub fn of(cfg: &BybitConfig) -> Result<Wiring, String> {
+        let ep = Endpoints::of(&cfg.network)
+            .ok_or_else(|| format!("unknown network {:?}", cfg.network))?;
+        Ok(Wiring {
+            rest: ep.rest,
+            private_ws: ep.private_ws,
+            trade_ws: ep.trade_ws,
+            public_ws: ep.public_ws,
+            ip_echo_url: cfg.ip_echo_url.clone(),
+        })
+    }
+
+    /// Test-only: the wiring in `text` (JSON with `rest`, `private_ws`,
+    /// `trade_ws`, `public_ws` and `ip_echo_url`), refused unless every host
+    /// is `127.0.0.1`: a test build never reaches the network through it.
+    #[cfg(any(test, feature = "failpoints"))]
+    pub fn of_test(text: &str) -> Result<Wiring, String> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct W {
+            rest: String,
+            private_ws: String,
+            trade_ws: String,
+            public_ws: String,
+            ip_echo_url: String,
+        }
+        let w: W = serde_json::from_str(text).map_err(|e| format!("{TEST_WIRING}: {e}"))?;
+        for (name, url) in [
+            ("rest", &w.rest),
+            ("private_ws", &w.private_ws),
+            ("trade_ws", &w.trade_ws),
+            ("public_ws", &w.public_ws),
+            ("ip_echo_url", &w.ip_echo_url),
+        ] {
+            let host = reqwest::Url::parse(url)
+                .map_err(|e| format!("{TEST_WIRING}: {name}: {e}"))?
+                .host_str()
+                .map(str::to_string);
+            if host.as_deref() != Some("127.0.0.1") {
+                return Err(format!(
+                    "{TEST_WIRING}: {name} must be on 127.0.0.1, not {host:?}"
+                ));
+            }
+        }
+        Ok(Wiring {
+            rest: w.rest,
+            private_ws: w.private_ws,
+            trade_ws: w.trade_ws,
+            public_ws: w.public_ws,
+            ip_echo_url: w.ip_echo_url,
+        })
+    }
+}
+
+/// The environment variable that replaces the network's endpoints, read
+/// only by a build with the `failpoints` feature (the node tests).
+#[cfg(any(test, feature = "failpoints"))]
+pub const TEST_WIRING: &str = "OMS_TEST_BYBIT_WIRING";
 
 pub(crate) struct Gateway {
     rest: Rest,
@@ -739,6 +806,27 @@ impl VenueGateway for Gateway {
             timing: self.timing,
         };
         tokio::spawn(trade::run(self.trade.clone(), self.clone(), conn));
+        let mut symbols: Vec<String> = self.symbols.iter().cloned().collect();
+        symbols.sort();
+        let conn = ticker::Conn {
+            url: self.wiring.public_ws.clone(),
+            symbols,
+            timing: self.timing,
+            input: self.input.clone(),
+        };
+        tokio::spawn(ticker::run(self.clone(), conn));
+    }
+}
+
+/// What the public stream asks of the gateway: it connects when the private
+/// stream would.
+impl ticker::Host for Gateway {
+    fn block(&self) -> Option<String> {
+        self.allowed().err()
+    }
+
+    fn ban(&self, why: String) {
+        Gateway::ban(self, why);
     }
 }
 
@@ -773,13 +861,17 @@ pub fn spawn(
     ports: GatewayPorts,
     max_concurrent: usize,
 ) -> Result<(String, BlockView), String> {
-    let ep =
-        Endpoints::of(&cfg.network).ok_or_else(|| format!("unknown network {:?}", cfg.network))?;
-    let wiring = Wiring {
-        rest: ep.rest,
-        private_ws: ep.private_ws,
-        trade_ws: ep.trade_ws,
-        ip_echo_url: cfg.ip_echo_url.clone(),
+    let wiring = Wiring::of(&cfg)?;
+    // Only a build with the failpoints feature (the node tests) reads it;
+    // the shipped binary has no such code.
+    #[cfg(feature = "failpoints")]
+    let wiring = match std::env::var(TEST_WIRING) {
+        Ok(text) => {
+            let w = Wiring::of_test(&text)?;
+            warn!("the Bybit gateway uses the test endpoints", "wiring": format!("{w:?}"));
+            w
+        }
+        Err(_) => wiring,
     };
     let creds = Arc::new(Credentials::load(&cfg.credentials_file)?);
     spawn_with(cfg, creds, wiring, symbols, ports, max_concurrent, None)
@@ -894,6 +986,10 @@ mod tests {
         /// Speak WS Trade: auth and pong answers carry retCode, and order
         /// requests are answered as the script says.
         trade: bool,
+        /// Speak the public stream: no auth, subscribe answers echo the
+        /// `req_id`, and the pong is the public linear shape (`op = "ping"`,
+        /// `ret_msg = "pong"`, F20 2.10).
+        public: bool,
     }
 
     /// How the fake WS Trade answers the next order request. With an empty
@@ -937,6 +1033,11 @@ mod tests {
         /// A loopback WS Trade.
         async fn start_trade(mode: Mode) -> FakeWs {
             FakeWs::start_at(Mode { trade: true, ..mode }, "/v5/trade").await
+        }
+
+        /// A loopback public stream of category linear.
+        async fn start_public(mode: Mode) -> FakeWs {
+            FakeWs::start_at(Mode { public: true, ..mode }, "/v5/public/linear").await
         }
 
         async fn start_at(mode: Mode, path: &str) -> FakeWs {
@@ -1091,6 +1192,16 @@ mod tests {
                             }
                             _ => None,
                         }
+                    } else if m.public {
+                        match v["op"].as_str() {
+                            Some("subscribe") if m.subscribe != Reply::Silent => Some(json!({"success": m.subscribe == Reply::Ok, "ret_msg": if m.subscribe == Reply::Ok { "" } else { "error:handler not found" }, "conn_id": "c", "req_id": v["req_id"], "op": "subscribe"})),
+                            Some("ping") if m.pong => Some(json!({"success": true, "ret_msg": "pong", "conn_id": "c", "req_id": "", "op": "ping"})),
+                            Some("ping") => {
+                                unanswered.fetch_add(1, Ordering::SeqCst);
+                                None
+                            }
+                            _ => None,
+                        }
                     } else { match v["op"].as_str() {
                         Some("auth") if m.auth != Reply::Silent => Some(json!({"success": m.auth == Reply::Ok, "ret_msg": if m.auth == Reply::Ok { "" } else { "error sign" }, "op": "auth", "conn_id": "c"})),
                         Some("subscribe") if m.subscribe != Reply::Silent => Some(json!({"success": m.subscribe == Reply::Ok, "ret_msg": "", "op": "subscribe", "conn_id": "c"})),
@@ -1133,6 +1244,7 @@ mod tests {
         forbid: false,
         garbage: false,
         trade: false,
+        public: false,
     };
 
     fn cfg() -> BybitConfig {
@@ -1147,6 +1259,7 @@ mod tests {
             mainnet_confirmed: false,
             fills_lag_ms: 2000,
             ping_interval_ms: 5000,
+            ref_price_interval_ms: 5000,
         }
     }
 
@@ -1161,6 +1274,7 @@ mod tests {
             backoff_min: Duration::from_millis(20),
             backoff_max: Duration::from_millis(50),
             request: Duration::from_millis(300),
+            ref_price: Duration::from_millis(300),
         }
     }
 
@@ -1173,8 +1287,9 @@ mod tests {
         queues: Arc<InputQueues>,
         /// While set, the core takes nothing from the queues.
         hold: Arc<std::sync::atomic::AtomicBool>,
-        /// A bound port that does not listen: WS Trade of a rig without one.
-        _no_trade: Option<tokio::net::TcpSocket>,
+        /// Bound ports that do not listen: WS Trade or the public stream of
+        /// a rig without one.
+        _held: Vec<tokio::net::TcpSocket>,
     }
 
     impl Drop for Rig {
@@ -1221,33 +1336,50 @@ mod tests {
         rig_with(api, ws, timing(), 256)
     }
 
-    /// A rig whose WS Trade never connects: orders go over REST.
+    /// A rig whose WS Trade and public stream never connect: orders go
+    /// over REST.
     fn rig_with(api: &FakeHttp, ws: &FakeWs, timing: Timing, venue_lane: usize) -> Rig {
-        // Bound, not listening: the port stays ours and a connect is
-        // refused.
-        let held = tokio::net::TcpSocket::new_v4().unwrap();
-        held.bind("127.0.0.1:0".parse().unwrap()).unwrap();
-        let url = format!("ws://{}/v5/trade", held.local_addr().unwrap());
-        rig_at(api, ws, url, Some(held), timing, venue_lane)
+        rig_at(api, ws, None, None, timing, venue_lane)
     }
 
     fn rig_trade(api: &FakeHttp, ws: &FakeWs, trade: &FakeWs, timing: Timing) -> Rig {
-        rig_at(api, ws, trade.url.clone(), None, timing, 256)
+        rig_at(api, ws, Some(trade), None, timing, 256)
+    }
+
+    /// A rig with a public stream and no WS Trade.
+    fn rig_public(api: &FakeHttp, ws: &FakeWs, public: &FakeWs, timing: Timing) -> Rig {
+        rig_at(api, ws, None, Some(public), timing, 256)
     }
 
     fn rig_at(
         api: &FakeHttp,
         ws: &FakeWs,
-        trade_ws: String,
-        no_trade: Option<tokio::net::TcpSocket>,
+        trade: Option<&FakeWs>,
+        public: Option<&FakeWs>,
         timing: Timing,
         venue_lane: usize,
     ) -> Rig {
+        let mut ports = Vec::new();
+        // Bound, not listening: the port stays ours and a connect is
+        // refused.
+        let mut url = |fake: Option<&FakeWs>, path: &str| match fake {
+            Some(f) => f.url.clone(),
+            None => {
+                let s = tokio::net::TcpSocket::new_v4().unwrap();
+                s.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+                let url = format!("ws://{}{path}", s.local_addr().unwrap());
+                ports.push(s);
+                url
+            }
+        };
+        let trade_ws = url(trade, "/v5/trade");
+        let public_ws = url(public, "/v5/public/linear");
         let queues = Arc::new(InputQueues::new(venue_lane, 256, 256));
         let wiring = Wiring {
             rest: api.url(),
             private_ws: ws.url.clone(),
             trade_ws,
+            public_ws,
             ip_echo_url: format!("{}/ip", api.url()),
         };
         let gw = Arc::new(
@@ -1305,7 +1437,7 @@ mod tests {
             queries: q_tx,
             queues,
             hold,
-            _no_trade: no_trade,
+            _held: ports,
         }
     }
 
@@ -2612,5 +2744,309 @@ mod tests {
         }
         let fx = host.effects.lock().unwrap().clone();
         assert!(fx.len() == 1 && fx[0].starts_with("reject:"), "{fx:?}");
+    }
+
+    // ---- the node test hook (U17c) -------------------------------------------------
+
+    /// `OMS_TEST_BYBIT_WIRING` names every endpoint, and each must be on
+    /// 127.0.0.1: another host, a name, IPv6 loopback, a user part that
+    /// hides the host, an unknown or a missing key are refused.
+    #[test]
+    fn the_test_wiring_takes_only_hosts_on_127_0_0_1() {
+        let keys = ["rest", "private_ws", "trade_ws", "public_ws", "ip_echo_url"];
+        let good = json!({
+            "rest": "http://127.0.0.1:1",
+            "private_ws": "ws://127.0.0.1:2/v5/private",
+            "trade_ws": "ws://127.0.0.1:3/v5/trade",
+            "public_ws": "ws://127.0.0.1:4/v5/public/linear",
+            "ip_echo_url": "http://127.0.0.1:5/ip",
+        });
+        let w = Wiring::of_test(&good.to_string()).unwrap();
+        assert_eq!(
+            [w.rest, w.private_ws, w.trade_ws, w.public_ws, w.ip_echo_url],
+            keys.map(|k| good[k].as_str().unwrap().to_string())
+        );
+        for key in keys {
+            for bad in [
+                "https://api.bybit.com",
+                "wss://stream.bybit.com/v5/public/linear",
+                "http://localhost:1",
+                "http://127.0.0.2:1",
+                "http://[::1]:1",
+                "http://127.0.0.1@api.bybit.com/",
+                "http://127.0.0.1.example:1",
+                "not a url",
+            ] {
+                let mut v = good.clone();
+                v[key] = json!(bad);
+                let e = Wiring::of_test(&v.to_string()).expect_err(&format!("{key} = {bad} taken"));
+                assert!(e.starts_with(TEST_WIRING), "{e}");
+            }
+            let mut v = good.clone();
+            v.as_object_mut().unwrap().remove(key);
+            assert!(Wiring::of_test(&v.to_string()).is_err(), "{key} missing");
+        }
+        let mut v = good.clone();
+        v["extra"] = json!("http://127.0.0.1:6");
+        assert!(Wiring::of_test(&v.to_string()).is_err(), "an unknown key");
+        assert_eq!(TEST_WIRING, "OMS_TEST_BYBIT_WIRING");
+    }
+
+    // ---- the reference price (U17c) ----------------------------------------------
+
+    fn ref_prices(r: &Rig) -> Vec<(String, Px, Ts)> {
+        r.inputs()
+            .into_iter()
+            .filter_map(|i| match i {
+                VenueInput::RefPrice {
+                    instrument,
+                    px,
+                    venue_ts,
+                } => Some((instrument.to_string(), px, venue_ts)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn px(s: &str) -> Px {
+        Px::parse(s).unwrap()
+    }
+
+    fn ticker_msg(kind: &str, data: Value, ts: u64) -> String {
+        let topic = format!("tickers.{}", data["symbol"].as_str().unwrap_or("BTCUSDT"));
+        json!({"topic": topic, "type": kind, "data": data, "cs": 7, "ts": ts}).to_string()
+    }
+
+    /// The `n`-th public connection sent its subscribe request.
+    fn subscribed(public: &FakeWs, n: usize) -> bool {
+        public.accepted() > n && public.texts(n).iter().any(|t| t.contains("\"subscribe\""))
+    }
+
+    /// The newest public connection sent a ping (so it lived a ping
+    /// interval).
+    fn pinged(public: &FakeWs) -> bool {
+        public.accepted() > 0
+            && public
+                .texts(public.accepted() - 1)
+                .iter()
+                .any(|t| t.contains("\"ping\""))
+    }
+
+    /// The snapshot's mark goes to the core at once, then at most once per
+    /// interval. A delta before the snapshot gives nothing; a delta with
+    /// `markPrice` moves the held mark; a delta without it gives the held
+    /// mark as of its `ts`. Other symbols are ignored, nothing is sent
+    /// again without a frame, and the public stream does not move the link.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_ticker_mark_becomes_the_reference_price_at_most_once_per_interval() {
+        let api = rest_venue("REGULAR_MARGIN");
+        let ws = FakeWs::start(GOOD).await;
+        let public = FakeWs::start_public(GOOD).await;
+        let r = rig_public(&api, &ws, &public, timing());
+        r.until("subscribed", |_| subscribed(&public, 0)).await;
+        let sub: Value = serde_json::from_str(&public.texts(0)[0]).unwrap();
+        assert_eq!(sub["op"], "subscribe");
+        assert_eq!(sub["args"], json!(["tickers.BTCUSDT"]));
+
+        public.send(ticker_msg("delta", json!({"symbol": "BTCUSDT", "markPrice": "29999"}), 1));
+        public.send(ticker_msg("snapshot", json!({"symbol": "ETHUSDT", "markPrice": "2000"}), 2));
+        public.send(ticker_msg(
+            "snapshot",
+            json!({"symbol": "BTCUSDT", "markPrice": "30000.5", "lastPrice": "30001", "indexPrice": "29990"}),
+            1_700_000_000_000,
+        ));
+        r.until("a reference price", |r| !ref_prices(r).is_empty()).await;
+        let first = Instant::now();
+        assert_eq!(
+            ref_prices(&r),
+            [("BTCUSDT".to_string(), px("30000.5"), 1_700_000_000_000_000)]
+        );
+        // Within the interval: nothing goes out, the new mark is held.
+        public.send(ticker_msg("delta", json!({"symbol": "BTCUSDT", "markPrice": "30001"}), 1_700_000_000_100));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(ref_prices(&r).len(), 1, "{:?}", ref_prices(&r));
+        // After the interval, a delta without markPrice: the held mark.
+        tokio::time::sleep((first + timing().ref_price + Duration::from_millis(20)).saturating_duration_since(Instant::now())).await;
+        public.send(ticker_msg("delta", json!({"symbol": "BTCUSDT", "fundingRate": "0.0001"}), 1_700_000_000_400));
+        r.until("a second reference price", |r| ref_prices(r).len() >= 2).await;
+        assert_eq!(
+            ref_prices(&r)[1],
+            ("BTCUSDT".to_string(), px("30001"), 1_700_000_000_400_000)
+        );
+        // No timer sends the held price again.
+        tokio::time::sleep(timing().ref_price * 3).await;
+        assert_eq!(ref_prices(&r).len(), 2, "{:?}", ref_prices(&r));
+        assert_eq!(public.accepted(), 1);
+        assert_eq!(r.links().len(), 1, "the public stream moved the link: {:?}", r.links());
+    }
+
+    /// An unreadable ticker frame ends the connection. The next connection
+    /// knows no mark until its own snapshot: a delta before it gives
+    /// nothing, even after the interval.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_unreadable_ticker_frame_ends_the_connection_and_the_next_starts_with_no_mark() {
+        let api = rest_venue("REGULAR_MARGIN");
+        let ws = FakeWs::start(GOOD).await;
+        let public = FakeWs::start_public(GOOD).await;
+        let r = rig_public(&api, &ws, &public, timing());
+        r.until("subscribed", |_| subscribed(&public, 0)).await;
+        public.send(ticker_msg("snapshot", json!({"symbol": "BTCUSDT", "markPrice": "30000"}), 1));
+        r.until("a reference price", |r| ref_prices(r).len() == 1).await;
+        public.send(ticker_msg("delta", json!({"symbol": "BTCUSDT", "markPrice": "x"}), 2));
+        r.until("a second connection", |_| subscribed(&public, 1)).await;
+        tokio::time::sleep(timing().ref_price + Duration::from_millis(50)).await;
+        public.send(ticker_msg("delta", json!({"symbol": "BTCUSDT", "fundingRate": "0.0001"}), 3));
+        public.send(ticker_msg("delta", json!({"symbol": "BTCUSDT", "markPrice": "30005"}), 4));
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(ref_prices(&r).len(), 1, "a mark before the snapshot: {:?}", ref_prices(&r));
+        public.send(ticker_msg("snapshot", json!({"symbol": "BTCUSDT", "markPrice": "30010"}), 5));
+        r.until("the new snapshot's price", |r| ref_prices(r).len() == 2).await;
+        assert_eq!(ref_prices(&r)[1], ("BTCUSDT".to_string(), px("30010"), 5_000));
+        assert_eq!(r.links().len(), 1, "{:?}", r.links());
+    }
+
+    /// A refused subscription is retried (it is not a key rejection), and
+    /// the connection comes up once the venue accepts.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_refused_ticker_subscription_is_retried() {
+        let api = rest_venue("REGULAR_MARGIN");
+        let ws = FakeWs::start(GOOD).await;
+        let public = FakeWs::start_public(Mode {
+            subscribe: Reply::Refuse,
+            ..GOOD
+        })
+        .await;
+        let r = rig_public(&api, &ws, &public, timing());
+        r.until("three connections", |_| public.accepted() >= 3).await;
+        assert!(
+            (0..3).all(|i| public.texts(i).iter().all(|t| !t.contains("\"ping\""))),
+            "a refused connection lived a ping interval"
+        );
+        assert_eq!(r.block(), None);
+        public.set(|m| m.subscribe = Reply::Ok);
+        r.until("a ping on a subscribed connection", |_| pinged(&public)).await;
+        let n = public.accepted();
+        public.send(ticker_msg("snapshot", json!({"symbol": "BTCUSDT", "markPrice": "30000"}), 1));
+        r.until("a reference price", |r| ref_prices(r).len() == 1).await;
+        tokio::time::sleep(timing().ping * 3).await;
+        assert_eq!(public.accepted(), n);
+    }
+
+    /// No pong within the ping interval ends the connection; the public
+    /// pong shape (`op = "ping"`, `ret_msg = "pong"`) keeps it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_missing_ticker_pong_ends_the_connection_and_the_public_pong_keeps_it() {
+        let api = rest_venue("REGULAR_MARGIN");
+        let ws = FakeWs::start(GOOD).await;
+        let public = FakeWs::start_public(Mode {
+            pong: false,
+            ..GOOD
+        })
+        .await;
+        let r = rig_public(&api, &ws, &public, timing());
+        r.until("a second connection", |_| public.accepted() >= 2).await;
+        assert!(public.unanswered() >= 1);
+        public.set(|m| m.pong = true);
+        // A second ping goes out only after the pong to the first.
+        let pings = |p: &FakeWs| p.texts(p.accepted() - 1).iter().filter(|t| t.contains("\"ping\"")).count();
+        r.until("a ping answered", |_| pings(&public) >= 2).await;
+        let n = public.accepted();
+        tokio::time::sleep(timing().ping * 4).await;
+        assert_eq!(public.accepted(), n, "the public pong was not taken as one");
+        assert!(pings(&public) >= 4, "{:?}", public.texts(n - 1));
+        drop(r);
+    }
+
+    /// HTTP 403 on the public upgrade is a ban like any other: every
+    /// request pauses, and nothing connects during the pause.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_403_on_the_public_upgrade_pauses_every_request() {
+        let api = rest_venue("REGULAR_MARGIN");
+        let ws = FakeWs::start(GOOD).await;
+        let public = FakeWs::start_public(Mode {
+            forbid: true,
+            ..GOOD
+        })
+        .await;
+        let r = rig_public(&api, &ws, &public, timing());
+        r.until("the ban", |r| {
+            r.block().is_some_and(|b| b.starts_with("ip_banned: public stream upgrade"))
+        })
+        .await;
+        let (attempts, sent) = (public.attempts(), api.requests().len());
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(public.attempts(), attempts, "a connect during the pause");
+        assert_eq!(api.requests().len(), sent, "a request during the pause");
+    }
+
+    /// The public stream connects only when the private stream would: not
+    /// while a boot check fails, and a block while it is up takes it down
+    /// and keeps it down.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_ticker_stream_connects_only_without_a_block() {
+        let api = rest_venue("ISOLATED_MARGIN");
+        let ws = FakeWs::start(GOOD).await;
+        let public = FakeWs::start_public(GOOD).await;
+        let r = rig_public(&api, &ws, &public, timing());
+        r.until("the block", |r| r.block().is_some_and(|b| b.starts_with("account:")))
+            .await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(public.attempts(), 0);
+        api.route("/v5/account/info", [ok(json!({"marginMode": "REGULAR_MARGIN", "unifiedMarginStatus": 5, "updatedTime": "1"}))]);
+        r.until("subscribed", |_| subscribed(&public, 0)).await;
+        // The IP changes: the key is rejected until the restart.
+        api.route("/ip", [Http::Reply(200, "198.51.100.9\n".into())]);
+        r.until("the key block", |r| r.block().is_some_and(|b| b.starts_with("auth_rejected:")))
+            .await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        public.send(ticker_msg("snapshot", json!({"symbol": "BTCUSDT", "markPrice": "30000"}), 1));
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(ref_prices(&r).is_empty(), "read under a block: {:?}", ref_prices(&r));
+        assert_eq!(public.accepted(), 1);
+    }
+
+    /// A host that never blocks.
+    struct OpenHost;
+
+    impl ticker::Host for OpenHost {
+        fn block(&self) -> Option<String> {
+            None
+        }
+        fn ban(&self, _: String) {}
+    }
+
+    /// Twelve symbols: two subscribe requests of ten and two topics, both
+    /// confirmed, and the connection stays.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_ticker_stream_subscribes_ten_topics_per_request() {
+        let public = FakeWs::start_public(GOOD).await;
+        let symbols: Vec<String> = (0..12).map(|i| format!("S{i:02}USDT")).collect();
+        let queues = Arc::new(InputQueues::new(16, 16, 16));
+        let conn = ticker::Conn {
+            url: public.url.clone(),
+            symbols: symbols.clone(),
+            timing: timing(),
+            input: VenueInputTx::new(queues.clone()),
+        };
+        tokio::spawn(ticker::run(Arc::new(OpenHost), conn));
+        for _ in 0..200 {
+            if pinged(&public) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(pinged(&public), "{:?}", public.accepted());
+        let subs: Vec<Value> = public
+            .requests("subscribe")
+            .into_iter()
+            .collect();
+        let args: Vec<Vec<String>> = subs
+            .iter()
+            .map(|m| m["args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap().to_string()).collect())
+            .collect();
+        let want: Vec<String> = symbols.iter().map(|s| format!("tickers.{s}")).collect();
+        assert_eq!(args, [want[..10].to_vec(), want[10..].to_vec()]);
+        assert_eq!(public.accepted(), 1);
+        queues.close();
     }
 }
