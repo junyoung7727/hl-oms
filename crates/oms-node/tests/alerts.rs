@@ -852,6 +852,26 @@ fn after_a_fatal_stop_only_the_fatal_message_is_sent() {
     );
 }
 
+/// Review S1. `finish` sends the fatal message and waits for it whenever
+/// the latch is tripped, whatever the exit code it is given.
+#[test]
+fn finish_sends_the_fatal_message_whatever_the_code() {
+    let f = FakeHttp::start(ok());
+    let rig = Rig::start("finish-fatal", 64);
+    let bell = Bell::start(&rig, alert_config(&f), None);
+    bell.delivered();
+    let n = texts(&f).len();
+    rig.fatal.trip("commit failed: injected");
+    assert!(bell.alerts.finish(3));
+    let got = since(&f, n);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(
+        got[0].contains("치명 종료: commit failed: injected"),
+        "{}",
+        got[0]
+    );
+}
+
 // ---- configuration ------------------------------------------------------------
 
 fn write_mode(path: &Path, body: &str, mode: u32) {
