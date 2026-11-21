@@ -236,8 +236,20 @@ impl Rest {
         self
     }
 
+    /// The local clock in ms, as the client signs with it.
+    pub fn now_ms(&self) -> u64 {
+        (self.now_ms)()
+    }
+
+    pub fn recv_window_ms(&self) -> u64 {
+        self.recv_window_ms
+    }
+
     fn signed(&self, rb: reqwest::RequestBuilder, payload: &str) -> reqwest::RequestBuilder {
-        let ts = (self.now_ms)();
+        self.signed_at(rb, payload, (self.now_ms)())
+    }
+
+    fn signed_at(&self, rb: reqwest::RequestBuilder, payload: &str, ts: u64) -> reqwest::RequestBuilder {
         let sig = sign::rest_signature(
             &self.creds.api_secret,
             ts,
@@ -253,6 +265,13 @@ impl Rest {
     }
 
     async fn send(&self, rb: reqwest::RequestBuilder) -> Result<Value, RestError> {
+        let (status, text) = self.send_raw(rb).await?;
+        classify(status, &text)
+    }
+
+    /// The HTTP status and body. Err only when the request was not sent
+    /// (`NotSent`) or no answer came (`NoAnswer`).
+    async fn send_raw(&self, rb: reqwest::RequestBuilder) -> Result<(u16, String), RestError> {
         let resp = rb.send().await.map_err(|e| {
             let text = error_chain(&e);
             if e.is_connect() || e.is_builder() {
@@ -266,7 +285,7 @@ impl Rest {
             .text()
             .await
             .map_err(|e| RestError::NoAnswer(error_chain(&e)))?;
-        classify(status, &text)
+        Ok((status, text))
     }
 
     /// A signed GET; returns `result`.
@@ -290,6 +309,23 @@ impl Rest {
             .header("Content-Type", "application/json")
             .body(text.clone());
         self.send(self.signed(rb, &text)).await
+    }
+
+    /// A signed POST with request time `ts_ms`, answered raw: the order
+    /// path classifies the answer itself (`answer`).
+    pub async fn post_raw_at(
+        &self,
+        path: &str,
+        body: &Value,
+        ts_ms: u64,
+    ) -> Result<(u16, String), RestError> {
+        let text = serde_json::to_string(body).map_err(|e| RestError::NotSent(e.to_string()))?;
+        let rb = self
+            .http
+            .post(format!("{}{path}", self.base))
+            .header("Content-Type", "application/json")
+            .body(text.clone());
+        self.send_raw(self.signed_at(rb, &text, ts_ms)).await
     }
 }
 

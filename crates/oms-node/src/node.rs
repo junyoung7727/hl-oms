@@ -169,7 +169,16 @@ pub fn run(cfg: NodeConfig) -> i32 {
                 }
             }
             VenueConfig::Bybit(b) => {
-                let symbols = cfg.core.instruments.keys().map(|i| i.to_string()).collect();
+                let symbols = cfg
+                    .core
+                    .instruments
+                    .iter()
+                    .map(|(id, spec)| venue::bybit::checks::SymbolSpec {
+                        name: id.to_string(),
+                        px_tick: spec.px_tick,
+                        qty_step: spec.qty_step,
+                    })
+                    .collect();
                 match venue::bybit::gateway::spawn(b.clone(), symbols, ports, policy.max_inflight_sends as usize + 16) {
                     Ok((name, block)) => (name, <venue::bybit::gateway::Gateway as VenueGateway>::WIRE_ID, Some(block)),
                     Err(e) => {

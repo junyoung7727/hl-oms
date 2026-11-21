@@ -7,6 +7,7 @@ use std::net::IpAddr;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use oms_core::{Px, Qty};
 use serde_json::Value;
 
 use super::rest::{Rest, RestError};
@@ -25,6 +26,11 @@ pub enum Block {
     /// The venue banned this IP for too many requests (HTTP 403). No
     /// request may go out for `rest::IP_BAN_PAUSE`; then retried.
     IpBanned(String),
+    /// The local clock may be ahead of the venue's by more than
+    /// `MAX_CLOCK_LEAD_MS`. Blocks new orders only (`Health::create_block`):
+    /// the send-time rule is a rule for creates. Rechecked every
+    /// `boot_retry` while it lasts.
+    Clock(String),
 }
 
 impl std::fmt::Display for Block {
@@ -34,6 +40,7 @@ impl std::fmt::Display for Block {
             Block::Account(e) => write!(f, "account: {e}"),
             Block::Unchecked(e) => write!(f, "unchecked: {e}"),
             Block::IpBanned(e) => write!(f, "ip_banned: {e}"),
+            Block::Clock(e) => write!(f, "clock: {e}"),
         }
     }
 }
@@ -51,6 +58,8 @@ impl From<RestError> for Block {
 
 /// The gateway's block, shared by the boot checks, the IP loop and the
 /// stream (which may report the link up only while `block` is `None`).
+/// The clock slot is apart: it keeps new orders home (`create_block`), not
+/// cancels or the link.
 ///
 /// Each source owns its slot, so a passing IP recheck cannot lift a failed
 /// boot check and a passing boot rerun cannot lift an IP mismatch. An auth
@@ -67,11 +76,12 @@ struct Slots {
     ban: Option<Block>,
     boot: Option<Block>,
     ip: Option<Block>,
+    clock: Option<Block>,
 }
 
 impl Health {
-    /// The block that keeps the link down: auth first, then an IP ban,
-    /// then boot, then IP.
+    /// The block that keeps the link down and every request home: auth
+    /// first, then an IP ban, then boot, then IP.
     pub fn block(&self) -> Option<Block> {
         let g = self.slots.lock().unwrap_or_else(|e| e.into_inner());
         g.auth
@@ -79,6 +89,20 @@ impl Health {
             .or_else(|| g.ban.clone())
             .or_else(|| g.boot.clone())
             .or_else(|| g.ip.clone())
+    }
+
+    /// The block that keeps a new order home: `block`, then the clock.
+    pub fn create_block(&self) -> Option<Block> {
+        self.block().or_else(|| self.clock())
+    }
+
+    /// The clock slot alone.
+    pub fn clock(&self) -> Option<Block> {
+        self.slots
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clock
+            .clone()
     }
 
     /// The key was rejected (by any request, or by the stream's auth).
@@ -111,6 +135,11 @@ impl Health {
         self.set(b, |s| &mut s.ip);
     }
 
+    /// The result of a clock check.
+    pub fn set_clock(&self, b: Option<Block>) {
+        self.set(b, |s| &mut s.clock);
+    }
+
     fn set(&self, b: Option<Block>, slot: fn(&mut Slots) -> &mut Option<Block>) {
         let mut g = self.slots.lock().unwrap_or_else(|e| e.into_inner());
         match b {
@@ -130,7 +159,15 @@ pub struct Expected {
     /// The sub-account the key must belong to (`userID` of query-api).
     pub sub_account_uid: u64,
     /// The traded symbols (category linear).
-    pub symbols: Vec<String>,
+    pub symbols: Vec<SymbolSpec>,
+}
+
+/// A traded symbol and the steps the core rounds its orders to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SymbolSpec {
+    pub name: String,
+    pub px_tick: Px,
+    pub qty_step: Qty,
 }
 
 /// The settle coin every traded symbol must have: the kill scope of
@@ -228,8 +265,12 @@ pub async fn check_account(rest: &Rest) -> Result<(), Block> {
     Ok(())
 }
 
-/// One-way position mode and the settle coin, per symbol.
-pub async fn check_symbol(rest: &Rest, symbol: &str) -> Result<(), Block> {
+/// One-way position mode, the settle coin, and the steps, per symbol. The
+/// configured price tick and quantity step must be multiples of the
+/// venue's (`priceFilter.tickSize`, `lotSizeFilter.qtyStep`): what the venue
+/// does with an order off its steps is not documented.
+pub async fn check_symbol(rest: &Rest, spec: &SymbolSpec) -> Result<(), Block> {
+    let symbol = spec.name.as_str();
     let params = [
         ("category", "linear".to_string()),
         ("symbol", symbol.to_string()),
@@ -247,6 +288,20 @@ pub async fn check_symbol(rest: &Rest, symbol: &str) -> Result<(), Block> {
     if settle != SETTLE_COIN {
         return Err(Block::Account(format!(
             "{symbol} settles in {settle:?}; the kill scope is {SETTLE_COIN}"
+        )));
+    }
+    let read = |ptr: &str| row.pointer(ptr).and_then(Value::as_str).unwrap_or("");
+    let (tick, step) = (read("/priceFilter/tickSize"), read("/lotSizeFilter/qtyStep"));
+    let (Ok(venue_tick), Ok(venue_step)) = (Px::parse(tick), Qty::parse(step)) else {
+        return Err(Block::Unchecked(format!(
+            "{symbol}: tickSize {tick:?} or qtyStep {step:?} cannot be read"
+        )));
+    };
+    let multiple = |ours: i64, venue: i64| venue > 0 && ours % venue == 0;
+    if !multiple(spec.px_tick.0, venue_tick.0) || !multiple(spec.qty_step.0, venue_step.0) {
+        return Err(Block::Account(format!(
+            "{symbol}: px_tick {} and qty_step {} must be multiples of the venue's tickSize {venue_tick} and qtyStep {venue_step}",
+            spec.px_tick, spec.qty_step
         )));
     }
     let pos = rest.get("/v5/position/list", &params).await?;
@@ -326,6 +381,46 @@ pub async fn boot(
     Ok(())
 }
 
+/// How far the local clock may be ahead of the venue's. The send-time rule
+/// (G-4, `orders::fits_expiry`) relies on the venue refusing requests stamped
+/// more than 1 s ahead; this keeps our lead well inside that (judgment).
+pub const MAX_CLOCK_LEAD_MS: i64 = 500;
+
+/// The slowest answer the clock check judges by. The bound below adds the
+/// round trip; a slower answer could block a clock that is fine, so it
+/// proves nothing (`Unchecked`) and the last result stands (judgment).
+pub const MAX_CLOCK_RTT_MS: i64 = 250;
+
+/// The local clock's lead over the venue's, bounded from above: local time
+/// after the answer minus the venue's time in it (`/v5/market/time`,
+/// `timeNano`). The bound adds the round trip (at most `MAX_CLOCK_RTT_MS`).
+/// Only a lead blocks: a clock behind makes the venue refuse requests
+/// (10002), which sends nothing in doubt.
+pub async fn check_clock(rest: &Rest) -> Result<(), Block> {
+    let before = rest.now_ms() as i64;
+    let t = rest.get("/v5/market/time", &[]).await?;
+    let after = rest.now_ms() as i64;
+    if after - before > MAX_CLOCK_RTT_MS {
+        return Err(Block::Unchecked(format!(
+            "the clock answer took {} ms (at most {MAX_CLOCK_RTT_MS} is judged)",
+            after - before
+        )));
+    }
+    let venue_ms = t
+        .get("timeNano")
+        .and_then(Value::as_str)
+        .and_then(|n| n.parse::<i128>().ok())
+        .map(|ns| (ns / 1_000_000) as i64)
+        .ok_or_else(|| Block::Unchecked(format!("market/time has no readable timeNano: {t}")))?;
+    let lead = after - venue_ms;
+    if lead > MAX_CLOCK_LEAD_MS {
+        return Err(Block::Clock(format!(
+            "the local clock may be {lead} ms ahead of the venue's (at most {MAX_CLOCK_LEAD_MS})"
+        )));
+    }
+    Ok(())
+}
+
 /// One IP check of the loop: re-reads the key's IPs and the public IP.
 pub async fn recheck_ip(
     rest: &Rest,
@@ -370,7 +465,8 @@ mod tests {
     }
 
     fn instrument(symbol: &str, settle: &str) -> Value {
-        serde_json::json!({"category": "linear", "list": [{"symbol": symbol, "settleCoin": settle, "status": "Trading"}], "nextPageCursor": ""})
+        serde_json::json!({"category": "linear", "list": [{"symbol": symbol, "settleCoin": settle, "status": "Trading",
+            "priceFilter": {"tickSize": "0.10"}, "lotSizeFilter": {"qtyStep": "0.001"}}], "nextPageCursor": ""})
     }
 
     fn positions(idx: &[i64]) -> Value {
@@ -406,14 +502,26 @@ mod tests {
         )
     }
 
+    fn spec(tick: &str, step: &str) -> SymbolSpec {
+        SymbolSpec {
+            name: "BTCUSDT".into(),
+            px_tick: Px::parse(tick).unwrap(),
+            qty_step: Qty::parse(step).unwrap(),
+        }
+    }
+
     fn want() -> Expected {
         Expected {
             sub_account_uid: 4242,
-            symbols: vec!["BTCUSDT".into()],
+            symbols: vec![spec("0.5", "0.001")],
         }
     }
 
     async fn run(v: &Venue) -> Result<(), Block> {
+        run_with(v, &want()).await
+    }
+
+    async fn run_with(v: &Venue, want: &Expected) -> Result<(), Block> {
         let rest = Rest::new(
             &v.api.url(),
             Arc::new(Credentials::new("K", "S")),
@@ -422,7 +530,102 @@ mod tests {
         )
         .unwrap();
         let echo = echo_client(Duration::from_millis(500)).unwrap();
-        boot(&rest, &echo, &v.echo.url(), &want()).await
+        boot(&rest, &echo, &v.echo.url(), want).await
+    }
+
+    const CLOCK_MS: u64 = 1_700_000_000_000;
+
+    fn fixed() -> u64 {
+        CLOCK_MS
+    }
+
+    #[tokio::test]
+    async fn a_local_clock_ahead_by_more_than_half_a_second_blocks() {
+        for (venue_ms, want) in [
+            (CLOCK_MS, Ok(())),
+            (CLOCK_MS - 500, Ok(())),
+            (CLOCK_MS + 60_000, Ok(())),
+            (CLOCK_MS - 501, Err("clock")),
+        ] {
+            let api = FakeHttp::start(Answer::Reply(404, "{}".into()));
+            api.route(
+                "/v5/market/time",
+                [ok(json!({"timeSecond": (venue_ms / 1000).to_string(), "timeNano": (u128::from(venue_ms) * 1_000_000 + 999_999).to_string()}))],
+            );
+            let rest = Rest::new(&api.url(), Arc::new(Credentials::new("K", "S")), 5000, Duration::from_millis(500))
+                .unwrap()
+                .with_clock(fixed);
+            let r = check_clock(&rest).await;
+            match want {
+                Ok(()) => assert_eq!(r, Ok(()), "{venue_ms}"),
+                Err(_) => assert!(matches!(&r, Err(Block::Clock(e)) if e.contains("501 ms ahead")), "{venue_ms}: {r:?}"),
+            }
+        }
+        let api = FakeHttp::start(Answer::Reply(404, "{}".into()));
+        api.route("/v5/market/time", [ok(json!({"timeSecond": "1"}))]);
+        let rest = Rest::new(&api.url(), Arc::new(Credentials::new("K", "S")), 5000, Duration::from_millis(500))
+            .unwrap()
+            .with_clock(fixed);
+        assert!(matches!(check_clock(&rest).await, Err(Block::Unchecked(_))));
+    }
+
+    #[tokio::test]
+    async fn a_slow_clock_answer_proves_nothing() {
+        use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
+        // The local clock moves `STEP` ms at each reading. The check reads
+        // it three times (before, to sign, after): the answer takes two
+        // steps. The venue's time equals the last reading (no lead).
+        static T: AtomicU64 = AtomicU64::new(0);
+        static STEP: AtomicU64 = AtomicU64::new(0);
+        fn ticking() -> u64 {
+            T.fetch_add(STEP.load(SeqCst), SeqCst)
+        }
+        for (step, judged) in [(125, true), (126, false)] {
+            T.store(CLOCK_MS, SeqCst);
+            STEP.store(step, SeqCst);
+            let api = FakeHttp::start(Answer::Reply(404, "{}".into()));
+            let venue_ns = u128::from(CLOCK_MS + 2 * step) * 1_000_000;
+            api.route("/v5/market/time", [ok(json!({"timeSecond": "1", "timeNano": venue_ns.to_string()}))]);
+            let rest = Rest::new(&api.url(), Arc::new(Credentials::new("K", "S")), 5000, Duration::from_millis(500))
+                .unwrap()
+                .with_clock(ticking);
+            let r = check_clock(&rest).await;
+            if judged {
+                assert_eq!(r, Ok(()), "{step}");
+            } else {
+                assert!(matches!(&r, Err(Block::Unchecked(e)) if e.contains("252 ms")), "{r:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_clock_slot_blocks_creates_only() {
+        let h = Health::default();
+        h.set_clock(Some(Block::Clock("ahead".into())));
+        assert_eq!(h.block(), None, "the link and cancels stay");
+        assert!(matches!(h.create_block(), Some(Block::Clock(_))));
+        h.set_boot(Some(Block::Account("hedge".into())));
+        assert!(matches!(h.create_block(), Some(Block::Account(_))), "the general block comes first");
+        h.set_boot(None);
+        h.set_clock(None);
+        assert_eq!(h.create_block(), None);
+    }
+
+    #[tokio::test]
+    async fn steps_off_the_venue_steps_block_and_unreadable_steps_are_unchecked() {
+        for (tick, step, ok) in [("0.1", "0.001", true), ("1", "0.01", true), ("0.05", "0.001", false), ("0.5", "0.0005", false)] {
+            let v = good();
+            let want = Expected { symbols: vec![spec(tick, step)], ..want() };
+            let r = run_with(&v, &want).await;
+            if ok {
+                assert_eq!(r, Ok(()), "{tick} {step}");
+            } else {
+                assert!(matches!(&r, Err(Block::Account(e)) if e.contains("multiples")), "{tick} {step}: {r:?}");
+            }
+        }
+        let bare = serde_json::json!({"category": "linear", "list": [{"symbol": "BTCUSDT", "settleCoin": "USDT", "status": "Trading"}], "nextPageCursor": ""});
+        let v = venue(key(json!({})), account("REGULAR_MARGIN", 5), bare, positions(&[0]), "127.0.0.1");
+        assert!(matches!(run(&v).await, Err(Block::Unchecked(e)) if e.contains("cannot be read")));
     }
 
     #[tokio::test]
