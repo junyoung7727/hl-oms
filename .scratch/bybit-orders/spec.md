@@ -67,6 +67,20 @@ Node (`tests/bybit_node.rs`, `--features failpoints`; the node is its own proces
 2. The journal flush fails (failpoint) for the new order: the node stops, and no create reaches REST or WS Trade. Restarted without the failpoint, the order is resolved by the orderLinkId queries (realtime and history miss twice) as not placed; still no create.
 3. WS Trade reads the create and does not answer: the order becomes in doubt, the realtime query by orderLinkId finds it open, the order is working. Creates over both paths = 1.
 
+## U17d decisions
+
+Owner question of 11-20 (DM bd8d7b04, repeated in the U17 plan 14b70681): no answer by 11-21, so the stated default applies. The owner can remove the rule.
+
+- Rule (C-MARGIN, new rule id `AccountMm`): on a recorded margin report, the account's maintenance-margin rate at or above `account_mm_rate_max_bps` latches REDUCING through the existing `enter_reducing` (cancel open plain orders; reduce-only kept). Default for Bybit: 5000 bps = 50 % (판단, 모델 아님; the venue liquidates at 100 %; revisit on testnet).
+- Rate = `totalMaintenanceMargin / totalMarginBalance` of the unified account, both USD amounts of `/v5/account/wallet-balance` (documented fields, F18 §6, F20 13.2). Not `accountMMRate`: its format (ratio or percent) is undocumented (F20 13.4). The gateway keeps `accountMMRate` only in the report's log line for comparison on testnet. `totalMarginBalance` ≤ 0 with any maintenance margin is at or above every limit. Judged without division: `mm × 10 000 ≥ max_bps × balance`.
+- Report: `MarginReport` gets `account_mm: Option<AccountMm { maintenance: Amount, margin_balance: Amount }>`, serde default and skipped when `None` (Hyperliquid reports and old journal records unchanged; follow the record-schema contract and its tests for whether `RECORD_SCHEMA` must change). The Bybit gateway always fills it; a missing or unreadable field makes the whole answer `MarginReportInvalid` (as today for the other fields).
+- Policy: `MarginPolicy.account_mm_rate_max_bps: Option<u32>` (serde default `None`). Config: Bybit with a margin policy requires it (1..=9999); Hyperliquid refuses it (its account is isolated; the rule would never judge). With the limit set, a recorded report without `account_mm` is rejected as a whole (`MarginReportRejected`), as a report with `max_leverage = 0` is.
+- The rule runs with the other report rules (`judge_mm_buffer`, `judge_daily_loss`); the first rule to trip names the latch. The status and journal show the rule id and the numbers.
+
+## Testing Decisions (U17d)
+
+Core (deterministic): rate just below the limit = no latch; at the limit = latch with rule `account_mm` and the cancels; balance 0 or negative with maintenance > 0 = latch; balance 0 and maintenance 0 = no latch; a report without `account_mm` under the limit = rejected, without the limit = recorded; the latch is not replaced by a later rule; replay of a journal with the new field and of an old one without it gives the same state. Config bounds. Gateway (fake HTTP): the two fields read into the report; a missing or non-number field = `MarginReportInvalid`; `accountMMRate` is not used for the judgment.
+
 ## Out of Scope
 
 Amend (the core issues no amend), cancel-all (U18b), any real venue call, testnet orders.
