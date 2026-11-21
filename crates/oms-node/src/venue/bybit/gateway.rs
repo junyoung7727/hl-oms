@@ -2427,4 +2427,94 @@ mod tests {
             dropped.elapsed()
         );
     }
+
+    /// A host whose block the test sets.
+    #[derive(Default)]
+    struct TestHost {
+        blocked: std::sync::atomic::AtomicBool,
+    }
+
+    impl trade::Host for TestHost {
+        fn block(&self) -> Option<String> {
+            self.blocked
+                .load(Ordering::SeqCst)
+                .then(|| "ip_banned: test".to_string())
+        }
+        fn key_rejected(&self) -> bool {
+            false
+        }
+        fn ban(&self, _: String) {}
+        fn reject_key(&self, _: String) {}
+    }
+
+    /// The connection task alone, with a block that only the write sees
+    /// (the health poll is slow): a block set before the write keeps the
+    /// request off the wire (`NotWritten`), and a reqId already pending is
+    /// never written again.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_task_writes_nothing_under_a_block_and_no_reqid_twice() {
+        let fake = FakeWs::start_trade(GOOD).await;
+        let start = |host: Arc<TestHost>| {
+            let t = Arc::new(Trade::default());
+            let conn = trade::Conn {
+                url: fake.url.clone(),
+                creds: Arc::new(Credentials::new("KEY", "SECRET")),
+                recv_window_ms: 5000,
+                timing: Timing {
+                    health_poll: Duration::from_secs(30),
+                    request: Duration::from_secs(5),
+                    ..timing()
+                },
+            };
+            tokio::spawn(trade::run(t.clone(), host, conn));
+            t
+        };
+        let host = Arc::new(TestHost::default());
+        let t = start(host.clone());
+        for _ in 0..200 {
+            if t.is_up() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(t.is_up());
+        let msg = |id: &str| {
+            trade::request_message(id, trade::CREATE_OP, 1, 5000, &json!({"orderLinkId": id}))
+        };
+
+        // The same reqId while the first waits for its answer.
+        fake.then([Script::Silent]);
+        let first = {
+            let t = t.clone();
+            let m = msg("cA");
+            tokio::spawn(async move { t.request("cA", m).await })
+        };
+        for _ in 0..200 {
+            if !fake.requests(trade::CREATE_OP).is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let again = t.request("cA", msg("cA")).await;
+        assert!(
+            matches!(&again, trade::Reply::NoAnswer(e) if e.contains("already pending")),
+            "{again:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(fake.requests(trade::CREATE_OP).len(), 1, "written twice");
+        assert!(!first.is_finished());
+
+        // A block the task sees before the write.
+        host.blocked.store(true, Ordering::SeqCst);
+        let r = t.request("cB", msg("cB")).await;
+        assert!(matches!(&r, trade::Reply::NotWritten(e) if e.starts_with("ip_banned")), "{r:?}");
+        let first = first.await.unwrap();
+        assert!(
+            matches!(&first, trade::Reply::NoAnswer(e) if e.contains("went down")),
+            "{first:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(fake.requests(trade::CREATE_OP).len(), 1, "written under a block");
+        assert!(!t.is_up());
+    }
 }
