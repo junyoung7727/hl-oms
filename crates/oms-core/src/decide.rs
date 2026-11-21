@@ -590,7 +590,7 @@ impl Tx<'_> {
                 }
             },
             OperatorCmd::ClearHold { reason, note } => match self.clear_hold_refusal(*reason, note) {
-                Some(refusal) => Err(refusal.text().into()),
+                Some(refusal) => Err(refusal.text()),
                 None => {
                     self.emit(Event::HoldCleared {
                         hold: *reason,
@@ -645,7 +645,9 @@ impl Tx<'_> {
 
     /// Why `clear-hold` cannot be taken now, if it cannot (C-HOLD). There is
     /// no force option: a kill is released only after the kill loop of
-    /// this process confirmed zero open orders.
+    /// this process answered, and only while the core's own book has no
+    /// open order, whatever the loop answered (a gateway without cancel-all
+    /// answers `unsupported` and cancels nothing).
     fn clear_hold_refusal(&self, reason: HoldKind, note: &str) -> Option<HoldRefusal> {
         let core = &*self.core;
         let held = match reason {
@@ -663,6 +665,10 @@ impl Tx<'_> {
         let kill_unconfirmed = core.kill.as_ref().is_some_and(|k| k.confirmed_at.is_none());
         if reason == HoldKind::Kill && kill_unconfirmed {
             return Some(HoldRefusal::KillUnconfirmed);
+        }
+        let kill_orders_open = core.open.len();
+        if reason == HoldKind::Kill && kill_orders_open > 0 {
+            return Some(HoldRefusal::KillOrdersOpen(kill_orders_open));
         }
         if reason == HoldKind::VenueChange && !core.venue_change_wait.is_empty() {
             return Some(HoldRefusal::VenueChangePending);
@@ -689,9 +695,13 @@ impl Tx<'_> {
 
     fn watcher(&mut self, w: &WatcherInput) -> Result<(), CoreFault> {
         let reply = match w {
-            // The node refuses an empty detail before the core sees it.
+            // The node refuses an empty or overlong detail before the core
+            // sees it.
             WatcherInput::Mismatch { detail, .. } | WatcherInput::Kill { detail } if detail.trim().is_empty() => {
                 Err("bad_request: the detail is empty".to_string())
+            }
+            WatcherInput::Mismatch { detail, .. } | WatcherInput::Kill { detail } if detail.len() > WATCHER_DETAIL_MAX => {
+                Err(format!("bad_request: the detail is longer than {WATCHER_DETAIL_MAX} bytes"))
             }
             WatcherInput::Mismatch { check, detail } => {
                 if self.core.watcher_mismatch.is_some() {

@@ -111,6 +111,11 @@ pub enum OperatorCmd {
     ClearHold { reason: HoldKind, note: String },
 }
 
+/// The longest `detail` a watcher input may carry, in bytes (C-HOLD,
+/// review N8): one watcher input writes at most this much into the
+/// journal. 1 KiB 판단(모델 아님), as the marker's 512 bytes.
+pub const WATCHER_DETAIL_MAX: usize = 1024;
+
 /// What the watcher (U19) tells the OMS (C-HOLD).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

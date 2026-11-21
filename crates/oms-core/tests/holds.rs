@@ -290,6 +290,64 @@ fn clear_hold_refusals() {
     assert_eq!(h.rebuilt(), h.core);
 }
 
+/// C-HOLD (amends the U18b1 spec, review S1): `clear-hold kill` is refused
+/// while the core's own book has open orders, whatever the kill loop
+/// answered, and after the confirmation check. `cancel-all` is taken under
+/// the latch (cancels are not new orders); once the venue has closed the
+/// orders the clear is taken.
+#[test]
+fn a_kill_is_not_cleared_while_the_book_has_open_orders() {
+    for outcome in [KillOutcome::Unsupported, KillOutcome::Confirmed] {
+        let mut h = H::ready();
+        let a = h.accept("a", "k1", Side::Buy, "1", "100");
+        h.placed_open(a, "v1");
+        let b = h.accept("a", "k2", Side::Sell, "1", "110");
+        h.placed_open(b, "v2");
+        watcher_kill(&mut h, "k").1.unwrap();
+        let refused = |h: &mut H, code: &str| {
+            let records = h.log.len();
+            let (out, reply) = clear(h, HoldKind::Kill, "venue checked");
+            let text = reply.expect_err("refused");
+            assert!(text.starts_with(&format!("{code}:")), "{outcome:?}: {text}");
+            assert!(out.events.is_empty() && out.commands.is_empty());
+            assert_eq!(h.log.len(), records);
+            text
+        };
+        // The confirmation is checked first.
+        refused(&mut h, "kill_unconfirmed");
+        kill_loop_ended(&mut h, outcome);
+        let text = refused(&mut h, "kill_orders_open");
+        assert!(
+            text.contains("2 open orders") && text.contains("cancel-all"),
+            "{text}"
+        );
+
+        // cancel-all is taken under the latch and asks the venue once per
+        // order; until the venue answers, the orders are still open.
+        assert_eq!(
+            h.op(OperatorCmd::CancelAll {
+                scope: Scope::Account,
+                note: "kill".into(),
+            }),
+            Ok("cancel requested for 2 orders".to_string())
+        );
+        assert_eq!(h.cancels().len(), 2);
+        assert!(h.core.holds(None).contains(&HoldReason::KillLatched));
+        refused(&mut h, "kill_orders_open");
+        h.status(a, VenueStatus::Canceled { reason: "canceled".into() }, Some("0"));
+        let text = refused(&mut h, "kill_orders_open");
+        assert!(text.contains("1 open orders"), "{text}");
+        h.status(b, VenueStatus::Canceled { reason: "canceled".into() }, Some("0"));
+        assert!(h.core.open.is_empty());
+
+        let (out, reply) = clear(&mut h, HoldKind::Kill, "venue checked");
+        assert_eq!(reply, Ok("cleared".to_string()), "{outcome:?}");
+        assert_eq!(names(&out), ["hold_cleared"]);
+        assert_eq!(out.commands, [VenueCommand::KillStop]);
+        assert_eq!(h.rebuilt(), h.core);
+    }
+}
+
 /// `resume` ends only an operator's halt: under a kill, a watcher mismatch
 /// and an operator halt, `resume` leaves the first two.
 #[test]
@@ -492,16 +550,27 @@ fn a_second_trigger_keeps_the_first_note() {
     assert_eq!(h.rebuilt(), h.core);
 }
 
-/// The watcher's inputs need a detail; an empty one is refused and
-/// nothing is written.
+/// The watcher's inputs need a detail of at most `WATCHER_DETAIL_MAX`
+/// (1 KiB) bytes; an empty or longer one is refused and nothing is written
+/// (review N8).
 #[test]
 fn a_watcher_input_without_a_detail_is_refused() {
     let mut h = H::ready();
-    for (out, reply) in [watcher_kill(&mut h, " "), watcher_mismatch(&mut h, "")] {
+    let long = "x".repeat(WATCHER_DETAIL_MAX + 1);
+    for (out, reply) in [
+        watcher_kill(&mut h, " "),
+        watcher_mismatch(&mut h, ""),
+        watcher_kill(&mut h, &long),
+        watcher_mismatch(&mut h, &long),
+    ] {
         assert!(reply.unwrap_err().starts_with("bad_request"));
         assert!(out.events.is_empty());
     }
     assert_eq!(h.core.holds(None), vec![]);
+    assert_eq!(WATCHER_DETAIL_MAX, 1024);
+    let longest = "x".repeat(WATCHER_DETAIL_MAX);
+    assert_eq!(watcher_mismatch(&mut h, &longest).1, Ok("held".to_string()));
+    assert_eq!(watcher_kill(&mut h, &longest).1, Ok("latched".to_string()));
 }
 
 /// The kill latch replays from `hold_set`, its confirmation from
@@ -640,6 +709,7 @@ fn every_command_comes_from_command_for_on_a_recorded_event() {
     h.placed_open(id, "v1");
     watcher_kill(&mut h, "k").1.unwrap();
     h.cancel("a", id);
+    h.status(id, VenueStatus::Canceled { reason: "canceled".into() }, Some("0"));
     kill_loop_ended(&mut h, KillOutcome::Confirmed);
     h.inp(Input::Boot {
         binary: "test".into(),

@@ -446,17 +446,20 @@ pub enum HoldRefusal {
     NotHeld,
     NoteRequired,
     KillUnconfirmed,
+    /// The core's own book still has this many open orders.
+    KillOrdersOpen(usize),
     VenueChangePending,
 }
 
 impl HoldRefusal {
     /// The stable code and one sentence for the operator.
-    pub fn text(self) -> &'static str {
+    pub fn text(self) -> String {
         match self {
-            HoldRefusal::NotHeld => "not_held: that hold is not set",
-            HoldRefusal::NoteRequired => "note_required: the command needs a note",
-            HoldRefusal::KillUnconfirmed => "kill_unconfirmed: the kill loop has not confirmed zero open orders in this process",
-            HoldRefusal::VenueChangePending => "venue_change_pending: the venue's position after the change has not been read yet",
+            HoldRefusal::NotHeld => "not_held: that hold is not set".into(),
+            HoldRefusal::NoteRequired => "note_required: the command needs a note".into(),
+            HoldRefusal::KillUnconfirmed => "kill_unconfirmed: the kill loop has not confirmed zero open orders in this process".into(),
+            HoldRefusal::KillOrdersOpen(n) => format!("kill_orders_open: {n} open orders in the book; run omsctl cancel-all first"),
+            HoldRefusal::VenueChangePending => "venue_change_pending: the venue's position after the change has not been read yet".into(),
         }
     }
 }
