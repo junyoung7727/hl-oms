@@ -160,6 +160,28 @@ _Avoid_: reset
 The rule cancel of every resting plain order when no margin report has been accepted for longer than the stale-cancel limit.
 _Avoid_: timeout cancel, watchdog
 
+**Kill latch** (킬 래치):
+The hold `KillLatched`: every order is refused, reduce-only included, until the operator clears it after the kill loop of the running process confirmed zero open orders (C-HOLD).
+_Avoid_: kill flag, emergency stop
+
+**Kill loop** (킬 루프):
+What a gateway does for a `Kill` command: cancel every order at the venue until zero is confirmed (Bybit, U18b2), or answer `unsupported` when it has no cancel-all.
+_Avoid_: panic cancel
+
+**Kill marker** (킬 마커):
+The file the watcher writes when it kills. Read once before the boot record; anything at its path, or a path that cannot be examined, latches the kill. Removed only after a durable `clear-hold kill`.
+_Avoid_: kill file, lock file
+
+**Hold release** (보류 해제):
+The operator's `clear-hold` of one hold of C-HOLD (`kill`, `watcher_mismatch`, `venue_change`). It has no force option; each refusal has a stable code.
+_Avoid_: unhold, override
+
+**Watcher mismatch** (워처 불일치):
+The hold `WatcherMismatch`, set when a check of the watcher (W1–W4) confirms a difference. Refuses plain orders until released.
+
+**Venue change** (거래소 변경):
+The hold `VenueChange`, set from the records of a position change the venue made or of an execution nobody could classify. Refuses plain orders until the mismatch is acknowledged and the hold released.
+
 **Venue setting** (거래소 설정):
 The margin mode (isolated or cross) and venue leverage of one instrument, as the venue reports them.
 _Avoid_: leverage config

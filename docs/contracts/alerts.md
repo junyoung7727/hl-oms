@@ -28,6 +28,9 @@
 | `hold:venue_setting:<i>` | `VenueSetting(i)`(거래소가 말한 값과 정책) | 설정대로 | 30초 |
 | `hold:account_mode` | `AccountMode`(거래소가 말한 모드) | 허용된 모드 | 30초 |
 | `hold:no_config` | `NoConfig` | 설정 활성 | 30초 |
+| `hold:kill_latched` | `KillLatched`(출처, 시각, 메모, 킬 루프의 확인 여부·`unsupported`, [C-HOLD](holds.md)) | `hold_cleared{kill}`(운영자 `clear-hold`) | 0 |
+| `hold:watcher_mismatch` | `WatcherMismatch`(검사 이름, 시각, 내용) | `hold_cleared{watcher_mismatch}` | 0 |
+| `hold:venue_change` | `VenueChange`(시각, 처음의 내용) | `hold_cleared{venue_change}` | 0 |
 | `gateway_block` | 게이트웨이 막힘 `Some(이유)`(키 거부, IP 차단, 계좌, 확인 못 함, 시계) | `None` | 30초 |
 
 - 유예 30초는 `alert.grace_ms`다. 조건은 평가마다 계속 있어야 하고, 유예가 지난 평가(`now − 처음 본 시각 ≥ grace_ms`)에서 시작이 나간다. 한 번이라도 없으면 처음부터 다시 센다. 유예 안에 끝난 조건은 시작도 해소도 보내지 않는다.

@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `5b2a2f42df62ec4e`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `72aed7c1895cf932`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
-주장 89건: 통과 0, 실패 0, 미실행 22, 이전 버전 결과 67.
+주장 95건: 통과 0, 실패 0, 미실행 28, 이전 버전 결과 67.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -96,6 +96,12 @@
 | V-ALERT-3 | 알림 조건은 C-ALERT 표의 키와 유예를 따른다: 차단 사유마다 비어 있지 않은 문장(Mismatch와 OperatorStrategy는 조건 없음), 래치와 운영자 행위는 유예 0, 지나가는 상태와 저장 공간 부족은 grace_ms. Core::handle로 만든 상태에서 hold:link_down, gateway_block, hold:resync, hold:operator_account, hold:storage_low, halt_strategy:<s>, mismatch:<kind>, hold:venue_setting:<i>, hold:account_mode, margin_stale, hold:reducing이 나오고 문장 끝은 '근거: 저널 seq n'이다. 불일치는 종류마다 키 하나에 개수와 최근 3개(subject: detail)를 담고 확인한 것은 빠진다. 계좌 중지는 시작 1번, +4분 0번, +5분에 그때의 메모로 1번, +10분 1번, 재개에 '해소: <시작 문장>' 1번, 그 뒤 +5분 0번이다. 연결 끊김은 20초 만에 다시 붙으면 아무것도 보내지 않고, 29.999초에는 아니고 정확히 30초에 시작을, 31초에는 더 보내지 않고, 다시 붙으면 해소를 보낸다. 저장 공간 부족이 20초 낮음·5초 정상을 열 번 되풀이하면 아무것도 보내지 않고, 30초를 넘게 계속되면 시작 1번(29.999초에는 아니고 30초에, 35초에 더 없음), 풀리면 해소 1번이다 | 통합 | 미실행 | `cargo test -p oms-node --test alerts; cargo test -p oms-node --lib alerts::` |
 | V-ALERT-4 | OMS 알림에 둘째 채널을 주면(alerts::start) 모든 메시지의 사본이 바로 그쪽에 가고, 텔레그램이 500으로 답한 첫 시도부터 59초에는 장애 알림이 없고 61초가 되면 1초 안에 'Telegram 전송이 61초째 실패함'이 둘째 채널에만 가며(텔레그램 요청에는 없음), 텔레그램이 다시 답하면 해소가 간다. 텔레그램이 답하지 않아도(연결은 받고 답 없음) 계좌 중지·재개 1,000건이 5초 안에 내구화되고 알림 스레드는 계속 평가한다 | 통합 | 미실행 | `cargo test -p oms-node --test alerts -- telegram_ a_hung` |
 | V-ALERT-5 | [alert] 설정은 절대 경로의 토큰 파일을 요구하고 그 파일을 설정을 읽을 때 alert-direct 규칙으로 읽는다: 0640, 심볼릭 링크, 저장소 안, 없는 파일은 '[alert] telegram: '로 시작하는 설정 오류이고 그 문장과 설정의 Debug에 토큰이 없다. 각 값(grace_ms, eval_ms, repeat_ms, exit_flush_ms, second_after_ms)은 양 끝에서 받고 바로 바깥에서 거부하며, second_channel은 "none"만 받는다. 표가 없으면 알림이 없고 status.alerts는 {"configured": false}다. mainnet(Hyperliquid, Bybit)은 표 없이 시작하지 않고, testnet과 가상 거래소에서는 선택이다. OMS_TEST_TELEGRAM_API는 loopback http만 받고, 배포하는 바이너리(failpoints 없음)는 그 변수를 무시해 저장소 안의 토큰 파일을 여전히 거부하고 종료 코드 2로 끝난다. 시작 알림은 그 평가에서 시작이 나간 조건과 유예 안의 조건을 따로 센다: 계좌 중지와 연결 끊김이면 '활성 조건 1개(유예 중 1개)'다. 프로세스에서: 시작 알림 'OMS 시작 (boot 1, config 1)'이 나가고, SIGTERM으로 정상 종료하면 'OMS 정상 종료. 걸린 주문 1개는 거래소에 남음'이 종료 전에 나간다. 설정이 활성화된 뒤 거래 소켓을 bind하지 못하면 종료 코드 3으로 끝나고 'OMS 시작 실패(exit 3): trading_socket' 하나가 종료 전에 나가며, 어떤 요청에도 소켓 경로·토큰·토큰 파일 이름이 없다 | 통합 | 미실행 | `cargo test -p oms-node --lib config::; cargo test -p oms-node --test alerts the_; cargo test -p oms-node --features failpoints --test crash_points -- a_clean_stop an_exit_3` |
+| V-HOLD-1 | 증거금 정책이 있으면 워처 불일치와 거래소 변경 아래에서 감소 전용 주문은 통과하고 일반 주문은 거절되며, 킬 래치와 운영자 중지 아래에서는 둘 다 거절된다(TN 표 7-7). 정책이 없으면 모든 보류가 모든 주문을 거절한다. 새 사유 셋은 기존 사유 뒤에 붙어 기존 사유의 순서가 바뀌지 않는다. 프로세스에서: 운영 소켓의 watcher_mismatch 뒤 일반 주문은 Hold(WatcherMismatch)로 거절되고 감소 전용 주문은 받으며, watcher_kill 뒤에는 감소 전용도 Hold(KillLatched)로 거절된다 | 단위, 통합 | 미실행 | `cargo test -p oms-core --test holds; cargo test -p oms-node --test holds_node watcher` |
+| V-HOLD-2 | clear_hold는 고정 코드로 거절한다: 걸려 있지 않음(not_held), 메모 없음(note_required), 이 프로세스의 킬 루프가 0건을 확인하지 않음(kill_unconfirmed), 거래소 변경 뒤 포지션을 아직 읽지 않음(venue_change_pending). 거절은 기록도 명령도 남기지 않는다. 받으면 hold_cleared 하나와, 킬이면 KillStop 하나. 거래소 변경의 해제와 불일치 확인은 따로다. resume은 킬과 워처 불일치를 풀지 않는다. omsctl clear-hold는 세 사유와 메모를 읽는다 | 단위 | 미실행 | `cargo test -p oms-core --test holds clear_hold resume; cargo test -p oms-api` |
+| V-HOLD-3 | 킬 래치는 hold_set에서, 그 확인은 kill_loop_ended에서 재실행으로 같은 상태가 되고, 모든 boot가 확인을 지우고 래치의 필드 그대로 Kill 명령을 다시 요청한다. 래치가 없거나 이미 확인된 뒤의 KillLoopEnded는 기록되지 않는다. 모든 게이트웨이 명령은 기록된 이벤트에 command_for를 적용한 것과 같다. 커밋 단계는 Kill을 래치가 내구화된 뒤에만 넘기고, flush가 실패하면 Kill도 응답도 나가지 않으며 다시 시작한 노드에 래치가 없다 | 단위, 통합 | 미실행 | `cargo test -p oms-core --test holds; cargo test -p oms-node --features failpoints --test pipeline a_kill_command` |
+| V-HOLD-4 | 킬 마커가 있으면 OMS는 시작할 때 boot 기록 안에서 KillLatched를 걸고(booted, hold_set), 감소 전용을 포함한 어떤 주문도 받지 않으며, 가상 거래소가 unsupported로 답한 뒤 clear_hold kill이 마커를 지운다. 거절된 해제는 마커를 건드리지 않는다. 다음 시작은 걸리지 않고 주문을 받는다. 지우지 못한 마커는 응답이 말하고 다음 시작이 다시 건다. 볼 수 없는 마커 경로(권한)도 건다. 마커 파일은 처음 512바이트를 제어 문자를 바꿔 읽고, 디렉터리·심볼릭 링크도 마커다 | 통합, 단위 | 미실행 | `cargo test -p oms-node --test holds_node; cargo test -p oms-node --lib node::tests; cargo test -p oms-core --test holds marker` |
+| V-HOLD-5 | 거래소 변경 보류는 새 이벤트 없이 venue_position_changed, unclassified_execution_noted, 종류가 venue_position_change인 mismatch_raised(넘침 경로)에서 apply가 건다. 그래서 U13b의 이벤트 목록은 그대로이고, U18b 전에 쓴 저널에 이 셋 중 하나가 있으면 재실행한 상태에 보류가 있다. 다른 종류의 불일치는 걸지 않는다. 불일치를 확인해도 보류는 남는다. 각 보류는 한 번만 걸리고 두 번째 원인은 첫 메모를 바꾸지 않는다 | 단위 | 미실행 | `cargo test -p oms-core --test holds venue second` |
+| V-HOLD-6 | 킬 래치·워처 불일치·거래소 변경의 상태 필드, Boot의 kill_marker, 워처 입력과 새 이벤트 셋은 기록 스키마를 올리지 않는다: 비어 있으면 쓰지 않아 옛 상태의 바이트가 그대로이고, 이들이 든 저널은 라이브 상태로 복구되며 verify --re-decide를 통과한다. 이벤트 필드 표는 새 이벤트의 모든 필드를 적는다. 알림 조건 hold:kill_latched·hold:watcher_mismatch·hold:venue_change는 유예 0이고, 킬 문장은 출처·메모·확인 상태를 담으며, Alerts::notice는 접두어를 붙여 한 번 보낸다. [kill] marker는 절대 경로, 데이터 디렉터리 밖, 읽을 때 디렉터리가 있어야 하고, mainnet은 그것 없이 시작하지 않는다 | 단위, 통합 | 미실행 | `cargo test -p oms-node --test record_schema --test alerts; cargo test -p oms-node --lib alerts:: config::; cargo test -p oms-core --test event_fields` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -2162,4 +2168,132 @@
 | `node-unit/the_start_notice_counts_sent_and_pending_conditions_apart` | 미실행 |  |
 | `pipeline/a_clean_stop_sends_the_stop_notice_with_the_open_orders` | 미실행 |  |
 | `pipeline/an_exit_3_after_activation_sends_one_start_failure_notice` | 미실행 |  |
+
+## V-HOLD-1 — 증거금 정책이 있으면 워처 불일치와 거래소 변경 아래에서 감소 전용 주문은 통과하고 일반 주문은 거절되며, 킬 래치와 운영자 중지 아래에서는 둘 다 거절된다(TN 표 7-7). 정책이 없으면 모든 보류가 모든 주문을 거절한다. 새 사유 셋은 기존 사유 뒤에 붙어 기존 사유의 순서가 바뀌지 않는다. 프로세스에서: 운영 소켓의 watcher_mismatch 뒤 일반 주문은 Hold(WatcherMismatch)로 거절되고 감소 전용 주문은 받으며, watcher_kill 뒤에는 감소 전용도 Hold(KillLatched)로 거절된다
+
+- 상태: **미실행**
+- 왜 중요한가: 킬 루프는 미체결 0건을 확인해야 끝나므로 어떤 새 주문도 받으면 안 되고, 불일치나 거래소 변경에서는 포지션을 줄이는 길을 막으면 안 된다(설계 R5, Q22)
+- 수준: 단위, 통합
+- 전제와 범위: 보류 사유마다 한 줄(증거금 정책 있음, 신선한 보고, 롱 2), 정책 없음 한 경우, 사유의 순서. 실제 oms-node·simvenue 프로세스 하나(증거금 정책)
+- 실제 구성요소: oms-core, oms-node 프로세스(운영 소켓, 코어 스레드, 커밋 단계, 저널), simvenue 프로세스
+- 모의·시뮬레이션: 워처의 입력(시험이 운영 소켓으로 보냄), 거래소(simvenue)
+- 주입한 장애: 같은 입력 두 번, 빈 detail, 거래 소켓에서의 워처 입력, 모르는 검사 이름
+- 판정 기준과 근거: 거절 사유 목록에 그 Hold가 있는지, 감소 전용 주문의 접수 여부, holds의 정확한 목록, 저널의 hold_set 개수. 결함(KillLatched가 일반 주문만 막음)을 넣어 잡는 것을 확인했다(M125)
+- 재현: `cargo test -p oms-core --test holds; cargo test -p oms-node --test holds_node watcher`
+- 뒷받침하는 것: C-HOLD의 보류 표와 워처 입력, ADR-030 §7, ADR-008 §7
+- 확인하지 않은 범위: 실제 거래소. 감시 없음(U18b4)과 전략 연결(U18b3)의 줄. 거래소가 감소 전용 주문의 포지션 확대를 실제로 막는지(T5)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/the_hold_table_of_table_7_7` | 미실행 |  |
+| `core/the_new_holds_come_last_in_their_order` | 미실행 |  |
+| `core/a_watcher_input_without_a_detail_is_refused` | 미실행 |  |
+| `node-unit/watcher_mismatch_over_the_admin_socket_refuses_plain_orders_only` | 미실행 |  |
+
+## V-HOLD-2 — clear_hold는 고정 코드로 거절한다: 걸려 있지 않음(not_held), 메모 없음(note_required), 이 프로세스의 킬 루프가 0건을 확인하지 않음(kill_unconfirmed), 거래소 변경 뒤 포지션을 아직 읽지 않음(venue_change_pending). 거절은 기록도 명령도 남기지 않는다. 받으면 hold_cleared 하나와, 킬이면 KillStop 하나. 거래소 변경의 해제와 불일치 확인은 따로다. resume은 킬과 워처 불일치를 풀지 않는다. omsctl clear-hold는 세 사유와 메모를 읽는다
+
+- 상태: **미실행**
+- 왜 중요한가: 사람만 풀어야 하는 보류가 다른 명령이나 확인 없는 해제로 풀리면 킬 스위치가 뜻을 잃는다(ADR-030, 소유자 질문 2)
+- 수준: 단위
+- 전제와 범위: 코드마다 한 경우와 받는 경우, 거래소 변경의 두 단계, 운영자 중지와 함께 걸린 킬, omsctl 인자
+- 실제 구성요소: oms-core, oms-api ctl
+- 모의·시뮬레이션: 킬 루프의 답(시험이 KillLoopEnded를 넣음), 거래소 포지션 응답
+- 주입한 장애: 공백뿐인 메모, 같은 해제 두 번, 운영자 중지가 없을 때의 resume
+- 판정 기준과 근거: 응답 문장의 코드, 거절 뒤 기록 수와 명령 수가 그대로인지, 받은 뒤의 이벤트 이름과 명령, holds 목록. 결함(kill_unconfirmed 검사 없음, 메모 검사 없음, resume이 킬도 풂)을 넣어 잡는 것을 확인했다(M126)
+- 재현: `cargo test -p oms-core --test holds clear_hold resume; cargo test -p oms-api`
+- 뒷받침하는 것: C-HOLD의 clear_hold, ADR-030 §7
+- 확인하지 않은 범위: omsctl 실행 파일 자체(본문 함수만, V-HOLD-4의 프로세스 시험에서도 함수로 부른다)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/clear_hold_refusals` | 미실행 |  |
+| `core/resume_leaves_kill_and_watcher_mismatch` | 미실행 |  |
+| `api/ctl::tests::clear_hold_parses_its_reason_and_note` | 미실행 |  |
+| `api/tests::wire_examples_of_the_holds` | 미실행 |  |
+
+## V-HOLD-3 — 킬 래치는 hold_set에서, 그 확인은 kill_loop_ended에서 재실행으로 같은 상태가 되고, 모든 boot가 확인을 지우고 래치의 필드 그대로 Kill 명령을 다시 요청한다. 래치가 없거나 이미 확인된 뒤의 KillLoopEnded는 기록되지 않는다. 모든 게이트웨이 명령은 기록된 이벤트에 command_for를 적용한 것과 같다. 커밋 단계는 Kill을 래치가 내구화된 뒤에만 넘기고, flush가 실패하면 Kill도 응답도 나가지 않으며 다시 시작한 노드에 래치가 없다
+
+- 상태: **미실행**
+- 왜 중요한가: 킬 루프의 일괄 취소는 래치가 디스크에 있은 뒤에만 나가야 하고(ADR-004), 앞 프로세스의 확인은 새 프로세스가 모르는 주문을 덮지 않는다(소유자 질문 5)
+- 수준: 단위, 통합
+- 전제와 범위: 코어: 래치, 확인, 재시작, unsupported 확인과 해제, 해제 뒤 재시작. 프로세스 안: 실제 코어 스레드·커밋 스레드·저널 파일로 정상과 flush 실패
+- 실제 구성요소: oms-core, oms-node 파이프라인(코어 스레드, 커밋 스레드, 저널 쓰기와 flush), 복구
+- 모의·시뮬레이션: 게이트웨이(명령 채널만 읽음), 저장 장치의 flush 실패(failpoints)
+- 주입한 장애: 재시작, 두 번째 루프 답, flush 실패
+- 판정 기준과 근거: 명령 목록의 정확한 값, confirmed_at·outcome, 재실행한 상태 = 라이브 상태, 명령을 받은 순간 읽기 모델과 durable_seq, 복구한 상태의 kill. 결함(boot가 확인을 남김, 두 번째 답도 기록, Kill을 command_for 밖에서 만듦, Kill을 flush 전에 넘김)을 넣어 잡는 것을 확인했다(M127, M130)
+- 재현: `cargo test -p oms-core --test holds; cargo test -p oms-node --features failpoints --test pipeline a_kill_command`
+- 뒷받침하는 것: C-HOLD의 킬 명령, C-COMMIT, ADR-030 §7
+- 확인하지 않은 범위: Bybit의 실제 킬 루프(U18b2, C-KILL). 게이트웨이 프로세스가 명령을 받은 뒤의 일(가상 거래소의 unsupported 답은 V-HOLD-4)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/the_kill_latch_and_its_confirmation_survive_replay_and_a_boot_asks_for_a_new_loop` | 미실행 |  |
+| `core/every_command_comes_from_command_for_on_a_recorded_event` | 미실행 |  |
+| `pipeline/a_kill_command_leaves_only_after_the_latch_is_durable` | 미실행 |  |
+
+## V-HOLD-4 — 킬 마커가 있으면 OMS는 시작할 때 boot 기록 안에서 KillLatched를 걸고(booted, hold_set), 감소 전용을 포함한 어떤 주문도 받지 않으며, 가상 거래소가 unsupported로 답한 뒤 clear_hold kill이 마커를 지운다. 거절된 해제는 마커를 건드리지 않는다. 다음 시작은 걸리지 않고 주문을 받는다. 지우지 못한 마커는 응답이 말하고 다음 시작이 다시 건다. 볼 수 없는 마커 경로(권한)도 건다. 마커 파일은 처음 512바이트를 제어 문자를 바꿔 읽고, 디렉터리·심볼릭 링크도 마커다
+
+- 상태: **미실행**
+- 왜 중요한가: 워처가 킬한 사실은 OMS 재시작을 넘어 남아야 하고(U-06), 확인할 수 없는 경로는 킬하지 않았다는 증거가 아니다. 마커를 해제 전에 지우면 래치를 잃을 수 있다
+- 수준: 통합, 단위
+- 전제와 범위: 실제 oms-node·simvenue 프로세스 세 개(증거금 정책 하나), 재시작 두 번, 권한을 바꾼 디렉터리. 단위: 파일 종류와 내용, 권한 거부, 디렉터리가 아닌 경로
+- 실제 구성요소: oms-node 프로세스(시작 순서, 운영 소켓, 코어, 커밋 단계, 저널, 마커 읽기와 지우기), simvenue, omsctl 본문 함수
+- 모의·시뮬레이션: 워처(시험이 마커 파일을 씀), 거래소(simvenue, 일괄 취소 없음)
+- 주입한 장애: 읽을 수 없는 디렉터리(0000), 지울 수 없는 디렉터리(0500), 빈 메모의 해제, 거래 소켓의 해제, 재시작
+- 판정 기준과 근거: status의 core.kill(출처, 메모, outcome)과 node.kill_marker, 저널의 boot 기록 이벤트와 kill_loop_ended의 순서, 거절 사유, 마커 파일의 존재, 응답 문장, 저널의 hold_set·hold_cleared 개수. 결함(stat 오류를 마커 없음으로 읽음, 해제 전에 마커를 지움, 메모 검사 없음)을 넣어 잡는 것을 확인했다(M128, M129)
+- 재현: `cargo test -p oms-node --test holds_node; cargo test -p oms-node --lib node::tests; cargo test -p oms-core --test holds marker`
+- 뒷받침하는 것: C-HOLD의 킬 마커, ADR-030 §7, U-06
+- 확인하지 않은 범위: root로 실행한 시험(권한 시험 셋은 건너뛴다). 해제가 내구화된 뒤 마커를 지우기 전의 중단(순서는 코드와 M129로만). 실행 중 마커(범위 밖). Bybit·Hyperliquid 노드 프로세스
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/the_kill_marker_latches_in_the_boot_record` | 미실행 |  |
+| `core/a_second_trigger_keeps_the_first_note` | 미실행 |  |
+| `node-unit/a_kill_marker_at_boot_refuses_every_order_until_clear_hold_kill_removes_it` | 미실행 |  |
+| `node-unit/an_unremovable_marker_is_reported_and_latches_the_next_boot` | 미실행 |  |
+| `node-unit/a_marker_path_that_cannot_be_examined_latches` | 미실행 |  |
+| `node-unit/node::tests::the_kill_marker_is_whatever_is_at_its_path` | 미실행 |  |
+| `node-unit/node::tests::a_marker_that_cannot_be_examined_latches` | 미실행 |  |
+
+## V-HOLD-5 — 거래소 변경 보류는 새 이벤트 없이 venue_position_changed, unclassified_execution_noted, 종류가 venue_position_change인 mismatch_raised(넘침 경로)에서 apply가 건다. 그래서 U13b의 이벤트 목록은 그대로이고, U18b 전에 쓴 저널에 이 셋 중 하나가 있으면 재실행한 상태에 보류가 있다. 다른 종류의 불일치는 걸지 않는다. 불일치를 확인해도 보류는 남는다. 각 보류는 한 번만 걸리고 두 번째 원인은 첫 메모를 바꾸지 않는다
+
+- 상태: **미실행**
+- 왜 중요한가: 불일치 확인 한 번으로 바뀐 포지션을 보지 않고 일반 주문이 흐르면 안 된다. 보류가 결정에 있으면 옛 저널의 재실행이 그것을 잃는다
+- 수준: 단위
+- 전제와 범위: 세 경로, 손으로 만든 옛 기록 세 개와 다른 종류 하나, 각 보류의 두 번째 원인(워처 킬, 시작 마커, 워처 불일치, 거래소 변경)
+- 실제 구성요소: oms-core(apply, replay)
+- 모의·시뮬레이션: 거래소의 실행 통보(시험이 입력)
+- 주입한 장애: 포지션 넘침, 옛 저널, 같은 원인 두 번
+- 판정 기준과 근거: 이벤트 이름 목록, holds, venue_change의 since와 메모, 재실행 상태. 결함(넘침 경로에서 안 걸림, apply 대신 결정에서 걸음, 두 번째 원인이 덮어씀)을 넣어 잡는 것을 확인했다
+- 재현: `cargo test -p oms-core --test holds venue second`
+- 뒷받침하는 것: C-HOLD의 보류 표(venue_change), ADR-030 §7, ADR-023
+- 확인하지 않은 범위: 실제 거래소의 ADL·인수 통보
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `core/a_venue_change_latches_without_a_new_event` | 미실행 |  |
+| `core/a_journal_with_a_venue_change_latches_on_replay` | 미실행 |  |
+| `core/a_second_trigger_keeps_the_first_note` | 미실행 |  |
+
+## V-HOLD-6 — 킬 래치·워처 불일치·거래소 변경의 상태 필드, Boot의 kill_marker, 워처 입력과 새 이벤트 셋은 기록 스키마를 올리지 않는다: 비어 있으면 쓰지 않아 옛 상태의 바이트가 그대로이고, 이들이 든 저널은 라이브 상태로 복구되며 verify --re-decide를 통과한다. 이벤트 필드 표는 새 이벤트의 모든 필드를 적는다. 알림 조건 hold:kill_latched·hold:watcher_mismatch·hold:venue_change는 유예 0이고, 킬 문장은 출처·메모·확인 상태를 담으며, Alerts::notice는 접두어를 붙여 한 번 보낸다. [kill] marker는 절대 경로, 데이터 디렉터리 밖, 읽을 때 디렉터리가 있어야 하고, mainnet은 그것 없이 시작하지 않는다
+
+- 상태: **미실행**
+- 왜 중요한가: 기존 저널과 시험의 기대값이 바뀌지 않아야 하고(스펙 완료 기준), 워처(U19a)는 필드 표만으로 만든다. 래치는 사람에게 곧바로 알려야 한다(C-ALERT)
+- 수준: 단위, 통합
+- 전제와 범위: 저널 하나를 쓰고 복구·재결정, 필드 표 대조, 알림 조건 표와 loopback 가짜 텔레그램, 설정 검증
+- 실제 구성요소: oms-node 복구와 verify, 알림 스레드와 alert-direct(loopback HTTP), 설정 읽기
+- 모의·시뮬레이션: 텔레그램(http-fake), 거래소 입력(시험이 넣음)
+- 주입한 장애: 옛 상태, 상대 경로, 데이터 디렉터리 안의 마커, 없는 디렉터리, mainnet에 [kill] 없음
+- 판정 기준과 근거: RECORD_SCHEMA = 2, 다이제스트 같음, 재결정 통과, 직렬화에 필드 없음, 필드 표의 행, 알림 문장의 부분과 유예, 설정 오류 문장. 결함(킬 알림에 지나가는 유예)을 넣어 잡는 것을 확인했다
+- 재현: `cargo test -p oms-node --test record_schema --test alerts; cargo test -p oms-node --lib alerts:: config::; cargo test -p oms-core --test event_fields`
+- 뒷받침하는 것: C-HOLD의 상태와 알림, C-TAIL 필드 표, C-ALERT 조건 표, ADR-030 §7
+- 확인하지 않은 범위: 실제 텔레그램. 실행 파일 단위의 mainnet 시작 거부(설정 검증 함수만)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `node-unit/kill_holds_liveness_and_heartbeats_recover_to_the_live_state` | 미실행 |  |
+| `core/the_field_table_lists_every_field_the_encoder_writes` | 미실행 |  |
+| `node-unit/alerts::tests::every_hold_reason_has_a_text_and_the_grace_of_the_table` | 미실행 |  |
+| `node-unit/a_kill_latch_is_told_at_once_and_a_notice_goes_out_once` | 미실행 |  |
+| `node-unit/config::tests::the_kill_marker_is_validated_and_required_on_mainnet` | 미실행 |  |
 
