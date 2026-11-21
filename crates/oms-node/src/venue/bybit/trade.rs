@@ -19,7 +19,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Message;
 
-use super::answer::Answer;
+use super::answer::{self, Answer};
 use super::gateway::{End, Timing, connect, wall_ms};
 use super::orders::{self, Effect};
 use super::rest::Credentials;
@@ -359,6 +359,15 @@ async fn once<H: Host>(trade: &Trade, host: &H, c: &Conn, alive: &mut bool) -> E
                         *alive = true;
                     }
                     Ok(Frame::Answer { req_id, code }) => {
+                        // What it says about the IP or the key takes effect
+                        // here, before the next write: the requests queued
+                        // behind it stay home. Also for an answer no
+                        // request waits for.
+                        match effect(&answer::classify(200, text.as_str()), code) {
+                            Effect::Ban(why) => host.ban(why),
+                            Effect::RejectKey(why) => host.reject_key(why),
+                            Effect::None => {}
+                        }
                         match req_id.as_ref().and_then(|id| pending.remove(id)) {
                             Some(p) => {
                                 let _ = p.reply.send(Reply::Answered {

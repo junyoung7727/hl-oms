@@ -2432,6 +2432,8 @@ mod tests {
     #[derive(Default)]
     struct TestHost {
         blocked: std::sync::atomic::AtomicBool,
+        /// The bans and key rejections the task applied, in order.
+        effects: Mutex<Vec<String>>,
     }
 
     impl trade::Host for TestHost {
@@ -2443,8 +2445,15 @@ mod tests {
         fn key_rejected(&self) -> bool {
             false
         }
-        fn ban(&self, _: String) {}
-        fn reject_key(&self, _: String) {}
+        /// A ban sets the block, as the gateway's does.
+        fn ban(&self, why: String) {
+            self.blocked.store(true, Ordering::SeqCst);
+            self.effects.lock().unwrap().push(format!("ban: {why}"));
+        }
+        fn reject_key(&self, why: String) {
+            self.blocked.store(true, Ordering::SeqCst);
+            self.effects.lock().unwrap().push(format!("reject: {why}"));
+        }
     }
 
     /// The connection task alone, with a block that only the write sees
@@ -2516,5 +2525,92 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(fake.requests(trade::CREATE_OP).len(), 1, "written under a block");
         assert!(!t.is_up());
+    }
+
+    /// What an answer says about the IP or the key takes effect in the
+    /// connection task before its next write, so the requests queued
+    /// behind it stay home; also for an answer that matches no request.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_task_applies_a_ban_or_key_answer_before_its_next_write() {
+        let fake = FakeWs::start_trade(GOOD).await;
+        let start = |host: Arc<TestHost>| {
+            let t = Arc::new(Trade::default());
+            let conn = trade::Conn {
+                url: fake.url.clone(),
+                creds: Arc::new(Credentials::new("KEY", "SECRET")),
+                recv_window_ms: 5000,
+                timing: Timing {
+                    health_poll: Duration::from_secs(30),
+                    request: Duration::from_secs(5),
+                    ..timing()
+                },
+            };
+            tokio::spawn(trade::run(t.clone(), host, conn));
+            t
+        };
+        let up = |t: Arc<Trade>| async move {
+            for _ in 0..200 {
+                if t.is_up() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            panic!("WS Trade not up");
+        };
+        let msg = |id: &str| {
+            trade::request_message(id, trade::CREATE_OP, 1, 5000, &json!({"orderLinkId": id}))
+        };
+
+        // 10403 to the first request: the ban is set when its caller sees
+        // the answer, and the next request is not written.
+        let host = Arc::new(TestHost::default());
+        let t = start(host.clone());
+        up(t.clone()).await;
+        fake.then([Script::Code(trade::IP_LIMIT)]);
+        let r = t.request("cA", msg("cA")).await;
+        assert!(
+            matches!(
+                &r,
+                trade::Reply::Answered {
+                    code: Some(trade::IP_LIMIT),
+                    ..
+                }
+            ),
+            "{r:?}"
+        );
+        assert_eq!(host.effects.lock().unwrap().len(), 1, "{:?}", host.effects);
+        assert!(host.effects.lock().unwrap()[0].starts_with("ban:"));
+        let r = t.request("cB", msg("cB")).await;
+        assert!(matches!(&r, trade::Reply::NotWritten(_)), "{r:?}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            fake.requests(trade::CREATE_OP).len(),
+            1,
+            "written after the ban"
+        );
+
+        // A key-rejection answer no request waits for still rejects the key.
+        let host = Arc::new(TestHost::default());
+        let n = fake.accepted();
+        let t = start(host.clone());
+        for _ in 0..200 {
+            if fake.accepted() > n && t.is_up() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(t.is_up());
+        fake.send(
+            json!({"reqId": "late", "retCode": 10003, "retMsg": "Invalid apikey", "op": trade::CREATE_OP})
+                .to_string(),
+        );
+        for _ in 0..200 {
+            if !host.effects.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let fx = host.effects.lock().unwrap().clone();
+        assert!(fx.len() == 1 && fx[0].starts_with("reject:"), "{fx:?}");
     }
 }

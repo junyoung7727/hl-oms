@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `16d93a407f4bd92b`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `71584b8ecf809bfb`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 주장 80건: 통과 0, 실패 0, 미실행 13, 이전 버전 결과 67.
 
@@ -1897,14 +1897,14 @@
 - 상태: **미실행**
 - 왜 중요한가: 주문 경로가 둘이 되어도 같은 주문이 두 번 놓이지 않고(G-3), 결과를 모르는 요청을 거부나 미전송으로 보지 않으며(G-2), 막힘·차단·거부된 키로 요청을 보내지 않고, 두 경로를 합쳐 거래소 요청 한도를 넘지 않는다는 전제
 - 수준: 통합
-- 전제와 범위: loopback 가짜 WS Trade 서버(auth·pong·주문 응답을 시험이 고른다: 응답 코드, 침묵, 요청 뒤 끊음, ping 무응답, auth 거부, 업그레이드 403, auth 뒤 읽을 수 없는 메시지)와 가짜 비공개 스트림·가짜 HTTP 서버, 가짜 연결 작업(orders 시험), 막힘을 시험이 정하는 가짜 Host(연결 작업 시험), 짧게 줄인 시간, 시험 22개
+- 전제와 범위: loopback 가짜 WS Trade 서버(auth·pong·주문 응답을 시험이 고른다: 응답 코드, 침묵, 요청 뒤 끊음, ping 무응답, auth 거부, 업그레이드 403, auth 뒤 읽을 수 없는 메시지)와 가짜 비공개 스트림·가짜 HTTP 서버, 가짜 연결 작업(orders 시험), 막힘을 시험이 정하는 가짜 Host(연결 작업 시험), 짧게 줄인 시간, 시험 23개
 - 실제 구성요소: venue::bybit::{trade, orders, answer, gateway}(연결 작업, 경로 고르기, 한도, 분류), oms-core::rate, venue::start(명령 반복)
 - 모의·시뮬레이션: Bybit WS Trade와 REST(문서 모양의 손으로 쓴 JSON), 시간(ping 150ms, 요청 제한 300ms 또는 5초, 멈춤 600ms)
-- 주입한 장애: WS Trade 끊김과 복귀, 응답 없는 요청 셋, ping 무응답, 요청을 읽은 뒤 끊김, 20006, 10019, 10429, 10016, 110072, 110007, 10010, 10018, 10403, orderId 없는 접수, 늦은 응답, auth 거부, 업그레이드 403, pong 전에 거듭 끊김, 첫 확인과 REST 사이에 생긴 막힘, 쓰기 직전에 생긴 막힘, 기다리는 중인 reqId, 두 경로에 걸친 1초 9번째 생성, 응답 없는 WS 요청 8개
+- 주입한 장애: WS Trade 끊김과 복귀, 응답 없는 요청 셋, ping 무응답, 요청을 읽은 뒤 끊김, 20006, 10019, 10429, 10016, 110072, 110007, 10010, 10018, 10403, orderId 없는 접수, 늦은 응답, 기다리는 요청 없는 키 거부 응답, 줄 선 요청 앞의 10403, auth 거부, 업그레이드 403, pong 전에 거듭 끊김, 첫 확인과 REST 사이에 생긴 막힘, 쓰기 직전에 생긴 막힘, 기다리는 중인 reqId, 두 경로에 걸친 1초 9번째 생성, 응답 없는 WS 요청 8개
 - 판정 기준과 근거: 코어에 간 결과(종류, 이유, venue_oid), 가짜 WS Trade가 받은 메시지(reqId, header, op, args, 주문마다 생성 수)와 가짜 HTTP가 받은 요청의 경로·개수, 막힘 이유, 연결 수와 재연결 간격, 9번째 생성이 나간 시각, Link 입력 수
 - 재현: `cargo test -p oms-node --lib venue::bybit`
 - 뒷받침하는 것: C-GW(Bybit 열: G-1, G-2, G-3, 주문 경로, 요청 한도), ADR-028 §7e
-- 확인하지 않은 범위: 실제 WS Trade(testnet은 U-01 허가 뒤): 응답의 실제 모양(data, header, connId), 실패한 auth와 pong의 실제 모양, 무응답 때 거래소의 동작, reqId 중복의 범위와 기간, WS Trade의 요청 시각 검사가 REST와 같은지(G-4의 가정, ADR-028 §8), WS Trade와 REST의 한도 공유(T8). TLS 접속(시험은 ws://). 노드 끝에서 끝까지(U17c). 늦은 응답 속 키 거부·10403의 효과(버린다). 상태 API의 WS Trade 상태(이 판에 없음)
+- 확인하지 않은 범위: 실제 WS Trade(testnet은 U-01 허가 뒤): 응답의 실제 모양(data, header, connId), 실패한 auth와 pong의 실제 모양, 무응답 때 거래소의 동작, reqId 중복의 범위와 기간, WS Trade의 요청 시각 검사가 REST와 같은지(G-4의 가정, ADR-028 §8), WS Trade와 REST의 한도 공유(T8). TLS 접속(시험은 ws://). 노드 끝에서 끝까지(U17c).상태 API의 WS Trade 상태(이 판에 없음)
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
@@ -1929,5 +1929,6 @@
 | `node-unit/venue::bybit::gateway::tests::a_403_on_the_ws_trade_upgrade_pauses_every_request` | 미실행 |  |
 | `node-unit/venue::bybit::gateway::tests::ws_trade_reconnect_waits_grow_until_a_pong_then_start_over` | 미실행 |  |
 | `node-unit/venue::bybit::gateway::tests::the_task_writes_nothing_under_a_block_and_no_reqid_twice` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::the_task_applies_a_ban_or_key_answer_before_its_next_write` | 미실행 |  |
 | `node-unit/venue::bybit::tests::endpoints_are_the_documented_hosts` | 미실행 |  |
 
