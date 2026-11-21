@@ -79,7 +79,7 @@
 
 ### Bybit 게이트웨이(만드는 중, [ADR-028](../adr/ADR-028-bybit-gateway.md))
 
-U17c까지 있는 것: 서명, REST 클라이언트, 시작 확인, IP 확인, cancel-all, 조회 일곱 가지(`query.rs`), 실행 분류표(`exec.rs`), 비공개 스트림(`stream.rs`), `VenueGateway` 구현과 노드 연결(`gateway.rs`, `node.venue = bybit:<network>`), 주문·취소(`orders.rs`, WS Trade 먼저 `trade.rs`, 아니면 REST)와 응답 분류표(`answer.rs`), 요청 한도(`oms-core::rate`), 참조 가격(`ticker.rs`, 공개 스트림의 mark price, U17c). 교차 계좌의 유지증거금 규칙은 U17d다.
+U17d까지 있는 것: 서명, REST 클라이언트, 시작 확인, IP 확인, cancel-all, 조회 일곱 가지(`query.rs`), 실행 분류표(`exec.rs`), 비공개 스트림(`stream.rs`), `VenueGateway` 구현과 노드 연결(`gateway.rs`, `node.venue = bybit:<network>`), 주문·취소(`orders.rs`, WS Trade 먼저 `trade.rs`, 아니면 REST)와 응답 분류표(`answer.rs`), 요청 한도(`oms-core::rate`), 참조 가격(`ticker.rs`, 공개 스트림의 mark price, U17c), 증거금 보고의 계좌 유지증거금과 증거금 잔고(`totalMaintenanceMargin`, `totalMarginBalance`. 코어의 계좌 유지증거금률 규칙이 판정한다, [C-MARGIN](margin.md), U17d).
 
 | 의무·규칙 | Bybit 게이트웨이 |
 |---|---|
