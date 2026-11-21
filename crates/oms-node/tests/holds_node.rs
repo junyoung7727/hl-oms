@@ -526,7 +526,11 @@ fn watcher_mismatch_over_the_admin_socket_refuses_plain_orders_only() {
         env.try_status()
             .is_some_and(|s| s["core"]["open_orders"] == 0)
     });
-    assert!(ok, "the cancels never closed the orders: {}", env.log_tail(20));
+    assert!(
+        ok,
+        "the cancels never closed the orders: {}",
+        env.log_tail(20)
+    );
     assert!(
         env.status()["core"]["holds"]
             .as_array()

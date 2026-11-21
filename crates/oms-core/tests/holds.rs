@@ -334,10 +334,22 @@ fn a_kill_is_not_cleared_while_the_book_has_open_orders() {
         assert_eq!(h.cancels().len(), 2);
         assert!(h.core.holds(None).contains(&HoldReason::KillLatched));
         refused(&mut h, "kill_orders_open");
-        h.status(a, VenueStatus::Canceled { reason: "canceled".into() }, Some("0"));
+        h.status(
+            a,
+            VenueStatus::Canceled {
+                reason: "canceled".into(),
+            },
+            Some("0"),
+        );
         let text = refused(&mut h, "kill_orders_open");
         assert!(text.contains("1 open orders"), "{text}");
-        h.status(b, VenueStatus::Canceled { reason: "canceled".into() }, Some("0"));
+        h.status(
+            b,
+            VenueStatus::Canceled {
+                reason: "canceled".into(),
+            },
+            Some("0"),
+        );
         assert!(h.core.open.is_empty());
 
         let (out, reply) = clear(&mut h, HoldKind::Kill, "venue checked");
@@ -709,7 +721,13 @@ fn every_command_comes_from_command_for_on_a_recorded_event() {
     h.placed_open(id, "v1");
     watcher_kill(&mut h, "k").1.unwrap();
     h.cancel("a", id);
-    h.status(id, VenueStatus::Canceled { reason: "canceled".into() }, Some("0"));
+    h.status(
+        id,
+        VenueStatus::Canceled {
+            reason: "canceled".into(),
+        },
+        Some("0"),
+    );
     kill_loop_ended(&mut h, KillOutcome::Confirmed);
     h.inp(Input::Boot {
         binary: "test".into(),
