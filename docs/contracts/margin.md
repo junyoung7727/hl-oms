@@ -169,7 +169,7 @@ N_down = max(0, −pos × ref + Σ_매도 예약 × max(지정가, ref))
 |---|---|
 | `NoConfig`, `LinkDown`, `OperatorAccount`, `OperatorStrategy`, `StorageLow` | `Resync`, `InDoubt`, `Mismatch`, `Reducing`, `VenueSetting(종목)`, `AccountMode` |
 
-이 표는 `policy.margin`이 있을 때만 적용한다. 정책이 없으면 오른쪽 열의 차단도 감소 전용 주문을 포함한 모든 신규 주문을 막는다(이 계약 이전의 동작). 그래서 정책 없이 기록된 저널은 `verify --re-decide`에서 기록된 결과와 같다.
+이 표는 `policy.margin`이 있을 때만 적용한다. 정책이 없으면 오른쪽 열의 차단도 감소 전용 주문을 포함한 모든 신규 주문을 막는다(이 계약 이전의 동작). 그래서 정책 없이 기록된 저널은 `verify --re-decide`에서 기록된 결과와 같다. 예외는 U18b 전에 쓰였고 거래소 변경이 있는 저널이다: 이 빌드는 재실행에서 `VenueChange`를 걸고(정책이 없으면 모든 주문을 막는다), 그 뒤 옛 빌드가 받은 첫 주문에서 차이를 보고한다([C-HOLD](holds.md)).
 
 감소 전용 주문은 오른쪽 열의 차단, 증거금 보고 신선도, 레버리지 검사만 통과한다. 다른 검사([ADR-008](../adr/ADR-008-risk-reservation.md) §7: 전략·종목 허용, 수량, 가격, 주문 금액, 가격대, 계좌와 전략의 포지션 구간, 주문 수, 진행 중 전송 수, 만료)는 모두 받는다.
 

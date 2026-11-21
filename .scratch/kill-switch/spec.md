@@ -50,6 +50,8 @@ Order: U18b1, U18b2, U18b3, U18b4 (U18b3 and U18b4 touch disjoint files except `
 
 ## U18b1 decisions: holds, release, marker
 
+> Amendment (review S1, 2026-11-21, owner-side judgment one step safer than this spec): `clear_hold kill` is also refused `kill_orders_open` while the core's own book has open orders, whatever the kill outcome (sim, Hyperliquid and Bybit all answer `unsupported` in U18b1). This amends the `clear_hold` table and the "Kill commands" bullet below.
+
 ### Hold reasons (table 7-7)
 
 New variants, appended after `AccountMode` (serde snake_case); `holds()` pushes them after the existing ones so existing exact-order assertions stay true.
@@ -93,6 +95,7 @@ All three get rows in the tail contract's field table (`docs/contracts/tail.md` 
 | `not_held` | that hold is not set |
 | `note_required` | note empty or whitespace |
 | `kill_unconfirmed` | reason `kill` and `core.kill.confirmed_at` is `None`: no `kill_loop_ended` since the latch or since this boot. Text adds "the kill loop has not confirmed zero open orders in this process" |
+| `kill_orders_open` | reason `kill` and the core's own book has open orders (`core.open` not empty), whatever the kill outcome. Text: "kill_orders_open: N open orders in the book; run omsctl cancel-all first". Checked after `kill_unconfirmed`, before `venue_change_pending` |
 | `venue_change_pending` | reason `venue_change` and `core.venue_change_wait` is not empty: the venue's position after the change has not been read yet (U13b) |
 
 There is no force option, as for `clear_reduce` (`decide.rs:604-606`) (owner question 2). `booted` sets `kill.confirmed_at = None`: every process confirms zero again before a kill can be cleared.
@@ -102,7 +105,7 @@ There is no force option, as for `clear_reduce` (`decide.rs:604-606`) (owner que
 - `VenueCommand::Kill { since, source, note }`: `command_for(hold_set{kill})`, and `command_for(booted)` when `core.kill` is set before the boot (a latch replayed from the journal). Released after durable (step 2): the latch is on disk before the first cancel-all leaves.
 - `VenueCommand::KillStop`: `command_for(hold_cleared{kill})`. The gateway ends its loop.
 - `VenueGateway` gets `fn kill(&self, cmd)`; `start` dispatches both commands (`venue/mod.rs:118-121`). It must return at once (the loop runs on its own task, not under a command permit).
-- Sim and Hyperliquid: `kill` sends `VenueInput::KillLoopEnded { outcome: Unsupported, detail: "this gateway has no cancel-all; cancel with omsctl cancel-all" }` and logs `warn`. Core: `kill_loop_ended{unsupported}` sets `confirmed_at`, so `clear_hold kill` works there. Orders resting on those venues are left to the operator (Out of Scope). In U18b1 the Bybit gateway answers the same way; U18b2 replaces that with the loop, so no Bybit build with a real loop ever confirms without one.
+- Sim and Hyperliquid: `kill` sends `VenueInput::KillLoopEnded { outcome: Unsupported, detail: "this gateway has no cancel-all; cancel with omsctl cancel-all" }` and logs `warn`. Core: `kill_loop_ended{unsupported}` sets `confirmed_at`; `clear_hold kill` is then taken once the book has no open order (`kill_orders_open` above). Orders resting on those venues are left to the operator (`cancel-all`, which is taken under the latch). In U18b1 the Bybit gateway answers the same way; U18b2 replaces that with the loop, so no Bybit build with a real loop ever confirms without one.
 - `VenueInput::KillLoopEnded` while not latched, or already confirmed: no event.
 
 ### Kill marker
@@ -267,6 +270,7 @@ Further tests holding the decisions: `holds::clear_hold_refusals` (each code; no
 7. The `Kill` command released from the core thread instead of after durable (derived outside `command_for`).
 8. `StrategyLink` cancels every strategy's plain orders; a strategy's reduce-only order cancelled; `ping` not counted as a request; hello answered before the restore is durable.
 9. The gate reads W3 in place of W2; stage 2 at `unmonitored_since + 0`; a stale-W2 heartbeat clears the gate; a future check time accepted.
+10. (Review fix of U18b1) `clear_hold kill` skips the `kill_orders_open` check (M131); the marker is removed before the core decides a clear with a note (M132).
 
 ## Documents and registry
 

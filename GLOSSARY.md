@@ -161,7 +161,7 @@ The rule cancel of every resting plain order when no margin report has been acce
 _Avoid_: timeout cancel, watchdog
 
 **Kill latch** (킬 래치):
-The hold `KillLatched`: every order is refused, reduce-only included, until the operator clears it after the kill loop of the running process confirmed zero open orders (C-HOLD).
+The hold `KillLatched`: every order is refused, reduce-only included, until the operator clears it. The clear is taken only after the gateway of the running process answered the kill (`confirmed`, or `unsupported` from a gateway without cancel-all: in U18b1 the simulated venue, Hyperliquid and Bybit) and only while the OMS book has no open order (`kill_orders_open` otherwise: run cancel-all first) (C-HOLD).
 _Avoid_: kill flag, emergency stop
 
 **Kill loop** (킬 루프):
