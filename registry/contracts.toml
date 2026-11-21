@@ -214,3 +214,14 @@ events = ["margin_reported", "margin_report_rejected", "day_base_set", "reducing
 adr = ["ADR-008", "ADR-018"]
 code = ["crates/oms-core/src/config.rs", "crates/oms-core/src/decide.rs", "crates/oms-core/src/core.rs", "crates/oms-core/src/exposure.rs", "crates/oms-core/src/model.rs", "crates/oms-core/src/margin_view.rs", "crates/oms-node/src/config.rs", "crates/oms-node/src/venue/bybit/query.rs", "crates/oms-node/src/venue/reconciler.rs", "crates/oms-node/src/venue/simnet.rs", "crates/oms-node/src/venue/hyperliquid/mod.rs", "crates/oms-node/src/venue/hyperliquid/wire.rs", "crates/oms-node/src/status.rs", "crates/oms-node/src/server.rs", "crates/oms-api/src/lib.rs", "crates/oms-api/src/ctl.rs", "crates/oms-sim/src/venue.rs", "crates/oms-sim/src/world.rs"]
 claims = ["V-MARGIN-1", "V-MARGIN-2", "V-MARGIN-3", "V-MARGIN-4", "V-MARGIN-5", "V-MARGIN-6", "V-MARGIN-7", "V-MARGIN-8", "V-MARGIN-9", "V-MARGIN-10", "V-MARGIN-11", "V-MARGIN-12", "V-MARGIN-13"]
+
+# 구현됨(U18a2). 실제 텔레그램에는 보낸 적이 없다(loopback 가짜만).
+[[contract]]
+id = "C-ALERT"
+title = "직접 알림"
+file = "docs/contracts/alerts.md"
+summary = "노드가 공개된(내구화된) 상태에서 거래 안전 조건을 계산해 텔레그램으로 직접 보낸다. 조건 표, 유예, 내보내는 시점, 놓칠 수 있는 것, 치명 알림과 게이트웨이 막힘의 예외, 종료 전 전송. 저널 이벤트는 더하지 않는다"
+events = []
+adr = ["ADR-029", "ADR-004", "ADR-016"]
+code = ["crates/oms-node/src/alerts.rs", "crates/oms-node/src/config.rs", "crates/oms-node/src/node.rs", "crates/oms-node/src/status.rs", "crates/alert-direct/src/lib.rs"]
+claims = ["V-ALERT-1", "V-ALERT-2", "V-ALERT-3", "V-ALERT-4", "V-ALERT-5"]

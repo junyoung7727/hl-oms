@@ -223,16 +223,24 @@ The collector's writer loop marking itself alive once a second after a tick in w
 _Avoid_: heartbeat of the venue, keepalive (that is the WebSocket ping)
 
 **Direct alert** (직접 알림):
-A Telegram message sent by the process itself (alert-direct), not through the observability stack, with the repeat rule: once at start, every 5 min while the condition lasts, once at clear; prefixes `[MD P1]`, later `[OMS P1]`, `[WATCH P1]`. With a second channel configured, every direct alert also goes there.
+A Telegram message sent by the process itself (alert-direct), not through the observability stack, with the repeat rule: once at start, every 5 min while the condition lasts, once at clear; prefixes `[MD P1]` (md-collector), `[OMS P1]` (oms-node, C-ALERT), later `[WATCH P1]`. With a second channel configured, every direct alert also goes there.
 _Avoid_: notification (the stack's alerts are `[MON P?]`)
 
 **Second channel** (둘째 채널):
-A push service besides Telegram for direct alerts (alert-direct `SecondChannel`, design §7.7): it gets a copy of every message through its own bounded outbox and thread, and the Telegram-down notice. Which service is not decided (D3); md-collector and the OMS run without one.
+A push service besides Telegram for direct alerts (alert-direct `SecondChannel`, design §7.7): it gets a copy of every message through its own bounded outbox and thread, and the Telegram-down notice. Which service is not decided (D3); md-collector and the OMS run without one (the OMS accepts only `second_channel = "none"`; `alerts::start` takes one for tests).
 _Avoid_: backup bot (it is the same bot that fails), fallback route (that is the pinned Telegram IP)
 
 **Telegram-down notice** (텔레그램 장애 알림):
-The direct alert, on the second channel only, that Telegram has failed for more than `second_after_ms` (60 s): counted from the first failed attempt since Telegram last answered (delivered or refused), with the repeat rule (start, every 5 min, clear when Telegram answers). Not raised while nothing is queued (no probe).
+The direct alert, on the second channel only, that Telegram has failed for more than `second_after_ms` (60 s; `[alert] second_after_ms` in the OMS): counted from the first failed attempt since Telegram last answered (delivered or refused), with the repeat rule (start, every 5 min, clear when Telegram answers). Not raised while nothing is queued (no probe).
 _Avoid_: Telegram outage (only failed sends are seen)
+
+**Alert condition** (알림 조건):
+One row of the C-ALERT table: a key (`hold:reducing`, `mismatch:<kind>`, `halt_strategy:<s>`, `margin_stale`, `gateway_block`, ...), a text and a grace, computed by the `oms-alert` thread from the published (durable) state only; `gateway_block` is the one read from gateway process state. Each key goes through the repeat rule of the direct alert.
+_Avoid_: alert rule (that is vmalert's, U20b), hold (a hold is one source of conditions)
+
+**Grace** (유예):
+How long an alert condition must hold at every evaluation before its start is sent: 0 for latches and operator acts, `alert.grace_ms` (30 s) for states every reconnect or boot passes through. A condition that ends inside its grace sends nothing.
+_Avoid_: debounce (the clear is not delayed), delay
 
 **Hour seal** (시간별 봉인):
 The sealer's move of a closed hour's open files into the day files, recorded by a begin and a done entry of the seal log; lossless and restartable at any step.

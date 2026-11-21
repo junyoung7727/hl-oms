@@ -36,3 +36,4 @@
 | [ADR-026](ADR-026-observability-projector.md) | 저널을 따라 읽어 VictoriaMetrics·VictoriaLogs로 내보내는 별도 프로젝터, 저장소가 받은 줄까지만 커서, 죽은 OMS의 미확정 줄(ADR-016 §8을 대신함) | 운영 |
 | [ADR-027](ADR-027-trading-export.md) | 저널에서 레이크 거래 테이블(orders·fills·events)을 내구화된 기록, 완결된 날짜만, 바뀐 파일만 쓰기 | 운영 |
 | [ADR-028](ADR-028-bybit-gateway.md) | Bybit 게이트웨이: 0600 자격 파일, 서명, 키 거부 비재시도, 읽기만 하는 시작 확인과 IP 확인(만드는 중) | 거래소 |
+| [ADR-029](ADR-029-oms-direct-alerts.md) | OMS 직접 알림: 공개된(내구화된) 상태만 읽는 노드 안의 평가 스레드, 지나가는 상태의 유예 30초, 치명 알림과 종료 전 전송(ADR-016 §8의 "알림이 없다"를 대신함) | 운영 |
