@@ -247,6 +247,20 @@ pub struct MarginReport {
     /// Every position the venue listed, also on instruments that are not
     /// configured here.
     pub positions: Vec<MarginPosition>,
+    /// The account's maintenance margin and margin balance, from a venue
+    /// whose account is cross margin (Bybit). Not written when absent, so a
+    /// report without them keeps the bytes it had before the field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_mm: Option<AccountMm>,
+}
+
+/// What a cross-margin account owes and holds, both in USD (Bybit
+/// `totalMaintenanceMargin`, `totalMarginBalance`). The venue liquidates
+/// when the maintenance margin reaches the margin balance.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountMm {
+    pub maintenance: Amount,
+    pub margin_balance: Amount,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

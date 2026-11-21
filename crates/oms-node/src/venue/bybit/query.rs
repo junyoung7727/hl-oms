@@ -558,6 +558,7 @@ impl Queries {
             queried_at,
             account_value,
             positions,
+            account_mm: None,
         })])
     }
 
@@ -1215,6 +1216,7 @@ mod tests {
                     leverage_value: 10,
                     max_leverage: 100,
                 }],
+                account_mm: None,
             })]
         );
         // The maximum leverage is read once per symbol.

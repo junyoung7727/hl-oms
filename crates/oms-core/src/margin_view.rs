@@ -8,7 +8,7 @@
 use crate::core::Core;
 use crate::exposure::Exposure;
 use crate::ids::{InstrumentId, Ts};
-use crate::input::MarginPosition;
+use crate::input::{AccountMm, MarginPosition};
 use crate::model::{DayBase, MarginRejection, Reducing};
 use crate::num::Amount;
 use serde::Serialize;
@@ -28,6 +28,10 @@ pub struct MarginView<'a> {
     pub session: Option<u64>,
     pub seq: Option<u64>,
     pub positions: Option<&'a [MarginPosition]>,
+    /// The account numbers of the newest report (cross margin). Not shown
+    /// when the report has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_mm: Option<&'a AccountMm>,
     pub last_rejection: &'a Option<MarginRejection>,
     /// NORMAL is `None`. Otherwise the rule that tripped first, what it
     /// saw and since when.
@@ -90,6 +94,7 @@ impl Core {
             session: report.map(|r| r.session),
             seq: report.map(|r| r.seq),
             positions: report.map(|r| r.positions.as_slice()),
+            account_mm: report.and_then(|r| r.account_mm.as_ref()),
             last_rejection: &margin.last_rejection,
             reducing: &margin.reducing,
             day_base: &margin.day_base,

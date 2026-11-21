@@ -472,6 +472,9 @@ pub enum RuleId {
     /// The isolated margin of a position is below its maintenance margin
     /// plus `mm_buffer_bps` of the position value.
     MmBuffer,
+    /// The account's maintenance margin is at or above
+    /// `account_mm_rate_max_bps` of its margin balance (cross margin).
+    AccountMm,
     /// No margin report was accepted for longer than `stale_cancel_us`
     /// while the link was up. It cancels and latches nothing.
     MarginStale,
@@ -513,6 +516,7 @@ pub enum MarginRefusal {
     NotReducing,
     MarginUnavailable,
     MmBufferActive,
+    AccountMmActive,
     NoteRequired,
 }
 
@@ -523,6 +527,7 @@ impl MarginRefusal {
             MarginRefusal::NotReducing => "not_reducing: the account is not REDUCING",
             MarginRefusal::MarginUnavailable => "margin_unavailable: no fresh margin report",
             MarginRefusal::MmBufferActive => "mm_buffer_active: a position is below its maintenance margin plus the buffer on the last margin report",
+            MarginRefusal::AccountMmActive => "account_mm_active: the account maintenance margin is at or above account_mm_rate_max_bps of the margin balance on the last margin report",
             MarginRefusal::NoteRequired => "note_required: the command needs a note",
         }
     }

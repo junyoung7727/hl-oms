@@ -1067,6 +1067,7 @@ impl World {
                 queried_at,
                 account_value: self.venue.account_value(),
                 positions: self.venue.margin_positions(),
+                account_mm: None,
             })],
             Query::VenueSetting => {
                 let (mode, leverage) = self.venue.setting(&inst());

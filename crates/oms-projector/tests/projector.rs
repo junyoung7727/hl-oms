@@ -876,6 +876,7 @@ fn margin_case() -> H {
             leverage_value: 2,
             max_leverage: 50,
         }],
+        account_mm: None,
     }));
     assert_eq!(
         h.core.margin.report.as_ref().unwrap().account_value,

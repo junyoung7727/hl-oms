@@ -188,6 +188,8 @@ payload 하나는 JSON 객체 하나다: `{"seq": u64, "at": u64 µs(기록 시�
 | `purged` | `cutoff` | u64 µs | 이보다 오래된 확인된 불일치도 지움 |
 | `purged` | `fill_floor` | u64 µs | 새 체결 바닥 시각. 이보다 이른 체결 키는 잊음 |
 | `purged` | `order_ids` | u64 list | 메모리에서 지운 닫힌 주문 |
+| `margin_reported` | `report.account_mm.maintenance` | decimal string | 교차 증거금 계좌의 유지증거금(USD, Bybit `totalMaintenanceMargin`). 게이트웨이가 주지 않으면(Hyperliquid) `account_mm` 전체를 쓰지 않음 |
+| `margin_reported` | `report.account_mm.margin_balance` | decimal string | 교차 증거금 계좌의 증거금 잔고(USD, Bybit `totalMarginBalance`). 위와 같이 쓰지 않을 수 있음 |
 | `margin_reported` | `report.account_value` | decimal string | 증거금 보고의 계좌 가치 |
 | `margin_reported` | `report.positions[].instrument` | string | 보고된 포지션의 종목 |
 | `margin_reported` | `report.positions[].leverage_type` | enum isolated/cross | 보고된 포지션의 증거금 방식 |
@@ -207,7 +209,7 @@ payload 하나는 JSON 객체 하나다: `{"seq": u64, "at": u64 µs(기록 시�
 | `day_base_set` | `set_by` | enum BaseSetBy | report/operator |
 | `day_base_set` | `value` | decimal string | 일 기준 계좌 가치 |
 | `reducing_entered` | `detail` | string | 설명 문장 |
-| `reducing_entered` | `rule` | enum RuleId | daily_loss/mm_buffer/margin_stale |
+| `reducing_entered` | `rule` | enum RuleId | daily_loss/mm_buffer/account_mm/margin_stale |
 | `venue_setting_noted` | `instrument` | string | 종목 |
 | `venue_setting_noted` | `isolated` | bool | 격리 마진인가 |
 | `venue_setting_noted` | `leverage` | u32 | 레버리지 |

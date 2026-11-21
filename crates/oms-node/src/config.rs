@@ -582,6 +582,7 @@ max = "10"
                 venue_leverage: 2,
                 isolated: true,
                 account_modes_allowed: vec![],
+                account_mm_rate_max_bps: None,
             })
         );
         assert_eq!((cfg.runtime.margin_poll_ms, cfg.runtime.venue_setting_poll_ms), (5_000, 60_000));

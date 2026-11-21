@@ -609,6 +609,17 @@ impl Tx<'_> {
         if mm_condition_holds {
             return Some(MarginRefusal::MmBufferActive);
         }
+        // The same for the account of a cross-margin venue (judgment, U17d).
+        let account_mm_holds = match (&self.core.config.policy.margin, &self.core.margin.report) {
+            (Some(policy), Some(report)) => match (policy.account_mm_rate_max_bps, &report.account_mm) {
+                (Some(max_bps), Some(a)) => account_mm_at_or_above(a, max_bps),
+                _ => false,
+            },
+            _ => false,
+        };
+        if account_mm_holds {
+            return Some(MarginRefusal::AccountMmActive);
+        }
         let clear_has_a_note = !note.trim().is_empty();
         if !clear_has_a_note {
             return Some(MarginRefusal::NoteRequired);
@@ -790,10 +801,53 @@ impl Tx<'_> {
                 reason: format!("position {}: max_leverage is zero", p.instrument),
             });
         }
+        if let Some(reason) = self.account_mm_unusable(r) {
+            return self.emit(Event::MarginReportRejected {
+                session: r.session,
+                seq: r.seq,
+                queried_at: r.queried_at,
+                reason,
+            });
+        }
         self.emit(Event::MarginReported { report: r.clone() })?;
         self.judge_mm_buffer(r)?;
+        self.judge_account_mm(r)?;
         self.judge_daily_loss(r)?;
         self.roll_day_base(r)
+    }
+
+    /// Why the account numbers of a report cannot be judged, when the
+    /// account maintenance-margin rule is on. Without the rule they are not
+    /// looked at.
+    fn account_mm_unusable(&self, r: &MarginReport) -> Option<String> {
+        let rule_is_on = self.core.config.policy.margin.as_ref().is_some_and(|m| m.account_mm_rate_max_bps.is_some());
+        if !rule_is_on {
+            return None;
+        }
+        match &r.account_mm {
+            None => Some("account_mm is missing: the policy sets account_mm_rate_max_bps".to_string()),
+            Some(a) if a.maintenance.0 < 0 => {
+                Some(format!("account_mm: maintenance margin {} is negative", a.maintenance))
+            }
+            Some(_) => None,
+        }
+    }
+
+    /// Account maintenance margin (C-MARGIN, 계좌 유지증거금률): the
+    /// maintenance margin of a cross-margin account is at or above
+    /// `account_mm_rate_max_bps` of its margin balance.
+    fn judge_account_mm(&mut self, r: &MarginReport) -> Result<(), CoreFault> {
+        let Some(max_bps) = self.core.config.policy.margin.as_ref().and_then(|m| m.account_mm_rate_max_bps) else {
+            return Ok(());
+        };
+        let Some(a) = r.account_mm.as_ref().filter(|a| account_mm_at_or_above(a, max_bps)) else {
+            return Ok(());
+        };
+        let detail = format!(
+            "account maintenance margin {} is at or above {} bps of the margin balance {}",
+            a.maintenance, max_bps, a.margin_balance
+        );
+        self.enter_reducing(RuleId::AccountMm, detail)
     }
 
     /// MM buffer (C-MARGIN, 유지증거금 여유): an isolated position of a
@@ -1869,6 +1923,16 @@ fn reach_after(b: &Book, side: Side, qty: Qty) -> Option<i64> {
         Side::Buy => b.upper()?.checked_add(qty.0),
         Side::Sell => b.lower()?.checked_sub(qty.0),
     }
+}
+
+/// Whether the account's maintenance margin is at or above `max_bps` of its
+/// margin balance: `maintenance × 10 000 ≥ max_bps × balance`, nothing
+/// divided. A balance of zero or below with any maintenance margin is at or
+/// above every limit; without maintenance margin nothing is.
+fn account_mm_at_or_above(a: &AccountMm, max_bps: u32) -> bool {
+    let (maintenance, balance) = (i128::from(a.maintenance.0), i128::from(a.margin_balance.0));
+    // Each product is below 2^63 × 2^32: it fits.
+    maintenance > 0 && maintenance * ONE_IN_BPS >= i128::from(max_bps) * balance
 }
 
 /// The first position of the report that the MM-buffer rule judges and
