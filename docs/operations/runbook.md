@@ -335,7 +335,7 @@ telegram = "/etc/oms/telegram.json"   # 절대 경로
 | `hold:reducing`(감소 전용) | 증거금 규칙이 걸었다(규칙, 내용, 시각) | 7.8의 `clear-reduce` |
 | `mismatch:<종류>`(확인하지 않은 불일치) | 그 종류의 불일치 개수와 최근 3개 | 원인을 확인하고 `ack --id N`(7.2) |
 | `hold:operator_account`, `halt_strategy:<s>`(운영자가 중지함) | 누군가 `halt`를 했다(메모) | `resume [--target-strategy S]` |
-| `hold:storage_low`(저장 공간 부족) | 저널 디스크의 여유가 설정 아래다 | 공간을 늘린다. 다음 측정(5초)에 풀린다 |
+| `hold:storage_low`(저장 공간 부족, 30초 넘게) | 저널 디스크의 여유가 설정 아래다. 문턱 근처에서 들락거리면 30초 넘게 계속될 때만 온다 | 공간을 늘린다. 다음 측정(5초)에 풀린다 |
 | `hold:link_down`, `hold:resync`(30초 넘게) | 거래소 연결이 끊겼거나 다시 확인하지 못했다 | 7.5. 다시 붙으면 저절로 풀린다 |
 | `gateway_block`(30초 넘게) | Bybit 게이트웨이가 막혔다(`auth_rejected`, `ip_banned`, `account`, `unchecked`, `clock`) | 7.5의 표 |
 | `hold:in_doubt`(30초 넘게) | 결과를 모르는 주문이 있다 | 7.1 |

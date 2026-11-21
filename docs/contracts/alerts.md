@@ -20,7 +20,7 @@
 | `mismatch:<kind>` | 그 `MismatchKind`의 확인하지 않은 불일치 1개 이상(개수, 최근 3개의 subject: detail). 대조기의 불일치와 `venue_position_change`·`unclassified_execution` 포함 | 그 종류의 확인하지 않은 불일치가 없음 | 0 |
 | `hold:operator_account` | `halt_account`(메모) | resume | 0 |
 | `halt_strategy:<s>` | `halt_strategy`에 `s`(메모) | `s`의 resume | 0 |
-| `hold:storage_low` | `storage_low` | `StorageLowChanged{low:false}` | 0 |
+| `hold:storage_low` | `storage_low`(5초마다 측정, 문턱 근처에서 들락거릴 수 있다) | `StorageLowChanged{low:false}` | 30초 |
 | `margin_stale` | 증거금 정책 있음, 연결 올라옴, `!margin_report_is_fresh(now)`(나이 또는 "아직 없음", 신선도 한도, 취소 한도) | 신선한 보고 | 30초 |
 | `hold:link_down` | `LinkDown`(게이트웨이 막힘이 있으면 문장에 더함) | 연결 올라옴 | 30초 |
 | `hold:resync` | `Resync` | 확인 끝남 | 30초 |

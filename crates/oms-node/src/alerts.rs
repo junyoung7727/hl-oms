@@ -49,7 +49,8 @@ pub struct Cond {
 pub enum Grace {
     /// Latches and operator acts: at once.
     None,
-    /// States every reconnect or boot passes through: `grace_ms`.
+    /// States every reconnect or boot passes through, and measured states
+    /// that can flap (storage low): `grace_ms`.
     Passing,
 }
 
@@ -147,10 +148,12 @@ pub fn hold_condition(
         }
         // Never in `holds(None)`; covered by `halt_strategy:<s>`.
         HoldReason::OperatorStrategy => return None,
+        // Measured every 5 s with no hysteresis: it can flap near the
+        // threshold, so it waits like a passing state (review S2).
         HoldReason::StorageLow => (
             "hold:storage_low".to_string(),
             "저널 저장 공간 부족. 모든 신규 주문 거절".to_string(),
-            Grace::None,
+            Grace::Passing,
         ),
         HoldReason::Reducing => {
             let detail = match &core.margin.reducing {
@@ -780,10 +783,9 @@ mod tests {
             let got = hold_condition(&h, &c, T0, None);
             let want = match &h {
                 HoldReason::Mismatch | HoldReason::OperatorStrategy => None,
-                HoldReason::OperatorAccount | HoldReason::StorageLow | HoldReason::Reducing => {
-                    Some(Grace::None)
-                }
+                HoldReason::OperatorAccount | HoldReason::Reducing => Some(Grace::None),
                 HoldReason::NoConfig
+                | HoldReason::StorageLow
                 | HoldReason::LinkDown
                 | HoldReason::Resync
                 | HoldReason::InDoubt
@@ -839,7 +841,8 @@ mod tests {
         );
         assert_eq!(keys(&conditions(&c, 3, T0, None, 30_000)), ["hold:resync"]);
 
-        // Operator acts, storage and mismatches: grace 0.
+        // Operator acts and mismatches: grace 0; storage low: the passing
+        // grace.
         let a = StrategyId::new("a").unwrap();
         handle(
             &mut c,
@@ -875,7 +878,12 @@ mod tests {
             ]
         );
         for g in &got[1..] {
-            assert_eq!(g.grace_ms, 0, "{}", g.key);
+            let want = if g.key == "hold:storage_low" {
+                30_000
+            } else {
+                0
+            };
+            assert_eq!(g.grace_ms, want, "{}", g.key);
             assert!(g.text.ends_with("\n근거: 저널 seq 9"), "{}", g.text);
         }
         assert!(got[1].text.contains("acct-note"));

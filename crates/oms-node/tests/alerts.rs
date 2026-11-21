@@ -629,6 +629,77 @@ fn grace_hides_a_short_link_down_and_reports_a_long_one() {
     );
 }
 
+const STORAGE_TEXT: &str = "저널 저장 공간 부족";
+
+impl Rig {
+    /// The storage monitor's measurement, committed and published.
+    fn storage(&self, low: bool) {
+        self.push(Input::Storage {
+            low,
+            free_bytes: if low { 5 } else { 1 << 40 },
+        });
+        self.wait(|p| p.core.storage_low == low);
+    }
+}
+
+/// Review S2. `hold:storage_low` is measured and can flap near the
+/// threshold: low for 20 s, then ok for 5 s, ten times over, sends nothing
+/// (each low run is shorter than the 30 s grace).
+#[test]
+fn a_storage_low_that_flaps_inside_the_grace_sends_nothing() {
+    let f = FakeHttp::start(ok());
+    let rig = Rig::start("storage-flap", 64);
+    let bell = Bell::start(&rig, alert_config(&f), None);
+    bell.delivered();
+    let n = texts(&f).len();
+    for _ in 0..10 {
+        rig.storage(true);
+        bell.settle();
+        bell.advance(20_000);
+        rig.storage(false);
+        bell.settle();
+        bell.advance(5_000);
+    }
+    bell.delivered();
+    assert_eq!(since(&f, n), Vec::<String>::new());
+}
+
+/// Review S2. Storage low that lasts past the grace sends one start (none
+/// at 29.999 s, one at 30 s, no second one at 35 s), and its end the clear.
+#[test]
+fn a_storage_low_that_lasts_past_the_grace_sends_one_start() {
+    let f = FakeHttp::start(ok());
+    let rig = Rig::start("storage-long", 64);
+    let bell = Bell::start(&rig, alert_config(&f), None);
+    bell.delivered();
+    let n = texts(&f).len();
+    rig.storage(true);
+    bell.settle();
+    bell.advance(29_999);
+    bell.delivered();
+    assert_eq!(since(&f, n), Vec::<String>::new());
+    bell.advance(1);
+    bell.delivered();
+    bell.advance(5_000);
+    bell.delivered();
+    let got = since(&f, n);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(
+        got[0].contains(STORAGE_TEXT) && !got[0].contains("해소: "),
+        "{}",
+        got[0]
+    );
+    rig.storage(false);
+    bell.delivered();
+    let got = since(&f, n);
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert!(
+        got[1].contains("해소: ") && got[1].contains(STORAGE_TEXT),
+        "{}",
+        got[1]
+    );
+}
+
 /// Telegram that never answers does not slow the commit stage: 1,000
 /// halt and resume records commit within 5 s (판단(모델 아님)).
 #[test]

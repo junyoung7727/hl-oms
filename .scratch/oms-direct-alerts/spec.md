@@ -69,7 +69,7 @@ A pure function `alerts::conditions(core: &Core, now_us: Ts, gateway_block: Opti
 | `mismatch:<kind>` | ≥ 1 unacked mismatch of that `MismatchKind` (count, newest 3 subject: detail — 3 판단(모델 아님)); covers the reconciler's mismatches and `VenuePositionChange` / `UnclassifiedExecution` | no unacked mismatch of that kind | 0 |
 | `hold:operator_account` | `halt_account` set (note) | resume | 0 |
 | `halt_strategy:<s>` | `halt_strategy` holds `s` (note) | resume of `s` | 0 |
-| `hold:storage_low` | `storage_low` | `StorageLowChanged{low:false}` | 0 |
+| `hold:storage_low` | `storage_low` (measured every 5 s; can flap near the threshold, review S2) | `StorageLowChanged{low:false}` | 30 s |
 | `margin_stale` | margin policy set, link up, `!margin_report_is_fresh(now)` (age or "none yet"; stale-cancel time) | a fresh report | 30 s |
 | `hold:link_down` | `LinkDown`; text adds the gateway block if any | link up | 30 s |
 | `hold:resync` | `Resync` | confirmed | 30 s |
@@ -80,7 +80,7 @@ A pure function `alerts::conditions(core: &Core, now_us: Ts, gateway_block: Opti
 | `gateway_block` | block view `Some(reason)` (key rejected, IP ban, account, unchecked, clock) | `None` | 30 s |
 
 - The hold texts come from one `match` over `HoldReason` **without a wildcard arm**: a new variant does not compile until it has a text and a grace (this is how U18b's reasons get alerts). `Mismatch` maps to no condition (covered per kind); `OperatorStrategy` never appears in `holds(None)` (covered by `halt_strategy:<s>`).
-- Grace: a condition must hold at every evaluation for `grace_ms` before its start is sent; one that ends inside the grace sends nothing. 0 for latches and operator acts, `alert.grace_ms` (default 30 s, 판단(모델 아님)) for states that every reconnect or boot passes through. A flapping state sends at most one start and one clear per grace period.
+- Grace: a condition must hold at every evaluation for `grace_ms` before its start is sent; one that ends inside the grace sends nothing. 0 for latches and operator acts, `alert.grace_ms` (default 30 s, 판단(모델 아님)) for states that every reconnect or boot passes through and for storage low, a measured state with no hysteresis in the core (review S2). A flapping state sends at most one start and one clear per grace period.
 - Keys are bounded: hold kinds + instruments + strategies + mismatch kinds (16) + 2. So the outbox fills only through repeats during a long Telegram outage.
 - `gateway_block` is the one condition not read from the journal: the block is gateway process state with no journal event. It reports that the gateway refuses to send and carries no journaled data, so it cannot contradict the journal (판단(모델 아님)). Every other condition is read only from the published core.
 
