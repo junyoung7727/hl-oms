@@ -214,6 +214,8 @@ kill -TERM <pid>
 
 Bybit 게이트웨이의 주문과 취소는 WS Trade 연결로 나간다. 그 연결이 내려가 있으면 REST로 나가므로 주문이 멈추지는 않는다. 로그의 "WS Trade is down; orders and cancels go over REST until it is back"(이유는 `error`)는 그 뜻이고, 다시 붙으면 "WS Trade is up"이 남는다. 내려갈 때 응답을 기다리던 주문은 결과 불명이 되고 대조가 조회로 푼다(다시 보내지 않는다). 계속 되풀이되면 네트워크와 거래소 공지를 본다. 응답 없는 늦은 답은 "a WS Trade answer for no pending request"로 남고 버려진다.
 
+Bybit 게이트웨이의 참조 가격은 공개 스트림의 티커(mark price)에서 온다. 로그의 "the public ticker stream is down; no reference price reaches the core until it is back"(이유는 `error`)가 남으면 그 연결이 내려가 있다는 뜻이고, 다시 붙으면 "the public ticker stream is subscribed"가 남는다. 내려간 동안 가격은 새로 오지 않고 `ref_price_max_age_us`(기본 15초)가 지나면 가격 범위(`price_band_bps`)가 있는 종목의 새 주문이 `ref_price_unavailable`로 거절된다. 열린 주문과 취소는 그대로다. 다시 붙어 스냅숏이 오면 저절로 풀린다. 연결이 붙어 있는데도 거절되면 그 종목의 티커가 오지 않는 것이다(거래 중지 등): 거래소 공지를 본다.
+
 Bybit 게이트웨이는 막힘이 있으면 다시 붙지 않는다. `status`의 `gateway.block`이 이유를 보여 준다([ADR-028 §7c](../adr/ADR-028-bybit-gateway.md)):
 
 | `gateway.block` | 뜻 | 할 일 |

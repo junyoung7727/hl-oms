@@ -714,11 +714,15 @@ fn an_unanswered_create_is_found_open_by_its_order_link_id_and_never_sent_again(
     };
     assert!(node.wait(Duration::from_secs(5), || venue.ws_creates() == 1));
     let sent_at = venue.api.requests().len();
+    // In doubt for a moment only: the status query follows within a
+    // reconcile round, so the journal says it, not a status poll.
+    let in_doubt = || {
+        records(&node.data()).iter().flat_map(|r| r.events.clone()).any(|e| {
+            matches!(e, Event::OrderInDoubt { order_id: id, reason: DoubtReason::Transport, .. } if id == order_id)
+        })
+    };
     assert!(
-        node.wait(Duration::from_secs(5), || node
-            .order(order_id)
-            .doubt
-            .is_some_and(|d| d.reason == DoubtReason::Transport)),
+        node.wait(Duration::from_secs(5), in_doubt),
         "never in doubt: {:?}",
         node.order(order_id)
     );

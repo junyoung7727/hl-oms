@@ -79,7 +79,7 @@
 
 ### Bybit 게이트웨이(만드는 중, [ADR-028](../adr/ADR-028-bybit-gateway.md))
 
-U17b까지 있는 것: 서명, REST 클라이언트, 시작 확인, IP 확인, cancel-all, 조회 일곱 가지(`query.rs`), 실행 분류표(`exec.rs`), 비공개 스트림(`stream.rs`), `VenueGateway` 구현과 노드 연결(`gateway.rs`, `node.venue = bybit:<network>`), 주문·취소(`orders.rs`, WS Trade 먼저 `trade.rs`, 아니면 REST)와 응답 분류표(`answer.rs`), 요청 한도(`oms-core::rate`). 참조 가격은 U17c다. 참조 가격이 없으므로 그때까지 코어가 일반 주문을 거절한다.
+U17c까지 있는 것: 서명, REST 클라이언트, 시작 확인, IP 확인, cancel-all, 조회 일곱 가지(`query.rs`), 실행 분류표(`exec.rs`), 비공개 스트림(`stream.rs`), `VenueGateway` 구현과 노드 연결(`gateway.rs`, `node.venue = bybit:<network>`), 주문·취소(`orders.rs`, WS Trade 먼저 `trade.rs`, 아니면 REST)와 응답 분류표(`answer.rs`), 요청 한도(`oms-core::rate`), 참조 가격(`ticker.rs`, 공개 스트림의 mark price, U17c). 교차 계좌의 유지증거금 규칙은 U17d다.
 
 | 의무·규칙 | Bybit 게이트웨이 |
 |---|---|
@@ -106,6 +106,7 @@ U17b까지 있는 것: 서명, REST 클라이언트, 시작 확인, IP 확인, c
 | G-9(스트림) | 읽을 수 없는 메시지, `data` 목록이 없는 토픽 메시지, 읽을 수 없는 주문·실행 행, 연결 중의 인증·구독 응답은 끊고 다시 붙는 사유다. 앞서 읽은 행은 넘긴다. 설정한 종목이 아닌 행은 넘기지 않는다(조회가 정리 범위로 읽는다) |
 | 인증 거부(스트림) | `success: true`가 아닌 `auth` 응답은 키 거부: 재시작까지 다시 붙지 않고 요청도 보내지 않는다. WS Trade는 retCode 0이 아닌 `auth` 응답이 키 거부다 |
 | IP 차단 멈춤 | 어느 요청이든(비공개 스트림과 WS Trade의 업그레이드 포함) HTTP 403이면 600초 동안 REST 요청과 스트림·WS Trade 접속을 모두 멈추고 연결을 내린다 |
+| 참조 가격(U17c) | 공개 스트림(`/v5/public/linear`) 연결 하나가 거래하는 종목마다 `tickers.<symbol>`을 구독한다(구독 요청 하나에 10개까지, 응답마다 `success: true`, 아니면 다시 붙음). 연결 규칙(IPv4, 막힘이 없을 때만, 업그레이드 403 = IP 차단 멈춤, ping·pong 두 모양, 기다림)은 비공개 스트림과 같고 `Link`는 움직이지 않는다. 값은 `markPrice`. 스냅숏 뒤의 델타는 바뀐 칸만 싣고, `markPrice` 없는 델타는 그 `ts`에 mark가 그대로라는 뜻이다. 연결의 스냅숏 전 델타는 버리고 연결마다 mark를 비운다. 티커 메시지가 오면 종목마다 `ref_price_interval_ms`(기본 5초, 1초 이상, `ref_price_max_age_us`의 절반 이하)에 많아야 한 번 `RefPrice { px = mark, venue_ts = ts }`. 같은 가격을 다시 보내는 타이머는 없다: 거래소가 보내지 않는 종목은 코어에서 낡아 가격 범위가 있는 주문이 거절된다. 읽을 수 없는 티커 메시지(JSON 아님, `type`·`symbol`·`markPrice`·`ts` 이상, `markPrice` 없는 스냅숏)는 끊고 다시 붙는다. 거래하지 않는 종목의 메시지는 버린다 |
 | 상태 API | `gateway.block`: 막힘 이유 또는 null |
 
 Bybit 게이트웨이의 G-4(U17a, [ADR-024](../adr/ADR-024-absence-count-and-market-ref.md)): Bybit에는 만료 필드가 없고, 요청 시각(`X-BAPI-TIMESTAMP`) + `X-BAPI-RECV-WINDOW`가 서버 시각보다 이르면 요청을 거절한다. 게이트웨이는 요청 시각을 보내는 순간의 로컬 시각으로 하고(서명도 그 시각으로) `요청 시각 + recv_window + 1초 ≤ expires_at`일 때만 보낸다. 요청 한도를 기다렸으면 기다린 뒤에 잰다. 아니면 보내지 않고 `NotSent`. 1초는 Bybit가 받아 주는 요청 시각 앞섬의 한도다(`요청 시각 < 서버 시각 + 1000`). 이것이 만료 뒤 처리를 막으려면 로컬 시계가 거래소보다 크게 앞서지 않아야 하므로, 게이트웨이가 시계를 재서 500ms 넘게 앞설 수 있으면 생성을 막는다(취소와 스트림은 막지 않는다). 이 조건으로 거래소가 만료를 강제하므로 Bybit 설정은 `venue_enforces_expiry = true`, `absence_not_found_needed = 2`를 쓴다. 횟수는 조회 사본의 짧은 불일치만 막는다. realtime 조회는 닫힌 주문을 최근 500건까지만 들고 있고 서비스 재시작 때 비우므로, 게이트웨이는 realtime과 주문 내역(`/v5/order/history`) 모두에서 없을 때만 `StatusNotFound`를 보낸다(필수, U16c에 있음).
