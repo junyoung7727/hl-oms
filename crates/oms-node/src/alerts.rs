@@ -421,24 +421,38 @@ impl Evaluator {
             );
             (conds, p.durable_seq, p.core.boot, p.core.config.version)
         };
+        // The latch may have tripped after the thread's fatal check: then
+        // nothing is set, not even the start notice (review N1).
+        if self.common.fatal.is_tripped() {
+            return;
+        }
         self.last_seq = Some(seq);
         self.last_eval_ms = now_ms;
         self.last_eval_at = Instant::now();
         let handle = &self.common.handle;
-        if !self.started {
-            self.started = true;
-            handle.once(&format!(
-                "OMS 시작 (boot {boot}, config {version}). 활성 조건 {}개",
-                conds.len()
-            ));
-        }
         let mut seen = BTreeSet::new();
+        let mut starts = Vec::new();
+        let mut pending = 0usize;
         for c in conds {
             let since = *self.since.entry(c.key.clone()).or_insert(now_ms);
             if now_ms - since >= c.grace_ms {
-                handle.set(&c.key, Some(c.text));
+                starts.push((c.key.clone(), c.text));
+            } else {
+                pending += 1;
             }
             seen.insert(c.key);
+        }
+        // Counts the conditions whose start goes out now, and apart those
+        // still inside their grace (review N4).
+        if !self.started {
+            self.started = true;
+            handle.once(&format!(
+                "OMS 시작 (boot {boot}, config {version}). 활성 조건 {}개(유예 중 {pending}개)",
+                starts.len()
+            ));
+        }
+        for (key, text) in starts {
+            handle.set(&key, Some(text));
         }
         let gone: Vec<String> = self
             .since
@@ -1020,6 +1034,63 @@ mod tests {
             "{}",
             un[0].text
         );
+    }
+
+    /// An evaluator over `core` with alert-direct pointed at a closed
+    /// loopback port, active, not yet ticked.
+    fn evaluator(core: Core, fatal: Arc<Fatal>) -> Evaluator {
+        let tg = alert_direct::TelegramConfig::new("123456:ABCdef_ghi-JKL", "42").unwrap();
+        let mut cfg = AlertConfig::new(tg, PREFIX, "sim");
+        cfg.routes = vec![alert_direct::Route::direct("http://127.0.0.1:9").unwrap()];
+        let clock: Arc<dyn Clock> = Arc::new(alert_direct::SystemClock);
+        let common = Arc::new(Common {
+            handle: AlertDirect::start(cfg, clock.clone()).unwrap(),
+            published: Arc::new(Published::new(core, 9)),
+            fatal,
+            gateway_block: Mutex::new(None),
+            active: AtomicBool::new(true),
+            fatal_sent: AtomicBool::new(false),
+            start_failure: Mutex::new(None),
+            stop: AtomicBool::new(false),
+            evaluations: AtomicU64::new(0),
+        });
+        Evaluator {
+            common,
+            clock,
+            settings: Settings::default(),
+            since: BTreeMap::new(),
+            last_seq: None,
+            last_eval_ms: 0,
+            last_eval_at: Instant::now(),
+            started: false,
+        }
+    }
+
+    /// Review N1. The latch trips after the thread's fatal check returned
+    /// `false` (here: before `tick` is called at all). The evaluation reads
+    /// the state, then sees the trip and sets nothing: no start notice, no
+    /// start. Without the trip the same evaluation starts the halt.
+    #[test]
+    fn a_fatal_trip_during_an_evaluation_sets_nothing() {
+        let mut c = core(false);
+        handle(
+            &mut c,
+            Input::Operator(OperatorCmd::Halt {
+                scope: Scope::Account,
+                note: "n".into(),
+            }),
+        );
+        let mut ev = evaluator(c.clone(), Arc::new(Fatal::default()));
+        ev.tick();
+        assert_eq!(ev.common.handle.state().active, ["hold:operator_account"]);
+
+        let fatal = Arc::new(Fatal::default());
+        let mut ev = evaluator(c, fatal.clone());
+        fatal.trip("core fault: x");
+        ev.tick();
+        assert!(!ev.started);
+        assert!(ev.common.handle.state().active.is_empty());
+        assert_eq!(ev.common.evaluations.load(Ordering::SeqCst), 0);
     }
 
     /// The fatal text holds the reason and the last durable sequence only.

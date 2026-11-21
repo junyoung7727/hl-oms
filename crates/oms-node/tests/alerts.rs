@@ -700,6 +700,28 @@ fn a_storage_low_that_lasts_past_the_grace_sends_one_start() {
     );
 }
 
+/// Review N4. The start notice counts the conditions whose start went out
+/// at that evaluation and, apart, those still inside their grace: an
+/// account halt (grace 0) and a link down (30 s) give one and one.
+#[test]
+fn the_start_notice_counts_sent_and_pending_conditions_apart() {
+    let f = FakeHttp::start(ok());
+    let rig = Rig::start("start-count", 64);
+    rig.halt("count-note");
+    rig.link(false, 1);
+    rig.wait(|p| p.core.halt_account.is_some() && !p.core.link.up);
+    let bell = Bell::start(&rig, alert_config(&f), None);
+    bell.delivered();
+    let got = texts(&f);
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert!(
+        got[0].ends_with("\nOMS 시작 (boot 1, config 1). 활성 조건 1개(유예 중 1개)"),
+        "{}",
+        got[0]
+    );
+    assert!(got[1].contains("count-note"), "{}", got[1]);
+}
+
 /// Telegram that never answers does not slow the commit stage: 1,000
 /// halt and resume records commit within 5 s (판단(모델 아님)).
 #[test]
