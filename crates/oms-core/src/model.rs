@@ -322,6 +322,18 @@ pub enum HoldReason {
     /// is unified account or portfolio margin, or is not on the allow-list
     /// of the margin policy (C-MARGIN). Refuses plain orders on the account.
     AccountMode,
+    /// The kill switch is latched (C-HOLD): the private stream was lost, the
+    /// watcher killed, or the kill marker was there at boot. Refuses every
+    /// order; only the operator clears it, after the kill loop of this
+    /// process confirmed zero open orders.
+    KillLatched,
+    /// The watcher confirmed a mismatch (C-HOLD). Refuses plain orders until
+    /// the operator clears it.
+    WatcherMismatch,
+    /// The venue changed a position on its own, or an execution could not be
+    /// classified (C-HOLD). Refuses plain orders until the operator clears
+    /// it.
+    VenueChange,
 }
 
 impl HoldReason {
@@ -335,6 +347,116 @@ impl HoldReason {
             HoldReason::Reducing => true,
             HoldReason::Resync | HoldReason::InDoubt | HoldReason::Mismatch => true,
             HoldReason::VenueSetting(_) | HoldReason::AccountMode => true,
+            // The kill loop must confirm zero open orders, and a new order of
+            // any kind would keep it from ending (C-HOLD).
+            HoldReason::KillLatched => false,
+            HoldReason::WatcherMismatch | HoldReason::VenueChange => true,
+        }
+    }
+}
+
+/// The holds an operator releases with `clear-hold` (C-HOLD). The names are
+/// the `hold` field of `hold_set` and `hold_cleared`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HoldKind {
+    Kill,
+    WatcherMismatch,
+    VenueChange,
+}
+
+/// Who set a hold of C-HOLD. A kill comes from the private stream, the
+/// watcher or the kill marker; a watcher mismatch names the watcher's
+/// check; a venue change comes from the venue's own executions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum HoldSource {
+    #[serde(rename = "stream")]
+    Stream,
+    #[serde(rename = "watcher")]
+    Watcher,
+    #[serde(rename = "marker")]
+    Marker,
+    #[serde(rename = "venue")]
+    Venue,
+    W1,
+    W2,
+    W3,
+    W4,
+}
+
+/// A check of the watcher that can confirm a mismatch (U19a).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum WatcherCheck {
+    W1,
+    W2,
+    W3,
+    W4,
+}
+
+impl WatcherCheck {
+    pub fn source(self) -> HoldSource {
+        match self {
+            WatcherCheck::W1 => HoldSource::W1,
+            WatcherCheck::W2 => HoldSource::W2,
+            WatcherCheck::W3 => HoldSource::W3,
+            WatcherCheck::W4 => HoldSource::W4,
+        }
+    }
+}
+
+/// The kill latch (C-HOLD). Set once; a later trigger leaves it as it is.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KillLatch {
+    pub since: Ts,
+    pub source: HoldSource,
+    pub note: String,
+    /// Record time of the `kill_loop_ended` of this process. Reset by every
+    /// boot: each process confirms zero open orders again before the latch
+    /// can be cleared.
+    pub confirmed_at: Option<Ts>,
+    /// How that loop ended, with `confirmed_at`. Not written while unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<KillOutcome>,
+}
+
+/// A hold of C-HOLD other than the kill: when and why it was set. Set once;
+/// a later trigger leaves the first note.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HoldNote {
+    pub since: Ts,
+    pub source: HoldSource,
+    pub note: String,
+}
+
+/// How a kill loop ended (C-HOLD, C-KILL).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KillOutcome {
+    /// Zero open orders confirmed and kept for the watch time.
+    Confirmed,
+    /// The gateway has no cancel-all (the simulated venue, Hyperliquid).
+    /// The operator cancels the orders that rest there.
+    Unsupported,
+}
+
+/// Why an operator's `clear-hold` was refused (C-HOLD). The reply text
+/// starts with the code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HoldRefusal {
+    NotHeld,
+    NoteRequired,
+    KillUnconfirmed,
+    VenueChangePending,
+}
+
+impl HoldRefusal {
+    /// The stable code and one sentence for the operator.
+    pub fn text(self) -> &'static str {
+        match self {
+            HoldRefusal::NotHeld => "not_held: that hold is not set",
+            HoldRefusal::NoteRequired => "note_required: the command needs a note",
+            HoldRefusal::KillUnconfirmed => "kill_unconfirmed: the kill loop has not confirmed zero open orders in this process",
+            HoldRefusal::VenueChangePending => "venue_change_pending: the venue's position after the change has not been read yet",
         }
     }
 }

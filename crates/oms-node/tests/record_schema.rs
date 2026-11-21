@@ -83,6 +83,7 @@ impl Run {
 fn schema_1_history(run: &mut Run) {
     run.input(Input::Boot {
         binary: "test".into(),
+        kill_marker: None,
     });
     run.input(Input::Config(Box::new(config())));
     run.venue(VenueInput::Link {
@@ -278,6 +279,7 @@ fn margin_reports_with_and_without_account_mm_recover_to_the_live_state() {
         });
         run.input(Input::Boot {
             binary: "test".into(),
+            kill_marker: None,
         });
         run.input(Input::Config(Box::new(cfg)));
         run.venue(VenueInput::Link {

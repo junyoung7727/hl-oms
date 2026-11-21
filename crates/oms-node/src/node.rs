@@ -119,7 +119,7 @@ pub fn run(cfg: NodeConfig) -> i32 {
     let code = runtime.block_on(async {
         // Step 3: boot and configuration, in that order, both durable.
         if queues
-            .try_push(Lane::Control, CoreMsg::new(Input::Boot { binary: writer_name() }))
+            .try_push(Lane::Control, CoreMsg::new(Input::Boot { binary: writer_name(), kill_marker: None }))
             .is_err()
         {
             return 3;

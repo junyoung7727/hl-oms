@@ -95,7 +95,7 @@ impl Rig {
 
     /// Boot, configure, link up and sync, so that orders are acceptable.
     fn ready(&mut self) {
-        self.push(Input::Boot { binary: "test".into() });
+        self.push(Input::Boot { binary: "test".into(), kill_marker: None });
         assert!(matches!(self.ask(Input::Config(Box::new(config()))), Ok(Reply::Config(Ok(1)))));
         let session = 1;
         self.push(Input::Venue(VenueInput::Link { up: true, session, reason: "t".into() }));

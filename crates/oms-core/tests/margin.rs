@@ -2237,6 +2237,7 @@ fn latch_and_day_base_replay_to_the_same_state() {
     // The process restarts and the link comes back as session 2.
     h.inp(Input::Boot {
         binary: "test".into(),
+        kill_marker: None,
     });
     assert_eq!(
         h.core.margin.day_base,

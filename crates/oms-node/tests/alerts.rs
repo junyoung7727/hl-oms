@@ -232,6 +232,7 @@ impl Rig {
     fn ready(&mut self) {
         self.push(Input::Boot {
             binary: "test".into(),
+            kill_marker: None,
         });
         assert!(matches!(
             self.ask(Input::Config(Box::new(config()))),

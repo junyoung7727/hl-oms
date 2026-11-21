@@ -32,12 +32,13 @@ impl Core {
             out: Output::default(),
         };
         match input {
-            Input::Boot { binary } => tx.boot(binary)?,
+            Input::Boot { binary, kill_marker } => tx.boot(binary, kill_marker.as_deref())?,
             Input::Config(cfg) => tx.config(cfg)?,
             Input::NewOrder(r) => tx.new_order(r)?,
             Input::Cancel(c) => tx.cancel(c)?,
             Input::Operator(cmd) => tx.operator(cmd)?,
             Input::Venue(v) => tx.venue(v)?,
+            Input::Watcher(w) => tx.watcher(w)?,
             Input::Tick => tx.tick()?,
             Input::Storage { low, free_bytes } => {
                 if *low != tx.core.storage_low {
@@ -88,7 +89,7 @@ impl Tx<'_> {
 
     // ---- lifecycle --------------------------------------------------------
 
-    fn boot(&mut self, binary: &str) -> Result<(), CoreFault> {
+    fn boot(&mut self, binary: &str, kill_marker: Option<&str>) -> Result<(), CoreFault> {
         let boot = self.core.boot + 1;
         // A new data directory does not inherit the account's history: fills
         // older than its first start (less a clock margin) are not its
@@ -103,6 +104,11 @@ impl Tx<'_> {
             binary: binary.to_string(),
             fill_floor,
         })?;
+        // The kill marker latches in the boot record itself (C-HOLD): no
+        // order can be decided before it.
+        if let Some(text) = kill_marker {
+            self.latch_kill(HoldSource::Marker, text.to_string())?;
+        }
         for id in self.open_ids() {
             let Some(o) = self.core.orders.get(&id) else { continue };
             let pending_without_result = o.phase == Phase::PendingSend && o.doubt.is_none();
@@ -583,6 +589,16 @@ impl Tx<'_> {
                     Ok("rebased".into())
                 }
             },
+            OperatorCmd::ClearHold { reason, note } => match self.clear_hold_refusal(*reason, note) {
+                Some(refusal) => Err(refusal.text().into()),
+                None => {
+                    self.emit(Event::HoldCleared {
+                        hold: *reason,
+                        note: note.clone(),
+                    })?;
+                    Ok("cleared".into())
+                }
+            },
         };
         self.out.reply = Some(Reply::Operator(reply));
         Ok(())
@@ -625,6 +641,80 @@ impl Tx<'_> {
             return Some(MarginRefusal::NoteRequired);
         }
         None
+    }
+
+    /// Why `clear-hold` cannot be taken now, if it cannot (C-HOLD). There is
+    /// no force option: a kill is released only after the kill loop of
+    /// this process confirmed zero open orders.
+    fn clear_hold_refusal(&self, reason: HoldKind, note: &str) -> Option<HoldRefusal> {
+        let core = &*self.core;
+        let held = match reason {
+            HoldKind::Kill => core.kill.is_some(),
+            HoldKind::WatcherMismatch => core.watcher_mismatch.is_some(),
+            HoldKind::VenueChange => core.venue_change.is_some(),
+        };
+        if !held {
+            return Some(HoldRefusal::NotHeld);
+        }
+        let clear_has_a_note = !note.trim().is_empty();
+        if !clear_has_a_note {
+            return Some(HoldRefusal::NoteRequired);
+        }
+        let kill_unconfirmed = core.kill.as_ref().is_some_and(|k| k.confirmed_at.is_none());
+        if reason == HoldKind::Kill && kill_unconfirmed {
+            return Some(HoldRefusal::KillUnconfirmed);
+        }
+        if reason == HoldKind::VenueChange && !core.venue_change_wait.is_empty() {
+            return Some(HoldRefusal::VenueChangePending);
+        }
+        None
+    }
+
+    /// Latches the kill switch unless it is latched (C-HOLD): a later
+    /// trigger emits nothing and the first note stays. Returns whether this
+    /// call latched it.
+    fn latch_kill(&mut self, source: HoldSource, note: String) -> Result<bool, CoreFault> {
+        if self.core.kill.is_some() {
+            return Ok(false);
+        }
+        self.emit(Event::HoldSet {
+            hold: HoldKind::Kill,
+            source,
+            note,
+        })?;
+        Ok(true)
+    }
+
+    // ---- watcher (C-HOLD) -------------------------------------------------
+
+    fn watcher(&mut self, w: &WatcherInput) -> Result<(), CoreFault> {
+        let reply = match w {
+            // The node refuses an empty detail before the core sees it.
+            WatcherInput::Mismatch { detail, .. } | WatcherInput::Kill { detail } if detail.trim().is_empty() => {
+                Err("bad_request: the detail is empty".to_string())
+            }
+            WatcherInput::Mismatch { check, detail } => {
+                if self.core.watcher_mismatch.is_some() {
+                    Ok("already held".to_string())
+                } else {
+                    self.emit(Event::HoldSet {
+                        hold: HoldKind::WatcherMismatch,
+                        source: check.source(),
+                        note: detail.clone(),
+                    })?;
+                    Ok("held".to_string())
+                }
+            }
+            WatcherInput::Kill { detail } => {
+                if self.latch_kill(HoldSource::Watcher, detail.clone())? {
+                    Ok("latched".to_string())
+                } else {
+                    Ok("already latched".to_string())
+                }
+            }
+        };
+        self.out.reply = Some(Reply::Operator(reply));
+        Ok(())
     }
 
     /// Why `rebase-day` cannot be taken now, if it cannot (C-MARGIN, 기준
@@ -763,6 +853,24 @@ impl Tx<'_> {
                 self.emit(Event::AccountModeNoted {
                     session: *session,
                     mode: mode.clone(),
+                })
+            }
+            VenueInput::KillLoopEnded {
+                outcome,
+                rounds,
+                cancel_all_calls,
+                detail,
+            } => {
+                // Only the first answer of this process to a latch counts.
+                let unconfirmed = self.core.kill.as_ref().is_some_and(|k| k.confirmed_at.is_none());
+                if !unconfirmed {
+                    return Ok(());
+                }
+                self.emit(Event::KillLoopEnded {
+                    outcome: *outcome,
+                    rounds: *rounds,
+                    cancel_all_calls: *cancel_all_calls,
+                    detail: detail.clone(),
                 })
             }
         }

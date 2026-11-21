@@ -156,6 +156,7 @@ impl H {
         let mut h = H::new();
         h.inp(Input::Boot {
             binary: "test".into(),
+            kill_marker: None,
         });
         let out = h.inp(Input::Config(Box::new(cfg)));
         assert!(

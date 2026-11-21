@@ -11,13 +11,22 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum Input {
     /// First input of every process incarnation, issued after replay.
-    Boot { binary: String },
+    Boot {
+        binary: String,
+        /// What the node read at the kill marker path before this input,
+        /// if anything was there or the path could not be examined
+        /// (C-HOLD). Not written when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kill_marker: Option<String>,
+    },
     /// A configuration to activate.
     Config(Box<CoreConfig>),
     NewOrder(NewOrderReq),
     Cancel(CancelReq),
     Operator(OperatorCmd),
     Venue(VenueInput),
+    /// From the watcher, on the admin socket (C-HOLD).
+    Watcher(WatcherInput),
     /// Time has passed. Carries nothing; the time is the record timestamp.
     Tick,
     /// Journal storage headroom, measured by the execution layer.
@@ -96,6 +105,21 @@ pub enum OperatorCmd {
     /// as it is (C-MARGIN, 기준 재설정). For use after a deposit or a
     /// withdrawal. Needs a fresh margin report and a note.
     RebaseDay { note: String },
+    /// Releases one hold of C-HOLD. Needs a note; a kill needs the kill
+    /// loop's confirmation in this process, a venue change the venue's
+    /// position after it.
+    ClearHold { reason: HoldKind, note: String },
+}
+
+/// What the watcher (U19) tells the OMS (C-HOLD).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WatcherInput {
+    /// A check of the watcher confirmed a mismatch: plain orders are held.
+    Mismatch { check: WatcherCheck, detail: String },
+    /// The watcher killed: every order is held, and the gateway runs its
+    /// kill loop.
+    Kill { detail: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -188,6 +212,14 @@ pub enum VenueInput {
         /// What else the gateway could read, for the operator.
         detail: String,
         venue_ts: Ts,
+    },
+    /// The gateway's kill loop ended (C-HOLD, C-KILL): it confirmed zero
+    /// open orders, or the gateway has no cancel-all.
+    KillLoopEnded {
+        outcome: KillOutcome,
+        rounds: u32,
+        cancel_all_calls: u32,
+        detail: String,
     },
 }
 

@@ -892,6 +892,10 @@ impl VenueGateway for Gateway {
         Gateway::query(self, q)
     }
 
+    fn kill(&self, cmd: VenueCommand) {
+        crate::venue::kill_unsupported(&self.input, "hyperliquid", cmd);
+    }
+
     fn spawn_tasks(self: &Arc<Self>, boot: u32) {
         tokio::spawn(self.clone().stream_loop(boot));
         tokio::spawn(self.clone().dead_man_switch());

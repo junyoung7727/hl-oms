@@ -254,7 +254,7 @@ mod tests {
         for _ in 0..50 {
             q.try_push(Lane::Venue, CoreMsg::new(Input::Storage { low: false, free_bytes: 0 }))
                 .ok();
-            q.try_push(Lane::Control, CoreMsg::new(Input::Boot { binary: String::new() }))
+            q.try_push(Lane::Control, CoreMsg::new(Input::Boot { binary: String::new(), kill_marker: None }))
                 .ok();
             q.try_push(Lane::Orders, tick()).ok();
         }

@@ -210,6 +210,57 @@ pub fn hold_condition(
                 Grace::Passing,
             )
         }
+        // The holds of C-HOLD are latches: at once.
+        HoldReason::KillLatched => {
+            let (head, confirmation) = match &core.kill {
+                Some(k) => (
+                    format!("{}, {}", snake(&k.source), kst_us(k.since)),
+                    match (k.confirmed_at, k.outcome) {
+                        (Some(at), Some(KillOutcome::Unsupported)) => format!(
+                            "확인: 이 게이트웨이에는 일괄 취소가 없음({}). 걸린 주문은 운영자가 취소해야 함(omsctl cancel-all)",
+                            kst_us(at)
+                        ),
+                        (Some(at), _) => format!("확인: 킬 루프가 0건을 확인함 {}", kst_us(at)),
+                        (None, _) => "확인: 킬 루프가 아직 0건을 확인하지 않음".to_string(),
+                    },
+                ),
+                None => (String::new(), String::new()),
+            };
+            let note = core.kill.as_ref().map(|k| k.note.as_str()).unwrap_or("");
+            (
+                "hold:kill_latched".to_string(),
+                format!(
+                    "킬 래치({head}). 모든 주문 거절(감소 전용 포함). 포지션은 닫지 않음. 운영자만 해제: omsctl clear-hold --reason kill. 메모: {note}\n{confirmation}"
+                ),
+                Grace::None,
+            )
+        }
+        HoldReason::WatcherMismatch => {
+            let (check, since, note) = match &core.watcher_mismatch {
+                Some(w) => (snake(&w.source), kst_us(w.since), w.note.as_str()),
+                None => (String::new(), String::new(), ""),
+            };
+            (
+                "hold:watcher_mismatch".to_string(),
+                format!(
+                    "워처가 불일치를 확정함({check}, {since}). 일반 주문 거절, 감소 전용은 받음. 운영자 해제: clear-hold --reason watcher_mismatch. 내용: {note}"
+                ),
+                Grace::None,
+            )
+        }
+        HoldReason::VenueChange => {
+            let (since, note) = match &core.venue_change {
+                Some(v) => (kst_us(v.since), v.note.as_str()),
+                None => (String::new(), ""),
+            };
+            (
+                "hold:venue_change".to_string(),
+                format!(
+                    "거래소가 포지션을 바꿈 또는 분류표에 없는 체결({since}). 일반 주문 거절, 감소 전용은 받음. 해제: ack + clear-hold --reason venue_change. 내용: {note}"
+                ),
+                Grace::None,
+            )
+        }
     };
     Some(c)
 }
@@ -558,6 +609,13 @@ impl Alerts {
         }
     }
 
+    /// One message with the prefix, outside the conditions: the kill
+    /// loop's notices (C-KILL, U18b2). The caller sends it only for what is
+    /// durable.
+    pub fn notice(&self, text: &str) {
+        self.common.handle.once(text);
+    }
+
     /// Evaluations made so far (tests wait on it).
     pub fn evaluations(&self) -> u64 {
         self.common.evaluations.load(Ordering::SeqCst)
@@ -682,6 +740,9 @@ mod tests {
             HoldReason::Reducing,
             HoldReason::VenueSetting(x),
             HoldReason::AccountMode,
+            HoldReason::KillLatched,
+            HoldReason::WatcherMismatch,
+            HoldReason::VenueChange,
         ];
         for h in &all {
             match h {
@@ -695,7 +756,10 @@ mod tests {
                 | HoldReason::StorageLow
                 | HoldReason::Reducing
                 | HoldReason::VenueSetting(_)
-                | HoldReason::AccountMode => {}
+                | HoldReason::AccountMode
+                | HoldReason::KillLatched
+                | HoldReason::WatcherMismatch
+                | HoldReason::VenueChange => {}
             }
         }
         all
@@ -758,6 +822,7 @@ mod tests {
             T0,
             &Input::Boot {
                 binary: "test".into(),
+                kill_marker: None,
             },
         )
         .unwrap();
@@ -798,6 +863,7 @@ mod tests {
             let want = match &h {
                 HoldReason::Mismatch | HoldReason::OperatorStrategy => None,
                 HoldReason::OperatorAccount | HoldReason::Reducing => Some(Grace::None),
+                HoldReason::KillLatched | HoldReason::WatcherMismatch | HoldReason::VenueChange => Some(Grace::None),
                 HoldReason::NoConfig
                 | HoldReason::StorageLow
                 | HoldReason::LinkDown
@@ -887,6 +953,9 @@ mod tests {
                 "hold:resync",
                 "hold:operator_account",
                 "hold:storage_low",
+                // U18b1: an unclassified execution also holds plain orders
+                // until the operator clears it (C-HOLD).
+                "hold:venue_change",
                 "halt_strategy:a",
                 "mismatch:unclassified_execution",
             ]
@@ -901,7 +970,7 @@ mod tests {
             assert!(g.text.ends_with("\n근거: 저널 seq 9"), "{}", g.text);
         }
         assert!(got[1].text.contains("acct-note"));
-        assert!(got[3].text.contains("strat-note"));
+        assert!(got[4].text.contains("strat-note"));
 
         // A margin policy with no report while the link is up: margin_stale
         // and the venue setting and account mode not yet told.

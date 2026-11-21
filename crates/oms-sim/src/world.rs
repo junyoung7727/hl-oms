@@ -847,6 +847,9 @@ impl World {
                 let d = self.net_delay();
                 self.schedule(d, Net::CancelArrive { req, epoch: self.epoch, order_id, attempt, client });
             }
+            // No input of the simulation latches the kill switch (C-HOLD),
+            // and the simulated venue has no cancel-all.
+            VenueCommand::Kill { .. } | VenueCommand::KillStop => {}
         }
         Ok(())
     }
@@ -1401,7 +1404,7 @@ impl World {
         self.inflight.clear();
         self.link_up = false;
         self.link_up_at = None;
-        self.feed(Input::Boot { binary: "sim".into() })?;
+        self.feed(Input::Boot { binary: "sim".into(), kill_marker: None })?;
         self.commit()?;
         let d = self.rng.range(100_000, 3_000_000);
         self.schedule(d, Net::LinkUp { epoch: self.epoch });
@@ -1918,7 +1921,7 @@ impl World {
 
     /// Boots the core, activates the configuration and lets the link come up.
     pub fn start(&mut self) -> Result<(), Violation> {
-        self.feed(Input::Boot { binary: "sim".into() })?;
+        self.feed(Input::Boot { binary: "sim".into(), kill_marker: None })?;
         self.feed(Input::Config(Box::new(sim_config(&self.p))))?;
         self.commit()?;
         self.schedule(10_000, Net::LinkUp { epoch: self.epoch });
@@ -1987,7 +1990,7 @@ impl World {
     }
 
     fn run_inner(&mut self) -> Result<(), Violation> {
-        self.feed(Input::Boot { binary: "sim".into() })?;
+        self.feed(Input::Boot { binary: "sim".into(), kill_marker: None })?;
         self.feed(Input::Config(Box::new(sim_config(&self.p))))?;
         self.commit()?;
         self.schedule(10_000, Net::LinkUp { epoch: self.epoch });

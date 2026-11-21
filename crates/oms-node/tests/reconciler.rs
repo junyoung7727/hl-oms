@@ -75,6 +75,7 @@ fn synced_core() -> Core {
         &mut core,
         Input::Boot {
             binary: "test".into(),
+            kill_marker: None,
         },
     );
     feed(&mut core, Input::Config(Box::new(config())));
