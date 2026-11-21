@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `e9a615b68627b060`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `71584b8ecf809bfb`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
-주장 79건: 통과 0, 실패 0, 미실행 12, 이전 버전 결과 67.
+주장 80건: 통과 0, 실패 0, 미실행 13, 이전 버전 결과 67.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -86,6 +86,7 @@
 | V-BYBIT-READ-1 | Bybit 게이트웨이의 조회 일곱 가지는 읽기만 하고, 통째로 읽을 수 있는 응답만 입력으로 넘긴다. 쪽 넘김은 커서가 비고 쪽이 덜 찼을 때만 끝으로 보고, 다 찬 쪽에 커서가 없거나 커서가 그대로이거나 쪽이 20을 넘으면 스냅숏(열린 주문, 포지션, 증거금 보고)을 넘기지 않는다. 주문 상태는 우리 orderLinkId의 행만 보고 realtime, 기간 없는 주문 내역, 코어가 주문을 받은 시각 − 1분부터 7일의 주문 내역 셋 다에 없을 때만 StatusNotFound(첫 조회 전 시각)를 낸다. 체결은 since − 2분부터 7일 이하의 창으로 읽고(창 사이 1ms 겹침, 중복 키는 한 번), 한 번에 30쪽까지 읽고 다 읽은 창까지만 선언한 채 멈추며(오류 아님), 창을 다 읽은 뒤에만 그 끝 직전까지 FillsSynced를 내며, 끝을 알 수 없는 창은 반으로 나누고, 읽을 수 없는 행에서 멈춘다. 실행 행은 execType 표 하나로 Fill(우리 주문이면 order_id, 아니면 외부 체결), Funding, PositionChange(adl, takeover, delivery, settle), UnclassifiedExecution이 된다. 증거금 보고는 totalEquity, positionIM, 계좌 증거금 모드, 정수 레버리지, maxLeverage로 만들고 한 값이라도 못 읽으면 MarginReportInvalid다. 이 코드에는 주문 생성·정정·단건 취소 요청이 없다. 설정은 Bybit에서 REGULAR_MARGIN 밖의 계좌 모드 허용을 거절한다 | 단위 | 미실행 | `cargo test -p oms-node --lib venue::bybit` |
 | V-BYBIT-STREAM-1 | Bybit 게이트웨이는 시작 확인이 통과하고 막힘이 없을 때만 비공개 스트림에 접속하고, auth(GET/realtime + 만료 시각의 서명, 만료 = 지금 + recv_window)가 확인된 뒤 order.linear·execution.linear를 구독하며, 구독이 확인된 뒤에만 Link를 올린다. 접속마다 세션 번호가 커진다. ping 뒤 ping 간격 안에 pong이 없거나(코어 입력 큐를 기다린 시간은 빼고), 소켓이 닫히거나, 읽을 수 없는 행이나 symbol 없는 행이 오거나, 연결 중 막힘(IP 변경, 키 거부, IP 차단)이 생기면 Link를 내리고, 키 거부와 IP 변경이 아니면 다시 붙는다. 인증 거부, 조회의 키 거부 코드, IP 변경 뒤에는 재시작까지 접속도 요청도 하지 않는다. HTTP 403(REST든 스트림 업그레이드든) 뒤에는 멈춤 시간 동안 REST 요청과 스트림 접속이 없고, 끝나면 다시 붙는다. 구독 거부와 응답 없는 인증은 키 거부가 아니라 다시 시도하고, 인증 응답 전에는 구독을 보내지 않는다. 연결이 올라가 첫 pong을 받았으면 재연결 기다림은 처음 값으로 돌아가고, pong 전에 끊기면 기다림이 계속 는다. 설정한 종목의 주문 행은 OrderStatus(Stream), 실행 행은 실행 분류표를 거쳐 받은 시각이 실린 입력이 되고 다른 종목의 행은 넘기지 않는다. 주문과 취소는 V-BYBIT-ORDERS-1 | 통합 | 미실행 | `cargo test -p oms-node --lib venue::bybit` |
 | V-BYBIT-ORDERS-1 | Bybit 게이트웨이는 주문과 취소마다 결과 하나를 돌려주고 REST 요청을 많아야 하나 보내며 다시 보내지 않는다. 생성은 orderLinkId = 우리 고객 주문번호, category linear, Limit, 단방향(positionIdx 0)으로 보내고 보낸 본문에 서명한다. 요청 시각 + recv_window + 1초가 expires_at보다 늦거나, 막힘이 있거나, 거래하지 않는 종목이거나, 접속이 되지 않으면 보내지 않고 NotSent다. retCode 0은 생성이면 orderId가 있을 때만 Placed(Open, 누적 수량 없음), 취소면 Confirmed. 오류 문서의 0 아닌 코드는 UNKNOWN_CODES가 아니면 Rejected, 그 밖의 모든 응답(문서에 없는 코드, 2xx가 아닌 HTTP, 시간 초과, 끊김, 읽을 수 없는 본문)은 Unknown이다. HTTP 403과 retCode 10018은 IP 차단 멈춤을, HTTP 401과 키 거부 retCode는 키 거부를 건다. 요청은 자리를 잡은 때부터 응답 + 1초까지(응답이 없으면 요청 시각 + recv_window + 1초 + 1초까지) 세므로 보낸 때와 응답(또는 마지막 도착 가능 시각) 사이 어디에 도착하든 어느 1초에도 주문은 8개, 주문과 취소는 합쳐 10개를 넘지 않고, 주문이 8개를 다 써도 취소는 바로 나가며, 차면 기다린다(버리지 않는다). 아무 바이트도 나가지 않은 요청은 자리를 바로 돌려준다. 시작 확인은 설정의 px_tick·qty_step이 거래소 tickSize·qtyStep의 배수가 아니면 막고, 로컬 시계가 거래소보다 500ms 넘게 앞설 수 있으면(시작 확인 전, IP 확인 주기마다, 막힌 동안 10초마다, 왕복 250ms 넘는 측정은 판정 안 함) 생성만 막고 취소와 스트림은 막지 않는다 | 통합 | 미실행 | `cargo test -p oms-core --lib rate && cargo test -p oms-node --lib venue::bybit` |
+| V-BYBIT-TRADE-1 | Bybit 게이트웨이는 주문과 취소를 WS Trade(/v5/trade)로 보내고, REST로는 WS Trade 연결 작업이 그 요청의 아무 바이트도 쓰지 않았을 때(인증된 연결 없음, 쓰기 전 막힘)만, 막힘을 다시 본 뒤 같은 한도 자리와 같은 요청 시각으로 보낸다. 요청은 두 경로를 합쳐 많아야 한 번 나가고 한도 자리는 경로와 상관없이 하나다(1초 안의 9번째 생성은 경로가 섞여도 기다린다). 요청은 reqId(생성 c + 고객 주문번호, 취소 x + 36진 시도 번호 + 고객 주문번호, 36자 이하), header의 X-BAPI-TIMESTAMP·X-BAPI-RECV-WINDOW, op, REST 본문 하나인 args로 되어 있다. 응답은 REST와 같은 표로 분류하고, 20006·10019·10429는 결과 불명, 10019는 연결을 닫고 다시 열며, 10403과 10018은 IP 차단 멈춤을, 키 거부 코드는 키 거부를 건다. 쓴 요청에 request_timeout_ms 안에 응답이 없거나 그 사이 연결이 내려가면(pong 없음, 끊김, 막힘) 결과 불명이고 어느 경로로도 다시 보내지 않으며, 한도는 요청 시각 + recv_window + 1초 + 1초까지 센다. 늦은 응답은 버린다. 같은 reqId가 기다리는 중이면 다시 쓰지 않는다. WS Trade 연결은 막힘이 없을 때만 IPv4로 접속하고, auth(비공개 스트림의 서명)의 retCode가 0일 때만 올라가며, 0이 아니면 재시작까지 키 거부, 업그레이드의 HTTP 403은 IP 차단 멈춤이다. ping 뒤 간격 안에 pong이 없으면 내려가고, 재연결 기다림은 첫 pong을 받은 연결 뒤에만 처음 값으로 돌아간다. WS Trade는 Link를 움직이지 않는다 | 통합 | 미실행 | `cargo test -p oms-node --lib venue::bybit` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -1859,7 +1860,7 @@
 - 판정 기준과 근거: 코어에 간 결과(종류, 이유, venue_oid, 상태), 가짜 서버가 받은 요청의 경로·개수·본문·서명 머리글, 막힘 이유, 한도 규칙이 돌려준 시각, 지연(0–0.4초)과 임의 도착의 일정 2만 번에서 도착 기준 어느 1초든 주문 ≤ 8·전체 ≤ 10
 - 재현: `cargo test -p oms-core --lib rate && cargo test -p oms-node --lib venue::bybit`
 - 뒷받침하는 것: C-GW(Bybit 열: G-1, G-2, G-3, G-4, G-5, 요청 한도), ADR-028 §7d
-- 확인하지 않은 범위: 실제 Bybit 주문 응답과 코드의 실제 뜻(T6, testnet은 U-01 허가 뒤), WS Trade와 REST의 한도 공유(T8), WS Trade 경로(U17b), 참조 가격과 노드 끝에서 끝까지(U17c), 저널 flush 실패 때 요청 0(U17c, 커밋 단계가 명령을 내구화 뒤에만 넘기는 것은 V-COMMIT 계열이 가상 거래소로 보인다), 감시자·다른 프로세스가 같은 UID로 보내는 요청(세지 않는다), 접속 단계 오류가 바이트를 내보내지 않았다는 가정(A-08), 접수된 취소가 적용되지 않는 경우(U18b·U19), 운영 중 틱·수량 단위 변경
+- 확인하지 않은 범위: 실제 Bybit 주문 응답과 코드의 실제 뜻(T6, testnet은 U-01 허가 뒤), WS Trade와 REST의 한도 공유(T8), WS Trade 경로(V-BYBIT-TRADE-1), 참조 가격과 노드 끝에서 끝까지(U17c), 저널 flush 실패 때 요청 0(U17c, 커밋 단계가 명령을 내구화 뒤에만 넘기는 것은 V-COMMIT 계열이 가상 거래소로 보인다), 감시자·다른 프로세스가 같은 UID로 보내는 요청(세지 않는다), 접속 단계 오류가 바이트를 내보내지 않았다는 가정(A-08), 접수된 취소가 적용되지 않는 경우(U18b·U19), 운영 중 틱·수량 단위 변경
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
@@ -1890,4 +1891,44 @@
 | `node-unit/venue::bybit::gateway::tests::an_order_and_a_cancel_each_go_out_once_over_rest_and_get_one_result` | 미실행 |  |
 | `node-unit/venue::bybit::gateway::tests::nothing_goes_out_while_blocked_or_for_an_untraded_symbol` | 미실행 |  |
 | `node-unit/venue::bybit::checks::tests::steps_off_the_venue_steps_block_and_unreadable_steps_are_unchecked` | 미실행 |  |
+
+## V-BYBIT-TRADE-1 — Bybit 게이트웨이는 주문과 취소를 WS Trade(/v5/trade)로 보내고, REST로는 WS Trade 연결 작업이 그 요청의 아무 바이트도 쓰지 않았을 때(인증된 연결 없음, 쓰기 전 막힘)만, 막힘을 다시 본 뒤 같은 한도 자리와 같은 요청 시각으로 보낸다. 요청은 두 경로를 합쳐 많아야 한 번 나가고 한도 자리는 경로와 상관없이 하나다(1초 안의 9번째 생성은 경로가 섞여도 기다린다). 요청은 reqId(생성 c + 고객 주문번호, 취소 x + 36진 시도 번호 + 고객 주문번호, 36자 이하), header의 X-BAPI-TIMESTAMP·X-BAPI-RECV-WINDOW, op, REST 본문 하나인 args로 되어 있다. 응답은 REST와 같은 표로 분류하고, 20006·10019·10429는 결과 불명, 10019는 연결을 닫고 다시 열며, 10403과 10018은 IP 차단 멈춤을, 키 거부 코드는 키 거부를 건다. 쓴 요청에 request_timeout_ms 안에 응답이 없거나 그 사이 연결이 내려가면(pong 없음, 끊김, 막힘) 결과 불명이고 어느 경로로도 다시 보내지 않으며, 한도는 요청 시각 + recv_window + 1초 + 1초까지 센다. 늦은 응답은 버린다. 같은 reqId가 기다리는 중이면 다시 쓰지 않는다. WS Trade 연결은 막힘이 없을 때만 IPv4로 접속하고, auth(비공개 스트림의 서명)의 retCode가 0일 때만 올라가며, 0이 아니면 재시작까지 키 거부, 업그레이드의 HTTP 403은 IP 차단 멈춤이다. ping 뒤 간격 안에 pong이 없으면 내려가고, 재연결 기다림은 첫 pong을 받은 연결 뒤에만 처음 값으로 돌아간다. WS Trade는 Link를 움직이지 않는다
+
+- 상태: **미실행**
+- 왜 중요한가: 주문 경로가 둘이 되어도 같은 주문이 두 번 놓이지 않고(G-3), 결과를 모르는 요청을 거부나 미전송으로 보지 않으며(G-2), 막힘·차단·거부된 키로 요청을 보내지 않고, 두 경로를 합쳐 거래소 요청 한도를 넘지 않는다는 전제
+- 수준: 통합
+- 전제와 범위: loopback 가짜 WS Trade 서버(auth·pong·주문 응답을 시험이 고른다: 응답 코드, 침묵, 요청 뒤 끊음, ping 무응답, auth 거부, 업그레이드 403, auth 뒤 읽을 수 없는 메시지)와 가짜 비공개 스트림·가짜 HTTP 서버, 가짜 연결 작업(orders 시험), 막힘을 시험이 정하는 가짜 Host(연결 작업 시험), 짧게 줄인 시간, 시험 23개
+- 실제 구성요소: venue::bybit::{trade, orders, answer, gateway}(연결 작업, 경로 고르기, 한도, 분류), oms-core::rate, venue::start(명령 반복)
+- 모의·시뮬레이션: Bybit WS Trade와 REST(문서 모양의 손으로 쓴 JSON), 시간(ping 150ms, 요청 제한 300ms 또는 5초, 멈춤 600ms)
+- 주입한 장애: WS Trade 끊김과 복귀, 응답 없는 요청 셋, ping 무응답, 요청을 읽은 뒤 끊김, 20006, 10019, 10429, 10016, 110072, 110007, 10010, 10018, 10403, orderId 없는 접수, 늦은 응답, 기다리는 요청 없는 키 거부 응답, 줄 선 요청 앞의 10403, auth 거부, 업그레이드 403, pong 전에 거듭 끊김, 첫 확인과 REST 사이에 생긴 막힘, 쓰기 직전에 생긴 막힘, 기다리는 중인 reqId, 두 경로에 걸친 1초 9번째 생성, 응답 없는 WS 요청 8개
+- 판정 기준과 근거: 코어에 간 결과(종류, 이유, venue_oid), 가짜 WS Trade가 받은 메시지(reqId, header, op, args, 주문마다 생성 수)와 가짜 HTTP가 받은 요청의 경로·개수, 막힘 이유, 연결 수와 재연결 간격, 9번째 생성이 나간 시각, Link 입력 수
+- 재현: `cargo test -p oms-node --lib venue::bybit`
+- 뒷받침하는 것: C-GW(Bybit 열: G-1, G-2, G-3, 주문 경로, 요청 한도), ADR-028 §7e
+- 확인하지 않은 범위: 실제 WS Trade(testnet은 U-01 허가 뒤): 응답의 실제 모양(data, header, connId), 실패한 auth와 pong의 실제 모양, 무응답 때 거래소의 동작, reqId 중복의 범위와 기간, WS Trade의 요청 시각 검사가 REST와 같은지(G-4의 가정, ADR-028 §8), WS Trade와 REST의 한도 공유(T8). TLS 접속(시험은 ws://). 노드 끝에서 끝까지(U17c).상태 API의 WS Trade 상태(이 판에 없음)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `node-unit/venue::bybit::trade::tests::req_ids_are_unique_per_request_and_fit_the_venue_limit` | 미실행 |  |
+| `node-unit/venue::bybit::trade::tests::a_request_carries_its_id_time_window_op_and_the_rest_body` | 미실행 |  |
+| `node-unit/venue::bybit::trade::tests::the_auth_message_is_the_private_stream_signature` | 미실행 |  |
+| `node-unit/venue::bybit::trade::tests::frames_are_read_by_their_documented_fields` | 미실행 |  |
+| `node-unit/venue::bybit::orders::tests::a_request_goes_over_ws_trade_when_it_is_up_and_not_over_rest` | 미실행 |  |
+| `node-unit/venue::bybit::orders::tests::a_request_not_written_goes_over_rest_once_unless_a_block_came` | 미실행 |  |
+| `node-unit/venue::bybit::orders::tests::a_written_request_without_an_answer_is_unknown_and_not_sent_again` | 미실행 |  |
+| `node-unit/venue::bybit::orders::tests::ws_answers_have_the_rest_classes_and_their_effects` | 미실행 |  |
+| `node-unit/venue::bybit::orders::tests::the_ninth_create_in_a_second_waits_across_both_paths` | 미실행 |  |
+| `node-unit/venue::bybit::orders::tests::a_ws_request_without_an_answer_counts_until_its_last_arrival_plus_a_second` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::orders_go_over_ws_trade_when_it_is_up_over_rest_while_it_is_down_and_back` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::a_silent_ws_trade_makes_every_unanswered_request_unknown_and_nothing_is_sent_again` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::a_ws_trade_that_stops_answering_pings_makes_its_pending_request_unknown` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::a_connection_that_drops_after_reading_the_request_makes_it_unknown` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::answers_20006_and_10019_are_unknown_and_10019_reopens_the_connection` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::a_late_answer_is_dropped` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::a_refused_ws_trade_auth_rejects_the_key_until_the_restart` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::a_ws_ip_limit_answer_starts_the_ban_pause` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::a_403_on_the_ws_trade_upgrade_pauses_every_request` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::ws_trade_reconnect_waits_grow_until_a_pong_then_start_over` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::the_task_writes_nothing_under_a_block_and_no_reqid_twice` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::the_task_applies_a_ban_or_key_answer_before_its_next_write` | 미실행 |  |
+| `node-unit/venue::bybit::tests::endpoints_are_the_documented_hosts` | 미실행 |  |
 
