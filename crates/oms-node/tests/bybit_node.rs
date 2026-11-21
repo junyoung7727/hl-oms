@@ -532,10 +532,15 @@ fn order_op(key: &str, ttl_ms: u64) -> Op {
 /// Test 1. Before any ticker an order with a price band is refused
 /// (`RefPriceUnavailable`) and no create leaves. After a ticker snapshot
 /// the same request is accepted and goes over WS Trade; when the fake WS
-/// Trade reads the `order.create`, the journal files on disk already hold
-/// the order's acceptance. One create in total, and the order is working.
+/// Trade reads the `order.create`, the journal files on disk hold the
+/// order's acceptance. One create in total, and the order is working.
+///
+/// The journal check does not prove the order of release: the record
+/// reaches the file faster than the round trip, so a send before the
+/// write would pass it too. Test 2 proves that nothing leaves before the
+/// record is durable.
 #[test]
-fn an_order_waits_for_the_reference_price_and_leaves_only_after_its_record() {
+fn an_order_waits_for_the_reference_price_and_goes_out_once() {
     let seen: Arc<Mutex<Vec<(String, bool)>>> = Arc::default();
     let data: Arc<Mutex<Option<PathBuf>>> = Arc::default();
     let on_order: OnOrder = {

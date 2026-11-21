@@ -990,6 +990,9 @@ mod tests {
         /// `req_id`, and the pong is the public linear shape (`op = "ping"`,
         /// `ret_msg = "pong"`, F20 2.10).
         public: bool,
+        /// The public stream answers only this many subscribe requests of a
+        /// connection; the rest get no answer.
+        subscribe_answers: usize,
     }
 
     /// How the fake WS Trade answers the next order request. With an empty
@@ -1159,6 +1162,7 @@ mod tests {
         script: Arc<Mutex<std::collections::VecDeque<Script>>>,
     ) {
         let (mut write, mut read) = ws.split();
+        let mut subscribes = 0usize;
         loop {
             tokio::select! {
                 m = read.next() => {
@@ -1193,8 +1197,11 @@ mod tests {
                             _ => None,
                         }
                     } else if m.public {
+                        if v["op"] == "subscribe" {
+                            subscribes += 1;
+                        }
                         match v["op"].as_str() {
-                            Some("subscribe") if m.subscribe != Reply::Silent => Some(json!({"success": m.subscribe == Reply::Ok, "ret_msg": if m.subscribe == Reply::Ok { "" } else { "error:handler not found" }, "conn_id": "c", "req_id": v["req_id"], "op": "subscribe"})),
+                            Some("subscribe") if m.subscribe != Reply::Silent && subscribes <= m.subscribe_answers => Some(json!({"success": m.subscribe == Reply::Ok, "ret_msg": if m.subscribe == Reply::Ok { "" } else { "error:handler not found" }, "conn_id": "c", "req_id": v["req_id"], "op": "subscribe"})),
                             Some("ping") if m.pong => Some(json!({"success": true, "ret_msg": "pong", "conn_id": "c", "req_id": "", "op": "ping"})),
                             Some("ping") => {
                                 unanswered.fetch_add(1, Ordering::SeqCst);
@@ -1245,6 +1252,7 @@ mod tests {
         garbage: false,
         trade: false,
         public: false,
+        subscribe_answers: usize::MAX,
     };
 
     fn cfg() -> BybitConfig {
@@ -2930,6 +2938,95 @@ mod tests {
         r.until("a reference price", |r| ref_prices(r).len() == 1).await;
         tokio::time::sleep(timing().ping * 3).await;
         assert_eq!(public.accepted(), n);
+    }
+
+    /// A subscribe request with no answer ends the connection at the end of
+    /// the handshake time, even while pings are answered: a connection
+    /// without its subscription would never bring a price.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_unanswered_ticker_subscription_ends_the_connection_after_the_handshake_time() {
+        let api = rest_venue("REGULAR_MARGIN");
+        let ws = FakeWs::start(GOOD).await;
+        let public = FakeWs::start_public(Mode {
+            subscribe: Reply::Silent,
+            ..GOOD
+        })
+        .await;
+        let r = rig_public(&api, &ws, &public, timing());
+        r.until("the first connection", |_| public.accepted() >= 1).await;
+        let first = Instant::now();
+        r.until("a second connection", |_| public.accepted() >= 2).await;
+        assert!(
+            first.elapsed() >= timing().handshake - Duration::from_millis(100),
+            "the first connection ended after {:?}, before the handshake time",
+            first.elapsed()
+        );
+        assert!(
+            public.texts(0).iter().any(|t| t.contains("\"ping\"")),
+            "the first connection did not live past a ping"
+        );
+        assert_eq!(r.block(), None);
+    }
+
+    /// Twelve symbols: the first request of ten is confirmed, the second
+    /// gets no answer. Answered pings do not keep the connection.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn one_unanswered_subscribe_request_of_two_ends_the_connection() {
+        let public = FakeWs::start_public(Mode {
+            subscribe_answers: 1,
+            ..GOOD
+        })
+        .await;
+        let symbols: Vec<String> = (0..12).map(|i| format!("S{i:02}USDT")).collect();
+        let queues = Arc::new(InputQueues::new(16, 16, 16));
+        let conn = ticker::Conn {
+            url: public.url.clone(),
+            symbols,
+            timing: timing(),
+            input: VenueInputTx::new(queues.clone()),
+        };
+        tokio::spawn(ticker::run(Arc::new(OpenHost), conn));
+        let start = Instant::now();
+        while public.accepted() < 2 && start.elapsed() < Duration::from_secs(4) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(public.accepted() >= 2, "the connection stayed with one subscribe unanswered");
+        assert_eq!(public.texts(0).iter().filter(|t| t.contains("\"subscribe\"")).count(), 2);
+        assert!(public.texts(0).iter().any(|t| t.contains("\"ping\"")));
+        queues.close();
+    }
+
+    /// A ticker connection that fails before its first pong keeps the
+    /// reconnect waits growing, as on the private stream.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_ticker_connection_that_fails_before_its_first_pong_keeps_the_waits_growing() {
+        let api = rest_venue("REGULAR_MARGIN");
+        let ws = FakeWs::start(GOOD).await;
+        let public = FakeWs::start_public(Mode {
+            garbage: true,
+            ..GOOD
+        })
+        .await;
+        let t = Timing {
+            backoff_max: Duration::from_millis(1000),
+            ..timing()
+        };
+        let _r = rig_public(&api, &ws, &public, t);
+        let start = Instant::now();
+        while public.accepted() < 1 && start.elapsed() < Duration::from_secs(4) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let first = Instant::now();
+        while public.accepted() < 6 && first.elapsed() < Duration::from_secs(4) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(public.accepted() >= 6);
+        // Waits of 20, 40, 80, 160, 320 ms between the six connections.
+        assert!(
+            first.elapsed() >= Duration::from_millis(500),
+            "six connections in {:?}: the waits started over each time",
+            first.elapsed()
+        );
     }
 
     /// No pong within the ping interval ends the connection; the public
