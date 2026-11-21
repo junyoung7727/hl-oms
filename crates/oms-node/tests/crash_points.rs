@@ -452,3 +452,48 @@ fn a_flush_failure_sends_one_fatal_alert_and_nothing_of_the_batch() {
     }
     assert!(env.log_tail(10).contains("alerts delivered before the exit"), "{}", env.log_tail(10));
 }
+
+/// C-ALERT, review S1. The first journal flush after the start (the Boot
+/// record, `OMS_CRASH_ON=boot`) fails, before the configuration is active.
+/// The fatal stop exits with status 2, not 3, and the exit flush delivers
+/// exactly one fatal message; no start notice was ever due.
+#[test]
+fn a_flush_failure_at_startup_exits_2_and_sends_the_fatal_message() {
+    let f = http_fake::FakeHttp::start(http_fake::Answer::Reply(200, r#"{"ok":true,"result":{}}"#.into()));
+    let mut env = Env::new("alert-fatal-boot");
+    with_alerts(&mut env, &f);
+    env.node_env.extend(crash_on("sync_error_after_write", "boot"));
+    env.start_node();
+    assert_eq!(env.wait_exit(Duration::from_secs(25)), Some(2), "{}", env.log_tail(10));
+    let all = telegram_texts(&f);
+    assert_eq!(all.len(), 1, "{all:?}");
+    assert!(all[0].starts_with("[OMS P1] sim "), "{}", all[0]);
+    assert!(all[0].contains("치명 종료: commit failed: ") && all[0].contains("노드가 멈춤(exit 2)"), "{}", all[0]);
+    assert!(!all[0].contains("OMS 시작"), "{}", all[0]);
+    assert!(env.log_tail(10).contains("alerts delivered before the exit"), "{}", env.log_tail(10));
+}
+
+/// C-ALERT, review N5. Exit 3 after the configuration is active (here the
+/// trading socket cannot be bound: its directory does not exist) sends one
+/// start-failure notice with the error kind only, no path and no token,
+/// and the exit waits for its delivery.
+#[test]
+fn an_exit_3_after_activation_sends_one_start_failure_notice() {
+    let f = http_fake::FakeHttp::start(http_fake::Answer::Reply(200, r#"{"ok":true,"result":{}}"#.into()));
+    let mut env = Env::new("alert-exit3");
+    with_alerts(&mut env, &f);
+    env.extra_api = "socket = \"no-such-dir/oms.sock\"".into();
+    env.start_node();
+    assert_eq!(env.wait_exit(Duration::from_secs(25)), Some(3), "{}", env.log_tail(10));
+    assert!(env.log_tail(10).contains("cannot open the trading socket"), "{}", env.log_tail(10));
+    let all = telegram_texts(&f);
+    let failed: Vec<&String> = all.iter().filter(|t| t.contains("OMS 시작 실패")).collect();
+    assert_eq!(failed.len(), 1, "{all:?}");
+    assert!(failed[0].starts_with("[OMS P1] sim ") && failed[0].ends_with("\nOMS 시작 실패(exit 3): trading_socket"), "{}", failed[0]);
+    // Only the start notice may have gone out before it.
+    for t in &all {
+        assert!(t.contains("OMS 시작 실패") || t.contains("OMS 시작 (boot 1, config 1)"), "{t}");
+        assert!(!t.contains("no-such-dir") && !t.contains("oms.sock") && !t.contains("ABCdef") && !t.contains("telegram.json"), "{t}");
+    }
+    assert!(env.log_tail(10).contains("alerts delivered before the exit"), "{}", env.log_tail(10));
+}

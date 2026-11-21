@@ -307,6 +307,12 @@ pub fn fatal_text(reason: &str, durable_seq: u64) -> String {
     )
 }
 
+/// The start-failure notice (exit 3 after the configuration is active): the
+/// error kind only, no path and no token.
+pub fn start_failure_text(kind: &str) -> String {
+    format!("OMS 시작 실패(exit 3): {kind}")
+}
+
 /// The evaluator's pace and the exit flush.
 #[derive(Clone, Copy, Debug)]
 pub struct Settings {
@@ -340,6 +346,8 @@ struct Common {
     /// evaluated from now on.
     active: AtomicBool,
     fatal_sent: AtomicBool,
+    /// The kind of a start-up failure after activation (exit 3).
+    start_failure: Mutex<Option<&'static str>>,
     stop: AtomicBool,
     evaluations: AtomicU64,
 }
@@ -487,6 +495,7 @@ impl Alerts {
             gateway_block: Mutex::new(None),
             active: AtomicBool::new(false),
             fatal_sent: AtomicBool::new(false),
+            start_failure: Mutex::new(None),
             stop: AtomicBool::new(false),
             evaluations: AtomicU64::new(0),
         });
@@ -515,6 +524,14 @@ impl Alerts {
     /// sends the start notice and the conditions that hold.
     pub fn activate(&self) {
         self.common.active.store(true, Ordering::SeqCst);
+    }
+
+    /// The node is about to exit with 3 after a start-up failure of `kind`
+    /// (`trading_socket`, ...); [`Alerts::finish`] tells it.
+    pub fn start_failed(&self, kind: &'static str) {
+        if let Ok(mut k) = self.common.start_failure.lock() {
+            *k = Some(kind);
+        }
     }
 
     /// The gateway's block view, once the gateway runs (Bybit only).
@@ -546,21 +563,33 @@ impl Alerts {
         }
     }
 
-    /// At the exit, after the drain: stops the evaluator, queues the stop
-    /// notice (code 0) or the fatal message (code 2), and waits up to
-    /// `exit_flush` for delivery. Best effort: what is not delivered by then
-    /// is lost. Returns whether everything was delivered.
+    /// At the exit, after the drain: stops the evaluator, queues the fatal
+    /// message (the latch is tripped, whatever the code), the stop notice
+    /// (code 0) or the start-failure notice (code 3 after activation), and
+    /// waits up to `exit_flush` for delivery. Exit 3 before activation is
+    /// silent. Best effort: what is not delivered by then is lost. Returns
+    /// whether everything was delivered.
     pub fn finish(&self, code: i32) -> bool {
         self.stop_thread();
         match code {
+            _ if self.common.fatal.is_tripped() => {
+                self.common.fatal_notice();
+            }
             0 => {
                 let open = self.common.published.read().core.open.len();
                 self.common.handle.once(&format!(
                     "OMS 정상 종료. 걸린 주문 {open}개는 거래소에 남음"
                 ));
             }
-            2 => {
-                self.common.fatal_notice();
+            3 if self.common.active.load(Ordering::SeqCst) => {
+                let kind = self
+                    .common
+                    .start_failure
+                    .lock()
+                    .ok()
+                    .and_then(|k| *k)
+                    .unwrap_or("unknown");
+                self.common.handle.once(&start_failure_text(kind));
             }
             _ => return false,
         }

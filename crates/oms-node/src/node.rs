@@ -16,9 +16,11 @@
 //! let the core and the commit stage drain, write a final snapshot, exit 0.
 //! Open orders are left at the venue. A fatal condition (journal failure,
 //! core fault) releases nothing further and exits with status 2, also when
-//! it happens during the drain. A panic aborts the process (SIGABRT).
-//! Before either exit the alerts queue the stop notice or the fatal message
-//! and wait up to `exit_flush_ms` for delivery.
+//! it happens during the drain or before the configuration is active. A
+//! panic aborts the process (SIGABRT). Before either exit the alerts queue
+//! the stop notice or the fatal message and wait up to `exit_flush_ms` for
+//! delivery. A start-up failure (exit 3) after the configuration is active
+//! queues a start-failure notice with the error kind and waits the same.
 
 use crate::alerts::{self, Alerts};
 use crate::config::{NodeConfig, VenueConfig};
@@ -146,6 +148,14 @@ pub fn run(cfg: NodeConfig) -> i32 {
             let p = published.read();
             (p.core.boot, p.core.instance_id)
         };
+        // A start-up failure from here on is told (exit 3, the error kind
+        // only: no path, no token).
+        let start_failed = |kind: &'static str| {
+            if let Some(a) = &alerts {
+                a.start_failed(kind);
+            }
+            3
+        };
 
         // Step 4: gateway, reconciler, timer, storage monitor.
         let ports = GatewayPorts {
@@ -183,7 +193,7 @@ pub fn run(cfg: NodeConfig) -> i32 {
                     Ok(name) => (name, <venue::hyperliquid::Gateway as VenueGateway>::WIRE_ID, None),
                     Err(e) => {
                         error!("cannot start the Hyperliquid gateway", "error": e);
-                        return 3;
+                        return start_failed("hyperliquid_gateway");
                     }
                 }
             }
@@ -207,7 +217,7 @@ pub fn run(cfg: NodeConfig) -> i32 {
                     }
                     Err(e) => {
                         error!("cannot start the Bybit gateway", "error": e);
-                        return 3;
+                        return start_failed("bybit_gateway");
                     }
                 }
             }
@@ -279,14 +289,14 @@ pub fn run(cfg: NodeConfig) -> i32 {
             Ok(l) => l,
             Err(e) => {
                 error!("cannot open the trading socket", "error": e);
-                return 3;
+                return start_failed("trading_socket");
             }
         };
         let admin = match server::bind(&cfg.admin_socket_path(), 0o600) {
             Ok(l) => l,
             Err(e) => {
                 error!("cannot open the admin socket", "error": e);
-                return 3;
+                return start_failed("admin_socket");
             }
         };
         if !cfg.http.listen.is_empty() {
@@ -310,7 +320,7 @@ pub fn run(cfg: NodeConfig) -> i32 {
             Ok(s) => s,
             Err(e) => {
                 error!("cannot install the signal handler", "error": e.to_string());
-                return 3;
+                return start_failed("signal_handler");
             }
         };
         let code = tokio::select! {
@@ -334,8 +344,9 @@ pub fn run(cfg: NodeConfig) -> i32 {
     }
     let _ = pipe.snapshot_thread.join();
     // The drain itself can fail (a write error while the last queued inputs
-    // are committed). That is not a clean stop.
-    let code = if code == 0 && fatal.is_tripped() { 2 } else { code };
+    // are committed), and so can the start (the Boot or Config flush, seen
+    // as a missing reply, code 3). Any fatal stop exits with 2.
+    let code = if fatal.is_tripped() { 2 } else { code };
 
     if code == 0 {
         // A final snapshot of the durable state shortens the next recovery.
@@ -373,8 +384,9 @@ pub fn run(cfg: NodeConfig) -> i32 {
     } else {
         error!("stopped after a fatal condition", "reason": fatal.reason(), "code": code);
     }
-    // The stop notice or the fatal message, then up to exit_flush_ms for
-    // delivery. `/api/status` still answers meanwhile, with `fatal` set.
+    // The stop notice, the fatal message or the start-failure notice, then
+    // up to exit_flush_ms for delivery. `/api/status` still answers
+    // meanwhile, with `fatal` set.
     if let Some(a) = &alerts {
         a.finish(code);
     }
