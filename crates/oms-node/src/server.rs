@@ -322,6 +322,19 @@ fn submit(
     submit_then(s, ctx, lane, id, input, permit, |r| r)
 }
 
+/// Why a watcher input's `detail` is refused before the core sees it, if it
+/// is: empty, or longer than `WATCHER_DETAIL_MAX` (C-HOLD). The core refuses
+/// both again.
+fn watcher_detail_refusal(detail: &str) -> Option<String> {
+    if detail.trim().is_empty() {
+        return Some("the detail is empty; nothing was recorded".into());
+    }
+    if detail.len() > WATCHER_DETAIL_MAX {
+        return Some(format!("the detail is longer than {WATCHER_DETAIL_MAX} bytes; nothing was recorded"));
+    }
+    None
+}
+
 /// `submit`, with `after` applied to an operator reply once its record is
 /// durable, before the answer leaves.
 fn submit_then(
@@ -588,15 +601,15 @@ async fn dispatch(
             })
         }),
         Op::WatcherMismatch { check, detail } => operator_only(s).or_else(|| {
-            if detail.trim().is_empty() {
-                return Some(Response::err(id, ErrorCode::BadRequest, "the detail is empty; nothing was recorded"));
+            if let Some(why) = watcher_detail_refusal(&detail) {
+                return Some(Response::err(id, ErrorCode::BadRequest, why));
             }
             let input = Input::Watcher(WatcherInput::Mismatch { check, detail });
             submit(s, ctx, Lane::Control, id, input, permit)
         }),
         Op::WatcherKill { detail } => operator_only(s).or_else(|| {
-            if detail.trim().is_empty() {
-                return Some(Response::err(id, ErrorCode::BadRequest, "the detail is empty; nothing was recorded"));
+            if let Some(why) = watcher_detail_refusal(&detail) {
+                return Some(Response::err(id, ErrorCode::BadRequest, why));
             }
             // Answered after the latch is durable: the watcher then knows
             // that the OMS sends no new order (C-HOLD).

@@ -178,6 +178,14 @@ pub fn kill_unsupported(input: &VenueInputTx, venue: &'static str, cmd: VenueCom
     match cmd {
         VenueCommand::Kill { source, note, .. } => {
             crate::warn!("kill latched, but this gateway has no cancel-all: cancel the resting orders with omsctl cancel-all", "venue": venue, "source": format!("{source:?}"), "note": note);
+            // Test-only: `OMS_HOLD_KILL_ANSWER` keeps the answer back, so a
+            // test sees a latch that is not confirmed. Only a build with the
+            // failpoints feature (the node tests) reads it.
+            #[cfg(feature = "failpoints")]
+            if std::env::var_os("OMS_HOLD_KILL_ANSWER").is_some() {
+                crate::warn!("failpoint: the kill answer is held back", "venue": venue);
+                return;
+            }
             let input = input.clone();
             tokio::spawn(async move {
                 input

@@ -80,6 +80,16 @@ fn secs_between(from: Ts, to: Ts) -> u64 {
     to.saturating_sub(from) / 1_000_000
 }
 
+/// What a plain-only hold does to a reduce-only order: it passes only with
+/// a margin policy; without one every hold refuses every order (C-HOLD).
+fn reduce_only_clause(core: &Core) -> &'static str {
+    if core.config.policy.margin.is_some() {
+        "감소 전용은 받음"
+    } else {
+        "증거금 정책이 없어 감소 전용도 거절"
+    }
+}
+
 /// The key, text and grace of one hold reason; `None` for the reasons that
 /// are covered by other conditions. No wildcard arm: a new reason does not
 /// compile until it has a text and a grace.
@@ -217,7 +227,7 @@ pub fn hold_condition(
                     format!("{}, {}", snake(&k.source), kst_us(k.since)),
                     match (k.confirmed_at, k.outcome) {
                         (Some(at), Some(KillOutcome::Unsupported)) => format!(
-                            "확인: 이 게이트웨이에는 일괄 취소가 없음({}). 걸린 주문은 운영자가 취소해야 함(omsctl cancel-all)",
+                            "확인: 이 게이트웨이에는 일괄 취소가 없음({}). 걸린 주문은 운영자가 취소해야 함(omsctl cancel-all). 장부에 미체결이 남아 있으면 해제는 거절됨(kill_orders_open)",
                             kst_us(at)
                         ),
                         (Some(at), _) => format!("확인: 킬 루프가 0건을 확인함 {}", kst_us(at)),
@@ -236,6 +246,7 @@ pub fn hold_condition(
             )
         }
         HoldReason::WatcherMismatch => {
+            let reduce_only = reduce_only_clause(core);
             let (check, since, note) = match &core.watcher_mismatch {
                 Some(w) => (snake(&w.source), kst_us(w.since), w.note.as_str()),
                 None => (String::new(), String::new(), ""),
@@ -243,12 +254,13 @@ pub fn hold_condition(
             (
                 "hold:watcher_mismatch".to_string(),
                 format!(
-                    "워처가 불일치를 확정함({check}, {since}). 일반 주문 거절, 감소 전용은 받음. 운영자 해제: clear-hold --reason watcher_mismatch. 내용: {note}"
+                    "워처가 불일치를 확정함({check}, {since}). 일반 주문 거절, {reduce_only}. 운영자 해제: clear-hold --reason watcher_mismatch. 내용: {note}"
                 ),
                 Grace::None,
             )
         }
         HoldReason::VenueChange => {
+            let reduce_only = reduce_only_clause(core);
             let (since, note) = match &core.venue_change {
                 Some(v) => (kst_us(v.since), v.note.as_str()),
                 None => (String::new(), ""),
@@ -256,7 +268,7 @@ pub fn hold_condition(
             (
                 "hold:venue_change".to_string(),
                 format!(
-                    "거래소가 포지션을 바꿈 또는 분류표에 없는 체결({since}). 일반 주문 거절, 감소 전용은 받음. 해제: ack + clear-hold --reason venue_change. 내용: {note}"
+                    "거래소가 포지션을 바꿈 또는 분류표에 없는 체결({since}). 일반 주문 거절, {reduce_only}. 해제: ack + clear-hold --reason venue_change. 내용: {note}"
                 ),
                 Grace::None,
             )
@@ -851,6 +863,23 @@ mod tests {
 
     fn keys(conds: &[Cond]) -> Vec<&str> {
         conds.iter().map(|c| c.key.as_str()).collect()
+    }
+
+    /// C-HOLD, review S4. The texts of the two plain-only holds say that a
+    /// reduce-only order is accepted only when a margin policy is set;
+    /// without one it is refused as well.
+    #[test]
+    fn the_plain_only_hold_texts_follow_the_margin_policy() {
+        for (margin, want, not) in [
+            (true, "일반 주문 거절, 감소 전용은 받음", "감소 전용도 거절"),
+            (false, "일반 주문 거절, 증거금 정책이 없어 감소 전용도 거절", "감소 전용은 받음"),
+        ] {
+            let c = core(margin);
+            for h in [HoldReason::WatcherMismatch, HoldReason::VenueChange] {
+                let (_, text, _) = hold_condition(&h, &c, T0, None).unwrap();
+                assert!(text.contains(want) && !text.contains(not), "margin {margin}, {h:?}: {text}");
+            }
+        }
     }
 
     /// Every hold reason has a non-empty text and the grace of the table in

@@ -362,6 +362,8 @@ fn a_marker_path_that_cannot_be_examined_latches() {
 /// Done criterion (U18b): under WatcherMismatch a reduce-only order passes
 /// and a plain one is refused. The watcher's two inputs on the admin
 /// socket, their replies, and what is refused without being recorded.
+/// Under the watcher's kill the clear waits for the book: refused
+/// `kill_orders_open` while two orders rest, taken after `cancel-all`.
 #[test]
 fn watcher_mismatch_over_the_admin_socket_refuses_plain_orders_only() {
     let mut env = margin_node("watcher-mismatch", "100000");
@@ -391,6 +393,22 @@ fn watcher_mismatch_over_the_admin_socket_refuses_plain_orders_only() {
     // nothing recorded.
     let (code, _) = admin_call(&env, mismatch(WatcherCheck::W3, " ")).unwrap_err();
     assert_eq!(code, ErrorCode::BadRequest);
+    // A detail longer than 1 KiB is refused by the node (review N8).
+    let long = "x".repeat(WATCHER_DETAIL_MAX + 1);
+    for op in [
+        mismatch(WatcherCheck::W3, &long),
+        Op::WatcherKill {
+            detail: long.clone(),
+        },
+    ] {
+        assert_eq!(
+            admin_call(&env, op).unwrap_err(),
+            (
+                ErrorCode::BadRequest,
+                "the detail is longer than 1024 bytes; nothing was recorded".to_string()
+            )
+        );
+    }
     assert_eq!(
         api_error(a.call(mismatch(WatcherCheck::W3, "d"))),
         ErrorCode::Forbidden
@@ -462,6 +480,46 @@ fn watcher_mismatch_over_the_admin_socket_refuses_plain_orders_only() {
     refused_for(
         new_order(&mut a, "reduce-killed", "120", true),
         HoldReason::KillLatched,
+    );
+    // The simulated venue answered unsupported and cancelled nothing: the
+    // two orders still rest, so the clear is refused (review S1). The
+    // marker is not configured here, so nothing else is touched.
+    assert_eq!(st["core"]["open_orders"], 2, "{}", st["core"]);
+    let (code, why) = admin_call(
+        &env,
+        Op::ClearHold {
+            reason: HoldKind::Kill,
+            note: "checked".into(),
+        },
+    )
+    .unwrap_err();
+    assert_eq!(code, ErrorCode::BadRequest);
+    assert_eq!(
+        why,
+        "kill_orders_open: 2 open orders in the book; run omsctl cancel-all first"
+    );
+    // cancel-all is taken under the latch; once the venue has cancelled
+    // both orders the clear is taken.
+    assert_eq!(
+        admin_call(
+            &env,
+            Op::CancelAll {
+                strategy: None,
+                note: "kill".into()
+            }
+        ),
+        Ok("cancel requested for 2 orders".to_string())
+    );
+    let ok = env.wait(Duration::from_secs(20), || {
+        env.try_status()
+            .is_some_and(|s| s["core"]["open_orders"] == 0)
+    });
+    assert!(ok, "the cancels never closed the orders: {}", env.log_tail(20));
+    assert!(
+        env.status()["core"]["holds"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("kill_latched"))
     );
     assert_eq!(
         admin_call(

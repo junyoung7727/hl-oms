@@ -34,8 +34,13 @@ use std::thread::JoinHandle;
 use std::time::Instant;
 use tokio::sync::{mpsc, oneshot};
 
-/// Version of the snapshot payload written by this build.
-pub const STATE_SCHEMA: u16 = 1;
+/// Version of the snapshot payload written by this build. 2 since U18b1:
+/// the holds of C-HOLD are derived in `apply`, and a state saved by an
+/// earlier build lacks the venue-change hold that a full replay of the same
+/// journal sets, so its snapshots are skipped and the journal is replayed
+/// from the start (review S3). Nothing prunes segments, so the journal is
+/// there.
+pub const STATE_SCHEMA: u16 = 2;
 
 /// Snapshot payload.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -80,13 +85,15 @@ pub struct Shared {
 /// for. `OMS_CRASH_ON` names it: unset or `new_order` is a newly accepted
 /// order whose send is released; `reducing_entered` and `day_base_set` are a
 /// margin report whose record holds that event (C-MARGIN, 중단과 재실행);
-/// `boot` is the Boot record, the first flush after a start (C-ALERT).
+/// `boot` is the Boot record, the first flush after a start (C-ALERT);
+/// `clear_hold` is an operator's accepted `clear-hold` (C-HOLD, kill marker).
 #[cfg(feature = "failpoints")]
 fn crash_trigger(record: Option<&Record>, has_commands: bool) -> bool {
     let Some(rec) = record else { return false };
     match std::env::var("OMS_CRASH_ON").as_deref() {
         Ok("new_order") | Err(_) => has_commands && matches!(rec.input, Input::NewOrder(_)),
         Ok("boot") => matches!(rec.input, Input::Boot { .. }),
+        Ok("clear_hold") => matches!(rec.input, Input::Operator(OperatorCmd::ClearHold { .. })),
         Ok(event) => matches!(rec.input, Input::Venue(VenueInput::MarginReport(_))) && rec.events.iter().any(|e| e.name() == event),
     }
 }
