@@ -711,7 +711,7 @@ necessity = "장애 주입 지점이 운영 바이너리에 있으면 환경 변
 sources = ["ASVS", "SSDF"]
 applicability = "적용"
 reason = "장애 주입 지점과 가상 거래소가 같은 저장소에 있다"
-handling = "장애 주입 코드는 `failpoints` 기능으로만 컴파일되고 기본 빌드에는 없다. 가상 거래소는 별도 바이너리(`simvenue`)다. 운영 바이너리에 남는 시험용 설정은 `runtime.inline_commit` 하나이며 동작 계약은 같다. 노드에는 장애를 주입하는 API가 없다"
+handling = "장애 주입 코드는 `failpoints` 기능으로만 컴파일되고 기본 빌드에는 없다. `failpoints` 빌드에는 Bybit 거래소 주소를 환경 변수(`OMS_TEST_BYBIT_WIRING`, 127.0.0.1만 받음)로 바꾸는 시험용 훅도 있다(ADR-028 §7f). 가상 거래소는 별도 바이너리(`simvenue`)다. 운영 바이너리에 남는 시험용 설정은 `runtime.inline_commit` 하나이며 동작 계약은 같다. 노드에는 장애를 주입하는 API가 없다"
 design = "결정"
 impl = "구현"
 verify = "미검증"
@@ -719,7 +719,7 @@ adr = ["ADR-016"]
 contracts = []
 code = ["crates/oms-node/Cargo.toml", "crates/oms-node/src/pipeline.rs"]
 claims = []
-open = "배포용 빌드에 `failpoints`가 꺼져 있는지 확인하는 시험이 없다. 가상 거래소에 붙는 게이트웨이(`venue.kind = \"sim\"`)는 운영 바이너리에 들어 있다. 영향: 설정을 잘못 쓰면 운영 노드가 가상 거래소에 붙는다(화면 상단에 표시된다). 해소: 빌드 기능으로 분리하고, 바이너리에 failpoint 문자열이 없는지 검사한다. 단계: 배포 전."
+open = "배포용 빌드에 `failpoints`가 꺼져 있는지 확인하는 시험이 없다(U17c 뒤로는 거래소 주소를 바꾸는 훅도 걸려 있다. 2026-11-21 검토에서 기본 빌드 바이너리에 `OMS_TEST_BYBIT_WIRING`·`OMS_CRASH_AT` 문자열이 없음을 손으로 확인했다). 가상 거래소에 붙는 게이트웨이(`venue.kind = \"sim\"`)는 운영 바이너리에 들어 있다. 영향: 설정을 잘못 쓰면 운영 노드가 가상 거래소에 붙는다(화면 상단에 표시된다). 해소: 빌드 기능으로 분리하고, 바이너리에 failpoint 문자열이 없는지 검사한다. 단계: 배포 전."
 
 [[item]]
 id = "G-SEC-13"

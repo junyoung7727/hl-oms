@@ -55,7 +55,8 @@ pub enum Frame {
     Other,
 }
 
-fn outcome(v: &Value) -> Result<(), String> {
+/// `Ok` only for `success: true` (F20 Q2.15); `Err` holds what the venue said.
+pub(super) fn outcome(v: &Value) -> Result<(), String> {
     if v.get("success").and_then(Value::as_bool) == Some(true) {
         return Ok(());
     }

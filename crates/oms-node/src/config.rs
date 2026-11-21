@@ -238,6 +238,10 @@ pub struct BybitConfig {
     /// time means the stream is down.
     #[serde(default = "default_ping_interval_ms")]
     pub ping_interval_ms: u64,
+    /// Minimum time between reference price updates per instrument, read
+    /// from the public ticker stream (U17c).
+    #[serde(default = "default_ref_price_ms")]
+    pub ref_price_interval_ms: u64,
 }
 
 fn default_ping_interval_ms() -> u64 {
@@ -413,6 +417,13 @@ impl NodeConfig {
         // The venue recommends a ping every 20 s (F20 Q2.11).
         if !(1_000..=20_000).contains(&b.ping_interval_ms) {
             return Err("[venue] ping_interval_ms must be between 1000 and 20000".into());
+        }
+        // Judgment (U17c): one lost update must not make the price stale.
+        let p = &self.core.policy;
+        if b.ref_price_interval_ms < 1_000 || b.ref_price_interval_ms.saturating_mul(2_000) > p.ref_price_max_age_us {
+            return Err(
+                "[venue] ref_price_interval_ms must be at least 1000 and at most half of [core.policy] ref_price_max_age_us".into(),
+            );
         }
         // ADR-024: Bybit enforces expiry through the receive window, and
         // its realtime query can miss an order for a moment.
@@ -746,5 +757,33 @@ max = "10"
         assert!(cfg.validate().unwrap_err().contains("absence_not_found_needed = 2"));
         // An unknown key in the venue table.
         assert!(parse(&bybit("testnet", "api_secret = \"x\""), "", None, 1).is_err());
+    }
+
+    /// The reference price interval (U17c): at least 1 s, and at most half
+    /// of the freshness limit, so one lost update does not make the price
+    /// stale. The default is 5 s against the default limit of 15 s.
+    #[test]
+    fn the_bybit_reference_price_interval_is_bounded_by_one_second_and_half_the_freshness_limit() {
+        let with = |interval: Option<u64>, max_age_us: Option<u64>| {
+            let more = interval.map(|ms| format!("ref_price_interval_ms = {ms}")).unwrap_or_default();
+            let mut cfg = parse(&bybit("testnet", &more), "", None, 1).unwrap();
+            cfg.data_dir = "/var/lib/hl-oms/data".into();
+            cfg.core.policy.absence_not_found_needed = 2;
+            if let Some(us) = max_age_us {
+                cfg.core.policy.ref_price_max_age_us = us;
+            }
+            let VenueConfig::Bybit(b) = &cfg.venue else { panic!("not bybit") };
+            (b.ref_price_interval_ms, cfg.validate())
+        };
+        assert_eq!(oms_core::Policy::default().ref_price_max_age_us, 15_000_000);
+        assert_eq!(with(None, None), (5_000, Ok(())));
+        assert_eq!(with(Some(1_000), None), (1_000, Ok(())));
+        assert_eq!(with(Some(7_500), None), (7_500, Ok(())));
+        assert_eq!(with(Some(2_000), Some(4_000_000)), (2_000, Ok(())));
+        for (interval, max_age) in [(999, None), (0, None), (7_501, None), (2_001, Some(4_000_000)), (5_000, Some(9_999_999))] {
+            let (_, r) = with(Some(interval), max_age);
+            let e = r.expect_err(&format!("{interval} ms loaded"));
+            assert!(e.contains("ref_price_interval_ms"), "{interval}: {e}");
+        }
     }
 }

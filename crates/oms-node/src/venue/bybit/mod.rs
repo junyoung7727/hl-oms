@@ -6,7 +6,8 @@
 //! execution table (`exec`). U16d: the private stream (`stream`) and the
 //! gateway behind `VenueGateway` (`gateway`). U17a: orders and cancels over
 //! REST (`orders`) and the answer table (`answer`). U17b: WS Trade
-//! (`trade`), the first path for orders and cancels.
+//! (`trade`), the first path for orders and cancels. U17c: the reference
+//! price from the public stream (`ticker`).
 
 pub mod answer;
 pub mod checks;
@@ -17,6 +18,7 @@ pub mod query;
 pub mod rest;
 pub mod sign;
 pub mod stream;
+pub mod ticker;
 pub mod trade;
 
 use serde_json::Value;
@@ -30,6 +32,8 @@ pub struct Endpoints {
     pub private_ws: String,
     /// WS Trade (F18 §3.1).
     pub trade_ws: String,
+    /// The public stream of category linear (the reference price, U17c).
+    pub public_ws: String,
 }
 
 impl Endpoints {
@@ -46,6 +50,7 @@ impl Endpoints {
             rest: rest.into(),
             private_ws: format!("{ws}/private"),
             trade_ws: format!("{ws}/trade"),
+            public_ws: format!("{ws}/public/linear"),
         })
     }
 }
@@ -115,6 +120,14 @@ mod tests {
         assert_eq!(
             Endpoints::of("testnet").unwrap().trade_ws,
             "wss://stream-testnet.bybit.com/v5/trade"
+        );
+        assert_eq!(
+            Endpoints::of("mainnet").unwrap().public_ws,
+            "wss://stream.bybit.com/v5/public/linear"
+        );
+        assert_eq!(
+            Endpoints::of("testnet").unwrap().public_ws,
+            "wss://stream-testnet.bybit.com/v5/public/linear"
         );
         assert_eq!(Endpoints::of("demo"), None);
     }
