@@ -1,6 +1,7 @@
-//! The Bybit gateway behind `VenueGateway` (ADR-028 §7c–§7d): the boot
+//! The Bybit gateway behind `VenueGateway` (ADR-028 §7c–§7e): the boot
 //! checks and the IP loop, the private stream, the queries, the pause after
-//! an IP ban, and orders and cancels over REST (`orders`).
+//! an IP ban, and orders and cancels (`orders`) over WS Trade (`trade`) or
+//! REST.
 //!
 //! The link is up only while a stream is authenticated and subscribed and
 //! `Health` has no block. Every reconnect is a new link session, so the
@@ -22,6 +23,7 @@ use super::checks::{self, Block, Expected, Health, SymbolSpec};
 use super::orders::{Create, Effect, Orders};
 use super::query::{Queries, QueryFail};
 use super::rest::{Credentials, IP_BAN_PAUSE, Rest, RestError};
+use super::trade::{self, Trade};
 use super::{Endpoints, exec, stream};
 use crate::config::BybitConfig;
 use crate::util::wall_us;
@@ -50,6 +52,9 @@ pub struct Timing {
     pub backoff_min: Duration,
     /// Longest wait between reconnects.
     pub backoff_max: Duration,
+    /// A request written to WS Trade with no answer within this time is
+    /// unknown (`request_timeout_ms`, as on REST).
+    pub request: Duration,
 }
 
 impl Timing {
@@ -65,6 +70,7 @@ impl Timing {
             health_poll: Duration::from_millis(250),
             backoff_min: Duration::from_millis(500),
             backoff_max: Duration::from_secs(10),
+            request: Duration::from_millis(cfg.request_timeout_ms),
         }
     }
 }
@@ -75,12 +81,15 @@ impl Timing {
 pub struct Wiring {
     pub rest: String,
     pub private_ws: String,
+    pub trade_ws: String,
     pub ip_echo_url: String,
 }
 
 pub(crate) struct Gateway {
     rest: Rest,
     orders: Orders,
+    /// The WS Trade connection's handle, shared with `orders`.
+    trade: Arc<Trade>,
     queries: Queries,
     echo: reqwest::Client,
     wiring: Wiring,
@@ -97,8 +106,43 @@ pub(crate) struct Gateway {
     timing: Timing,
 }
 
-fn wall_ms() -> u64 {
+pub(super) fn wall_ms() -> u64 {
     wall_us() / 1000
+}
+
+/// A client WebSocket.
+pub(super) type Ws =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+/// Connects to `url` over IPv4, as every other request does
+/// (`LOCAL_ADDRESS`). An upgrade answered with HTTP 403 is an IP ban.
+pub(super) async fn connect(url: &str) -> Result<Ws, End> {
+    let retry = |e: String| End::Retry(e);
+    let parsed = reqwest::Url::parse(url).map_err(|e| retry(e.to_string()))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| retry("the stream URL has no host".into()))?;
+    let port = parsed
+        .port_or_known_default()
+        .ok_or_else(|| retry("the stream URL has no port".into()))?;
+    let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|e| retry(e.to_string()))?
+        .filter(SocketAddr::is_ipv4)
+        .collect();
+    let addr = addrs
+        .first()
+        .ok_or_else(|| retry("the stream host has no IPv4 address".into()))?;
+    let tcp = tokio::net::TcpStream::connect(addr)
+        .await
+        .map_err(|e| retry(e.to_string()))?;
+    match tokio_tungstenite::client_async_tls(url, tcp).await {
+        Ok((ws, _)) => Ok(ws),
+        Err(tokio_tungstenite::tungstenite::Error::Http(r)) if r.status().as_u16() == 403 => {
+            Err(End::IpBanned("HTTP 403 on the upgrade".into()))
+        }
+        Err(e) => Err(retry(e.to_string())),
+    }
 }
 
 fn wall_ns() -> i64 {
@@ -108,9 +152,9 @@ fn wall_ns() -> i64 {
         .unwrap_or(0)
 }
 
-/// Why a stream ended. `Rejected` stops the reconnects; `IpBanned` starts
-/// the pause.
-enum End {
+/// Why a stream (the private one or WS Trade) ended. `Rejected` stops the
+/// reconnects; `IpBanned` starts the pause.
+pub(super) enum End {
     Retry(String),
     Rejected(String),
     IpBanned(String),
@@ -134,9 +178,11 @@ impl Gateway {
         health.set_boot(Some(Block::Unchecked(
             "the boot checks have not run yet".into(),
         )));
+        let trade = Arc::new(Trade::default());
         Ok(Gateway {
             queries: Queries::new(rest()?, instance_id, cfg.fills_lag_ms),
-            orders: Orders::new(rest()?),
+            orders: Orders::new(rest()?).with_trade(trade.clone()),
+            trade,
             rest: rest()?,
             echo: checks::echo_client(timeout)?,
             expected: Expected {
@@ -348,44 +394,6 @@ impl Gateway {
         }
     }
 
-    /// Connects over IPv4, as every other request does (`LOCAL_ADDRESS`).
-    /// An upgrade answered with HTTP 403 is an IP ban.
-    async fn connect(
-        &self,
-    ) -> Result<
-        tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
-        End,
-    > {
-        let retry = |e: String| End::Retry(e);
-        let url = reqwest::Url::parse(&self.wiring.private_ws).map_err(|e| retry(e.to_string()))?;
-        let host = url
-            .host_str()
-            .ok_or_else(|| retry("the stream URL has no host".into()))?;
-        let port = url
-            .port_or_known_default()
-            .ok_or_else(|| retry("the stream URL has no port".into()))?;
-        let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host, port))
-            .await
-            .map_err(|e| retry(e.to_string()))?
-            .filter(SocketAddr::is_ipv4)
-            .collect();
-        let addr = addrs
-            .first()
-            .ok_or_else(|| retry("the stream host has no IPv4 address".into()))?;
-        let tcp = tokio::net::TcpStream::connect(addr)
-            .await
-            .map_err(|e| retry(e.to_string()))?;
-        match tokio_tungstenite::client_async_tls(self.wiring.private_ws.as_str(), tcp).await {
-            Ok((ws, _)) => Ok(ws),
-            Err(tokio_tungstenite::tungstenite::Error::Http(r)) if r.status().as_u16() == 403 => {
-                Err(End::IpBanned("HTTP 403 on the upgrade".into()))
-            }
-            Err(e) => Err(retry(e.to_string())),
-        }
-    }
-
     /// One connection, from the upgrade to its end. `connection` grows only
     /// when the link came up; `alive` is set at the first pong.
     async fn run_stream(&self, boot: u32, connection: &mut u32, alive: &mut bool) -> End {
@@ -401,7 +409,7 @@ impl Gateway {
         connection: &mut u32,
         alive: &mut bool,
     ) -> Result<std::convert::Infallible, End> {
-        let ws = tokio::time::timeout(self.timing.handshake, self.connect())
+        let ws = tokio::time::timeout(self.timing.handshake, connect(&self.wiring.private_ws))
             .await
             .map_err(|_| End::Retry("connect timed out".into()))??;
         let (mut write, mut read) = ws.split();
@@ -687,7 +695,7 @@ impl Gateway {
         });
         let (outcome, fx) = self
             .orders
-            .cancel(instrument.as_str(), &wire_id, || self.allowed())
+            .cancel(instrument.as_str(), &wire_id, attempt, || self.allowed())
             .await;
         self.apply(fx);
         self.input
@@ -724,6 +732,33 @@ impl VenueGateway for Gateway {
     fn spawn_tasks(self: &Arc<Self>, boot: u32) {
         tokio::spawn(self.clone().checks_loop());
         tokio::spawn(self.clone().stream_loop(boot));
+        let conn = trade::Conn {
+            url: self.wiring.trade_ws.clone(),
+            creds: self.creds.clone(),
+            recv_window_ms: self.recv_window_ms,
+            timing: self.timing,
+        };
+        tokio::spawn(trade::run(self.trade.clone(), self.clone(), conn));
+    }
+}
+
+/// What WS Trade asks of the gateway: the same blocks, pause and key
+/// rejection as every other request.
+impl trade::Host for Gateway {
+    fn block(&self) -> Option<String> {
+        self.allowed().err()
+    }
+
+    fn key_rejected(&self) -> bool {
+        self.health.auth_rejected()
+    }
+
+    fn ban(&self, why: String) {
+        Gateway::ban(self, why);
+    }
+
+    fn reject_key(&self, why: String) {
+        self.apply(Effect::RejectKey(why));
     }
 }
 
@@ -743,6 +778,7 @@ pub fn spawn(
     let wiring = Wiring {
         rest: ep.rest,
         private_ws: ep.private_ws,
+        trade_ws: ep.trade_ws,
         ip_echo_url: cfg.ip_echo_url.clone(),
     };
     let creds = Arc::new(Credentials::load(&cfg.credentials_file)?);
@@ -852,8 +888,22 @@ mod tests {
         pong: bool,
         /// Answer the upgrade with HTTP 403.
         forbid: bool,
-        /// Send a frame that is not JSON right after confirming subscribe.
+        /// Send a frame that is not JSON right after confirming subscribe
+        /// (WS Trade: auth).
         garbage: bool,
+        /// Speak WS Trade: auth and pong answers carry retCode, and order
+        /// requests are answered as the script says.
+        trade: bool,
+    }
+
+    /// How the fake WS Trade answers the next order request. With an empty
+    /// script it answers retCode 0.
+    #[derive(Clone, Copy, Debug)]
+    enum Script {
+        Code(i64),
+        Silent,
+        /// Close the connection after reading the request.
+        Drop,
     }
 
     /// What one fake connection received.
@@ -876,12 +926,22 @@ mod tests {
         /// Pings that got no pong.
         unanswered: Arc<AtomicU64>,
         push: Arc<Mutex<Option<mpsc::UnboundedSender<Ctl>>>>,
+        script: Arc<Mutex<std::collections::VecDeque<Script>>>,
     }
 
     impl FakeWs {
         async fn start(mode: Mode) -> FakeWs {
+            FakeWs::start_at(mode, "/v5/private").await
+        }
+
+        /// A loopback WS Trade.
+        async fn start_trade(mode: Mode) -> FakeWs {
+            FakeWs::start_at(Mode { trade: true, ..mode }, "/v5/trade").await
+        }
+
+        async fn start_at(mode: Mode, path: &str) -> FakeWs {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let url = format!("ws://{}/v5/private", listener.local_addr().unwrap());
+            let url = format!("ws://{}{path}", listener.local_addr().unwrap());
             let fake = FakeWs {
                 url,
                 mode: Arc::new(Mutex::new(mode)),
@@ -889,8 +949,10 @@ mod tests {
                 attempts: Arc::default(),
                 unanswered: Arc::default(),
                 push: Arc::default(),
+                script: Arc::default(),
             };
             let (mode, conns, push) = (fake.mode.clone(), fake.conns.clone(), fake.push.clone());
+            let script = fake.script.clone();
             let (attempts, unanswered) = (fake.attempts.clone(), fake.unanswered.clone());
             tokio::spawn(async move {
                 while let Ok((tcp, _)) = listener.accept().await {
@@ -913,7 +975,14 @@ mod tests {
                     conns.lock().unwrap().push(log.clone());
                     let (tx, rx) = mpsc::unbounded_channel();
                     *push.lock().unwrap() = Some(tx);
-                    tokio::spawn(serve(ws, mode.clone(), log, rx, unanswered.clone()));
+                    tokio::spawn(serve(
+                        ws,
+                        mode.clone(),
+                        log,
+                        rx,
+                        unanswered.clone(),
+                        script.clone(),
+                    ));
                 }
             });
             fake
@@ -952,6 +1021,32 @@ mod tests {
         fn drop_conn(&self) {
             let _ = self.push.lock().unwrap().as_ref().unwrap().send(Ctl::Drop);
         }
+
+        fn then(&self, s: impl IntoIterator<Item = Script>) {
+            self.script.lock().unwrap().extend(s);
+        }
+
+        /// Every order request received, over all connections.
+        fn requests(&self, op: &str) -> Vec<Value> {
+            let conns = self.conns.lock().unwrap().clone();
+            conns
+                .iter()
+                .flat_map(|c| c.lock().unwrap().clone())
+                .filter_map(|t| serde_json::from_str::<Value>(&t).ok())
+                .filter(|v| v["op"] == op)
+                .collect()
+        }
+    }
+
+    /// The fake WS Trade's answer to an order request.
+    fn trade_answer(v: &Value, code: i64, n: usize) -> Value {
+        let data = if code == 0 {
+            json!({"orderId": format!("o-ws-{n}"), "orderLinkId": v["args"][0]["orderLinkId"]})
+        } else {
+            json!({})
+        };
+        json!({"reqId": v["reqId"], "retCode": code, "retMsg": if code == 0 { "OK" } else { "refused" },
+               "op": v["op"], "data": data, "header": {"X-Bapi-Limit": "10"}, "connId": "c"})
     }
 
     async fn serve(
@@ -960,16 +1055,43 @@ mod tests {
         log: Arc<Mutex<Vec<String>>>,
         mut ctl: mpsc::UnboundedReceiver<Ctl>,
         unanswered: Arc<AtomicU64>,
+        script: Arc<Mutex<std::collections::VecDeque<Script>>>,
     ) {
         let (mut write, mut read) = ws.split();
         loop {
             tokio::select! {
                 m = read.next() => {
                     let Some(Ok(Message::Text(t))) = m else { return };
-                    log.lock().unwrap().push(t.to_string());
+                    let n = {
+                        let mut l = log.lock().unwrap();
+                        l.push(t.to_string());
+                        l.len()
+                    };
                     let v: Value = serde_json::from_str(t.as_str()).unwrap_or_default();
                     let m = *mode.lock().unwrap();
-                    let answer = match v["op"].as_str() {
+                    let answer = if m.trade {
+                        match v["op"].as_str() {
+                            Some("auth") if m.auth != Reply::Silent => Some(if m.auth == Reply::Ok {
+                                json!({"retCode": 0, "retMsg": "OK", "op": "auth", "connId": "c"})
+                            } else {
+                                json!({"retCode": 10004, "retMsg": "Invalid sign", "op": "auth", "connId": "c"})
+                            }),
+                            Some("ping") if m.pong => Some(json!({"reqId": v["req_id"], "retCode": 0, "retMsg": "OK", "op": "pong", "data": ["1"], "connId": "c"})),
+                            Some("ping") => {
+                                unanswered.fetch_add(1, Ordering::SeqCst);
+                                None
+                            }
+                            Some(op) if op == trade::CREATE_OP || op == trade::CANCEL_OP => {
+                                let next = script.lock().unwrap().pop_front();
+                                match next.unwrap_or(Script::Code(0)) {
+                                    Script::Code(c) => Some(trade_answer(&v, c, n)),
+                                    Script::Silent => None,
+                                    Script::Drop => return,
+                                }
+                            }
+                            _ => None,
+                        }
+                    } else { match v["op"].as_str() {
                         Some("auth") if m.auth != Reply::Silent => Some(json!({"success": m.auth == Reply::Ok, "ret_msg": if m.auth == Reply::Ok { "" } else { "error sign" }, "op": "auth", "conn_id": "c"})),
                         Some("subscribe") if m.subscribe != Reply::Silent => Some(json!({"success": m.subscribe == Reply::Ok, "ret_msg": "", "op": "subscribe", "conn_id": "c"})),
                         Some("ping") if m.pong => Some(json!({"req_id": v["req_id"], "op": "pong", "args": ["1"], "conn_id": "c"})),
@@ -978,13 +1100,15 @@ mod tests {
                             None
                         }
                         _ => None,
-                    };
+                    } };
                     if let Some(a) = answer {
                         if write.send(Message::text(a.to_string())).await.is_err() {
                             return;
                         }
                     }
-                    if v["op"] == "subscribe" && m.subscribe == Reply::Ok && m.garbage {
+                    let confirmed = if m.trade { "auth" } else { "subscribe" };
+                    let ok = if m.trade { m.auth } else { m.subscribe };
+                    if v["op"] == confirmed && ok == Reply::Ok && m.garbage {
                         if write.send(Message::text("not json")).await.is_err() {
                             return;
                         }
@@ -1008,6 +1132,7 @@ mod tests {
         pong: true,
         forbid: false,
         garbage: false,
+        trade: false,
     };
 
     fn cfg() -> BybitConfig {
@@ -1035,6 +1160,7 @@ mod tests {
             health_poll: Duration::from_millis(10),
             backoff_min: Duration::from_millis(20),
             backoff_max: Duration::from_millis(50),
+            request: Duration::from_millis(300),
         }
     }
 
@@ -1047,6 +1173,8 @@ mod tests {
         queues: Arc<InputQueues>,
         /// While set, the core takes nothing from the queues.
         hold: Arc<std::sync::atomic::AtomicBool>,
+        /// A bound port that does not listen: WS Trade of a rig without one.
+        _no_trade: Option<tokio::net::TcpSocket>,
     }
 
     impl Drop for Rig {
@@ -1093,11 +1221,33 @@ mod tests {
         rig_with(api, ws, timing(), 256)
     }
 
+    /// A rig whose WS Trade never connects: orders go over REST.
     fn rig_with(api: &FakeHttp, ws: &FakeWs, timing: Timing, venue_lane: usize) -> Rig {
+        // Bound, not listening: the port stays ours and a connect is
+        // refused.
+        let held = tokio::net::TcpSocket::new_v4().unwrap();
+        held.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let url = format!("ws://{}/v5/trade", held.local_addr().unwrap());
+        rig_at(api, ws, url, Some(held), timing, venue_lane)
+    }
+
+    fn rig_trade(api: &FakeHttp, ws: &FakeWs, trade: &FakeWs, timing: Timing) -> Rig {
+        rig_at(api, ws, trade.url.clone(), None, timing, 256)
+    }
+
+    fn rig_at(
+        api: &FakeHttp,
+        ws: &FakeWs,
+        trade_ws: String,
+        no_trade: Option<tokio::net::TcpSocket>,
+        timing: Timing,
+        venue_lane: usize,
+    ) -> Rig {
         let queues = Arc::new(InputQueues::new(venue_lane, 256, 256));
         let wiring = Wiring {
             rest: api.url(),
             private_ws: ws.url.clone(),
+            trade_ws,
             ip_echo_url: format!("{}/ip", api.url()),
         };
         let gw = Arc::new(
@@ -1155,6 +1305,7 @@ mod tests {
             queries: q_tx,
             queues,
             hold,
+            _no_trade: no_trade,
         }
     }
 
@@ -1868,6 +2019,412 @@ mod tests {
                 .all(|l| l.2.contains("could not be read")),
             "{:?}",
             r.links()
+        );
+    }
+
+    // ---- WS Trade (U17b) ----------------------------------------------------------
+
+    fn trade_up(r: &Rig) -> bool {
+        r.gw.trade.is_up()
+    }
+
+    /// The REST venue with answers to both order paths.
+    fn order_venue() -> FakeHttp {
+        let api = rest_venue("REGULAR_MARGIN");
+        api.route(
+            orders::CREATE_PATH,
+            [ok(json!({"orderId": "o-rest", "orderLinkId": "x"}))],
+        );
+        api.route(orders::CANCEL_PATH, [ok(json!({"orderId": "o-rest"}))]);
+        api
+    }
+
+    fn rest_creates(api: &FakeHttp) -> usize {
+        posts(api)
+            .iter()
+            .filter(|p| *p == orders::CREATE_PATH)
+            .count()
+    }
+
+    fn ws_links(trade: &FakeWs, op: &str) -> Vec<String> {
+        trade
+            .requests(op)
+            .iter()
+            .map(|v| v["args"][0]["orderLinkId"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    fn send_outcome(r: &Rig, order: u64) -> Option<SendOutcome> {
+        results(r).into_iter().find_map(|i| match i {
+            VenueInput::SendResult {
+                order_id, outcome, ..
+            } if order_id == OrderId(order) => Some(outcome),
+            _ => None,
+        })
+    }
+
+    async fn outcome_of(r: &Rig, order: u64) -> SendOutcome {
+        r.until("the send result", |r| send_outcome(r, order).is_some())
+            .await;
+        send_outcome(r, order).unwrap()
+    }
+
+    async fn rig_up(api: &FakeHttp, ws: &FakeWs, trade: &FakeWs, t: Timing) -> Rig {
+        let r = rig_trade(api, ws, trade, t);
+        r.until("link and WS Trade up", |r| up(r) && trade_up(r))
+            .await;
+        r
+    }
+
+    /// Up: the create and the cancel go over WS Trade, each once, with its
+    /// reqId. Down: REST takes the next create. Back up: WS Trade again.
+    /// WS Trade does not move the link.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn orders_go_over_ws_trade_when_it_is_up_over_rest_while_it_is_down_and_back() {
+        let api = order_venue();
+        let ws = FakeWs::start(GOOD).await;
+        let trade = FakeWs::start_trade(GOOD).await;
+        let r = rig_up(&api, &ws, &trade, timing()).await;
+        // Auth: the private stream's signature over GET/realtime + expires.
+        let auth: Value = serde_json::from_str(&trade.texts(0)[0]).unwrap();
+        assert_eq!(auth["op"], "auth");
+        assert_eq!(auth["args"][0], "KEY");
+        let expires = auth["args"][1].as_u64().unwrap();
+        assert_eq!(
+            auth["args"][2],
+            super::super::sign::ws_auth_signature("SECRET", expires)
+        );
+
+        r.commands.send(order_cmd(1, "BTCUSDT")).await.unwrap();
+        let out = outcome_of(&r, 1).await;
+        assert!(
+            matches!(&out, SendOutcome::Placed { venue_oid, .. } if venue_oid.as_str().starts_with("o-ws-")),
+            "{out:?}"
+        );
+        r.commands.send(cancel_cmd(1, "BTCUSDT")).await.unwrap();
+        r.until("the cancel result", |r| results(r).len() == 2).await;
+        assert!(matches!(
+            &results(&r)[1],
+            VenueInput::CancelResult {
+                outcome: CancelOutcome::Confirmed,
+                ..
+            }
+        ));
+        assert!(posts(&api).is_empty(), "REST was used: {:?}", posts(&api));
+        let create = &trade.requests(trade::CREATE_OP)[0];
+        assert_eq!(create["reqId"], format!("c{}", link(1)));
+        assert_eq!(create["header"]["X-BAPI-RECV-WINDOW"], "5000");
+        assert_eq!(create["args"][0]["orderLinkId"], link(1));
+        assert_eq!(create["args"][0]["positionIdx"], 0);
+        assert_eq!(
+            trade.requests(trade::CANCEL_OP)[0]["reqId"],
+            format!("x1{}", link(1))
+        );
+
+        // Down, and kept down: the next create goes over REST.
+        trade.set(|m| m.auth = Reply::Silent);
+        trade.drop_conn();
+        r.until("WS Trade down", |r| !trade_up(r)).await;
+        r.commands.send(order_cmd(2, "BTCUSDT")).await.unwrap();
+        let out = outcome_of(&r, 2).await;
+        assert!(
+            matches!(&out, SendOutcome::Placed { venue_oid, .. } if venue_oid.as_str() == "o-rest"),
+            "{out:?}"
+        );
+
+        // Back: WS Trade again.
+        trade.set(|m| m.auth = Reply::Ok);
+        r.until("WS Trade up again", trade_up).await;
+        r.commands.send(order_cmd(3, "BTCUSDT")).await.unwrap();
+        let out = outcome_of(&r, 3).await;
+        assert!(
+            matches!(&out, SendOutcome::Placed { venue_oid, .. } if venue_oid.as_str().starts_with("o-ws-")),
+            "{out:?}"
+        );
+        assert_eq!(ws_links(&trade, trade::CREATE_OP), [link(1), link(3)]);
+        assert_eq!(rest_creates(&api), 1);
+        let create = api
+            .requests()
+            .into_iter()
+            .find(|q| q.path() == orders::CREATE_PATH)
+            .unwrap();
+        assert!(create.body_str().contains(&link(2)));
+        assert_eq!(r.links().len(), 1, "WS Trade moved the link: {:?}", r.links());
+    }
+
+    /// Requests the venue never answers are unknown after the request
+    /// timeout, all of them, and none is sent again over either path.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_silent_ws_trade_makes_every_unanswered_request_unknown_and_nothing_is_sent_again() {
+        let api = order_venue();
+        let ws = FakeWs::start(GOOD).await;
+        let trade = FakeWs::start_trade(GOOD).await;
+        let r = rig_up(&api, &ws, &trade, timing()).await;
+        trade.then([Script::Silent; 3]);
+        let sent = Instant::now();
+        for o in 1..=3 {
+            r.commands.send(order_cmd(o, "BTCUSDT")).await.unwrap();
+        }
+        for o in 1..=3 {
+            let out = outcome_of(&r, o).await;
+            assert!(
+                matches!(&out, SendOutcome::Unknown { reason } if reason.contains("no answer within")),
+                "{o}: {out:?}"
+            );
+        }
+        let took = sent.elapsed();
+        assert!(
+            took >= timing().request && took < timing().request + timing().ping,
+            "unknown after {took:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let mut sent = ws_links(&trade, trade::CREATE_OP);
+        sent.sort();
+        assert_eq!(sent, [link(1), link(2), link(3)], "one create each");
+        assert_eq!(rest_creates(&api), 0);
+        assert_eq!(results(&r).len(), 3);
+        assert!(trade_up(&r), "the connection stays up: its pings are answered");
+    }
+
+    /// A WS Trade that stops answering pings goes down within two ping
+    /// intervals, and the request it held is unknown then, not after the
+    /// (long) request timeout. It is not sent again after the reconnect.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_ws_trade_that_stops_answering_pings_makes_its_pending_request_unknown() {
+        let api = order_venue();
+        let ws = FakeWs::start(GOOD).await;
+        let trade = FakeWs::start_trade(GOOD).await;
+        let t = Timing {
+            request: Duration::from_secs(5),
+            ..timing()
+        };
+        let r = rig_up(&api, &ws, &trade, t).await;
+        trade.set(|m| m.pong = false);
+        trade.then([Script::Silent]);
+        let sent = Instant::now();
+        r.commands.send(order_cmd(1, "BTCUSDT")).await.unwrap();
+        let out = outcome_of(&r, 1).await;
+        let took = sent.elapsed();
+        assert!(
+            matches!(&out, SendOutcome::Unknown { reason } if reason.contains("no pong")),
+            "{out:?}"
+        );
+        assert!(took < t.ping * 3, "unknown after {took:?}");
+        trade.set(|m| m.pong = true);
+        r.until("a new connection", |_| trade.accepted() >= 2).await;
+        r.until("WS Trade up again", trade_up).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(ws_links(&trade, trade::CREATE_OP), [link(1)]);
+        assert_eq!(rest_creates(&api), 0);
+    }
+
+    /// The connection drops right after the venue read the request: unknown
+    /// at once, never sent over REST.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_connection_that_drops_after_reading_the_request_makes_it_unknown() {
+        let api = order_venue();
+        let ws = FakeWs::start(GOOD).await;
+        let trade = FakeWs::start_trade(GOOD).await;
+        let t = Timing {
+            request: Duration::from_secs(5),
+            ..timing()
+        };
+        let r = rig_up(&api, &ws, &trade, t).await;
+        trade.then([Script::Drop]);
+        let sent = Instant::now();
+        r.commands.send(order_cmd(1, "BTCUSDT")).await.unwrap();
+        let out = outcome_of(&r, 1).await;
+        assert!(
+            matches!(&out, SendOutcome::Unknown { reason } if reason.contains("went down")),
+            "{out:?}"
+        );
+        assert!(sent.elapsed() < Duration::from_secs(1), "{:?}", sent.elapsed());
+        r.until("WS Trade up again", |r| trade.accepted() >= 2 && trade_up(r))
+            .await;
+        // A cancel dropped the same way is unknown too.
+        trade.then([Script::Drop]);
+        r.commands.send(cancel_cmd(1, "BTCUSDT")).await.unwrap();
+        r.until("the cancel result", |r| results(r).len() == 2).await;
+        assert!(matches!(
+            &results(&r)[1],
+            VenueInput::CancelResult {
+                outcome: CancelOutcome::Unknown { .. },
+                ..
+            }
+        ));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(ws_links(&trade, trade::CREATE_OP), [link(1)]);
+        assert_eq!(ws_links(&trade, trade::CANCEL_OP), [link(1)]);
+        assert!(posts(&api).is_empty(), "{:?}", posts(&api));
+    }
+
+    /// 20006 (duplicate reqId) and 10019 (WS Trade restarting) are unknown;
+    /// 10019 also closes the connection, and the next create goes over the
+    /// new one.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn answers_20006_and_10019_are_unknown_and_10019_reopens_the_connection() {
+        let api = order_venue();
+        let ws = FakeWs::start(GOOD).await;
+        let trade = FakeWs::start_trade(GOOD).await;
+        let r = rig_up(&api, &ws, &trade, timing()).await;
+        trade.then([Script::Code(20006), Script::Code(10019)]);
+        r.commands.send(order_cmd(1, "BTCUSDT")).await.unwrap();
+        assert!(matches!(outcome_of(&r, 1).await, SendOutcome::Unknown { .. }));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(trade.accepted(), 1, "20006 closed the connection");
+        r.commands.send(order_cmd(2, "BTCUSDT")).await.unwrap();
+        let out = outcome_of(&r, 2).await;
+        assert!(
+            matches!(&out, SendOutcome::Unknown { reason } if reason.contains("10019")),
+            "{out:?}"
+        );
+        r.until("a new connection", |r| trade.accepted() >= 2 && trade_up(r))
+            .await;
+        r.commands.send(order_cmd(3, "BTCUSDT")).await.unwrap();
+        assert!(matches!(outcome_of(&r, 3).await, SendOutcome::Placed { .. }));
+        assert_eq!(trade.texts(1).iter().filter(|t| t.contains(&link(3))).count(), 1);
+        assert_eq!(ws_links(&trade, trade::CREATE_OP), [link(1), link(2), link(3)]);
+        assert_eq!(rest_creates(&api), 0);
+        assert_eq!(r.block(), None);
+    }
+
+    /// A late answer to a request already reported unknown is dropped: no
+    /// second result, and the connection stays.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_late_answer_is_dropped() {
+        let api = order_venue();
+        let ws = FakeWs::start(GOOD).await;
+        let trade = FakeWs::start_trade(GOOD).await;
+        let r = rig_up(&api, &ws, &trade, timing()).await;
+        trade.then([Script::Silent]);
+        r.commands.send(order_cmd(1, "BTCUSDT")).await.unwrap();
+        assert!(matches!(outcome_of(&r, 1).await, SendOutcome::Unknown { .. }));
+        let req = trade.requests(trade::CREATE_OP)[0].clone();
+        trade.send(trade_answer(&req, 0, 99).to_string());
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(results(&r).len(), 1, "{:?}", results(&r));
+        assert!(trade_up(&r));
+        assert_eq!(trade.accepted(), 1);
+        r.commands.send(order_cmd(2, "BTCUSDT")).await.unwrap();
+        assert!(matches!(outcome_of(&r, 2).await, SendOutcome::Placed { .. }));
+    }
+
+    /// A refused WS Trade auth rejects the key until the restart: no order
+    /// leaves over either path, and WS Trade does not reconnect.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_refused_ws_trade_auth_rejects_the_key_until_the_restart() {
+        let api = order_venue();
+        let ws = FakeWs::start(GOOD).await;
+        let trade = FakeWs::start_trade(Mode {
+            auth: Reply::Refuse,
+            ..GOOD
+        })
+        .await;
+        let r = rig_trade(&api, &ws, &trade, timing());
+        r.until("the key block", |r| {
+            r.block().is_some_and(|b| b.starts_with("auth_rejected: WS Trade auth"))
+        })
+        .await;
+        r.commands.send(order_cmd(1, "BTCUSDT")).await.unwrap();
+        let out = outcome_of(&r, 1).await;
+        assert!(
+            matches!(&out, SendOutcome::NotSent { reason } if reason.starts_with("auth_rejected:")),
+            "{out:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(trade.accepted(), 1, "WS Trade reconnected");
+        assert!(trade.requests(trade::CREATE_OP).is_empty());
+        assert!(posts(&api).is_empty());
+    }
+
+    /// 10403 (the WS IP limit) starts the ban pause: the request is unknown,
+    /// WS Trade goes down, and nothing leaves during the pause.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_ws_ip_limit_answer_starts_the_ban_pause() {
+        let api = order_venue();
+        let ws = FakeWs::start(GOOD).await;
+        let trade = FakeWs::start_trade(GOOD).await;
+        let r = rig_up(&api, &ws, &trade, timing()).await;
+        trade.then([Script::Code(trade::IP_LIMIT)]);
+        r.commands.send(order_cmd(1, "BTCUSDT")).await.unwrap();
+        assert!(matches!(outcome_of(&r, 1).await, SendOutcome::Unknown { .. }));
+        assert!(r.block().is_some_and(|b| b.starts_with("ip_banned:")), "{:?}", r.block());
+        r.until("WS Trade down", |r| !trade_up(r)).await;
+        r.commands.send(order_cmd(2, "BTCUSDT")).await.unwrap();
+        assert!(matches!(outcome_of(&r, 2).await, SendOutcome::NotSent { reason } if reason.starts_with("ip_banned:")));
+        assert_eq!(ws_links(&trade, trade::CREATE_OP), [link(1)]);
+        assert!(posts(&api).is_empty());
+        // After the pause WS Trade comes back.
+        r.until("WS Trade up after the pause", trade_up).await;
+    }
+
+    /// HTTP 403 on the WS Trade upgrade is a ban like any other.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_403_on_the_ws_trade_upgrade_pauses_every_request() {
+        let api = order_venue();
+        let ws = FakeWs::start(GOOD).await;
+        let trade = FakeWs::start_trade(Mode {
+            forbid: true,
+            ..GOOD
+        })
+        .await;
+        let r = rig_trade(&api, &ws, &trade, timing());
+        r.until("the ban", |r| {
+            r.block().is_some_and(|b| b.starts_with("ip_banned: WS Trade upgrade"))
+        })
+        .await;
+        let attempts = trade.attempts();
+        r.commands.send(order_cmd(1, "BTCUSDT")).await.unwrap();
+        assert!(matches!(outcome_of(&r, 1).await, SendOutcome::NotSent { .. }));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(trade.attempts(), attempts, "a connect during the pause");
+        assert!(posts(&api).is_empty());
+    }
+
+    /// The private stream's reconnect waits: they grow while connections
+    /// fail before their first pong, and start over after one that answered.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ws_trade_reconnect_waits_grow_until_a_pong_then_start_over() {
+        let api = order_venue();
+        let ws = FakeWs::start(GOOD).await;
+        let trade = FakeWs::start_trade(Mode {
+            garbage: true,
+            ..GOOD
+        })
+        .await;
+        let t = Timing {
+            backoff_max: Duration::from_millis(1000),
+            ..timing()
+        };
+        let r = rig_trade(&api, &ws, &trade, t);
+        r.until("a first connection", |_| trade.accepted() >= 1).await;
+        let first = Instant::now();
+        r.until("six connections", |_| trade.accepted() >= 6).await;
+        // Waits of 20, 40, 80, 160, 320 ms between the six.
+        assert!(
+            first.elapsed() >= Duration::from_millis(500),
+            "six connections in {:?}",
+            first.elapsed()
+        );
+        trade.set(|m| m.garbage = false);
+        r.until("up and a ping answered", |r| {
+            trade_up(r)
+                && trade
+                    .texts(trade.accepted() - 1)
+                    .iter()
+                    .any(|t| t.contains("\"ping\""))
+        })
+        .await;
+        let n = trade.accepted();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        trade.drop_conn();
+        let dropped = Instant::now();
+        r.until("up again", |r| trade.accepted() > n && trade_up(r))
+            .await;
+        assert!(
+            dropped.elapsed() < Duration::from_millis(500),
+            "waited {:?} after a connection that answered a ping",
+            dropped.elapsed()
         );
     }
 }

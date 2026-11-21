@@ -5,7 +5,8 @@
 //! public-IP check, cancel-all. U16c: the queries (`query`) and the
 //! execution table (`exec`). U16d: the private stream (`stream`) and the
 //! gateway behind `VenueGateway` (`gateway`). U17a: orders and cancels over
-//! REST (`orders`) and the answer table (`answer`).
+//! REST (`orders`) and the answer table (`answer`). U17b: WS Trade
+//! (`trade`), the first path for orders and cancels.
 
 pub mod answer;
 pub mod checks;
@@ -16,6 +17,7 @@ pub mod query;
 pub mod rest;
 pub mod sign;
 pub mod stream;
+pub mod trade;
 
 use serde_json::Value;
 
@@ -26,21 +28,24 @@ use rest::{Rest, RestError};
 pub struct Endpoints {
     pub rest: String,
     pub private_ws: String,
+    /// WS Trade (F18 §3.1).
+    pub trade_ws: String,
 }
 
 impl Endpoints {
     pub fn of(network: &str) -> Option<Endpoints> {
         let (rest, ws) = match network {
-            "mainnet" => ("https://api.bybit.com", "wss://stream.bybit.com/v5/private"),
+            "mainnet" => ("https://api.bybit.com", "wss://stream.bybit.com/v5"),
             "testnet" => (
                 "https://api-testnet.bybit.com",
-                "wss://stream-testnet.bybit.com/v5/private",
+                "wss://stream-testnet.bybit.com/v5",
             ),
             _ => return None,
         };
         Some(Endpoints {
             rest: rest.into(),
-            private_ws: ws.into(),
+            private_ws: format!("{ws}/private"),
+            trade_ws: format!("{ws}/trade"),
         })
     }
 }
@@ -102,6 +107,14 @@ mod tests {
         assert_eq!(
             Endpoints::of("testnet").unwrap().private_ws,
             "wss://stream-testnet.bybit.com/v5/private"
+        );
+        assert_eq!(
+            Endpoints::of("mainnet").unwrap().trade_ws,
+            "wss://stream.bybit.com/v5/trade"
+        );
+        assert_eq!(
+            Endpoints::of("testnet").unwrap().trade_ws,
+            "wss://stream-testnet.bybit.com/v5/trade"
         );
         assert_eq!(Endpoints::of("demo"), None);
     }
