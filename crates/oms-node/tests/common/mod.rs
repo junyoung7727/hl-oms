@@ -26,6 +26,8 @@ pub struct Env {
     pub extra_policy: String,
     pub extra_limits: String,
     pub extra_api: String,
+    /// Tables written after `[core.policy]`, e.g. `[alert]`.
+    pub extra_tables: String,
     /// Environment variables for the node process (failpoints).
     pub node_env: Vec<(String, String)>,
     venue_id: u64,
@@ -51,6 +53,7 @@ impl Env {
             extra_policy: String::new(),
             extra_limits: String::new(),
             extra_api: String::new(),
+            extra_tables: String::new(),
             node_env: Vec::new(),
             venue_id: 0,
         };
@@ -157,6 +160,8 @@ absence_margin_us = 300000
 cancel_retry_backoff_us = 100000
 max_expiry_horizon_us = 60000000
 {extra_policy}
+
+{extra_tables}
 "#,
             data = self.data_dir().display(),
             venue = self.venue_sock().display(),
@@ -164,6 +169,7 @@ max_expiry_horizon_us = 60000000
             extra_api = self.extra_api,
             extra_limits = self.extra_limits,
             extra_policy = self.extra_policy,
+            extra_tables = self.extra_tables,
         );
         std::fs::write(self.config_path(), text).unwrap();
     }

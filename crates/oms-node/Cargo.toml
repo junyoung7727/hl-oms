@@ -12,6 +12,8 @@ oms-core = { workspace = true }
 oms-journal = { workspace = true }
 oms-api = { workspace = true }
 oms-sim = { workspace = true }
+# Direct Telegram alerts (C-ALERT, ADR-029)
+alert-direct = { path = "../alert-direct" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "io-util", "time", "sync", "signal", "macros", "fs"] }
@@ -35,8 +37,9 @@ workspace = true
 
 [features]
 # Compiles in the journal-failure hook used by tests/pipeline.rs and
-# tests/crash_points.rs, and the Bybit endpoint hook OMS_TEST_BYBIT_WIRING
-# used by tests/bybit_node.rs. Never enabled for the binary that is
+# tests/crash_points.rs, the Bybit endpoint hook OMS_TEST_BYBIT_WIRING
+# used by tests/bybit_node.rs, and the Telegram endpoint hook
+# OMS_TEST_TELEGRAM_API (C-ALERT). Never enabled for the binary that is
 # deployed.
 failpoints = []
 

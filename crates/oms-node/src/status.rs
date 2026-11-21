@@ -83,6 +83,9 @@ pub fn status(ctx: &ApiCtx, strategy: Option<&StrategyId>) -> serde_json::Value 
         // ip_banned, account, unchecked; ADR-028). Null when nothing blocks
         // it, or when the gateway does not report one.
         "gateway": {"block": ctx.gateway_block.as_ref().and_then(|f| f())},
+        // The direct alerts (C-ALERT): process counters, never the token or
+        // the file path.
+        "alerts": crate::alerts::status_json(ctx.alerts.as_deref()),
         "core": {
             "instance_id": format!("{:016x}", core.instance_id),
             "boot": core.boot,

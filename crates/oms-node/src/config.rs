@@ -31,6 +31,8 @@ pub struct NodeConfig {
     pub limits: IngressLimits,
     pub venue: VenueConfig,
     pub core: CoreConfig,
+    /// Direct Telegram alerts (C-ALERT). Absent: none.
+    pub alert: Option<AlertSection>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -77,6 +79,121 @@ pub struct HttpConfig {
     pub listen: String,
     /// Directory with the dashboard's static files and generated registry.
     pub static_dir: PathBuf,
+}
+
+/// The `[alert]` table (C-ALERT, ADR-029).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AlertSection {
+    /// The bot token file (alert-direct format, mode 0600, outside any
+    /// repository). Absolute path.
+    pub telegram: PathBuf,
+    /// How long a passing state (link down, resync, in doubt, ...) must
+    /// hold before its start is sent.
+    #[serde(default = "default_grace_ms")]
+    pub grace_ms: u64,
+    /// The conditions are evaluated at least this often.
+    #[serde(default = "default_eval_ms")]
+    pub eval_ms: u64,
+    /// A lasting condition is sent again this often (design 7.7).
+    #[serde(default = "default_repeat_ms")]
+    pub repeat_ms: u64,
+    /// How long the exit waits for queued alerts.
+    #[serde(default = "default_exit_flush_ms")]
+    pub exit_flush_ms: u64,
+    /// Only "none" until a second channel is chosen (owner decision D3).
+    #[serde(default = "default_second_channel")]
+    pub second_channel: String,
+    /// Telegram failing for longer than this is told on the second channel.
+    #[serde(default = "default_second_after_ms")]
+    pub second_after_ms: u64,
+    /// The token file, loaded by `NodeConfig::load`.
+    #[serde(skip)]
+    pub loaded: Option<alert_direct::TelegramConfig>,
+    /// The loopback Bot API base of `OMS_TEST_TELEGRAM_API` (failpoints
+    /// builds only).
+    #[serde(skip)]
+    pub test_api: Option<String>,
+}
+
+fn default_grace_ms() -> u64 {
+    30_000
+}
+
+fn default_eval_ms() -> u64 {
+    1_000
+}
+
+fn default_repeat_ms() -> u64 {
+    alert_direct::REPEAT_MS as u64
+}
+
+fn default_exit_flush_ms() -> u64 {
+    15_000
+}
+
+fn default_second_channel() -> String {
+    "none".into()
+}
+
+fn default_second_after_ms() -> u64 {
+    alert_direct::SECOND_AFTER_MS as u64
+}
+
+/// The environment variable that replaces the Telegram routes with one
+/// loopback URL, read only by a build with the `failpoints` feature.
+pub const TEST_TELEGRAM_API: &str = "OMS_TEST_TELEGRAM_API";
+
+/// The value of `OMS_TEST_TELEGRAM_API` if it is an `http://` URL on a
+/// loopback address; any other host is refused.
+pub fn test_api_base(value: &str) -> Result<String, String> {
+    let url = reqwest::Url::parse(value).map_err(|e| format!("{TEST_TELEGRAM_API}: {e}"))?;
+    let host = url.host_str().unwrap_or_default().trim_start_matches('[').trim_end_matches(']');
+    let loopback = host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback());
+    if url.scheme() != "http" || !loopback {
+        return Err(format!("{TEST_TELEGRAM_API} must be http://<loopback address>:<port>"));
+    }
+    Ok(value.to_string())
+}
+
+impl AlertSection {
+    fn validate(&self) -> Result<(), String> {
+        // A relative path would resolve against the configuration's
+        // directory, often a checkout.
+        if !self.telegram.is_absolute() {
+            return Err("[alert] telegram must be an absolute path".into());
+        }
+        let bounds: [(&str, u64, u64, u64); 5] = [
+            ("grace_ms", self.grace_ms, 0, 600_000),
+            ("eval_ms", self.eval_ms, 100, 10_000),
+            ("repeat_ms", self.repeat_ms, 60_000, 3_600_000),
+            ("exit_flush_ms", self.exit_flush_ms, 1_000, 30_000),
+            ("second_after_ms", self.second_after_ms, 10_000, 600_000),
+        ];
+        for (name, v, lo, hi) in bounds {
+            if !(lo..=hi).contains(&v) {
+                return Err(format!("[alert] {name} must be between {lo} and {hi}"));
+            }
+        }
+        if self.second_channel != "none" {
+            return Err(format!(
+                "[alert] second_channel {:?}: only \"none\" until a second channel is chosen (D3)",
+                self.second_channel
+            ));
+        }
+        Ok(())
+    }
+
+    /// Loads the token file with every rule of alert-direct; with a test
+    /// API the repository rule is skipped (the test directory may be inside
+    /// a checkout). Errors never hold the token.
+    fn load(&mut self, test_api: Option<String>) -> Result<(), String> {
+        let tg = alert_direct::TelegramConfig::load_with(&self.telegram, test_api.is_none())
+            .map_err(|e| format!("[alert] telegram: {e}"))?;
+        self.loaded = Some(tg);
+        self.test_api = test_api;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -319,7 +436,36 @@ impl NodeConfig {
             cfg.http.static_dir = base.join(&cfg.http.static_dir);
         }
         cfg.validate()?;
+        // Only a build with the failpoints feature (the node tests) reads
+        // it; the shipped binary has no such code.
+        #[cfg(feature = "failpoints")]
+        let test_api = std::env::var(TEST_TELEGRAM_API).ok().map(|v| test_api_base(&v)).transpose()?;
+        #[cfg(not(feature = "failpoints"))]
+        let test_api: Option<String> = None;
+        if let Some(a) = &mut cfg.alert {
+            a.load(test_api)?;
+        }
         Ok(cfg)
+    }
+
+    /// Whether this configuration trades real money: a mainnet venue with
+    /// `mainnet_confirmed`.
+    pub fn is_mainnet(&self) -> bool {
+        match &self.venue {
+            VenueConfig::Sim { .. } => false,
+            VenueConfig::Hyperliquid(h) => h.network == "mainnet" && h.mainnet_confirmed,
+            VenueConfig::Bybit(b) => b.network == "mainnet" && b.mainnet_confirmed,
+        }
+    }
+
+    /// The venue's name as `status.node.venue` shows it, worked out from
+    /// the configuration so that the alerts start before the gateway.
+    pub fn venue_label(&self) -> String {
+        match &self.venue {
+            VenueConfig::Sim { .. } => "sim".into(),
+            VenueConfig::Hyperliquid(h) => format!("hyperliquid:{}", h.network),
+            VenueConfig::Bybit(b) => format!("bybit:{}", b.network),
+        }
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -378,6 +524,14 @@ impl NodeConfig {
             // The other venues report isolated positions and no account
             // numbers: the rule would refuse every report (U17d).
             return Err("[core.policy.margin] account_mm_rate_max_bps is for a cross-margin account (Bybit) only".into());
+        }
+        if let Some(a) = &self.alert {
+            a.validate()?;
+        }
+        // Real money is not traded without the trading-safety alerts
+        // (C-ALERT; owner question 1 of U18a, default: refuse).
+        if self.is_mainnet() && self.alert.is_none() {
+            return Err("[venue] mainnet requires [alert] (direct alerts, C-ALERT)".into());
         }
         Ok(())
     }
@@ -556,6 +710,9 @@ max = "10"
 [core.policy]
 
 {margin}
+
+[alert]
+telegram = "/etc/hl-oms/telegram.json"
 "#
         );
         toml::from_str(&text).map_err(|e| format!("parse: {e}"))
@@ -729,6 +886,96 @@ max = "10"
         refused(&hyperliquid("mainnet"), "", Some("account_mm_rate_max_bps = 5000"), because);
         refused(SIM, "", Some("account_mm_rate_max_bps = 5000"), because);
         assert_eq!(check(&hyperliquid("testnet"), "", Some("")), Ok(()));
+    }
+
+    /// C-ALERT. The `[alert]` table: an absolute token path, each bound at
+    /// both ends, only `second_channel = "none"`; mainnet (Hyperliquid and
+    /// Bybit) does not start without the table, elsewhere it is optional.
+    #[test]
+    fn the_alert_table_is_validated_and_required_on_mainnet() {
+        let with = |venue: &str, margin: Option<&str>, edit: &dyn Fn(&mut AlertSection)| {
+            let mut cfg = parse(venue, "", margin, 1).unwrap();
+            cfg.data_dir = "/var/lib/hl-oms/data".into();
+            if venue.contains("bybit") {
+                cfg.core.policy.absence_not_found_needed = 2;
+            }
+            edit(cfg.alert.as_mut().expect("the helper writes [alert]"));
+            cfg.validate()
+        };
+        let a = parse(SIM, "", None, 1).unwrap().alert.unwrap();
+        assert_eq!(
+            (a.grace_ms, a.eval_ms, a.repeat_ms, a.exit_flush_ms, a.second_channel.as_str(), a.second_after_ms),
+            (30_000, 1_000, 300_000, 15_000, "none", 60_000)
+        );
+        assert_eq!(with(SIM, None, &|_| {}), Ok(()));
+
+        let because = "telegram must be an absolute path";
+        for rel in ["telegram.json", "./t.json", "secrets/t.json"] {
+            let e = with(SIM, None, &|a| a.telegram = rel.into()).unwrap_err();
+            assert!(e.contains(because), "{rel}: {e}");
+        }
+        type Field = fn(&mut AlertSection) -> &mut u64;
+        let fields: [(&str, Field, u64, u64); 5] = [
+            ("grace_ms", |a| &mut a.grace_ms, 0, 600_000),
+            ("eval_ms", |a| &mut a.eval_ms, 100, 10_000),
+            ("repeat_ms", |a| &mut a.repeat_ms, 60_000, 3_600_000),
+            ("exit_flush_ms", |a| &mut a.exit_flush_ms, 1_000, 30_000),
+            ("second_after_ms", |a| &mut a.second_after_ms, 10_000, 600_000),
+        ];
+        for (name, field, lo, hi) in fields {
+            assert_eq!(with(SIM, None, &|a| *field(a) = lo), Ok(()), "{name} = {lo}");
+            assert_eq!(with(SIM, None, &|a| *field(a) = hi), Ok(()), "{name} = {hi}");
+            let mut outside = vec![hi + 1];
+            if lo > 0 {
+                outside.push(lo - 1);
+            }
+            for v in outside {
+                let e = with(SIM, None, &|a| *field(a) = v).unwrap_err();
+                assert!(e.contains(&format!("[alert] {name} must be between {lo} and {hi}")), "{name} = {v}: {e}");
+            }
+        }
+        for other in ["pushover", "", "None"] {
+            let e = with(SIM, None, &|a| a.second_channel = other.into()).unwrap_err();
+            assert!(e.contains("second_channel") && e.contains("D3"), "{other}: {e}");
+        }
+        // An unknown key in the table.
+        let text = "data_dir = \"d\"\n[venue]\nkind = \"sim\"\nsocket = \"v.sock\"\n[core]\nversion = 1\n[alert]\ntelegram = \"/t.json\"\ntoken = \"x\"\n";
+        assert!(toml::from_str::<NodeConfig>(text).is_err());
+
+        // Mainnet: required. Testnet and the simulated venue: optional.
+        let without = |venue: &str, margin: Option<&str>| {
+            let mut cfg = parse(venue, "", margin, 1).unwrap();
+            cfg.data_dir = "/var/lib/hl-oms/data".into();
+            cfg.core.policy.absence_not_found_needed = if venue.contains("bybit") { 2 } else { 1 };
+            cfg.alert = None;
+            cfg.validate()
+        };
+        let because = "mainnet requires [alert]";
+        let bybit_margin = Some("isolated = false\naccount_mm_rate_max_bps = 5000");
+        for (venue, margin) in [(hyperliquid("mainnet"), Some("")), (bybit("mainnet", "mainnet_confirmed = true"), bybit_margin)] {
+            let e = without(&venue, margin).unwrap_err();
+            assert!(e.contains(because), "{venue}: {e}");
+            assert_eq!(with(&venue, margin, &|_| {}), Ok(()), "{venue}");
+        }
+        assert_eq!(without(&hyperliquid("testnet"), None), Ok(()));
+        assert_eq!(without(&bybit("testnet", ""), None), Ok(()));
+        assert_eq!(without(SIM, None), Ok(()));
+        // Mainnet without mainnet_confirmed is refused for that reason first.
+        let e = without(&bybit("mainnet", ""), None).unwrap_err();
+        assert!(e.contains("mainnet_confirmed"), "{e}");
+    }
+
+    /// C-ALERT. `OMS_TEST_TELEGRAM_API` is taken only as an http URL on a
+    /// loopback address.
+    #[test]
+    fn the_test_telegram_api_must_be_loopback_http() {
+        assert_eq!(TEST_TELEGRAM_API, "OMS_TEST_TELEGRAM_API");
+        for ok in ["http://127.0.0.1:8080", "http://127.0.0.1:9/", "http://[::1]:8080"] {
+            assert_eq!(test_api_base(ok), Ok(ok.to_string()), "{ok}");
+        }
+        for bad in ["https://api.telegram.org", "http://api.telegram.org", "http://10.0.0.1:80", "http://localhost:80", "https://127.0.0.1:443", "127.0.0.1:80", ""] {
+            assert!(test_api_base(bad).is_err(), "{bad} was taken");
+        }
     }
 
     fn bybit(network: &str, more: &str) -> String {

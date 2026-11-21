@@ -3,7 +3,8 @@
 //! Startup order, each step finishing before the next begins:
 //!
 //! 1. Recover the state from snapshot and journal (no sends are possible).
-//! 2. Start the core thread and the commit stage.
+//! 2. Start the direct alerts, if `[alert]` is configured (C-ALERT), then
+//!    the core thread and the commit stage.
 //! 3. Submit `Boot`, then the configuration from the file. Wait until both
 //!    are durable. A configuration the core refuses stops the process.
 //! 4. Start the venue gateway, the reconciler, the timer and the storage
@@ -16,7 +17,10 @@
 //! Open orders are left at the venue. A fatal condition (journal failure,
 //! core fault) releases nothing further and exits with status 2, also when
 //! it happens during the drain. A panic aborts the process (SIGABRT).
+//! Before either exit the alerts queue the stop notice or the fatal message
+//! and wait up to `exit_flush_ms` for delivery.
 
+use crate::alerts::{self, Alerts};
 use crate::config::{NodeConfig, VenueConfig};
 use crate::pipeline::{self, PipelineConfig, STATE_SCHEMA, Shared, SnapshotState};
 use crate::published::Published;
@@ -80,6 +84,16 @@ pub fn run(cfg: NodeConfig) -> i32 {
         fail_next_sync: AtomicBool::new(false),
     });
 
+    // The direct alerts start before the gateway, so that every later
+    // failure, a fatal one included, can be told (C-ALERT).
+    let alerts = match start_alerts(&cfg, &published, &fatal) {
+        Ok(a) => a,
+        Err(e) => {
+            error!("cannot start the direct alerts; not starting", "error": e);
+            return 3;
+        }
+    };
+
     let policy = &cfg.core.policy;
     let command_capacity = (policy.max_inflight_sends + policy.max_open_orders) as usize + 64;
     let (cmd_tx, cmd_rx) = mpsc::channel::<VenueCommand>(command_capacity);
@@ -113,7 +127,12 @@ pub fn run(cfg: NodeConfig) -> i32 {
             return 3;
         }
         match rx.await {
-            Ok(Reply::Config(Ok(version))) => info!("configuration active", "version": version),
+            Ok(Reply::Config(Ok(version))) => {
+                info!("configuration active", "version": version);
+                if let Some(a) = &alerts {
+                    a.activate();
+                }
+            }
             Ok(Reply::Config(Err(errs))) => {
                 error!("the configuration was refused; not starting", "errors": errs);
                 return 3;
@@ -180,7 +199,12 @@ pub fn run(cfg: NodeConfig) -> i32 {
                     })
                     .collect();
                 match venue::bybit::gateway::spawn(b.clone(), symbols, ports, policy.max_inflight_sends as usize + 16) {
-                    Ok((name, block)) => (name, <venue::bybit::gateway::Gateway as VenueGateway>::WIRE_ID, Some(block)),
+                    Ok((name, block)) => {
+                        if let Some(a) = &alerts {
+                            a.set_gateway_block(block.clone());
+                        }
+                        (name, <venue::bybit::gateway::Gateway as VenueGateway>::WIRE_ID, Some(block))
+                    }
                     Err(e) => {
                         error!("cannot start the Bybit gateway", "error": e);
                         return 3;
@@ -248,6 +272,7 @@ pub fn run(cfg: NodeConfig) -> i32 {
             node_info,
             own_uid,
             gateway_block,
+            alerts.clone(),
         ));
         let trading_mode = if cfg.api.allowed_uids.is_empty() { 0o600 } else { 0o666 };
         let trading = match server::bind(&cfg.socket_path(), trading_mode) {
@@ -348,6 +373,39 @@ pub fn run(cfg: NodeConfig) -> i32 {
     } else {
         error!("stopped after a fatal condition", "reason": fatal.reason(), "code": code);
     }
+    // The stop notice or the fatal message, then up to exit_flush_ms for
+    // delivery. `/api/status` still answers meanwhile, with `fatal` set.
+    if let Some(a) = &alerts {
+        a.finish(code);
+    }
     runtime.shutdown_timeout(Duration::from_millis(200));
     code
+}
+
+/// Starts the direct alerts of `[alert]`; `None` without the section.
+fn start_alerts(cfg: &NodeConfig, published: &Arc<Published>, fatal: &Arc<Fatal>) -> Result<Option<Arc<Alerts>>, String> {
+    let Some(a) = &cfg.alert else {
+        warn!("no [alert] section: direct [OMS P1] alerts are off");
+        return Ok(None);
+    };
+    let Some(tg) = a.loaded.clone() else {
+        return Err("[alert] telegram was not loaded".into());
+    };
+    let mut ac = alert_direct::AlertConfig::new(tg, alerts::PREFIX, &cfg.venue_label());
+    if let Some(base) = &a.test_api {
+        warn!("the direct alerts use the test endpoint", "url": base.clone());
+        ac.routes = vec![alert_direct::Route::direct(base)?];
+    }
+    ac.repeat_ms = a.repeat_ms as i64;
+    ac.second_after_ms = a.second_after_ms as i64;
+    let settings = alerts::Settings {
+        grace_ms: a.grace_ms as i64,
+        eval_ms: a.eval_ms as i64,
+        poll: Duration::from_millis(100),
+        exit_flush: Duration::from_millis(a.exit_flush_ms),
+    };
+    // second_channel is "none" until D3 names a service (validated).
+    let started = Alerts::start(ac, Arc::new(alert_direct::SystemClock), published.clone(), fatal.clone(), settings, None)?;
+    info!("direct alerts on", "venue": cfg.venue_label(), "grace_ms": a.grace_ms, "repeat_ms": a.repeat_ms);
+    Ok(Some(Arc::new(started)))
 }

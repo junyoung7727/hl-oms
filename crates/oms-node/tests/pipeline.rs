@@ -226,3 +226,69 @@ fn inputs_that_arrive_together_share_a_flush() {
     rig.stop();
     std::fs::remove_dir_all(&d).unwrap();
 }
+
+/// The texts a fake Telegram got, in order.
+fn telegram_texts(f: &http_fake::FakeHttp) -> Vec<String> {
+    f.requests()
+        .iter()
+        .map(|r| serde_json::from_slice::<serde_json::Value>(&r.body).unwrap()["text"].as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+/// Waits until the fake Telegram holds `n` requests; returns their texts.
+fn wait_texts(f: &http_fake::FakeHttp, n: usize) -> Vec<String> {
+    f.wait_requests(n, Duration::from_secs(5));
+    let t = telegram_texts(f);
+    assert!(t.len() >= n, "expected {n} requests: {t:?}");
+    t
+}
+
+/// C-ALERT, done criterion: no Telegram request for an event whose batch
+/// failed to flush. The real core thread, commit thread, journal and alert
+/// thread: an account halt committed normally is sent, and so is its
+/// clear; then the next flush fails while a second account halt is
+/// committed. Two seconds later the fake has exactly one new request, the
+/// fatal message with the last durable sequence, and no request holds the
+/// second halt's note.
+#[test]
+fn no_alert_for_a_batch_that_failed_to_flush() {
+    use oms_node::alerts::{self, Alerts, Settings};
+    let f = http_fake::FakeHttp::start(http_fake::Answer::Reply(200, r#"{"ok":true,"result":{}}"#.into()));
+    let d = dir("alert-flush");
+    let mut rig = Rig::start(d.clone(), false);
+    rig.ready();
+    let tg = alert_direct::TelegramConfig::new("123456:ABCdef_ghi-JKL", "42").unwrap();
+    let mut cfg = alert_direct::AlertConfig::new(tg, alerts::PREFIX, "sim");
+    cfg.routes = vec![alert_direct::Route::direct(&f.url()).unwrap()];
+    cfg.flush_every = Duration::from_millis(20);
+    let settings = Settings { grace_ms: 30_000, eval_ms: 100, poll: Duration::from_millis(5), exit_flush: Duration::from_secs(2) };
+    let a = Alerts::start(cfg, Arc::new(alert_direct::SystemClock), rig.published.clone(), rig.fatal.clone(), settings, None).unwrap();
+    a.activate();
+    assert!(wait_texts(&f, 1)[0].contains("OMS 시작"));
+
+    rig.push(Input::Operator(OperatorCmd::Halt { scope: Scope::Account, note: "first-halt".into() }));
+    let t = wait_texts(&f, 2);
+    assert!(t[1].contains("운영자가 계좌를 중지함") && t[1].contains("first-halt"), "{}", t[1]);
+    rig.push(Input::Operator(OperatorCmd::Resume { scope: Scope::Account, note: "r".into() }));
+    let t = wait_texts(&f, 3);
+    assert!(t[2].contains("해소: ") && t[2].contains("first-halt"), "{}", t[2]);
+    assert!(a.flush_for(Duration::from_secs(2)));
+    let before = telegram_texts(&f).len();
+    let durable_before = rig.shared.durable_seq.load(Ordering::SeqCst);
+
+    rig.shared.fail_next_sync.store(true, Ordering::SeqCst);
+    rig.push(Input::Operator(OperatorCmd::Halt { scope: Scope::Account, note: "SECOND-HALT-NOTE".into() }));
+    rig.wait(|_| rig.fatal.is_tripped());
+    std::thread::sleep(Duration::from_secs(2));
+    let all = telegram_texts(&f);
+    let new = &all[before..];
+    assert_eq!(new.len(), 1, "{new:?}");
+    let reason = rig.fatal.reason().unwrap();
+    assert!(reason.starts_with("commit failed: "), "{reason}");
+    assert!(new[0].ends_with(&alerts::fatal_text(&reason, durable_before)), "{}", new[0]);
+    assert!(!all.iter().any(|t| t.contains("SECOND-HALT-NOTE")), "{all:?}");
+    assert!(rig.published.read().core.halt_account.is_none());
+    rig.stop();
+    drop(a);
+    std::fs::remove_dir_all(&d).unwrap();
+}

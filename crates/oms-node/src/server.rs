@@ -59,6 +59,8 @@ pub struct ApiCtx {
     pub own_uid: u32,
     /// Why the gateway keeps the link down, if it says (Bybit only).
     pub gateway_block: Option<crate::venue::bybit::gateway::BlockView>,
+    /// The direct alerts, if `[alert]` is configured (C-ALERT).
+    pub alerts: Option<Arc<crate::alerts::Alerts>>,
     connections: Arc<Semaphore>,
     admin_connections: Arc<Semaphore>,
     buckets: Mutex<HashMap<(StrategyId, bool), Bucket>>,
@@ -74,9 +76,11 @@ impl ApiCtx {
         info: status::NodeInfo,
         own_uid: u32,
         gateway_block: Option<crate::venue::bybit::gateway::BlockView>,
+        alerts: Option<Arc<crate::alerts::Alerts>>,
     ) -> ApiCtx {
         ApiCtx {
             gateway_block,
+            alerts,
             connections: Arc::new(Semaphore::new(cfg.max_connections)),
             admin_connections: Arc::new(Semaphore::new(cfg.admin_max_connections)),
             cfg,

@@ -355,3 +355,68 @@ fn stopped_around_a_day_base_set_the_base_is_set_exactly_once() {
         assert_eq!(shown["day"], *day, "{point}");
     }
 }
+
+// ---- C-ALERT: the fatal message ------------------------------------------------
+
+/// C-ALERT, done criterion. The flush of the record that enters REDUCING
+/// fails (two plain orders rest, the margin report breaches the daily
+/// loss) and the node stops with status 2. A loopback fake stands in for
+/// Telegram (`OMS_TEST_TELEGRAM_API`): it gets the start notice and the
+/// fatal message, and nothing about REDUCING. Its first answer to the fatal
+/// message is 500, so the message arrives only if the exit waits for the
+/// retry (the exit flush); the node still exits within exit_flush_ms + 5 s.
+#[test]
+fn a_flush_failure_sends_one_fatal_alert_and_nothing_of_the_batch() {
+    let ok = || http_fake::Answer::Reply(200, r#"{"ok":true,"result":{}}"#.into());
+    let f = http_fake::FakeHttp::start(ok());
+    f.script([ok(), http_fake::Answer::Reply(500, r#"{"ok":false,"description":"down"}"#.into())]);
+    let mut env = Env::new("alert-fatal");
+    let token = env.dir.join("telegram.json");
+    std::fs::write(&token, r#"{"token":"123456:ABCdef_ghi-JKL","chat_id":"42"}"#).unwrap();
+    std::fs::set_permissions(&token, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+    env.extra_tables = format!("[alert]\ntelegram = \"{}\"\n", token.display());
+    env.node_env = crash_on("sync_error_after_write", "reducing_entered");
+    env.node_env.push(("OMS_TEST_TELEGRAM_API".into(), f.url()));
+    env.extra_runtime = "margin_poll_ms = 100".into();
+    env.extra_policy = "\n[core.policy.margin]\naccount_modes_allowed = [\"standard\"]\n".into();
+    env.ctl(json!({"account_value": {"value": "100"}}));
+    env.start_node();
+    env.wait_ready();
+    wait_margin(&env, "the account value", |m| m["account_value"] == "100");
+    two_resting_plain_orders(&mut env);
+    let texts = || -> Vec<String> {
+        f.requests()
+            .iter()
+            .map(|r| serde_json::from_slice::<serde_json::Value>(&r.body).unwrap()["text"].as_str().unwrap_or_default().to_string())
+            .collect()
+    };
+    assert!(env.wait(Duration::from_secs(5), || texts().len() == 1), "{:?}", texts());
+    assert!(texts()[0].contains("[OMS P1] sim ") && texts()[0].contains("OMS 시작 (boot 1, config 1)"), "{:?}", texts());
+    let st = env.status();
+    assert_eq!(st["alerts"]["configured"], true, "{}", st["alerts"]);
+    assert_eq!(st["alerts"]["queued"], 0, "{}", st["alerts"]);
+    assert!(!st.to_string().contains("ABCdef") && !st.to_string().contains("telegram.json"));
+    let seq = st["journal"]["durable_seq"].as_u64().unwrap();
+
+    let t = std::time::Instant::now();
+    env.ctl(json!({"account_value": {"value": "94"}}));
+    assert_eq!(env.wait_exit(Duration::from_secs(25)), Some(2), "{}", env.log_tail(10));
+    assert!(t.elapsed() < Duration::from_secs(15 + 5), "{:?}", t.elapsed());
+    assert_eq!(env.journal_count("reducing_entered"), 1, "the record reached the file before the failed flush");
+
+    let all = texts();
+    assert_eq!(all.len(), 3, "start, fatal (500), fatal again: {all:?}");
+    assert_eq!(all[1], all[2]);
+    let fatal = &all[1];
+    assert!(fatal.contains("치명 종료: commit failed: ") && fatal.contains("노드가 멈춤(exit 2)"), "{fatal}");
+    // The last durable sequence: the margin reports after `seq` are
+    // durable, the failed record is not.
+    let shown: u64 = fatal.split("마지막 내구 seq ").nth(1).and_then(|r| r.split('.').next()).and_then(|n| n.parse().ok()).unwrap();
+    assert!(shown >= seq, "{fatal}");
+    let failed = env.journal_records().into_iter().find(|r| r.events.iter().any(|e| e.name() == "reducing_entered")).unwrap();
+    assert!(shown < failed.seq, "{fatal}");
+    for t in &all {
+        assert!(!t.contains("REDUCING") && !t.contains("감소 전용") && !t.contains("daily_loss"), "{t}");
+    }
+    assert!(env.log_tail(10).contains("alerts delivered before the exit"), "{}", env.log_tail(10));
+}
