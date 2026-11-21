@@ -58,6 +58,12 @@ pub fn suites(quick: bool, live: bool, extended: Option<&str>) -> Vec<Suite> {
             env: env(&[]),
         },
         Suite {
+            name: "alert",
+            what: "direct Telegram alerts (alert-direct): delivery rules, repeat rule, Telegram failing since, the second channel and its Telegram-down notice; loopback fakes only",
+            args: &["test", "-p", "alert-direct"],
+            env: env(&[]),
+        },
+        Suite {
             name: "pipeline",
             what: "commit gate with an injected flush failure (real threads, real file); the process stopped at each commit boundary; the Bybit node against fake venue servers",
             args: &[

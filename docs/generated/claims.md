@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `4b742cb2b7423dc8`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `611102795dbf8fad`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
-주장 83건: 통과 0, 실패 0, 미실행 16, 이전 버전 결과 67.
+주장 84건: 통과 0, 실패 0, 미실행 17, 이전 버전 결과 67.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -90,6 +90,7 @@
 | V-BYBIT-TRADE-1 | Bybit 게이트웨이는 주문과 취소를 WS Trade(/v5/trade)로 보내고, REST로는 WS Trade 연결 작업이 그 요청의 아무 바이트도 쓰지 않았을 때(인증된 연결 없음, 쓰기 전 막힘)만, 막힘을 다시 본 뒤 같은 한도 자리와 같은 요청 시각으로 보낸다. 요청은 두 경로를 합쳐 많아야 한 번 나가고 한도 자리는 경로와 상관없이 하나다(1초 안의 9번째 생성은 경로가 섞여도 기다린다). 요청은 reqId(생성 c + 고객 주문번호, 취소 x + 36진 시도 번호 + 고객 주문번호, 36자 이하), header의 X-BAPI-TIMESTAMP·X-BAPI-RECV-WINDOW, op, REST 본문 하나인 args로 되어 있다. 응답은 REST와 같은 표로 분류하고, 20006·10019·10429는 결과 불명, 10019는 연결을 닫고 다시 열며, 10403과 10018은 IP 차단 멈춤을, 키 거부 코드는 키 거부를 건다. 쓴 요청에 request_timeout_ms 안에 응답이 없거나 그 사이 연결이 내려가면(pong 없음, 끊김, 막힘) 결과 불명이고 어느 경로로도 다시 보내지 않으며, 한도는 요청 시각 + recv_window + 1초 + 1초까지 센다. 늦은 응답은 버린다. 같은 reqId가 기다리는 중이면 다시 쓰지 않는다. WS Trade 연결은 막힘이 없을 때만 IPv4로 접속하고, auth(비공개 스트림의 서명)의 retCode가 0일 때만 올라가며, 0이 아니면 재시작까지 키 거부, 업그레이드의 HTTP 403은 IP 차단 멈춤이다. ping 뒤 간격 안에 pong이 없으면 내려가고, 재연결 기다림은 첫 pong을 받은 연결 뒤에만 처음 값으로 돌아간다. WS Trade는 Link를 움직이지 않는다 | 통합 | 미실행 | `cargo test -p oms-node --lib venue::bybit` |
 | V-BYBIT-REFPX-1 | Bybit 게이트웨이는 공개 linear 스트림에 거래하는 종목마다 tickers.<symbol>을 구독하고(구독 요청 하나에 토픽 10개까지, 모든 응답이 success: true일 때만 구독됨, 거부되거나 handshake 시간 안에 답이 없는 요청이 하나라도 있으면 pong이 와도 끊고 다시 붙음), 종목마다 그 연결의 스냅숏의 markPrice를 mark로 삼아 RefPrice(px = mark, venue_ts = 메시지 ts의 µs)로 코어에 보낸다. 스냅숏 전의 델타는 버리고, markPrice가 있는 델타는 mark를 바꾸며, markPrice 없는 델타는 든 mark를 그 델타의 ts로 다시 보낸다. 내보냄은 종목마다 ref_price_interval_ms에 많아야 한 번이고(재연결을 넘어 센다) 메시지 없이 다시 보내지 않는다. mark는 연결마다 비운다. 읽을 수 없는 티커 메시지(JSON 아님, type·data·symbol·markPrice·ts 이상, markPrice 없는 스냅숏, 소수 9자리, 0 이하)는 연결을 끊고 다시 붙으며, 거래하지 않는 종목의 메시지는 읽지 않고 버린다. 연결은 막힘이 없을 때만 IPv4로 접속하고, 연결 중 막힘이 생기면 끊고 막힌 동안 다시 붙지 않으며, 업그레이드의 HTTP 403은 IP 차단 멈춤이다. ping 뒤 간격 안에 pong(op = pong, 또는 공개 linear의 op = ping + ret_msg = pong)이 없으면 끊는다. 첫 pong 전에 끊긴 연결은 재연결 대기를 늘리고, 첫 pong 뒤에 끊긴 연결만 대기를 처음으로 되돌린다. 공개 스트림은 Link를 움직이지 않는다. 설정의 ref_price_interval_ms는 1000 이상, ref_price_max_age_us의 절반 이하만 받는다. 시험용 연결 주소 OMS_TEST_BYBIT_WIRING은 다섯 주소의 호스트가 모두 127.0.0.1일 때만 받는다 | 통합 | 미실행 | `cargo test -p oms-node --lib -- venue::bybit config::tests` |
 | V-BYBIT-NODE-1 | kind = bybit인 oms-node 프로세스(failpoints 빌드, 시험용 연결 주소로 가짜 Bybit에 연결)는 참조 가격이 오기 전 가격 범위가 있는 주문을 RefPriceUnavailable로 거절하고 아무 요청도 보내지 않으며, 공개 스트림의 티커 스냅숏 뒤에는 같은 요청을 받아 WS Trade로 한 번 보내고, 가짜 WS Trade가 그 order.create를 읽을 때 디스크의 저널 파일에 그 주문의 수락 기록이 있다(이 확인은 순서의 증명이 아니다: 기록이 네트워크 왕복보다 먼저 파일에 닿으므로 쓰기 전에 보내도 통과한다. 기록이 내구화된 뒤에만 보낸다는 것은 다음 flush 실패 시험이 증명한다). 새 주문의 저널 flush가 실패하면(OMS_CRASH_AT=sync_error_after_write) 노드는 상태 2로 멈추고 REST와 WS Trade 어느 쪽에도 생성이 닿지 않으며, failpoint 없이 다시 시작하면 그 기록을 찾고 orderLinkId 조회(realtime과 history 두 번이 모두 비었음)로 주문을 '놓이지 않음'으로 닫고, 그래도 생성은 없다. WS Trade가 생성을 읽고 답하지 않으면 주문은 결과 불명(Transport)이 되고, orderLinkId로 묻는 realtime 조회가 열린 주문을 찾아 Working이 되며, 두 경로를 합친 생성은 하나다 | 프로세스 | 미실행 | `cargo test -p oms-node --features failpoints --test bybit_node` |
+| V-ALERT-DIRECT-1 | alert-direct의 송신 스레드는 텔레그램 전송이 처음 다시 보내기(Retry)로 끝난 시도의 시각을 '실패 시작'으로 두고, 텔레그램이 답하면(전달 또는 400·413 거절) 지운다. 보낼 것이 없으면 실패 시작은 생기지 않는다. 둘째 채널을 설정하면 once와 set이 만든 모든 메시지가 같은 분할·같은 한도(50개)의 둘째 보관함에도 통째로 들어가 자기 스레드(alert-second)로 한 번씩 나가고, 넘치면 오래된 것부터 버리고 세어 자기 버림 알림을 보내며, 오류는 그 조각을 두고 그 전송을 끝낸다. 실패 시작에서 second_after_ms(기본 60초)를 넘게 지나면 둘째 채널에만 'Telegram 전송이 N초째 실패함' 알림이 시작 1번, repeat_ms마다 1번, 텔레그램이 다시 답하면 해소 1번 나간다. flush_for는 두 보관함을 모두 기다린다. 둘째 채널이 없으면 스레드도 복사도 없다 | 통합 | 미실행 | `cargo test -p alert-direct` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -2023,4 +2024,27 @@
 | `pipeline/an_order_waits_for_the_reference_price_and_goes_out_once` | 미실행 |  |
 | `pipeline/a_failed_flush_sends_nothing_and_the_restart_resolves_the_order_as_not_placed` | 미실행 |  |
 | `pipeline/an_unanswered_create_is_found_open_by_its_order_link_id_and_never_sent_again` | 미실행 |  |
+
+## V-ALERT-DIRECT-1 — alert-direct의 송신 스레드는 텔레그램 전송이 처음 다시 보내기(Retry)로 끝난 시도의 시각을 '실패 시작'으로 두고, 텔레그램이 답하면(전달 또는 400·413 거절) 지운다. 보낼 것이 없으면 실패 시작은 생기지 않는다. 둘째 채널을 설정하면 once와 set이 만든 모든 메시지가 같은 분할·같은 한도(50개)의 둘째 보관함에도 통째로 들어가 자기 스레드(alert-second)로 한 번씩 나가고, 넘치면 오래된 것부터 버리고 세어 자기 버림 알림을 보내며, 오류는 그 조각을 두고 그 전송을 끝낸다. 실패 시작에서 second_after_ms(기본 60초)를 넘게 지나면 둘째 채널에만 'Telegram 전송이 N초째 실패함' 알림이 시작 1번, repeat_ms마다 1번, 텔레그램이 다시 답하면 해소 1번 나간다. flush_for는 두 보관함을 모두 기다린다. 둘째 채널이 없으면 스레드도 복사도 없다
+
+- 상태: **미실행**
+- 왜 중요한가: 텔레그램이 막혔을 때 그것을 알릴 다른 길(설계 §7.7, D3). U18a2의 OMS 직접 알림이 이 송신기를 쓴다. md-collector와 md-lake는 둘째 채널 없이 쓰므로 동작이 그대로여야 한다
+- 수준: 통합
+- 전제와 범위: 시험 6개(alert 5, second_off 1). 텔레그램은 loopback http-fake(500, 400, 200을 바꿔 가며), 둘째 채널은 시험 안의 가짜(성공, 실패, 300ms 지연). 시계는 시험이 움직인다(+59초, 정확히 +60초, +61초, +5분). flush 주기 20~50ms
+- 실제 구성요소: alert-direct의 송신 스레드, 둘째 채널 스레드, 보관함, 반복 규칙, reqwest 클라이언트(loopback HTTP)
+- 모의·시뮬레이션: 텔레그램 Bot API(http-fake), 둘째 채널(시험의 구현), 시계
+- 주입한 장애: 텔레그램 500(계속), 400, 다시 200. 둘째 채널의 계속된 오류와 회복, 느린 둘째 채널
+- 판정 기준과 근거: state()의 failing_since_ms와 second 계수(queued, delivered, dropped_total, failures), 가짜 텔레그램이 받은 요청 본문, 가짜 둘째 채널이 받은 문구와 순서, +61초 뒤 1초 안에 알림, 알림이 텔레그램 요청에 없음, /proc/self/task의 스레드 이름
+- 재현: `cargo test -p alert-direct`
+- 뒷받침하는 것: 설계 §7.7(둘째 채널, 60초), U18a1 결정
+- 확인하지 않은 범위: 실제 텔레그램과 실제 둘째 채널 서비스(D3, 정하지 않음). 보낼 것이 없을 때의 텔레그램 장애(탐침 없음, 범위 밖). 둘째 채널이 멈춰 돌아오지 않는 경우(send가 끝나지 않으면 그 스레드가 멈추고 flush_for는 시간 한도까지 기다린다). 프로세스가 끝날 때 둘째 보관함에 남은 것(저장하지 않음). OMS에의 연결은 U18a2
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `alert/failing_since_set_and_reset` | 미실행 |  |
+| `alert/second_channel_gets_every_message` | 미실행 |  |
+| `alert/second_outbox_bound` | 미실행 |  |
+| `alert/telegram_down_notice_after_60s` | 미실행 |  |
+| `alert/flush_for_waits_for_both` | 미실행 |  |
+| `alert/second_off_by_default` | 미실행 |  |
 

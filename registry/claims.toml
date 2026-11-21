@@ -1250,3 +1250,18 @@ tests = ["pipeline/an_order_waits_for_the_reference_price_and_goes_out_once", "p
 repro = "cargo test -p oms-node --features failpoints --test bybit_node"
 supports = "C-GW(Bybit 열), C-COMMIT, ADR-028 §7f"
 not_covered = "실제 Bybit(testnet은 U-01 허가 뒤), TLS(시험은 ws://와 http://), 전원 장애(flush 실패는 프로세스가 살아 있는 경우), 프로세스 강제 종료 중의 WS Trade 전송, 체결과 취소의 끝에서 끝까지, 여러 주문과 요청 한도, 배포 바이너리(failpoints 없음)가 시험용 주소를 읽지 않는다는 것(코드 검토만)"
+
+[[claim]]
+id = "V-ALERT-DIRECT-1"
+statement = "alert-direct의 송신 스레드는 텔레그램 전송이 처음 다시 보내기(Retry)로 끝난 시도의 시각을 '실패 시작'으로 두고, 텔레그램이 답하면(전달 또는 400·413 거절) 지운다. 보낼 것이 없으면 실패 시작은 생기지 않는다. 둘째 채널을 설정하면 once와 set이 만든 모든 메시지가 같은 분할·같은 한도(50개)의 둘째 보관함에도 통째로 들어가 자기 스레드(alert-second)로 한 번씩 나가고, 넘치면 오래된 것부터 버리고 세어 자기 버림 알림을 보내며, 오류는 그 조각을 두고 그 전송을 끝낸다. 실패 시작에서 second_after_ms(기본 60초)를 넘게 지나면 둘째 채널에만 'Telegram 전송이 N초째 실패함' 알림이 시작 1번, repeat_ms마다 1번, 텔레그램이 다시 답하면 해소 1번 나간다. flush_for는 두 보관함을 모두 기다린다. 둘째 채널이 없으면 스레드도 복사도 없다"
+why = "텔레그램이 막혔을 때 그것을 알릴 다른 길(설계 §7.7, D3). U18a2의 OMS 직접 알림이 이 송신기를 쓴다. md-collector와 md-lake는 둘째 채널 없이 쓰므로 동작이 그대로여야 한다"
+level = "통합"
+scope = "시험 6개(alert 5, second_off 1). 텔레그램은 loopback http-fake(500, 400, 200을 바꿔 가며), 둘째 채널은 시험 안의 가짜(성공, 실패, 300ms 지연). 시계는 시험이 움직인다(+59초, 정확히 +60초, +61초, +5분). flush 주기 20~50ms"
+real = "alert-direct의 송신 스레드, 둘째 채널 스레드, 보관함, 반복 규칙, reqwest 클라이언트(loopback HTTP)"
+simulated = "텔레그램 Bot API(http-fake), 둘째 채널(시험의 구현), 시계"
+faults = "텔레그램 500(계속), 400, 다시 200. 둘째 채널의 계속된 오류와 회복, 느린 둘째 채널"
+criterion = "state()의 failing_since_ms와 second 계수(queued, delivered, dropped_total, failures), 가짜 텔레그램이 받은 요청 본문, 가짜 둘째 채널이 받은 문구와 순서, +61초 뒤 1초 안에 알림, 알림이 텔레그램 요청에 없음, /proc/self/task의 스레드 이름"
+tests = ["alert/failing_since_set_and_reset", "alert/second_channel_gets_every_message", "alert/second_outbox_bound", "alert/telegram_down_notice_after_60s", "alert/flush_for_waits_for_both", "alert/second_off_by_default"]
+repro = "cargo test -p alert-direct"
+supports = "설계 §7.7(둘째 채널, 60초), U18a1 결정"
+not_covered = "실제 텔레그램과 실제 둘째 채널 서비스(D3, 정하지 않음). 보낼 것이 없을 때의 텔레그램 장애(탐침 없음, 범위 밖). 둘째 채널이 멈춰 돌아오지 않는 경우(send가 끝나지 않으면 그 스레드가 멈추고 flush_for는 시간 한도까지 기다린다). 프로세스가 끝날 때 둘째 보관함에 남은 것(저장하지 않음). OMS에의 연결은 U18a2"
