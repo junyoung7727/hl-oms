@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `9824b169fec81a84`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `499bf7457fdf88f8`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 주장 89건: 통과 0, 실패 0, 미실행 22, 이전 버전 결과 67.
 
@@ -91,11 +91,11 @@
 | V-BYBIT-REFPX-1 | Bybit 게이트웨이는 공개 linear 스트림에 거래하는 종목마다 tickers.<symbol>을 구독하고(구독 요청 하나에 토픽 10개까지, 모든 응답이 success: true일 때만 구독됨, 거부되거나 handshake 시간 안에 답이 없는 요청이 하나라도 있으면 pong이 와도 끊고 다시 붙음), 종목마다 그 연결의 스냅숏의 markPrice를 mark로 삼아 RefPrice(px = mark, venue_ts = 메시지 ts의 µs)로 코어에 보낸다. 스냅숏 전의 델타는 버리고, markPrice가 있는 델타는 mark를 바꾸며, markPrice 없는 델타는 든 mark를 그 델타의 ts로 다시 보낸다. 내보냄은 종목마다 ref_price_interval_ms에 많아야 한 번이고(재연결을 넘어 센다) 메시지 없이 다시 보내지 않는다. mark는 연결마다 비운다. 읽을 수 없는 티커 메시지(JSON 아님, type·data·symbol·markPrice·ts 이상, markPrice 없는 스냅숏, 소수 9자리, 0 이하)는 연결을 끊고 다시 붙으며, 거래하지 않는 종목의 메시지는 읽지 않고 버린다. 연결은 막힘이 없을 때만 IPv4로 접속하고, 연결 중 막힘이 생기면 끊고 막힌 동안 다시 붙지 않으며, 업그레이드의 HTTP 403은 IP 차단 멈춤이다. ping 뒤 간격 안에 pong(op = pong, 또는 공개 linear의 op = ping + ret_msg = pong)이 없으면 끊는다. 첫 pong 전에 끊긴 연결은 재연결 대기를 늘리고, 첫 pong 뒤에 끊긴 연결만 대기를 처음으로 되돌린다. 공개 스트림은 Link를 움직이지 않는다. 설정의 ref_price_interval_ms는 1000 이상, ref_price_max_age_us의 절반 이하만 받는다. 시험용 연결 주소 OMS_TEST_BYBIT_WIRING은 다섯 주소의 호스트가 모두 127.0.0.1일 때만 받는다 | 통합 | 미실행 | `cargo test -p oms-node --lib -- venue::bybit config::tests` |
 | V-BYBIT-NODE-1 | kind = bybit인 oms-node 프로세스(failpoints 빌드, 시험용 연결 주소로 가짜 Bybit에 연결)는 참조 가격이 오기 전 가격 범위가 있는 주문을 RefPriceUnavailable로 거절하고 아무 요청도 보내지 않으며, 공개 스트림의 티커 스냅숏 뒤에는 같은 요청을 받아 WS Trade로 한 번 보내고, 가짜 WS Trade가 그 order.create를 읽을 때 디스크의 저널 파일에 그 주문의 수락 기록이 있다(이 확인은 순서의 증명이 아니다: 기록이 네트워크 왕복보다 먼저 파일에 닿으므로 쓰기 전에 보내도 통과한다. 기록이 내구화된 뒤에만 보낸다는 것은 다음 flush 실패 시험이 증명한다). 새 주문의 저널 flush가 실패하면(OMS_CRASH_AT=sync_error_after_write) 노드는 상태 2로 멈추고 REST와 WS Trade 어느 쪽에도 생성이 닿지 않으며, failpoint 없이 다시 시작하면 그 기록을 찾고 orderLinkId 조회(realtime과 history 두 번이 모두 비었음)로 주문을 '놓이지 않음'으로 닫고, 그래도 생성은 없다. WS Trade가 생성을 읽고 답하지 않으면 주문은 결과 불명(Transport)이 되고, orderLinkId로 묻는 realtime 조회가 열린 주문을 찾아 Working이 되며, 두 경로를 합친 생성은 하나다 | 프로세스 | 미실행 | `cargo test -p oms-node --features failpoints --test bybit_node` |
 | V-ALERT-DIRECT-1 | alert-direct의 송신 스레드는 텔레그램 전송이 처음 다시 보내기(Retry)로 끝난 시도의 시각을 '실패 시작'으로 두고, 텔레그램이 답하면(전달 또는 400·413 거절) 지운다. 보낼 것이 없으면 실패 시작은 생기지 않는다. 둘째 채널을 설정하면 once와 set이 만든 모든 메시지가 같은 분할·같은 한도(50개)의 둘째 보관함에도 통째로 들어가 자기 스레드(alert-second)로 한 번씩 나가고, 넘치면 오래된 것부터 버리고 세어 자기 버림 알림을 보내며, 오류는 그 조각을 두고 그 전송을 끝낸다. 실패 시작에서 second_after_ms(기본 60초)를 넘게 지나면 둘째 채널에만 'Telegram 전송이 N초째 실패함' 알림이 시작 1번, repeat_ms마다 1번, 텔레그램이 다시 답하면 해소 1번 나간다. flush_for는 두 보관함을 모두 기다린다. 둘째 채널이 없으면 스레드도 복사도 없다 | 통합 | 미실행 | `cargo test -p alert-direct` |
-| V-ALERT-1 | OMS의 알림 스레드(oms-alert)는 공개된 읽기 모델만 읽으므로, 알림은 그 원인이 된 기록이 내구화된 뒤에만 나간다. 코어가 결정했지만 커밋 단계가 아직 내구화하지 않은 계좌 중지는 보내지 않고, 내구화되면 보낸다. flush에 실패한 묶음의 계좌 중지는 어떤 요청에도 나오지 않고, 그 뒤의 새 요청은 치명 알림 하나뿐이다. 치명 알림은 치명 사유와 마지막 내구 seq만 담고(실패한 묶음의 내용 없음) 치명 래치를 처음 본 때 한 번 나가며, 그 뒤에는 조건을 평가하지 않는다: 유예가 지난 연결 끊김도 시작하지 않고, 읽기 모델에서 사라진 중지도 해소를 보내지 않는다. 프로세스에서: 감소 전용 상태로 들어가는 기록의 flush가 실패하면 노드는 종료 코드 2로 exit_flush_ms + 5초 안에 끝나고, 가짜 텔레그램은 시작 알림과 치명 알림만 받으며(첫 시도 500 뒤 종료 전 전송에서 다시) REDUCING에 관한 것은 없다 | 통합 | 미실행 | `cargo test -p oms-node --features failpoints --test pipeline --test crash_points; cargo test -p oms-node --test alerts; cargo test -p oms-node --lib alerts::` |
+| V-ALERT-1 | OMS의 알림 스레드(oms-alert)는 공개된 읽기 모델만 읽으므로, 알림은 그 원인이 된 기록이 내구화된 뒤에만 나간다. 코어가 결정했지만 커밋 단계가 아직 내구화하지 않은 계좌 중지는 보내지 않고, 내구화되면 보낸다. flush에 실패한 묶음의 계좌 중지는 어떤 요청에도 나오지 않고, 그 뒤의 새 요청은 치명 알림 하나뿐이다. 치명 알림은 치명 사유와 마지막 내구 seq만 담고(실패한 묶음의 내용 없음) 치명 래치를 처음 본 때 한 번 나가며, 그 뒤에는 조건을 평가하지 않는다: 유예가 지난 연결 끊김도 시작하지 않고, 읽기 모델에서 사라진 중지도 해소를 보내지 않는다. 평가가 읽기 모델을 읽은 뒤 래치가 걸려 있으면 그 평가는 시작 알림도 set도 하지 않는다. 종료는 래치가 걸려 있으면 받은 종료 코드와 상관없이 치명 알림을 넣고 전송을 기다린다. 프로세스에서: 감소 전용 상태로 들어가는 기록의 flush가 실패하면 노드는 종료 코드 2로 exit_flush_ms + 5초 안에 끝나고, 가짜 텔레그램은 시작 알림과 치명 알림만 받으며(첫 시도 500 뒤 종료 전 전송에서 다시) REDUCING에 관한 것은 없다. 시작 뒤 첫 flush(Boot 기록)가 실패하면 설정이 활성화되기 전이어도 노드는 종료 코드 2로 끝나고, 가짜 텔레그램은 치명 알림 하나만 받는다(종료 전 전송) | 통합 | 미실행 | `cargo test -p oms-node --features failpoints --test pipeline --test crash_points; cargo test -p oms-node --test alerts; cargo test -p oms-node --lib alerts::` |
 | V-ALERT-2 | 텔레그램이 계속 500으로 답하는 동안 시작 알림, 계좌 중지, 5분씩 시계를 58번 움직인 반복이 만든 60개 메시지 가운데 50개가 보관되고 10개가 버려져 status.alerts에 queued 50, dropped_total 10으로 보인다(failures와 failing_since_ms도 보이고, 토큰은 없다). 텔레그램이 다시 200으로 답하면 남은 50개가 나간 뒤 '[OMS P1] 전송 실패로 알림 10개를 버림' 하나가 나가고, 전달 51, 대기 0, failing_since_ms null이 된다 | 통합 | 미실행 | `cargo test -p oms-node --test alerts outbox_bound` |
-| V-ALERT-3 | 알림 조건은 C-ALERT 표의 키와 유예를 따른다: 차단 사유마다 비어 있지 않은 문장(Mismatch와 OperatorStrategy는 조건 없음), 래치와 운영자 행위는 유예 0, 지나가는 상태는 grace_ms. Core::handle로 만든 상태에서 hold:link_down, gateway_block, hold:resync, hold:operator_account, hold:storage_low, halt_strategy:<s>, mismatch:<kind>, hold:venue_setting:<i>, hold:account_mode, margin_stale, hold:reducing이 나오고 문장 끝은 '근거: 저널 seq n'이다. 불일치는 종류마다 키 하나에 개수와 최근 3개(subject: detail)를 담고 확인한 것은 빠진다. 계좌 중지는 시작 1번, +4분 0번, +5분에 그때의 메모로 1번, +10분 1번, 재개에 '해소: <시작 문장>' 1번, 그 뒤 +5분 0번이다. 연결 끊김은 20초 만에 다시 붙으면 아무것도 보내지 않고, 29.999초에는 아니고 정확히 30초에 시작을, 31초에는 더 보내지 않고, 다시 붙으면 해소를 보낸다 | 통합 | 미실행 | `cargo test -p oms-node --test alerts; cargo test -p oms-node --lib alerts::` |
+| V-ALERT-3 | 알림 조건은 C-ALERT 표의 키와 유예를 따른다: 차단 사유마다 비어 있지 않은 문장(Mismatch와 OperatorStrategy는 조건 없음), 래치와 운영자 행위는 유예 0, 지나가는 상태와 저장 공간 부족은 grace_ms. Core::handle로 만든 상태에서 hold:link_down, gateway_block, hold:resync, hold:operator_account, hold:storage_low, halt_strategy:<s>, mismatch:<kind>, hold:venue_setting:<i>, hold:account_mode, margin_stale, hold:reducing이 나오고 문장 끝은 '근거: 저널 seq n'이다. 불일치는 종류마다 키 하나에 개수와 최근 3개(subject: detail)를 담고 확인한 것은 빠진다. 계좌 중지는 시작 1번, +4분 0번, +5분에 그때의 메모로 1번, +10분 1번, 재개에 '해소: <시작 문장>' 1번, 그 뒤 +5분 0번이다. 연결 끊김은 20초 만에 다시 붙으면 아무것도 보내지 않고, 29.999초에는 아니고 정확히 30초에 시작을, 31초에는 더 보내지 않고, 다시 붙으면 해소를 보낸다. 저장 공간 부족이 20초 낮음·5초 정상을 열 번 되풀이하면 아무것도 보내지 않고, 30초를 넘게 계속되면 시작 1번(29.999초에는 아니고 30초에, 35초에 더 없음), 풀리면 해소 1번이다 | 통합 | 미실행 | `cargo test -p oms-node --test alerts; cargo test -p oms-node --lib alerts::` |
 | V-ALERT-4 | OMS 알림에 둘째 채널을 주면(alerts::start) 모든 메시지의 사본이 바로 그쪽에 가고, 텔레그램이 500으로 답한 첫 시도부터 59초에는 장애 알림이 없고 61초가 되면 1초 안에 'Telegram 전송이 61초째 실패함'이 둘째 채널에만 가며(텔레그램 요청에는 없음), 텔레그램이 다시 답하면 해소가 간다. 텔레그램이 답하지 않아도(연결은 받고 답 없음) 계좌 중지·재개 1,000건이 5초 안에 내구화되고 알림 스레드는 계속 평가한다 | 통합 | 미실행 | `cargo test -p oms-node --test alerts -- telegram_ a_hung` |
-| V-ALERT-5 | [alert] 설정은 절대 경로의 토큰 파일을 요구하고 그 파일을 설정을 읽을 때 alert-direct 규칙으로 읽는다: 0640, 심볼릭 링크, 저장소 안, 없는 파일은 '[alert] telegram: '로 시작하는 설정 오류이고 그 문장과 설정의 Debug에 토큰이 없다. 각 값(grace_ms, eval_ms, repeat_ms, exit_flush_ms, second_after_ms)은 양 끝에서 받고 바로 바깥에서 거부하며, second_channel은 "none"만 받는다. 표가 없으면 알림이 없고 status.alerts는 {"configured": false}다. mainnet(Hyperliquid, Bybit)은 표 없이 시작하지 않고, testnet과 가상 거래소에서는 선택이다. OMS_TEST_TELEGRAM_API는 loopback http만 받고, 배포하는 바이너리(failpoints 없음)는 그 변수를 무시해 저장소 안의 토큰 파일을 여전히 거부하고 종료 코드 2로 끝난다. 프로세스에서: 시작 알림 'OMS 시작 (boot 1, config 1)'이 나가고, SIGTERM으로 정상 종료하면 'OMS 정상 종료. 걸린 주문 1개는 거래소에 남음'이 종료 전에 나간다 | 통합 | 미실행 | `cargo test -p oms-node --lib config::; cargo test -p oms-node --test alerts the_; cargo test -p oms-node --features failpoints --test crash_points a_clean_stop` |
+| V-ALERT-5 | [alert] 설정은 절대 경로의 토큰 파일을 요구하고 그 파일을 설정을 읽을 때 alert-direct 규칙으로 읽는다: 0640, 심볼릭 링크, 저장소 안, 없는 파일은 '[alert] telegram: '로 시작하는 설정 오류이고 그 문장과 설정의 Debug에 토큰이 없다. 각 값(grace_ms, eval_ms, repeat_ms, exit_flush_ms, second_after_ms)은 양 끝에서 받고 바로 바깥에서 거부하며, second_channel은 "none"만 받는다. 표가 없으면 알림이 없고 status.alerts는 {"configured": false}다. mainnet(Hyperliquid, Bybit)은 표 없이 시작하지 않고, testnet과 가상 거래소에서는 선택이다. OMS_TEST_TELEGRAM_API는 loopback http만 받고, 배포하는 바이너리(failpoints 없음)는 그 변수를 무시해 저장소 안의 토큰 파일을 여전히 거부하고 종료 코드 2로 끝난다. 시작 알림은 그 평가에서 시작이 나간 조건과 유예 안의 조건을 따로 센다: 계좌 중지와 연결 끊김이면 '활성 조건 1개(유예 중 1개)'다. 프로세스에서: 시작 알림 'OMS 시작 (boot 1, config 1)'이 나가고, SIGTERM으로 정상 종료하면 'OMS 정상 종료. 걸린 주문 1개는 거래소에 남음'이 종료 전에 나간다. 설정이 활성화된 뒤 거래 소켓을 bind하지 못하면 종료 코드 3으로 끝나고 'OMS 시작 실패(exit 3): trading_socket' 하나가 종료 전에 나가며, 어떤 요청에도 소켓 경로·토큰·토큰 파일 이름이 없다 | 통합 | 미실행 | `cargo test -p oms-node --lib config::; cargo test -p oms-node --test alerts the_; cargo test -p oms-node --features failpoints --test crash_points -- a_clean_stop an_exit_3` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -2053,27 +2053,30 @@
 | `alert/flush_for_waits_for_both` | 미실행 |  |
 | `alert/second_off_by_default` | 미실행 |  |
 
-## V-ALERT-1 — OMS의 알림 스레드(oms-alert)는 공개된 읽기 모델만 읽으므로, 알림은 그 원인이 된 기록이 내구화된 뒤에만 나간다. 코어가 결정했지만 커밋 단계가 아직 내구화하지 않은 계좌 중지는 보내지 않고, 내구화되면 보낸다. flush에 실패한 묶음의 계좌 중지는 어떤 요청에도 나오지 않고, 그 뒤의 새 요청은 치명 알림 하나뿐이다. 치명 알림은 치명 사유와 마지막 내구 seq만 담고(실패한 묶음의 내용 없음) 치명 래치를 처음 본 때 한 번 나가며, 그 뒤에는 조건을 평가하지 않는다: 유예가 지난 연결 끊김도 시작하지 않고, 읽기 모델에서 사라진 중지도 해소를 보내지 않는다. 프로세스에서: 감소 전용 상태로 들어가는 기록의 flush가 실패하면 노드는 종료 코드 2로 exit_flush_ms + 5초 안에 끝나고, 가짜 텔레그램은 시작 알림과 치명 알림만 받으며(첫 시도 500 뒤 종료 전 전송에서 다시) REDUCING에 관한 것은 없다
+## V-ALERT-1 — OMS의 알림 스레드(oms-alert)는 공개된 읽기 모델만 읽으므로, 알림은 그 원인이 된 기록이 내구화된 뒤에만 나간다. 코어가 결정했지만 커밋 단계가 아직 내구화하지 않은 계좌 중지는 보내지 않고, 내구화되면 보낸다. flush에 실패한 묶음의 계좌 중지는 어떤 요청에도 나오지 않고, 그 뒤의 새 요청은 치명 알림 하나뿐이다. 치명 알림은 치명 사유와 마지막 내구 seq만 담고(실패한 묶음의 내용 없음) 치명 래치를 처음 본 때 한 번 나가며, 그 뒤에는 조건을 평가하지 않는다: 유예가 지난 연결 끊김도 시작하지 않고, 읽기 모델에서 사라진 중지도 해소를 보내지 않는다. 평가가 읽기 모델을 읽은 뒤 래치가 걸려 있으면 그 평가는 시작 알림도 set도 하지 않는다. 종료는 래치가 걸려 있으면 받은 종료 코드와 상관없이 치명 알림을 넣고 전송을 기다린다. 프로세스에서: 감소 전용 상태로 들어가는 기록의 flush가 실패하면 노드는 종료 코드 2로 exit_flush_ms + 5초 안에 끝나고, 가짜 텔레그램은 시작 알림과 치명 알림만 받으며(첫 시도 500 뒤 종료 전 전송에서 다시) REDUCING에 관한 것은 없다. 시작 뒤 첫 flush(Boot 기록)가 실패하면 설정이 활성화되기 전이어도 노드는 종료 코드 2로 끝나고, 가짜 텔레그램은 치명 알림 하나만 받는다(종료 전 전송)
 
 - 상태: **미실행**
 - 왜 중요한가: ADR-004의 '내구화 전에는 아무것도 밖으로 나가지 않는다'를 알림도 지켜야 한다. 복구한 노드가 모르는 사건을 사람에게 알리면 운영자가 저널에 없는 상태를 찾게 된다(ADR-029)
 - 수준: 통합
-- 전제와 범위: 시험 5개: 프로세스 안(실제 코어 스레드·커밋 스레드·저널 파일·알림 스레드, loopback http-fake 텔레그램) 3개, 실제 oms-node·simvenue 프로세스 1개, 단위 1개. 커밋 단계는 가득 찬 게이트웨이 큐로 붙잡거나 failpoints의 flush 실패(fail_next_sync, OMS_CRASH_AT=sync_error_after_write)로 멈춘다
+- 전제와 범위: 시험 8개: 프로세스 안(실제 코어 스레드·커밋 스레드·저널 파일·알림 스레드, loopback http-fake 텔레그램) 4개, 실제 oms-node·simvenue 프로세스 2개, 단위 2개. 커밋 단계는 가득 찬 게이트웨이 큐로 붙잡거나 failpoints의 flush 실패(fail_next_sync, OMS_CRASH_AT=sync_error_after_write와 OMS_CRASH_ON=reducing_entered 또는 boot)로 멈춘다
 - 실제 구성요소: oms-node 파이프라인(코어 스레드, 커밋 스레드, 저널 쓰기와 flush), 공개된 읽기 모델, oms-alert 스레드, alert-direct 송신 스레드와 reqwest(loopback HTTP), node::run의 종료 경로
 - 모의·시뮬레이션: 텔레그램 Bot API(http-fake), 저장 장치의 flush 실패(failpoints), 거래소(simvenue), 알림 시계(시험이 움직임)
-- 주입한 장애: flush 실패(프로세스 안과 프로세스), 커밋 단계 정지(게이트웨이 큐 가득), 치명 래치 뒤의 시간 경과와 읽기 모델 변화, 치명 알림에 대한 텔레그램 500
-- 판정 기준과 근거: 가짜 텔레그램이 받은 요청 본문의 수와 내용(두 번째 중지 메모 없음, REDUCING·감소 전용·daily_loss 없음), 치명 문장 = fatal_text(사유, 실패 전 durable_seq), 종료 코드와 걸린 시간, 저널의 reducing_entered 기록 번호 > 알린 내구 seq. 결함(살아 있는 코어를 읽음, 치명 검사를 평가 뒤로, 치명 뒤 평가, 코드 2에서 종료 전송 없음)을 넣어 각각 잡는 것을 확인했다(M124 포함)
+- 주입한 장애: flush 실패(프로세스 안과 프로세스, 시작 중 Boot 기록 포함), 커밋 단계 정지(게이트웨이 큐 가득), 치명 래치 뒤의 시간 경과와 읽기 모델 변화, 평가 직전에 걸린 래치, 치명 알림에 대한 텔레그램 500
+- 판정 기준과 근거: 가짜 텔레그램이 받은 요청 본문의 수와 내용(두 번째 중지 메모 없음, REDUCING·감소 전용·daily_loss 없음), 치명 문장 = fatal_text(사유, 실패 전 durable_seq), 종료 코드와 걸린 시간, 저널의 reducing_entered 기록 번호 > 알린 내구 seq. 결함(살아 있는 코어를 읽음, 치명 검사를 평가 뒤로, 치명 뒤 평가, 코드 2에서 종료 전송 없음, 시작 중 치명이 코드 3으로 남음, 코드 2가 아니면 치명 알림 없음, 잠금을 푼 뒤 치명 재확인 없음)을 넣어 각각 잡는 것을 확인했다(M124 포함)
 - 재현: `cargo test -p oms-node --features failpoints --test pipeline --test crash_points; cargo test -p oms-node --test alerts; cargo test -p oms-node --lib alerts::`
 - 뒷받침하는 것: C-ALERT의 '내보내는 시점', ADR-029 §7, ADR-004
-- 확인하지 않은 범위: 실제 텔레그램. 게이트웨이 막힘 조건(저널에 없는 예외, 단위 시험만). 평가 두 번 사이에 생겼다 풀린 유예 0 조건(놓친다고 적었다). SIGKILL·abort·panic(아무것도 보내지 않는다). 실제 저장 장치의 flush 오류(주입한 실패만)
+- 확인하지 않은 범위: 실제 텔레그램. 게이트웨이 막힘 조건(저널에 없는 예외, 단위 시험만). 평가 두 번 사이에 생겼다 풀린 유예 0 조건(놓친다고 적었다). SIGKILL·abort·panic(아무것도 보내지 않는다). 실제 저장 장치의 flush 오류(주입한 실패만). 래치를 다시 본 직후와 set 사이의 창(명령 몇 개 길이, 시험하지 않음). 코어 결함 뒤 치명 문장의 내구 seq가 실제보다 작을 수 있는 것(C-ALERT 한계, 리뷰 N2)
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
 | `pipeline/no_alert_for_a_batch_that_failed_to_flush` | 미실행 |  |
 | `pipeline/a_flush_failure_sends_one_fatal_alert_and_nothing_of_the_batch` | 미실행 |  |
+| `pipeline/a_flush_failure_at_startup_exits_2_and_sends_the_fatal_message` | 미실행 |  |
 | `node-unit/nothing_is_sent_before_its_record_is_durable` | 미실행 |  |
 | `node-unit/after_a_fatal_stop_only_the_fatal_message_is_sent` | 미실행 |  |
+| `node-unit/finish_sends_the_fatal_message_whatever_the_code` | 미실행 |  |
 | `node-unit/alerts::tests::the_fatal_text_holds_the_reason_and_the_seq_only` | 미실행 |  |
+| `node-unit/alerts::tests::a_fatal_trip_during_an_evaluation_sets_nothing` | 미실행 |  |
 
 ## V-ALERT-2 — 텔레그램이 계속 500으로 답하는 동안 시작 알림, 계좌 중지, 5분씩 시계를 58번 움직인 반복이 만든 60개 메시지 가운데 50개가 보관되고 10개가 버려져 status.alerts에 queued 50, dropped_total 10으로 보인다(failures와 failing_since_ms도 보이고, 토큰은 없다). 텔레그램이 다시 200으로 답하면 남은 50개가 나간 뒤 '[OMS P1] 전송 실패로 알림 10개를 버림' 하나가 나가고, 전달 51, 대기 0, failing_since_ms null이 된다
 
@@ -2093,24 +2096,26 @@
 |---|---|---|
 | `node-unit/outbox_bound_holds_and_drops_are_counted` | 미실행 |  |
 
-## V-ALERT-3 — 알림 조건은 C-ALERT 표의 키와 유예를 따른다: 차단 사유마다 비어 있지 않은 문장(Mismatch와 OperatorStrategy는 조건 없음), 래치와 운영자 행위는 유예 0, 지나가는 상태는 grace_ms. Core::handle로 만든 상태에서 hold:link_down, gateway_block, hold:resync, hold:operator_account, hold:storage_low, halt_strategy:<s>, mismatch:<kind>, hold:venue_setting:<i>, hold:account_mode, margin_stale, hold:reducing이 나오고 문장 끝은 '근거: 저널 seq n'이다. 불일치는 종류마다 키 하나에 개수와 최근 3개(subject: detail)를 담고 확인한 것은 빠진다. 계좌 중지는 시작 1번, +4분 0번, +5분에 그때의 메모로 1번, +10분 1번, 재개에 '해소: <시작 문장>' 1번, 그 뒤 +5분 0번이다. 연결 끊김은 20초 만에 다시 붙으면 아무것도 보내지 않고, 29.999초에는 아니고 정확히 30초에 시작을, 31초에는 더 보내지 않고, 다시 붙으면 해소를 보낸다
+## V-ALERT-3 — 알림 조건은 C-ALERT 표의 키와 유예를 따른다: 차단 사유마다 비어 있지 않은 문장(Mismatch와 OperatorStrategy는 조건 없음), 래치와 운영자 행위는 유예 0, 지나가는 상태와 저장 공간 부족은 grace_ms. Core::handle로 만든 상태에서 hold:link_down, gateway_block, hold:resync, hold:operator_account, hold:storage_low, halt_strategy:<s>, mismatch:<kind>, hold:venue_setting:<i>, hold:account_mode, margin_stale, hold:reducing이 나오고 문장 끝은 '근거: 저널 seq n'이다. 불일치는 종류마다 키 하나에 개수와 최근 3개(subject: detail)를 담고 확인한 것은 빠진다. 계좌 중지는 시작 1번, +4분 0번, +5분에 그때의 메모로 1번, +10분 1번, 재개에 '해소: <시작 문장>' 1번, 그 뒤 +5분 0번이다. 연결 끊김은 20초 만에 다시 붙으면 아무것도 보내지 않고, 29.999초에는 아니고 정확히 30초에 시작을, 31초에는 더 보내지 않고, 다시 붙으면 해소를 보낸다. 저장 공간 부족이 20초 낮음·5초 정상을 열 번 되풀이하면 아무것도 보내지 않고, 30초를 넘게 계속되면 시작 1번(29.999초에는 아니고 30초에, 35초에 더 없음), 풀리면 해소 1번이다
 
 - 상태: **미실행**
 - 왜 중요한가: 알림이 소음이 되지 않고(지나가는 상태), 중요한 것은 바로 알리며(래치), 새 차단 사유가 알림 없이 들어오지 못해야 한다(와일드카드 없는 match, ADR-029)
 - 수준: 통합
-- 전제와 범위: 프로세스 안 시험 2개(실제 파이프라인, 알림 스레드, loopback http-fake, 시험이 움직이는 시계), 단위 시험 3개(Core::handle로 만든 코어와 직접 넣은 불일치)
+- 전제와 범위: 프로세스 안 시험 4개(실제 파이프라인, 알림 스레드, loopback http-fake, 시험이 움직이는 시계), 단위 시험 3개(Core::handle로 만든 코어와 직접 넣은 불일치)
 - 실제 구성요소: alerts::conditions와 hold_condition, oms-alert 스레드의 유예, alert-direct 반복 규칙, oms-core의 holds
-- 모의·시뮬레이션: 텔레그램(http-fake 200), 시계, 거래소 입력(시험이 넣는 Link·FillsSynced·OpenOrders·Positions·UnclassifiedExecution)
-- 주입한 장애: 짧은 연결 끊김(20초), 유예 경계(29.999초, 30초, 31초), 반복 주기 안의 새 메모
-- 판정 기준과 근거: C-ALERT 조건 표. 가짜 텔레그램이 받은 메시지의 수와 내용. 결함(유예 검사 없음, 유예 > , 불일치 키가 종류별이 아님, 감소 전용에 유예, 게이트웨이 막힘 조건 없음)을 넣어 각각 잡는 것을 확인했다(M123 포함)
+- 모의·시뮬레이션: 텔레그램(http-fake 200), 시계, 거래소 입력(시험이 넣는 Link·FillsSynced·OpenOrders·Positions·UnclassifiedExecution), 저장 공간 측정(시험이 넣는 Storage)
+- 주입한 장애: 짧은 연결 끊김(20초), 유예 경계(29.999초, 30초, 31초), 반복 주기 안의 새 메모, 문턱 근처에서 들락거리는 저장 공간
+- 판정 기준과 근거: C-ALERT 조건 표. 가짜 텔레그램이 받은 메시지의 수와 내용. 결함(유예 검사 없음, 유예 > , 불일치 키가 종류별이 아님, 감소 전용에 유예, 저장 공간 부족에 유예 0, 게이트웨이 막힘 조건 없음)을 넣어 각각 잡는 것을 확인했다(M123 포함)
 - 재현: `cargo test -p oms-node --test alerts; cargo test -p oms-node --lib alerts::`
 - 뒷받침하는 것: C-ALERT의 '조건 표', ADR-029 §7
-- 확인하지 않은 범위: 결과 불명·거래소 설정·계좌 모드·증거금 신선도의 시작이 프로세스에서 나가는 것(단위 시험의 키와 유예만). 실제 거래소에서 생기는 불일치. 문장의 한국어가 운영자에게 충분한지(판단)
+- 확인하지 않은 범위: 결과 불명·거래소 설정·계좌 모드·증거금 신선도의 시작이 프로세스에서 나가는 것(단위 시험의 키와 유예만). 실제 거래소에서 생기는 불일치. 이미 알린 종류의 새 불일치가 다음 반복까지 기다리는 것(C-ALERT 한계, 리뷰 N3). 실제 디스크에서 측정한 저장 공간. 문장의 한국어가 운영자에게 충분한지(판단)
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
 | `node-unit/repeat_rule_with_an_injected_clock` | 미실행 |  |
 | `node-unit/grace_hides_a_short_link_down_and_reports_a_long_one` | 미실행 |  |
+| `node-unit/a_storage_low_that_flaps_inside_the_grace_sends_nothing` | 미실행 |  |
+| `node-unit/a_storage_low_that_lasts_past_the_grace_sends_one_start` | 미실행 |  |
 | `node-unit/alerts::tests::every_hold_reason_has_a_text_and_the_grace_of_the_table` | 미실행 |  |
 | `node-unit/alerts::tests::conditions_give_the_keys_of_the_table` | 미실행 |  |
 | `node-unit/alerts::tests::a_mismatch_condition_per_kind_lists_the_count_and_the_newest_three` | 미실행 |  |
@@ -2134,19 +2139,19 @@
 | `node-unit/telegram_failing_over_60s_notifies_the_second_channel` | 미실행 |  |
 | `node-unit/a_hung_telegram_never_slows_the_commit_stage` | 미실행 |  |
 
-## V-ALERT-5 — [alert] 설정은 절대 경로의 토큰 파일을 요구하고 그 파일을 설정을 읽을 때 alert-direct 규칙으로 읽는다: 0640, 심볼릭 링크, 저장소 안, 없는 파일은 '[alert] telegram: '로 시작하는 설정 오류이고 그 문장과 설정의 Debug에 토큰이 없다. 각 값(grace_ms, eval_ms, repeat_ms, exit_flush_ms, second_after_ms)은 양 끝에서 받고 바로 바깥에서 거부하며, second_channel은 "none"만 받는다. 표가 없으면 알림이 없고 status.alerts는 {"configured": false}다. mainnet(Hyperliquid, Bybit)은 표 없이 시작하지 않고, testnet과 가상 거래소에서는 선택이다. OMS_TEST_TELEGRAM_API는 loopback http만 받고, 배포하는 바이너리(failpoints 없음)는 그 변수를 무시해 저장소 안의 토큰 파일을 여전히 거부하고 종료 코드 2로 끝난다. 프로세스에서: 시작 알림 'OMS 시작 (boot 1, config 1)'이 나가고, SIGTERM으로 정상 종료하면 'OMS 정상 종료. 걸린 주문 1개는 거래소에 남음'이 종료 전에 나간다
+## V-ALERT-5 — [alert] 설정은 절대 경로의 토큰 파일을 요구하고 그 파일을 설정을 읽을 때 alert-direct 규칙으로 읽는다: 0640, 심볼릭 링크, 저장소 안, 없는 파일은 '[alert] telegram: '로 시작하는 설정 오류이고 그 문장과 설정의 Debug에 토큰이 없다. 각 값(grace_ms, eval_ms, repeat_ms, exit_flush_ms, second_after_ms)은 양 끝에서 받고 바로 바깥에서 거부하며, second_channel은 "none"만 받는다. 표가 없으면 알림이 없고 status.alerts는 {"configured": false}다. mainnet(Hyperliquid, Bybit)은 표 없이 시작하지 않고, testnet과 가상 거래소에서는 선택이다. OMS_TEST_TELEGRAM_API는 loopback http만 받고, 배포하는 바이너리(failpoints 없음)는 그 변수를 무시해 저장소 안의 토큰 파일을 여전히 거부하고 종료 코드 2로 끝난다. 시작 알림은 그 평가에서 시작이 나간 조건과 유예 안의 조건을 따로 센다: 계좌 중지와 연결 끊김이면 '활성 조건 1개(유예 중 1개)'다. 프로세스에서: 시작 알림 'OMS 시작 (boot 1, config 1)'이 나가고, SIGTERM으로 정상 종료하면 'OMS 정상 종료. 걸린 주문 1개는 거래소에 남음'이 종료 전에 나간다. 설정이 활성화된 뒤 거래 소켓을 bind하지 못하면 종료 코드 3으로 끝나고 'OMS 시작 실패(exit 3): trading_socket' 하나가 종료 전에 나가며, 어떤 요청에도 소켓 경로·토큰·토큰 파일 이름이 없다
 
 - 상태: **미실행**
 - 왜 중요한가: 토큰이 저장소나 로그로 새지 않고, 실거래는 알림 없이 하지 않으며(소유자 질문 1의 기본값), 시험용 훅이 배포 바이너리에 없어야 한다(ADR-029)
 - 수준: 통합
-- 전제와 범위: 설정 단위 시험 2개, 설정 파일을 디스크에서 읽는 시험 1개, oms-node 실행 파일 시험 1개(failpoints 없는 빌드에서만), 실제 oms-node·simvenue 프로세스 시험 1개(failpoints 빌드, loopback http-fake)
+- 전제와 범위: 설정 단위 시험 2개, 설정 파일을 디스크에서 읽는 시험 1개, oms-node 실행 파일 시험 1개(failpoints 없는 빌드에서만), 프로세스 안 시험 1개(시작 알림의 수), 실제 oms-node·simvenue 프로세스 시험 2개(failpoints 빌드, loopback http-fake)
 - 실제 구성요소: NodeConfig::load와 validate, alert_direct::TelegramConfig::load_with, oms-node 실행 파일, node::run의 시작과 종료 경로
 - 모의·시뮬레이션: 텔레그램(http-fake), 거래소(simvenue), 저장소(시험이 만든 .git 디렉터리)
-- 주입한 장애: 상대 경로, 0640, 심볼릭 링크, 저장소 안, 없는 파일, 범위 밖 값, 모르는 키, second_channel = pushover, mainnet에 표 없음, loopback이 아닌 시험 주소
-- 판정 기준과 근거: 오류 문장, Debug와 status에 토큰 없음, 종료 코드, 가짜 텔레그램이 받은 시작·정지 알림, 로그의 'alerts delivered before the exit'. 결함(mainnet 통과, 배포 바이너리가 시험 훅을 읽음, 상대 경로 통과, 정지 알림 없음)을 넣어 각각 잡는 것을 확인했다
-- 재현: `cargo test -p oms-node --lib config::; cargo test -p oms-node --test alerts the_; cargo test -p oms-node --features failpoints --test crash_points a_clean_stop`
+- 주입한 장애: 상대 경로, 0640, 심볼릭 링크, 저장소 안, 없는 파일, 범위 밖 값, 모르는 키, second_channel = pushover, mainnet에 표 없음, loopback이 아닌 시험 주소, 없는 디렉터리 안의 거래 소켓(bind 실패)
+- 판정 기준과 근거: 오류 문장, Debug와 status에 토큰 없음, 종료 코드, 가짜 텔레그램이 받은 시작·정지 알림, 로그의 'alerts delivered before the exit'. 결함(mainnet 통과, 배포 바이너리가 시험 훅을 읽음, 상대 경로 통과, 정지 알림 없음, 활성 뒤 코드 3에 시작 실패 알림 없음)을 넣어 각각 잡는 것을 확인했다
+- 재현: `cargo test -p oms-node --lib config::; cargo test -p oms-node --test alerts the_; cargo test -p oms-node --features failpoints --test crash_points -- a_clean_stop an_exit_3`
 - 뒷받침하는 것: C-ALERT의 '설정'과 '종료', ADR-029 §7, U-11
-- 확인하지 않은 범위: 실제 텔레그램으로의 시작·정지 알림. Hyperliquid·Bybit 노드 프로세스의 알림(가상 거래소 노드만). 종료 전 전송이 exit_flush_ms를 다 쓰는 경우(시험은 바로 또는 5초 재시도 한 번에 끝난다). 시험 디렉터리가 저장소 안이면 좋은 토큰 파일을 읽는 확인은 그 규칙의 거부를 확인하는 것으로 바뀐다
+- 확인하지 않은 범위: 실제 텔레그램으로의 시작·정지 알림. Hyperliquid·Bybit 노드 프로세스의 알림(가상 거래소 노드만). 종료 전 전송이 exit_flush_ms를 다 쓰는 경우(시험은 바로 또는 5초 재시도 한 번에 끝난다). 시험 디렉터리가 저장소 안이면 좋은 토큰 파일을 읽는 확인은 그 규칙의 거부를 확인하는 것으로 바뀐다. 설정이 활성화되기 전의 종료 코드 3이 아무것도 보내지 않는 것(코드만, 시험 없음). 게이트웨이 시작·관리 소켓·신호 처리기 실패의 시작 실패 알림(거래 소켓 하나로만 시험). 토큰 파일 경로가 설정 Debug와 오류 문장에 보이는 것(C-ALERT 한계, 리뷰 N6)
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
@@ -2154,5 +2159,7 @@
 | `node-unit/config::tests::the_test_telegram_api_must_be_loopback_http` | 미실행 |  |
 | `node-unit/the_token_file_is_loaded_with_its_rules` | 미실행 |  |
 | `node-unit/the_shipped_binary_ignores_the_test_telegram_api` | 미실행 |  |
+| `node-unit/the_start_notice_counts_sent_and_pending_conditions_apart` | 미실행 |  |
 | `pipeline/a_clean_stop_sends_the_stop_notice_with_the_open_orders` | 미실행 |  |
+| `pipeline/an_exit_3_after_activation_sends_one_start_failure_notice` | 미실행 |  |
 

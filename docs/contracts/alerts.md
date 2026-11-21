@@ -33,12 +33,12 @@
 - 유예 30초는 `alert.grace_ms`다. 조건은 평가마다 계속 있어야 하고, 유예가 지난 평가(`now − 처음 본 시각 ≥ grace_ms`)에서 시작이 나간다. 한 번이라도 없으면 처음부터 다시 센다. 유예 안에 끝난 조건은 시작도 해소도 보내지 않는다.
 - 반복 규칙(alert-direct): 시작 1번, `repeat_ms`(5분)마다 그때의 문장으로 1번, 해소 때 `해소: <시작 문장>` 1번.
 - 차단 문장은 `HoldReason`에 대한 와일드카드 없는 `match` 하나에서 나온다. `Mismatch`는 조건이 없고(종류별로 맡는다), `OperatorStrategy`는 `holds(None)`에 나오지 않는다(`halt_strategy:<s>`가 맡는다).
-- 그 밖의 알림: 설정이 활성화된 뒤 첫 평가에서 한 번 `OMS 시작 (boot n, config v). 활성 조건 k개(유예 중 m개)`(k는 그 평가에서 시작이 나간 조건, m은 아직 유예 안의 조건), 정상 종료(코드 0)에 한 번 `OMS 정상 종료. 걸린 주문 n개는 거래소에 남음`.
+- 그 밖의 알림: 설정이 활성화된 뒤 첫 평가에서 한 번 `OMS 시작 (boot n, config v). 활성 조건 k개(유예 중 m개)`(k는 그 평가에서 시작이 나간 조건, m은 아직 유예 안의 조건), 정상 종료(코드 0)에 한 번 `OMS 정상 종료. 걸린 주문 n개는 거래소에 남음`, 설정이 활성화된 뒤의 시작 실패(코드 3)에 한 번 `OMS 시작 실패(exit 3): <종류>`(아래 '종료').
 
 ### 내보내는 시점(확정 시점과 외부 효과)
 
 1. 커밋 단계가 기록을 쓰고 flush가 성공한 뒤 1단계에서 읽기 모델을 고친다([C-COMMIT](commit.md)). 실패한 묶음은 읽기 모델에 닿지 않는다.
-2. 스레드 `oms-alert`가 100 ms마다 먼저 치명 래치를 보고, 아니면 공개된 `durable_seq`가 바뀌었거나 `eval_ms`(1초)가 지났을 때 읽기 잠금 안에서 조건을 계산한다. 잠금을 푼 뒤 조건마다 `AlertHandle::set`을 부른다.
+2. 스레드 `oms-alert`가 100 ms마다 먼저 치명 래치를 보고, 아니면 공개된 `durable_seq`가 바뀌었거나 `eval_ms`(1초)가 지났을 때 읽기 잠금 안에서 조건을 계산한다. 잠금을 푼 뒤 치명 래치를 다시 보고(걸렸으면 시작 알림도 `set`도 없이 끝낸다), 조건마다 `AlertHandle::set`을 부른다.
 3. alert-direct의 송신 스레드가 텔레그램으로(둘째 채널이 있으면 그쪽에도) 보낸다. `set`과 `once`는 뮤텍스만 잡는다. 상태 파일이 없으므로 평가 스레드에서 파일을 쓰지 않는다.
 
 그러므로 알림은 그 원인이 된 기록이 내구화된 뒤에만 나간다. 예외는 둘이다:
@@ -46,7 +46,7 @@
 - **게이트웨이 막힘:** 게이트웨이 프로세스의 상태이고 저널 이벤트가 없다. 문장의 근거 줄이 그렇게 말한다(`근거: 게이트웨이 프로세스 상태(저널에 없음)`). 저널의 값을 담지 않는다.
 - **치명 알림:** 내구성이 실패했다는 알림이다. 문장은 `치명 종료: <사유>. 노드가 멈춤(exit 2). 마지막 내구 seq <n>. 걸린 주문은 거래소에 남아 있음, 워처와 운영자가 확인해야 함`이고, 사유(`commit failed: <io error>`, 코어 결함은 입력 이름만)와 마지막 내구 seq 말고는 실패한 묶음의 어떤 것도 담지 않는다. 치명 래치를 처음 본 때 한 번 나가고, 그 뒤에는 조건을 평가하지 않는다(시작도 해소도 없다).
 
-### 놓칠 수 있는 것
+### 놓칠 수 있는 것과 한계
 
 | 경우 | 결과 |
 |---|---|
@@ -56,10 +56,21 @@
 | SIGKILL, abort, panic | 아무것도 보내지 못한다. 관측 경로(`oms_up` = 0)와 감시자 W5가 맡는다 |
 | 보낼 것이 없을 때의 텔레그램 장애 | 모른다(탐침 없음) |
 | 다시 시작 | 걸려 있는 조건마다 시작을 다시 보낸다(반복 상태를 저장하지 않음) |
+| 코어 결함 뒤의 치명 알림(리뷰 N2) | 문장의 `마지막 내구 seq`가 실제 마지막 값보다 작을 수 있다: 래치를 처음 본 때 만들고, 커밋 스레드는 앞선 묶음을 아직 커밋하고 있을 수 있다. 커밋 실패면 정확하다 |
+| 이미 알린 종류의 새 불일치, 바뀐 중지 메모(리뷰 N3) | 키가 종류마다 하나라서 다음 반복(`repeat_ms`, 기본 5분)에야 새 문장이 나간다 |
+| 토큰 파일 경로(리뷰 N6) | `[alert]` 설정의 `Debug`와 설정 오류 문장에 보인다(토큰은 보이지 않는다). `status`에는 없다 |
+| 치명 래치의 재확인과 `set` 사이(리뷰 N1) | 잠금을 푼 뒤 다시 보지만, 그 직후에 걸린 래치는 그 평가의 `set`을 막지 못한다(명령 몇 개 길이의 창). 그 상태는 내구화된 것이다 |
 
 ### 종료
 
-`node::run`은 drain 뒤, 런타임을 내리기 전에 평가 스레드를 멈추고 정지 알림(코드 0) 또는 치명 알림(코드 2, 이미 나갔으면 다시 넣지 않음)을 넣은 뒤 `exit_flush_ms`까지 전송을 기다린다. 그동안 `/api/status`는 `fatal`이 채워진 채 답한다. 텔레그램이 실패하면 alert-direct가 5초마다 다시 보내므로 15초 안에 세 번까지 시도한다.
+`node::run`은 drain 뒤, 런타임을 내리기 전에 평가 스레드를 멈추고 알림 하나를 넣은 뒤 `exit_flush_ms`까지 전송을 기다린다:
+
+- 치명 래치가 걸려 있으면 종료 코드는 무엇이든 2가 되고(drain 중의 실패, 설정이 활성화되기 전 Boot·Config 기록의 flush 실패 포함) 치명 알림을 넣는다(이미 나갔으면 다시 넣지 않음).
+- 아니면 코드 0에 정지 알림.
+- 아니면 설정이 활성화된 뒤의 코드 3(게이트웨이 시작, 소켓 bind, 신호 처리기 설치 실패)에 `OMS 시작 실패(exit 3): <종류>`. 종류는 `hyperliquid_gateway`, `bybit_gateway`, `trading_socket`, `admin_socket`, `signal_handler` 가운데 하나이고 오류 문장·경로·토큰은 담지 않는다.
+- 설정이 활성화되기 전의 코드 3(복구 실패, 설정 거부 등)은 아무것도 보내지 않는다. 사람이 띄웠고 종료를 본다.
+
+ 그동안 `/api/status`는 `fatal`이 채워진 채 답한다. 텔레그램이 실패하면 alert-direct가 5초마다 다시 보내므로 15초 안에 세 번까지 시도한다.
 
 ### 설정(`[alert]`)
 
@@ -93,8 +104,8 @@
 
 | 성질 | 주장 | 시험 |
 |---|---|---|
-| 내구화된 것만, 치명 예외 | V-ALERT-1 | `pipeline::no_alert_for_a_batch_that_failed_to_flush`, `crash_points::a_flush_failure_sends_one_fatal_alert_and_nothing_of_the_batch`, `alerts::nothing_is_sent_before_its_record_is_durable`, `alerts::after_a_fatal_stop_only_the_fatal_message_is_sent` |
+| 내구화된 것만, 치명 예외 | V-ALERT-1 | `pipeline::no_alert_for_a_batch_that_failed_to_flush`, `crash_points::a_flush_failure_sends_one_fatal_alert_and_nothing_of_the_batch`, `crash_points::a_flush_failure_at_startup_exits_2_and_sends_the_fatal_message`, `alerts::nothing_is_sent_before_its_record_is_durable`, `alerts::after_a_fatal_stop_only_the_fatal_message_is_sent`, `alerts::finish_sends_the_fatal_message_whatever_the_code`, 단위 시험 `alerts::tests::a_fatal_trip_during_an_evaluation_sets_nothing` |
 | 보관함 상한과 버린 수 | V-ALERT-2 | `alerts::outbox_bound_holds_and_drops_are_counted` |
-| 조건 표, 유예, 반복 | V-ALERT-3 | `alerts::repeat_rule_with_an_injected_clock`, `alerts::grace_hides_a_short_link_down_and_reports_a_long_one`, 단위 시험 `alerts::tests` |
+| 조건 표, 유예, 반복 | V-ALERT-3 | `alerts::repeat_rule_with_an_injected_clock`, `alerts::grace_hides_a_short_link_down_and_reports_a_long_one`, `alerts::a_storage_low_that_flaps_inside_the_grace_sends_nothing`, `alerts::a_storage_low_that_lasts_past_the_grace_sends_one_start`, 단위 시험 `alerts::tests` |
 | 텔레그램 장애와 둘째 채널, 커밋 단계 독립 | V-ALERT-4 | `alerts::telegram_failing_over_60s_notifies_the_second_channel`, `alerts::a_hung_telegram_never_slows_the_commit_stage` |
-| 설정, 시작·정지, 종료 전송 | V-ALERT-5 | `config::tests` 두 개, `alerts::the_token_file_is_loaded_with_its_rules`, `alerts::the_shipped_binary_ignores_the_test_telegram_api`, `crash_points::a_clean_stop_sends_the_stop_notice_with_the_open_orders` |
+| 설정, 시작·정지, 종료 전송 | V-ALERT-5 | `config::tests` 두 개, `alerts::the_token_file_is_loaded_with_its_rules`, `alerts::the_shipped_binary_ignores_the_test_telegram_api`, `alerts::the_start_notice_counts_sent_and_pending_conditions_apart`, `crash_points::a_clean_stop_sends_the_stop_notice_with_the_open_orders`, `crash_points::an_exit_3_after_activation_sends_one_start_failure_notice` |
