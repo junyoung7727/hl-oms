@@ -118,6 +118,25 @@ pub enum Op {
     },
     /// Write a snapshot now.
     Snapshot,
+    /// Release one hold of C-HOLD: `kill`, `watcher_mismatch` or
+    /// `venue_change`. Releasing the kill also removes the kill marker.
+    ClearHold {
+        reason: HoldKind,
+        note: String,
+    },
+
+    // ---- admin socket, sent by the watcher (C-HOLD) -----------------------
+    /// A check of the watcher confirmed a mismatch: plain orders are held
+    /// until the operator clears it.
+    WatcherMismatch {
+        check: WatcherCheck,
+        detail: String,
+    },
+    /// The watcher killed: every order is held. Answered after the latch is
+    /// durable.
+    WatcherKill {
+        detail: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -220,6 +239,40 @@ mod tests {
         let json = serde_json::to_string(&ServerMsg::Response(resp.clone())).unwrap();
         assert_eq!(json, r#"{"id":7,"ok":true,"result":{"accepted":{"order_id":3}}}"#);
         assert_eq!(serde_json::from_str::<ServerMsg>(&json).unwrap(), ServerMsg::Response(resp));
+    }
+
+    /// U18b1. The operator's `clear_hold` and the watcher's two inputs, as
+    /// the watcher (U19) writes them without this crate; a check outside
+    /// W1..W4 or an unknown hold does not parse.
+    #[test]
+    fn wire_examples_of_the_holds() {
+        let r: Request = serde_json::from_str(r#"{"id":1,"op":"watcher_mismatch","check":"W2","detail":"positions differ"}"#).unwrap();
+        assert_eq!(
+            r.op,
+            Op::WatcherMismatch {
+                check: WatcherCheck::W2,
+                detail: "positions differ".into()
+            }
+        );
+        let r: Request = serde_json::from_str(r#"{"id":2,"op":"watcher_kill","detail":"W5: the OMS is silent"}"#).unwrap();
+        assert_eq!(r.op, Op::WatcherKill { detail: "W5: the OMS is silent".into() });
+        let r: Request = serde_json::from_str(r#"{"id":3,"op":"clear_hold","reason":"venue_change","note":"ADL seen"}"#).unwrap();
+        assert_eq!(
+            r.op,
+            Op::ClearHold {
+                reason: HoldKind::VenueChange,
+                note: "ADL seen".into()
+            }
+        );
+        for bad in [
+            r#"{"id":4,"op":"watcher_mismatch","check":"W5","detail":"d"}"#,
+            r#"{"id":4,"op":"watcher_mismatch","check":"w1","detail":"d"}"#,
+            r#"{"id":4,"op":"watcher_mismatch","detail":"d"}"#,
+            r#"{"id":4,"op":"clear_hold","reason":"operator_account","note":"n"}"#,
+            r#"{"id":4,"op":"watcher_kill"}"#,
+        ] {
+            assert!(serde_json::from_str::<Request>(bad).is_err(), "{bad}");
+        }
     }
 
     /// U13c. A new order may carry the order book state it was decided on;

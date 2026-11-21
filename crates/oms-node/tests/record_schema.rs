@@ -322,3 +322,79 @@ fn margin_reports_with_and_without_account_mm_recover_to_the_live_state() {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+/// U18b1. The kill marker in `Boot`, the watcher's inputs, `hold_set`,
+/// `hold_cleared`, `kill_loop_ended` and the three holds of C-HOLD in the
+/// state are optional fields and new kinds, not a schema rise: a journal
+/// with them recovers to the live state and `verify --re-decide` passes,
+/// and a state without them keeps the bytes it had.
+#[test]
+fn kill_holds_liveness_and_heartbeats_recover_to_the_live_state() {
+    assert_eq!(RECORD_SCHEMA, 2, "no record schema rise for new kinds and optional fields");
+    let dir = data_dir("holds");
+    let mut run = Run {
+        core: Core::new(INSTANCE),
+        at: 1_000 * SEC,
+        records: Vec::new(),
+        next_seq: 1,
+    };
+    let plain = {
+        let mut c = Core::new(INSTANCE);
+        c.handle(SEC, &Input::Boot { binary: "test".into(), kill_marker: None }).unwrap();
+        serde_json::to_string(&c).unwrap()
+    };
+    for field in ["\"kill\"", "\"watcher_mismatch\"", "\"venue_change\"", "kill_marker"] {
+        assert!(!plain.contains(field), "{field} written while unset: {plain}");
+    }
+    run.input(Input::Boot {
+        binary: "test".into(),
+        kill_marker: Some("marker: W5".into()),
+    });
+    run.input(Input::Config(Box::new(config())));
+    run.venue(VenueInput::Link {
+        up: true,
+        session: 1,
+        reason: "test".into(),
+    });
+    run.venue(VenueInput::KillLoopEnded {
+        outcome: KillOutcome::Unsupported,
+        rounds: 0,
+        cancel_all_calls: 0,
+        detail: "no cancel-all".into(),
+    });
+    run.input(Input::Watcher(WatcherInput::Mismatch {
+        check: WatcherCheck::W1,
+        detail: "fills differ".into(),
+    }));
+    let t = run.at;
+    run.venue(VenueInput::UnclassifiedExecution {
+        key: fkey("e1"),
+        instrument: iid("X"),
+        exec_type: "Odd".into(),
+        detail: "d".into(),
+        venue_ts: t,
+    });
+    for reason in [HoldKind::Kill, HoldKind::WatcherMismatch, HoldKind::VenueChange] {
+        let out = run.input(Input::Operator(OperatorCmd::ClearHold {
+            reason,
+            note: "checked".into(),
+        }));
+        assert_eq!(out.reply, Some(Reply::Operator(Ok("cleared".into()))), "{reason:?}");
+    }
+    // A second latch, left set, so the recovered state holds one.
+    run.input(Input::Watcher(WatcherInput::Kill { detail: "W5 again".into() }));
+    assert!(run.core.kill.is_some());
+    let records = run.take();
+    let names: Vec<&str> = records.iter().flat_map(|r| r.events.iter().map(Event::name)).collect();
+    for kind in ["hold_set", "hold_cleared", "kill_loop_ended"] {
+        assert!(names.contains(&kind), "{kind}: {names:?}");
+    }
+    write(&dir, RECORD_SCHEMA, &records);
+    let recovered = oms_node::recovery::recover(&dir, 1 << 30, "test").unwrap();
+    assert_eq!(recovered.core.digest(), run.core.digest());
+    assert_eq!(recovered.core, run.core);
+    drop(recovered);
+    let report = oms_node::recovery::verify(&dir, true).unwrap();
+    assert_eq!(report.records, records.len() as u64);
+    let _ = std::fs::remove_dir_all(&dir);
+}

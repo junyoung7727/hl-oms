@@ -199,6 +199,46 @@ fn outputs_follow_durability_with_inline_commit() {
     outputs_follow_durability(true);
 }
 
+/// C-HOLD. The `Kill` command leaves the commit stage only after the latch
+/// is durable: when the gateway gets it, the read model and the journal
+/// already hold the latch. If the flush fails, no `Kill` ever leaves and a
+/// restart finds no latch.
+#[test]
+fn a_kill_command_leaves_only_after_the_latch_is_durable() {
+    let kill = || Input::Watcher(WatcherInput::Kill { detail: "W5: no heartbeat".into() });
+    let d = dir("kill");
+    let mut rig = Rig::start(d.clone(), false);
+    rig.ready();
+    assert_eq!(rig.ask(kill()).unwrap(), Reply::Operator(Ok("latched".into())));
+    let cmd = rig.commands.blocking_recv().unwrap();
+    assert!(matches!(&cmd, VenueCommand::Kill { source: HoldSource::Watcher, note, .. } if note == "W5: no heartbeat"), "{cmd:?}");
+    {
+        let p = rig.published.read();
+        assert!(p.core.kill.is_some(), "the read model holds the latch before the command leaves");
+        assert_eq!(p.durable_seq, rig.shared.durable_seq.load(Ordering::SeqCst));
+    }
+    rig.stop();
+    let rec = recovery::recover(&d, 1 << 20, "test").unwrap();
+    assert!(rec.core.kill.is_some(), "the latch is in the journal");
+    drop(rec);
+    std::fs::remove_dir_all(&d).unwrap();
+
+    let d = dir("kill-unflushed");
+    let mut rig = Rig::start(d.clone(), false);
+    rig.ready();
+    rig.shared.fail_next_sync.store(true, Ordering::SeqCst);
+    assert!(rig.ask(kill()).is_err(), "no reply for a latch that is not durable");
+    assert!(rig.fatal.is_tripped());
+    rig.stop();
+    while let Ok(cmd) = rig.commands.try_recv() {
+        assert!(!matches!(cmd, VenueCommand::Kill { .. }), "a Kill left before its record was durable");
+    }
+    let rec = recovery::recover(&d, 1 << 20, "test").unwrap();
+    assert_eq!(rec.core.kill, None);
+    drop(rec);
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
 /// Replies come back in the order the core decided, and a batch of inputs
 /// that arrive together shares one flush.
 #[test]

@@ -723,6 +723,43 @@ fn the_start_notice_counts_sent_and_pending_conditions_apart() {
     assert!(got[1].contains("count-note"), "{}", got[1]);
 }
 
+/// U18b1 (C-HOLD). The kill latch is a latch: its start goes out at once,
+/// with its source, its note and whether the kill loop confirmed zero.
+/// `Alerts::notice` sends one message with the prefix, once.
+#[test]
+fn a_kill_latch_is_told_at_once_and_a_notice_goes_out_once() {
+    let f = FakeHttp::start(ok());
+    let rig = Rig::start("kill-latch", 64);
+    rig.push(Input::Watcher(WatcherInput::Kill {
+        detail: "W5: the OMS is silent".into(),
+    }));
+    rig.wait(|p| p.core.kill.is_some());
+    let bell = Bell::start(&rig, alert_config(&f), None);
+    bell.delivered();
+    let got = texts(&f);
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert!(got[0].contains("활성 조건 1개(유예 중 0개)"), "{}", got[0]);
+    let t = &got[1];
+    assert!(t.starts_with(alerts::PREFIX), "{t}");
+    for part in [
+        "킬 래치(watcher, ",
+        "모든 주문 거절(감소 전용 포함)",
+        "omsctl clear-hold --reason kill",
+        "메모: W5: the OMS is silent",
+        "확인: 킬 루프가 아직 0건을 확인하지 않음",
+    ] {
+        assert!(t.contains(part), "{part}: {t}");
+    }
+    bell.alerts.notice("킬 루프 시작(watcher: W5). 시험");
+    bell.delivered();
+    let got = since(&f, 2);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0].starts_with(alerts::PREFIX) && got[0].contains("킬 루프 시작(watcher: W5). 시험"), "{}", got[0]);
+    bell.advance(60_000);
+    bell.delivered();
+    assert!(since(&f, 3).iter().all(|t| !t.contains("킬 루프 시작")), "a notice is sent once");
+}
+
 /// Telegram that never answers does not slow the commit stage: 1,000
 /// halt and resume records commit within 5 s (판단(모델 아님)).
 #[test]

@@ -524,7 +524,7 @@ fn the_kill_latch_and_its_confirmation_survive_replay_and_a_boot_asks_for_a_new_
         source: HoldSource::Watcher,
         note: "W5: no heartbeat".into(),
     };
-    assert_eq!(kills(&h), [kill.clone()]);
+    assert_eq!(kills(&h), std::slice::from_ref(&kill));
     assert_eq!(h.rebuilt().kill, h.core.kill);
 
     let out = kill_loop_ended(&mut h, KillOutcome::Confirmed);
@@ -548,7 +548,7 @@ fn the_kill_latch_and_its_confirmation_survive_replay_and_a_boot_asks_for_a_new_
         kill_marker: None,
     });
     assert_eq!(names(&out), ["booted"]);
-    assert_eq!(out.commands, [kill.clone()]);
+    assert_eq!(out.commands, std::slice::from_ref(&kill));
     let k = h.core.kill.clone().unwrap();
     assert_eq!((k.since, k.confirmed_at, k.outcome), (since, None, None));
     assert!(h.core.holds(None).contains(&HoldReason::KillLatched));
