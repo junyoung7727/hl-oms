@@ -353,7 +353,7 @@ pub struct NoticeContext {
 }
 
 fn secs(ms: u64) -> String {
-    if ms % 1000 == 0 {
+    if ms.is_multiple_of(1000) {
         format!("{}", ms / 1000)
     } else {
         format!("{}.{}", ms / 1000, (ms % 1000) / 100)

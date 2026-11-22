@@ -71,6 +71,7 @@ pub struct ApiCtx {
 }
 
 impl ApiCtx {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         cfg: ApiConfig,
         limits: IngressLimits,

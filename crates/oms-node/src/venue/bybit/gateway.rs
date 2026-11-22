@@ -283,6 +283,7 @@ pub(super) enum End {
 }
 
 impl Gateway {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         cfg: &BybitConfig,
         creds: Arc<Credentials>,
