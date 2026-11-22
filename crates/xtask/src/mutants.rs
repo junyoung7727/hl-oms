@@ -1787,6 +1787,24 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "state", "the_fill_floor_never_goes_down"],
         guards: "C-WATCH / C-TAIL",
     },
+    Mutant {
+        id: "M232-watcher-follows-redirects",
+        what: "the watcher's client follows redirects (reqwest's default, up to 10): a 3xx answer with a Location to another host makes it send the signed request, with the key and the signature, again to that host (review 1 S1 of U19a3)",
+        file: "crates/watcher/src/rest.rs",
+        find: "            .redirect(reqwest::redirect::Policy::none())\n",
+        replace: "",
+        test: &["-p", "watcher", "--test", "client", "a_redirect_is_not_followed"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M233-watcher-guard-waiter-skips-the-stop",
+        what: "a request waiting at the watcher's full request guard looks at the key rejection and the 403 pause only before its first wait: a 10010 or a 403 that came while it waited does not stop it, so it goes out after the key was rejected or during the IP ban (review 1 S2 of U19a3)",
+        file: "crates/watcher/src/rest.rs",
+        find: "        loop {\n            let now = self.clock.now_ms();\n            let at = {\n                let mut s = self\n                    .stop\n                    .lock()\n                    .map_err(|_| RestError::NotSent(\"client state poisoned\".into()))?;\n                if let (true, Some(code)) = (bybit, s.auth) {\n                    return Err(RestError::Auth {\n                        code,\n                        msg: \"not sent: the key was rejected earlier; every Bybit request stops until restart\".into(),\n                    });\n                }\n                if let Some(until) = s.paused_until.filter(|&u| now < u) {\n                    return Err(RestError::IpBanned(format!(\n                        \"not sent: paused after HTTP 403 until {until} ms\"\n                    )));\n                }\n                match s.guard.admit(now) {\n                    Ok(()) => return Ok(()),\n                    Err(at) => at,\n                }\n            };\n            let wait = at.saturating_sub(now).clamp(1, GUARD_POLL_MS);\n            tokio::time::sleep(Duration::from_millis(wait)).await;\n",
+        replace: "        let mut first = true;\n        loop {\n            let now = self.clock.now_ms();\n            let at = {\n                let mut s = self\n                    .stop\n                    .lock()\n                    .map_err(|_| RestError::NotSent(\"client state poisoned\".into()))?;\n                if let (true, Some(code), true) = (bybit, s.auth, first) {\n                    return Err(RestError::Auth {\n                        code,\n                        msg: \"not sent: the key was rejected earlier; every Bybit request stops until restart\".into(),\n                    });\n                }\n                if let Some(until) = s.paused_until.filter(|&u| first && now < u) {\n                    return Err(RestError::IpBanned(format!(\n                        \"not sent: paused after HTTP 403 until {until} ms\"\n                    )));\n                }\n                match s.guard.admit(now) {\n                    Ok(()) => return Ok(()),\n                    Err(at) => at,\n                }\n            };\n            let wait = at.saturating_sub(now).clamp(1, GUARD_POLL_MS);\n            first = false;\n            tokio::time::sleep(Duration::from_millis(wait)).await;\n",
+        test: &["-p", "watcher", "--test", "client", "a_request_waiting_at_the_guard_sees_a_later_rejection_or_pause"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
