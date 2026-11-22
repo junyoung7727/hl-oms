@@ -323,8 +323,9 @@ async fn answers_are_classified() {
         Some(1.0)
     );
     // A message of the venue (retMsg, or the body of a status) is kept to
-    // 200 characters on one line: control characters become spaces.
-    let long = format!("line one\nline two\r\t{}", "x".repeat(400));
+    // 200 characters on one line: control characters and the Unicode line
+    // and paragraph separators become spaces (review 2 N2).
+    let long = format!("line one\nline two\r\t\u{2028}\u{2029}{}", "x".repeat(400));
     let body = serde_json::to_string(&json!({"retCode": 10001, "retMsg": long})).unwrap();
     for answer in [
         Answer::Reply(200, body),
@@ -339,8 +340,16 @@ async fn answers_are_classified() {
             e => panic!("{answer:?}: {e:?}"),
         };
         assert!(msg.chars().count() <= 210, "{answer:?}: {msg:?}");
-        assert!(msg.contains("line one line two  x"), "{answer:?}: {msg:?}");
-        assert!(!e.to_string().chars().any(char::is_control), "{e:?}");
+        assert!(
+            msg.contains("line one line two    x"),
+            "{answer:?}: {msg:?}"
+        );
+        assert!(
+            !e.to_string()
+                .chars()
+                .any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}')),
+            "{e:?}"
+        );
     }
     // Connection refused: nothing sent.
     let c = client_of(&format!("http://{}", http_fake::dead_addr()), 300);
@@ -536,6 +545,127 @@ async fn a_redirect_is_not_followed() {
             other.requests()
         );
     }
+}
+
+/// A loopback server that takes at most 8 connections in groups of
+/// `group`: it reads one request on each connection of a group, then writes
+/// `answer` (status line, headers and body as raw text) to all of them and
+/// closes them. It counts the requests it read.
+fn raw_server(group: usize, answer: String) -> (String, Arc<AtomicUsize>) {
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", l.local_addr().unwrap());
+    let n = Arc::new(AtomicUsize::new(0));
+    let seen = n.clone();
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        for s in l.incoming().take(8) {
+            let Ok(mut s) = s else { return };
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 4096];
+            while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                match s.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(k) => buf.extend_from_slice(&chunk[..k]),
+                }
+            }
+            seen.fetch_add(1, Ordering::SeqCst);
+            held.push(s);
+            if held.len() == group {
+                for mut s in held.drain(..) {
+                    let _ = s.write_all(answer.as_bytes());
+                }
+            }
+        }
+    });
+    (url, n)
+}
+
+/// The status counts when the body is cut: a 401 or 403 whose connection
+/// closes before the whole body still latches the key stop or starts the
+/// 403 pause, and the next request is not sent (review 2 S1).
+#[tokio::test]
+async fn a_status_counts_when_its_body_is_cut() {
+    for (status, class) in [
+        (401, "auth"),
+        (403, "ip_banned"),
+        (429, "rate_limited"),
+        (500, "no_answer"),
+        (200, "no_answer"),
+    ] {
+        let (url, seen) = raw_server(
+            1,
+            format!(
+                "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: 100\r\nconnection: close\r\n\r\nshort"
+            ),
+        );
+        let c = client_of(&url, 2_000);
+        let e = c
+            .client
+            .get("/v5/position/list", &linear())
+            .await
+            .unwrap_err();
+        assert_eq!(e.class(), class, "{status}: {e:?}");
+        assert!(!e.to_string().chars().any(char::is_control), "{e}");
+        let stops = matches!(status, 401 | 403);
+        assert_eq!(
+            c.client.auth_rejected(),
+            (status == 401).then_some(401),
+            "{status}"
+        );
+        assert_eq!(
+            c.client.paused_until(),
+            (status == 403).then_some(T0 + 600_000),
+            "{status}"
+        );
+        assert_eq!(
+            c.lines.lock().unwrap().len(),
+            usize::from(stops),
+            "{status}"
+        );
+        // The next request: not sent after a cut 401 or 403, sent after
+        // the others.
+        let e = c
+            .client
+            .get("/v5/position/list", &linear())
+            .await
+            .unwrap_err();
+        assert_eq!(e.class(), class, "{status} next: {e:?}");
+        assert_eq!(
+            seen.load(Ordering::SeqCst),
+            if stops { 1 } else { 2 },
+            "{status}"
+        );
+    }
+}
+
+/// Two requests in flight that both get a key rejection write one error
+/// line (review 2 N1).
+#[tokio::test]
+async fn two_rejections_in_flight_write_one_error_line() {
+    let body = r#"{"retCode":10010,"retMsg":"m10010","result":{},"time":1}"#;
+    let (url, seen) = raw_server(
+        2,
+        format!(
+            "HTTP/1.1 200 X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        ),
+    );
+    let c = client_of(&url, 5_000);
+    let params = linear();
+    let (a, b) = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(
+            c.client.get("/v5/position/list", &params),
+            c.client.get("/v5/order/realtime", &params),
+        )
+    })
+    .await
+    .unwrap();
+    assert_eq!(a.unwrap_err().class(), "auth");
+    assert_eq!(b.unwrap_err().class(), "auth");
+    assert_eq!(seen.load(Ordering::SeqCst), 2);
+    assert_eq!(c.client.auth_rejected(), Some(10010));
+    let lines = c.lines.lock().unwrap().clone();
+    assert_eq!(lines.len(), 1, "{lines:?}");
 }
 
 /// A request that waits at a full guard looks at the key rejection and the

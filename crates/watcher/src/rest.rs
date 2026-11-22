@@ -159,12 +159,19 @@ pub const AUTH_CODES: [i64; 6] = [10003, 10004, 10005, 10007, 10010, 33004];
 pub const IP_BAN_PAUSE_MS: u64 = 600_000;
 
 /// A message of the venue as it goes into an error and a log line: at
-/// most 200 characters, control characters (line breaks) as spaces, so one
-/// error line stays one line.
+/// most 200 characters (not bytes), control characters (line breaks) and
+/// the Unicode line and paragraph separators as spaces, so one error line
+/// stays one line.
 fn one_line(text: &str) -> String {
     text.chars()
         .take(200)
-        .map(|c| if c.is_control() { ' ' } else { c })
+        .map(|c| {
+            if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') {
+                ' '
+            } else {
+                c
+            }
+        })
         .collect()
 }
 
@@ -437,7 +444,10 @@ impl Client {
     }
 
     /// The HTTP status and body; `NotSent` when the connection failed,
-    /// `NoAnswer` when no answer came.
+    /// `NoAnswer` when no answer came. A status other than 2xx keeps its
+    /// status when its body is cut, so that a 401 or 403 still stops or
+    /// pauses (`classify` uses the body of such a status only in the
+    /// message; review 2 S1).
     async fn send(&self, rb: reqwest::RequestBuilder) -> Result<(u16, String), RestError> {
         let resp = rb.send().await.map_err(|e| {
             let text = error_chain(&e);
@@ -448,10 +458,12 @@ impl Client {
             }
         })?;
         let status = resp.status().as_u16();
-        let text = resp
-            .text()
-            .await
-            .map_err(|e| RestError::NoAnswer(error_chain(&e)))?;
-        Ok((status, text))
+        match resp.text().await {
+            Ok(text) => Ok((status, text)),
+            Err(e) if !(200..=299).contains(&status) => {
+                Ok((status, format!("(body cut: {})", error_chain(&e))))
+            }
+            Err(e) => Err(RestError::NoAnswer(error_chain(&e))),
+        }
     }
 }
