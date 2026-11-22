@@ -245,7 +245,14 @@ async fn a_request_beyond_the_guard_waits_for_the_window() {
     c.clock.advance(1);
     let r = tokio::time::timeout(Duration::from_secs(5), late).await;
     assert!(matches!(r, Ok(Ok(Ok(_)))), "{r:?}");
-    assert_eq!(fake.requests().len(), GUARD_MAX + 1);
+    let reqs = fake.requests();
+    assert_eq!(reqs.len(), GUARD_MAX + 1);
+    // Signed with the clock at the send, after the wait: a timestamp taken
+    // before it would be up to 10 s old, outside a 5 s recv window.
+    assert_eq!(
+        reqs[GUARD_MAX].header("x-bapi-timestamp"),
+        Some((T0 + GUARD_WINDOW_MS).to_string().as_str())
+    );
 }
 
 #[tokio::test]
