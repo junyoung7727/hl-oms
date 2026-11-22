@@ -213,6 +213,9 @@ fn the_sets_follow_the_field_table() {
         json!({"order_id": 2, "venue_oid": "v2"}),
     )]);
     assert_eq!(s.st.orders[&2].venue_oid.as_deref(), Some("v2"));
+    // An ack without a venue order id keeps the known one (review 1 N3).
+    s.apply(&[acked(2, Value::Null)]);
+    assert_eq!(s.st.orders[&2].venue_oid.as_deref(), Some("v2"));
 
     // In doubt (cleared by an ack or venue_terminal, see the tests below).
     s.apply(&[other(
@@ -265,6 +268,8 @@ fn the_sets_follow_the_field_table() {
     s.apply(&[closed(2)]);
     assert_eq!(s.st.open.iter().copied().collect::<Vec<_>>(), vec![1, 3]);
     assert!(!s.st.orders[&2].open);
+    // A close is not an end at the venue (review 1 N3).
+    assert!(!s.st.orders[&2].terminal);
 
     // Holds and the day base.
     s.apply(&[other(
@@ -377,8 +382,19 @@ fn purging_an_unknown_order_stops_the_state() {
 #[test]
 fn the_fill_floor_never_goes_down() {
     let mut s = S::new();
+    s.apply(&[
+        accepted(1, "buy", "1"),
+        fill(1, "BTCUSDT:f", "1", 100),
+        change("BTCUSDT:c", "BTCUSDT", "1", "adl", 100),
+        funding("BTCUSDT:p", "BTCUSDT", 100),
+    ]);
     s.apply(&[booted(500)]);
     assert_eq!(s.st.fill_floor, 500);
+    // booted raises the floor and forgets no key; only purged forgets
+    // (review 1 S2).
+    assert!(s.st.fills.contains_key("BTCUSDT:f"));
+    assert!(s.st.venue_changes.contains_key("BTCUSDT:c"));
+    assert!(s.st.funding.contains_key("BTCUSDT:p"));
     s.apply(&[booted(300)]);
     assert_eq!(s.st.fill_floor, 500);
     s.apply(&[
@@ -388,6 +404,7 @@ fn the_fill_floor_never_goes_down() {
     // A purge with a lower floor keeps the higher one, and forgets by it.
     s.apply(&[purged(&[], 400)]);
     assert_eq!(s.st.fill_floor, 500);
+    assert!(s.st.fills.is_empty() && s.st.venue_changes.is_empty());
     assert_eq!(
         s.st.funding.keys().cloned().collect::<Vec<_>>(),
         vec!["BTCUSDT:m"]

@@ -293,6 +293,18 @@ fn same(core: &Core, st: &JournalState, at: &str) {
         assert!(keys.insert(k.clone(), t).is_none(), "{at}: key {k} twice");
     }
     assert_eq!(keys, core_keys, "{at}: fill keys");
+    // Holds and the day base (review 1 S1).
+    assert_eq!(st.holds.kill, core.kill.is_some(), "{at}: kill hold");
+    assert_eq!(
+        st.holds.watcher_mismatch,
+        core.watcher_mismatch.is_some(),
+        "{at}: watcher mismatch hold"
+    );
+    assert_eq!(
+        st.day_base.map(|b| (b.day, b.value)),
+        core.margin.day_base.as_ref().map(|b| (b.day, dec(b.value))),
+        "{at}: day base"
+    );
 }
 
 /// Writes the scenario's records with `oms-journal` (small segments, so
