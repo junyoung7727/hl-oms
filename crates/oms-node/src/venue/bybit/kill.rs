@@ -756,6 +756,9 @@ mod tests {
 
     const T: KillTiming = KillTiming::DEFAULT;
 
+    /// The longest scenario (ten failed minutes) takes about 2,500 actions.
+    const MAX_STEPS: usize = 100_000;
+
     fn done() -> CancelAnswer {
         CancelAnswer::Done(CancelAll {
             cancelled: 1,
@@ -765,7 +768,9 @@ mod tests {
 
     /// Runs the machine against a venue given as two functions of the loop
     /// time, every step taking no time, until it ends or `until` passes.
-    /// Returns the actions with their times.
+    /// Returns the actions with their times. A machine that asks for more
+    /// than `MAX_STEPS` actions (one that never lets time pass) fails the
+    /// test instead of growing the log without bound.
     fn simulate(
         timing: KillTiming,
         until: u64,
@@ -777,6 +782,11 @@ mod tests {
         let mut queue: std::collections::VecDeque<Action> = m.start(now).into();
         let mut log = Vec::new();
         while let Some(a) = queue.pop_front() {
+            assert!(
+                log.len() < MAX_STEPS,
+                "more than {MAX_STEPS} actions by loop time {now} ms: {:?}",
+                &log[log.len() - 4..]
+            );
             log.push((now, a.clone()));
             let next = match a {
                 Action::CancelAll => m.cancel_done(now, cancel(now)),
