@@ -5,6 +5,8 @@
 
 #![allow(clippy::unwrap_used)]
 
+use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -481,4 +483,130 @@ async fn http_403_pauses_every_request_for_600_s() {
     let e = c.client.echo(&echo_url).await.unwrap_err();
     assert_eq!(e.class(), "no_answer");
     c.client.get("/v5/position/list", &linear()).await.unwrap();
+}
+
+/// A loopback server that answers each of at most 16 connections with
+/// `status` and `location: <location>`, and counts the requests it read.
+fn redirector(status: u16, location: String) -> (String, Arc<AtomicUsize>) {
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", l.local_addr().unwrap());
+    let n = Arc::new(AtomicUsize::new(0));
+    let seen = n.clone();
+    std::thread::spawn(move || {
+        for s in l.incoming().take(16) {
+            let Ok(mut s) = s else { return };
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 4096];
+            while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                match s.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(k) => buf.extend_from_slice(&chunk[..k]),
+                }
+            }
+            seen.fetch_add(1, Ordering::SeqCst);
+            let head = format!(
+                "HTTP/1.1 {status} Moved\r\nlocation: {location}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+            );
+            let _ = s.write_all(head.as_bytes());
+        }
+    });
+    (url, n)
+}
+
+/// A redirect is not followed: following it would send the signed request
+/// (key and signature) again, to another host.
+#[tokio::test]
+async fn a_redirect_is_not_followed() {
+    let other = FakeHttp::start(ok("{}"));
+    for status in [301, 302, 307, 308] {
+        let (url, seen) = redirector(status, format!("{}/v5/position/list", other.url()));
+        let c = client_of(&url, 2_000);
+        let e = c
+            .client
+            .get("/v5/position/list", &linear())
+            .await
+            .unwrap_err();
+        assert_eq!(e.class(), "no_answer", "{status}: {e:?}");
+        let e = c.client.echo(&format!("{url}/ip")).await.unwrap_err();
+        assert_eq!(e.class(), "no_answer", "{status} echo: {e:?}");
+        assert_eq!(seen.load(Ordering::SeqCst), 2, "{status}");
+        assert!(
+            other.requests().is_empty(),
+            "{status}: {:?}",
+            other.requests()
+        );
+    }
+}
+
+/// A request that waits at a full guard looks at the key rejection and the
+/// 403 pause again when it wakes: an answer that came while it waited
+/// stops it. Real time: the guard's last place goes to a request whose
+/// answer the fake holds until the waiter is waiting.
+#[tokio::test]
+async fn a_request_waiting_at_the_guard_sees_a_later_rejection_or_pause() {
+    let held = "/v5/user/query-api";
+    for (answer, class) in [
+        (code(10010), "auth"),
+        (
+            Answer::Reply(403, "access too frequent".into()),
+            "ip_banned",
+        ),
+    ] {
+        let fake = FakeHttp::start(ok("{}"));
+        fake.route(held, [answer.clone()]);
+        let c = client_of(&fake.url(), 10_000);
+        for _ in 0..GUARD_MAX - 1 {
+            c.client
+                .get("/v5/account/wallet-balance", &[])
+                .await
+                .unwrap();
+        }
+        let arrived = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(AtomicBool::new(false));
+        let (a, r) = (arrived.clone(), release.clone());
+        fake.on_request(move |req| {
+            if req.path() == held {
+                a.store(true, Ordering::SeqCst);
+                for _ in 0..2_000 {
+                    if r.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+        });
+        let client = Arc::new(c.client);
+        let cl = client.clone();
+        let first = tokio::spawn(async move { cl.get(held, &[]).await });
+        for _ in 0..1_000 {
+            if arrived.load(Ordering::SeqCst) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(
+            arrived.load(Ordering::SeqCst),
+            "{class}: the held request arrived"
+        );
+        let cl = client.clone();
+        let waiter = tokio::spawn(async move { cl.get("/v5/order/realtime", &[]).await });
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(!waiter.is_finished(), "{class}: waits at the full guard");
+        release.store(true, Ordering::SeqCst);
+        let e = tokio::time::timeout(Duration::from_secs(5), first)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(e.class(), class, "{e:?}");
+        // The guard's window ends; the waiter wakes into the stop or pause.
+        c.clock.advance(GUARD_WINDOW_MS);
+        let e = tokio::time::timeout(Duration::from_secs(5), waiter)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(e.class(), class, "waiter: {e:?}");
+        assert_eq!(fake.requests().len(), GUARD_MAX, "{class}");
+    }
 }
