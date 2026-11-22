@@ -1706,6 +1706,15 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "journal", "io_damage_and_no_start_are_retried_and_the_other_errors_latch"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M230-watcher-payload-refusal-moves-position",
+        what: "the watcher's reader moves its byte position past a frame before the record is checked: after a payload refusal (not JSON, time going back, no events) it never reads that record again, even once the file is mended (review 1 S3 of U19a1)",
+        file: "crates/watcher/src/journal.rs",
+        find: "                    let rec = self.decode(seq, seg.schema, &payload)?;\n                    seg.offset += len;\n                    seg.fresh = false;\n                    self.pos = Some(Pos {\n                        first_seq: seg.first_seq,\n                        offset: seg.offset,\n                        schema: seg.schema,\n                    });\n",
+        replace: "                    seg.offset += len;\n                    seg.fresh = false;\n                    self.pos = Some(Pos {\n                        first_seq: seg.first_seq,\n                        offset: seg.offset,\n                        schema: seg.schema,\n                    });\n                    let rec = self.decode(seq, seg.schema, &payload)?;\n",
+        test: &["-p", "watcher", "--test", "journal", "a_damaged_frame_at_or_below_the_cap_stops_without_moving"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
