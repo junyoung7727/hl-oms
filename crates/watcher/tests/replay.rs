@@ -28,7 +28,7 @@ const RECORDS: u64 = 100_000;
 /// memory bounded. `unpurged` is the first order not purged yet.
 fn events(seq: u64, at: u64, unpurged: &mut u64) -> Vec<Value> {
     let id = (seq - 1) / 10 + 1;
-    let side = if id % 2 == 0 { "buy" } else { "sell" };
+    let side = if id.is_multiple_of(2) { "buy" } else { "sell" };
     if seq % 10_000 == 6 && seq > 10 {
         let ids: Vec<u64> = (*unpurged..=id).collect();
         *unpurged = id + 1;
