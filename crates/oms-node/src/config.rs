@@ -57,6 +57,11 @@ pub struct LivenessSection {
 pub const LIVENESS_MS_MIN: u64 = 1_000;
 pub const LIVENESS_MS_MAX: u64 = 60_000;
 
+/// The longest `runtime.tick_ms` with the monitoring gate (C-LIVE part 2):
+/// the gate notices missing heartbeats and runs stage 2 only on a tick, so
+/// its bounds are late by up to one tick. 판단(모델 아님).
+pub const MONITOR_TICK_MAX_MS: u64 = 1_000;
+
 impl LivenessSection {
     fn validate(&self, core: &CoreConfig) -> Result<(), String> {
         for (s, ms) in &self.strategies {
@@ -664,6 +669,14 @@ impl NodeConfig {
         // the watcher is gone (C-LIVE part 2; owner question 1 of U18b).
         if self.is_mainnet() && self.core.policy.monitor.is_none() {
             return Err("[venue] mainnet requires [core.policy.monitor] (the monitoring gate, C-LIVE)".into());
+        }
+        // The gate notices missing heartbeats and runs stage 2 only on a
+        // tick: a slow tick would move its 30 s and 60 s by as much
+        // (C-LIVE part 2, review 1 S3; 1 s 판단(모델 아님)).
+        if self.core.policy.monitor.is_some() && self.runtime.tick_ms > MONITOR_TICK_MAX_MS {
+            return Err(format!(
+                "[runtime] tick_ms must be at most {MONITOR_TICK_MAX_MS} with [core.policy.monitor]: the gate notices missing heartbeats and cancels only on a tick"
+            ));
         }
         if let Some(l) = &self.liveness {
             l.validate(&self.core)?;
@@ -1283,6 +1296,22 @@ strategies = {{ a = 5000 }}
         };
         let e = with(SIM, None, Some(slow)).unwrap_err();
         assert!(e.contains("[core] policy.monitor: unmonitored_cancel_us must be between"), "{e}");
+        // The gate notices missing heartbeats and runs stage 2 only on a
+        // tick: with the gate the tick is at most 1 s (review 1 S3).
+        for (tick_ms, gate, ok) in [(1_000, true, true), (1_001, true, false), (60_000, false, true)] {
+            let mut cfg = parse(SIM, "", None, 1).unwrap();
+            cfg.runtime.tick_ms = tick_ms;
+            if !gate {
+                cfg.core.policy.monitor = None;
+            }
+            match cfg.validate() {
+                Ok(()) => assert!(ok, "tick_ms {tick_ms} was taken"),
+                Err(e) => {
+                    assert!(!ok, "tick_ms {tick_ms}: {e}");
+                    assert!(e.contains("[runtime] tick_ms must be at most 1000 with [core.policy.monitor]"), "{e}");
+                }
+            }
+        }
 
         let because = "mainnet requires [core.policy.monitor]";
         let bybit_margin = Some("isolated = false\naccount_mm_rate_max_bps = 5000");
