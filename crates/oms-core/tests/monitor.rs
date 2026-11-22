@@ -590,7 +590,7 @@ fn stale_heartbeats_that_keep_coming_do_not_delay_the_cancels() {
     let mut t = t0 + TICK;
     // Bounded: 80 s of 250 ms steps.
     while t <= t0 + 80 * SEC {
-        let out = if (t - t0) % (5 * SEC) == 0 {
+        let out = if (t - t0).is_multiple_of(5 * SEC) {
             let (out, reply) = heartbeat(&mut h, t, checks(Some(t), Some(t0), Some(t)));
             assert_eq!(reply, Ok("recorded".to_string()));
             out
