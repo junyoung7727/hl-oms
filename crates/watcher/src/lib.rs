@@ -13,6 +13,7 @@
 
 pub mod clock;
 pub mod config;
+pub mod creds;
 pub mod decimal;
 pub mod events;
 pub mod journal;
