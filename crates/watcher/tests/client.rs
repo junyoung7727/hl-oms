@@ -320,6 +320,26 @@ async fn answers_are_classified() {
         ),
         Some(1.0)
     );
+    // A message of the venue (retMsg, or the body of a status) is kept to
+    // 200 characters on one line: control characters become spaces.
+    let long = format!("line one\nline two\r\t{}", "x".repeat(400));
+    let body = serde_json::to_string(&json!({"retCode": 10001, "retMsg": long})).unwrap();
+    for answer in [
+        Answer::Reply(200, body),
+        Answer::Reply(500, long.clone()),
+        Answer::Reply(429, long.clone()),
+    ] {
+        fake.route(p, [answer.clone()]);
+        let e = c.client.get(p, &[]).await.unwrap_err();
+        let msg = match &e {
+            RestError::Refused { msg, .. } => msg.clone(),
+            RestError::NoAnswer(m) | RestError::RateLimited(m) => m.clone(),
+            e => panic!("{answer:?}: {e:?}"),
+        };
+        assert!(msg.chars().count() <= 210, "{answer:?}: {msg:?}");
+        assert!(msg.contains("line one line two  x"), "{answer:?}: {msg:?}");
+        assert!(!e.to_string().chars().any(char::is_control), "{e:?}");
+    }
     // Connection refused: nothing sent.
     let c = client_of(&format!("http://{}", http_fake::dead_addr()), 300);
     let e = c.client.get(p, &[]).await.unwrap_err();
@@ -346,7 +366,18 @@ async fn auth_answers_are_never_retried() {
         (10010, code(10010)),
         (10003, code(10003)),
         (33004, code(33004)),
-        (10004, code(10004)),
+        // The venue's 10004 message quotes the string it signed, over lines.
+        (
+            10004,
+            Answer::Reply(
+                200,
+                serde_json::to_string(&json!({
+                    "retCode": 10004,
+                    "retMsg": format!("error sign!\norigin_string[{}]", "y".repeat(400)),
+                }))
+                .unwrap(),
+            ),
+        ),
         (10005, code(10005)),
         (10007, code(10007)),
         (401, Answer::Reply(401, "no".into())),
@@ -377,6 +408,8 @@ async fn auth_answers_are_never_retried() {
         let lines = c.lines.lock().unwrap().clone();
         assert_eq!(lines.len(), 1, "{c_want}: {lines:?}");
         assert!(lines[0].contains(&c_want.to_string()), "{lines:?}");
+        assert!(!lines[0].chars().any(char::is_control), "{lines:?}");
+        assert!(lines[0].chars().count() < 400, "{lines:?}");
         assert_eq!(
             c.metrics.get(
                 "watcher_request_errors_total",
@@ -388,6 +421,11 @@ async fn auth_answers_are_never_retried() {
         // public IP is a usual cause of 10010).
         let ip = c.client.echo(&format!("{}/ip", echo.url())).await.unwrap();
         assert_eq!(ip, "203.0.113.7");
+        assert_eq!(
+            c.metrics
+                .get("watcher_requests_total", &[("endpoint", "ip_echo")]),
+            Some(1.0)
+        );
     }
 }
 

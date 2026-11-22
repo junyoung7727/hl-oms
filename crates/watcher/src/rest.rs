@@ -158,10 +158,20 @@ pub const AUTH_CODES: [i64; 6] = [10003, 10004, 10005, 10007, 10010, 33004];
 /// (F18 L186: "wait for at least 10 minutes").
 pub const IP_BAN_PAUSE_MS: u64 = 600_000;
 
+/// A message of the venue as it goes into an error and a log line: at
+/// most 200 characters, control characters (line breaks) as spaces, so one
+/// error line stays one line.
+fn one_line(text: &str) -> String {
+    text.chars()
+        .take(200)
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
+}
+
 /// Classifies an answer: the `result` of retCode 0 (`null` when absent),
 /// or the error.
 pub fn classify(status: u16, body: &str) -> Result<Value, RestError> {
-    let short: String = body.chars().take(200).collect();
+    let short = one_line(body);
     match status {
         200..=299 => {}
         401 => {
@@ -180,11 +190,7 @@ pub fn classify(status: u16, body: &str) -> Result<Value, RestError> {
         .get("retCode")
         .and_then(Value::as_i64)
         .ok_or_else(|| RestError::NoAnswer(format!("no retCode: {short}")))?;
-    let msg = v
-        .get("retMsg")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
+    let msg = one_line(v.get("retMsg").and_then(Value::as_str).unwrap_or(""));
     match code {
         0 => Ok(v.get("result").cloned().unwrap_or(Value::Null)),
         c if AUTH_CODES.contains(&c) => Err(RestError::Auth { code: c, msg }),
