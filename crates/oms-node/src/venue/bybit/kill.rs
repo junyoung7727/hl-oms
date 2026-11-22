@@ -1336,6 +1336,15 @@ mod tests {
             }
         }
 
+        /// The driver's end, waited for at most 5 s of real time: a driver
+        /// that does not end fails the test instead of hanging it.
+        async fn end(&mut self) -> RunEnd {
+            tokio::time::timeout(Duration::from_secs(5), &mut self.task)
+                .await
+                .unwrap_or_else(|_| panic!("the driver did not end at {}", self.now()))
+                .unwrap()
+        }
+
         fn ended(&self) -> Vec<Report> {
             self.host.ended.lock().unwrap().clone()
         }
@@ -1391,7 +1400,7 @@ mod tests {
         let ended = r.ended();
         assert_eq!(ended.len(), 1, "{ended:?}");
         assert_eq!((ended[0].rounds, ended[0].cancel_all_calls), (2, 2));
-        assert_eq!((&mut r.task).await.unwrap(), RunEnd::Confirmed);
+        assert_eq!(r.end().await, RunEnd::Confirmed);
         let v = r.view.lock().unwrap().clone();
         assert_eq!(
             (v.phase, v.round, v.remaining, v.cancel_all_calls),
@@ -1597,7 +1606,7 @@ mod tests {
         assert_eq!(r.posts, [2_000]);
         let notices = r.notices().len();
         r.ctl.send(VenueCommand::KillStop).unwrap();
-        assert_eq!((&mut r.task).await.unwrap(), RunEnd::Stopped);
+        assert_eq!(r.end().await, RunEnd::Stopped);
         r.clock.advance(60_000);
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert_eq!(r.notices().len(), notices);
