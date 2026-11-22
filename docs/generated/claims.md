@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `9d5ada207711397d`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `fa538f6067feffc8`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 주장 100건: 통과 0, 실패 0, 미실행 33, 이전 버전 결과 67.
 
@@ -104,7 +104,7 @@
 | V-HOLD-6 | 킬 래치·워처 불일치·거래소 변경의 상태 필드, Boot의 kill_marker, 워처 입력과 새 이벤트 셋은 기록 스키마를 올리지 않는다: 비어 있으면 쓰지 않아 옛 상태의 바이트가 그대로이고, 이들이 든 저널은 라이브 상태로 복구되며 verify --re-decide를 통과한다. 상태 스키마는 2로 올랐다: U18b 전의 스냅샷(상태 스키마 1, venue_change 없음)은 사유와 함께 건너뛰고 저널을 처음부터 재생해, 거래소 변경 보류가 스냅샷의 유무에 따라 달라지지 않는다. 이벤트 필드 표는 새 이벤트의 모든 필드를 적는다. 알림 조건 hold:kill_latched·hold:watcher_mismatch·hold:venue_change는 유예 0이고, 킬 문장은 출처·메모·확인 상태를 담으며, 워처 불일치와 거래소 변경의 문장은 증거금 정책이 있을 때만 감소 전용을 받는다고 말하며, Alerts::notice는 접두어를 붙여 한 번 보낸다. [kill] marker는 절대 경로, 데이터 디렉터리 밖, 읽을 때 디렉터리가 있어야 하고, mainnet은 그것 없이 시작하지 않는다 | 단위, 통합 | 미실행 | `cargo test -p oms-node --test record_schema --test alerts; cargo test -p oms-node --lib alerts:: config::; cargo test -p oms-core --test event_fields` |
 | V-KILL-1 | Bybit 게이트웨이는 개인 스트림의 마지막 생존 증거(구독 확인, pong, 시작 확인의 첫 통과) 뒤 kill_after_ms가 지나도록 연결이 내려가 있으면 끊김 하나에 한 번 StreamLost를 보내고, 코어는 래치가 없으면 hold_set{kill, source: stream}과 Kill 명령을 한 기록으로 낸다. 마지막 pong 전에는 걸리지 않고, ping에 답하는 조용한 스트림, 기한 전에 다시 구독된 연결, 시작 확인 전의 끊김, 코어 큐를 기다린 시간은 킬을 부르지 않는다. 프로세스에서: 반쯤 열린 개인 스트림(ping 1초, kill_after 10초)은 마지막 pong 9초 뒤에는 디스크에 hold_set이 없고 11초까지 하나 있으며, 가짜 거래소의 첫 일괄 취소는 그 기록이 이미 저널 파일에 있을 때 온다. 다시 시작해도 래치가 남고, 새 프로세스의 루프가 끝나기 전 clear-hold는 kill_unconfirmed로 거절되며 끝난 뒤 받아들여지고 일반 주문이 다시 받아진다 | 단위, 통합 | 미실행 | `cargo test -p oms-node --lib venue::bybit::gateway::tests::; cargo test -p oms-core --test holds stream; cargo test -p oms-node --features failpoints --test bybit_node a_ten_second` |
 | V-KILL-2 | 킬 루프는 일괄 취소 뒤 거래소의 미체결을 세어 0이 될 때까지 회차의 시작부터 kill_round_ms마다 일괄 취소를 되풀이하고, 첫 0 뒤 kill_watch_every_ms마다 kill_watch_ms 동안 다시 세어 모두 0일 때만 KillLoopEnded{confirmed}를 보낸다. 실패한 셈은 0이 아니고, 감시 중의 늦은 주문은 곧바로 회차로 돌아간다. 거래소가 첫 일괄 취소 뒤 주문 하나를 남기거나 5xx로 답해도 0을 확인할 때까지 되풀이하고, 어느 1초 창에도 일괄 취소는 둘을 넘지 않으며(비상 예산 2/1초, 회차가 100 ms여도), 생성이나 단건 취소는 하나도 나가지 않는다. 막힘(IP 차단 등)에는 요청을 보내지 않고 막힘 문장으로 회차가 실패하며, 예산을 기다리는 동안 생긴 막힘도 그 요청을 집에 둔다. 셈은 모든 쪽의 열린 행(New, PartiallyFilled, Untriggered)을 orderLinkId와 상관없이 세고, 상태를 읽을 수 없는 행, 실패한 쪽, 20쪽 넘음은 오류다. 정지(IP 차단 뒤, 키 거부) 중에는 셈을 보내지 않는다. 감시는 첫 0 + kill_watch_ms에 나간 셈으로만 끝난다(그 전에 나가 늦게 답한 셈으로는 끝나지 않는다) | 단위, 통합(드라이버) | 미실행 | `cargo test -p oms-node --lib venue::bybit::kill::tests:: venue::bybit::gateway::tests::a_blocked venue::bybit::query::tests::the_kill_count` |
-| V-KILL-3 | 킬 루프의 P1은 시작, 알려진 수의 바뀜, kill_notice_ms마다의 반복, 마지막(0건 확인 뒤 감시를 마침)뿐이고 모르는 수는 바뀜이 아니다. 10분 동안 셈이 실패하면 정확히 시작 1 + 반복 10 + 마지막 1 = 12개이고, 드라이버와 Alerts를 loopback 가짜 텔레그램에 붙여도 '킬 루프'가 든 요청은 12개 이하다. 모든 알림은 태그, 회차, 남은 수(모르면 이유), 일괄 취소 수와 바로 전에 읽은 포지션 묶음(심볼마다 수량, 미실현손익, 마크, 마크에서 강제청산가까지의 거리 %, 0.01 %에서 내림, 청산가가 없으면 모름, 크기 0은 뺌, 조회 실패는 실패라고)을 담는다. 알림은 루프 옆에서 순서대로 나가서, 포지션 조회가 답하지 않아도 첫 일괄 취소와 감시 중 늦은 주문의 일괄 취소는 기다리지 않는다. 일괄 취소가 나갈 수 없는 동안(정지, 막힘)은 포지션을 읽지 않고 그렇다고 말한다 | 단위, 통합(드라이버) | 미실행 | `cargo test -p oms-node --lib venue::bybit::kill::tests::` |
+| V-KILL-3 | 킬 루프의 P1은 시작, 알려진 수의 바뀜, kill_notice_ms마다의 반복, 마지막(0건 확인 뒤 감시를 마침)뿐이고 모르는 수는 바뀜이 아니다. 10분 동안 셈이 실패하면 정확히 시작 1 + 반복 10 + 마지막 1 = 12개이고, 드라이버와 Alerts를 loopback 가짜 텔레그램에 붙여도 '킬 루프'가 든 요청은 12개 이하다. 모든 알림은 태그, 회차, 남은 수(모르면 이유), 일괄 취소 수와 바로 전에 읽은 포지션 묶음(심볼마다 수량, 미실현손익, 마크, 마크에서 강제청산가까지의 거리 %, 0.01 %에서 내림, 청산가가 없으면 모름, 크기 0은 뺌, 조회 실패는 실패라고)을 담는다. 알림은 루프 옆에서 순서대로 나가서, 포지션 조회가 답하지 않아도 첫 일괄 취소와 감시 중 늦은 주문의 일괄 취소는 기다리지 않는다. 느린 조회 뒤에서 기다리는 알림은 하나이고 가장 새 수의 것이 남으며, 마지막 알림은 KillLoopEnded보다 먼저 나간다. status의 notices는 보낸 알림 수다. 일괄 취소가 나갈 수 없는 동안(정지, 막힘)은 포지션을 읽지 않고 그렇다고 말한다 | 단위, 통합(드라이버) | 미실행 | `cargo test -p oms-node --lib venue::bybit::kill::tests::` |
 | V-KILL-4 | Bybit 게이트웨이는 Kill을 받으면 곧바로 킬 활성을 켜서 루프가 도는 동안 어떤 생성도 내보내지 않고(래치 전에 풀린 생성도 NotSent), 루프가 도는 동안의 두 번째 Kill은 무시하며, KillStop은 다음 대기에서 알림도 입력도 없이 루프를 끝내고 생성이 다시 나간다 | 단위, 통합(게이트웨이·드라이버) | 미실행 | `cargo test -p oms-node --lib venue::bybit::gateway::tests::no_create venue::bybit::gateway::tests::kill_stop venue::bybit::kill::tests::a_stop` |
 | V-KILL-5 | 이 프로세스의 루프가 거래소에서 0건을 확인한 뒤(confirmed) 새 킬 계기(StreamLost, watcher_kill)가 오면 코어는 kill_rearmed{source, note}로 확인(confirmed_at, outcome)을 지우고 새 Kill을 부르며, 래치의 첫 메모는 그대로다. 새 루프가 확인하기 전 clear-hold는 kill_unconfirmed로 거절되고, 재실행이 같은 상태를 만든다. 확인 전의 두 번째 계기와 unsupported 답 뒤의 계기는 아무것도 쓰지 않는다. [venue]의 킬 필드 다섯은 설계 기본값으로 읽히고 각 경계 밖 한 걸음은 거절된다(kill_after_ms는 2 × ping 이상) | 단위 | 미실행 | `cargo test -p oms-core --test holds a_new_trigger second; cargo test -p oms-node --lib config::tests::the_kill_loop; cargo test -p oms-core --test event_fields` |
 
@@ -2360,7 +2360,7 @@
 | `node-unit/while_requests_are_paused_no_count_and_no_position_read_go_out` | 미실행 |  |
 | `node-unit/a_slow_watch_check_answered_after_the_end_is_not_the_last_check` | 미실행 |  |
 
-## V-KILL-3 — 킬 루프의 P1은 시작, 알려진 수의 바뀜, kill_notice_ms마다의 반복, 마지막(0건 확인 뒤 감시를 마침)뿐이고 모르는 수는 바뀜이 아니다. 10분 동안 셈이 실패하면 정확히 시작 1 + 반복 10 + 마지막 1 = 12개이고, 드라이버와 Alerts를 loopback 가짜 텔레그램에 붙여도 '킬 루프'가 든 요청은 12개 이하다. 모든 알림은 태그, 회차, 남은 수(모르면 이유), 일괄 취소 수와 바로 전에 읽은 포지션 묶음(심볼마다 수량, 미실현손익, 마크, 마크에서 강제청산가까지의 거리 %, 0.01 %에서 내림, 청산가가 없으면 모름, 크기 0은 뺌, 조회 실패는 실패라고)을 담는다. 알림은 루프 옆에서 순서대로 나가서, 포지션 조회가 답하지 않아도 첫 일괄 취소와 감시 중 늦은 주문의 일괄 취소는 기다리지 않는다. 일괄 취소가 나갈 수 없는 동안(정지, 막힘)은 포지션을 읽지 않고 그렇다고 말한다
+## V-KILL-3 — 킬 루프의 P1은 시작, 알려진 수의 바뀜, kill_notice_ms마다의 반복, 마지막(0건 확인 뒤 감시를 마침)뿐이고 모르는 수는 바뀜이 아니다. 10분 동안 셈이 실패하면 정확히 시작 1 + 반복 10 + 마지막 1 = 12개이고, 드라이버와 Alerts를 loopback 가짜 텔레그램에 붙여도 '킬 루프'가 든 요청은 12개 이하다. 모든 알림은 태그, 회차, 남은 수(모르면 이유), 일괄 취소 수와 바로 전에 읽은 포지션 묶음(심볼마다 수량, 미실현손익, 마크, 마크에서 강제청산가까지의 거리 %, 0.01 %에서 내림, 청산가가 없으면 모름, 크기 0은 뺌, 조회 실패는 실패라고)을 담는다. 알림은 루프 옆에서 순서대로 나가서, 포지션 조회가 답하지 않아도 첫 일괄 취소와 감시 중 늦은 주문의 일괄 취소는 기다리지 않는다. 느린 조회 뒤에서 기다리는 알림은 하나이고 가장 새 수의 것이 남으며, 마지막 알림은 KillLoopEnded보다 먼저 나간다. status의 notices는 보낸 알림 수다. 일괄 취소가 나갈 수 없는 동안(정지, 막힘)은 포지션을 읽지 않고 그렇다고 말한다
 
 - 상태: **미실행**
 - 왜 중요한가: 운영자는 끊긴 동안 포지션의 위험을 알아야 하지만 알림 폭주는 신호를 묻는다(TN 표 7-8 C4: 10분에 12개)
@@ -2369,7 +2369,7 @@
 - 실제 구성요소: KillLoop, run 드라이버, Alerts와 alert-direct(loopback HTTP), position_block·liq_distance
 - 모의·시뮬레이션: 텔레그램(http-fake), Bybit REST(http-fake), 시계(수동)
 - 주입한 장애: 10분 동안 셈 500, 포지션 조회 실패, 답하지 않는 포지션 조회, 정지와 계정 막힘, 청산가 없음, 마크 0 이하
-- 판정 기준과 근거: 알림의 시각과 종류 목록(정확히), 가짜 텔레그램이 받은 요청 수, 알림 문장의 부분 문자열, 거리 문자열. 넣은 결함과 잡은 시험: 반복이 notice_ms를 무시(M148), 모르는 수를 바뀜으로(M149), 알림이 루프를 붙잡음(M154), 막힘 중 포지션 조회(M158)
+- 판정 기준과 근거: 알림의 시각과 종류 목록(정확히), 가짜 텔레그램이 받은 요청 수, 알림 문장의 부분 문자열, 거리 문자열. 넣은 결함과 잡은 시험: 반복이 notice_ms를 무시(M148), 모르는 수를 바뀜으로(M149), 알림이 루프를 붙잡음(M154), 막힘 중 포지션 조회(M158), 알림 큐에 상한 없음(M160), 상태가 만든 알림을 셈(M161)
 - 재현: `cargo test -p oms-node --lib venue::bybit::kill::tests::`
 - 뒷받침하는 것: C-KILL의 P1 알림, C-ALERT의 Alerts::notice, ADR-030 §7(U18b2)
 - 확인하지 않은 범위: 실제 텔레그램. 교차 증거금에서 거래소 청산가 추정의 정확도. [alert]가 없을 때의 warn 줄(코드만)
@@ -2385,6 +2385,7 @@
 | `node-unit/the_notice_texts_hold_the_tag_the_round_the_count_and_the_calls` | 미실행 |  |
 | `node-unit/a_hanging_position_read_holds_back_no_cancel_all` | 미실행 |  |
 | `node-unit/while_requests_are_paused_no_count_and_no_position_read_go_out` | 미실행 |  |
+| `node-unit/a_slow_position_read_lets_at_most_one_notice_wait_and_the_newest_wins` | 미실행 |  |
 
 ## V-KILL-4 — Bybit 게이트웨이는 Kill을 받으면 곧바로 킬 활성을 켜서 루프가 도는 동안 어떤 생성도 내보내지 않고(래치 전에 풀린 생성도 NotSent), 루프가 도는 동안의 두 번째 Kill은 무시하며, KillStop은 다음 대기에서 알림도 입력도 없이 루프를 끝내고 생성이 다시 나간다
 

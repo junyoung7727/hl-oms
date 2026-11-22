@@ -199,6 +199,10 @@ Machine: `start(now)`, `cancel_done(now, Ok(CancelAll) | Err(why))`, `count_done
 - Amendment (N4): the watch ends only on the check that went out at `z + watch_ms` (its due time), not on any count answered after that time.
 - Amendment (S3): `http-fake` gets an `on_request` hook; the process test reads the journal files when the first cancel-all arrives. It proves the record is in the files (written), not that it was fsynced (that order is `pipeline::a_kill_command_leaves_only_after_the_latch_is_durable`, M130).
 
+### Amendments (U18b2 review 2)
+
+- Amendment (S1, N1): at most one notice waits behind the one in flight; a newer notice takes the place of a waiting change or repeat (Start and Final are never dropped), so the end waits for at most two notices (≤ 2 × `request_timeout_ms` late); `status.gateway.kill_loop.notices` counts the notices sent, not made.
+
 ## U18b3 decisions: strategy liveness (StrategyLink)
 
 - Keys: the strategy id. Only trading-socket connections count; admin connections never do.
