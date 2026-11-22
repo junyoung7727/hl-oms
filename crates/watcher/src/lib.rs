@@ -12,6 +12,7 @@
 pub mod decimal;
 pub mod events;
 pub mod journal;
+pub mod sign;
 pub mod state;
 pub mod wire_id;
 
