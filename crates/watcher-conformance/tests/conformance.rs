@@ -216,8 +216,11 @@ fn side(s: Side) -> watcher::state::Side {
 /// set; for every open order its instrument, side, quantity, strategy,
 /// client order id, venue order id, filled quantity, doubt and venue end;
 /// the position per instrument (0 counts as absent); the fill,
-/// venue-change and funding keys at or above the fill floor with their
-/// venue times; the fill floor itself.
+/// venue-change and funding keys with their venue times; the fill floor
+/// itself. The spec bounds the key comparison to keys at or above the
+/// floor; both sides forget keys at the same records (`purged` only, not
+/// `booted`), so the whole key sets are compared, which also shows that the
+/// watcher forgets what the core forgets.
 fn same(core: &Core, st: &JournalState, at: &str) {
     let open: Vec<u64> = core.open.iter().map(|id| id.0).collect();
     assert_eq!(
@@ -277,7 +280,6 @@ fn same(core: &Core, st: &JournalState, at: &str) {
     let core_keys: BTreeMap<String, u64> = core
         .seen_fills
         .iter()
-        .filter(|(_, t)| **t >= floor)
         .map(|(k, t)| (k.as_str().to_string(), *t))
         .collect();
     let mut keys = BTreeMap::new();
@@ -288,9 +290,7 @@ fn same(core: &Core, st: &JournalState, at: &str) {
         .chain(st.venue_changes.iter().map(|(k, c)| (k, c.venue_ts)))
         .chain(st.funding.iter().map(|(k, f)| (k, f.venue_ts)))
     {
-        if t >= floor {
-            assert!(keys.insert(k.clone(), t).is_none(), "{at}: key {k} twice");
-        }
+        assert!(keys.insert(k.clone(), t).is_none(), "{at}: key {k} twice");
     }
     assert_eq!(keys, core_keys, "{at}: fill keys");
 }
