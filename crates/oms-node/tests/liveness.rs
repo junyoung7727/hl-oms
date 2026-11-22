@@ -133,6 +133,17 @@ fn closing_the_last_connection_cancels_that_strategys_plain_orders_only() {
             .unwrap()
             .contains(&json!("strategy_link"))
     );
+    // An admin connection never counts: its hello naming `a` neither
+    // restores nor counts.
+    let admin_a = Client::connect(&env.admin_sock(), Some("a")).unwrap();
+    let l = link(&env, "a");
+    assert_eq!(
+        (l["held"].as_bool(), l["connections"].as_u64()),
+        (Some(true), Some(0)),
+        "{l}"
+    );
+    drop(admin_a);
+    assert_eq!(env.journal_count("strategy_link_restored"), 0);
     // `b` still trades.
     rest(&mut env, &mut b, "b-after", Side::Buy, "90", false);
     ping(&mut b);

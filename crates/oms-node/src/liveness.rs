@@ -306,6 +306,10 @@ mod tests {
 
         hello(&mut t, "a", ms(t0, 61_000));
         assert!(!t.hello_plan(&sid("a"), false).restore);
+        // The hello moved the clock on: silence is measured from it, not
+        // from the first hello.
+        t.tick(ms(t0, 66_000), &mut q.push());
+        assert_eq!(q.took.len(), 1, "silence is measured from the hello");
         t.closed(&sid("a"), &mut q.push());
         assert_eq!(q.took.len(), 2, "a new loss after the hello");
     }
