@@ -264,8 +264,8 @@ claims = ["V-LIVE-1", "V-LIVE-2", "V-LIVE-3", "V-LIVE-4", "V-GATE-1", "V-GATE-2"
 id = "C-WATCH"
 title = "독립 워처"
 file = "docs/contracts/watcher.md"
-summary = "1부: crate watcher는 oms-*·md-* crate도 다른 작업 공간 crate도 쓰지 않고(개발 의존성 http-fake만), watcher-conformance만 그것을 OMS 코드와 함께 링크한다. tools/ci/watcher_independent.sh가 선언된 의존성(모든 종류와 target), 호스트 그래프의 도달, 역방향, #[path]·include!·속성 안의 path =와 심볼릭 링크, 패키지 밖 소스의 target을 보고 0/1/2로 끝난다(CI, 자체 시험 22건). 독자 저널 읽기: ADR-011과 C-TAIL만으로, 읽기 전용, LOCK 없음, 상한 너머 금지, 프레임 하나씩, 회전과 헤더 다시 읽기, 상한 이하 손상은 위치를 두고 오류. Io·Damaged·NoStart는 다시 읽고 UnknownEvent·Schema·Format·Instance는 재시작까지 래치. 시작마다 기록 1부터 재생, 저장 상태 없음. 아는 이벤트는 C-TAIL 표의 51개"
+summary = "1부: crate watcher는 oms-*·md-* crate도 다른 작업 공간 crate도 쓰지 않고(개발 의존성 http-fake만), watcher-conformance만 그것을 OMS 코드와 함께 링크한다. tools/ci/watcher_independent.sh가 선언된 의존성(모든 종류와 target), 호스트 그래프의 도달, 역방향, #[path]·include!·속성 안의 path =와 심볼릭 링크, 패키지 밖 소스의 target을 보고 0/1/2로 끝난다(CI, 자체 시험 22건). 독자 저널 읽기: ADR-011과 C-TAIL만으로, 읽기 전용, LOCK 없음, 상한 너머 금지, 프레임 하나씩, 회전과 헤더 다시 읽기, 상한 이하 손상은 위치를 두고 오류. Io·Damaged·NoStart는 다시 읽고 UnknownEvent·Schema·Format·Instance는 재시작까지 래치. 시작마다 기록 1부터 재생, 저장 상태 없음. 아는 이벤트는 C-TAIL 표의 51개. 2부: 저널 상태 JournalState(C-TAIL 상태 표의 규칙과 C-WATCH 2부의 시각, 표의 확인·결과 불명·종결, 키, 바닥, 보류, 기준일 행은 U19a2 검토 1 M1에서 더함: 주문 정보는 order_accepted부터 purged까지, 열린 주문, 체결·거래소 변경·펀딩 키, 종목별 포지션 = 체결 + 거래소 변경 + 조정, 주문별 fact_at, 종목별 last_change_at, 보류, 기준일, 올라가기만 하는 체결 바닥). 규칙에 맞지 않는 기록은 State 오류로 래치. 코어와의 적합성은 이벤트 51개를 모두 쓰는 시나리오에서 기록마다. 재생은 100만 건당 약 1.3초"
 events = []
 adr = ["ADR-031", "ADR-025", "ADR-011"]
 code = ["crates/watcher/src", "tools/ci/watcher_independent.sh"]
-claims = ["V-WATCH-1"]
+claims = ["V-WATCH-1", "V-WATCH-2"]

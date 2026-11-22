@@ -1,6 +1,6 @@
 # ADR-031 독립 워처: OMS 코드를 쓰지 않는 저널 읽기와 그 증명
 
-상태: 채택. U19a1 구현(2026-11-23): crate `watcher`(라이브러리와 `--version`만 답하는 바이너리), `watcher-conformance`(적합성 시험), 독자 저널 읽기, 아는 이벤트, 소수, `Base32Pair`, 독립성 검사 `tools/ci/watcher_independent.sh`. 검사 W1~W4, Bybit 클라이언트, 하트비트는 U19a2~U19a9가 이 ADR에 절을 더한다. 계약: [C-WATCH](../contracts/watcher.md).
+상태: 채택. U19a1 구현(2026-11-23): crate `watcher`(라이브러리와 `--version`만 답하는 바이너리), `watcher-conformance`(적합성 시험), 독자 저널 읽기, 아는 이벤트, 소수, `Base32Pair`, 독립성 검사 `tools/ci/watcher_independent.sh`. U19a2 구현(2026-11-23): 저널 상태 `watcher::state::JournalState`(C-TAIL "이벤트가 바꾸는 상태" 표의 규칙만으로. 확인·결과 불명·종결 표시, 거래소 변경·펀딩 키, 체결 바닥, 보류, 일 기준값의 행은 U19a2 검토 1 M1에서 그 표에 더했다)와 코어와의 적합성 시나리오, 재생 속도 측정. 검사 W1~W4, Bybit 클라이언트, 하트비트는 U19a3~U19a9가 이 ADR에 절을 더한다. 계약: [C-WATCH](../contracts/watcher.md).
 
 ## 1. 문제와 발생 가능한 실패
 
@@ -85,7 +85,7 @@ B와 b. 커서 저장(C)은 하지 않는다.
 ## 8. 포기한 장점, 남은 위험, 가정
 
 - 포기: 이미 시험된 `oms-journal::Tail`. 같은 규칙을 두 번 구현하고 두 번 시험한다. 적합성 시험이 두 구현이 같은 답을 내는지 본다(U19a1은 잠금 중 읽기와 식별자, U19a2는 집합).
-- 포기: 재시작 비용. 저널 전체를 다시 읽는다. 저널은 하트비트(5초마다, 하루 약 17,000건)로도 자란다. U19a2가 기록 10만 건으로 초당 재생 속도를 재서 C-WATCH에 백만 건당 시작 시간을 적는다. 재생 중에는 하트비트가 없다(소유자 질문 9).
+- 포기: 재시작 비용. 저널 전체를 다시 읽는다. 저널은 하트비트(5초마다, 하루 약 17,000건)로도 자란다. U19a2의 측정(기록 10만 건, release, 페이지 캐시에 있는 파일): 초당 약 74만 건, 기록 100만 건당 약 1.3초(C-WATCH 2부 "재생 시간"). 게이트의 30초는 약 2,200만 건이다(판단(모델 아님): 단순 비례). 재생 중에는 하트비트가 없다(소유자 질문 9).
 - 위험: 워처가 이미 읽은 프레임이 그 뒤에 손상되면 그 프로세스는 보지 못한다(다시 읽지 않는다). 다음 시작의 재생이 본다. C-TAIL의 "커서 앞의 손상"은 다시 읽는 쪽의 규칙이다.
 - 한계(규칙 4): 해석된 그래프는 호스트 플랫폼의 것뿐이다. 다른 플랫폼의 의존성을 거쳐서만 닿는 패키지는 걷지 않는다. 워처가 그것을 직접 선언하면 규칙 2가 잡는다.
 - 한계(규칙 4): 개발 간선은 걷지 않는다. 허용된 개발 의존성 `http-fake`가 뒷날 `oms-*`에 의존하면 보지 못한다(검토 1 N4).
@@ -94,11 +94,12 @@ B와 b. 커서 저장(C)은 하지 않는다.
 
 ## 9. 근거
 
+- 시험(U19a2): `crates/watcher/tests/state.rs` 10개, 적합성 `conformance::the_watcher_sets_equal_the_core_on_journals_with_every_event_kind`(이벤트 51개를 모두 쓰는 시나리오 열 개, 기록마다 코어와 비교; 주장 V-WATCH-2), 재생 측정 `replay::replay_speed_of_100000_records`. 변이 M185~M187, M210, M231(검토 1 S2).
 - 시험: `crates/watcher/tests/journal.rs` 9개, `crates/watcher/src` 단위 시험 3개(`events`, `decimal`, `wire_id`), `crates/watcher/tests/binary.rs` 1개, `crates/watcher-conformance/tests/conformance.rs` 2개, `tools/ci/selftest.sh`의 워처 22건(주장 V-WATCH-1). 변이 M182~M184, M221, M230(검토 1 S3).
 - 설계 TN(암호화폐 거래 통합 설계) §7.5 독립성, `pr_plan.json` U19a, 스펙 `.scratch/watcher-core/spec.md`. 설계 문서는 저장소 밖에 있다.
 
 ## 10. 재검토 조건
 
-- 재생 시간이 게이트의 30초에 가까워질 때(U19a2의 측정): 커서 저장(C)을 다시 본다.
+- 재생 시간이 게이트의 30초에 가까워질 때(U19a2의 측정으로 약 2,200만 건): 커서 저장(C)을 다시 본다.
 - 워처가 다른 플랫폼에서 돌거나, 작업 공간에 `oms-*`·`md-*`가 아닌 OMS crate가 생길 때.
 - C-TAIL이 바뀔 때(새 이벤트, 새 스키마, 새 프레임 형식).

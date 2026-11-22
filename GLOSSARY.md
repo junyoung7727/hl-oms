@@ -189,8 +189,12 @@ The operator's `clear-hold` of one hold of C-HOLD (`kill`, `watcher_mismatch`, `
 _Avoid_: unhold, override
 
 **Watcher** (워처):
-The separate program (crate and binary `watcher`) that checks the OMS against the venue with code of its own: its own journal reader built from ADR-011 and C-TAIL only, its own sets, its own Bybit key and client. It depends on no `oms-*` or `md-*` crate and on no other workspace crate; only the test crate `watcher-conformance` links it with OMS code, and `tools/ci/watcher_independent.sh` checks this on every change (ADR-031, C-WATCH). It keeps no state and replays the journal from record 1 at every start. U19a1 built the reader; the checks W1–W4 and the heartbeat come in U19a5–U19a9.
+The separate program (crate and binary `watcher`) that checks the OMS against the venue with code of its own: its own journal reader built from ADR-011 and C-TAIL only, its own sets, its own Bybit key and client. It depends on no `oms-*` or `md-*` crate and on no other workspace crate; only the test crate `watcher-conformance` links it with OMS code, and `tools/ci/watcher_independent.sh` checks this on every change (ADR-031, C-WATCH). It keeps no state and replays the journal from record 1 at every start. U19a1 built the reader, U19a2 the journal state; the checks W1–W4 and the heartbeat come in U19a5–U19a9.
 _Avoid_: monitor (the monitoring gate is the OMS's), checker, reconciler (that is the OMS's own)
+
+**Watcher journal state** (워처 저널 상태):
+What the watcher builds from the journal with its own code (`watcher::state::JournalState`, C-WATCH part 2), one rule per row of the C-TAIL table: the order info from `order_accepted` until `purged` (kept after `order_closed`, so a late fill still has its side and instrument), the open set, the fill, venue-change and funding keys until the fill floor passes them, the position per instrument (booked fills, venue changes and adjustments; funding never), the fact time per order and the change time per instrument that W1 and W2 judge by, the holds, the day base and a fill floor that only goes up. A record that breaks a rule latches it until restart. A conformance test shows that it equals the core's sets after every record.
+_Avoid_: watcher cache, shadow core (it is not the core's state and holds only what the checks compare)
 
 **Watcher mismatch** (워처 불일치):
 The hold `WatcherMismatch`, set when a check of the watcher (W1–W4) confirms a difference. Refuses plain orders until released.

@@ -1,6 +1,6 @@
 # C-TAIL 저널 꼬리 읽기와 이벤트 필드 표
 
-설계 근거: [ADR-025](../adr/ADR-025-journal-tail.md). 코드: `crates/oms-journal/src/tail.rs`(읽기), `crates/oms-core/src/event.rs`(이벤트). 이 문서는 OMS 밖의 프로그램(프로젝터 U14b, 감시자 U19a)이 저널을 읽는 규칙과, 읽은 기록을 해석하는 데 필요한 것을 모두 적는다. 감시자는 이 문서만 보고 구현한다(OMS 코드에 의존하지 않는다). 감시자의 구현: `crates/watcher/src/journal.rs`(읽기), `crates/watcher/src/events.rs`(아는 이벤트), [C-WATCH](watcher.md) 1부(U19a1).
+설계 근거: [ADR-025](../adr/ADR-025-journal-tail.md). 코드: `crates/oms-journal/src/tail.rs`(읽기), `crates/oms-core/src/event.rs`(이벤트). 이 문서는 OMS 밖의 프로그램(프로젝터 U14b, 감시자 U19a)이 저널을 읽는 규칙과, 읽은 기록을 해석하는 데 필요한 것을 모두 적는다. 감시자는 이 문서만 보고 구현한다(OMS 코드에 의존하지 않는다). 감시자의 구현: `crates/watcher/src/journal.rs`(읽기), `crates/watcher/src/events.rs`(아는 이벤트), [C-WATCH](watcher.md) 1부(U19a1). 아래 "이벤트가 바꾸는 상태"의 감시자 구현: `crates/watcher/src/state.rs`, C-WATCH 2부(U19a2).
 
 ## C-TAIL 꼬리 읽기
 
@@ -29,25 +29,30 @@ payload 하나는 JSON 객체 하나다: `{"seq": u64, "at": u64 µs(기록 시�
 
 ## 이벤트가 바꾸는 상태
 
-감시자가 만드는 것: **주문 정보**(주문 번호 → 종목, 방향, 수량, 거래소 주문 번호; `order_accepted`부터 `purged`까지 유지), 그중 **열린 주문**(아직 `order_closed`가 없는 것), **체결**(체결 키 → 수량, 방향, 종목), **포지션**(종목 → 부호 있는 수량).
+감시자가 만드는 것: **주문 정보**(주문 번호 → 전략, 종목, 방향, 수량, 클라이언트 주문 ID, 거래소 주문 번호, 누적 체결, 확인·결과 불명·거래소 종결 표시; `order_accepted`부터 `purged`까지 유지), 그중 **열린 주문**(아직 `order_closed`가 없는 것), **키**(체결 키 → 수량, 방향, 종목, 거래소 시각; 거래소 변경 키; 펀딩 키. OMS는 셋을 한 집합으로 두고 같은 기록에서 잊는다), **포지션**(종목 → 부호 있는 수량), **그 밖의 상태**(체결 바닥, 킬 보류와 워처 불일치 보류, 일 기준값). 아래 표의 모든 행이 감시자의 규칙이다(C-WATCH 2부, U19a2 검토 1 M1에서 확인·결과 불명·종결 표시, 거래소 변경·펀딩 키, 체결 바닥, 보류, 일 기준값의 행을 더했다).
 
 닫힌 주문의 정보를 `order_closed`에서 지우면 안 된다. 닫힌 뒤에 그 주문의 `fill_booked`가 올 수 있고(늦은 체결, 불일치 `FillAfterClose`), 그 체결의 방향과 종목은 주문 정보에서만 알 수 있다(검토 2026-11-20).
 
-| 이벤트 | 열린 주문 | 체결 | 포지션 |
-|---|---|---|---|
-| `order_accepted` | 주문 정보와 열린 주문에 추가: `order_id`, `request.strategy`, `request.instrument`, `request.side`, `request.qty`, `request.client_order_id` | — | — |
-| `order_acked` | `venue_oid`가 있으면 그 주문의 거래소 주문 번호 | — | — |
-| `venue_oid_learned` | 그 주문의 거래소 주문 번호 | — | — |
-| `fill_booked` | 그 주문의 누적 체결 += `qty`(닫힌 주문일 수도 있다) | 추가: `key` → `qty`, 방향과 종목은 주문 정보의 `request.side`, `request.instrument` | 그 종목 += 부호 있는 `qty`(매수 +, 매도 −) |
-| `external_fill_booked` | — | 추가: `fill.key` → `fill.qty`, `fill.side`, `fill.instrument` | `fill.instrument` += 부호 있는 `fill.qty` |
-| `order_closed` | 열린 주문에서 제거. 주문 정보는 남긴다 | — | — |
-| `venue_position_changed` | — | — (체결이 아니다. 감시자 W4는 거래소의 위치 변경 행과 비교한다) | `change.instrument` += `change.qty`(이미 부호 있음) |
-| `position_adjusted` | — | — | `instrument` += `delta`(부호 있음) |
-| `funding_booked` | — | — (현금만. 수량을 바꾸지 않는다) | — |
-| `purged` | `order_ids`의 주문 정보를 지운다(모두 닫힌 주문이다). 열린 주문은 바뀌지 않는다 | `fill_floor`보다 이른 체결 키는 잊어도 된다 | — |
-| 그 밖의 이벤트 | — | — | — |
+| 이벤트 | 주문 정보·열린 주문 | 체결·거래소 변경·펀딩 키 | 포지션 | 그 밖의 상태 |
+|---|---|---|---|---|
+| `order_accepted` | 주문 정보와 열린 주문에 추가: `order_id`, `request.strategy`, `request.instrument`, `request.side`, `request.qty`, `request.client_order_id`. 거래소 주문 번호 없음, 누적 체결 0, 확인·결과 불명·거래소 종결 표시는 아님 | — | — | — |
+| `order_acked` | 확인됨. 결과 불명이 풀린다. `venue_oid`가 null이 아니면 그 주문의 거래소 주문 번호(null이면 아는 번호를 남긴다) | — | — | — |
+| `venue_oid_learned` | 그 주문의 거래소 주문 번호 | — | — | — |
+| `order_in_doubt` | 결과 불명 | — | — | — |
+| `venue_terminal` | 거래소 종결 표시. 결과 불명이 풀린다. 열린 주문에 남는다(`order_closed`까지, C-TERM) | — | — | — |
+| `fill_booked` | 그 주문의 누적 체결 += `qty`(닫힌 주문일 수도 있다) | 추가: `key` → `qty`, `venue_ts`, 방향과 종목은 주문 정보의 `request.side`, `request.instrument` | 그 종목 += 부호 있는 `qty`(매수 +, 매도 −) | — |
+| `external_fill_booked` | — | 추가: `fill.key` → `fill.qty`, `fill.side`, `fill.instrument`, `fill.venue_ts` | `fill.instrument` += 부호 있는 `fill.qty` | — |
+| `order_closed` | 열린 주문에서 제거. 주문 정보는 남긴다. 거래소 종결 표시는 바꾸지 않는다 | — | — | — |
+| `venue_position_changed` | — | 거래소 변경 키 추가: `change.key` → `change.instrument`, `change.qty`, `change.kind`, `change.venue_ts`(체결이 아니다. 감시자 W4는 거래소의 위치 변경 행과 비교한다) | `change.instrument` += `change.qty`(이미 부호 있음) | — |
+| `position_adjusted` | — | — | `instrument` += `delta`(부호 있음) | — |
+| `funding_booked` | — | 펀딩 키 추가: `funding.key` → `funding.instrument`, `funding.venue_ts`(현금만. 수량을 바꾸지 않는다) | — | — |
+| `purged` | `order_ids`의 주문 정보를 지운다(모두 닫힌 주문이다. 열린 주문이나 모르는 주문이면 저널이 이 표와 다르다). 열린 주문은 바뀌지 않는다 | 바닥을 올린 뒤, 세 가지 키 중 거래소 시각 < 체결 바닥인 것을 잊는다(바닥과 같은 시각은 남긴다) | — | 체결 바닥 = max(옛 값, `fill_floor`) |
+| `booted` | — | 잊지 않는다(키는 `purged`에서만 잊는다) | — | 체결 바닥 = max(옛 값, `fill_floor`) |
+| `hold_set` / `hold_cleared` | — | — | — | `hold`가 `kill`이면 킬 보류를, `watcher_mismatch`면 워처 불일치 보류를 건다(`hold_set`) 또는 푼다(`hold_cleared`). `hold_cleared`의 `venue_change`는 이 둘을 바꾸지 않는다(그 보류는 거래소 변경 이벤트에서 생긴다) |
+| `day_base_set` | — | — | — | 일 기준값 = `{day, value}` |
+| 그 밖의 이벤트 | — | — | — | — |
 
-그 밖의 이벤트(링크, 결과 불명, 상태 기록, 취소, 대조, 불일치, 운영자, 저장 공간, 참조 가격, 증거금, 펀딩·변경 대기, 부재 기록, 보류와 킬 루프 `hold_set`·`hold_cleared`·`kill_loop_ended`·`kill_rearmed`, 전략 연결 `strategy_link_lost`·`strategy_link_restored`, 모니터링 게이트 `watcher_heartbeat`·`monitor_changed`)는 세 집합을 바꾸지 않는다. 상태 화면과 알림은 이들을 쓴다. 뜻은 아래 필드 표와 각 계약 문서([C-NEW 등](order-lifecycle.md), [C-MISMATCH](reconciliation.md), [C-MARGIN](margin.md), [C-HOLD](holds.md), [C-LIVE](liveness.md))에 있다.
+그 밖의 이벤트(링크, 상태 기록, 취소, 대조, 불일치, 운영자, 저장 공간, 참조 가격, 증거금, 펀딩·변경 대기, 부재 기록, 킬 루프 `kill_loop_ended`·`kill_rearmed`, 전략 연결 `strategy_link_lost`·`strategy_link_restored`, 모니터링 게이트 `watcher_heartbeat`·`monitor_changed`)는 위의 상태를 바꾸지 않는다. 상태 화면과 알림은 이들을 쓴다. 뜻은 아래 필드 표와 각 계약 문서([C-NEW 등](order-lifecycle.md), [C-MISMATCH](reconciliation.md), [C-MARGIN](margin.md), [C-HOLD](holds.md), [C-LIVE](liveness.md))에 있다. 감시자가 이 표에서 더 구하는 시각(주문의 `fact_at`, 종목의 `last_change_at`)은 [C-WATCH](watcher.md) 2부에 있다.
 
 포지션 = `fill_booked` + `external_fill_booked` + `venue_position_changed` + `position_adjusted` 수량의 합이다(감시자 W2, ADR-023).
 
@@ -272,4 +277,4 @@ payload 하나는 JSON 객체 하나다: `{"seq": u64, "at": u64 µs(기록 시�
 
 `tail::the_tail_never_returns_a_record_above_the_durable_cap`, `tail::the_tail_follows_segment_rotation_and_starts_after_a_cursor`, `tail::the_tail_never_takes_the_lock`, `tail::a_damaged_durable_frame_stops_the_tail_without_moving_it`, `tail::peek_beyond_shows_valid_frames_past_the_cap_without_moving`, `tail::a_frame_with_the_wrong_sequence_comes_after_the_good_records`, `tail::damage_before_the_cursor_is_an_error`, `tail::the_tail_follows_a_schema_change_to_a_new_segment`, `tail::the_tail_reads_a_header_only_segment_rewritten_with_a_new_schema`(주장 V-TAIL-1). 필드 표: `event_fields`의 세 시험(주장 V-TAIL-2). 복구의 `fsync`는 시험하지 않았다(페이지 캐시 유실을 흉내 낼 수 없다).
 
-감시자의 독자 구현(C-WATCH 1부, 주장 V-WATCH-1, U19a2부터 V-WATCH-2): `crates/watcher/tests/journal.rs`의 시험 9개(상한, 회전과 스키마 변경, 헤더만 있는 세그먼트, 상한 이하 손상, 모르는 이벤트, 다시 읽는 오류와 래치하는 오류, 프레임 하나씩 읽는 큰 세그먼트, ADR-011의 바이트 배치), `events::the_known_events_are_the_rows_of_the_tail_table`(이 표의 이벤트 이름과 감시자가 아는 이름이 양방향으로 같다. 이 문서를 시험 시각에 파일로 읽는다). 적합성(`crates/watcher-conformance`): `conformance::the_watcher_reads_while_the_oms_writer_holds_the_lock`(코어가 결정한 기록을 `oms-journal`이 쓰고 잠금을 쥔 동안 감시자가 같은 이벤트로 읽고, 디렉터리를 바꾸지 않는다), `conformance::the_watcher_base32_pair_equals_the_core_form`.
+감시자의 독자 구현(C-WATCH 1부, 주장 V-WATCH-1, U19a2부터 V-WATCH-2): `crates/watcher/tests/journal.rs`의 시험 9개(상한, 회전과 스키마 변경, 헤더만 있는 세그먼트, 상한 이하 손상, 모르는 이벤트, 다시 읽는 오류와 래치하는 오류, 프레임 하나씩 읽는 큰 세그먼트, ADR-011의 바이트 배치), `events::the_known_events_are_the_rows_of_the_tail_table`(이 표의 이벤트 이름과 감시자가 아는 이름이 양방향으로 같다. 이 문서를 시험 시각에 파일로 읽는다). 적합성(`crates/watcher-conformance`): `conformance::the_watcher_reads_while_the_oms_writer_holds_the_lock`(코어가 결정한 기록을 `oms-journal`이 쓰고 잠금을 쥔 동안 감시자가 같은 이벤트로 읽고, 디렉터리를 바꾸지 않는다), `conformance::the_watcher_base32_pair_equals_the_core_form`. 상태(U19a2, V-WATCH-2): `crates/watcher/tests/state.rs`의 시험 10개와 `conformance::the_watcher_sets_equal_the_core_on_journals_with_every_event_kind`(이 표의 이벤트 51개를 모두 쓰는 코어 시나리오 열 개에서, 기록마다 감시자의 열린 주문·주문 필드·포지션·체결 키·체결 바닥이 코어와 같다).
