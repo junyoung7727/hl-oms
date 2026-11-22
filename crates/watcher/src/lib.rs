@@ -10,6 +10,7 @@
 
 pub mod decimal;
 pub mod events;
+pub mod journal;
 pub mod wire_id;
 
 /// The package version, printed by `watcher --version`.
