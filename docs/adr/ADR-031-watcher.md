@@ -98,7 +98,7 @@ B와 b. 커서 저장(C)은 하지 않는다.
 
 ## 9. 근거
 
-- 시험(U19a3): `crates/watcher/tests/sign.rs` 2개, `client.rs` 8개(검토 1에서 리다이렉트를 따르지 않음과 가드에서 기다린 요청이 그 사이의 키 거절·403을 봄을 더함), `metrics.rs` 2개(loopback 가짜와 수동 시계; 주장 V-WATCH-3). 변이 M188, M191, M192.
+- 시험(U19a3): `crates/watcher/tests/sign.rs` 2개, `client.rs` 8개(검토 1에서 리다이렉트를 따르지 않음과 가드에서 기다린 요청이 그 사이의 키 거절·403을 봄을 더함), `metrics.rs` 2개(loopback 가짜와 수동 시계; 주장 V-WATCH-3). 변이 M188, M191, M192, M232, M233.
 - 시험(U19a2): `crates/watcher/tests/state.rs` 10개, 적합성 `conformance::the_watcher_sets_equal_the_core_on_journals_with_every_event_kind`(이벤트 51개를 모두 쓰는 시나리오 열 개, 기록마다 코어와 비교; 주장 V-WATCH-2), 재생 측정 `replay::replay_speed_of_100000_records`. 변이 M185~M187, M210, M231(검토 1 S2).
 - 시험: `crates/watcher/tests/journal.rs` 9개, `crates/watcher/src` 단위 시험 3개(`events`, `decimal`, `wire_id`), `crates/watcher/tests/binary.rs` 1개, `crates/watcher-conformance/tests/conformance.rs` 2개, `tools/ci/selftest.sh`의 워처 22건(주장 V-WATCH-1). 변이 M182~M184, M221, M230(검토 1 S3).
 - 설계 TN(암호화폐 거래 통합 설계) §7.5 독립성, `pr_plan.json` U19a, 스펙 `.scratch/watcher-core/spec.md`. 설계 문서는 저장소 밖에 있다.

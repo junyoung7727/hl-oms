@@ -266,7 +266,7 @@ The confirmation count (2 rounds) is a constant, not config: the scope fixes it.
 - Every request is counted in `watcher_requests_total{endpoint}` before it is sent.
 
 Amendment (U19a3 review 1 S3): a venue message (`retMsg`, or the body of a non-2xx status) goes into a `RestError` and the key-rejection line cut to 200 characters with every control character replaced by a space, so "one error line" stays one line; tests `client::answers_are_classified` and `client::auth_answers_are_never_retried` (a multi-line 10004 `retMsg`).
-Amendment (U19a3 review 1 S1, S2): V-WATCH-3 also names `client::a_redirect_is_not_followed` (301, 302, 307, 308: `get` and the echo end `no_answer`, the redirect target gets no request) and `client::a_request_waiting_at_the_guard_sees_a_later_rejection_or_pause` (a request waiting at a full guard ends `auth` or `ip_banned` when a 10010 or 403 came while it waited, and is not sent).
+Amendment (U19a3 review 1 S1, S2): V-WATCH-3 also names `client::a_redirect_is_not_followed` (301, 302, 307, 308: `get` and the echo end `no_answer`, the redirect target gets no request) and `client::a_request_waiting_at_the_guard_sees_a_later_rejection_or_pause` (a request waiting at a full guard ends `auth` or `ip_banned` when a 10010 or 403 came while it waited, and is not sent); xtask mutants M232 (redirects followed) and M233 (a waiter skips the stop and the pause after its first wait), after M231 as U19a2 review 1 did.
 
 ### Start checks (`watcher::start`), in order
 1. Config and credentials (above). Refusal → exit 2.
