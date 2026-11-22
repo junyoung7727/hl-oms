@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `b7c0a6c59f1c6f9c`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `70b60526239373c6`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
-주장 109건: 통과 0, 실패 0, 미실행 42, 이전 버전 결과 67.
+주장 110건: 통과 0, 실패 0, 미실행 43, 이전 버전 결과 67.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -116,6 +116,7 @@
 | V-GATE-3 | monitor.sock은 게이트가 있을 때만 열리고(모드 0600) 자기 풀이 연결 둘이다: 셋째 연결은 거절된다. 그 소켓은 전략 없는 hello, ping, heartbeat만 받는다: status, list_open, new_order, halt, watcher_kill, snapshot은 forbidden, 전략을 단 hello는 unauthorized. heartbeat는 거래·운영 소켓에서 forbidden이고 기록되지 않는다. hello 전의 heartbeat는 unauthorized이고 기록되지 않는다. 계약의 줄(epoch ms, null 포함)은 해석되고, 기록이 내구화된 뒤 recorded로 답한다(답이 온 때 저널에 하트비트가 있다). 노드는 ms를 µs로 바꾸고(넘침은 거절), 연결마다 지난 1초에 둘을 받았으면 그 뒤를 overloaded로 거절한다(한꺼번에 보낸 넷 가운데 둘 기록). 코어는 검사 시각이 기록 시각보다 1초 넘게 뒤인 하트비트, W1·W2가 없거나 키가 W1..W9 밖이거나 이름이 1~64자가 아닌 하트비트, 게이트가 없을 때의 하트비트를 bad_request로 거절하고 아무것도 기록하지 않는다 | 단위, 통합 | 미실행 | `cargo test -p oms-node --test monitor_node; cargo test -p oms-node --lib monitor::; cargo test -p oms-core --test monitor; cargo test -p oms-api wire_example_of_the_heartbeat` |
 | V-GATE-4 | Input::Watcher(Heartbeat), watcher_heartbeat, monitor_changed, policy.monitor, core.monitor는 기록 스키마를 올리지 않는다(2 그대로): 게이트가 없으면 쓰지 않아 옛 상태와 설정의 바이트가 그대로이고, 게이트를 켜는 설정·신선한 하트비트·오래된 하트비트·2단계의 틱이 든 저널은 라이브 상태로 복구되며 verify --re-decide를 통과한다. 이벤트 필드 표가 두 이벤트의 모든 필드를 적는다(W1..W9 포함). [core.policy.monitor]의 값은 heartbeat_max_age_us 10..=300초, check_max_age_us 2..=60초, unmonitored_cancel_us 10..=600초이고, 모르는 키는 거부되며, mainnet은 표 없이 시작하지 않고 testnet과 가상 거래소는 선택이다. 표가 있으면 runtime.tick_ms는 1,000 이하다(1,001은 거부, 표가 없으면 60,000도 받음). 세 소켓 경로는 서로 달라야 한다. 알림 hold:unmonitored는 지나가는 상태의 유예(30초)를 받고 이유·시각·2단계까지 남은 초(또는 취소 중)와 증거금 정책에 따른 감소 전용 문장을 담으며, 신선한 하트비트로 해소된다. status.core.monitor는 게이트가 없으면 gate: false다 | 단위, 통합 | 미실행 | `cargo test -p oms-node --test record_schema; cargo test -p oms-node --lib alerts:: config::; cargo test -p oms-core --test event_fields; cargo test -p oms-core --test monitor the_gate_values` |
 | V-WATCH-1 | 워처 crate는 OMS와 코드를 나누지 않는다: oms-*·md-* crate를 어떤 종류(정상, 빌드, 개발)와 target으로도 선언하지 않고, 개발 의존성 http-fake 말고는 작업 공간 crate를 쓰지 않으며, 그 정상·빌드 그래프에서 OMS·시세·작업 공간 crate에 닿지 않고, watcher-conformance 말고는 아무 작업 공간 crate도 워처에 의존하지 않으며, 소스가 #[path]·include!·속성 안의 path =·심볼릭 링크로, 매니페스트의 target이 소스 경로로 패키지 밖의 파일을 가져오지 않는다. 검사 스크립트는 그 각각을 심으면 그 결과 줄과 종료 코드 1을 내고, 확인할 수 없을 때(맞지 않는 잠금, 없는 매니페스트)는 ok가 아니라 종료 코드 2를 낸다 | 소스 검사 | 미실행 | `tools/ci/watcher_independent.sh && tools/ci/selftest.sh` |
+| V-WATCH-2 | 워처의 독자 읽기와 저널 상태가 코어와 같은 집합을 세운다: 코어가 결정하고 oms-journal이 쓴 저널을 기록마다 읽어, 열린 주문 집합, 열린 주문마다 종목·방향·수량·전략·클라이언트 ID·거래소 주문 번호·누적 체결·결과 불명·거래소 종결, 종목마다 포지션, 체결·거래소 변경·펀딩 키와 그 거래소 시각, 체결 바닥이 같은 기록을 재생한 코어와 같다. 시나리오들이 C-TAIL 표의 이벤트를 모두 쓴다. 닫힌 주문의 정보는 purged까지 남아 늦은 체결의 방향과 종목을 주고, 펀딩은 포지션을 바꾸지 않으며, 체결 바닥은 내려가지 않고, 규칙에 맞지 않는 기록(모르는 주문의 체결, 열린 주문의 purged, 형식이 틀린 필드, 순서가 어긋난 기록)은 래치되는 오류다 | 단위, 통합 | 미실행 | `cargo test -p watcher --test state && cargo test -p watcher-conformance` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -2648,4 +2649,32 @@
 |---|---|---|
 | `source/watcher_independent` | 미실행 |  |
 | `source/selftest` | 미실행 |  |
+
+## V-WATCH-2 — 워처의 독자 읽기와 저널 상태가 코어와 같은 집합을 세운다: 코어가 결정하고 oms-journal이 쓴 저널을 기록마다 읽어, 열린 주문 집합, 열린 주문마다 종목·방향·수량·전략·클라이언트 ID·거래소 주문 번호·누적 체결·결과 불명·거래소 종결, 종목마다 포지션, 체결·거래소 변경·펀딩 키와 그 거래소 시각, 체결 바닥이 같은 기록을 재생한 코어와 같다. 시나리오들이 C-TAIL 표의 이벤트를 모두 쓴다. 닫힌 주문의 정보는 purged까지 남아 늦은 체결의 방향과 종목을 주고, 펀딩은 포지션을 바꾸지 않으며, 체결 바닥은 내려가지 않고, 규칙에 맞지 않는 기록(모르는 주문의 체결, 열린 주문의 purged, 형식이 틀린 필드, 순서가 어긋난 기록)은 래치되는 오류다
+
+- 상태: **미실행**
+- 왜 중요한가: OMS의 저널 인코딩이나 집합 계산의 결함을 같은 코드가 확인하면 확인이 아니다(ADR-031). 워처의 W1·W2·W4는 이 집합과 거래소를 비교하므로, 집합이 코어와 다르면 거짓 불일치나 놓친 불일치가 된다
+- 수준: 단위, 통합
+- 전제와 범위: 메모리에서 만든 기록의 규칙 시험 10개. 핵심 시험 도구(H)로 코어를 움직이는 시나리오 열 개(이벤트 51개 모두, 4 KiB 세그먼트 회전 포함), 기록마다 비교
+- 실제 구성요소: oms-core의 결정과 재생, oms-journal::Writer가 쓴 파일, 워처의 Tail과 JournalState
+- 모의·시뮬레이션: 거래소 입력(시험 도구가 만든 Venue 입력)
+- 주입한 장애: 닫힌 뒤의 체결, 파킹과 풀림, 결과 불명과 부재, 누락 체결, 거래소 변경 네 종류와 미분류 실행, 킬 재무장, 정리와 재시작으로 올라간 체결 바닥. 변이 M185~M187, M210(모두 잡힘)
+- 판정 기준과 근거: 모든 시나리오의 모든 기록 뒤에 위의 비교가 같고, 쓴 이벤트 이름의 합집합이 tail.md 표의 이름과 같다. 규칙 시험은 그 값과 오류를 정확히 단언한다
+- 재현: `cargo test -p watcher --test state && cargo test -p watcher-conformance`
+- 뒷받침하는 것: C-WATCH 2부, C-TAIL, ADR-031
+- 확인하지 않은 범위: fact_at과 last_change_at은 코어에 같은 값이 없어 규칙 시험으로만 본다. 보류와 기준일은 코어와 비교하지 않는다(규칙 시험만). 코어가 쓰지 않는 기록(규칙 위반)은 적합성 시나리오에 없다. 재생 속도(100만 건당 약 1.3초)는 측정이고 기준이 아니며, 페이지 캐시에 있는 파일로만 쟀다
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `watcher/the_watcher_sets_equal_the_core_on_journals_with_every_event_kind` | 미실행 |  |
+| `watcher/the_sets_follow_the_field_table` | 미실행 |  |
+| `watcher/a_fill_after_close_uses_the_kept_order_info` | 미실행 |  |
+| `watcher/purged_forgets_closed_orders_and_old_keys` | 미실행 |  |
+| `watcher/purging_an_unknown_order_stops_the_state` | 미실행 |  |
+| `watcher/the_fill_floor_never_goes_down` | 미실행 |  |
+| `watcher/the_fact_time_moves_only_on_the_compared_order_events` | 미실행 |  |
+| `watcher/funding_never_changes_a_position` | 미실행 |  |
+| `watcher/venue_terminal_marks_the_order_terminal_and_moves_its_fact_time` | 미실행 |  |
+| `watcher/an_instrument_the_journal_never_changed_has_no_change_time` | 미실행 |  |
+| `watcher/records_that_break_the_rules_stop_the_state` | 미실행 |  |
 
