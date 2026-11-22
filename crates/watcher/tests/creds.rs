@@ -7,7 +7,7 @@
 
 mod common;
 
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 use std::sync::mpsc;
 use std::time::Duration;
@@ -75,6 +75,16 @@ fn the_credentials_file_must_be_owner_only_and_outside_the_data_dir() {
     );
     let e = creds::file_rules(&p, false, me, 0o100600, me).unwrap_err();
     assert!(e.contains("is not a regular file"), "{e}");
+    // A real file of another owner: `/etc/hostname` is root's on a normal
+    // host, and the owner rule runs before the mode rule.
+    let root_file = Path::new("/etc/hostname");
+    if std::fs::symlink_metadata(root_file).is_ok_and(|m| m.is_file() && m.uid() != me) {
+        refused(
+            root_file,
+            &data,
+            "must be owned by the user the watcher runs as",
+        );
+    }
 
     // Not a regular file: a symlink to the good file, a directory, a FIFO
     // (refused at once, not waited on for a writer).
