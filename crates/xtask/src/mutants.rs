@@ -1467,6 +1467,24 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "oms-node", "--lib", "venue::bybit::kill::tests::a_slow_watch_check_answered_after_the_end_is_not_the_last_check"],
         guards: "C-KILL / C5",
     },
+    Mutant {
+        id: "M160-kill-notice-backlog-unbounded",
+        what: "a newer notice no longer takes the place of a waiting change or repeat: a slow position read builds a backlog of old counts and delays the end",
+        file: "crates/oms-node/src/venue/bybit/kill.rs",
+        find: "                {\n                    notices.pop_back();\n                }",
+        replace: "                {\n                    let _ = &notices;\n                }",
+        test: &["-p", "oms-node", "--lib", "venue::bybit::kill::tests::a_slow_position_read_lets_at_most_one_notice_wait_and_the_newest_wins"],
+        guards: "C-KILL / notices",
+    },
+    Mutant {
+        id: "M161-kill-status-counts-notices-made",
+        what: "status.gateway.kill_loop.notices counts the notices made, not the ones sent",
+        file: "crates/oms-node/src/venue/bybit/kill.rs",
+        find: "            notices: sent,",
+        replace: "            notices: m.notices(),",
+        test: &["-p", "oms-node", "--lib", "venue::bybit::kill::tests::a_slow_position_read_lets_at_most_one_notice_wait_and_the_newest_wins"],
+        guards: "C-KILL / status",
+    },
 
 ];
 
