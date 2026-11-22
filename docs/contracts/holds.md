@@ -1,6 +1,6 @@
 # 보류 계약: 킬 래치, 워처 불일치, 거래소 변경
 
-상태: 채택, 구현됨(U18b1, 2026-11-21). 설계 근거: [ADR-030](../adr/ADR-030-kill-switch-holds.md). 주장: V-HOLD-1~6. 실제 거래소에서는 한 번도 실행하지 않았다(가상 거래소와 코어 시험만). Bybit의 킬 루프(스트림 끊김 감지, 일괄 취소 반복, 비상 예산, P1)는 U18b2의 C-KILL이 정한다. 그때까지 Bybit 게이트웨이도 가상 거래소처럼 `unsupported`로 답한다. 그래서 이 빌드에서는 어느 게이트웨이도 미체결 0건을 확인하지 않는다. 킬의 해제는 코어 자신의 장부에 미체결이 없을 때만 받는다(`kill_orders_open`, 리뷰 S1).
+상태: 채택, 구현됨(U18b1, 2026-11-21). 설계 근거: [ADR-030](../adr/ADR-030-kill-switch-holds.md). 주장: V-HOLD-1~6. 실제 거래소에서는 한 번도 실행하지 않았다(가상 거래소와 코어 시험만). Bybit의 킬 루프(스트림 끊김 감지, 일괄 취소 반복, 비상 예산, P1, 확인 뒤의 다시 무장)는 [C-KILL](kill.md)(U18b2)이 정한다. Bybit는 거래소에서 미체결 0건을 확인하고 `confirmed`로 답한다. 가상 거래소와 Hyperliquid는 `unsupported`로 답한다. 킬의 해제는 코어 자신의 장부에 미체결이 없을 때만 받는다(`kill_orders_open`, 리뷰 S1).
 
 ## C-HOLD 운영자가 푸는 보류
 
@@ -8,7 +8,7 @@
 
 | 사유 | 거는 것(이벤트) | 거절하는 것 | 푸는 것 | 재실행 |
 |---|---|---|---|---|
-| `kill_latched` | `hold_set{hold: kill}`: 워처의 `watcher_kill`, 시작할 때의 킬 마커(U18b2: 개인 스트림 끊김) | **모든 주문, 감소 전용 포함**(`refuses_only_plain_orders = false`). 킬 루프가 미체결 0건을 확인해야 하고, 새 주문은 어떤 것이든 그 확인을 끝내지 못하게 한다 | `clear_hold{reason: kill}`만. 이 프로세스의 킬 루프가 답한 뒤, 그리고 코어의 장부에 미체결이 없을 때만 | `core.kill`은 `hold_set`·`hold_cleared`에서, 확인(`confirmed_at`, `outcome`)은 `kill_loop_ended`에서. `booted`가 확인을 지운다 |
+| `kill_latched` | `hold_set{hold: kill}`: 워처의 `watcher_kill`, 시작할 때의 킬 마커, Bybit 개인 스트림 끊김(`StreamLost`, C-KILL) | **모든 주문, 감소 전용 포함**(`refuses_only_plain_orders = false`). 킬 루프가 미체결 0건을 확인해야 하고, 새 주문은 어떤 것이든 그 확인을 끝내지 못하게 한다 | `clear_hold{reason: kill}`만. 이 프로세스의 킬 루프가 답한 뒤, 그리고 코어의 장부에 미체결이 없을 때만 | `core.kill`은 `hold_set`·`hold_cleared`에서, 확인(`confirmed_at`, `outcome`)은 `kill_loop_ended`에서. `booted`가 확인을 지운다 |
 | `watcher_mismatch` | `hold_set{hold: watcher_mismatch}`: 워처의 `watcher_mismatch` | 일반 주문만(`true`) | `clear_hold{reason: watcher_mismatch}` | `core.watcher_mismatch` |
 | `venue_change` | 새 이벤트 없음. `apply`가 이미 있는 이벤트 `venue_position_changed`, `unclassified_execution_noted`, 종류가 `venue_position_change`인 `mismatch_raised`(넘침 경로)에서 건다 | 일반 주문만(`true`) | `clear_hold{reason: venue_change}` | `core.venue_change` |
 
@@ -64,7 +64,7 @@
 - `VenueCommand::Kill { since, source, note }`: `command_for(hold_set{kill})`, 그리고 시작 전부터 래치가 있으면(저널에서 재실행된 래치) `command_for(booted)`. 다른 명령처럼 커밋 단계 2단계에서 내구화된 뒤에 풀린다: 래치가 디스크에 있은 뒤에 첫 일괄 취소가 나간다.
 - `VenueCommand::KillStop`: `command_for(hold_cleared{kill})`. 게이트웨이가 루프를 끝낸다.
 - `VenueGateway::kill`은 곧바로 돌아온다(루프는 자기 태스크에서 돌고, 명령 허가를 쓰지 않는다). 구동기가 두 명령을 허가 없이 넘긴다.
-- 가상 거래소와 Hyperliquid(그리고 U18b2 전의 Bybit): `Kill`에 `VenueInput::KillLoopEnded { outcome: Unsupported, detail: "this gateway has no cancel-all; cancel with omsctl cancel-all" }`로 답하고 `warn`을 남긴다. 코어는 `kill_loop_ended{unsupported}`로 확인을 표시한다. 그 거래소에 걸린 주문은 운영자가 `omsctl cancel-all`로 취소한다. 장부에 미체결이 남아 있는 동안 `clear_hold kill`은 `kill_orders_open`으로 거절된다. 그래서 이 빌드의 가상 거래소, Hyperliquid, Bybit 모두에서 래치는 장부가 빈 뒤에만 풀린다.
+- 가상 거래소와 Hyperliquid: `Kill`에 `VenueInput::KillLoopEnded { outcome: Unsupported, detail: "this gateway has no cancel-all; cancel with omsctl cancel-all" }`로 답하고 `warn`을 남긴다. 코어는 `kill_loop_ended{unsupported}`로 확인을 표시한다. 그 거래소에 걸린 주문은 운영자가 `omsctl cancel-all`로 취소한다. 장부에 미체결이 남아 있는 동안 `clear_hold kill`은 `kill_orders_open`으로 거절된다. 그래서 래치는 어느 게이트웨이에서도 장부가 빈 뒤에만 풀린다. Bybit는 그 위에 거래소의 0건 확인(C-KILL)이 있어야 한다.
 - 래치가 없거나 이미 확인된 뒤의 `KillLoopEnded`는 이벤트를 만들지 않는다.
 
 ### 킬 마커
@@ -83,7 +83,7 @@
 - `status.core.kill`(`since`, `source`, `note`, `confirmed_at`, `outcome`), `status.core.watcher_mismatch`, `status.core.venue_change`(`since`, `source`, `note`). 걸려 있지 않으면 `null`. `status.node.kill_marker`: `{configured, path, present_at_boot}`(프로세스 상태). 차단 목록에 새 사유가 나온다.
 - [C-ALERT](alerts.md)의 조건 `hold:kill_latched`, `hold:watcher_mismatch`, `hold:venue_change`, 유예 0. 킬 문장은 출처·시각·메모와 확인 상태(`확인: 킬 루프가 0건을 확인함 …`, `확인: 킬 루프가 아직 0건을 확인하지 않음`, `unsupported`이면 `확인: 이 게이트웨이에는 일괄 취소가 없음(…). 걸린 주문은 운영자가 취소해야 함(omsctl cancel-all). 장부에 미체결이 남아 있으면 해제는 거절됨(kill_orders_open)`)를 담는다. 워처 불일치와 거래소 변경의 문장은 증거금 정책이 있으면 `일반 주문 거절, 감소 전용은 받음`, 없으면 `일반 주문 거절, 증거금 정책이 없어 감소 전용도 거절`이라고 쓴다(리뷰 S4).
 - 분류표에 없는 체결 하나는 P1 두 개를 낸다: `hold:venue_change`와 `mismatch:unclassified_execution`. 둘은 따로 풀린다(`clear-hold`와 `ack`, 리뷰 N6).
-- `Alerts::notice(text)`: 접두어를 붙인 한 번의 메시지. U18b2의 킬 루프 알림이 쓴다.
+- `Alerts::notice(text)`: 접두어를 붙인 한 번의 메시지. 킬 루프 알림이 쓴다(C-KILL). `[alert]`가 없으면 게이트웨이가 알림마다 `warn` 한 줄을 남긴다.
 
 ### 중복·순서·중단·재실행
 
@@ -102,10 +102,10 @@
 ### 알려진 한계
 
 - 넘침 경로의 두 번째 거래소 변경(리뷰 N2). 넘침 경로가 `mismatch_raised{venue_position_change, instrument: X}`를 내어 `venue_change`가 걸린다. 운영자가 불일치를 확인(`ack`)하기 전에 `clear_hold venue_change`를 한다. 그 사이 X에 두 번째 넘침 변경이 오면 `raise`가 확인되지 않은 같은 항목과 겹친다고 보고 아무것도 내지 않는다. 그래서 `venue_change`가 다시 걸리지 않는다. 일반 주문은 `ack`까지 `Mismatch`가 거절한다. 그러나 `ack` 뒤에는 두 번째 변경에 보류가 없다. i64 넘침이 필요하므로 거의 일어나지 않는다. 고치려면 이벤트가 하나 더 필요하다. 그래서 고치지 않고 적어 둔다.
-- 장부 밖의 주문. `kill_orders_open`은 코어의 장부만 센다. 거래소에만 있는 주문(외부 주문, 고아 주문)은 세지 않는다. 그런 주문은 대조가 `OrphanOrder` 불일치로 드러낸다. 0건의 확인은 Bybit의 킬 루프(U18b2)가 한다.
+- 장부 밖의 주문. `kill_orders_open`은 코어의 장부만 센다. 거래소에만 있는 주문(외부 주문, 고아 주문)은 세지 않는다. 그런 주문은 대조가 `OrphanOrder` 불일치로 드러낸다. 0건의 확인은 Bybit의 킬 루프(C-KILL)가 한다.
 
 ### 범위 밖
 
-워처 자체(W1~W5, 마커 쓰기, 자기 루프), Bybit 킬 루프(U18b2), 전략 연결 감시(U18b3), 모니터링 게이트(U18b4), 가상 거래소와 Hyperliquid의 킬 루프, 실행 중 마커 감시, 킬 뒤의 포지션 청산(TN §7.6: 자동 감소 전용 청산 없음).
+워처 자체(W1~W5, 마커 쓰기, 자기 루프), Bybit 킬 루프([C-KILL](kill.md)), 전략 연결 감시(U18b3), 모니터링 게이트(U18b4), 가상 거래소와 Hyperliquid의 킬 루프, 실행 중 마커 감시, 킬 뒤의 포지션 청산(TN §7.6: 자동 감소 전용 청산 없음).
 
-래치 전에 풀린 주문(리뷰 N5). 명령 채널에서 `Kill`보다 앞에 있던 `SendOrder`는 래치 뒤에도 거래소로 나간다(가상 거래소, Hyperliquid, U18b1의 Bybit). 루프가 도는 동안 생성을 막는 것은 U18b2의 Bybit 일이다. 이 빌드에서는 그 주문이 코어의 장부에 이미 있다(받은 때부터 `core.open`). 그래서 `kill_orders_open`이 그 주문이 닫힐 때까지 해제를 막는다. 운영자는 `cancel-all`로 그 주문도 취소한다.
+래치 전에 풀린 주문(리뷰 N5). 명령 채널에서 `Kill`보다 앞에 있던 `SendOrder`는 래치 뒤에도 거래소로 나간다(가상 거래소, Hyperliquid). Bybit는 `Kill`을 받은 때부터 루프가 끝날 때까지 생성을 `NotSent("kill switch active")`로 집에 둔다(C-KILL). 그 전에 이미 나간 생성은 루프의 30초 감시가 잡는다. 이 빌드에서는 그 주문이 코어의 장부에 이미 있다(받은 때부터 `core.open`). 그래서 `kill_orders_open`이 그 주문이 닫힐 때까지 해제를 막는다. 운영자는 `cancel-all`로 그 주문도 취소한다.

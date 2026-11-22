@@ -18,7 +18,7 @@
 | testnet 실주문 | 실행하지 않았다(U-01). 증거금 규칙의 testnet 예행과 가정 T1~T11의 확인도 하지 않았다. mainnet 전에 필요하고 사용자의 승인이 필요하다(§10) |
 | 버전 올리기와 되돌리기 | 스키마 검사는 시험으로 확인. 절차 전체는 연습하지 않았다 |
 | 직접 알림(7.11: 토큰 파일, 시작·정지·치명 알림, 조건별 뜻) | 자동 시험으로 확인(loopback 가짜 텔레그램, 가상 거래소에 붙인 노드 프로세스). **실제 텔레그램에는 보낸 적이 없다** |
-| 보류(7.12 킬 래치와 킬 마커, 7.13 워처 불일치, 7.14 거래소 변경) | 코어 시험과 가상 거래소에 붙인 노드 프로세스로 확인(`clear-hold`는 `omsctl`의 본문 함수로). 가상 거래소는 일괄 취소가 없어 킬 루프 대신 `unsupported`로 답한다. 이 빌드에서는 Hyperliquid와 Bybit도 같다. Bybit 킬 루프는 U18b2. **실제 거래소에서는 한 번도 해 보지 않았다** |
+| 보류(7.12 킬 래치와 킬 마커, 7.13 워처 불일치, 7.14 거래소 변경) | 코어 시험과 가상 거래소에 붙인 노드 프로세스로 확인(`clear-hold`는 `omsctl`의 본문 함수로). 가상 거래소와 Hyperliquid는 일괄 취소가 없어 킬 루프 대신 `unsupported`로 답한다. Bybit 킬 루프(U18b2, [C-KILL](../contracts/kill.md))는 loopback 가짜 Bybit와 수동 시계, 가짜 Bybit에 붙인 노드 프로세스로 확인. **실제 거래소에서는 한 번도 해 보지 않았다** |
 
 ## 1. 구성 요소
 
@@ -355,11 +355,23 @@ telegram = "/etc/oms/telegram.json"   # 절대 경로
 
 ### 7.12 킬 래치가 걸렸다 (`holds`에 `kill_latched`)
 
-[C-HOLD](../contracts/holds.md). `status`의 `core.kill`이 출처(`source`: `watcher` = 워처의 `watcher_kill`, `marker` = 시작할 때 킬 마커가 있었음, `stream` = 개인 스트림을 10초 잃음(U18b2)), 걸린 시각(`since`), 메모(`note`), 확인(`confirmed_at`, `outcome`)을 보여 준다. `node.kill_marker`가 마커 경로와 시작할 때 있었는지를 보여 준다.
+[C-HOLD](../contracts/holds.md). `status`의 `core.kill`이 출처(`source`: `watcher` = 워처의 `watcher_kill`, `marker` = 시작할 때 킬 마커가 있었음, `stream` = Bybit 개인 스트림을 `kill_after_ms`(기본 10초) 잃음, [C-KILL](../contracts/kill.md)), 걸린 시각(`since`), 메모(`note`), 확인(`confirmed_at`, `outcome`)을 보여 준다. `node.kill_marker`가 마커 경로와 시작할 때 있었는지를 보여 준다.
 이 상태에서 OMS는 **모든 주문을 거절한다(감소 전용 포함)**. 포지션은 닫지 않는다. 재시작은 이 상태를 풀지 않는다(U-06): 저널의 래치나 마커가 있으면 다시 시작한 노드도 걸린 채로 시작하고, 게이트웨이가 킬 루프를 다시 돌린다.
 
 1. 걸린 이유를 본다(`core.kill.note`, 워처 로그). 마커 출처면 마커 파일의 내용이 메모에 있다(`marker: …`). `marker unreadable: <종류>`면 노드가 마커 경로를 볼 수 없었다는 뜻이다(권한 등). 경로를 고친다.
-2. 게이트웨이의 답을 기다리고, 걸린 주문을 취소한다. 이 빌드에서는 가상 거래소, Hyperliquid, Bybit 모두 일괄 취소가 없어 곧바로 `unsupported`로 답한다(`outcome: "unsupported"`, 로그의 `kill latched, but this gateway has no cancel-all`). 거래소에서 0건을 확인한 것이 아니다. 걸린 주문은 운영자가 취소한다: `omsctl … cancel-all --note "kill"`(래치 아래에서도 받는다. 취소는 새 주문이 아니다), 그리고 OMS가 모르는 주문은 거래소 화면에서. `status`의 `core.open_orders`가 0이 될 때까지 해제는 `kill_orders_open`으로 거절된다. U18b2부터 Bybit는 킬 루프를 돌린다: `킬 루프` P1이 회차와 남은 미체결 수, 포지션을 알리고, `킬 루프 정리 완료`가 오면 확인된 것이다.
+2. 게이트웨이의 답을 기다린다.
+   - Bybit: 킬 루프가 돈다(`status.gateway.kill_loop`). 루프가 도는 동안 새 주문은 거래소로 나가지 않는다. `킬 루프` P1의 뜻은 아래 표. `킬 루프 정리 완료`가 오면(`core.kill.outcome: "confirmed"`) 거래소에서 미체결 0건을 확인하고 30초 지켜본 것이다. 그 전에는 해제가 `kill_unconfirmed`로 거절된다. 확인 뒤 스트림이 다시 끊기거나 워처가 다시 킬하면 확인이 지워지고(`kill_rearmed`) 새 루프가 돈다: 새 `정리 완료`를 기다린다.
+   - 가상 거래소, Hyperliquid: 일괄 취소가 없어 곧바로 `unsupported`로 답한다(`outcome: "unsupported"`, 로그의 `kill latched, but this gateway has no cancel-all`). 거래소에서 0건을 확인한 것이 아니다. 걸린 주문은 운영자가 취소한다: `omsctl … cancel-all --note "kill"`(래치 아래에서도 받는다. 취소는 새 주문이 아니다), 그리고 OMS가 모르는 주문은 거래소 화면에서.
+   - 어느 쪽이든 `status`의 `core.open_orders`가 0이 될 때까지 해제는 `kill_orders_open`으로 거절된다.
+
+   | P1 | 뜻 | 할 일 |
+   |---|---|---|
+   | `킬 루프 시작(<출처>: <메모>)` | 래치가 디스크에 있고 루프가 시작했다. 포지션은 닫지 않는다 | 출처를 본다(1번). 포지션 묶음으로 위험을 본다 |
+   | `킬 루프 N회차: 남은 미체결 n건` | 일괄 취소 뒤에도 주문이 남았거나 수가 바뀌었다. 1초마다 되풀이한다 | 기다린다. 수가 줄지 않으면 거래소 화면을 본다 |
+   | `… 남은 미체결 모름: <이유>` (60초마다) | 일괄 취소나 셈이 실패한다(5xx, `auth_rejected`, `ip_banned`, `unchecked` 등). 확인하지 못한다 | 이유를 본다. 키 거부·IP 차단이 계속되면 강제로 푸는 길은 없다: 키를 폐기(X8)하고 새 키로 다시 시작하면 새 루프가 돈다. 그동안 거래소 화면에서 주문을 직접 취소한다 |
+   | `킬 루프 정리 완료` | 0건 확인 뒤 30초 동안 늦은 접수가 없었다 | 3번으로 |
+
+   모든 킬 루프 P1 끝에 거래소 `/v5/position/list`의 포지션 묶음(심볼, 수량, 미실현손익, 마크, 마크에서 강제청산가까지 %, 교차 증거금이면 거래소 추정)이 붙는다. `[alert]`가 없으면 P1 대신 노드 로그에 `kill loop notice (no [alert]: not sent)` 줄이 남는다.
 3. 거래소 화면에서 열린 주문이 없는지, 포지션이 어떤지 직접 확인한다. 포지션을 줄일지는 사람이 정한다(OMS는 래치 동안 감소 전용 주문도 받지 않는다. 거래소 화면에서 닫는다).
 4. 푼다. 사유는 저널에 남는다.
    ```

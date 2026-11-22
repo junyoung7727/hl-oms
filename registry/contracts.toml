@@ -226,13 +226,24 @@ adr = ["ADR-029", "ADR-004", "ADR-016"]
 code = ["crates/oms-node/src/alerts.rs", "crates/oms-node/src/config.rs", "crates/oms-node/src/node.rs", "crates/oms-node/src/status.rs", "crates/alert-direct/src/lib.rs"]
 claims = ["V-ALERT-1", "V-ALERT-2", "V-ALERT-3", "V-ALERT-4", "V-ALERT-5"]
 
-# 구현됨(U18b1). 실제 거래소에서는 확인하지 않았다. kill_loop_ended는 C-KILL(U18b2)의 종류이고 U18b1이 unsupported 답을 위해 먼저 더했다.
+# 구현됨(U18b1). 실제 거래소에서는 확인하지 않았다. kill_loop_ended는 U18b1이 unsupported 답을 위해 먼저 더했고 U18b2에서 C-KILL로 옮겼다.
 [[contract]]
 id = "C-HOLD"
 title = "운영자가 푸는 보류"
 file = "docs/contracts/holds.md"
 summary = "킬 래치(감소 전용 포함 모든 주문 거절), 워처 불일치, 거래소 변경(일반 주문만). 워처의 watcher_mismatch·watcher_kill, clear_hold의 거절 코드(강제 없음), 프로세스마다의 킬 확인, 내구화 뒤의 Kill·KillStop 명령과 unsupported 답, 시작 전에 읽고 내구화된 해제 뒤에 지우는 킬 마커, 상태와 알림"
-events = ["hold_set", "hold_cleared", "kill_loop_ended"]
+events = ["hold_set", "hold_cleared"]
 adr = ["ADR-030", "ADR-008", "ADR-004"]
 code = ["crates/oms-core/src/model.rs", "crates/oms-core/src/core.rs", "crates/oms-core/src/decide.rs", "crates/oms-core/src/input.rs", "crates/oms-core/src/event.rs", "crates/oms-node/src/node.rs", "crates/oms-node/src/server.rs", "crates/oms-node/src/config.rs", "crates/oms-node/src/status.rs", "crates/oms-node/src/alerts.rs", "crates/oms-node/src/venue/mod.rs", "crates/oms-api/src/lib.rs", "crates/oms-api/src/ctl.rs"]
 claims = ["V-HOLD-1", "V-HOLD-2", "V-HOLD-3", "V-HOLD-4", "V-HOLD-5", "V-HOLD-6"]
+
+# 구현됨(U18b2). 실제 거래소에서는 확인하지 않았다(loopback 가짜 Bybit, 가짜 텔레그램, 수동 시계).
+[[contract]]
+id = "C-KILL"
+title = "Bybit 킬 스위치"
+file = "docs/contracts/kill.md"
+summary = "개인 스트림을 마지막 생존 증거 뒤 kill_after_ms 동안 잃으면 킬을 거는 트리거(시작 확인 전에는 무장하지 않음, 코어 큐 대기는 끊김이 아님), 래치가 내구화된 뒤 도는 확인 루프(1초마다 일괄 취소, 0건 뒤 30초 감시, 비상 예산 2/1초, 루프 중 생성 거절), P1 알림 규칙(10분에 12개 이하, 포지션 묶음), 확인 뒤 새 계기의 다시 무장(kill_rearmed), 설정과 상태"
+events = ["kill_loop_ended", "kill_rearmed"]
+adr = ["ADR-030", "ADR-028", "ADR-004"]
+code = ["crates/oms-node/src/venue/bybit/kill.rs", "crates/oms-node/src/venue/bybit/gateway.rs", "crates/oms-node/src/venue/bybit/query.rs", "crates/oms-node/src/config.rs", "crates/oms-node/src/status.rs", "crates/oms-node/src/node.rs", "crates/oms-core/src/decide.rs", "crates/oms-core/src/core.rs", "crates/oms-core/src/input.rs", "crates/oms-core/src/event.rs"]
+claims = ["V-KILL-1", "V-KILL-2", "V-KILL-3", "V-KILL-4", "V-KILL-5"]

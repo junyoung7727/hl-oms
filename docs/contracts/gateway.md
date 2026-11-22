@@ -34,7 +34,7 @@
 | G-11 | 최종 누적 수량(`cum`)은 거래소가 신뢰할 수 있게 알려 줄 때만 채운다. 아니면 비운다 | 예약을 너무 일찍 푼다 |
 | G-12 | 비밀정보(서명 키)를 입력·로그·저널에 싣지 않는다 | 키 노출 |
 | G-13 | 문서에 없는 응답에서 결론을 내지 않는다. 주문 응답이면 `Unknown`, 상태 이름이면 전달하지 않고 오류로 남긴다 | 놓인 주문을 없다고 보거나 열린 주문을 닫는다 |
-| G-14 | `Kill` 하나에 킬 루프가 끝날 때 `KillLoopEnded` 하나(`confirmed`: 0건 확인, U18b2의 Bybit). 일괄 취소가 없는 게이트웨이(가상 거래소, Hyperliquid, U18b2 전의 Bybit)는 곧바로 `KillLoopEnded { outcome: Unsupported, detail: "this gateway has no cancel-all; cancel with omsctl cancel-all" }`와 `warn`. `KillStop`은 루프를 끝낸다(루프가 없으면 무시). `kill`은 곧바로 돌아오고 명령 허가를 쓰지 않는다([C-HOLD](holds.md)) | 래치를 풀 수 없다(`kill_unconfirmed`), 또는 확인 없이 풀린다 |
+| G-14 | `Kill` 하나에 킬 루프가 끝날 때 `KillLoopEnded` 하나(`confirmed`: 0건 확인, Bybit, [C-KILL](kill.md)). 일괄 취소가 없는 게이트웨이(가상 거래소, Hyperliquid)는 곧바로 `KillLoopEnded { outcome: Unsupported, detail: "this gateway has no cancel-all; cancel with omsctl cancel-all" }`와 `warn`. `KillStop`은 루프를 끝낸다(루프가 없으면 무시). `kill`은 곧바로 돌아오고 명령 허가를 쓰지 않는다([C-HOLD](holds.md)) | 래치를 풀 수 없다(`kill_unconfirmed`), 또는 확인 없이 풀린다 |
 
 코어는 G-1, G-5, G-6의 위반을 시간 초과와 재확인으로 견딘다. G-2, G-3, G-7, G-8, G-13은 코어가 대신할 수 없다.
 
@@ -100,10 +100,12 @@ U17d까지 있는 것: 서명, REST 클라이언트, 시작 확인, IP 확인, c
 | G-13 | 주문 상태는 `New`·`PartiallyFilled`(열림), `Filled`, `Cancelled`, `Rejected`만 해석한다. 조건부·스팟 상태와 그 밖의 값은 결론을 내지 않는다. 실행 종류(`execType`)는 분류표에 없으면 `UnclassifiedExecution`(코어가 일반 주문을 막는다) |
 | 실행 분류표 | `Trade` → 체결(우리 `orderLinkId`가 아니면 외부 체결), `Funding` → 펀딩, `AdlTrade`·`BustTrade`·`Delivery`·`Settle` → 거래소 포지션 변경(adl, takeover, delivery, settle), 그 밖 → 분류 못 한 실행([ADR-023](../adr/ADR-023-venue-made-executions.md)). 스트림과 조회가 같은 함수를 쓴다 |
 | 부재(StatusNotFound) | realtime, 기간 없는 주문 내역(최근 7일), 코어가 주문을 받은 시각(`accepted_at`) − 1분부터 7일의 주문 내역 셋 다에서 우리 `orderLinkId`가 없을 때만. 시각은 첫 요청 직전. 취소·거부된 주문은 내역에 24시간만 남는다 |
-| 정리 범위(kill scope) | `category=linear`, `settleCoin=USDT`. cancel-all 요청 하나(U18b가 부른다). `result.success = "1"`일 때만 성공이고, 500건을 취소했으면 남은 주문이 있을 수 있다고 알린다 |
+| 정리 범위(kill scope) | `category=linear`, `settleCoin=USDT`. cancel-all 요청 하나(킬 루프가 회차마다 부른다, C-KILL). `result.success = "1"`일 때만 성공이고, 500건을 취소했으면 남은 주문이 있을 수 있다고 알린다 |
 | G-1, G-5 | 주문·취소 명령마다 결과 하나. 요청은 WS Trade와 REST를 합쳐 많아야 하나이고 다시 보내지 않는다(U17a, U17b). 생성은 `orderLinkId` = 우리 고객 주문번호, 취소도 `orderLinkId`로 |
 | G-6 연결 | 시작 확인이 모두 통과하고 막힘(키 거부, IP 차단 멈춤, 시작 확인, IP 확인)이 없을 때만 접속한다. `auth`가 확인되고 `subscribe`(`order.linear`, `execution.linear`)가 확인된 뒤에만 `Link` 올림. 세션 번호는 부팅 번호 + 연결 번호로 접속마다 커진다. 연결 중 막힘이 생기면 내린다. 재연결 뒤의 다시 읽기는 코어의 `Resync`가 조회로 한다 |
 | 생존 확인 | `ping_interval_ms`(기본 5초)마다 ping. ping 뒤 그 간격 안에 pong이 없거나(코어 입력 큐를 기다린 시간은 빼고) 소켓이 닫히면 끊김 |
+| 킬 트리거(U18b2) | 마지막 생존 증거(구독 확인, pong, 시작 확인의 첫 통과) 뒤 `kill_after_ms`(기본 10초) 동안 연결이 내려가 있으면 끊김 하나에 한 번 `StreamLost { since, detail }`. 시작 확인 전에는 무장하지 않는다. 코어 큐를 기다린 시간은 증거를 민다([C-KILL](kill.md)) |
+| 킬 루프(U18b2) | `Kill`에 루프 하나: 생성 거절, 회차마다 정리 범위의 cancel-all 하나(비상 예산 2/1초), realtime으로 셈, 0건 뒤 30초 감시, 끝에 `KillLoopEnded{confirmed}`. 상태 `gateway.kill_loop`, `kill_armed`, `last_proof_age_ms`([C-KILL](kill.md)) |
 | G-9(스트림) | 읽을 수 없는 메시지, `data` 목록이 없는 토픽 메시지, 읽을 수 없는 주문·실행 행, 연결 중의 인증·구독 응답은 끊고 다시 붙는 사유다. 앞서 읽은 행은 넘긴다. 설정한 종목이 아닌 행은 넘기지 않는다(조회가 정리 범위로 읽는다) |
 | 인증 거부(스트림) | `success: true`가 아닌 `auth` 응답은 키 거부: 재시작까지 다시 붙지 않고 요청도 보내지 않는다. WS Trade는 retCode 0이 아닌 `auth` 응답이 키 거부다 |
 | IP 차단 멈춤 | 어느 요청이든(비공개 스트림과 WS Trade의 업그레이드 포함) HTTP 403이면 600초 동안 REST 요청과 스트림·WS Trade 접속을 모두 멈추고 연결을 내린다 |

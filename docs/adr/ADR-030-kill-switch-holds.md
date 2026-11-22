@@ -1,6 +1,6 @@
 # ADR-030 킬 스위치, 운영자가 푸는 보류, 전략 연결 감시, 모니터링 게이트
 
-상태: 채택. 구현은 네 PR로 나눈다: U18b1(보류 셋, 킬 마커, `clear_hold`, 워처 입력, 킬 명령 — 구현됨, 2026-11-21), U18b2(Bybit 킬 루프, C-KILL), U18b3(전략 연결 감시, C-LIVE 1부), U18b4(모니터링 게이트, C-LIVE 2부). 계약: [C-HOLD](../contracts/holds.md)(U18b1). [ADR-008](ADR-008-risk-reservation.md) §7의 차단 표와 [ADR-028](ADR-028-bybit-gateway.md)(킬 트리거, `kill_scope`의 사용, U18b2)을 고친다.
+상태: 채택. 구현은 네 PR로 나눈다: U18b1(보류 셋, 킬 마커, `clear_hold`, 워처 입력, 킬 명령 — 구현됨, 2026-11-21), U18b2(Bybit 킬 루프, C-KILL — 구현됨, 2026-11-22), U18b3(전략 연결 감시, C-LIVE 1부), U18b4(모니터링 게이트, C-LIVE 2부). 계약: [C-HOLD](../contracts/holds.md)(U18b1), [C-KILL](../contracts/kill.md)(U18b2). [ADR-008](ADR-008-risk-reservation.md) §7의 차단 표와 [ADR-028](ADR-028-bybit-gateway.md)(킬 트리거, `kill_scope`의 사용, U18b2)을 고친다.
 
 ## 1. 문제와 발생 가능한 실패
 
@@ -86,7 +86,25 @@ E. U18b1이 만든 부분은 다음과 같다(C-HOLD).
 - **mainnet은 `[kill]` 없이 시작하지 않는다:** 증거금 정책, `[alert]`와 같은 규칙(소유자 질문 1의 기본값).
 - **불일치 항목은 그대로:** 거래소 변경을 풀려면 `ack_mismatch`와 `clear_hold venue_change` 둘(소유자 질문 3의 기본값). 기존 시험과 불일치 계약이 바뀌지 않는다.
 
-U18b2~U18b4가 정할 것(이 ADR의 결정, 계약은 그 PR에서): 스트림 끊김 10초 트리거(마지막 증거 기준, 시작 확인 전에는 무장하지 않음), 킬 루프 C1~C5(1초마다 일괄 취소 하나, 0건 뒤 30초 감시, 비상 예산 2/s, P1 10분에 12개 이하), 노드가 감시하고 코어가 거는 전략 연결 보류(그 전략의 일반 주문만 취소), 저널에 남는 하트비트를 코어가 판단하는 게이트(30초에 일반 주문 거절, 90초에 걸린 일반 주문 취소).
+F. U18b2가 만든 부분은 다음과 같다(C-KILL, 단계 K1~K10은 계약에).
+
+| 단계 | 입력 | 처리 | 출력 | 실패하면 |
+|---|---|---|---|---|
+| B1 트리거 | 마지막 생존 증거(구독 확인, pong, 시작 확인의 첫 통과), 250 ms 감시 | 연결이 내려가 있고 `지금 − 증거 > kill_after_ms`면 끊김 하나에 한 번. 코어 큐를 기다린 시간은 증거를 민다 | `VenueInput::StreamLost { since, detail }` | 시작 확인 전에는 무장하지 않는다 |
+| B2 래치 | `StreamLost` | 없으면 `hold_set{kill, source: stream}`, 확인 전이면 기록 없음, 확인 뒤면 `kill_rearmed` | `Kill`(내구화 뒤) | flush 실패면 명령 없이 멈춘다 |
+| B3 루프 | `Kill` | 생성 거절을 켜고 `KillLoop`(순수 기계)를 드라이버가 주입한 시계 위에서 돈다: 일괄 취소 → 셈 → 되풀이 또는 30초 감시 | P1들, `KillLoopEnded{confirmed}` | 실패한 셈은 0이 아니다. 막힘이면 보내지 않는다 |
+| B4 멈춤 | `KillStop` | 다음 대기에서 끝, 알림·입력 없음, 생성 다시 허용 | — | — |
+
+결정과 이유(U18b2):
+
+- **트리거는 마지막 증거에서 잰다:** 연결이 내려간 때에서 재면 반쯤 열린 연결(pong 없음)이 `2 × ping`만큼 늦게 걸린다. 시작 확인의 첫 통과도 증거로 쳐서 첫 연결 전에도 무장한다. 확인 전에는 계좌가 설정한 하위 계좌인지 모르므로 일괄 취소를 보내지 않는다.
+- **루프는 순수 기계와 드라이버로:** 시간은 입력이고(`RateBudget`처럼) 시험은 수동 시계로 10분을 몇 초에 돈다. 그래서 "10분에 12개", "1초 창마다 둘 이하"를 정확한 목록으로 본다.
+- **비상 예산은 주문 예산과 따로:** 일괄 취소는 거래소 한도 표의 자기 행이다. 회차마다 하나, `kill_round_ms ≥ 1,000`이 초당 하나를 지키고, 예산(2/1초)은 바깥 가드다.
+- **확인 뒤의 새 계기는 다시 무장한다(`kill_rearmed`, U18b1 리뷰 N3):** 옛 확인으로 풀 수 있으면 그 뒤의 끊김에서 남은 주문을 아무도 확인하지 않는다. 새 이벤트는 확인을 지우고 `command_for`가 새 `Kill`을 부른다. 래치의 첫 메모·출처·시각은 그대로다. 판단(소유자 기본값 "예", 스펙 밖).
+- **`kill_loop_ended`는 C-KILL로 옮겼다:** 루프의 답이므로. 필드와 뜻은 그대로다.
+- **`[alert]`가 없으면 알림마다 `warn`:** 알림을 잃지 않고 로그에 남긴다. mainnet은 `[alert]` 없이 시작하지 않는다(ADR-029).
+
+U18b3~U18b4가 정할 것(이 ADR의 결정, 계약은 그 PR에서): 노드가 감시하고 코어가 거는 전략 연결 보류(그 전략의 일반 주문만 취소), 저널에 남는 하트비트를 코어가 판단하는 게이트(30초에 일반 주문 거절, 90초에 걸린 일반 주문 취소).
 
 ## 8. 포기한 장점, 남은 위험, 가정
 
@@ -97,11 +115,14 @@ U18b2~U18b4가 정할 것(이 ADR의 결정, 계약은 그 PR에서): 스트림 
 - 위험: U18b 전의 저널에 거래소 변경 이벤트가 있으면 시작 뒤 `clear_hold venue_change`가 필요하다(실제 저널 없음). 그 저널의 `verify --re-decide`는 변경 뒤, `ack` 다음에 옛 빌드가 받은 첫 주문(증거금 정책이 있으면 첫 일반 주문)에서 "this build decides the input differently"를 보고한다. 판단이 바뀐 것이지 저널의 손상이 아니다.
 - 결정(리뷰 S3): 상태 스키마를 1에서 2로 올렸다(`pipeline.rs` `STATE_SCHEMA`). 옛 빌드의 스냅샷에는 `venue_change`가 없어서, 스냅샷에서 복구한 노드와 저널 전체를 재생한 노드가 다른 보류로 시작할 수 있었다. 이제 상태 스키마 1의 스냅샷은 사유와 함께 건너뛰고 저널을 처음부터 재생한다. 세그먼트는 지우지 않으므로 저널은 처음부터 있다(ADR-011 §7 버전 표). 대가: 첫 시작이 저널 전체를 재생하는 만큼 느리다.
 - 위험(알려진 한계, 리뷰 N2): 넘침 경로의 두 번째 거래소 변경이, 첫 변경의 불일치가 확인되기 전에 `venue_change`가 풀렸다면 다시 걸리지 않는다. 일반 주문은 `ack`까지 `Mismatch`가 막는다. i64 넘침이 필요하다. C-HOLD 알려진 한계.
-- 가정: 실제 거래소에서 이 경로를 실행한 적이 없다(가상 거래소와 코어 시험만).
+- 위험(알려진 한계, U18b2): 구독은 되지만 pong에 한 번도 답하지 않는 연결이 되풀이되면 올라갈 때마다 증거가 새로 정해져 킬이 늦거나 걸리지 않을 수 있다(다시 연결하는 대기가 10초까지 길어지면 걸린다). 스펙이 "연결 올림"을 증거로 정했다. C-KILL 알려진 한계.
+- 위험(U18b2): 루프의 셈은 거래소의 realtime 목록을 믿는다. 목록이 늦게 실리면 감시(30초)가 늦은 접수를 잡는다는 가정이 틀릴 수 있다. 실제 거래소에서 잰 적이 없다.
+- 가정: 실제 거래소에서 이 경로를 실행한 적이 없다(가상 거래소와 코어 시험, U18b2는 loopback 가짜 Bybit와 수동 시계만).
 
 ## 9. 근거
 
 - 시험(U18b1): `crates/oms-core/tests/holds.rs` 12개, `crates/oms-node/tests/holds_node.rs` 4개(실제 oms-node·simvenue 프로세스), `tests/crash_points.rs`의 마커 시험 2개(`kill_unconfirmed`로 거절된 해제, flush가 실패한 해제), `tests/pipeline.rs::a_kill_command_leaves_only_after_the_latch_is_durable`, `tests/record_schema.rs::kill_holds_liveness_and_heartbeats_recover_to_the_live_state`와 `a_snapshot_of_state_schema_1_is_skipped_and_the_journal_replays_the_venue_change`, `tests/alerts.rs::a_kill_latch_is_told_at_once_and_a_notice_goes_out_once`, `node::tests` 2개, `config::tests::the_kill_marker_is_validated_and_required_on_mainnet`, `alerts::tests`(증거금 정책에 따른 문장 포함), `oms-api`의 `wire_examples_of_the_holds`와 `ctl::tests::clear_hold_parses_its_reason_and_note`. 주장 V-HOLD-1~6.
+- 시험(U18b2): `venue::bybit::kill::tests` 16개(순수 기계 9, 수동 시계와 http-fake의 드라이버 7), `venue::bybit::gateway::tests`의 킬 시험 8개, `config::tests::the_kill_loop_fields_are_bounded`, `holds.rs`의 `a_stream_loss_latches_the_kill_and_asks_for_the_loop`와 `a_new_trigger_after_the_confirmation_resets_it_and_asks_for_a_new_loop`, 프로세스 시험 `bybit_node::a_ten_second_stream_outage_latches_kill_through_a_restart_until_clear_hold_kill`. 주장 V-KILL-1~5. 넣은 결함 M141~M152(`cargo run -p xtask -- mutants --only M14`, `--only M15`)를 하나씩 돌려 모두 잡혔다(2026-11-22).
 - 넣은 결함 중 근거로 드는 것은 저장소에서 다시 돌릴 수 있는 `xtask mutants`의 M125~M140뿐이다(하나씩: `cargo run -p xtask -- mutants --only M131-`). M125~M130은 구현 때, M131~M140은 리뷰 수정 때(2026-11-21) 하나씩 돌려 모두 잡혔다. M134~M140은 구현 때 저장소 밖 스크립트로만 돌린 결함을 옮긴 것이다(리뷰 N7). 여러 파일을 바꾸는 둘(`Kill`을 `command_for` 밖에서 만듦, `venue_change`를 결정이 걸음)은 `xtask mutants`가 한 파일만 바꾸므로 옮기지 않았고, 근거로 들지 않는다.
 - 설계: 저장소 밖 `10_DESIGN_DRAFT.md` §7.5, §7.6, R2–R5, TN §7.5–§7.6 표 7-7·7-8, `pr_plan.json` U18b. 스펙: `.scratch/kill-switch/spec.md`.
 
