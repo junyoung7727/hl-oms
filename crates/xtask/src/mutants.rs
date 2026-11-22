@@ -1751,6 +1751,15 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "journal", "a_damaged_frame_at_or_below_the_cap_stops_without_moving"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M231-watcher-booted-forgets-keys",
+        what: "a booted record that raises the watcher's fill floor also forgets the fill keys below it: the OMS forgets keys only at purged, so the watcher would drop keys the OMS still holds (review 1 S2 of U19a2)",
+        file: "crates/watcher/src/state.rs",
+        find: "            \"booted\" => self.raise_floor(u64_at(f, \"fill_floor\")?),\n",
+        replace: "            \"booted\" => {\n                self.raise_floor(u64_at(f, \"fill_floor\")?);\n                let floor = self.fill_floor;\n                self.fills.retain(|_, x| x.venue_ts >= floor);\n            }\n",
+        test: &["-p", "watcher", "--test", "state", "the_fill_floor_never_goes_down"],
+        guards: "C-WATCH / C-TAIL",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
