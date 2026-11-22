@@ -97,6 +97,13 @@ fn frames_and_headers_follow_adr_011() {
             header_bytes(br#"{"format":1,"record_schema":2,"instance_id":7}"#),
         ),
         ("short header", bytes[..20].to_vec()),
+        // Complete, with a valid checksum: only the 64 KiB bound refuses it.
+        ("header JSON above 64 KiB", {
+            let big = String::from_utf8(header_json(1, 2, 7))
+                .unwrap()
+                .replace("watcher-test", &"w".repeat(64 * 1024));
+            header_bytes(big.as_bytes())
+        }),
         (
             "header first_seq is not the file's",
             header_bytes(&header_json(2, 2, 7)),
@@ -123,6 +130,13 @@ fn frames_and_headers_follow_adr_011() {
 
     // Frame refusals, after one good record.
     let frame_cases: Vec<(&str, Vec<u8>)> = vec![
+        // A complete record with a valid checksum: only the 16 MiB bound
+        // refuses it.
+        ("complete frame above 16 MiB", {
+            let pad = "p".repeat(16 * 1024 * 1024);
+            let big = format!(r#"{{"seq":2,"at":6,"input":{{"pad":"{pad}"}},"events":[]}}"#);
+            frame_bytes(2, big.as_bytes())
+        }),
         ("length above 16 MiB", {
             let mut f = frame_bytes(2, &payload(2, 6, &[filler()]));
             f[0..4].copy_from_slice(&(16 * 1024 * 1024 + 1u32).to_le_bytes());
@@ -337,6 +351,17 @@ fn a_damaged_frame_at_or_below_the_cap_stops_without_moving() {
             }),
         ),
         (
+            "wrong frame sequence while the payload says 4",
+            Box::new(|j: &TestJournal| {
+                let p = j.last_segment();
+                let at = frame_offset(&p, 1, 4);
+                let mut b = std::fs::read(&p).unwrap();
+                b.truncate(at);
+                b.extend_from_slice(&frame_bytes(5, &payload(4, 4_000, &[filler()])));
+                std::fs::write(&p, &b).unwrap();
+            }),
+        ),
+        (
             "wrong sequence with a valid checksum",
             Box::new(|j: &TestJournal| {
                 let p = j.last_segment();
@@ -396,7 +421,8 @@ fn a_damaged_frame_at_or_below_the_cap_stops_without_moving() {
     let at = frame_offset(&p, 1, 3);
     let b = std::fs::read(&p).unwrap();
     std::fs::write(&p, &b[..at]).unwrap();
-    damaged_at(t.read(5, 100), 4);
+    let why = damaged_at(t.read(5, 100), 4);
+    assert!(why.contains("shorter than the read position"), "{why}");
 }
 
 #[test]
