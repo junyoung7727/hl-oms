@@ -359,6 +359,21 @@ if command -v cargo > /dev/null; then
   expect_finding "watcher: path = in a cfg_attr" "source: watcher/src/lib.rs:1" indep
   ws_base && ws_lock && ln -s ../../oms-core/src/lib.rs ws/watcher/src/shared.rs
   expect_finding "watcher: symlink to OMS source" "symlink: watcher/src/shared.rs" indep
+  # White space between # and [, and before the ! of a macro (review 1 S2).
+  ws_base && ws_lock && printf '# [path = "../../oms-core/src/lib.rs"]\nmod x;\n' > ws/watcher/src/lib.rs
+  expect_finding "watcher: # [path] with a space" "source: watcher/src/lib.rs:1" indep
+  ws_base && ws_lock && printf 'const _: &str = include_str !("../../oms-core/src/lib.rs");\n' > ws/watcher/src/lib.rs
+  expect_finding "watcher: include_str ! with a space" "source: watcher/src/lib.rs:1" indep
+  # Rule 7: a target of the manifest whose source file lies outside the
+  # package directory (review 1 S1).
+  ws_base && printf '\n[lib]\npath = "../oms-core/src/lib.rs"\n' >> ws/watcher/Cargo.toml && ws_lock
+  expect_finding "watcher: [lib] path to OMS source" "target: watcher lib watcher -> oms-core/src/lib.rs" indep
+  ws_base && printf '\n[[test]]\nname = "t"\npath = "../oms-core/src/lib.rs"\n' >> ws/watcher/Cargo.toml && ws_lock
+  expect_finding "watcher: [[test]] path to OMS source" "target: watcher test t -> oms-core/src/lib.rs" indep
+  ws_base && sed -i 's|^publish = false$|publish = false\nbuild = "../oms-core/src/lib.rs"|' ws/watcher/Cargo.toml && ws_lock
+  expect_finding "watcher: build script from OMS source" "target: watcher custom-build build-script-lib -> oms-core/src/lib.rs" indep
+  ws_base && printf '\n[lib]\npath = "src/other.rs"\n' >> ws/watcher/Cargo.toml && : > ws/watcher/src/other.rs && ws_lock
+  expect_exit 0 "watcher: [lib] path inside the package" "watcher_independent: ok" indep
   # The lock of the base case stays: --locked must refuse it.
   ws_base && ws_lock && dep watcher dependencies oms-core
   expect_exit 2 "watcher: a stale lock cannot be checked (not ok)" "watcher_independent: cannot check:" indep
