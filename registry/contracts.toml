@@ -247,3 +247,14 @@ events = ["kill_loop_ended", "kill_rearmed"]
 adr = ["ADR-030", "ADR-028", "ADR-004"]
 code = ["crates/oms-node/src/venue/bybit/kill.rs", "crates/oms-node/src/venue/bybit/gateway.rs", "crates/oms-node/src/venue/bybit/query.rs", "crates/oms-node/src/config.rs", "crates/oms-node/src/status.rs", "crates/oms-node/src/node.rs", "crates/oms-core/src/decide.rs", "crates/oms-core/src/core.rs", "crates/oms-core/src/input.rs", "crates/oms-core/src/event.rs"]
 claims = ["V-KILL-1", "V-KILL-2", "V-KILL-3", "V-KILL-4", "V-KILL-5"]
+
+# 1부 구현됨(U18b3). 실제 거래소에서는 확인하지 않았다(가상 거래소에 붙인 노드 프로세스, 코어 시험, 시간을 입력으로 받는 표 시험). 2부(모니터링 게이트)는 U18b4가 더한다.
+[[contract]]
+id = "C-LIVE"
+title = "전략 연결 감시와 모니터링 게이트"
+file = "docs/contracts/liveness.md"
+summary = "1부: [liveness]에 적힌 전략의 마지막 거래 연결이 닫히거나 liveness_ms 동안 요청(ping 포함)이 없으면 노드가 Input::Session(Lost)를 한 번 넣고, 코어가 strategy_link_lost와 같은 기록에서 그 전략의 걸린 일반 주문만 규칙 취소하며 그 전략의 일반 주문만 보류한다. 그 전략의 hello가 Input::Session(Hello)로 풀고, hello의 답은 복구가 내구화된 뒤. 큐가 가득이면 잃음은 틱마다 다시. mainnet은 사용 중인 전략이 모두 적혀야 시작. 상태와 알림 strategy_link:<s>"
+events = ["strategy_link_lost", "strategy_link_restored"]
+adr = ["ADR-030", "ADR-008", "ADR-015", "ADR-004"]
+code = ["crates/oms-node/src/liveness.rs", "crates/oms-node/src/server.rs", "crates/oms-node/src/node.rs", "crates/oms-node/src/config.rs", "crates/oms-node/src/status.rs", "crates/oms-node/src/alerts.rs", "crates/oms-core/src/decide.rs", "crates/oms-core/src/core.rs", "crates/oms-core/src/model.rs", "crates/oms-core/src/input.rs", "crates/oms-core/src/event.rs"]
+claims = ["V-LIVE-1", "V-LIVE-2", "V-LIVE-3", "V-LIVE-4"]

@@ -216,6 +216,13 @@ Machine: `start(now)`, `cancel_done(now, Ok(CancelAll) | Err(why))`, `count_done
 - Alert: condition `strategy_link:<s>`, grace 0, `전략 {s} 연결 상실({why}, {since}). 그 전략의 걸린 일반 주문 취소 요청, 그 전략의 신규 일반 주문 거절. 감소 전용 주문은 유지. 그 전략이 다시 hello하면 풀림`. `hold_condition` returns `None` for `StrategyLink` (covered per strategy).
 - Status: `strategies.<s>.link: {liveness_ms, connections, last_request_age_ms, held, since, why}`.
 
+### Amendments (U18b3 implementation, 2026-11-22)
+
+- Amendment (alert text): the `strategy_link:<s>` text names what a new reduce-only order of that strategy gets, by the margin policy (`감소 전용은 받음` / `증거금 정책이 없어 감소 전용도 거절`), as U18b1 review S4 did for the other plain-only holds; resting reduce-only orders are `걸린 감소 전용 주문은 유지`.
+- Amendment (configuration): a `config_activated` without the strategy drops its `strategy_link` entry in `apply` (no orders can be open for a removed strategy, and no hello can name it).
+- Amendment (full queue at hello): a waiting loss that cannot enter the queue, or a restore that cannot, refuses the hello with `overloaded` and leaves the table as it was; when the loss went in and the restore did not, the next hello restores. A connection that says hello for another strategy stops counting for the first one (its close rule applies).
+- Amendment (core reply): `Input::Session` answers `Reply::Operator`: `held` / `already held` / `bad_request: unknown strategy …` for a loss, `restored` / `not held` for a hello.
+
 ## U18b4 decisions: the monitoring gate
 
 ### Socket and heartbeat format (C-API)

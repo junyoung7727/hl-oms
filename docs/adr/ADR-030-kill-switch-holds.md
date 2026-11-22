@@ -1,6 +1,6 @@
 # ADR-030 킬 스위치, 운영자가 푸는 보류, 전략 연결 감시, 모니터링 게이트
 
-상태: 채택. 구현은 네 PR로 나눈다: U18b1(보류 셋, 킬 마커, `clear_hold`, 워처 입력, 킬 명령 — 구현됨, 2026-11-21), U18b2(Bybit 킬 루프, C-KILL — 구현됨, 2026-11-22), U18b3(전략 연결 감시, C-LIVE 1부), U18b4(모니터링 게이트, C-LIVE 2부). 계약: [C-HOLD](../contracts/holds.md)(U18b1), [C-KILL](../contracts/kill.md)(U18b2). [ADR-008](ADR-008-risk-reservation.md) §7의 차단 표와 [ADR-028](ADR-028-bybit-gateway.md)(킬 트리거, `kill_scope`의 사용, U18b2)을 고친다.
+상태: 채택. 구현은 네 PR로 나눈다: U18b1(보류 셋, 킬 마커, `clear_hold`, 워처 입력, 킬 명령 — 구현됨, 2026-11-21), U18b2(Bybit 킬 루프, C-KILL — 구현됨, 2026-11-22), U18b3(전략 연결 감시, C-LIVE 1부 — 구현됨, 2026-11-22), U18b4(모니터링 게이트, C-LIVE 2부). 계약: [C-HOLD](../contracts/holds.md)(U18b1), [C-KILL](../contracts/kill.md)(U18b2), [C-LIVE](../contracts/liveness.md)(U18b3 1부). [ADR-008](ADR-008-risk-reservation.md) §7의 차단 표와 [ADR-028](ADR-028-bybit-gateway.md)(킬 트리거, `kill_scope`의 사용, U18b2)을 고친다.
 
 ## 1. 문제와 발생 가능한 실패
 
@@ -108,7 +108,26 @@ F. U18b2가 만든 부분은 다음과 같다(C-KILL, 단계 K1~K10은 계약에
 - **막힘 동안 알림은 포지션을 읽지 않는다(리뷰 N2):** 시작 확인 전에는 키의 계좌가 설정의 하위 계정인지 모른다. 다른 계좌의 포지션을 P1에 싣지 않는다. 알림은 `포지션 조회 안 함(<막힘>)`이라고 말한다. 판단(데이터에 안전한 쪽).
 - **감시의 끝은 끝 시각에 나간 셈(리뷰 N4):** 답을 받은 시각으로 끝을 정하면 끝 전에 나가 늦게 답한 셈이 마지막이 되어, 끝 시각 뒤의 목록을 보지 않고 끝날 수 있었다.
 
-U18b3~U18b4가 정할 것(이 ADR의 결정, 계약은 그 PR에서): 노드가 감시하고 코어가 거는 전략 연결 보류(그 전략의 일반 주문만 취소), 저널에 남는 하트비트를 코어가 판단하는 게이트(30초에 일반 주문 거절, 90초에 걸린 일반 주문 취소).
+G. U18b3이 만든 부분은 다음과 같다(C-LIVE 1부, 단계 L1~L5는 계약에).
+
+| 단계 | 입력 | 처리 | 출력 | 실패하면 |
+|---|---|---|---|---|
+| G1 감시 | 거래 소켓의 `hello{s}`, 그 뒤 해석한 요청 줄마다(`ping` 포함) | 노드의 표(`liveness.rs`, `[liveness]`에 적힌 전략만): 연결 수, 마지막 요청(단조 시계) | — | 운영 소켓은 세지 않는다 |
+| G2 잃음 | 마지막 연결이 닫힘, 또는 250 ms 타이머에서 `지금 − 마지막 요청 > liveness_ms` | 다음 `hello`까지 한 번 | `Input::Session(Lost{strategy, why})`(control 레인) | 큐가 가득이면 기다렸다 틱마다 다시 |
+| G3 보류 | `Lost` | `strategy_link_lost`와 같은 기록의 그 전략 일반 주문 규칙 취소(`RuleId::StrategyLink`) | `SendCancel`(내구화 뒤), `holds(Some(s))`의 `StrategyLink` | 걸려 있으면 기록 없음 |
+| G4 복구 | 잃음 뒤 또는 코어가 보류 중일 때의 `hello{s}` | 기다리던 잃음을 먼저, 그다음 `Input::Session(Hello)`(같은 레인) | `strategy_link_restored`, 그 뒤에 `hello`의 답 | 큐가 가득이면 `overloaded` |
+
+결정과 이유(U18b3):
+
+- **노드가 감시하고 코어가 건다:** 연결은 노드만 안다. 코어는 시계를 읽지 않으므로 "연결이 닫혔다", "요청이 없었다"를 판단할 수 없다. 노드가 사실을 입력으로 기록하고 코어가 보류와 취소를 결정해, 보류가 재실행에서 다시 만들어진다(다른 보류와 같다).
+- **그 전략의 일반 주문만:** 한 전략의 죽음이 다른 전략의 호가와 포지션을 줄이는 감소 전용 주문을 건드리지 않는다(대안 "전략을 잃으면 모든 전략의 주문 취소"를 버린 이유). 보류는 `holds(Some(s))`에만 있다.
+- **`hello`가 푼다, 내구화 뒤에 답한다:** 전략이 답을 받은 순간 보류가 풀려 있어야 그 뒤의 첫 일반 주문이 거절되지 않는다. 잃음과 복구는 같은 control 레인이라 겹쳐도 잃음(과 그 취소 요청)이 먼저다.
+- **적힌 전략만(소유자 질문 4의 기본값):** 요청마다 연결하는 클라이언트(`omsctl … new`)는 닫을 때마다 주문이 취소된다. mainnet은 사용 중인 전략이 모두 적혀야 시작한다(질문 1의 기본값).
+- **시작할 때는 걸린 일반 주문이 있는 전략만 무장(판단(모델 아님)):** 시작마다 전략마다 P1이 나가지 않게 한다. 걸린 일반 주문이 있으면 지켜야 하므로 시작부터 잰다.
+- **설정에서 빠진 전략의 보류는 사라진다(판단, 스펙 밖):** 걸린 주문이 있는 전략은 뺄 수 없고, `hello`할 수 없는 전략의 알림이 영원히 남지 않게 한다. `apply`에 있어 재실행이 같다.
+- **알림 문장은 증거금 정책을 따른다(판단, 스펙 문장에 더함):** U18b1 리뷰 S4와 같이 정책이 없으면 감소 전용도 거절된다고 말한다.
+
+U18b4가 정할 것(이 ADR의 결정, 계약은 그 PR에서): 저널에 남는 하트비트를 코어가 판단하는 게이트(30초에 일반 주문 거절, 90초에 걸린 일반 주문 취소).
 
 ## 8. 포기한 장점, 남은 위험, 가정
 
@@ -122,13 +141,17 @@ U18b3~U18b4가 정할 것(이 ADR의 결정, 계약은 그 PR에서): 노드가 
 - 위험(알려진 한계, U18b2): 구독은 되지만 pong에 한 번도 답하지 않는 연결이 되풀이되면 올라갈 때마다 증거가 새로 정해져 킬이 늦거나 걸리지 않을 수 있다(다시 연결하는 대기가 10초까지 길어지면 걸린다). 스펙이 "연결 올림"을 증거로 정했다. C-KILL 알려진 한계.
 - 위험(알려진 한계, U18b2 리뷰 N3): 수 바뀜 알림에는 상한이 없다(수가 오가면 회차마다 하나). 직접 알림의 큐는 상한이 있어 메모리는 안전하고, 가득 찬 순간에는 가장 오래된 알림(마지막 알림일 수도)이 버려진다. C-KILL 알려진 한계.
 - 위험(U18b2): 루프의 셈은 거래소의 realtime 목록을 믿는다. 목록이 늦게 실리면 감시(30초)가 늦은 접수를 잡는다는 가정이 틀릴 수 있다. 실제 거래소에서 잰 적이 없다.
-- 가정: 실제 거래소에서 이 경로를 실행한 적이 없다(가상 거래소와 코어 시험, U18b2는 loopback 가짜 Bybit와 수동 시계만).
+- 위험(U18b3): 살아 있지만 `liveness_ms`보다 오래 아무 요청도 보내지 않는 전략은 잃음으로 친다. 전략은 그보다 짧은 간격으로 `ping`해야 한다(C-LIVE 알려진 한계).
+- 위험(U18b3): 재시작 뒤 걸린 일반 주문이 있는 적힌 전략이 `liveness_ms` 안에 다시 붙지 않으면 그 주문이 취소된다. 의도한 동작이다(죽은 전략의 호가를 남기지 않는다).
+- 포기(U18b3): 적히지 않은 전략의 주문은 그 전략이 죽어도 남는다(testnet·가상 거래소에서만 가능, mainnet은 시작하지 않는다).
+- 가정: 실제 거래소에서 이 경로를 실행한 적이 없다(가상 거래소와 코어 시험, U18b2는 loopback 가짜 Bybit와 수동 시계만, U18b3은 가상 거래소에 붙인 노드 프로세스와 시간을 입력으로 받는 표 시험).
 
 ## 9. 근거
 
 - 시험(U18b1): `crates/oms-core/tests/holds.rs` 12개, `crates/oms-node/tests/holds_node.rs` 4개(실제 oms-node·simvenue 프로세스), `tests/crash_points.rs`의 마커 시험 2개(`kill_unconfirmed`로 거절된 해제, flush가 실패한 해제), `tests/pipeline.rs::a_kill_command_leaves_only_after_the_latch_is_durable`, `tests/record_schema.rs::kill_holds_liveness_and_heartbeats_recover_to_the_live_state`와 `a_snapshot_of_state_schema_1_is_skipped_and_the_journal_replays_the_venue_change`, `tests/alerts.rs::a_kill_latch_is_told_at_once_and_a_notice_goes_out_once`, `node::tests` 2개, `config::tests::the_kill_marker_is_validated_and_required_on_mainnet`, `alerts::tests`(증거금 정책에 따른 문장 포함), `oms-api`의 `wire_examples_of_the_holds`와 `ctl::tests::clear_hold_parses_its_reason_and_note`. 주장 V-HOLD-1~6.
 - 시험(U18b2): `venue::bybit::kill::tests` 20개(순수 기계 10, 수동 시계와 http-fake의 드라이버 10), `venue::bybit::query::tests::the_kill_count_is_every_open_row_of_every_page_and_never_a_guess`, `venue::bybit::gateway::tests`의 킬 시험 8개, `config::tests::the_kill_loop_fields_are_bounded`, `holds.rs`의 `a_stream_loss_latches_the_kill_and_asks_for_the_loop`, `a_new_trigger_after_the_confirmation_resets_it_and_asks_for_a_new_loop`, `a_new_trigger_after_an_unsupported_answer_records_nothing`, 프로세스 시험 `bybit_node::a_ten_second_stream_outage_latches_kill_through_a_restart_until_clear_hold_kill`. 주장 V-KILL-1~5. 넣은 결함 M141~M153(`cargo run -p xtask -- mutants --only M14`, `--only M15`)을 하나씩 돌려 모두 잡혔다(2026-11-22). 리뷰 수정의 M154~M159(알림이 루프를 붙잡음, 셈의 행, 정지·막힘 가드, 감시의 마지막 셈)도 `--only M15`로 돌렸다(결과는 U18b2 보고서). 리뷰 2의 M160(알림 큐에 상한 없음), M161(상태가 만든 알림을 셈)은 `--only M16`으로 돌려 잡혔다.
 - 넣은 결함 중 근거로 드는 것은 저장소에서 다시 돌릴 수 있는 `xtask mutants`의 M125~M140뿐이다(하나씩: `cargo run -p xtask -- mutants --only M131-`). M125~M130은 구현 때, M131~M140은 리뷰 수정 때(2026-11-21) 하나씩 돌려 모두 잡혔다. M134~M140은 구현 때 저장소 밖 스크립트로만 돌린 결함을 옮긴 것이다(리뷰 N7). 여러 파일을 바꾸는 둘(`Kill`을 `command_for` 밖에서 만듦, `venue_change`를 결정이 걸음)은 `xtask mutants`가 한 파일만 바꾸므로 옮기지 않았고, 근거로 들지 않는다.
+- 시험(U18b3): `crates/oms-core/tests/strategy_link.rs` 7개와 `holds.rs::the_hold_table_of_table_7_7`의 `StrategyLink` 줄, `liveness::tests` 7개(노드의 표, 시간이 입력), 프로세스 시험 `tests/liveness.rs` 4개(실제 oms-node·simvenue, 실제 시간), `config::tests::the_liveness_section_is_validated_and_required_on_mainnet`, `alerts::tests::a_lost_strategy_link_is_its_own_condition_at_once`, `record_schema::kill_holds_liveness_and_heartbeats_recover_to_the_live_state`(잃음·복구·잃음), `event_fields`의 두 이벤트. 주장 V-LIVE-1~4. 넣은 결함 M162~M168(`cargo run -p xtask -- mutants --only M16`)을 하나씩 돌려 모두 잡혔다(2026-11-22).
 - 설계: 저장소 밖 `10_DESIGN_DRAFT.md` §7.5, §7.6, R2–R5, TN §7.5–§7.6 표 7-7·7-8, `pr_plan.json` U18b. 스펙: `.scratch/kill-switch/spec.md`.
 
 ## 10. 재검토 조건

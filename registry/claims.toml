@@ -1506,3 +1506,63 @@ tests = ["core/a_new_trigger_after_the_confirmation_resets_it_and_asks_for_a_new
 repro = "cargo test -p oms-core --test holds a_new_trigger second; cargo test -p oms-node --lib config::tests::the_kill_loop; cargo test -p oms-core --test event_fields"
 supports = "C-KILL K9와 이벤트, C-TAIL 필드 표, ADR-030 §7(U18b2)"
 not_covered = "실행 파일 단위의 설정 거부(검증 함수만). status.gateway.kill_loop의 모든 필드(프로세스 시험이 phase와 kill_armed만 본다)"
+
+[[claim]]
+id = "V-LIVE-1"
+statement = "[liveness]에 적힌 전략의 마지막 거래 연결이 닫히거나, 그 전략의 어느 연결에서도 liveness_ms 동안 요청이 없으면(ping도 요청이다), 노드는 다음 hello까지 한 번 Input::Session(Lost)를 넣고, 코어는 strategy_link_lost와 같은 기록에서 그 전략의 걸린 일반 주문 가운데 취소 요청이 없는 것마다 규칙 strategy_link의 취소를 요청한다. 그 전략의 감소 전용 주문과 다른 전략의 주문은 취소하지 않는다. 프로세스에서: a(5,000 ms)와 b가 적혔을 때 a의 연결을 닫으면 거래소에서 a의 일반 주문만 취소되고 a의 감소 전용과 b의 일반 주문은 남는다. ping만 8초 보내면 잃음이 없고, 멈추면 마지막 요청 5초 뒤에서 7초 사이에 잃음이 기록된다. 두 연결 가운데 하나가 닫혀도 잃음이 없고 마지막이 닫히면 있다. 운영 소켓의 hello는 세지 않는다. 노드의 표에서: 정확히 liveness_ms의 침묵은 잃음이 아니고 1 ms 넘으면 잃음이며, 침묵은 마지막 요청이나 마지막 hello부터 잰다"
+why = "전략 프로세스가 죽으면 그 호가가 거래소에 남고, 전에는 OMS가 아무것도 취소하지 않았다(설계 R5 SHOULD 7). 한 전략의 죽음이 다른 전략의 주문이나 포지션을 줄이는 주문을 건드리면 안 된다"
+level = "단위, 통합"
+scope = "코어 시험(H 하네스, 매 입력 재실행 대조), 노드의 표(시간이 입력, 큐는 주입한 함수), 실제 oms-node·simvenue 프로세스 셋(실제 시간)"
+real = "oms-core의 결정과 apply, oms-node의 liveness 표, 서버의 연결 처리와 250 ms 타이머, 커밋 단계, 저널, 가상 거래소 프로세스"
+simulated = "거래소(simvenue), 전략(시험의 클라이언트), 시간(표 시험에서만 인자)"
+faults = "연결 닫힘, 열린 채 침묵, ping만, 두 번째 연결, 운영 소켓의 hello, 경계의 침묵"
+criterion = "거래소에 남은 열린 주문의 집합, 저널의 cancel_requested{by: rule strategy_link} 목록, strategy_link_lost 수와 기록된 때(마지막 요청 뒤 5~7초), status.strategies.<s>.link. 넣은 결함과 잡은 시험: 모든 전략의 일반 주문 취소(M162), 감소 전용 취소(M163), ping을 세지 않음(M164), 운영 연결을 셈(M168), 저장소 밖 mut.py의 경계·시계·닫힘 결함"
+tests = ["node-unit/closing_the_last_connection_cancels_that_strategys_plain_orders_only", "node-unit/five_seconds_without_a_request_cancel_and_a_ping_keeps_it_alive", "node-unit/a_second_connection_keeps_the_strategy_alive", "core/a_lost_strategy_gets_cancel_requests_for_its_plain_orders_only", "node-unit/liveness::tests::no_request_for_liveness_ms_reports_a_loss_and_any_request_keeps_it_alive", "node-unit/liveness::tests::the_last_close_reports_one_loss_until_the_next_hello", "node-unit/liveness::tests::two_connections_count_and_only_the_last_close_reports"]
+repro = "cargo test -p oms-node --test liveness; cargo test -p oms-node --lib liveness::; cargo test -p oms-core --test strategy_link"
+supports = "C-LIVE L1~L4, ADR-030 §7(U18b3)"
+not_covered = "실제 거래소. 취소가 거래소에서 거절되거나 시도가 다한 경우(C-CANCEL의 경로). 노드가 오래 멈췄다 깨어난 경우(단조 시계)"
+
+[[claim]]
+id = "V-LIVE-2"
+statement = "StrategyLink는 그 전략의 일반 주문만 거절한다: holds(Some(s))에만 있고 holds(None)과 다른 전략의 목록에는 없다. 증거금 정책이 있으면 그 전략의 감소 전용 주문은 받고, 없으면 모든 보류처럼 감소 전용도 거절한다. 걸린 동안의 잃음은 기록하지 않고 첫 이유와 시각이 남으며, 설정에 없는 전략의 잃음은 bad_request로 기록하지 않는다. 그 전략이 없는 설정이 활성화되면 보류가 사라진다. 표 7-7의 시험에서 StrategyLink 줄은 일반 주문 거절, 감소 전용 받음이다"
+why = "죽은 전략의 새 노출을 막되 그 전략의 포지션을 줄이는 길은 열어 둔다(R5). 다른 전략은 거래를 계속한다"
+level = "단위"
+scope = "코어 시험(H 하네스)"
+real = "oms-core의 check_new_order, holds, 결정과 apply"
+simulated = "노드의 입력(시험이 Input::Session을 넣음)"
+faults = "두 번째 잃음, 모르는 전략, 증거금 정책 없음, 전략을 뺀 설정"
+criterion = "거절 사유 목록, holds의 내용, 기록 수, core.strategy_link. 넣은 결함과 잡은 시험: 두 번째 잃음 기록, 모든 전략에 보류, 설정이 보류를 남김(저장소 밖 mut.py)"
+tests = ["core/the_hold_refuses_only_that_strategys_plain_orders", "core/the_hold_table_of_table_7_7", "core/a_second_loss_records_nothing_and_keeps_the_first_why", "core/a_loss_of_an_unknown_strategy_records_nothing", "core/a_configuration_without_the_strategy_drops_its_hold"]
+repro = "cargo test -p oms-core --test strategy_link --test holds"
+supports = "C-LIVE의 코어, ADR-008 §7, TN 표 7-7"
+not_covered = "실제 거래소"
+
+[[claim]]
+id = "V-LIVE-3"
+statement = "잃음 뒤(또는 내구화된 코어가 그 전략을 보류 중일 때) 거래 소켓의 hello는 Input::Session(Hello)를 control 레인에 넣고, strategy_link_restored가 내구화된 뒤에 답한다: 답이 온 순간 같은 연결의 status(내구화된 기록만)에 보류가 없고 저널 파일에 복구가 있다. 큐를 기다리던 잃음은 복구보다 먼저 넣는다. 큐가 가득이면 잃음은 버리지 않고 틱마다 다시 넣는다. 재시작 뒤 보류는 저널에서 복원되고 다음 hello가 푼다. 시작할 때는 걸린 일반 주문이 있는 적힌 전략만 무장한다. 걸리지 않은 전략의 hello는 기록하지 않는다"
+why = "전략이 답을 받은 뒤의 첫 일반 주문이 보류로 거절되면 안 되고, 잃음과 복구가 겹쳐도 잃음의 취소가 사라지면 안 된다"
+level = "단위, 통합"
+scope = "코어 시험, 노드의 표(큐가 가득인 경우 포함), 실제 oms-node·simvenue 프로세스(재시작 한 번)"
+real = "서버의 hello 처리, 커밋 단계와 읽기 모델(내구화된 기록만), 저널, 복구"
+simulated = "거래소(simvenue), 큐가 가득(표 시험의 주입한 함수)"
+faults = "잃음 뒤 hello, 큐가 가득, 재시작"
+criterion = "hello 직후 status의 strategies.a.link.held와 holds, 저널의 strategy_link_restored 수, 표의 계획(lost_first, restore). 넣은 결함과 잡은 시험: 내구화 전 답(M165), 큐가 거절한 잃음을 보낸 것으로 읽음(M166), 기다리던 잃음을 건너뜀(M167), 노드의 잃음을 무시한 복구(저장소 밖 mut.py)"
+tests = ["node-unit/hello_after_a_loss_is_answered_after_the_restore_is_durable", "core/hello_restores_only_a_held_strategy", "core/the_hold_survives_replay_and_a_restart", "node-unit/liveness::tests::hello_after_a_loss_asks_for_the_restore_and_a_waiting_loss_goes_first", "node-unit/liveness::tests::a_full_queue_is_retried_on_the_next_tick", "node-unit/liveness::tests::at_start_only_strategies_with_plain_orders_are_armed"]
+repro = "cargo test -p oms-node --test liveness hello; cargo test -p oms-node --lib liveness::; cargo test -p oms-core --test strategy_link"
+supports = "C-LIVE L5, C-COMMIT, ADR-030 §7(U18b3)"
+not_covered = "복구 기록의 flush 실패(C-COMMIT의 일반 경로로만, 이 경로의 시험은 없다). 이 시험이 보는 것은 읽기 모델과 파일의 기록이지 fsync 자체가 아니다(pipeline의 커밋 시험이 그 순서를 본다)"
+
+[[claim]]
+id = "V-LIVE-4"
+statement = "Input::Session, strategy_link_lost, strategy_link_restored, core.strategy_link는 기록 스키마를 올리지 않는다(2 그대로): 비어 있으면 쓰지 않아 옛 상태의 바이트가 그대로이고, 잃음·복구·잃음이 든 저널은 라이브 상태로 복구되며 verify --re-decide를 통과한다. 이벤트 필드 표가 두 이벤트의 모든 필드를 적는다. 알림 strategy_link:<s>는 유예 0이고 이유·시각과 증거금 정책에 따른 감소 전용 문장을 담으며 hello로 해소된다. [liveness]의 값은 1,000..=60,000 ms, 이름은 [core]의 전략이어야 하고, mainnet은 사용 중인 전략이 모두 적혀야 시작한다. 적히지 않은 전략은 감시하지 않는다"
+why = "기존 저널과 시험이 그대로여야 하고(스펙 완료 기준), 워처(U19a)는 필드 표만으로 만든다. 전략의 죽음은 사람에게 곧바로 알려야 한다(C-ALERT)"
+level = "단위, 통합"
+scope = "저널 하나를 쓰고 복구·재결정, 필드 표 대조, 알림 조건, 설정 검증, 노드의 표"
+real = "oms-node 복구와 verify, 알림 조건 함수, 설정 읽기"
+simulated = "입력(시험이 넣음)"
+faults = "경계 밖 값, 모르는 전략, mainnet에 [liveness] 없음 또는 빠진 전략, 사용하지 않는 전략"
+criterion = "RECORD_SCHEMA = 2, 다이제스트 같음, 재결정 통과, 직렬화에 필드 없음, 필드 표의 행, 알림의 키·문장·유예, 설정 오류 문장"
+tests = ["node-unit/kill_holds_liveness_and_heartbeats_recover_to_the_live_state", "core/the_field_table_lists_every_field_the_encoder_writes", "node-unit/alerts::tests::a_lost_strategy_link_is_its_own_condition_at_once", "node-unit/config::tests::the_liveness_section_is_validated_and_required_on_mainnet", "node-unit/liveness::tests::a_strategy_that_is_not_listed_has_no_liveness"]
+repro = "cargo test -p oms-node --test record_schema; cargo test -p oms-node --lib alerts:: config:: liveness::; cargo test -p oms-core --test event_fields"
+supports = "C-LIVE의 설정·상태·알림, C-TAIL 필드 표, C-ALERT 조건 표"
+not_covered = "실제 텔레그램. 실행 파일 단위의 mainnet 시작 거부(설정 검증 함수만). status.strategies.<s>.link의 모든 필드(프로세스 시험은 held, why, since, connections, liveness_ms를 본다)"

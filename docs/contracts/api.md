@@ -14,8 +14,8 @@
 
 | op | 소켓 | 필드 | 응답의 `result` |
 |---|---|---|---|
-| `hello` | 둘 다 | `strategy`(거래 소켓에서는 필수), `client` | 인스턴스 ID, 부팅 번호, 내구 순번, 서버 시각, 버전 |
-| `ping` | 둘 다 | — | `"pong"` |
+| `hello` | 둘 다 | `strategy`(거래 소켓에서는 필수), `client` | 인스턴스 ID, 부팅 번호, 내구 순번, 서버 시각, 버전. 거래 소켓에서 그 전략의 연결을 잃은 뒤(또는 코어가 그 전략을 보류 중일 때)는 복구(`strategy_link_restored`)가 내구화된 뒤에 답한다([C-LIVE](liveness.md)). 큐가 가득이면 `overloaded`: 다시 `hello` |
+| `ping` | 둘 다 | — | `"pong"`. 거래 소켓에서 `hello` 뒤의 `ping`은 다른 요청처럼 전략의 생존 증거다(C-LIVE) |
 | `new_order` | 거래 | `client_order_id`, `instrument`, `side`, `qty`, `px`, `tif`(`gtc`/`ioc`/`alo`), `reduce_only`, `expires_at` | `accepted` / `rejected` / `duplicate` / `conflict` |
 | `cancel` | 둘 다 | `order_id` 또는 `client_order_id` | `requested` / `already_requested` / `already_closed` / `not_found` / `not_owner` |
 | `get_order` | 둘 다 | `order_id` 또는 `client_order_id` | 주문 전체. 거래 소켓에서는 자기 전략의 것만 |
@@ -111,13 +111,15 @@
 | JSON이 아니거나 필드가 틀림 | `bad_request`. 연결은 유지 |
 | 진행 중 요청이 창(32)에 도달 | 다음 줄을 읽지 않는다. 응답이 나가면 다시 읽는다 |
 | 클라이언트가 응답을 읽지 않음 | 응답 버퍼가 차면 그 연결의 응답 전달이 멈춘다. 다른 연결과 코어는 영향 없다 |
-| 연결이 끊김 | 큐에 들어간 요청은 처리된다. 응답은 버려진다. 구독 전달도 그때 끝나고 연결 자리가 반환된다 |
+| 연결이 끊김 | 큐에 들어간 요청은 처리된다. 응답은 버려진다. 구독 전달도 그때 끝나고 연결 자리가 반환된다. `[liveness]`에 적힌 전략의 마지막 거래 연결이면 그 전략의 연결을 잃는다: 걸린 일반 주문의 취소를 요청하고, 다시 `hello`할 때까지 그 전략의 일반 주문을 거절한다([C-LIVE](liveness.md)) |
+| 적힌 전략의 연결에서 `liveness_ms` 동안 요청이 없음 | 위와 같이 연결을 잃는다(`no request for {ms} ms`). 그 연결에서 다시 `hello`하면 풀린다 |
 | OMS가 치명 상태 | 연결을 닫는다 |
 
 ## 검증
 
 `api::tests::wire_examples`, `e2e::a_strategy_sees_and_cancels_only_its_own_orders`, `e2e::external_activity_is_detected_and_needs_an_operator`,
 `e2e::vertical_slice_new_partial_fill_cancel_restart`(구독 순서), `e2e::overload_is_refused_at_the_door_and_cancels_still_work`.
+전략 연결 감시: `liveness::closing_the_last_connection_cancels_that_strategys_plain_orders_only`, `liveness::five_seconds_without_a_request_cancel_and_a_ping_keeps_it_alive`, `liveness::a_second_connection_keeps_the_strategy_alive`, `liveness::hello_after_a_loss_is_answered_after_the_restore_is_durable`.
 연결과 구독의 상한: `review_node::idle_trading_connections_do_not_lock_the_operator_out`, `a_departed_subscriber_gives_its_connection_slot_back`, `one_connection_cannot_register_thousands_of_subscriptions`.
 프로세스 수준에서 실행되는 운영 명령은 `ack_mismatch`, `cancel_all`, `halt`, `status`, `clear_reduce`, `rebase_day`다. 나머지(`resume`, `resolve_order`, `adjust_position`, `snapshot`)는 코어 시험으로만 확인했다. `omsctl`은 `status`, `clear-reduce`, `rebase-day`만 시험한다(`e2e::omsctl_clear_reduce_and_rebase_day_work_end_to_end`. 실행 파일이 부르는 함수 `oms_api::ctl::run`을 부른다).
 
