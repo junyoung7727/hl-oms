@@ -103,6 +103,9 @@ F. U18b2가 만든 부분은 다음과 같다(C-KILL, 단계 K1~K10은 계약에
 - **확인 뒤의 새 계기는 다시 무장한다(`kill_rearmed`, U18b1 리뷰 N3):** 옛 확인으로 풀 수 있으면 그 뒤의 끊김에서 남은 주문을 아무도 확인하지 않는다. 새 이벤트는 확인을 지우고 `command_for`가 새 `Kill`을 부른다. 래치의 첫 메모·출처·시각은 그대로다. 판단(소유자 기본값 "예", 스펙 밖). `unsupported` 답 뒤에는 다시 무장하지 않는다: 거래소에서 확인한 것이 없고 게이트웨이가 같은 답을 하며, 해제는 `kill_orders_open`이 막는다. 그래서 U18b1의 응답(`already latched`)이 그대로이고, 답이 두 계기 사이에 오느냐에 따라 응답이 달라지지 않는다(판단).
 - **`kill_loop_ended`는 C-KILL로 옮겼다:** 루프의 답이므로. 필드와 뜻은 그대로다.
 - **`[alert]`가 없으면 알림마다 `warn`:** 알림을 잃지 않고 로그에 남긴다. mainnet은 `[alert]` 없이 시작하지 않는다(ADR-029).
+- **알림은 루프 옆에서(U18b2 리뷰 M1):** 알림마다 포지션을 읽는데, 그 조회가 루프의 차례 안에 있으면 느린 조회 경로(스트림이 끊기는 바로 그때 흔하다)가 첫 일괄 취소와 감시 중 늦은 주문의 일괄 취소를 요청 시간 한도만큼 붙잡는다. 이제 드라이버가 알림을 따로 하나씩 보내고, 끝만 남은 알림을 기다린다(마지막 알림이 끝보다 먼저). 스펙의 "곧바로 C2"(C5)를 지키는 것이고 스펙보다 한 걸음 더 간 것이다(스펙 수정 줄).
+- **막힘 동안 알림은 포지션을 읽지 않는다(리뷰 N2):** 시작 확인 전에는 키의 계좌가 설정의 하위 계정인지 모른다. 다른 계좌의 포지션을 P1에 싣지 않는다. 알림은 `포지션 조회 안 함(<막힘>)`이라고 말한다. 판단(데이터에 안전한 쪽).
+- **감시의 끝은 끝 시각에 나간 셈(리뷰 N4):** 답을 받은 시각으로 끝을 정하면 끝 전에 나가 늦게 답한 셈이 마지막이 되어, 끝 시각 뒤의 목록을 보지 않고 끝날 수 있었다.
 
 U18b3~U18b4가 정할 것(이 ADR의 결정, 계약은 그 PR에서): 노드가 감시하고 코어가 거는 전략 연결 보류(그 전략의 일반 주문만 취소), 저널에 남는 하트비트를 코어가 판단하는 게이트(30초에 일반 주문 거절, 90초에 걸린 일반 주문 취소).
 
@@ -116,13 +119,14 @@ U18b3~U18b4가 정할 것(이 ADR의 결정, 계약은 그 PR에서): 노드가 
 - 결정(리뷰 S3): 상태 스키마를 1에서 2로 올렸다(`pipeline.rs` `STATE_SCHEMA`). 옛 빌드의 스냅샷에는 `venue_change`가 없어서, 스냅샷에서 복구한 노드와 저널 전체를 재생한 노드가 다른 보류로 시작할 수 있었다. 이제 상태 스키마 1의 스냅샷은 사유와 함께 건너뛰고 저널을 처음부터 재생한다. 세그먼트는 지우지 않으므로 저널은 처음부터 있다(ADR-011 §7 버전 표). 대가: 첫 시작이 저널 전체를 재생하는 만큼 느리다.
 - 위험(알려진 한계, 리뷰 N2): 넘침 경로의 두 번째 거래소 변경이, 첫 변경의 불일치가 확인되기 전에 `venue_change`가 풀렸다면 다시 걸리지 않는다. 일반 주문은 `ack`까지 `Mismatch`가 막는다. i64 넘침이 필요하다. C-HOLD 알려진 한계.
 - 위험(알려진 한계, U18b2): 구독은 되지만 pong에 한 번도 답하지 않는 연결이 되풀이되면 올라갈 때마다 증거가 새로 정해져 킬이 늦거나 걸리지 않을 수 있다(다시 연결하는 대기가 10초까지 길어지면 걸린다). 스펙이 "연결 올림"을 증거로 정했다. C-KILL 알려진 한계.
+- 위험(알려진 한계, U18b2 리뷰 N3): 수 바뀜 알림에는 상한이 없다(수가 오가면 회차마다 하나). 직접 알림의 큐는 상한이 있어 메모리는 안전하고, 가득 찬 순간에는 가장 오래된 알림(마지막 알림일 수도)이 버려진다. C-KILL 알려진 한계.
 - 위험(U18b2): 루프의 셈은 거래소의 realtime 목록을 믿는다. 목록이 늦게 실리면 감시(30초)가 늦은 접수를 잡는다는 가정이 틀릴 수 있다. 실제 거래소에서 잰 적이 없다.
 - 가정: 실제 거래소에서 이 경로를 실행한 적이 없다(가상 거래소와 코어 시험, U18b2는 loopback 가짜 Bybit와 수동 시계만).
 
 ## 9. 근거
 
 - 시험(U18b1): `crates/oms-core/tests/holds.rs` 12개, `crates/oms-node/tests/holds_node.rs` 4개(실제 oms-node·simvenue 프로세스), `tests/crash_points.rs`의 마커 시험 2개(`kill_unconfirmed`로 거절된 해제, flush가 실패한 해제), `tests/pipeline.rs::a_kill_command_leaves_only_after_the_latch_is_durable`, `tests/record_schema.rs::kill_holds_liveness_and_heartbeats_recover_to_the_live_state`와 `a_snapshot_of_state_schema_1_is_skipped_and_the_journal_replays_the_venue_change`, `tests/alerts.rs::a_kill_latch_is_told_at_once_and_a_notice_goes_out_once`, `node::tests` 2개, `config::tests::the_kill_marker_is_validated_and_required_on_mainnet`, `alerts::tests`(증거금 정책에 따른 문장 포함), `oms-api`의 `wire_examples_of_the_holds`와 `ctl::tests::clear_hold_parses_its_reason_and_note`. 주장 V-HOLD-1~6.
-- 시험(U18b2): `venue::bybit::kill::tests` 16개(순수 기계 9, 수동 시계와 http-fake의 드라이버 7), `venue::bybit::gateway::tests`의 킬 시험 8개, `config::tests::the_kill_loop_fields_are_bounded`, `holds.rs`의 `a_stream_loss_latches_the_kill_and_asks_for_the_loop`, `a_new_trigger_after_the_confirmation_resets_it_and_asks_for_a_new_loop`, `a_new_trigger_after_an_unsupported_answer_records_nothing`, 프로세스 시험 `bybit_node::a_ten_second_stream_outage_latches_kill_through_a_restart_until_clear_hold_kill`. 주장 V-KILL-1~5. 넣은 결함 M141~M153(`cargo run -p xtask -- mutants --only M14`, `--only M15`)을 하나씩 돌려 모두 잡혔다(2026-11-22).
+- 시험(U18b2): `venue::bybit::kill::tests` 19개(순수 기계 10, 수동 시계와 http-fake의 드라이버 9), `venue::bybit::query::tests::the_kill_count_is_every_open_row_of_every_page_and_never_a_guess`, `venue::bybit::gateway::tests`의 킬 시험 8개, `config::tests::the_kill_loop_fields_are_bounded`, `holds.rs`의 `a_stream_loss_latches_the_kill_and_asks_for_the_loop`, `a_new_trigger_after_the_confirmation_resets_it_and_asks_for_a_new_loop`, `a_new_trigger_after_an_unsupported_answer_records_nothing`, 프로세스 시험 `bybit_node::a_ten_second_stream_outage_latches_kill_through_a_restart_until_clear_hold_kill`. 주장 V-KILL-1~5. 넣은 결함 M141~M153(`cargo run -p xtask -- mutants --only M14`, `--only M15`)을 하나씩 돌려 모두 잡혔다(2026-11-22). 리뷰 수정의 M154~M159(알림이 루프를 붙잡음, 셈의 행, 정지·막힘 가드, 감시의 마지막 셈)도 `--only M15`로 돌렸다(결과는 U18b2 보고서).
 - 넣은 결함 중 근거로 드는 것은 저장소에서 다시 돌릴 수 있는 `xtask mutants`의 M125~M140뿐이다(하나씩: `cargo run -p xtask -- mutants --only M131-`). M125~M130은 구현 때, M131~M140은 리뷰 수정 때(2026-11-21) 하나씩 돌려 모두 잡혔다. M134~M140은 구현 때 저장소 밖 스크립트로만 돌린 결함을 옮긴 것이다(리뷰 N7). 여러 파일을 바꾸는 둘(`Kill`을 `command_for` 밖에서 만듦, `venue_change`를 결정이 걸음)은 `xtask mutants`가 한 파일만 바꾸므로 옮기지 않았고, 근거로 들지 않는다.
 - 설계: 저장소 밖 `10_DESIGN_DRAFT.md` §7.5, §7.6, R2–R5, TN §7.5–§7.6 표 7-7·7-8, `pr_plan.json` U18b. 스펙: `.scratch/kill-switch/spec.md`.
 
