@@ -22,7 +22,8 @@ enum KillTrigger {
     /// Latched, and the loop of this process has not confirmed yet: the
     /// running loop covers the new trigger.
     AlreadyLatched,
-    /// Latched and confirmed: the confirmation is void and a new loop runs.
+    /// Latched and confirmed at the venue: the confirmation is void and a
+    /// new loop runs.
     Rearmed,
 }
 
@@ -690,7 +691,9 @@ impl Tx<'_> {
     /// trigger while the loop has not confirmed emits nothing and the first
     /// note stays. A trigger after the confirmation of this process voids
     /// it (`kill_rearmed`, C-KILL): a new loop must confirm zero again,
-    /// since orders may have reached the venue after the last check.
+    /// since orders may have reached the venue after the last check. An
+    /// `unsupported` answer confirmed nothing at the venue and stays: the
+    /// gateway would answer the same, and `kill_orders_open` holds the clear.
     fn latch_kill(&mut self, source: HoldSource, note: String) -> Result<KillTrigger, CoreFault> {
         let Some(k) = &self.core.kill else {
             self.emit(Event::HoldSet {
@@ -700,7 +703,7 @@ impl Tx<'_> {
             })?;
             return Ok(KillTrigger::Latched);
         };
-        if k.confirmed_at.is_none() {
+        if k.confirmed_at.is_none() || k.outcome != Some(KillOutcome::Confirmed) {
             return Ok(KillTrigger::AlreadyLatched);
         }
         self.emit(Event::KillRearmed { source, note })?;

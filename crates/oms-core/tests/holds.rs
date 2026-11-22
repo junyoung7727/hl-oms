@@ -863,3 +863,25 @@ fn a_new_trigger_after_the_confirmation_resets_it_and_asks_for_a_new_loop() {
     }
     assert_eq!(derived, h.commands);
 }
+
+/// C-KILL. An `unsupported` answer confirms nothing at the venue: a new
+/// trigger after it keeps the answer, records nothing and asks for no new
+/// loop (the gateway would answer the same). The book check
+/// (`kill_orders_open`) still holds the clear while orders are open.
+#[test]
+fn a_new_trigger_after_an_unsupported_answer_records_nothing() {
+    let mut h = H::ready();
+    watcher_kill(&mut h, "first").1.unwrap();
+    kill_loop_ended(&mut h, KillOutcome::Unsupported);
+    let before = h.core.kill.clone().unwrap();
+    h.advance(SEC);
+    let (out, reply) = watcher_kill(&mut h, "second");
+    assert_eq!(reply, Ok("already latched".to_string()));
+    assert!(out.events.is_empty() && out.commands.is_empty(), "{out:?}");
+    h.advance(10 * SEC);
+    let since = h.now - 10 * SEC;
+    let out = stream_lost(&mut h, since, "closed by the venue");
+    assert!(out.events.is_empty() && out.commands.is_empty(), "{out:?}");
+    assert_eq!(h.core.kill.as_ref(), Some(&before));
+    assert_eq!(h.rebuilt(), h.core);
+}

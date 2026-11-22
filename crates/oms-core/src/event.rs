@@ -293,7 +293,8 @@ pub enum Event {
         detail: String,
     },
     /// A new kill trigger after the kill loop of this process confirmed
-    /// (C-KILL): the confirmation is void, the latch keeps its first note.
+    /// zero at the venue (outcome `confirmed`, C-KILL): the confirmation is
+    /// void, the latch keeps its first note. Not after `unsupported`.
     /// In live processing it is followed by one `Kill` command.
     KillRearmed { source: HoldSource, note: String },
 }
