@@ -1,0 +1,17 @@
+[package]
+name = "watcher-conformance"
+description = "The only package that links the watcher with OMS code: tests that the watcher's own reader, sets and identifiers equal the OMS's."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dev-dependencies]
+watcher = { path = "../watcher" }
+oms-core = { workspace = true }
+oms-journal = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

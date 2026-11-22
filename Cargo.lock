@@ -2478,6 +2478,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "watcher"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "serde_json",
+]
+
+[[package]]
+name = "watcher-conformance"
+version = "0.1.0"
+dependencies = [
+ "oms-core",
+ "oms-journal",
+ "serde_json",
+ "watcher",
+]
+
+[[package]]
 name = "web-sys"
 version = "0.3.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
