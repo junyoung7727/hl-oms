@@ -12,7 +12,7 @@
 | `watcher_mismatch` | `hold_set{hold: watcher_mismatch}`: 워처의 `watcher_mismatch` | 일반 주문만(`true`) | `clear_hold{reason: watcher_mismatch}` | `core.watcher_mismatch` |
 | `venue_change` | 새 이벤트 없음. `apply`가 이미 있는 이벤트 `venue_position_changed`, `unclassified_execution_noted`, 종류가 `venue_position_change`인 `mismatch_raised`(넘침 경로)에서 건다 | 일반 주문만(`true`) | `clear_hold{reason: venue_change}` | `core.venue_change` |
 
-표 7-7의 넷째 줄 `strategy_link`(그 전략의 일반 주문만, 그 전략의 `hello`가 푼다, `clear_hold`로는 풀지 않는다)는 [C-LIVE](liveness.md)에 있다(U18b3).
+표 7-7의 넷째 줄 `strategy_link`(그 전략의 일반 주문만, 그 전략의 `hello`가 푼다, `clear_hold`로는 풀지 않는다)는 [C-LIVE](liveness.md)에 있다(U18b3). 다섯째 줄 `unmonitored`(일반 주문만, `monitor_changed{false}`와 게이트가 있는 `booted`·`config_activated`가 걸고, 신선한 하트비트의 `monitor_changed{true}`가 푼다, `clear_hold`로는 풀지 않는다)는 [C-LIVE](liveness.md) 2부에 있다(U18b4).
 
 - 보류는 다른 차단처럼 상태에서 매번 계산한다(`Core::holds`). 새 셋은 기존 사유 뒤에 이 순서로 붙는다. 그래서 기존 사유의 순서를 그대로 비교하는 시험이 바뀌지 않는다.
 - 일반 주문만 거절하는 보류도 증거금 정책이 없으면 모든 주문을 거절한다(ADR-008 §7, ADR-018과 같다. `check_new_order`).
@@ -108,6 +108,6 @@
 
 ### 범위 밖
 
-워처 자체(W1~W5, 마커 쓰기, 자기 루프), Bybit 킬 루프([C-KILL](kill.md)), 전략 연결 감시([C-LIVE](liveness.md) 1부, U18b3), 모니터링 게이트(U18b4), 가상 거래소와 Hyperliquid의 킬 루프, 실행 중 마커 감시, 킬 뒤의 포지션 청산(TN §7.6: 자동 감소 전용 청산 없음).
+워처 자체(W1~W5, 마커 쓰기, 자기 루프), Bybit 킬 루프([C-KILL](kill.md)), 전략 연결 감시([C-LIVE](liveness.md) 1부, U18b3), 모니터링 게이트([C-LIVE](liveness.md) 2부, U18b4), 가상 거래소와 Hyperliquid의 킬 루프, 실행 중 마커 감시, 킬 뒤의 포지션 청산(TN §7.6: 자동 감소 전용 청산 없음).
 
 래치 전에 풀린 주문(리뷰 N5). 명령 채널에서 `Kill`보다 앞에 있던 `SendOrder`는 래치 뒤에도 거래소로 나간다(가상 거래소, Hyperliquid). Bybit는 `Kill`을 받은 때부터 루프가 끝날 때까지 생성을 `NotSent("kill switch active")`로 집에 둔다(C-KILL). 그 전에 이미 나간 생성은 루프의 30초 감시가 잡는다. 이 빌드에서는 그 주문이 코어의 장부에 이미 있다(받은 때부터 `core.open`). 그래서 `kill_orders_open`이 그 주문이 닫힐 때까지 해제를 막는다. 운영자는 `cancel-all`로 그 주문도 취소한다.

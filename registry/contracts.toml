@@ -248,13 +248,13 @@ adr = ["ADR-030", "ADR-028", "ADR-004"]
 code = ["crates/oms-node/src/venue/bybit/kill.rs", "crates/oms-node/src/venue/bybit/gateway.rs", "crates/oms-node/src/venue/bybit/query.rs", "crates/oms-node/src/config.rs", "crates/oms-node/src/status.rs", "crates/oms-node/src/node.rs", "crates/oms-core/src/decide.rs", "crates/oms-core/src/core.rs", "crates/oms-core/src/input.rs", "crates/oms-core/src/event.rs"]
 claims = ["V-KILL-1", "V-KILL-2", "V-KILL-3", "V-KILL-4", "V-KILL-5"]
 
-# 1부 구현됨(U18b3). 실제 거래소에서는 확인하지 않았다(가상 거래소에 붙인 노드 프로세스, 코어 시험, 시간을 입력으로 받는 표 시험). 2부(모니터링 게이트)는 U18b4가 더한다.
+# 1부 구현됨(U18b3), 2부 구현됨(U18b4). 실제 거래소에서는 확인하지 않았다(가상 거래소에 붙인 노드 프로세스, 코어 시험, 시간을 입력으로 받는 표 시험). 워처(U19a)는 아직 없다.
 [[contract]]
 id = "C-LIVE"
 title = "전략 연결 감시와 모니터링 게이트"
 file = "docs/contracts/liveness.md"
-summary = "1부: [liveness]에 적힌 전략의 마지막 거래 연결이 닫히거나 liveness_ms 동안 요청(ping 포함)이 없으면 노드가 Input::Session(Lost)를 한 번 넣고, 코어가 strategy_link_lost와 같은 기록에서 그 전략의 걸린 일반 주문만 규칙 취소하며 그 전략의 일반 주문만 보류한다. 그 전략의 hello가 Input::Session(Hello)로 풀고, hello의 답은 복구가 내구화된 뒤. 큐가 가득이면 잃음은 틱마다 다시. mainnet은 사용 중인 전략이 모두 적혀야 시작. 상태와 알림 strategy_link:<s>"
-events = ["strategy_link_lost", "strategy_link_restored"]
+summary = "1부: [liveness]에 적힌 전략의 마지막 거래 연결이 닫히거나 liveness_ms 동안 요청(ping 포함)이 없으면 노드가 Input::Session(Lost)를 한 번 넣고, 코어가 strategy_link_lost와 같은 기록에서 그 전략의 걸린 일반 주문만 규칙 취소하며 그 전략의 일반 주문만 보류한다. 그 전략의 hello가 Input::Session(Hello)로 풀고, hello의 답은 복구가 내구화된 뒤. 큐가 가득이면 잃음은 틱마다 다시. mainnet은 사용 중인 전략이 모두 적혀야 시작. 상태와 알림 strategy_link:<s>. 2부: [core.policy.monitor]가 있으면 monitor.sock(자기 uid, 연결 둘, 연결마다 초당 둘)의 heartbeat를 watcher_heartbeat로 기록하고 코어가 기록 시각으로 판단한다. 하트비트가 30초 없거나 그 하트비트에서 W1·W2가 없거나 10초 넘게 이전이면 monitor_changed{false}와 보류 Unmonitored(일반 주문만), 60초 더 가면 틱마다 걸린 일반 주문의 규칙 취소(연결이 올라와 있을 때). 모든 시작과 게이트를 켜는 설정은 감시 안 됨으로 시작. 신선한 하트비트가 monitor_changed{true}로 푼다. 미래의 검사 시각은 거절. mainnet은 게이트 없이 시작하지 않음. 알림 hold:unmonitored(유예 30초)"
+events = ["strategy_link_lost", "strategy_link_restored", "watcher_heartbeat", "monitor_changed"]
 adr = ["ADR-030", "ADR-008", "ADR-015", "ADR-004"]
-code = ["crates/oms-node/src/liveness.rs", "crates/oms-node/src/server.rs", "crates/oms-node/src/node.rs", "crates/oms-node/src/config.rs", "crates/oms-node/src/status.rs", "crates/oms-node/src/alerts.rs", "crates/oms-core/src/decide.rs", "crates/oms-core/src/core.rs", "crates/oms-core/src/model.rs", "crates/oms-core/src/input.rs", "crates/oms-core/src/event.rs"]
-claims = ["V-LIVE-1", "V-LIVE-2", "V-LIVE-3", "V-LIVE-4"]
+code = ["crates/oms-node/src/liveness.rs", "crates/oms-node/src/monitor.rs", "crates/oms-api/src/lib.rs", "crates/oms-core/src/config.rs", "crates/oms-node/src/server.rs", "crates/oms-node/src/node.rs", "crates/oms-node/src/config.rs", "crates/oms-node/src/status.rs", "crates/oms-node/src/alerts.rs", "crates/oms-core/src/decide.rs", "crates/oms-core/src/core.rs", "crates/oms-core/src/model.rs", "crates/oms-core/src/input.rs", "crates/oms-core/src/event.rs"]
+claims = ["V-LIVE-1", "V-LIVE-2", "V-LIVE-3", "V-LIVE-4", "V-GATE-1", "V-GATE-2", "V-GATE-3", "V-GATE-4"]

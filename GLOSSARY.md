@@ -202,6 +202,18 @@ _Avoid_: heartbeat, session timeout
 The hold `StrategyLink` of one strategy, set by `strategy_link_lost`: that strategy's resting plain orders get a rule cancel and its new plain orders are refused; its reduce-only orders and other strategies' orders stay. Released by the strategy's own `hello` (`strategy_link_restored`), not by `clear-hold` (C-LIVE).
 _Avoid_: strategy kill, disconnect halt
 
+**Monitoring gate** (모니터링 게이트):
+The core's rule, with `[core.policy.monitor]`, that trading needs a live watcher: the watcher's heartbeats on `monitor.sock` are journaled (`watcher_heartbeat`) and judged at record time; without a fresh one the account is unmonitored (C-LIVE part 2).
+_Avoid_: watchdog, dead-man switch
+
+**Unmonitored** (감시 안 됨):
+The gate's verdict when no heartbeat came in this process, the last one is older than `heartbeat_max_age_us`, or in it W1 or W2 had no success within `check_max_age_us`. Stage 1: the hold `Unmonitored` refuses plain orders. Stage 2, after `unmonitored_cancel_us` more: resting plain orders get a rule cancel. Released by the first fresh heartbeat, not by `clear-hold`.
+_Avoid_: watcher down, offline
+
+**Watcher heartbeat** (워처 하트비트):
+The watcher's line `heartbeat{watcher, checks}` on the monitor socket: per check `W1`..`W9` the time of its last success (ms on the wire, µs in the journal) or `null`. Answered `recorded` after it is durable.
+_Avoid_: ping (a `ping` is not a heartbeat)
+
 **Venue setting** (거래소 설정):
 The margin mode (isolated or cross) and venue leverage of one instrument, as the venue reports them.
 _Avoid_: leverage config

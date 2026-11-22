@@ -260,6 +260,14 @@ Machine: `start(now)`, `cancel_done(now, Ok(CancelAll) | Err(why))`, `count_done
 - Status: `core.monitor: {gate, monitored, since, reason, watcher, last_heartbeat_age_ms, checks: {W1: age_ms, …}, cancel_stage}`.
 - Mainnet without `[core.policy.monitor]` is refused (owner question 1).
 
+### Amendments (U18b4 implementation, 2026-11-22)
+
+- Amendment (check age): "W1 or W2 … older than `check_max_age` at `at`" is judged at the record time of the heartbeat that reported the check (`last.at − t > check_max_age`); the time after that heartbeat is covered by the heartbeat's own age. Judged at a tick's `at`, the 10 s check rule would always fire before the 30 s heartbeat rule when heartbeats stop, and the done criterion "monitored at 29.75 s, unmonitored at 30.25 s" could not hold.
+- Amendment (stage 2 timing): with 250 ms ticks and the strict `>`, missing heartbeats give the first cancel request at 90.5 s after the last heartbeat (`since` = 30.25 s), not 90.25 s; the test asserts no cancel at 90.25 s and the cancel at 90.5 s. With W2 frozen and heartbeats every 5 s, the heartbeat at 10 s (exactly 10 s old) keeps the gate and the one at 15 s closes it.
+- Amendment (first start): a new data directory has no configuration in its journal, so the `Config` input turns the gate on (`config_activated`): its reason is `no heartbeat since the gate came on`; a restart with the same configuration gives `no heartbeat since the start`.
+- Amendment (socket paths): `socket`, `admin_socket` and `monitor_socket` must be three different paths (binding one removes a stale file at its path).
+- Amendment (core refusals): a heartbeat without a configured gate, or with a shape the node already refuses (label 1–64 characters without control characters, keys `W1`..`W9`, `W1` and `W2` present), is refused by the core too (`bad_request`, nothing recorded).
+
 ## Testing Decisions
 
 Loopback fakes only (`http-fake`, the fake WS servers of `gateway.rs` tests and `tests/bybit_node.rs`, simvenue, fake Telegram); manual clocks (core record time; `KillClock`); test directories under `OMS_TEST_DIR` / `CARGO_TARGET_TMPDIR`. No live or testnet request.
