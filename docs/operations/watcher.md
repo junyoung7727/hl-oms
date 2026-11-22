@@ -39,7 +39,7 @@ vm_url = "http://127.0.0.1:8428"                  # http, loopback 주소 숫자
 | `credentials_file` | 필수 | 절대 경로, `..` 없음, `data_dir` 밖 |
 | `sub_account_uid` | 필수 | 1 이상 |
 | `symbols` | 필수 | 1~50개, 각각 `A-Z`·`0-9` 1~32자, 중복 없음 |
-| `ip_echo_url` | 필수 | `https://…` |
+| `ip_echo_url` | 필수 | `https://…`, 사용자·비밀번호 없음, 공백·제어 문자 없음 |
 | `data_dir` | 필수 | 절대 경로 |
 | `status_url` | 필수 | `http://127.0.0.1:<port>/api/status`, `http://[::1]:<port>/api/status`(포트 1~65535, 80 제외) |
 | `admin_socket`, `monitor_socket` | `<data_dir>/admin.sock`, `<data_dir>/monitor.sock` | 절대 경로, 서로 다름 |
@@ -59,7 +59,7 @@ vm_url = "http://127.0.0.1:8428"                  # http, loopback 주소 숫자
 | `[w3] daily_loss_bps` | 500 | 1~10,000 |
 | `[http] recv_window_ms` | 5000 | 1000~20,000 |
 | `[http] request_timeout_ms` | 2000(판단(모델 아님)) | 200~10,000 |
-| `[telemetry] vm_url` | 없음 | `http://`, loopback 주소 숫자(`localhost`는 안 됨) |
+| `[telemetry] vm_url` | 없음 | `http://`, loopback 주소 숫자(`localhost`는 안 됨), 공백·제어 문자 없음(끝의 공백도) |
 
 기본값의 근거(설계 §7.5, 스코프, OMS의 값)와 거부의 이유는 [C-WATCH 4부](../contracts/watcher.md)에 있다.
 
