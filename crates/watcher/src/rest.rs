@@ -204,6 +204,9 @@ pub struct ClientConfig {
 /// the address Bybit sees.
 pub const LOCAL_ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 
+/// The `endpoint` label of the IP echo (its URL is config, not a label).
+pub const ECHO: &str = "ip_echo";
+
 /// How long the client sleeps at most before it reads the clock again
 /// while it waits at the guard (판단(모델 아님)).
 const GUARD_POLL_MS: u64 = 100;
@@ -224,6 +227,10 @@ pub struct Client {
 #[derive(Default)]
 struct Stop {
     guard: Guard,
+    /// The code that stopped every Bybit request until restart.
+    auth: Option<i64>,
+    /// The end of the last 403 pause (the clock at the answer + 600 s).
+    paused_until: Option<u64>,
 }
 
 fn error_chain(e: &dyn std::error::Error) -> String {
@@ -275,6 +282,64 @@ impl Client {
         e
     }
 
+    /// The code of the answer that stopped every Bybit request, if any.
+    pub fn auth_rejected(&self) -> Option<i64> {
+        self.stop.lock().ok()?.auth
+    }
+
+    /// The end (ms) of the last 403 pause, if there was one. The start
+    /// checks wait for it before their retry (U19a4b).
+    pub fn paused_until(&self) -> Option<u64> {
+        self.stop.lock().ok()?.paused_until
+    }
+
+    /// An unsigned GET of the IP echo (U19a4b); returns the body, trimmed.
+    /// It waits at the guard and the 403 pause like every Bybit request,
+    /// but a rejected key does not stop it: the echo is not a Bybit
+    /// request, and a changed public IP is a usual cause of 10010. Any
+    /// HTTP status but 2xx is `no_answer` (the echo's 403 is no venue ban).
+    pub async fn echo(&self, url: &str) -> Result<String, RestError> {
+        self.turn(false).await?;
+        self.metrics
+            .add("watcher_requests_total", &[("endpoint", ECHO)], 1.0);
+        let res = match self.send(self.http.get(url)).await {
+            Ok((200..=299, body)) => Ok(body.trim().to_string()),
+            Ok((status, _)) => Err(RestError::NoAnswer(format!("IP echo HTTP {status}"))),
+            Err(e) => Err(e),
+        };
+        if let Err(e) = &res {
+            self.count_error(ECHO, e);
+        }
+        res
+    }
+
+    /// After an answer of Bybit: a rejected key stops every later Bybit
+    /// request (one error line); a 403 pauses every request for
+    /// [`IP_BAN_PAUSE_MS`] from the clock at the answer.
+    fn after(&self, path: &str, e: &RestError) {
+        let Ok(mut s) = self.stop.lock() else {
+            return;
+        };
+        match e {
+            RestError::Auth { code, msg } if s.auth.is_none() => {
+                s.auth = Some(*code);
+                self.metrics.set("watcher_auth_rejected", &[], 1.0);
+                (self.log)(&format!(
+                    "error: Bybit rejected the key ({code}) at {path}: {msg}; every Bybit request stops until the watcher restarts"
+                ));
+            }
+            RestError::IpBanned(_) => {
+                let until = self.clock.now_ms() + IP_BAN_PAUSE_MS;
+                s.paused_until = Some(until);
+                (self.log)(&format!(
+                    "error: Bybit answered HTTP 403 at {path}: every request (and the IP echo) pauses for {} s, until {until} ms",
+                    IP_BAN_PAUSE_MS / 1000
+                ));
+            }
+            _ => {}
+        }
+    }
+
     fn count_error(&self, endpoint: &str, e: &RestError) {
         self.metrics.add(
             "watcher_request_errors_total",
@@ -283,8 +348,11 @@ impl Client {
         );
     }
 
-    /// Waits until the guard lets a request go.
-    async fn turn(&self) -> Result<(), RestError> {
+    /// Refuses a request after a rejected key (`bybit` only) or during a
+    /// 403 pause, without sending or counting it; otherwise waits until the
+    /// guard lets it go. The stop and the pause are looked at again after
+    /// every wait.
+    async fn turn(&self, bybit: bool) -> Result<(), RestError> {
         loop {
             let now = self.clock.now_ms();
             let at = {
@@ -292,6 +360,17 @@ impl Client {
                     .stop
                     .lock()
                     .map_err(|_| RestError::NotSent("client state poisoned".into()))?;
+                if let (true, Some(code)) = (bybit, s.auth) {
+                    return Err(RestError::Auth {
+                        code,
+                        msg: "not sent: the key was rejected earlier; every Bybit request stops until restart".into(),
+                    });
+                }
+                if let Some(until) = s.paused_until.filter(|&u| now < u) {
+                    return Err(RestError::IpBanned(format!(
+                        "not sent: paused after HTTP 403 until {until} ms"
+                    )));
+                }
                 match s.guard.admit(now) {
                     Ok(()) => return Ok(()),
                     Err(at) => at,
@@ -312,7 +391,7 @@ impl Client {
                 return Err(e);
             }
         };
-        self.turn().await?;
+        self.turn(true).await?;
         self.metrics
             .add("watcher_requests_total", &[("endpoint", path)], 1.0);
         let url = if q.is_empty() {
@@ -342,6 +421,7 @@ impl Client {
         };
         if let Err(e) = &res {
             self.count_error(path, e);
+            self.after(path, e);
         }
         res
     }

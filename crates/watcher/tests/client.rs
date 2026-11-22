@@ -322,3 +322,118 @@ async fn answers_are_classified() {
         Some(1.0)
     );
 }
+
+/// Bybit paths the later checks use; every one stops after a rejection.
+const PATHS: [&str; 6] = [
+    "/v5/user/query-api",
+    "/v5/order/realtime",
+    "/v5/position/list",
+    "/v5/execution/list",
+    "/v5/account/wallet-balance",
+    "/v5/market/instruments-info",
+];
+
+#[tokio::test]
+async fn auth_answers_are_never_retried() {
+    let answers = [
+        (10010, code(10010)),
+        (10003, code(10003)),
+        (33004, code(33004)),
+        (10004, code(10004)),
+        (10005, code(10005)),
+        (10007, code(10007)),
+        (401, Answer::Reply(401, "no".into())),
+    ];
+    for (c_want, answer) in answers {
+        let fake = FakeHttp::start(ok("{}"));
+        fake.route("/v5/user/query-api", [answer.clone()]);
+        let echo = FakeHttp::start(Answer::Reply(200, "203.0.113.7".into()));
+        let c = client(&fake);
+        let e = c.client.get("/v5/user/query-api", &[]).await.unwrap_err();
+        assert!(
+            matches!(&e, RestError::Auth { code, .. } if *code == c_want),
+            "{c_want}: {e:?}"
+        );
+        assert_eq!(c.metrics.get("watcher_auth_rejected", &[]), Some(1.0));
+        assert_eq!(c.client.auth_rejected(), Some(c_want));
+        // Ten minutes on the manual clock, every path each second: nothing
+        // more reaches the venue.
+        for _ in 0..600 {
+            c.clock.advance(1_000);
+            for p in PATHS {
+                let e = c.client.get(p, &linear()).await.unwrap_err();
+                assert_eq!(e.class(), "auth", "{c_want} {p}: {e:?}");
+            }
+        }
+        assert_eq!(fake.requests().len(), 1, "{c_want}");
+        // One error line with the code, not one per refused request.
+        let lines = c.lines.lock().unwrap().clone();
+        assert_eq!(lines.len(), 1, "{c_want}: {lines:?}");
+        assert!(lines[0].contains(&c_want.to_string()), "{lines:?}");
+        assert_eq!(
+            c.metrics.get(
+                "watcher_request_errors_total",
+                &[("endpoint", "/v5/user/query-api"), ("class", "auth")]
+            ),
+            Some(1.0)
+        );
+        // The IP echo is not a Bybit request: it still goes (a changed
+        // public IP is a usual cause of 10010).
+        let ip = c.client.echo(&format!("{}/ip", echo.url())).await.unwrap();
+        assert_eq!(ip, "203.0.113.7");
+    }
+}
+
+#[tokio::test]
+async fn http_403_pauses_every_request_for_600_s() {
+    let fake = FakeHttp::start(ok("{}"));
+    fake.route(
+        "/v5/position/list",
+        [Answer::Reply(403, "access too frequent".into()), ok("{}")],
+    );
+    let echo = FakeHttp::start(Answer::Reply(200, "203.0.113.7\n".into()));
+    let echo_url = format!("{}/ip", echo.url());
+    let c = client(&fake);
+    // The answer comes 500 ms after the send: the pause runs from the
+    // answer.
+    let clock = c.clock.clone();
+    fake.on_request(move |_| clock.advance(500));
+    let e = c
+        .client
+        .get("/v5/position/list", &linear())
+        .await
+        .unwrap_err();
+    assert_eq!(e.class(), "ip_banned", "{e:?}");
+    let end = T0 + 500 + 600_000;
+    assert_eq!(c.client.paused_until(), Some(end));
+    assert_eq!(c.metrics.get("watcher_auth_rejected", &[]), Some(0.0));
+    for at in [T0 + 500, T0 + 60_500, T0 + 60_000 * 9, end - 1] {
+        c.clock.set(at);
+        for p in PATHS {
+            let e = c.client.get(p, &[]).await.unwrap_err();
+            assert_eq!(e.class(), "ip_banned", "{p} at +{}: {e:?}", at - T0);
+        }
+        let e = c.client.echo(&echo_url).await.unwrap_err();
+        assert_eq!(e.class(), "ip_banned", "echo at +{}", at - T0);
+    }
+    assert_eq!(fake.requests().len(), 1);
+    assert!(echo.requests().is_empty());
+    assert_eq!(
+        c.metrics.get(
+            "watcher_request_errors_total",
+            &[("endpoint", "/v5/position/list"), ("class", "ip_banned")]
+        ),
+        Some(1.0)
+    );
+    assert_eq!(c.lines.lock().unwrap().len(), 1);
+    // At the end of the pause every request goes again.
+    c.clock.set(end);
+    c.client.get("/v5/position/list", &linear()).await.unwrap();
+    assert_eq!(c.client.echo(&echo_url).await.unwrap(), "203.0.113.7");
+    assert_eq!(fake.requests().len(), 2);
+    // The echo's own 403 is no answer from the echo, not a Bybit ban.
+    echo.set_default(Answer::Reply(403, String::new()));
+    let e = c.client.echo(&echo_url).await.unwrap_err();
+    assert_eq!(e.class(), "no_answer");
+    c.client.get("/v5/position/list", &linear()).await.unwrap();
+}
