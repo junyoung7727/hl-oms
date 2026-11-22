@@ -1626,3 +1626,18 @@ tests = ["node-unit/kill_holds_liveness_and_heartbeats_recover_to_the_live_state
 repro = "cargo test -p oms-node --test record_schema; cargo test -p oms-node --lib alerts:: config::; cargo test -p oms-core --test event_fields; cargo test -p oms-core --test monitor the_gate_values"
 supports = "C-LIVE 2부의 설정·상태·알림·이벤트, C-TAIL 필드 표, C-ALERT 조건 표"
 not_covered = "실제 텔레그램. 실행 파일 단위의 mainnet 시작 거부(설정 검증 함수만). status.core.monitor의 모든 필드(프로세스 시험은 gate, monitored, reason, watcher, cancel_stage, checks의 W3·W4를 본다)"
+
+[[claim]]
+id = "V-WATCH-1"
+statement = "워처 crate는 OMS와 코드를 나누지 않는다: oms-*·md-* crate를 어떤 종류(정상, 빌드, 개발)와 target으로도 선언하지 않고, 개발 의존성 http-fake 말고는 작업 공간 crate를 쓰지 않으며, 그 정상·빌드 그래프에서 OMS·시세·작업 공간 crate에 닿지 않고, watcher-conformance 말고는 아무 작업 공간 crate도 워처에 의존하지 않으며, 소스가 #[path]·include!·속성 안의 path =·심볼릭 링크로 패키지 밖의 파일을 가져오지 않는다. 검사 스크립트는 그 각각을 심으면 그 결과 줄과 종료 코드 1을 내고, 확인할 수 없을 때(맞지 않는 잠금, 없는 매니페스트)는 ok가 아니라 종료 코드 2를 낸다"
+why = "OMS의 저널 인코딩·대조·Bybit 해석의 결함을 같은 코드로 확인하면 확인이 아니다(ADR-031). 독립성은 사람의 약속이 아니라 매 변경의 CI가 지킨다"
+level = "소스 검사"
+scope = "실제 트리 한 번(--locked, 호스트 플랫폼)과 합성 작업 공간의 16가지(실제 모양, 정상·빌드·개발·cfg(unix)·cfg(windows) 의존성, 거쳐서 닿는 oms-api, 다른 작업 공간 crate, 역방향, #[path], 시험의 include_str!, 패키지 안의 #[path], cfg_attr의 path =, 심볼릭 링크, 다시 만들지 않은 잠금, 없는 매니페스트)"
+real = "cargo metadata(1.96.0), jq, 실제 매니페스트와 잠금 파일"
+simulated = "빈 crate 아홉 개의 합성 작업 공간"
+faults = "심은 의존성과 소스 줄, 맞지 않는 잠금 파일, 없는 매니페스트. 스크립트 자신의 결함 여섯(개발·빌드 무시, target 무시, 도달 검사 생략, 역방향 생략, cargo 실패를 ok로, 규칙 6 생략)을 손으로 심어 각각 해당 경우가 빨갛게 됨을 확인했다(U19a1 보고)"
+criterion = "실제 트리: 종료 코드 0과 'watcher_independent: ok'. 경우마다 정확한 종료 코드와 그 결과 줄(grep -F), 결과가 있는 경우에는 ok 줄이 없음"
+tests = ["source/watcher_independent", "source/selftest"]
+repro = "tools/ci/watcher_independent.sh && tools/ci/selftest.sh"
+supports = "C-WATCH 1부, ADR-031"
+not_covered = "다른 플랫폼의 의존성을 거쳐서만 닿는 패키지(규칙 4는 호스트 그래프만 걷는다. 직접 선언은 규칙 2가 잡는다). 여러 줄에 걸친 속성 안의 path =(규칙 6은 평범한 텍스트 검색). oms-*·md-*가 아닌 이름의 OMS 코드가 레지스트리에서 오는 경우. 저널 읽기와 집합이 코어와 같다는 것은 V-WATCH-2(U19a2)"

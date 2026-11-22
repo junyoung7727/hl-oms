@@ -188,6 +188,10 @@ _Avoid_: kill file, lock file
 The operator's `clear-hold` of one hold of C-HOLD (`kill`, `watcher_mismatch`, `venue_change`). It has no force option; each refusal has a stable code.
 _Avoid_: unhold, override
 
+**Watcher** (워처):
+The separate program (crate and binary `watcher`) that checks the OMS against the venue with code of its own: its own journal reader built from ADR-011 and C-TAIL only, its own sets, its own Bybit key and client. It depends on no `oms-*` or `md-*` crate and on no other workspace crate; only the test crate `watcher-conformance` links it with OMS code, and `tools/ci/watcher_independent.sh` checks this on every change (ADR-031, C-WATCH). It keeps no state and replays the journal from record 1 at every start. U19a1 built the reader; the checks W1–W4 and the heartbeat come in U19a5–U19a9.
+_Avoid_: monitor (the monitoring gate is the OMS's), checker, reconciler (that is the OMS's own)
+
 **Watcher mismatch** (워처 불일치):
 The hold `WatcherMismatch`, set when a check of the watcher (W1–W4) confirms a difference. Refuses plain orders until released.
 

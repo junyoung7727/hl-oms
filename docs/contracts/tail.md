@@ -1,6 +1,6 @@
 # C-TAIL 저널 꼬리 읽기와 이벤트 필드 표
 
-설계 근거: [ADR-025](../adr/ADR-025-journal-tail.md). 코드: `crates/oms-journal/src/tail.rs`(읽기), `crates/oms-core/src/event.rs`(이벤트). 이 문서는 OMS 밖의 프로그램(프로젝터 U14b, 감시자 U19a)이 저널을 읽는 규칙과, 읽은 기록을 해석하는 데 필요한 것을 모두 적는다. 감시자는 이 문서만 보고 구현한다(OMS 코드에 의존하지 않는다).
+설계 근거: [ADR-025](../adr/ADR-025-journal-tail.md). 코드: `crates/oms-journal/src/tail.rs`(읽기), `crates/oms-core/src/event.rs`(이벤트). 이 문서는 OMS 밖의 프로그램(프로젝터 U14b, 감시자 U19a)이 저널을 읽는 규칙과, 읽은 기록을 해석하는 데 필요한 것을 모두 적는다. 감시자는 이 문서만 보고 구현한다(OMS 코드에 의존하지 않는다). 감시자의 구현: `crates/watcher/src/journal.rs`(읽기), `crates/watcher/src/events.rs`(아는 이벤트), [C-WATCH](watcher.md) 1부(U19a1).
 
 ## C-TAIL 꼬리 읽기
 
@@ -271,3 +271,5 @@ payload 하나는 JSON 객체 하나다: `{"seq": u64, "at": u64 µs(기록 시�
 ## 검증
 
 `tail::the_tail_never_returns_a_record_above_the_durable_cap`, `tail::the_tail_follows_segment_rotation_and_starts_after_a_cursor`, `tail::the_tail_never_takes_the_lock`, `tail::a_damaged_durable_frame_stops_the_tail_without_moving_it`, `tail::peek_beyond_shows_valid_frames_past_the_cap_without_moving`, `tail::a_frame_with_the_wrong_sequence_comes_after_the_good_records`, `tail::damage_before_the_cursor_is_an_error`, `tail::the_tail_follows_a_schema_change_to_a_new_segment`, `tail::the_tail_reads_a_header_only_segment_rewritten_with_a_new_schema`(주장 V-TAIL-1). 필드 표: `event_fields`의 세 시험(주장 V-TAIL-2). 복구의 `fsync`는 시험하지 않았다(페이지 캐시 유실을 흉내 낼 수 없다).
+
+감시자의 독자 구현(C-WATCH 1부, 주장 V-WATCH-1, U19a2부터 V-WATCH-2): `crates/watcher/tests/journal.rs`의 시험 9개(상한, 회전과 스키마 변경, 헤더만 있는 세그먼트, 상한 이하 손상, 모르는 이벤트, 다시 읽는 오류와 래치하는 오류, 프레임 하나씩 읽는 큰 세그먼트, ADR-011의 바이트 배치), `events::the_known_events_are_the_rows_of_the_tail_table`(이 표의 이벤트 이름과 감시자가 아는 이름이 양방향으로 같다. 이 문서를 시험 시각에 파일로 읽는다). 적합성(`crates/watcher-conformance`): `conformance::the_watcher_reads_while_the_oms_writer_holds_the_lock`(코어가 결정한 기록을 `oms-journal`이 쓰고 잠금을 쥔 동안 감시자가 같은 이벤트로 읽고, 디렉터리를 바꾸지 않는다), `conformance::the_watcher_base32_pair_equals_the_core_form`.
