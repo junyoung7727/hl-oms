@@ -1381,8 +1381,8 @@ const MUTANTS: &[Mutant] = &[
         id: "M150-kill-rearm-ignored",
         what: "a new trigger after the confirmation answers already latched",
         file: "crates/oms-core/src/decide.rs",
-        find: "        if k.confirmed_at.is_none() {\n            return Ok(KillTrigger::AlreadyLatched);\n        }",
-        replace: "        if k.confirmed_at.is_none() || k.outcome.is_some() {\n            return Ok(KillTrigger::AlreadyLatched);\n        }",
+        find: "        if k.confirmed_at.is_none() || k.outcome != Some(KillOutcome::Confirmed) {",
+        replace: "        if true {",
         test: &["-p", "oms-core", "--test", "holds", "a_new_trigger_after_the_confirmation"],
         guards: "C-KILL / re-arm",
     },
@@ -1403,6 +1403,15 @@ const MUTANTS: &[Mutant] = &[
         replace: "        Action::SleepUntil(self.round_start)",
         test: &["-p", "oms-node", "--lib", "venue::bybit::kill::tests::"],
         guards: "C-KILL / C4",
+    },
+    Mutant {
+        id: "M153-kill-rearmed-after-unsupported",
+        what: "a new trigger after an unsupported answer re-arms the kill as after a confirmed zero",
+        file: "crates/oms-core/src/decide.rs",
+        find: "        if k.confirmed_at.is_none() || k.outcome != Some(KillOutcome::Confirmed) {",
+        replace: "        if k.confirmed_at.is_none() {",
+        test: &["-p", "oms-core", "--test", "holds", "a_new_trigger_after_an_unsupported_answer_records_nothing"],
+        guards: "C-KILL / re-arm",
     },
 
 ];

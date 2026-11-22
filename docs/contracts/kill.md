@@ -9,12 +9,12 @@
 | K1 무장 | 시작 확인 첫 통과(`checks.rs` boot) | 마지막 증거 = 지금, 트리거 무장 | `kill_armed = true` | 확인 전에는 무장하지 않는다: 확인하지 않은 계좌로 일괄 취소를 보내지 않는다 |
 | K2 증거 | 구독 확인(연결 올림), pong | 마지막 증거 = 지금. 코어 큐를 기다린 시간만큼 뒤로 민다(pong 기한과 같다) | `last_proof_age_ms` | — |
 | K3 트리거 | 250 ms마다(`health_poll`) | 연결이 내려가 있고 `지금 − 마지막 증거 > kill_after_ms`이면, 끊김 하나에 한 번 | `VenueInput::StreamLost { since, detail }` | 연결이 올라가 있는 동안은 판단하지 않는다(스트림 자신이 pong 없음으로 내린다) |
-| K4 래치 | `StreamLost` | 걸려 있지 않으면 `hold_set{kill, source: stream, note: "private stream down for N ms (no proof of life since …): …"}`. 걸려 있고 확인 전이면 아무것도 없음. 걸려 있고 확인 뒤면 `kill_rearmed`(K9) | `Kill` 명령(내구화 뒤) | flush 실패면 명령 없이 멈춘다(C-COMMIT) |
+| K4 래치 | `StreamLost` | 걸려 있지 않으면 `hold_set{kill, source: stream, note: "private stream down for N ms (no proof of life since …): …"}`. 걸려 있고 확인 전이면 아무것도 없음. 걸려 있고 루프가 0건을 확인한 뒤(`confirmed`)면 `kill_rearmed`(K9). `unsupported` 답 뒤면 아무것도 없음 | `Kill` 명령(내구화 뒤) | flush 실패면 명령 없이 멈춘다(C-COMMIT) |
 | K5 C1 | `Kill` | 게이트웨이가 곧바로 "킬 활성"을 켠다: 그 뒤 생성은 `NotSent("kill switch active")`(래치 전에 풀린 생성도) | 루프 시작, 시작 P1 | — |
 | K6 C2 | 회차 시작 `t_r` | 막힘(`allowed()`)이면 요청 없이 회차 실패(막힘 문장). 아니면 비상 예산의 칸을 기다려 받고 막힘을 다시 묻고 `POST /v5/order/cancel-all`(linear, USDT) | 성공 → C3, 실패 → C4 | 5xx·거부·응답 없음은 실패한 요청(호출 수에 든다). 연결도 못 한 요청은 보낸 것이 아니다 |
 | K7 C3 | C2 성공 뒤 곧바로 | `/v5/order/realtime` 킬 범위 전 페이지, 열린 행(`New`, `PartiallyFilled`, `Untriggered`)을 센다. `orderLinkId`와 상관없이(OMS가 보내지 않은 주문도) | n = 0 → C5, n > 0 → C4 | 실패한 셈은 0이 아니다(C4). 1,000건(20쪽 × 50) 넘음도 실패 |
 | K8 C4·C5 | n > 0 또는 실패 / 첫 0 | C4: `t_r + kill_round_ms`까지 기다려 다음 회차. C5: `kill_watch_every_ms`마다 C3을 다시, 늦은 주문(n > 0)이면 곧바로 C2, 셈 실패면 C4, `kill_watch_ms` 동안 모두 0이면 끝 | 끝: 마지막 P1, `KillLoopEnded { confirmed, rounds, cancel_all_calls, detail }` | 프로세스가 멈추면 루프도 끝난다. 다음 시작의 `Kill`이 새 루프를 돈다 |
-| K9 다시 무장(N3) | 확인 뒤의 새 계기(`StreamLost`, `watcher_kill`) | `kill_rearmed{source, note}`: 확인(`confirmed_at`, `outcome`)을 지운다. 래치의 첫 메모는 그대로 | 새 `Kill`(내구화 뒤), 새 루프 | 새 루프가 확인하기 전 해제는 `kill_unconfirmed` |
+| K9 다시 무장(N3) | 0건 확인(`outcome: confirmed`) 뒤의 새 계기(`StreamLost`, `watcher_kill`). `unsupported` 뒤는 아님: 거래소에서 확인한 것이 없고 게이트웨이가 같은 답을 한다 | `kill_rearmed{source, note}`: 확인(`confirmed_at`, `outcome`)을 지운다. 래치의 첫 메모는 그대로 | 새 `Kill`(내구화 뒤), 새 루프 | 새 루프가 확인하기 전 해제는 `kill_unconfirmed` |
 | K10 멈춤 | `KillStop`(`clear_hold kill`이 내구화된 뒤) | 다음 대기에서 루프를 끝낸다. 알림도 입력도 없다. "킬 활성"을 끈다 | 생성이 다시 나간다 | — |
 
 ## 트리거
@@ -78,7 +78,7 @@
 | 이벤트 | 필드 | 뜻 |
 |---|---|---|
 | `kill_loop_ended` | `outcome`(`confirmed` \| `unsupported`), `rounds`, `cancel_all_calls`, `detail` | 게이트웨이의 킬 루프가 끝났다. 래치는 남고 이 프로세스에서 확인된 것으로 표시된다(`confirmed_at`, `outcome`). 래치가 없거나 이미 확인됐으면 기록하지 않는다. `unsupported`는 일괄 취소가 없는 게이트웨이의 답이다(C-HOLD) |
-| `kill_rearmed` | `source`(`stream` \| `watcher`), `note` | 확인 뒤의 새 계기(K9). 확인을 지우고 새 `Kill`을 부른다. 래치의 `since`, `source`, `note`는 첫 것 그대로다 |
+| `kill_rearmed` | `source`(`stream` \| `watcher`), `note` | 0건 확인(`confirmed`) 뒤의 새 계기(K9). 확인을 지우고 새 `Kill`을 부른다. 래치의 `since`, `source`, `note`는 첫 것 그대로다 |
 
 `StreamLost`는 새 입력(`venue.stream_lost`)이고 이벤트가 아니다. 래치는 C-HOLD의 `hold_set{source: stream}`이다. 두 이벤트 모두 열린 주문·체결·포지션 집합을 바꾸지 않는다([C-TAIL](tail.md) 필드 표).
 
@@ -93,7 +93,8 @@
 | IP 차단 정지(`quiet`) | 일괄 취소·셈·포지션 조회 모두 나가지 않는다. 회차는 막힘 문장으로 실패한다 |
 | 키 거부 | 회차마다 `auth_rejected`로 실패, 확인하지 못한다. 해제할 수 없다(강제 없음): 키를 폐기(X8)하고 새 키로 다시 시작 |
 | 감시 중 늦은 주문 | 곧바로 C2, 감시는 다음 0부터 다시 |
-| 확인 뒤의 새 계기 | `kill_rearmed`, 새 루프, 그 확인 전에는 해제 거절 |
+| 0건 확인 뒤의 새 계기 | `kill_rearmed`, 새 루프, 그 확인 전에는 해제 거절 |
+| `unsupported` 답 뒤의 새 계기 | 기록 없음, 응답 `already latched`. 해제는 여전히 장부가 빈 뒤에만(`kill_orders_open`) |
 | 루프 도중 재시작 | 확인 없음. 새 프로세스의 루프가 다시 확인한다 |
 | `clear_hold kill` 뒤 | `KillStop`이 루프를 끝내고 생성이 다시 나간다 |
 

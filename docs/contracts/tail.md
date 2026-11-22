@@ -247,7 +247,7 @@ payload 하나는 JSON 객체 하나다: `{"seq": u64, "at": u64 µs(기록 시�
 | `kill_loop_ended` | `rounds` | u32 | 일괄 취소 회차 수 |
 | `kill_loop_ended` | `cancel_all_calls` | u32 | 보낸 일괄 취소 요청 수 |
 | `kill_loop_ended` | `detail` | string | 설명 문장 |
-| `kill_rearmed` | `source` | enum stream/watcher | 확인 뒤의 새 킬 계기(C-KILL). 킬 래치의 확인을 지우고 새 킬 루프를 부른다. 래치의 첫 메모는 그대로다 |
+| `kill_rearmed` | `source` | enum stream/watcher | 킬 루프의 0건 확인(`confirmed`) 뒤의 새 킬 계기(C-KILL, `unsupported` 뒤는 아님). 킬 래치의 확인을 지우고 새 킬 루프를 부른다. 래치의 첫 메모는 그대로다 |
 | `kill_rearmed` | `note` | string | 새 계기의 메모 |
 <!-- event-fields:end -->
 

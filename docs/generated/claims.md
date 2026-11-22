@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `f8b45d65bc6e5f47`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `be44c0f7d082c5e5`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 주장 100건: 통과 0, 실패 0, 미실행 33, 이전 버전 결과 67.
 
@@ -106,7 +106,7 @@
 | V-KILL-2 | 킬 루프는 일괄 취소 뒤 거래소의 미체결을 세어 0이 될 때까지 회차의 시작부터 kill_round_ms마다 일괄 취소를 되풀이하고, 첫 0 뒤 kill_watch_every_ms마다 kill_watch_ms 동안 다시 세어 모두 0일 때만 KillLoopEnded{confirmed}를 보낸다. 실패한 셈은 0이 아니고, 감시 중의 늦은 주문은 곧바로 회차로 돌아간다. 거래소가 첫 일괄 취소 뒤 주문 하나를 남기거나 5xx로 답해도 0을 확인할 때까지 되풀이하고, 어느 1초 창에도 일괄 취소는 둘을 넘지 않으며(비상 예산 2/1초, 회차가 100 ms여도), 생성이나 단건 취소는 하나도 나가지 않는다. 막힘(IP 차단 등)에는 요청을 보내지 않고 막힘 문장으로 회차가 실패하며, 예산을 기다리는 동안 생긴 막힘도 그 요청을 집에 둔다 | 단위, 통합(드라이버) | 미실행 | `cargo test -p oms-node --lib venue::bybit::kill::tests:: venue::bybit::gateway::tests::a_blocked` |
 | V-KILL-3 | 킬 루프의 P1은 시작, 알려진 수의 바뀜, kill_notice_ms마다의 반복, 마지막(0건 확인 뒤 감시를 마침)뿐이고 모르는 수는 바뀜이 아니다. 10분 동안 셈이 실패하면 정확히 시작 1 + 반복 10 + 마지막 1 = 12개이고, 드라이버와 Alerts를 loopback 가짜 텔레그램에 붙여도 '킬 루프'가 든 요청은 12개 이하다. 모든 알림은 태그, 회차, 남은 수(모르면 이유), 일괄 취소 수와 바로 전에 읽은 포지션 묶음(심볼마다 수량, 미실현손익, 마크, 마크에서 강제청산가까지의 거리 %, 0.01 %에서 내림, 청산가가 없으면 모름, 크기 0은 뺌, 조회 실패는 실패라고)을 담는다 | 단위, 통합(드라이버) | 미실행 | `cargo test -p oms-node --lib venue::bybit::kill::tests::` |
 | V-KILL-4 | Bybit 게이트웨이는 Kill을 받으면 곧바로 킬 활성을 켜서 루프가 도는 동안 어떤 생성도 내보내지 않고(래치 전에 풀린 생성도 NotSent), 루프가 도는 동안의 두 번째 Kill은 무시하며, KillStop은 다음 대기에서 알림도 입력도 없이 루프를 끝내고 생성이 다시 나간다 | 단위, 통합(게이트웨이·드라이버) | 미실행 | `cargo test -p oms-node --lib venue::bybit::gateway::tests::no_create venue::bybit::gateway::tests::kill_stop venue::bybit::kill::tests::a_stop` |
-| V-KILL-5 | 이 프로세스의 루프가 확인한 뒤 새 킬 계기(StreamLost, watcher_kill)가 오면 코어는 kill_rearmed{source, note}로 확인(confirmed_at, outcome)을 지우고 새 Kill을 부르며, 래치의 첫 메모는 그대로다. 새 루프가 확인하기 전 clear-hold는 kill_unconfirmed로 거절되고, 재실행이 같은 상태를 만든다. 확인 전의 두 번째 계기는 아무것도 쓰지 않는다. [venue]의 킬 필드 다섯은 설계 기본값으로 읽히고 각 경계 밖 한 걸음은 거절된다(kill_after_ms는 2 × ping 이상) | 단위 | 미실행 | `cargo test -p oms-core --test holds a_new_trigger second; cargo test -p oms-node --lib config::tests::the_kill_loop; cargo test -p oms-core --test event_fields` |
+| V-KILL-5 | 이 프로세스의 루프가 거래소에서 0건을 확인한 뒤(confirmed) 새 킬 계기(StreamLost, watcher_kill)가 오면 코어는 kill_rearmed{source, note}로 확인(confirmed_at, outcome)을 지우고 새 Kill을 부르며, 래치의 첫 메모는 그대로다. 새 루프가 확인하기 전 clear-hold는 kill_unconfirmed로 거절되고, 재실행이 같은 상태를 만든다. 확인 전의 두 번째 계기와 unsupported 답 뒤의 계기는 아무것도 쓰지 않는다. [venue]의 킬 필드 다섯은 설계 기본값으로 읽히고 각 경계 밖 한 걸음은 거절된다(kill_after_ms는 2 × ping 이상) | 단위 | 미실행 | `cargo test -p oms-core --test holds a_new_trigger second; cargo test -p oms-node --lib config::tests::the_kill_loop; cargo test -p oms-core --test event_fields` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -2401,7 +2401,7 @@
 | `node-unit/kill_stop_ends_the_loop_and_creates_flow_again` | 미실행 |  |
 | `node-unit/a_stop_ends_the_loop_without_a_notice_or_an_input` | 미실행 |  |
 
-## V-KILL-5 — 이 프로세스의 루프가 확인한 뒤 새 킬 계기(StreamLost, watcher_kill)가 오면 코어는 kill_rearmed{source, note}로 확인(confirmed_at, outcome)을 지우고 새 Kill을 부르며, 래치의 첫 메모는 그대로다. 새 루프가 확인하기 전 clear-hold는 kill_unconfirmed로 거절되고, 재실행이 같은 상태를 만든다. 확인 전의 두 번째 계기는 아무것도 쓰지 않는다. [venue]의 킬 필드 다섯은 설계 기본값으로 읽히고 각 경계 밖 한 걸음은 거절된다(kill_after_ms는 2 × ping 이상)
+## V-KILL-5 — 이 프로세스의 루프가 거래소에서 0건을 확인한 뒤(confirmed) 새 킬 계기(StreamLost, watcher_kill)가 오면 코어는 kill_rearmed{source, note}로 확인(confirmed_at, outcome)을 지우고 새 Kill을 부르며, 래치의 첫 메모는 그대로다. 새 루프가 확인하기 전 clear-hold는 kill_unconfirmed로 거절되고, 재실행이 같은 상태를 만든다. 확인 전의 두 번째 계기와 unsupported 답 뒤의 계기는 아무것도 쓰지 않는다. [venue]의 킬 필드 다섯은 설계 기본값으로 읽히고 각 경계 밖 한 걸음은 거절된다(kill_after_ms는 2 × ping 이상)
 
 - 상태: **미실행**
 - 왜 중요한가: 확인 뒤의 새 끊김은 새 위험이다. 옛 확인으로 풀 수 있으면 그 뒤에 남은 주문을 아무도 확인하지 않는다(U18b1 리뷰 N3)
@@ -2409,8 +2409,8 @@
 - 전제와 범위: 코어 시험 하나(워처와 스트림 두 계기, 재실행), 설정 검증
 - 실제 구성요소: oms-core(decide, apply, command_for, replay), 설정 읽기
 - 모의·시뮬레이션: 계기 입력(시험이 넣음)
-- 주입한 장애: 확인 뒤의 새 계기, 확인 전의 두 번째 계기, 경계 밖 설정
-- 판정 기준과 근거: 이벤트 이름 목록, core.kill의 confirmed_at·outcome·note, 명령 목록, 해제 거절 코드, 재실행 다이제스트, 설정 오류 문장. 넣은 결함과 잡은 시험: 다시 무장하지 않음(M150), 확인을 남김(저장소 밖 mut.py rearm-keeps-confirmation)
+- 주입한 장애: 확인 뒤의 새 계기, 확인 전의 두 번째 계기, unsupported 답 뒤의 계기, 경계 밖 설정
+- 판정 기준과 근거: 이벤트 이름 목록, core.kill의 confirmed_at·outcome·note, 명령 목록, 해제 거절 코드, 재실행 다이제스트, 설정 오류 문장. 넣은 결함과 잡은 시험: 다시 무장하지 않음(M150), unsupported 뒤에도 다시 무장(M153), 확인을 남김(저장소 밖 mut.py rearm-keeps-confirmation)
 - 재현: `cargo test -p oms-core --test holds a_new_trigger second; cargo test -p oms-node --lib config::tests::the_kill_loop; cargo test -p oms-core --test event_fields`
 - 뒷받침하는 것: C-KILL K9와 이벤트, C-TAIL 필드 표, ADR-030 §7(U18b2)
 - 확인하지 않은 범위: 실행 파일 단위의 설정 거부(검증 함수만). status.gateway.kill_loop의 모든 필드(프로세스 시험이 phase와 kill_armed만 본다)
@@ -2418,6 +2418,7 @@
 | 시험 | 결과 | 비고 |
 |---|---|---|
 | `core/a_new_trigger_after_the_confirmation_resets_it_and_asks_for_a_new_loop` | 미실행 |  |
+| `core/a_new_trigger_after_an_unsupported_answer_records_nothing` | 미실행 |  |
 | `core/a_second_trigger_keeps_the_first_note` | 미실행 |  |
 | `node-unit/config::tests::the_kill_loop_fields_are_bounded` | 미실행 |  |
 | `core/the_field_table_lists_every_field_the_encoder_writes` | 미실행 |  |

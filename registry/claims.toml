@@ -1494,15 +1494,15 @@ not_covered = "실제 거래소. 명령 채널에서 Kill보다 앞에 이미 �
 
 [[claim]]
 id = "V-KILL-5"
-statement = "이 프로세스의 루프가 확인한 뒤 새 킬 계기(StreamLost, watcher_kill)가 오면 코어는 kill_rearmed{source, note}로 확인(confirmed_at, outcome)을 지우고 새 Kill을 부르며, 래치의 첫 메모는 그대로다. 새 루프가 확인하기 전 clear-hold는 kill_unconfirmed로 거절되고, 재실행이 같은 상태를 만든다. 확인 전의 두 번째 계기는 아무것도 쓰지 않는다. [venue]의 킬 필드 다섯은 설계 기본값으로 읽히고 각 경계 밖 한 걸음은 거절된다(kill_after_ms는 2 × ping 이상)"
+statement = "이 프로세스의 루프가 거래소에서 0건을 확인한 뒤(confirmed) 새 킬 계기(StreamLost, watcher_kill)가 오면 코어는 kill_rearmed{source, note}로 확인(confirmed_at, outcome)을 지우고 새 Kill을 부르며, 래치의 첫 메모는 그대로다. 새 루프가 확인하기 전 clear-hold는 kill_unconfirmed로 거절되고, 재실행이 같은 상태를 만든다. 확인 전의 두 번째 계기와 unsupported 답 뒤의 계기는 아무것도 쓰지 않는다. [venue]의 킬 필드 다섯은 설계 기본값으로 읽히고 각 경계 밖 한 걸음은 거절된다(kill_after_ms는 2 × ping 이상)"
 why = "확인 뒤의 새 끊김은 새 위험이다. 옛 확인으로 풀 수 있으면 그 뒤에 남은 주문을 아무도 확인하지 않는다(U18b1 리뷰 N3)"
 level = "단위"
 scope = "코어 시험 하나(워처와 스트림 두 계기, 재실행), 설정 검증"
 real = "oms-core(decide, apply, command_for, replay), 설정 읽기"
 simulated = "계기 입력(시험이 넣음)"
-faults = "확인 뒤의 새 계기, 확인 전의 두 번째 계기, 경계 밖 설정"
-criterion = "이벤트 이름 목록, core.kill의 confirmed_at·outcome·note, 명령 목록, 해제 거절 코드, 재실행 다이제스트, 설정 오류 문장. 넣은 결함과 잡은 시험: 다시 무장하지 않음(M150), 확인을 남김(저장소 밖 mut.py rearm-keeps-confirmation)"
-tests = ["core/a_new_trigger_after_the_confirmation_resets_it_and_asks_for_a_new_loop", "core/a_second_trigger_keeps_the_first_note", "node-unit/config::tests::the_kill_loop_fields_are_bounded", "core/the_field_table_lists_every_field_the_encoder_writes"]
+faults = "확인 뒤의 새 계기, 확인 전의 두 번째 계기, unsupported 답 뒤의 계기, 경계 밖 설정"
+criterion = "이벤트 이름 목록, core.kill의 confirmed_at·outcome·note, 명령 목록, 해제 거절 코드, 재실행 다이제스트, 설정 오류 문장. 넣은 결함과 잡은 시험: 다시 무장하지 않음(M150), unsupported 뒤에도 다시 무장(M153), 확인을 남김(저장소 밖 mut.py rearm-keeps-confirmation)"
+tests = ["core/a_new_trigger_after_the_confirmation_resets_it_and_asks_for_a_new_loop", "core/a_new_trigger_after_an_unsupported_answer_records_nothing", "core/a_second_trigger_keeps_the_first_note", "node-unit/config::tests::the_kill_loop_fields_are_bounded", "core/the_field_table_lists_every_field_the_encoder_writes"]
 repro = "cargo test -p oms-core --test holds a_new_trigger second; cargo test -p oms-node --lib config::tests::the_kill_loop; cargo test -p oms-core --test event_fields"
 supports = "C-KILL K9와 이벤트, C-TAIL 필드 표, ADR-030 §7(U18b2)"
 not_covered = "실행 파일 단위의 설정 거부(검증 함수만). status.gateway.kill_loop의 모든 필드(프로세스 시험이 phase와 kill_armed만 본다)"

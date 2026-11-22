@@ -177,7 +177,7 @@ The kill loop's own rate budget for cancel-all, 2 per 1 s on the loop's clock, a
 _Avoid_: kill rate limit
 
 **Kill re-arm** (킬 다시 무장):
-A new kill trigger after the kill loop of this process confirmed: `kill_rearmed` voids the confirmation and a new loop runs; the latch keeps its first note (C-KILL).
+A new kill trigger after the kill loop of this process confirmed zero at the venue (not after `unsupported`): `kill_rearmed` voids the confirmation and a new loop runs; the latch keeps its first note (C-KILL).
 _Avoid_: re-latch
 
 **Kill marker** (킬 마커):
