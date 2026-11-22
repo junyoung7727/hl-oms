@@ -393,9 +393,29 @@ impl Queries {
         }])
     }
 
+    /// The open orders in the kill scope (C-KILL C3): every row of every
+    /// page of `/v5/order/realtime` with `category=linear` and
+    /// `settleCoin=USDT` whose status is open, whatever its `orderLinkId`
+    /// (orders the OMS did not send count too). No whole snapshot (a
+    /// failed page, more than `MAX_PAGES` pages) is an error, never zero.
+    pub(super) async fn kill_count(&self) -> Result<usize, QueryFail> {
+        let rows = self
+            .all_pages("/v5/order/realtime", &linear(), LIMIT_ORDERS)
+            .await?;
+        let mut open = 0;
+        for r in &rows {
+            match text(r, "orderStatus") {
+                Ok("New" | "PartiallyFilled" | "Untriggered") => open += 1,
+                Ok(_) => {}
+                Err(e) => return Err(unreadable(format!("/v5/order/realtime: {e}"))),
+            }
+        }
+        Ok(open)
+    }
+
     /// Every linear USDT position (with `settleCoin` and no symbol the venue
     /// lists only positions above zero, F20 Q12.1).
-    async fn position_rows(&self) -> Result<Vec<Value>, QueryFail> {
+    pub(super) async fn position_rows(&self) -> Result<Vec<Value>, QueryFail> {
         self.all_pages("/v5/position/list", &linear(), LIMIT_POSITIONS)
             .await
     }

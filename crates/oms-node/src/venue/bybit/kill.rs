@@ -16,6 +16,7 @@ use serde_json::Value;
 
 use super::CancelAll;
 use super::exec::text;
+use super::rest::RestError;
 
 /// The loop's times (`[venue]` `kill_*`, validated at load).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -474,6 +475,280 @@ pub fn position_block(rows: Result<&[Value], &str>, kst: &str) -> String {
     format!("{head}\n{}", lines.join("\n"))
 }
 
+// ---- the driver ----------------------------------------------------------------
+
+/// The loop's clock: ms since some start, and a wait until a time on it.
+/// Production: tokio time (`TokioClock`); tests: a manual clock.
+pub trait KillClock: Send + Sync + 'static {
+    fn now_ms(&self) -> u64;
+    fn sleep_until(&self, ms: u64) -> impl Future<Output = ()> + Send;
+}
+
+/// Tokio time, from the moment the clock was made.
+pub struct TokioClock {
+    epoch: tokio::time::Instant,
+}
+
+impl TokioClock {
+    pub fn new() -> TokioClock {
+        TokioClock {
+            epoch: tokio::time::Instant::now(),
+        }
+    }
+}
+
+impl Default for TokioClock {
+    fn default() -> Self {
+        TokioClock::new()
+    }
+}
+
+impl KillClock for TokioClock {
+    fn now_ms(&self) -> u64 {
+        self.epoch.elapsed().as_millis() as u64
+    }
+
+    async fn sleep_until(&self, ms: u64) {
+        tokio::time::sleep_until(self.epoch + std::time::Duration::from_millis(ms)).await;
+    }
+}
+
+/// What the driver needs from the gateway. The venue calls are the
+/// gateway's: `cancel_all` (`mod.rs`), `Queries::kill_count`,
+/// `Queries::position_rows`.
+pub trait KillHost: Send + Sync + 'static {
+    /// Whether a cancel-all may leave now: no block and no pause (C2).
+    fn allowed(&self) -> Result<(), String>;
+    /// True while no request may go out at all (the pause after an IP ban,
+    /// a rejected key): no count and no position read then.
+    fn quiet(&self) -> bool;
+    fn cancel_all(&self) -> impl Future<Output = CancelAnswer> + Send;
+    fn count(&self) -> impl Future<Output = Result<usize, String>> + Send;
+    fn positions(&self) -> impl Future<Output = Result<Vec<Value>, String>> + Send;
+    /// Sends one notice: `[OMS P1]` through the direct alerts, or a `warn`
+    /// line without `[alert]`.
+    fn notice(&self, text: &str);
+    /// Delivers `KillLoopEnded { confirmed }` to the core.
+    fn ended(&self, r: Report) -> impl Future<Output = ()> + Send;
+}
+
+/// The loop as `status.gateway.kill_loop` shows it (process state).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct KillView {
+    pub phase: Phase,
+    pub round: u32,
+    /// Null when the last cancel-all or count failed.
+    pub remaining: Option<usize>,
+    pub cancel_all_calls: u32,
+    pub last_error: Option<String>,
+    /// Wall time (µs) of the loop's start.
+    pub started_at: Option<Ts>,
+    /// Wall time (µs) of the first zero of the current watch.
+    pub zero_since: Option<Ts>,
+    pub notices: u32,
+}
+
+impl Default for KillView {
+    fn default() -> Self {
+        KillView {
+            phase: Phase::Idle,
+            round: 0,
+            remaining: None,
+            cancel_all_calls: 0,
+            last_error: None,
+            started_at: None,
+            zero_since: None,
+            notices: 0,
+        }
+    }
+}
+
+/// How a run of the loop ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RunEnd {
+    /// Zero confirmed; `KillLoopEnded` was delivered.
+    Confirmed,
+    /// `KillStop`, or the command channel closed: nothing more is sent.
+    Stopped,
+}
+
+/// The emergency budget (C-KILL): at most 2 cancel-alls counted in any
+/// 1 s, apart from the order budget (cancel-all has its own venue limit,
+/// F20 Q11.6). An outer guard: one cancel-all per round of at least 1 s
+/// keeps the loop at 1 per second.
+pub fn emergency_budget() -> RateBudget {
+    RateBudget::new(2, 2, 1_000_000)
+}
+
+enum Step {
+    Next(Vec<Action>),
+    End(RunEnd),
+}
+
+/// Runs one kill loop to its end, or until `KillStop`. A second `Kill`
+/// while it runs is logged and ignored. Each action is performed under
+/// `ctl`, so a stop ends the loop at the next await.
+pub async fn run<H: KillHost, C: KillClock>(
+    host: &H,
+    clock: &C,
+    timing: KillTiming,
+    ctx: &NoticeContext,
+    ctl: &mut tokio::sync::mpsc::UnboundedReceiver<VenueCommand>,
+    view: &std::sync::Mutex<KillView>,
+) -> RunEnd {
+    let mut m = KillLoop::new(timing);
+    let mut budget = emergency_budget();
+    let start_ms = clock.now_ms();
+    let start_wall = crate::util::wall_us();
+    let mut queue: std::collections::VecDeque<Action> = m.start(start_ms).into();
+    let show = |m: &KillLoop| {
+        let mut v = view.lock().unwrap_or_else(|e| e.into_inner());
+        *v = KillView {
+            phase: m.phase(),
+            round: m.round(),
+            remaining: match m.remaining() {
+                Remaining::Known(n) => Some(*n),
+                Remaining::Unknown(_) => None,
+            },
+            cancel_all_calls: m.cancel_all_calls(),
+            last_error: m.last_error().map(str::to_string),
+            started_at: Some(start_wall),
+            zero_since: m.zero_since().map(|z| {
+                start_wall.saturating_add(z.saturating_sub(start_ms).saturating_mul(1000))
+            }),
+            notices: m.notices(),
+        };
+    };
+    show(&m);
+    while let Some(action) = queue.pop_front() {
+        let step = {
+            let fut = perform(host, clock, &mut m, &mut budget, ctx, action);
+            tokio::pin!(fut);
+            loop {
+                tokio::select! {
+                    biased;
+                    c = ctl.recv() => match c {
+                        Some(VenueCommand::Kill { .. }) => {
+                            crate::warn!("a kill loop runs already; the new Kill is ignored");
+                        }
+                        Some(VenueCommand::KillStop) | None => break Step::End(RunEnd::Stopped),
+                        Some(_) => {}
+                    },
+                    s = &mut fut => break s,
+                }
+            }
+        };
+        match step {
+            Step::Next(next) => queue.extend(next),
+            Step::End(RunEnd::Stopped) => {
+                m.stop();
+                show(&m);
+                crate::info!("the kill loop stopped: the kill was cleared");
+                return RunEnd::Stopped;
+            }
+            Step::End(RunEnd::Confirmed) => {
+                show(&m);
+                return RunEnd::Confirmed;
+            }
+        }
+        show(&m);
+    }
+    RunEnd::Stopped
+}
+
+async fn perform<H: KillHost, C: KillClock>(
+    host: &H,
+    clock: &C,
+    m: &mut KillLoop,
+    budget: &mut RateBudget,
+    ctx: &NoticeContext,
+    action: Action,
+) -> Step {
+    let next = match action {
+        Action::CancelAll => {
+            let a = cancel_once(host, clock, budget).await;
+            m.cancel_done(clock.now_ms(), a)
+        }
+        Action::Count => {
+            let r = if host.quiet() {
+                Err("requests are paused".to_string())
+            } else {
+                host.count().await
+            };
+            m.count_done(clock.now_ms(), r)
+        }
+        Action::Notice(n) => {
+            let rows = if host.quiet() {
+                Err("requests are paused".to_string())
+            } else {
+                host.positions().await
+            };
+            let kst = alert_direct::kst(i64::try_from(crate::util::wall_us() / 1000).unwrap_or(0));
+            let block = match &rows {
+                Ok(r) => position_block(Ok(r), &kst),
+                Err(e) => position_block(Err(e), &kst),
+            };
+            let text = format!("{}\n{block}", n.text(ctx));
+            crate::warn!("kill loop notice", "kind": format!("{:?}", n.kind), "round": n.round);
+            host.notice(&text);
+            Vec::new()
+        }
+        Action::SleepUntil(t) => {
+            clock.sleep_until(t).await;
+            m.wake(clock.now_ms())
+        }
+        Action::Ended(r) => {
+            crate::info!("the kill loop confirmed zero open orders", "rounds": r.rounds, "cancel_all_calls": r.cancel_all_calls);
+            host.ended(r).await;
+            return Step::End(RunEnd::Confirmed);
+        }
+    };
+    Step::Next(next)
+}
+
+/// C2: one cancel-all, after the block check and a slot of the emergency
+/// budget (waited for on the loop's clock). The block is asked again after
+/// the wait: a block that appeared meanwhile keeps the request home.
+async fn cancel_once<H: KillHost, C: KillClock>(
+    host: &H,
+    clock: &C,
+    budget: &mut RateBudget,
+) -> CancelAnswer {
+    if let Err(why) = host.allowed() {
+        return CancelAnswer::NotSent(why);
+    }
+    let slot = loop {
+        let now_us = clock.now_ms().saturating_mul(1000);
+        match budget.take(RateClass::Cancel, now_us) {
+            Ok(s) => break s,
+            Err(at) => clock.sleep_until(at.div_ceil(1000)).await,
+        }
+    };
+    if let Err(why) = host.allowed() {
+        budget.release(slot);
+        return CancelAnswer::NotSent(why);
+    }
+    let a = host.cancel_all().await;
+    match a {
+        // No byte left the host: the venue counted nothing.
+        CancelAnswer::NotSent(_) => budget.release(slot),
+        CancelAnswer::Done(_) | CancelAnswer::Failed(_) => {
+            budget.finish(slot, clock.now_ms().saturating_mul(1000))
+        }
+    }
+    a
+}
+
+/// The answer of `cancel_all` as the loop reads it. A connection that was
+/// never made sent nothing; every other error is a failed request.
+pub fn cancel_answer(r: Result<CancelAll, RestError>) -> CancelAnswer {
+    match r {
+        Ok(c) => CancelAnswer::Done(c),
+        Err(e @ RestError::NotSent(_)) => CancelAnswer::NotSent(e.to_string()),
+        Err(e) => CancelAnswer::Failed(e.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -804,5 +1079,519 @@ mod tests {
             position_block(Err("HTTP 500"), "t"),
             "포지션 조회 실패(HTTP 500). 수량·손익 모름"
         );
+    }
+
+    // ---- the driver against a loopback venue, on a manual clock ----------------
+
+    use crate::venue::bybit::query::Queries;
+    use crate::venue::bybit::rest::{Credentials, Rest};
+    use http_fake::{Answer as Http, FakeHttp};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    /// A manual loop clock: `sleep_until` parks until the test moves the
+    /// time past the deadline. `parked` is true while the driver waits at
+    /// the current time, i.e. it has done everything due until now.
+    pub(crate) struct ManualClock {
+        now: tokio::sync::watch::Sender<u64>,
+        seen: Mutex<Option<u64>>,
+    }
+
+    impl ManualClock {
+        pub(crate) fn new() -> ManualClock {
+            ManualClock {
+                now: tokio::sync::watch::Sender::new(0),
+                seen: Mutex::new(None),
+            }
+        }
+
+        pub(crate) fn parked(&self) -> bool {
+            *self.seen.lock().unwrap() == Some(self.now_ms())
+        }
+
+        pub(crate) fn advance(&self, ms: u64) {
+            self.now.send_modify(|t| *t += ms);
+        }
+    }
+
+    impl KillClock for ManualClock {
+        fn now_ms(&self) -> u64 {
+            *self.now.borrow()
+        }
+
+        async fn sleep_until(&self, ms: u64) {
+            let mut rx = self.now.subscribe();
+            loop {
+                let now = *rx.borrow_and_update();
+                if now >= ms {
+                    *self.seen.lock().unwrap() = None;
+                    return;
+                }
+                *self.seen.lock().unwrap() = Some(now);
+                if rx.changed().await.is_err() {
+                    return;
+                }
+            }
+        }
+    }
+
+    /// The gateway's side for the driver: the same venue calls as the
+    /// gateway, against the fake; the block is set by the test.
+    struct TestHost {
+        rest: Rest,
+        queries: Queries,
+        block: Mutex<Option<String>>,
+        notices: Mutex<Vec<String>>,
+        alerts: Option<crate::alerts::Alerts>,
+        ended: Mutex<Vec<Report>>,
+    }
+
+    impl KillHost for TestHost {
+        fn allowed(&self) -> Result<(), String> {
+            match self.block.lock().unwrap().clone() {
+                Some(b) => Err(b),
+                None => Ok(()),
+            }
+        }
+
+        fn quiet(&self) -> bool {
+            false
+        }
+
+        async fn cancel_all(&self) -> CancelAnswer {
+            cancel_answer(super::super::cancel_all(&self.rest).await)
+        }
+
+        async fn count(&self) -> Result<usize, String> {
+            self.queries.kill_count().await.map_err(|e| e.to_string())
+        }
+
+        async fn positions(&self) -> Result<Vec<Value>, String> {
+            self.queries
+                .position_rows()
+                .await
+                .map_err(|e| e.to_string())
+        }
+
+        fn notice(&self, text: &str) {
+            self.notices.lock().unwrap().push(text.to_string());
+            if let Some(a) = &self.alerts {
+                a.notice(text);
+            }
+        }
+
+        async fn ended(&self, r: Report) {
+            self.ended.lock().unwrap().push(r);
+        }
+    }
+
+    fn ok(result: Value) -> Http {
+        Http::Reply(
+            200,
+            json!({"retCode": 0, "retMsg": "OK", "result": result, "time": 1}).to_string(),
+        )
+    }
+
+    fn page(rows: Vec<Value>) -> Http {
+        ok(json!({"category": "linear", "list": rows, "nextPageCursor": ""}))
+    }
+
+    fn open_row(i: usize) -> Value {
+        json!({"orderId": format!("o{i}"), "orderLinkId": "", "symbol": "BTCUSDT", "side": "Buy",
+               "orderStatus": "New", "leavesQty": "0.001"})
+    }
+
+    fn cancelled() -> Http {
+        ok(json!({"list": [{"orderId": "o1", "orderLinkId": ""}], "success": "1"}))
+    }
+
+    const CANCEL_ALL: &str = "/v5/order/cancel-all";
+    const REALTIME: &str = "/v5/order/realtime";
+    const POSITIONS: &str = "/v5/position/list";
+
+    /// The fake venue: cancel-all accepted, no open order, one long.
+    fn venue() -> FakeHttp {
+        let api = FakeHttp::start(Http::Reply(404, "{}".into()));
+        api.route(CANCEL_ALL, [cancelled()]);
+        api.route(REALTIME, [page(vec![])]);
+        api.route(
+            POSITIONS,
+            [page(vec![
+                json!({"symbol": "BTCUSDT", "positionIdx": 0, "size": "0.010", "side": "Buy",
+                "unrealisedPnl": "-1.23", "markPrice": "70000.0", "liqPrice": "61362"}),
+            ])],
+        );
+        api
+    }
+
+    /// One driver running on a manual clock against `api`.
+    struct Rig {
+        host: Arc<TestHost>,
+        clock: Arc<ManualClock>,
+        ctl: tokio::sync::mpsc::UnboundedSender<VenueCommand>,
+        view: Arc<Mutex<KillView>>,
+        task: tokio::task::JoinHandle<RunEnd>,
+        /// Loop time of every cancel-all POST seen at the fake.
+        posts: Vec<u64>,
+        seen: usize,
+    }
+
+    impl Rig {
+        fn start(api: &FakeHttp, timing: KillTiming, alerts: Option<crate::alerts::Alerts>) -> Rig {
+            Rig::start_with(api, timing, alerts, None)
+        }
+
+        fn start_with(
+            api: &FakeHttp,
+            timing: KillTiming,
+            alerts: Option<crate::alerts::Alerts>,
+            block: Option<&str>,
+        ) -> Rig {
+            let rest = || {
+                Rest::new(
+                    &api.url(),
+                    Arc::new(Credentials::new("K", "S")),
+                    5000,
+                    Duration::from_millis(500),
+                )
+                .unwrap()
+            };
+            let host = Arc::new(TestHost {
+                rest: rest(),
+                queries: Queries::new(rest(), 7, 2000),
+                block: Mutex::new(block.map(str::to_string)),
+                notices: Mutex::default(),
+                alerts,
+                ended: Mutex::default(),
+            });
+            let clock = Arc::new(ManualClock::new());
+            let view = Arc::new(Mutex::new(KillView::default()));
+            let (ctl, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let ctx = NoticeContext {
+                source: HoldSource::Stream,
+                note: "private stream down".into(),
+                timing,
+            };
+            let (h, c, v) = (host.clone(), clock.clone(), view.clone());
+            let task = tokio::spawn(async move { run(&*h, &*c, timing, &ctx, &mut rx, &v).await });
+            Rig {
+                host,
+                clock,
+                ctl,
+                view,
+                task,
+                posts: Vec::new(),
+                seen: 0,
+            }
+        }
+
+        fn now(&self) -> u64 {
+            self.clock.now_ms()
+        }
+
+        /// Waits until the driver did everything due now (parked) or ended,
+        /// and books the new POSTs at the fake to the current loop time.
+        async fn settle(&mut self, api: &FakeHttp) {
+            for _ in 0..5_000 {
+                if self.clock.parked() || self.task.is_finished() {
+                    let reqs = api.requests();
+                    for q in &reqs[self.seen..] {
+                        assert!(
+                            q.method != "POST" || q.path() == CANCEL_ALL,
+                            "an order-path request other than cancel-all: {}",
+                            q.path()
+                        );
+                        if q.method == "POST" {
+                            self.posts.push(self.now());
+                        }
+                    }
+                    self.seen = reqs.len();
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+            panic!("the driver neither parks nor ends at {}", self.now());
+        }
+
+        /// Moves the clock in 100 ms steps until `until` or the end.
+        async fn run_to(&mut self, api: &FakeHttp, until: u64) {
+            self.run_by(api, until, 100).await;
+        }
+
+        async fn run_by(&mut self, api: &FakeHttp, until: u64, step: u64) {
+            self.settle(api).await;
+            while self.now() < until && !self.task.is_finished() {
+                self.clock.advance(step);
+                self.settle(api).await;
+            }
+        }
+
+        fn ended(&self) -> Vec<Report> {
+            self.host.ended.lock().unwrap().clone()
+        }
+
+        fn notices(&self) -> Vec<String> {
+            self.host.notices.lock().unwrap().clone()
+        }
+
+        /// Every 1 s window of loop time holds at most two cancel-alls.
+        fn at_most_two_per_second(&self) {
+            for (i, &t) in self.posts.iter().enumerate() {
+                let n = self.posts[i..]
+                    .iter()
+                    .take_while(|&&u| u < t + 1_000)
+                    .count();
+                assert!(
+                    n <= 2,
+                    "{n} cancel-alls in the second from {t}: {:?}",
+                    self.posts
+                );
+            }
+        }
+    }
+
+    fn gets(api: &FakeHttp, path: &str) -> usize {
+        api.requests()
+            .iter()
+            .filter(|q| q.method == "GET" && q.path() == path)
+            .count()
+    }
+
+    /// Done criterion: the fake leaves one order after the first cancel-all.
+    /// The loop repeats one second later, sees zero, counts every 5 s for
+    /// 30 s, and only then reports `confirmed`. Only cancel-alls go out on
+    /// the order path, at most two in any second.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn one_order_left_after_the_first_cancel_all_repeats_until_zero_then_watches_30_s() {
+        let api = venue();
+        api.route(REALTIME, [page(vec![open_row(1)]), page(vec![])]);
+        let mut r = Rig::start(&api, KillTiming::DEFAULT, None);
+        r.run_to(&api, 30_900).await;
+        assert_eq!(r.posts, [0, 1_000]);
+        assert!(
+            r.ended().is_empty(),
+            "ended before the 30 s watch: {:?}",
+            r.ended()
+        );
+        assert_eq!(r.view.lock().unwrap().phase, Phase::Watch);
+        // Counts: rounds 1 and 2, then the watch at +5 … +25 s.
+        assert_eq!(gets(&api, REALTIME), 2 + 5);
+        r.run_to(&api, 31_000).await;
+        assert_eq!(gets(&api, REALTIME), 2 + 6);
+        let ended = r.ended();
+        assert_eq!(ended.len(), 1, "{ended:?}");
+        assert_eq!((ended[0].rounds, ended[0].cancel_all_calls), (2, 2));
+        assert_eq!((&mut r.task).await.unwrap(), RunEnd::Confirmed);
+        let v = r.view.lock().unwrap().clone();
+        assert_eq!(
+            (v.phase, v.round, v.remaining, v.cancel_all_calls),
+            (Phase::Done, 2, Some(0), 2)
+        );
+        r.at_most_two_per_second();
+        let n = r.notices();
+        assert_eq!(n.len(), 3, "start, the count 1, final: {n:#?}");
+        assert!(
+            n[1].starts_with("킬 루프 1회차: 남은 미체결 1건, 일괄 취소 1회."),
+            "{}",
+            n[1]
+        );
+        assert!(n[2].starts_with("킬 루프 정리 완료"), "{}", n[2]);
+    }
+
+    /// Done criterion: cancel-all answers 5xx twice. Each failed round
+    /// waits for the next second; the third succeeds, zero follows, and
+    /// the loop ends 30 s after that zero. Never more than two cancel-alls
+    /// in a second.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_5xx_cancel_all_repeats_until_zero_and_never_exceeds_two_per_second() {
+        let api = venue();
+        let e500 = || Http::Reply(500, "{}".into());
+        api.route(CANCEL_ALL, [e500(), e500(), cancelled()]);
+        let mut r = Rig::start(&api, KillTiming::DEFAULT, None);
+        r.run_to(&api, 31_900).await;
+        assert_eq!(r.posts, [0, 1_000, 2_000]);
+        assert_eq!(
+            gets(&api, REALTIME),
+            1 + 5,
+            "no count after a failed cancel-all"
+        );
+        assert!(r.ended().is_empty());
+        r.run_to(&api, 32_000).await;
+        assert_eq!(r.ended().len(), 1);
+        assert_eq!(
+            r.ended()[0].cancel_all_calls,
+            3,
+            "failed requests count as calls"
+        );
+        r.at_most_two_per_second();
+        let v = r.view.lock().unwrap().clone();
+        assert_eq!(v.cancel_all_calls, 3);
+    }
+
+    /// The emergency budget is the outer guard: even with rounds of 100 ms
+    /// (below what the configuration allows) and orders always left, no
+    /// second holds more than two cancel-alls.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_emergency_budget_holds_two_per_second_with_a_short_round() {
+        let api = venue();
+        api.route(REALTIME, [page(vec![open_row(1)])]);
+        let t = KillTiming {
+            round_ms: 100,
+            ..KillTiming::DEFAULT
+        };
+        let mut r = Rig::start(&api, t, None);
+        r.run_to(&api, 5_000).await;
+        r.at_most_two_per_second();
+        assert_eq!(
+            r.posts,
+            [
+                0, 100, 1_000, 1_100, 2_000, 2_100, 3_000, 3_100, 4_000, 4_100, 5_000
+            ]
+        );
+    }
+
+    /// Done criterion: every notice carries the position block, read just
+    /// before it: each symbol with a position, its quantity, uPnL, mark and
+    /// distance to liquidation, unknown without a liquidation price; a
+    /// size-0 row is left out. A failed position query says so.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn every_notice_lists_each_position_with_its_liquidation_distance_or_unknown() {
+        let api = venue();
+        api.route(
+            REALTIME,
+            [page(vec![open_row(1), open_row(2)]), page(vec![])],
+        );
+        api.route(
+            POSITIONS,
+            [page(vec![
+                json!({"symbol": "BTCUSDT", "positionIdx": 0, "size": "0.010", "side": "Buy",
+                       "unrealisedPnl": "-1.23", "markPrice": "70000.0", "liqPrice": "61362"}),
+                json!({"symbol": "ETHUSDT", "positionIdx": 0, "size": "0.5", "side": "Sell",
+                       "unrealisedPnl": "2.00", "markPrice": "3000.0", "liqPrice": ""}),
+                json!({"symbol": "SOLUSDT", "positionIdx": 0, "size": "0", "side": "",
+                       "unrealisedPnl": "0", "markPrice": "150", "liqPrice": ""}),
+            ])],
+        );
+        let mut r = Rig::start(&api, KillTiming::DEFAULT, None);
+        r.run_to(&api, 20_000).await;
+        api.route(POSITIONS, [Http::Reply(500, "{}".into())]);
+        r.run_to(&api, 40_000).await;
+        let n = r.notices();
+        assert_eq!(n.len(), 3, "{n:#?}");
+        for text in &n[..2] {
+            assert!(
+                text.contains("\n포지션(거래소 /v5/position/list, "),
+                "{text}"
+            );
+            assert!(
+                text.contains("\n- BTCUSDT 매수 0.010, 미실현손익 -1.23, 마크 70000.0, 마크에서 강제청산가까지 12.34 %"),
+                "{text}"
+            );
+            assert!(
+                text.contains("\n- ETHUSDT 매도 0.5, 미실현손익 2.00, 마크 3000.0, 마크에서 강제청산가까지 모름(거래소가 청산가를 주지 않음)"),
+                "{text}"
+            );
+            assert!(!text.contains("SOLUSDT"), "{text}");
+        }
+        assert!(n[2].contains("\n포지션 조회 실패(no answer: "), "{}", n[2]);
+        assert!(n[2].ends_with(". 수량·손익 모름"), "{}", n[2]);
+        assert!(n.iter().all(|t| t.contains("킬 루프")));
+        assert_eq!(gets(&api, POSITIONS), 3, "one position read per notice");
+    }
+
+    /// Done criterion: ten minutes in which the count fails, through the
+    /// direct alerts to a loopback fake Telegram: at most 12 messages with
+    /// `킬 루프` reach it (here: start, ten repeats, final).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ten_minutes_of_failed_queries_reach_the_fake_telegram_at_most_twelve_times() {
+        let tg = FakeHttp::start(Http::Reply(200, r#"{"ok":true,"result":{}}"#.into()));
+        let mut cfg = alert_direct::AlertConfig::new(
+            alert_direct::TelegramConfig::new("123456:ABCdef_ghi-JKL", "42").unwrap(),
+            crate::alerts::PREFIX,
+            "bybit:testnet",
+        );
+        cfg.routes = vec![alert_direct::Route::direct(&tg.url()).unwrap()];
+        cfg.flush_every = Duration::from_millis(20);
+        let alerts = crate::alerts::Alerts::start(
+            cfg,
+            Arc::new(alert_direct::SystemClock),
+            Arc::new(crate::published::Published::new(Core::new(1), 0)),
+            Arc::new(crate::util::Fatal::default()),
+            crate::alerts::Settings::default(),
+            None,
+        )
+        .unwrap();
+        let api = venue();
+        api.route(REALTIME, [Http::Reply(500, "{}".into())]);
+        let mut r = Rig::start(&api, KillTiming::DEFAULT, Some(alerts));
+        // Every step of the loop falls on a whole second here: 1 s steps.
+        r.run_by(&api, 599_000, 1_000).await;
+        api.route(REALTIME, [page(vec![])]);
+        r.run_by(&api, 700_000, 1_000).await;
+        assert_eq!(r.ended().len(), 1);
+        assert_eq!(r.notices().len(), 12);
+        let a = r.host.alerts.as_ref().unwrap();
+        assert!(a.flush_for(Duration::from_secs(5)), "{:?}", a.state());
+        let texts: Vec<String> = tg
+            .requests()
+            .iter()
+            .map(|q| {
+                let v: Value = serde_json::from_slice(&q.body).unwrap();
+                v["text"].as_str().unwrap_or_default().to_string()
+            })
+            .collect();
+        let kill = texts.iter().filter(|t| t.contains("킬 루프")).count();
+        assert!(
+            (1..=12).contains(&kill),
+            "{kill} kill-loop messages: {texts:#?}"
+        );
+        assert!(
+            texts.iter().all(|t| t.starts_with(crate::alerts::PREFIX)),
+            "{texts:#?}"
+        );
+        r.at_most_two_per_second();
+    }
+
+    /// `KillStop` ends the loop at the next await: no notice and no input
+    /// after it. A second `Kill` while the loop runs is ignored. A blocked
+    /// gateway sends no cancel-all and the round says why.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_stop_ends_the_loop_without_a_notice_or_an_input() {
+        let api = venue();
+        api.route(REALTIME, [page(vec![open_row(1)])]);
+        let mut r = Rig::start_with(&api, KillTiming::DEFAULT, None, Some("ip_banned: HTTP 403"));
+        r.run_to(&api, 1_500).await;
+        assert!(r.posts.is_empty(), "a cancel-all left under the block");
+        assert_eq!(
+            gets(&api, REALTIME),
+            0,
+            "a count after a round that sent nothing"
+        );
+        {
+            let v = r.view.lock().unwrap().clone();
+            assert_eq!(
+                (v.round, v.remaining, v.last_error.as_deref()),
+                (2, None, Some("ip_banned: HTTP 403"))
+            );
+        }
+        *r.host.block.lock().unwrap() = None;
+        r.ctl
+            .send(VenueCommand::Kill {
+                since: 1,
+                source: HoldSource::Watcher,
+                note: "again".into(),
+            })
+            .unwrap();
+        r.run_to(&api, 2_500).await;
+        assert!(!r.task.is_finished(), "a second Kill ended the loop");
+        assert_eq!(r.posts, [2_000]);
+        let notices = r.notices().len();
+        r.ctl.send(VenueCommand::KillStop).unwrap();
+        assert_eq!((&mut r.task).await.unwrap(), RunEnd::Stopped);
+        r.clock.advance(60_000);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(r.notices().len(), notices);
+        assert!(r.ended().is_empty());
+        assert_eq!(r.view.lock().unwrap().phase, Phase::Stopped);
     }
 }
