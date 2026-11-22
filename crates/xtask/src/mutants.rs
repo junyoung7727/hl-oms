@@ -1823,6 +1823,33 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "client", "a_status_counts_when_its_body_is_cut"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M235-watcher-sockets-compared-as-written",
+        what: "the watcher's config compares admin_socket and monitor_socket as written, not by where they point: a symlinked directory or `..` makes one socket look like two, and the watcher would send watcher_mismatch to the monitor socket (review 1 S2 of U19a4)",
+        file: "crates/watcher/src/config.rs",
+        find: "        if resolved(&self.admin_socket) == resolved(&self.monitor_socket) {\n",
+        replace: "        if self.admin_socket == self.monitor_socket {\n",
+        test: &["-p", "watcher", "--test", "config", "the_config_is_validated_and_mainnet_needs_confirmation"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M236-watcher-credentials-owner-unchecked",
+        what: "the watcher's credentials load compares the file's owner with itself: a key file of another user is read (review 1 S4 of U19a4)",
+        file: "crates/watcher/src/creds.rs",
+        find: "        rustix::process::geteuid().as_raw(),\n",
+        replace: "        meta.uid(),\n",
+        test: &["-p", "watcher", "--test", "creds", "the_credentials_file_must_be_owner_only_and_outside_the_data_dir"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M237-watcher-vm-url-with-white-space",
+        what: "the watcher's config accepts a vm_url with white space at its end: URL parsing trims it, but the exporter appends /api/v1/import to the text, so every push fails and no watcher_* series reaches VictoriaMetrics (review 1 S3 of U19a4)",
+        file: "crates/watcher/src/config.rs",
+        find: "    if !plain(u) {\n        return refuse();\n    }\n",
+        replace: "",
+        test: &["-p", "watcher", "--test", "config", "the_config_is_validated_and_mainnet_needs_confirmation"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
