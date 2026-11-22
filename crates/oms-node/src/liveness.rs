@@ -352,7 +352,7 @@ mod tests {
     /// A second connection keeps the strategy alive when the first one
     /// closes; the close of the last one reports.
     #[test]
-    fn a_second_connection_keeps_the_strategy_alive() {
+    fn two_connections_count_and_only_the_last_close_reports() {
         let t0 = Instant::now();
         let mut t = table();
         let mut q = Queue::new();
