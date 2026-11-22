@@ -256,6 +256,12 @@ impl Config {
             return Err("sub_account_uid must be the sub-account's UID (> 0)".into());
         }
         self.check_symbols()?;
+        if !plain(&self.ip_echo_url) {
+            return Err(
+                "ip_echo_url must be written without white space or control characters".into(),
+            );
+        }
+        // An `https` URL always has a host: parsing refuses `https://`.
         let echo =
             reqwest::Url::parse(&self.ip_echo_url).map_err(|e| format!("ip_echo_url: {e}"))?;
         if echo.scheme() != "https" {
@@ -263,8 +269,8 @@ impl Config {
                 "ip_echo_url must be https: a forged answer would pass the IP check".into(),
             );
         }
-        if echo.host_str().is_none_or(str::is_empty) {
-            return Err("ip_echo_url has no host".into());
+        if !echo.username().is_empty() || echo.password().is_some() {
+            return Err("ip_echo_url must have no user or password".into());
         }
         check_status_url(&self.status_url)?;
         for (field, p) in [
@@ -411,13 +417,32 @@ fn check_status_url(u: &str) -> Result<(), String> {
     }
 }
 
-/// `http://` to a loopback address literal, no user, query or fragment.
+/// No white space and no control character anywhere. URL parsing drops
+/// them at the ends (and tabs and line feeds inside), so the text kept
+/// would not be the URL that is checked: the exporter appends its path
+/// to the text.
+fn plain(u: &str) -> bool {
+    !u.chars().any(|c| c.is_whitespace() || c.is_control())
+}
+
+/// `http://` to a loopback address literal, no user, query or fragment,
+/// written without white space. A refusal quotes the URL unless it may
+/// hold a password.
 fn check_vm_url(u: &str) -> Result<(), String> {
     let refuse = || {
+        if u.contains('@') {
+            return Err(
+                "[telemetry] vm_url must be http:// to a loopback address, without a user or password"
+                    .into(),
+            );
+        }
         Err(format!(
             "[telemetry] vm_url must be http:// to a loopback address, not {u:?}"
         ))
     };
+    if !plain(u) {
+        return refuse();
+    }
     let Ok(url) = reqwest::Url::parse(u) else {
         return refuse();
     };
@@ -440,11 +465,16 @@ fn check_vm_url(u: &str) -> Result<(), String> {
 /// A TOML error as one line: its message, the line it starts at and the
 /// key written on that line (the error's own text spans several lines
 /// with a quote of the file, and a wrong value does not name its key).
+/// A missing field names itself; its span is the whole table, so its
+/// first line and key would point at another, correct line.
 fn one_line(text: &str, e: &toml::de::Error) -> String {
     let msg = e.message().split_whitespace().collect::<Vec<_>>().join(" ");
     let Some(s) = e.span() else {
         return msg;
     };
+    if msg.starts_with("missing field ") {
+        return msg;
+    }
     let start = s.start.min(text.len());
     let line = text[..start].matches('\n').count() + 1;
     let key = text

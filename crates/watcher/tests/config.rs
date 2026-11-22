@@ -162,7 +162,15 @@ fn the_config_is_validated_and_mainnet_needs_confirmation() {
         "data_dir",
         "status_url",
     ] {
-        refused(&set(key, None), key);
+        // The TOML error of a missing field spans the whole file: its
+        // line and the key on it would point at another, correct line.
+        let text = set(key, None);
+        refused(&text, &format!("missing field `{key}`"));
+        let e = Config::from_toml(&text).unwrap_err();
+        assert!(
+            !e.contains(" at line ") && !e.contains("(key "),
+            "a missing field names another line: {e:?}"
+        );
     }
     // A parse error is one line too (TOML errors span several).
     refused("name = \n", "line 1");
@@ -234,6 +242,17 @@ fn the_config_is_validated_and_mainnet_needs_confirmation() {
     );
     refused(&set("ip_echo_url", Some("\"not a url\"")), "ip_echo_url");
     refused(&set("ip_echo_url", Some("\"https://\"")), "ip_echo_url");
+    // No user, no white space or control character (URL parsing drops
+    // them at the ends, so the text kept would not be the URL used).
+    for bad in [
+        "\"https://u:pw@ip.example/\"",
+        "\" https://ip.example/\"",
+        "\"https://ip.example/ \"",
+        "\"https://ip.example/\\n\"",
+        "\"https://ip.exa\\tmple/\"",
+    ] {
+        refused(&set("ip_echo_url", Some(bad)), "ip_echo_url");
+    }
 
     // data_dir absolute; credentials_file absolute, no `..`, outside the
     // data directory (the directory itself included).
@@ -336,14 +355,47 @@ fn the_config_is_validated_and_mainnet_needs_confirmation() {
         &set("admin_socket", Some("\"/srv/oms/data/./monitor.sock\"")),
         "admin_socket and monitor_socket must be different",
     );
+    // Compared by where they point: through a symlinked directory and
+    // through `..`, which `Path` equality does not fold.
+    let dir = common::test_dir("config-sockets");
+    let real = dir.join("real");
+    std::fs::create_dir_all(&real).unwrap();
+    let alias = dir.join("alias");
+    std::os::unix::fs::symlink(&real, &alias).unwrap();
+    let pair = |admin: &Path, monitor: &Path| {
+        set("admin_socket", Some(&format!("'{}'", admin.display()))).replace(
+            "name = ",
+            &format!("monitor_socket = '{}'\nname = ", monitor.display()),
+        )
+    };
+    let same = real.join("oms.sock");
+    for admin in [
+        alias.join("oms.sock"),
+        real.join("sub").join("..").join("oms.sock"),
+        alias.join("sub").join("..").join("oms.sock"),
+    ] {
+        refused(
+            &pair(&admin, &same),
+            "admin_socket and monitor_socket must be different",
+        );
+    }
+    let apart = ok(&pair(&alias.join("admin.sock"), &same));
+    assert_eq!(apart.admin_socket, alias.join("admin.sock"));
+    let _ = std::fs::remove_dir_all(&dir);
 
     // host: a label, given or /etc/hostname.
     assert_eq!(ok(&set("host", Some("\"tokyo-1\""))).host, "tokyo-1");
     refused(&set("host", Some("\"\"")), "host");
     refused(&set("host", Some("\"a\\nb\"")), "host");
+    let h255 = "h".repeat(255);
+    assert_eq!(ok(&set("host", Some(&format!("\"{h255}\"")))).host, h255);
+    refused(
+        &set("host", Some(&format!("\"{}\"", "h".repeat(256)))),
+        "host",
+    );
 
     // Every range at both bounds and one past each.
-    let ranges: [(&str, &str, u64, u64); 18] = [
+    let ranges: [(&str, &str, u64, u64); 16] = [
         ("intervals", "w1_ms", 500, 10_000),
         ("intervals", "w2_ms", 500, 10_000),
         ("intervals", "w3_ms", 1000, 30_000),
@@ -360,9 +412,6 @@ fn the_config_is_validated_and_mainnet_needs_confirmation() {
         ("w3", "daily_loss_bps", 1, 10_000),
         ("http", "recv_window_ms", 1000, 20_000),
         ("http", "request_timeout_ms", 200, 10_000),
-        // Two fields of one table at once: each bound is its own.
-        ("intervals", "w1_ms", 500, 10_000),
-        ("rules", "w4_max_pages", 1, 50),
     ];
     for (table, field, lo, hi) in ranges {
         let with = |v: u64| format!("{MIN}\n[{table}]\n{field} = {v}\n");
@@ -385,6 +434,18 @@ fn the_config_is_validated_and_mainnet_needs_confirmation() {
         &format!("{MIN}\n[rules]\nw4_overlap_ms = -1\n"),
         "w4_overlap_ms",
     );
+    // Two fields of one table at once: each bound is its own.
+    let two = ok(&format!("{MIN}\n[intervals]\nw1_ms = 500\nw2_ms = 10000\n"));
+    assert_eq!((two.intervals.w1_ms, two.intervals.w2_ms), (500, 10_000));
+    assert_eq!(two.intervals.w3_ms, 2000);
+    refused(
+        &format!("{MIN}\n[intervals]\nw1_ms = 500\nw2_ms = 10001\n"),
+        "[intervals] w2_ms must be between 500 and 10000",
+    );
+    refused(
+        &format!("{MIN}\n[rules]\nw4_max_pages = 51\nmin_age_ms = 500\n"),
+        "[rules] w4_max_pages must be between 1 and 50",
+    );
 
     // vm_url: loopback http only; absent = nothing exported.
     for good in [
@@ -402,13 +463,26 @@ fn the_config_is_validated_and_mainnet_needs_confirmation() {
         "http://vm.example:8428",
         "http://user:pw@127.0.0.1:8428",
         "http://127.0.0.1:8428/?db=x",
+        "http://127.0.0.1:8428/#x",
         "127.0.0.1:8428",
+        // The exporter appends `/api/v1/import` to the text: a trailing
+        // space would give a URL that never parses.
+        "http://127.0.0.1:8428 ",
+        " http://127.0.0.1:8428",
+        "http://127.0.0.1:84\\t28",
+        "http://127.0.0.1:8428\\n",
     ] {
         refused(
             &format!("{MIN}\n[telemetry]\nvm_url = \"{bad}\"\n"),
             "vm_url",
         );
     }
+    // A refused URL with a user is not quoted (it may hold a password).
+    let e = Config::from_toml(&format!(
+        "{MIN}\n[telemetry]\nvm_url = \"http://u:hunter2@10.0.0.1:8428\"\n"
+    ))
+    .unwrap_err();
+    assert!(e.contains("vm_url") && !e.contains("hunter2"), "{e}");
 }
 
 fn value_of(c: &Config, field: &str) -> u64 {
