@@ -1805,6 +1805,15 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "client", "a_request_waiting_at_the_guard_sees_a_later_rejection_or_pause"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M234-watcher-cut-body-loses-the-status",
+        what: "the watcher's client reads a status other than 2xx whose body is cut (the connection closes or the request times out during the body) as no answer: a cut 401 does not latch the key stop and a cut 403 does not start the 600 s pause, so the next request goes out during an IP ban (review 2 S1 of U19a3)",
+        file: "crates/watcher/src/rest.rs",
+        find: "            Err(e) if !(200..=299).contains(&status) => {\n",
+        replace: "            Err(e) if false && !(200..=299).contains(&status) => {\n",
+        test: &["-p", "watcher", "--test", "client", "a_status_counts_when_its_body_is_cut"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
