@@ -1,14 +1,14 @@
 # C-WATCH 독립 워처
 
-상태: 1~2부 구현됨(U19a1, U19a2, 2026-11-23). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md). 주장: V-WATCH-1, V-WATCH-2. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
+상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
 
-워처는 OMS와 코드를 나누지 않는 별도 프로그램이다. 저널을 자기 읽기로 읽고(이 문서와 [C-TAIL](tail.md), [ADR-011](../adr/ADR-011-file-format.md)만으로 썼다), 자기 키와 클라이언트로 Bybit를 조회해 OMS와 비교하고, 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고, `monitor.sock`에 하트비트를 보낸다. **U19a2까지는 저널 읽기, 저널 상태, 독립성 검사만 있다. 검사(W1~W4), Bybit 클라이언트, 하트비트는 아직 없어 워처는 아직 아무것도 감시하지 않는다.** 바이너리는 `watcher --version`에만 답하고, 그 밖의 호출은 "not built yet: the checks arrive in U19a5–U19a7"를 찍고 코드 2로 끝난다(네트워크도 파일도 건드리지 않는다).
+워처는 OMS와 코드를 나누지 않는 별도 프로그램이다. 저널을 자기 읽기로 읽고(이 문서와 [C-TAIL](tail.md), [ADR-011](../adr/ADR-011-file-format.md)만으로 썼다), 자기 키와 클라이언트로 Bybit를 조회해 OMS와 비교하고, 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고, `monitor.sock`에 하트비트를 보낸다. **U19a3까지는 저널 읽기, 저널 상태, 독립성 검사, Bybit 서명·클라이언트와 지표 내보내기만 있다. 시작 확인, 검사(W1~W4), 하트비트는 아직 없어 워처는 아직 아무것도 감시하지 않고, 클라이언트를 부르는 코드도 아직 없다.** 바이너리는 `watcher --version`에만 답하고, 그 밖의 호출은 "not built yet: the checks arrive in U19a5–U19a7"를 찍고 코드 2로 끝난다(네트워크도 파일도 건드리지 않는다).
 
 | 부 | 내용 | 단위 |
 |---|---|---|
 | 1 | 독립성과 그 검사, 저널 읽기, 아는 이벤트, 소수, `Base32Pair` | U19a1(이 문서) |
 | 2 | 저널 상태(주문, 열린 주문, 체결, 포지션, 보류, 기준일), 재생 속도 | U19a2(이 문서) |
-| 3 | Bybit 서명과 클라이언트, 응답 분류, 요청 제한, 지표 | U19a3(아직 없음) |
+| 3 | Bybit 서명과 클라이언트, 응답 분류, 요청 제한, 지표 | U19a3(이 문서) |
 | 4 | 설정, 자격 파일, 시작 확인, IP 재확인 | U19a4, U19a4b(아직 없음) |
 | 5~9 | 검사 엔진과 W1, W2, OMS 연결과 실행, W4, W3과 예산 | U19a5~U19a9(아직 없음) |
 
@@ -18,8 +18,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| `watcher`의 정상 의존성 | 레지스트리 crate만(U19a1: `serde_json`, `crc32fast`). 작업 공간 crate는 없다 |
-| `watcher`의 개발 의존성 | 작업 공간에서는 `http-fake`만(U19a3부터 쓴다) |
+| `watcher`의 정상 의존성 | 레지스트리 crate만(U19a1: `serde_json`, `crc32fast`; U19a3: `hmac`, `sha2`, `hex`, `reqwest`(rustls, 기본 기능 없음), `tokio`). 작업 공간 crate는 없다 |
+| `watcher`의 개발 의존성 | 작업 공간에서는 `http-fake`만(U19a3부터 쓴다). 레지스트리에서는 `tokio`(시험 매크로) |
 | `watcher`에 의존하는 패키지 | `watcher-conformance`만 |
 | `watcher-conformance` | `publish = false`, 빈 `lib.rs`, 시험만. 개발 의존성 `watcher`, `oms-core`, `oms-journal`, `serde_json` |
 | 소스 | `watcher` 디렉터리의 어떤 `.rs`도 `#[path]`, `include!` 계열, 속성 안의 `path =`로 패키지 밖의 파일을 가져오지 않는다. 심볼릭 링크가 없다. 매니페스트의 target(`[lib]`, `[[bin]]`, `[[test]]`, `[[bench]]`, `[[example]]`의 `path`, `build`)의 소스 파일도 패키지 안에 있다. `tail.md`는 시험이 파일로 읽는다 |
@@ -151,3 +151,74 @@
 ### 검증(2부)
 
 `state::the_sets_follow_the_field_table`, `state::a_fill_after_close_uses_the_kept_order_info`, `state::purged_forgets_closed_orders_and_old_keys`, `state::purging_an_unknown_order_stops_the_state`, `state::the_fill_floor_never_goes_down`, `state::the_fact_time_moves_only_on_the_compared_order_events`, `state::funding_never_changes_a_position`, `state::venue_terminal_marks_the_order_terminal_and_moves_its_fact_time`, `state::an_instrument_the_journal_never_changed_has_no_change_time`, `state::records_that_break_the_rules_stop_the_state`(`crates/watcher/tests/state.rs`, 기록을 메모리에서 만든다). 적합성: `conformance::the_watcher_sets_equal_the_core_on_journals_with_every_event_kind`. 핵심 시험 도구(`H`)로 코어를 움직이는 시나리오 열 개(일반 체결과 종결, 부분 체결과 취소, 닫힌 뒤의 체결, 외부·파킹·풀린 체결, 결과 불명·재확인·부재·누락 체결, 거래소 변경 네 종류·펀딩·미분류·스냅숏 조정, 운영자·저장 공간·참조 가격·불일치·전략 연결·두 번째 설정, 킬과 재무장·워처 불일치·킬 마커, 증거금·기준일·감소 전용, 모니터링 게이트, 정리와 재시작)가 C-TAIL 표의 이벤트 51개를 모두 쓴다(시험이 `tail.md`를 읽어 확인하고 빠진 이름을 적는다). 기록을 `oms-journal::Writer`가 4 KiB 세그먼트로 쓰고, 워처가 기록마다 상한을 그 기록으로 두고 읽어, 같은 기록을 재생한 코어와 비교한다: 열린 주문 집합, 열린 주문마다 종목·방향·수량·전략·클라이언트 ID·거래소 주문 번호·누적 체결·결과 불명·거래소 종결, 종목마다 포지션(0은 없는 것으로), 체결·거래소 변경·펀딩 키와 그 거래소 시각(스펙은 바닥 이상만 요구하지만, 양쪽이 같은 기록에서 잊으므로 집합 전체를 비교한다), 체결 바닥, 킬 보류(`core.kill`), 워처 불일치 보류(`core.watcher_mismatch`), 일 기준값(`core.margin.day_base`의 `day`, `value`; 검토 1 S1). 변이: M185(종결이 주문 정보를 지움), M186(거래소 변경을 포지션에서 뺌), M187(바닥과 같은 시각의 키를 잊음), M210(`purged`·`booted`가 바닥을 낮춤), M231(`booted`가 바닥 아래의 키를 잊음, 검토 1 S2).
+
+## 3부. Bybit 서명과 클라이언트, 지표
+
+`watcher::sign`, `watcher::rest`, `watcher::metrics`, `watcher::clock`. OMS의 Bybit 코드(`crates/oms-node/src/venue/bybit`)는 API를 알려고 읽기만 했고 쓰지 않는다. 시험은 loopback 가짜(`http-fake`)와 수동 시계로만 한다. **실제 Bybit에는 한 번도 보내지 않았다**(키가 아직 없다). 이 부분은 클라이언트만 만든다. 그것을 부르는 시작 확인(U19a4b)과 검사(U19a5~)는 아직 없다.
+
+### 서명
+
+- GET만 서명한다(POST는 U19b의 일괄 취소가 쓸 때 더한다). `X-BAPI-SIGN = hex(HMAC_SHA256(secret, timestamp + api_key + recv_window + query))`. `query`는 URL에 보내는 문자열과 바이트까지 같다.
+- 질의 문자열: `k=v`를 `&`로 잇고 키로 정렬한다. 값은 그대로 보낸다(거래소의 커서는 이미 퍼센트 인코딩되어 온다). 키나 값에 `[A-Za-z0-9-_.~%:,]` 밖의 글자가 있으면 **보내기 전에 거절**한다(`not_sent`). 인코딩해서 보내지 않는다. 이 거절은 요청이 아니므로 `watcher_requests_total`에 세지 않고 `watcher_request_errors_total{class="not_sent"}`에만 센다.
+- 머리글 다섯: `X-BAPI-API-KEY`, `X-BAPI-TIMESTAMP`(보내는 순간의 주입된 시계, 요청 제한에서 기다린 뒤에 읽는다), `X-BAPI-RECV-WINDOW`(`recv_window_ms`), `X-BAPI-SIGN`, `X-BAPI-SIGN-TYPE: 2`.
+- 연결: 지역 주소는 IPv4만(IP 반향이 보는 주소가 Bybit가 보는 주소가 되도록), 연결 제한 3초, 요청 제한 `request_timeout_ms`, 리다이렉트를 따르지 않고(서명된 요청을 다시 보내게 된다), 프록시를 쓰지 않는다.
+- 자격(`rest::Credentials`)의 `Debug`는 비밀을 찍지 않는다. 파일에서 읽는 것은 U19a4다.
+
+### 응답 분류
+
+`rest::classify(status, body)`와 `Client::get(path, params) -> Result<Value, RestError>`. retCode 0이면 `result`(없으면 `null`)를 돌려준다.
+
+| 응답 | 부류(`class`) | 효과 |
+|---|---|---|
+| 연결 실패, 아무것도 보내지 않음. 보낼 수 없는 질의 값 | `not_sent` | 그 라운드 실패 |
+| 시간 초과, HTTP 5xx와 그 밖의 2xx 아닌 상태, 읽을 수 없는 본문, retCode 없음(정수 아님 포함), retCode 10016 | `no_answer` | 그 라운드 실패 |
+| HTTP 401. retCode 10003, 10004, 10005, 10007, 10010, 33004 | `auth` | **다시 보내지 않는다**: 그 뒤 모든 Bybit 요청이 프로세스가 다시 시작할 때까지 멈춘다. `watcher_auth_rejected = 1`, 코드를 적은 오류 줄 하나 |
+| HTTP 403 | `ip_banned` | 모든 Bybit 요청과 IP 반향이 600초 멈춘다 |
+| HTTP 429, retCode 10006 | `rate_limited` | 그 라운드 실패 |
+| retCode 10002 | `clock` | 그 라운드 실패 |
+| 그 밖의 0 아닌 retCode | `refused` | 그 라운드 실패 |
+| retCode 0인데 행을 읽을 수 없다 | `unreadable` | 그 라운드 실패. 클라이언트가 아니라 검사가 만든다(`Client::unreadable(endpoint, why)`가 세고 돌려준다) |
+
+- 스코프가 이름 붙인 코드는 10010, 10003, 33004다. 10004(서명), 10005(권한), 10007(인증 실패)와 HTTP 401은 OMS가 낫지 않는 것으로 보는 같은 묶음이라 더했다(소유자 질문 3, 멈추는 쪽이 안전하다). HTTP 401의 코드는 `401`로 적는다.
+- 클라이언트 안에서 다시 시도하지 않는다. 다음 라운드가 다시 시도다(스펙 "Errors at start and in a round").
+
+### 다시 보내지 않는 코드
+
+- 첫 `auth` 응답이 클라이언트에 그 코드를 래치한다(`Client::auth_rejected()`). 그 뒤의 모든 `get`은 보내지 않고 세지 않고 `auth`(`"not sent: the key was rejected earlier…"`)로 끝난다. 오류 줄은 첫 응답에 한 번만 쓴다. 프로세스를 다시 시작해야 풀린다.
+- `watcher_auth_rejected`는 클라이언트를 만들 때 0으로 두고, 래치할 때 1로 둔다.
+- IP 반향(`Client::echo(url)`)은 이 래치로 멈추지 않는다(판단(모델 아님)): 반향은 Bybit 요청이 아니고, 10010의 흔한 원인이 바뀐 공인 IP라 `watcher_public_ip_ok`가 계속 맞는 값을 보여 주는 편이 낫다. 403 멈춤과 요청 제한은 반향에도 걸린다.
+
+### 403 멈춤
+
+- HTTP 403을 받으면 **그 응답을 받은 순간의 시계 + 600,000 ms**까지 모든 Bybit 요청과 IP 반향이 멈춘다(F18 L186 "최소 10분", OMS와 같은 값). 그 사이의 요청은 보내지 않고 세지 않고 `ip_banned`로 끝난다. 끝나는 순간(`Client::paused_until()`)부터 다시 보낸다. 시작 확인의 재시도(U19a4b)가 이 순간을 기다린다.
+- 반향 서비스 자신의 403은 Bybit의 차단이 아니다: 반향의 2xx가 아닌 상태는 모두 `no_answer`다.
+
+### 요청 제한(가드)
+
+- 어느 10초 창에서든 요청은 60개까지다. 모든 Bybit 경로와 IP 반향을 합친다(판단(모델 아님); 최악의 경우는 "Budget", U19a9). OMS와 같이 쓰는 IP 한도(5초에 600, 설계 §7.3)를 워처의 폭주 루프에서 지킨다.
+- `rest::Guard::admit(now) -> Result<(), u64>`는 주입된 시계 위의 sans-IO 부분이다. 요청을 기록하고 보내게 하거나, 보낼 수 있는 가장 이른 순간(창의 첫 요청 + 10,000 ms)을 돌려준다. 거절된 요청은 기록하지 않는다. 시계가 뒤로 가면 옛 기록이 창에 남아 시계가 그 값을 다시 지날 때까지 막는다.
+- 넘는 요청은 버리지 않고 기다린다. 클라이언트는 그 순간까지 자고 다시 묻는다. 한 번에 최대 100 ms만 자고 시계를 다시 읽는다(판단(모델 아님): 수동 시계나 한 걸음 움직인 시계를 놓치지 않도록. 실제 시계에서 10초를 기다리면 깨는 횟수가 100번이다). 깰 때마다 래치와 403 멈춤을 다시 본다.
+
+### 요청 집계
+
+- `watcher_requests_total{endpoint}`: 보내기 직전에 센다(요청 제한을 지난 뒤, 보내기 전). `endpoint`는 경로(`/v5/order/realtime` 등). 반향은 `ip_echo`다(URL은 설정이라 이름표에 넣지 않는다). 페이지마다 하나다.
+- `watcher_request_errors_total{endpoint,class}`: 위 표의 부류. 래치와 403 멈춤 때문에 보내지 않은 요청은 세지 않는다(요청이 아니다).
+
+### 지표 등록부와 VM 가져오기 클라이언트
+
+- `metrics::Metrics`: 게이지(`set`, `remove`)와 카운터(`add`)를 이름과 이름표로 둔다. 모든 계열에 `venue="bybit"`, `host`, `watcher`가 붙는다(같은 이름의 계열 이름표보다 이 셋이 이긴다). 이름표는 정렬한다. 값이 유한하지 않은 계열과 지운 게이지는 보내지 않는다.
+- 가져오기 본문(`Metrics::import_lines(ts_ms)`): 표본마다 JSON 한 줄 `{"metric":{"__name__":…,이름표},"values":[v],"timestamps":[ms]}`, 모두 내보내는 순간의 시각. `watcher_up 1`이 언제나 첫 줄이다(없으면 워처나 그 밀어 넣기가 사라진 것). 문자열은 JSON으로 따옴표를 친다.
+- `metrics::Exporter::push(&Metrics, now_ms)`: `<vm_url>/api/v1/import`로 POST 하나(제한 시간 `request_timeout_ms`, 리다이렉트·프록시 없음). **큐가 없다**: 실패한 밀어 넣기는 버린다(게이지는 다음에 새 값으로, 카운터는 누적이라 다음 밀어 넣기가 따라잡는다). 첫 실패와 그 뒤 1분에 한 번까지만 로그를 쓴다. 워처는 작업 공간의 `obs-push`를 쓰지 않는다(독립성 규칙 3).
+- 밀어 넣기 타이머(`export_ms`)는 엔진이 아니라 런타임(U19a7)의 것이다. 설정을 읽은 직후부터 돌고, 종료 때 한 번 더 민다.
+
+### 알려진 한계(3부)
+
+- 실제 Bybit, 실제 VictoriaMetrics에 보낸 적이 없다. 응답 형식과 코드는 문서(gateway facts, F18, F20)와 OMS의 분류에서 왔다.
+- 요청 제한은 이 프로세스의 요청만 센다. OMS의 요청은 모른다. 60/10초는 IP 한도의 1%다(판단(모델 아님)).
+- 요청 제한에서 기다리는 동안 실제 시간으로 최대 100 ms씩 잔다. 시계가 뒤로 가면 그만큼 더 기다린다(공통 결정 "Clock"의 한계와 같다).
+- 카운터는 프로세스마다 0에서 시작한다(재시작 뒤 VM의 증가율 함수가 처리한다).
+- `retCode`는 2xx 본문에서만 읽는다. 401·403·429가 아닌 2xx 아닌 상태의 본문 안 retCode는 보지 않는다(`no_answer`).
+
+### 검증(3부)
+
+`sign::the_strings_to_sign_and_signatures_match_independent_values`(거래소의 예시 문자열, RFC 4231 경우 2, 지어낸 비밀 `watcher-made-up-secret-42`로 Python `hmac`이 계산한 값; `tools/ci/secret_scan_allow.txt`에 이유와 함께), `sign::query_strings_are_sorted_and_unsafe_values_refused`, `client::every_request_carries_the_five_headers_and_the_signed_query`(Python 값과 같은 서명, 가짜가 요청을 받는 순간 카운터가 이미 올라가 있음, 보낼 수 없는 값은 아무것도 보내지 않음), `client::answers_are_classified`(부류마다 한 번, 다음 요청은 그대로 감), `client::auth_answers_are_never_retried`(10010, 10003, 33004, 10004, 10005, 10007, HTTP 401 각각: 응답 뒤 수동 시계를 10분 움직이며 매초 여섯 경로에 요청해도 가짜에 닿는 요청이 더 없고, 오류 줄은 하나), `client::http_403_pauses_every_request_for_600_s`(응답이 보낸 뒤 500 ms에 와도 멈춤은 응답부터 600초, 끝나기 1 ms 전까지 모든 경로와 반향이 보내지지 않음), `client::the_guard_holds_requests_beyond_60_in_10_s`(가드만, 수동 시계, 1분의 폭주 루프에서 어느 10초 창도 60 이하), `client::a_request_beyond_the_guard_waits_for_the_window`(클라이언트가 가득 찬 가드에서 기다리다 시계가 그 순간에 이르면 보내고, 그 요청은 기다린 뒤의 시계로 서명됨; 실제 시간), `metrics::the_import_lines_are_victoria_metrics_json`, `metrics::a_failed_push_is_dropped`. 변이: M188(10010을 다음 라운드에 다시 보냄), M191(질의 문자열을 정렬하지 않음), M192(403 멈춤 60초).

@@ -68,7 +68,7 @@ pub fn suites(quick: bool, live: bool, extended: Option<&str>) -> Vec<Suite> {
         },
         Suite {
             name: "watcher",
-            what: "the independent watcher (U19a): its own journal reader at its failure boundaries (cap, rotation, damage, latched errors), known events against the C-TAIL table, decimals, Base32Pair, its journal state by the rows of the C-TAIL table; conformance against oms-core and oms-journal (the sets after every record of scenarios with every event kind)",
+            what: "the independent watcher (U19a): its own journal reader at its failure boundaries (cap, rotation, damage, latched errors), known events against the C-TAIL table, decimals, Base32Pair, its journal state by the rows of the C-TAIL table; its own Bybit signer and client against a loopback fake on a manual clock (answer classes, never-retried key rejections, the 403 pause, the request guard) and its metrics registry and VM import client; conformance against oms-core and oms-journal (the sets after every record of scenarios with every event kind)",
             args: &["test", "-p", "watcher", "-p", "watcher-conformance"],
             env: env(&[]),
         },

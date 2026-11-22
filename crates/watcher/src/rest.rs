@@ -1,4 +1,8 @@
-//! The watcher's own Bybit v5 REST client (C-WATCH part 3).
+//! The watcher's own Bybit v5 REST client (C-WATCH part 3), written from
+//! the venue's documentation, not from the OMS's code: signed GETs, the
+//! answer classes, the never-retried key rejection, the 403 pause, the
+//! request guard and the request counters. The checks call it; it never
+//! retries inside a call (the next round is the retry).
 
 use std::collections::VecDeque;
 use std::net::{IpAddr, Ipv4Addr};

@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `6b7d7592b178e334`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `914b8d589d837662`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
-주장 110건: 통과 0, 실패 0, 미실행 43, 이전 버전 결과 67.
+주장 111건: 통과 0, 실패 0, 미실행 44, 이전 버전 결과 67.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -117,6 +117,7 @@
 | V-GATE-4 | Input::Watcher(Heartbeat), watcher_heartbeat, monitor_changed, policy.monitor, core.monitor는 기록 스키마를 올리지 않는다(2 그대로): 게이트가 없으면 쓰지 않아 옛 상태와 설정의 바이트가 그대로이고, 게이트를 켜는 설정·신선한 하트비트·오래된 하트비트·2단계의 틱이 든 저널은 라이브 상태로 복구되며 verify --re-decide를 통과한다. 이벤트 필드 표가 두 이벤트의 모든 필드를 적는다(W1..W9 포함). [core.policy.monitor]의 값은 heartbeat_max_age_us 10..=300초, check_max_age_us 2..=60초, unmonitored_cancel_us 10..=600초이고, 모르는 키는 거부되며, mainnet은 표 없이 시작하지 않고 testnet과 가상 거래소는 선택이다. 표가 있으면 runtime.tick_ms는 1,000 이하다(1,001은 거부, 표가 없으면 60,000도 받음). 세 소켓 경로는 서로 달라야 한다. 알림 hold:unmonitored는 지나가는 상태의 유예(30초)를 받고 이유·시각·2단계까지 남은 초(또는 취소 중)와 증거금 정책에 따른 감소 전용 문장을 담으며, 신선한 하트비트로 해소된다. status.core.monitor는 게이트가 없으면 gate: false다 | 단위, 통합 | 미실행 | `cargo test -p oms-node --test record_schema; cargo test -p oms-node --lib alerts:: config::; cargo test -p oms-core --test event_fields; cargo test -p oms-core --test monitor the_gate_values` |
 | V-WATCH-1 | 워처 crate는 OMS와 코드를 나누지 않는다: oms-*·md-* crate를 어떤 종류(정상, 빌드, 개발)와 target으로도 선언하지 않고, 개발 의존성 http-fake 말고는 작업 공간 crate를 쓰지 않으며, 그 정상·빌드 그래프에서 OMS·시세·작업 공간 crate에 닿지 않고, watcher-conformance 말고는 아무 작업 공간 crate도 워처에 의존하지 않으며, 소스가 #[path]·include!·속성 안의 path =·심볼릭 링크로, 매니페스트의 target이 소스 경로로 패키지 밖의 파일을 가져오지 않는다. 검사 스크립트는 그 각각을 심으면 그 결과 줄과 종료 코드 1을 내고, 확인할 수 없을 때(맞지 않는 잠금, 없는 매니페스트)는 ok가 아니라 종료 코드 2를 낸다 | 소스 검사 | 미실행 | `tools/ci/watcher_independent.sh && tools/ci/selftest.sh` |
 | V-WATCH-2 | 워처의 독자 읽기와 저널 상태가 코어와 같은 집합을 세운다: 코어가 결정하고 oms-journal이 쓴 저널을 기록마다 읽어, 열린 주문 집합, 열린 주문마다 종목·방향·수량·전략·클라이언트 ID·거래소 주문 번호·누적 체결·결과 불명·거래소 종결, 종목마다 포지션, 체결·거래소 변경·펀딩 키와 그 거래소 시각, 체결 바닥, 킬 보류와 워처 불일치 보류, 일 기준값이 같은 기록을 재생한 코어와 같다. 시나리오들이 C-TAIL 표의 이벤트를 모두 쓴다. 닫힌 주문의 정보는 purged까지 남아 늦은 체결의 방향과 종목을 주고, 펀딩은 포지션을 바꾸지 않으며, 체결 바닥은 내려가지 않고 booted는 키를 잊지 않으며, 규칙에 맞지 않는 기록(모르는 주문의 체결, 열린 주문의 purged, 형식이 틀린 필드, 순서가 어긋난 기록)은 래치되는 오류다 | 단위, 통합 | 미실행 | `cargo test -p watcher --test state && cargo test -p watcher-conformance` |
+| V-WATCH-3 | 워처의 자기 Bybit 클라이언트는 GET을 거래소 문서대로 서명하고(정렬된 질의, 보낼 수 없는 값은 보내기 전에 거절, 머리글 다섯, 보내는 순간의 시계), 응답을 부류로 나누며(not_sent, no_answer, rate_limited, clock, refused, auth, ip_banned; unreadable은 검사가 만든다), 키 거절(HTTP 401, retCode 10003·10004·10005·10007·10010·33004) 뒤에는 프로세스가 다시 시작할 때까지 Bybit에 아무 요청도 보내지 않고, HTTP 403 뒤에는 응답 순간부터 600초 동안 모든 요청과 IP 반향을 보내지 않으며, 어느 10초 창에서도 60개를 넘겨 보내지 않고 넘는 요청은 버리지 않고 기다린다. 요청은 보내기 전에 세고, 지표는 VictoriaMetrics 가져오기 JSON 한 줄씩(watcher_up 포함) 큐 없이 밀어 넣는다 | 단위, 통합(loopback) | 미실행 | `cargo test -p watcher --test sign --test client --test metrics` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -2677,4 +2678,31 @@
 | `watcher/venue_terminal_marks_the_order_terminal_and_moves_its_fact_time` | 미실행 |  |
 | `watcher/an_instrument_the_journal_never_changed_has_no_change_time` | 미실행 |  |
 | `watcher/records_that_break_the_rules_stop_the_state` | 미실행 |  |
+
+## V-WATCH-3 — 워처의 자기 Bybit 클라이언트는 GET을 거래소 문서대로 서명하고(정렬된 질의, 보낼 수 없는 값은 보내기 전에 거절, 머리글 다섯, 보내는 순간의 시계), 응답을 부류로 나누며(not_sent, no_answer, rate_limited, clock, refused, auth, ip_banned; unreadable은 검사가 만든다), 키 거절(HTTP 401, retCode 10003·10004·10005·10007·10010·33004) 뒤에는 프로세스가 다시 시작할 때까지 Bybit에 아무 요청도 보내지 않고, HTTP 403 뒤에는 응답 순간부터 600초 동안 모든 요청과 IP 반향을 보내지 않으며, 어느 10초 창에서도 60개를 넘겨 보내지 않고 넘는 요청은 버리지 않고 기다린다. 요청은 보내기 전에 세고, 지표는 VictoriaMetrics 가져오기 JSON 한 줄씩(watcher_up 포함) 큐 없이 밀어 넣는다
+
+- 상태: **미실행**
+- 왜 중요한가: OMS의 Bybit 해석 결함을 같은 코드로 확인하면 확인이 아니다(ADR-031). 거절된 키로 계속 보내거나 403 뒤에 일찍 보내면 OMS와 같이 쓰는 IP가 더 오래 막히고, 폭주 루프는 그 IP 한도를 먹는다
+- 수준: 단위, 통합(loopback)
+- 전제와 범위: 서명 함수와 질의 문자열, 수동 시계 위의 가드(1분 폭주 루프 포함), loopback 가짜 Bybit·반향·VM에 붙인 클라이언트와 내보내기(부류마다 한 번, 거절 코드 일곱 각각 10분, 403 전후, 가득 찬 가드의 대기)
+- 실제 구성요소: reqwest(rustls), hmac·sha2, 클라이언트와 등록부 코드, loopback TCP
+- 모의·시뮬레이션: Bybit, IP 반향, VictoriaMetrics(http-fake), 시계(수동)
+- 주입한 장애: 연결 거절, 응답 없음, 연결 닫힘, 5xx, 읽을 수 없는 본문, retCode 없음·문자열, 10016, 429, 10006, 10002, 다른 retCode, 거절 코드 일곱, 403(응답이 500 ms 늦음), 반향의 403, VM의 503·닫힘·500. 변이 M188, M191, M192와 mut.py 18개
+- 판정 기준과 근거: 서명이 거래소 예시·RFC 4231·Python hmac 값과 같다. 부류와 카운터가 표대로다. 거절 뒤 10분 동안 가짜가 받는 요청이 하나뿐이고 오류 줄이 하나다. 403 뒤 응답 + 599,999 ms까지 어떤 요청도 가짜에 닿지 않고 응답 + 600,000 ms에 간다. 어느 10초 창도 60 이하이고 거절된 요청은 받은 순간에 간다. 실패한 밀어 넣기는 다음 본문에 남지 않는다
+- 재현: `cargo test -p watcher --test sign --test client --test metrics`
+- 뒷받침하는 것: C-WATCH 3부, ADR-031
+- 확인하지 않은 범위: 실제 Bybit와 실제 VictoriaMetrics(키가 없고 U-01 승인이 필요하다). 응답 형식은 문서와 OMS의 분류에서 왔다. 가드는 이 프로세스의 요청만 센다(OMS의 요청은 모른다). 이 클라이언트를 부르는 시작 확인(U19a4b), 검사(U19a5~), 밀어 넣기 타이머와 종료 때의 마지막 밀어 넣기(U19a7)는 아직 없다
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `watcher/the_strings_to_sign_and_signatures_match_independent_values` | 미실행 |  |
+| `watcher/query_strings_are_sorted_and_unsafe_values_refused` | 미실행 |  |
+| `watcher/every_request_carries_the_five_headers_and_the_signed_query` | 미실행 |  |
+| `watcher/answers_are_classified` | 미실행 |  |
+| `watcher/auth_answers_are_never_retried` | 미실행 |  |
+| `watcher/http_403_pauses_every_request_for_600_s` | 미실행 |  |
+| `watcher/the_guard_holds_requests_beyond_60_in_10_s` | 미실행 |  |
+| `watcher/a_request_beyond_the_guard_waits_for_the_window` | 미실행 |  |
+| `watcher/the_import_lines_are_victoria_metrics_json` | 미실행 |  |
+| `watcher/a_failed_push_is_dropped` | 미실행 |  |
 
