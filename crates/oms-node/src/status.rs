@@ -70,22 +70,37 @@ pub fn status(ctx: &ApiCtx, strategy: Option<&StrategyId>) -> serde_json::Value 
             .filter(|id| core.order(**id).is_some_and(|o| o.phase == ph))
             .count()
     };
+    let liveness = ctx.liveness();
+    let mono = std::time::Instant::now();
     let strategies: serde_json::Map<String, serde_json::Value> = core
         .config
         .strategies
         .keys()
         .filter(|s| strategy.is_none_or(|own| own == *s))
         .map(|s| {
+            // Strategy liveness (C-LIVE): the table is process state, the
+            // hold is the published core's.
+            let view = liveness.view(s, mono);
+            let loss = core.strategy_link.get(s);
             (
                 s.to_string(),
                 serde_json::json!({
                     "holds": core.holds(Some(s)),
                     "open_orders": core.strategy_open_orders(s),
                     "books": core.strategy_books.get(s),
+                    "link": {
+                        "liveness_ms": view.as_ref().map(|v| v.liveness_ms),
+                        "connections": view.as_ref().map(|v| v.connections),
+                        "last_request_age_ms": view.as_ref().and_then(|v| v.last_request_age_ms),
+                        "held": loss.is_some(),
+                        "since": loss.map(|l| l.since),
+                        "why": loss.map(|l| l.why.clone()),
+                    },
                 }),
             )
         })
         .collect();
+    drop(liveness);
     // Margin rules (C-MARGIN): null without a margin policy. The age is
     // this process's clock now minus the query time of the last report.
     let margin = core.margin_view(now);

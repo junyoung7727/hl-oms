@@ -297,6 +297,12 @@ pub enum Event {
     /// void, the latch keeps its first note. Not after `unsupported`.
     /// In live processing it is followed by one `Kill` command.
     KillRearmed { source: HoldSource, note: String },
+    /// The node lost the strategy's link (C-LIVE): its plain orders are
+    /// held, and the `cancel_requested` events of the same record ask to
+    /// cancel its resting plain orders.
+    StrategyLinkLost { strategy: StrategyId, why: String },
+    /// The strategy said `hello` again: its hold is released (C-LIVE).
+    StrategyLinkRestored { strategy: StrategyId },
 }
 
 /// Stable reason codes for a refused new-order request.
@@ -492,6 +498,8 @@ impl Event {
             Event::HoldCleared { .. } => "hold_cleared",
             Event::KillLoopEnded { .. } => "kill_loop_ended",
             Event::KillRearmed { .. } => "kill_rearmed",
+            Event::StrategyLinkLost { .. } => "strategy_link_lost",
+            Event::StrategyLinkRestored { .. } => "strategy_link_restored",
         }
     }
 }
@@ -509,6 +517,10 @@ impl Input {
             Input::Watcher(w) => match w {
                 WatcherInput::Mismatch { .. } => "watcher.mismatch",
                 WatcherInput::Kill { .. } => "watcher.kill",
+            },
+            Input::Session(s) => match s {
+                SessionInput::Lost { .. } => "session.lost",
+                SessionInput::Hello { .. } => "session.hello",
             },
             Input::Venue(v) => match v {
                 VenueInput::Link { .. } => "venue.link",

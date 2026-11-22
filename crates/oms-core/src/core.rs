@@ -94,6 +94,10 @@ pub struct Core {
     /// classify (C-HOLD). Set by the events that record them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub venue_change: Option<HoldNote>,
+    /// Strategies whose link the node lost (C-LIVE), until their next
+    /// `hello`. Not serialised while empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub strategy_link: BTreeMap<StrategyId, StrategyLinkLoss>,
 }
 
 impl Core {
@@ -131,6 +135,7 @@ impl Core {
             kill: None,
             watcher_mismatch: None,
             venue_change: None,
+            strategy_link: BTreeMap::new(),
         }
     }
 
@@ -242,6 +247,12 @@ impl Core {
         }
         if self.venue_change.is_some() {
             v.push(HoldReason::VenueChange);
+        }
+        // Per strategy, as the operator's strategy halt (C-LIVE).
+        if let Some(s) = strategy {
+            if self.strategy_link.contains_key(s) {
+                v.push(HoldReason::StrategyLink);
+            }
         }
         v
     }
@@ -429,6 +440,10 @@ impl Core {
             Event::ConfigActivated { config } => {
                 let policy_comes_on = self.config.policy.margin.is_none() && config.policy.margin.is_some();
                 self.config = (**config).clone();
+                // A strategy that is no longer configured has no orders and
+                // can say no `hello`: its link hold goes with it (C-LIVE).
+                let strategies = &self.config.strategies;
+                self.strategy_link.retain(|s, _| strategies.contains_key(s));
                 // A policy that comes on while the link is up has no
                 // link-up moment of its own: the stale cancel measures
                 // from here.
@@ -1058,6 +1073,15 @@ impl Core {
                 };
                 k.confirmed_at = None;
                 k.outcome = None;
+            }
+            Event::StrategyLinkLost { strategy, why } => {
+                self.strategy_link.entry(strategy.clone()).or_insert(StrategyLinkLoss {
+                    since: at,
+                    why: why.clone(),
+                });
+            }
+            Event::StrategyLinkRestored { strategy } => {
+                self.strategy_link.remove(strategy);
             }
         }
         Ok(())

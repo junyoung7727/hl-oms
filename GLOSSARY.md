@@ -194,6 +194,14 @@ The hold `WatcherMismatch`, set when a check of the watcher (W1–W4) confirms a
 **Venue change** (거래소 변경):
 The hold `VenueChange`, set from the records of a position change the venue made or of an execution nobody could classify. Refuses plain orders until the mismatch is acknowledged and the hold released.
 
+**Strategy liveness** (전략 연결 감시):
+The node's watch over the trading connections of each strategy listed in `[liveness]`: the strategy's link is lost when its last trading connection that said `hello` closes, or when no request (ping included) comes on any of them for its liveness time. The loss is told to the core once until the strategy's next `hello` (C-LIVE).
+_Avoid_: heartbeat, session timeout
+
+**Strategy link hold** (전략 연결 보류):
+The hold `StrategyLink` of one strategy, set by `strategy_link_lost`: that strategy's resting plain orders get a rule cancel and its new plain orders are refused; its reduce-only orders and other strategies' orders stay. Released by the strategy's own `hello` (`strategy_link_restored`), not by `clear-hold` (C-LIVE).
+_Avoid_: strategy kill, disconnect halt
+
 **Venue setting** (거래소 설정):
 The margin mode (isolated or cross) and venue leverage of one instrument, as the venue reports them.
 _Avoid_: leverage config

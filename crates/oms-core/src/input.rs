@@ -27,6 +27,8 @@ pub enum Input {
     Venue(VenueInput),
     /// From the watcher, on the admin socket (C-HOLD).
     Watcher(WatcherInput),
+    /// A strategy's trading link, as the node sees it (C-LIVE).
+    Session(SessionInput),
     /// Time has passed. Carries nothing; the time is the record timestamp.
     Tick,
     /// Journal storage headroom, measured by the execution layer.
@@ -130,6 +132,17 @@ pub enum WatcherInput {
     /// The watcher killed: every order is held, and the gateway runs its
     /// kill loop.
     Kill { detail: String },
+}
+
+/// What the node tells about a strategy's trading connections (C-LIVE).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionInput {
+    /// The strategy's last trading connection closed, or no request came
+    /// from it for its liveness time.
+    Lost { strategy: StrategyId, why: String },
+    /// The strategy said `hello` on the trading socket.
+    Hello { strategy: StrategyId },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

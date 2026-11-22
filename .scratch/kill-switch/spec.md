@@ -216,6 +216,17 @@ Machine: `start(now)`, `cancel_done(now, Ok(CancelAll) | Err(why))`, `count_done
 - Alert: condition `strategy_link:<s>`, grace 0, `전략 {s} 연결 상실({why}, {since}). 그 전략의 걸린 일반 주문 취소 요청, 그 전략의 신규 일반 주문 거절. 감소 전용 주문은 유지. 그 전략이 다시 hello하면 풀림`. `hold_condition` returns `None` for `StrategyLink` (covered per strategy).
 - Status: `strategies.<s>.link: {liveness_ms, connections, last_request_age_ms, held, since, why}`.
 
+### Amendments (U18b3 implementation, 2026-11-22)
+
+- Amendment (alert text): the `strategy_link:<s>` text names what a new reduce-only order of that strategy gets, by the margin policy (`감소 전용은 받음` / `증거금 정책이 없어 감소 전용도 거절`), as U18b1 review S4 did for the other plain-only holds; resting reduce-only orders are `걸린 감소 전용 주문은 유지`.
+- Amendment (configuration): a `config_activated` without the strategy drops its `strategy_link` entry in `apply` (no orders can be open for a removed strategy, and no hello can name it).
+- Amendment (full queue at hello): a waiting loss that cannot enter the queue, or a restore that cannot, refuses the hello with `overloaded` and leaves the table as it was; when the loss went in and the restore did not, the next hello restores. A connection that says hello for another strategy stops counting for the first one (its close rule applies).
+- Amendment (core reply): `Input::Session` answers `Reply::Operator`: `held` / `already held` / `bad_request: unknown strategy …` for a loss, `restored` / `not held` for a hello.
+
+### Amendments (U18b3 review 1, 2026-11-22)
+
+- Amendment (restore in flight): "since the last restore" means since the last restore was answered: the node table counts the restores it put in the queue whose answer has not come back, and while one is in flight a `hello` for that strategy also submits `Input::Session(Hello)` (a `not held` no-op in the core) and is answered only after it, so a second hello is never answered before the first restore is durable (review 1 S1; C-LIVE L5, mutant M169).
+
 ## U18b4 decisions: the monitoring gate
 
 ### Socket and heartbeat format (C-API)
@@ -264,7 +275,7 @@ Loopback fakes only (`http-fake`, the fake WS servers of `gateway.rs` tests and 
 | With the kill marker the OMS boots with KillLatched and accepts no order, reduce-only included, until `clear_hold` kill, which removes the marker | `holds_node::a_kill_marker_at_boot_refuses_every_order_until_clear_hold_kill_removes_it` (sim processes, margin policy set: plain and reduce-only refused with `Hold(KillLatched)`; sim answers `unsupported`; clear → file gone; next boot unlatched; an order accepted). Also `holds_node::an_unremovable_marker_is_reported_and_latches_the_next_boot`, `holds_node::a_marker_path_that_cannot_be_examined_latches`, core `holds::the_kill_marker_latches_in_the_boot_record` | U18b1 |
 | Under WatcherMismatch, VenueChange and unmonitored a reduce-only order passes and a plain one is refused; under KillLatched and the operator halt both are refused | `holds::the_hold_table_of_table_7_7` (one row per reason, margin policy set; U18b4 adds the `Unmonitored` row, U18b3 the `StrategyLink` row) and `holds_node::watcher_mismatch_over_the_admin_socket_refuses_plain_orders_only` | U18b1, U18b3, U18b4 |
 | Existing tests pass with unchanged expectations | the whole suite; in particular `venue_changes::*` event lists, `margin::*` exact hold lists, `e2e::*` (no liveness section, no gate, no marker) and `record_schema::*` (`RECORD_SCHEMA` stays 2, new test `record_schema::kill_holds_liveness_and_heartbeats_recover_to_the_live_state`) | all |
-| Closing a strategy's connection, or 5 s without any request, sends cancel requests for that strategy's plain orders only | `liveness::closing_the_last_connection_cancels_that_strategys_plain_orders_only`, `liveness::five_seconds_without_a_request_cancel_and_a_ping_keeps_it_alive` (simvenue; strategies `a` listed at 5,000 ms, `b` listed; `a` plain + reduce-only, `b` plain: cancels at simvenue only for `a`'s plain order; `b` untouched); `liveness::a_second_connection_keeps_the_strategy_alive`, `liveness::hello_after_a_loss_is_answered_after_the_restore_is_durable`; core `strategy_link::*` | U18b3 |
+| Closing a strategy's connection, or 5 s without any request, sends cancel requests for that strategy's plain orders only | `liveness::closing_the_last_connection_cancels_that_strategys_plain_orders_only`, `liveness::five_seconds_without_a_request_cancel_and_a_ping_keeps_it_alive` (simvenue; strategies `a` listed at 5,000 ms, `b` listed; `a` plain + reduce-only, `b` plain: cancels at simvenue only for `a`'s plain order; `b` untouched); `liveness::a_second_connection_keeps_the_strategy_alive`, `liveness::hello_after_a_loss_is_answered_after_the_restore_is_durable`, `liveness::after_a_restart_a_strategy_with_resting_plain_orders_is_armed_without_a_hello`, `liveness::a_hello_for_another_strategy_loses_the_first_on_that_connection` (review 1); core `strategy_link::*` | U18b3 |
 | Missing heartbeats, and heartbeats with W1 or W2 older than 10 s, move the gate through the states at 30 s and 90 s with an injected clock | `monitor::missing_heartbeats_unmonitor_at_30_s_and_cancel_plain_orders_at_90_s`, `monitor::a_heartbeat_with_w1_or_w2_older_than_10_s_unmonitors_and_cancels_60_s_later` (core, record time in 250 ms ticks: monitored at 29.75 s, unmonitored at 30.25 s; no cancel at 89.75 s, cancels at 90.25 s; reduce-only resting order kept), `monitor::the_gate_starts_unmonitored_at_boot_until_the_first_fresh_heartbeat`, `monitor::a_fresh_heartbeat_monitors_again_and_stops_the_cancels`, `monitor::a_heartbeat_from_the_future_is_refused`; node `monitor_node::heartbeats_over_monitor_sock_open_the_gate_and_other_ops_are_forbidden` | U18b4 |
 | Full local gate | the unit's `checks` command | all |
 
@@ -282,6 +293,7 @@ Further tests holding the decisions: `holds::clear_hold_refusals` (each code; no
 8. `StrategyLink` cancels every strategy's plain orders; a strategy's reduce-only order cancelled; `ping` not counted as a request; hello answered before the restore is durable.
 9. The gate reads W3 in place of W2; stage 2 at `unmonitored_since + 0`; a stale-W2 heartbeat clears the gate; a future check time accepted.
 10. (Review fix of U18b1) `clear_hold kill` skips the `kill_orders_open` check (M131); the marker is removed before the core decides a clear with a note (M132).
+11. (Review fix of U18b3) a hello while a restore is in flight answered at once (M169); the start does not arm the table (M170) or arms on reduce-only orders (M171); a hello for another strategy keeps counting for the first (M172).
 
 ## Documents and registry
 

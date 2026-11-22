@@ -334,6 +334,10 @@ pub enum HoldReason {
     /// classified (C-HOLD). Refuses plain orders until the operator clears
     /// it.
     VenueChange,
+    /// The node lost this strategy's link: its last trading connection
+    /// closed, or no request came for its liveness time (C-LIVE). Refuses
+    /// this strategy's plain orders until the strategy says `hello` again.
+    StrategyLink,
 }
 
 impl HoldReason {
@@ -351,6 +355,8 @@ impl HoldReason {
             // any kind would keep it from ending (C-HOLD).
             HoldReason::KillLatched => false,
             HoldReason::WatcherMismatch | HoldReason::VenueChange => true,
+            // Its reduce-only orders can only lower the position (C-LIVE).
+            HoldReason::StrategyLink => true,
         }
     }
 }
@@ -402,6 +408,14 @@ impl WatcherCheck {
             WatcherCheck::W4 => HoldSource::W4,
         }
     }
+}
+
+/// Why and since when a strategy's link is lost (C-LIVE). Set once; a
+/// later loss leaves it as it is, the strategy's `hello` removes it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StrategyLinkLoss {
+    pub since: Ts,
+    pub why: String,
 }
 
 /// The kill latch (C-HOLD). Set once; a later trigger leaves it as it is.
@@ -603,6 +617,9 @@ pub enum RuleId {
     /// No margin report was accepted for longer than `stale_cancel_us`
     /// while the link was up. It cancels and latches nothing.
     MarginStale,
+    /// The node lost a strategy's link (C-LIVE). It cancels that
+    /// strategy's plain orders and latches nothing beyond its hold.
+    StrategyLink,
 }
 
 /// The REDUCING latch (C-MARGIN, 감소 전용 상태).

@@ -16,6 +16,7 @@
 //! refused at once with `overloaded` and leaves no trace in the journal.
 
 use crate::config::{ApiConfig, IngressLimits};
+use crate::liveness::{HelloOutcome, Liveness};
 use crate::pipeline::Shared;
 use crate::queues::{CoreMsg, Lane};
 use crate::status;
@@ -63,6 +64,9 @@ pub struct ApiCtx {
     pub gateway_kill: Option<crate::venue::bybit::gateway::KillStatusView>,
     /// The direct alerts, if `[alert]` is configured (C-ALERT).
     pub alerts: Option<Arc<crate::alerts::Alerts>>,
+    /// Strategy liveness (C-LIVE): process state of the trading
+    /// connections.
+    pub liveness: Mutex<Liveness>,
     connections: Arc<Semaphore>,
     admin_connections: Arc<Semaphore>,
     buckets: Mutex<HashMap<(StrategyId, bool), Bucket>>,
@@ -81,11 +85,13 @@ impl ApiCtx {
         gateway_block: Option<crate::venue::bybit::gateway::BlockView>,
         gateway_kill: Option<crate::venue::bybit::gateway::KillStatusView>,
         alerts: Option<Arc<crate::alerts::Alerts>>,
+        liveness: Liveness,
     ) -> ApiCtx {
         ApiCtx {
             gateway_block,
             gateway_kill,
             alerts,
+            liveness: Mutex::new(liveness),
             connections: Arc::new(Semaphore::new(cfg.max_connections)),
             admin_connections: Arc::new(Semaphore::new(cfg.admin_max_connections)),
             cfg,
@@ -117,6 +123,31 @@ impl ApiCtx {
         }
         ok
     }
+
+    pub fn liveness(&self) -> std::sync::MutexGuard<'_, Liveness> {
+        self.liveness.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The liveness timer's step (C-LIVE): waiting losses again, and the
+    /// strategies silent for longer than their liveness time.
+    pub fn liveness_tick(&self) {
+        self.liveness().tick(Instant::now(), &mut |input| push_session(&self.shared, input));
+    }
+}
+
+/// Hands a loss of a strategy's link to the core (C-LIVE): control lane,
+/// no reply. False when the lane is full or closed; the table then offers
+/// it again at its next tick.
+pub fn push_session(shared: &Shared, input: Input) -> bool {
+    let lost = match &input {
+        Input::Session(SessionInput::Lost { strategy, why }) => Some((strategy.to_string(), why.clone())),
+        _ => None,
+    };
+    let taken = shared.queues.try_push(Lane::Control, CoreMsg::new(input)).is_ok();
+    if let (true, Some((strategy, why))) = (taken, lost) {
+        warn!("strategy link lost: its plain orders are held and its resting plain orders cancelled", "strategy": strategy, "why": why);
+    }
+    taken
 }
 
 /// Binds a socket file with the given mode, replacing a stale file.
@@ -215,6 +246,9 @@ struct Session {
     closing: Arc<Notify>,
     /// The event forwarder of this connection, if it subscribed. At most one.
     subscription: Option<tokio::task::JoinHandle<()>>,
+    /// The strategy this connection counts for in the liveness table: a
+    /// trading connection after its `hello` (C-LIVE).
+    link: Option<StrategyId>,
 }
 
 async fn connection(stream: UnixStream, admin: bool, ctx: Arc<ApiCtx>) {
@@ -237,6 +271,7 @@ async fn connection(stream: UnixStream, admin: bool, ctx: Arc<ApiCtx>) {
         window: Arc::new(Semaphore::new(ctx.cfg.window)),
         closing: Arc::new(Notify::new()),
         subscription: None,
+        link: None,
     };
     let hello_deadline = (ctx.cfg.hello_timeout_ms > 0)
         .then(|| tokio::time::Instant::now() + std::time::Duration::from_millis(ctx.cfg.hello_timeout_ms));
@@ -290,6 +325,11 @@ async fn connection(stream: UnixStream, admin: bool, ctx: Arc<ApiCtx>) {
                 continue;
             }
         };
+        // Every parsed request is a sign of life of the strategy, `ping`
+        // included (C-LIVE).
+        if let Some(st) = &s.link {
+            ctx.liveness().request(st, Instant::now());
+        }
         // No further line is read while `window` requests are outstanding.
         let Ok(permit) = s.window.clone().acquire_owned().await else {
             break;
@@ -308,6 +348,9 @@ async fn connection(stream: UnixStream, admin: bool, ctx: Arc<ApiCtx>) {
     // and the connection slot is never returned.
     if let Some(h) = s.subscription.take() {
         h.abort();
+    }
+    if let Some(st) = s.link.take() {
+        ctx.liveness().closed(&st, &mut |input| push_session(&ctx.shared, input));
     }
     drop(s);
     let _ = writer.await;
@@ -386,6 +429,91 @@ fn submit_then(
     None
 }
 
+fn hello_answer(ctx: &ApiCtx) -> serde_json::Value {
+    let p = ctx.shared.published.read();
+    serde_json::json!({
+        "instance_id": format!("{:016x}", p.core.instance_id),
+        "boot": p.core.boot,
+        "durable_seq": p.durable_seq,
+        "server_time": crate::util::wall_us(),
+        "version": ctx.info.version,
+    })
+}
+
+/// `hello` for a strategy on the trading socket (C-LIVE). The connection
+/// counts for the strategy from here. After a loss reported since the last
+/// restore, or while the core holds the strategy, the hello submits
+/// `Input::Session(Hello)` and is answered only once that is durable; a
+/// loss still waiting for room in the queue goes in first. Both go on the
+/// control lane, so the core applies the loss before the restore. While a
+/// restore is in flight, a further hello restores too, so that its answer
+/// also comes after the first restore is durable. A full queue refuses the
+/// hello and the connection does not count. The table's `hello` does all
+/// this (C-LIVE L5).
+fn trading_hello(
+    s: &mut Session,
+    ctx: &Arc<ApiCtx>,
+    id: u64,
+    strategy: StrategyId,
+    client: String,
+    permit: tokio::sync::OwnedSemaphorePermit,
+) -> Option<Response> {
+    let held = ctx.shared.published.read().core.strategy_link.contains_key(&strategy);
+    let mut restored = None;
+    let outcome = ctx.liveness().hello(
+        &strategy,
+        held,
+        Instant::now(),
+        s.link.as_ref(),
+        &mut |input| push_session(&ctx.shared, input),
+        &mut |input| {
+            let (msg, rx) = CoreMsg::with_reply(input);
+            let taken = ctx.shared.queues.try_push(Lane::Control, msg).is_ok();
+            if taken {
+                restored = Some(rx);
+            }
+            taken
+        },
+    );
+    if outcome == HelloOutcome::Refused {
+        ctx.refused_overload.fetch_add(1, Ordering::Relaxed);
+        let (code, why) = if ctx.shared.queues.is_closed() {
+            (ErrorCode::Unavailable, "the OMS is stopping")
+        } else {
+            (ErrorCode::Overloaded, "input queue is full; say hello again")
+        };
+        return Some(Response::err(id, code, why));
+    }
+    s.hello = true;
+    s.strategy = Some(strategy.clone());
+    s.link = Some(strategy.clone());
+    info!("client connected", "strategy": strategy.to_string(), "admin": false, "client": client, "restore": restored.is_some());
+    let Some(rx) = restored else {
+        return Some(Response::ok(id, hello_answer(ctx)));
+    };
+    let out = s.out.clone();
+    let ctx = ctx.clone();
+    tokio::spawn(async move {
+        let reply = rx.await;
+        // Before the answer leaves: a later hello is answered at once again
+        // only after this one's restore is (review 1 S1).
+        ctx.liveness().restore_answered(&strategy);
+        let resp = match reply {
+            Ok(Reply::Operator(Ok(_))) => Response::ok(id, hello_answer(&ctx)),
+            Ok(Reply::Operator(Err(text))) => Response::err(id, ErrorCode::BadRequest, text),
+            Ok(_) => Response::err(id, ErrorCode::Internal, "unexpected reply"),
+            Err(_) => Response::err(
+                id,
+                ErrorCode::Unavailable,
+                "the restore of the strategy's link was not confirmed; say hello again",
+            ),
+        };
+        let _ = out.send(ServerMsg::Response(resp)).await;
+        drop(permit);
+    });
+    None
+}
+
 async fn dispatch(
     s: &mut Session,
     ctx: &Arc<ApiCtx>,
@@ -417,20 +545,13 @@ async fn dispatch(
                 }
                 (None, true) => {}
             }
+            if let (Some(st), false) = (&strategy, s.admin) {
+                return trading_hello(s, ctx, id, st.clone(), client, permit);
+            }
             s.hello = true;
             s.strategy = strategy.clone();
             info!("client connected", "strategy": strategy.as_ref().map(|x| x.to_string()), "admin": s.admin, "client": client);
-            let p = ctx.shared.published.read();
-            Some(Response::ok(
-                id,
-                serde_json::json!({
-                    "instance_id": format!("{:016x}", p.core.instance_id),
-                    "boot": p.core.boot,
-                    "durable_seq": p.durable_seq,
-                    "server_time": crate::util::wall_us(),
-                    "version": ctx.info.version,
-                }),
-            ))
+            Some(Response::ok(id, hello_answer(ctx)))
         }
         Op::NewOrder {
             client_order_id,

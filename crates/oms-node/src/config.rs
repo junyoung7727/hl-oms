@@ -5,7 +5,8 @@
 //! process and is not part of the domain state.
 
 use crate::venue::hyperliquid::wire::{WEIGHT_MARGIN_QUERY, WEIGHT_OTHER_INFO_QUERY};
-use oms_core::CoreConfig;
+use oms_core::{CoreConfig, StrategyId};
+use std::collections::BTreeMap;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
@@ -35,6 +36,39 @@ pub struct NodeConfig {
     pub alert: Option<AlertSection>,
     /// The kill marker (C-HOLD). Absent: no marker is looked for.
     pub kill: Option<KillSection>,
+    /// Strategy liveness (C-LIVE). Absent: no strategy has liveness.
+    pub liveness: Option<LivenessSection>,
+}
+
+/// The `[liveness]` table (C-LIVE).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LivenessSection {
+    /// Liveness time in ms per strategy of `[core]`: the strategy's link is
+    /// lost when its last trading connection closes, or when no request
+    /// comes on any of its connections for this long. A strategy not listed
+    /// has no liveness.
+    pub strategies: BTreeMap<StrategyId, u64>,
+}
+
+/// The bounds of a liveness time, ms. 판단(모델 아님): at least four ticks
+/// of the liveness timer, at most a minute of resting orders without a
+/// strategy.
+pub const LIVENESS_MS_MIN: u64 = 1_000;
+pub const LIVENESS_MS_MAX: u64 = 60_000;
+
+impl LivenessSection {
+    fn validate(&self, core: &CoreConfig) -> Result<(), String> {
+        for (s, ms) in &self.strategies {
+            if !core.strategies.contains_key(s) {
+                return Err(format!("[liveness] {s} is not a strategy of [core]"));
+            }
+            if !(LIVENESS_MS_MIN..=LIVENESS_MS_MAX).contains(ms) {
+                return Err(format!("[liveness] {s} must be between {LIVENESS_MS_MIN} and {LIVENESS_MS_MAX} ms"));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// The `[kill]` table (C-HOLD).
@@ -616,7 +650,35 @@ impl NodeConfig {
         if self.is_mainnet() && self.kill.is_none() {
             return Err("[venue] mainnet requires [kill] marker (the kill marker, C-HOLD)".into());
         }
+        if let Some(l) = &self.liveness {
+            l.validate(&self.core)?;
+        }
+        // Nor with an enabled strategy whose resting orders nothing
+        // cancels when it dies (C-LIVE; owner question 1 of U18b).
+        let unlisted = self.strategies_without_liveness();
+        if self.is_mainnet() && !unlisted.is_empty() {
+            return Err(format!(
+                "[venue] mainnet requires every enabled strategy in [liveness] (strategy liveness, C-LIVE): {}",
+                unlisted.join(", ")
+            ));
+        }
         Ok(())
+    }
+
+    /// The enabled strategies of `[core]` that `[liveness]` does not list.
+    pub fn strategies_without_liveness(&self) -> Vec<String> {
+        self.core
+            .strategies
+            .iter()
+            .filter(|(s, spec)| spec.enabled && !self.liveness.as_ref().is_some_and(|l| l.strategies.contains_key(*s)))
+            .map(|(s, _)| s.to_string())
+            .collect()
+    }
+
+    /// The liveness time of each listed strategy (C-LIVE); empty without
+    /// `[liveness]`.
+    pub fn liveness_ms(&self) -> BTreeMap<StrategyId, u64> {
+        self.liveness.as_ref().map(|l| l.strategies.clone()).unwrap_or_default()
     }
 
     fn validate_bybit(&self, b: &BybitConfig) -> Result<(), String> {
@@ -819,6 +881,9 @@ telegram = "/etc/hl-oms/telegram.json"
 
 [kill]
 marker = "/var/lib/hl-oms/kill.marker"
+
+[liveness]
+strategies = {{ a = 5000 }}
 "#
         );
         toml::from_str(&text).map_err(|e| format!("parse: {e}"))
@@ -1125,6 +1190,55 @@ marker = "/var/lib/hl-oms/kill.marker"
         let e = load(&tmp.join("missing/kill.marker")).unwrap_err();
         assert!(e.contains("does not exist"), "{e}");
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// C-LIVE. Each listed strategy is a strategy of `[core]` with a
+    /// liveness time of 1,000..=60,000 ms; mainnet needs every enabled
+    /// strategy listed, testnet and sim do not.
+    #[test]
+    fn the_liveness_section_is_validated_and_required_on_mainnet() {
+        let sid = |s: &str| StrategyId::new(s).unwrap();
+        let with = |venue: &str, margin: Option<&str>, listed: Option<&[(&str, u64)]>| {
+            let mut cfg = parse(venue, "", margin, 1).unwrap();
+            cfg.core.policy.absence_not_found_needed = if venue.contains("bybit") { 2 } else { 1 };
+            cfg.liveness = listed.map(|l| LivenessSection {
+                strategies: l.iter().map(|(s, ms)| (sid(s), *ms)).collect(),
+            });
+            cfg.validate()
+        };
+        let parsed = parse(SIM, "", None, 1).unwrap().liveness.unwrap();
+        assert_eq!(parsed.strategies.into_iter().collect::<Vec<_>>(), [(sid("a"), 5_000)]);
+        for (ms, ok) in [(999, false), (1_000, true), (60_000, true), (60_001, false), (0, false)] {
+            let r = with(SIM, None, Some(&[("a", ms)]));
+            assert_eq!(r.is_ok(), ok, "{ms}: {r:?}");
+            if !ok {
+                assert!(r.unwrap_err().contains("between 1000 and 60000"), "{ms}");
+            }
+        }
+        let e = with(SIM, None, Some(&[("a", 5_000), ("zz", 5_000)])).unwrap_err();
+        assert!(e.contains("[liveness] zz is not a strategy of [core]"), "{e}");
+
+        let because = "mainnet requires every enabled strategy in [liveness]";
+        let bybit_margin = Some("isolated = false\naccount_mm_rate_max_bps = 5000");
+        for (venue, margin) in [(hyperliquid("mainnet"), Some("")), (bybit("mainnet", "mainnet_confirmed = true"), bybit_margin)] {
+            for listed in [None, Some(&[][..])] {
+                let e = with(&venue, margin, listed).unwrap_err();
+                assert!(e.contains(because) && e.contains(": a"), "{venue}: {e}");
+            }
+            assert_eq!(with(&venue, margin, Some(&[("a", 5_000)])), Ok(()), "{venue}");
+            // A disabled strategy need not be listed.
+            let mut cfg = parse(&venue, "", margin, 1).unwrap();
+            cfg.core.policy.absence_not_found_needed = if venue.contains("bybit") { 2 } else { 1 };
+            cfg.liveness = None;
+            cfg.core.strategies.get_mut(&sid("a")).unwrap().enabled = false;
+            assert_eq!(cfg.validate(), Ok(()), "{venue}");
+        }
+        assert_eq!(with(&hyperliquid("testnet"), None, None), Ok(()));
+        assert_eq!(with(&bybit("testnet", ""), None, None), Ok(()));
+        assert_eq!(with(SIM, None, None), Ok(()));
+        // An unknown key in the table.
+        let text = "data_dir = \"d\"\n[venue]\nkind = \"sim\"\nsocket = \"v.sock\"\n[core]\nversion = 1\n[liveness]\nstrategies = {}\ntick_ms = 1\n";
+        assert!(toml::from_str::<NodeConfig>(text).is_err());
     }
 
     /// C-ALERT. `OMS_TEST_TELEGRAM_API` is taken only as an http URL on a

@@ -344,7 +344,7 @@ fn kill_holds_liveness_and_heartbeats_recover_to_the_live_state() {
         c.handle(SEC, &Input::Boot { binary: "test".into(), kill_marker: None }).unwrap();
         serde_json::to_string(&c).unwrap()
     };
-    for field in ["\"kill\"", "\"watcher_mismatch\"", "\"venue_change\"", "kill_marker"] {
+    for field in ["\"kill\"", "\"watcher_mismatch\"", "\"venue_change\"", "kill_marker", "strategy_link"] {
         assert!(!plain.contains(field), "{field} written while unset: {plain}");
     }
     run.input(Input::Boot {
@@ -396,9 +396,20 @@ fn kill_holds_liveness_and_heartbeats_recover_to_the_live_state() {
     let since = run.at;
     run.venue(VenueInput::StreamLost { since, detail: "closed by the venue".into() });
     assert!(run.core.kill.as_ref().is_some_and(|k| k.confirmed_at.is_none()));
+    // U18b3: strategy liveness. A loss and a restore, then a loss left set.
+    let a = StrategyId::new("a").unwrap();
+    for (input, reply) in [
+        (SessionInput::Lost { strategy: a.clone(), why: "last trading connection closed".into() }, "held"),
+        (SessionInput::Hello { strategy: a.clone() }, "restored"),
+        (SessionInput::Lost { strategy: a.clone(), why: "no request for 5000 ms".into() }, "held"),
+    ] {
+        let out = run.input(Input::Session(input));
+        assert_eq!(out.reply, Some(Reply::Operator(Ok(reply.into()))));
+    }
+    assert!(run.core.strategy_link.contains_key(&a));
     let records = run.take();
     let names: Vec<&str> = records.iter().flat_map(|r| r.events.iter().map(Event::name)).collect();
-    for kind in ["hold_set", "hold_cleared", "kill_loop_ended", "kill_rearmed"] {
+    for kind in ["hold_set", "hold_cleared", "kill_loop_ended", "kill_rearmed", "strategy_link_lost", "strategy_link_restored"] {
         assert!(names.contains(&kind), "{kind}: {names:?}");
     }
     write(&dir, RECORD_SCHEMA, &records);
