@@ -334,6 +334,16 @@ impl Core {
                     note: k.note.clone(),
                 })
             }
+            // A new trigger after the confirmation asks for a new loop; the
+            // command names the new trigger.
+            Event::KillRearmed { source, note } => {
+                let k = self.kill.as_ref()?;
+                Some(VenueCommand::Kill {
+                    since: k.since,
+                    source: *source,
+                    note: note.clone(),
+                })
+            }
             Event::HoldCleared {
                 hold: HoldKind::Kill, ..
             } => Some(VenueCommand::KillStop),
@@ -1041,6 +1051,13 @@ impl Core {
                     k.confirmed_at = Some(at);
                     k.outcome = Some(*outcome);
                 }
+            }
+            Event::KillRearmed { .. } => {
+                let Some(k) = self.kill.as_mut() else {
+                    return fault("kill_rearmed without a kill latch");
+                };
+                k.confirmed_at = None;
+                k.outcome = None;
             }
         }
         Ok(())

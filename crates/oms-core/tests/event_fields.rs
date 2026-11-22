@@ -262,6 +262,10 @@ fn every_event() -> Vec<Event> {
             cancel_all_calls: 0,
             detail: "d".into(),
         },
+        Event::KillRearmed {
+            source: HoldSource::Stream,
+            note: "n".into(),
+        },
     ]
 }
 
@@ -314,7 +318,8 @@ fn _every_kind_is_listed(e: &Event) {
         | Event::AbsenceNoted { .. }
         | Event::HoldSet { .. }
         | Event::HoldCleared { .. }
-        | Event::KillLoopEnded { .. } => {}
+        | Event::KillLoopEnded { .. }
+        | Event::KillRearmed { .. } => {}
     }
 }
 
@@ -400,7 +405,7 @@ fn the_field_table_lists_every_field_the_encoder_writes() {
             "the table lists an unknown event {e}"
         );
     }
-    assert_eq!(kinds.len(), 46, "one instance of every event kind");
+    assert_eq!(kinds.len(), 47, "one instance of every event kind");
 }
 
 /// Whether a JSON value has the kind the type column names. "… 또는 null"

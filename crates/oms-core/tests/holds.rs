@@ -747,3 +747,119 @@ fn every_command_comes_from_command_for_on_a_recorded_event() {
     assert_eq!(derived, h.commands);
     assert_eq!(kills(&h).len(), 3, "{:?}", kills(&h));
 }
+
+// ---- U18b2: the stream trigger and a new trigger after the confirmation ----
+
+fn stream_lost(h: &mut H, since: Ts, detail: &str) -> Output {
+    h.venue(VenueInput::StreamLost {
+        since,
+        detail: detail.into(),
+    })
+}
+
+/// C-KILL. `StreamLost` latches the kill with source `stream` and a note
+/// that says how long the stream was down and why, in one record with the
+/// `Kill` command; a second loss while the loop runs records nothing.
+#[test]
+fn a_stream_loss_latches_the_kill_and_asks_for_the_loop() {
+    let mut h = H::ready();
+    let since = h.now;
+    // The harness adds 1 ms to the record time of every input.
+    h.advance(10 * SEC);
+    let out = stream_lost(&mut h, since, "no pong within 1000 ms of a ping");
+    assert_eq!(names(&out), ["hold_set"]);
+    let k = h.core.kill.clone().unwrap();
+    assert_eq!((k.since, k.source), (h.now, HoldSource::Stream));
+    assert_eq!(
+        k.note,
+        format!(
+            "private stream down for 10001 ms (no proof of life since {since}): no pong within 1000 ms of a ping"
+        )
+    );
+    assert_eq!(
+        out.commands,
+        [VenueCommand::Kill {
+            since: k.since,
+            source: HoldSource::Stream,
+            note: k.note.clone(),
+        }]
+    );
+    assert!(h.core.holds(None).contains(&HoldReason::KillLatched));
+    // The loop has not confirmed: the running loop covers a new loss.
+    h.advance(SEC);
+    let out = stream_lost(&mut h, since, "closed by the venue");
+    assert!(out.events.is_empty() && out.commands.is_empty());
+    assert_eq!(h.core.kill, Some(k));
+    assert_eq!(h.rebuilt(), h.core);
+}
+
+/// C-KILL (review N3 of U18b1). After the loop confirmed, a new trigger
+/// (the watcher or the stream) voids the confirmation with `kill_rearmed`
+/// and asks for a new loop; the latch keeps its first note. A clear is
+/// refused until the new loop confirms. Replay gives the same state.
+#[test]
+fn a_new_trigger_after_the_confirmation_resets_it_and_asks_for_a_new_loop() {
+    let mut h = H::ready();
+    watcher_kill(&mut h, "first").1.unwrap();
+    let first = h.core.kill.clone().unwrap();
+    kill_loop_ended(&mut h, KillOutcome::Confirmed);
+    assert!(h.core.kill.as_ref().unwrap().confirmed_at.is_some());
+
+    h.advance(SEC);
+    let (out, reply) = watcher_kill(&mut h, "second");
+    assert_eq!(reply, Ok(KILL_REARMED_REPLY.to_string()));
+    assert!(KILL_REARMED_REPLY.starts_with("already latched"));
+    assert_eq!(names(&out), ["kill_rearmed"]);
+    assert_eq!(
+        out.commands,
+        [VenueCommand::Kill {
+            since: first.since,
+            source: HoldSource::Watcher,
+            note: "second".into(),
+        }]
+    );
+    let k = h.core.kill.clone().unwrap();
+    assert_eq!(
+        (k.since, k.source, k.note.as_str(), k.confirmed_at, k.outcome),
+        (first.since, HoldSource::Watcher, "first", None, None)
+    );
+    let (_, reply) = clear(&mut h, HoldKind::Kill, "n");
+    assert!(reply.unwrap_err().starts_with("kill_unconfirmed"));
+    // While the new loop runs, another trigger records nothing.
+    let (out, reply) = watcher_kill(&mut h, "third");
+    assert_eq!(reply, Ok("already latched".to_string()));
+    assert!(out.events.is_empty());
+    assert_eq!(h.rebuilt(), h.core);
+
+    // The new loop confirms; a stream loss after it re-arms again.
+    kill_loop_ended(&mut h, KillOutcome::Confirmed);
+    h.advance(SEC);
+    let since = h.now;
+    h.advance(10 * SEC);
+    let out = stream_lost(&mut h, since, "closed by the venue");
+    assert_eq!(names(&out), ["kill_rearmed"]);
+    assert!(
+        matches!(&out.commands[..], [VenueCommand::Kill { source: HoldSource::Stream, note, .. }] if note.ends_with("closed by the venue")),
+        "{:?}",
+        out.commands
+    );
+    assert_eq!(h.core.kill.as_ref().unwrap().confirmed_at, None);
+    kill_loop_ended(&mut h, KillOutcome::Confirmed);
+    assert_eq!(
+        clear(&mut h, HoldKind::Kill, "venue checked").1,
+        Ok("cleared".to_string())
+    );
+    assert_eq!(kills(&h).len(), 4, "{:?}", kills(&h));
+    assert_eq!(h.rebuilt(), h.core);
+
+    // Every command still comes from `command_for` on a recorded event.
+    let mut c = Core::new(h.core.instance_id);
+    let mut derived = Vec::new();
+    for rec in &h.log {
+        for ev in &rec.events {
+            c.apply(rec.at, ev).unwrap();
+            derived.extend(c.command_for(ev));
+        }
+    }
+    assert_eq!(derived, h.commands);
+}

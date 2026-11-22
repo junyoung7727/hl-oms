@@ -292,6 +292,10 @@ pub enum Event {
         cancel_all_calls: u32,
         detail: String,
     },
+    /// A new kill trigger after the kill loop of this process confirmed
+    /// (C-KILL): the confirmation is void, the latch keeps its first note.
+    /// In live processing it is followed by one `Kill` command.
+    KillRearmed { source: HoldSource, note: String },
 }
 
 /// Stable reason codes for a refused new-order request.
@@ -486,6 +490,7 @@ impl Event {
             Event::HoldSet { .. } => "hold_set",
             Event::HoldCleared { .. } => "hold_cleared",
             Event::KillLoopEnded { .. } => "kill_loop_ended",
+            Event::KillRearmed { .. } => "kill_rearmed",
         }
     }
 }
@@ -523,6 +528,7 @@ impl Input {
                 VenueInput::PositionChange(_) => "venue.position_change",
                 VenueInput::UnclassifiedExecution { .. } => "venue.unclassified_execution",
                 VenueInput::KillLoopEnded { .. } => "venue.kill_loop_ended",
+                VenueInput::StreamLost { .. } => "venue.stream_lost",
             },
         }
     }

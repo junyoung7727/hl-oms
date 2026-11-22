@@ -47,7 +47,7 @@ payload 하나는 JSON 객체 하나다: `{"seq": u64, "at": u64 µs(기록 시�
 | `purged` | `order_ids`의 주문 정보를 지운다(모두 닫힌 주문이다). 열린 주문은 바뀌지 않는다 | `fill_floor`보다 이른 체결 키는 잊어도 된다 | — |
 | 그 밖의 이벤트 | — | — | — |
 
-그 밖의 이벤트(링크, 결과 불명, 상태 기록, 취소, 대조, 불일치, 운영자, 저장 공간, 참조 가격, 증거금, 펀딩·변경 대기, 부재 기록, 보류와 킬 루프 `hold_set`·`hold_cleared`·`kill_loop_ended`)는 세 집합을 바꾸지 않는다. 상태 화면과 알림은 이들을 쓴다. 뜻은 아래 필드 표와 각 계약 문서([C-NEW 등](order-lifecycle.md), [C-MISMATCH](reconciliation.md), [C-MARGIN](margin.md), [C-HOLD](holds.md))에 있다.
+그 밖의 이벤트(링크, 결과 불명, 상태 기록, 취소, 대조, 불일치, 운영자, 저장 공간, 참조 가격, 증거금, 펀딩·변경 대기, 부재 기록, 보류와 킬 루프 `hold_set`·`hold_cleared`·`kill_loop_ended`·`kill_rearmed`)는 세 집합을 바꾸지 않는다. 상태 화면과 알림은 이들을 쓴다. 뜻은 아래 필드 표와 각 계약 문서([C-NEW 등](order-lifecycle.md), [C-MISMATCH](reconciliation.md), [C-MARGIN](margin.md), [C-HOLD](holds.md))에 있다.
 
 포지션 = `fill_booked` + `external_fill_booked` + `venue_position_changed` + `position_adjusted` 수량의 합이다(감시자 W2, ADR-023).
 
@@ -247,6 +247,8 @@ payload 하나는 JSON 객체 하나다: `{"seq": u64, "at": u64 µs(기록 시�
 | `kill_loop_ended` | `rounds` | u32 | 일괄 취소 회차 수 |
 | `kill_loop_ended` | `cancel_all_calls` | u32 | 보낸 일괄 취소 요청 수 |
 | `kill_loop_ended` | `detail` | string | 설명 문장 |
+| `kill_rearmed` | `source` | enum stream/watcher | 확인 뒤의 새 킬 계기(C-KILL). 킬 래치의 확인을 지우고 새 킬 루프를 부른다. 래치의 첫 메모는 그대로다 |
+| `kill_rearmed` | `note` | string | 새 계기의 메모 |
 <!-- event-fields:end -->
 
 쓰지 않는 기본값: `position_adjusted.reason`은 `operator`일 때 쓰지 않는다. `order_accepted.request.market_ref`, `request_rejected.request.market_ref`는 없을 때 쓰지 않는다. `order_acked.session`은 옛 기록에 없을 수 있다(0).
