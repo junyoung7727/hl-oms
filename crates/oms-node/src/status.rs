@@ -97,7 +97,9 @@ pub fn status(ctx: &ApiCtx, strategy: Option<&StrategyId>) -> serde_json::Value 
         // Why the gateway keeps the link down (Bybit: auth_rejected,
         // ip_banned, account, unchecked; ADR-028). Null when nothing blocks
         // it, or when the gateway does not report one.
-        "gateway": {"block": ctx.gateway_block.as_ref().and_then(|f| f())},
+        // The kill switch (C-KILL, Bybit only): the loop, whether the
+        // trigger is armed and the age of the stream's last proof of life.
+        "gateway": gateway_json(ctx),
         // The direct alerts (C-ALERT): process counters, never the token or
         // the file path.
         "alerts": crate::alerts::status_json(ctx.alerts.as_deref()),
@@ -152,4 +154,21 @@ pub fn status(ctx: &ApiCtx, strategy: Option<&StrategyId>) -> serde_json::Value 
             "ingress_refused_overload": ctx.refused_overload.load(Ordering::Relaxed),
         },
     })
+}
+
+/// `status.gateway`: the block, and the kill switch's process state (null
+/// for a gateway without one).
+fn gateway_json(ctx: &ApiCtx) -> serde_json::Value {
+    let mut v = serde_json::json!({
+        "block": ctx.gateway_block.as_ref().and_then(|f| f()),
+        "kill_loop": null,
+        "kill_armed": null,
+        "last_proof_age_ms": null,
+    });
+    if let Some(kill) = &ctx.gateway_kill {
+        if let (Some(v), serde_json::Value::Object(k)) = (v.as_object_mut(), kill()) {
+            v.extend(k);
+        }
+    }
+    v
 }

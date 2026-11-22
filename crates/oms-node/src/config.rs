@@ -395,6 +395,42 @@ pub struct BybitConfig {
     /// from the public ticker stream (U17c).
     #[serde(default = "default_ref_price_ms")]
     pub ref_price_interval_ms: u64,
+    /// The kill trigger (C-KILL): the private stream down this long after
+    /// its last proof of life (subscribe, pong) latches the kill.
+    #[serde(default = "default_kill_after_ms")]
+    pub kill_after_ms: u64,
+    /// One cancel-all per round; a round starts this long after the last.
+    #[serde(default = "default_kill_round_ms")]
+    pub kill_round_ms: u64,
+    /// After the first zero count, zero must hold this long.
+    #[serde(default = "default_kill_watch_ms")]
+    pub kill_watch_ms: u64,
+    /// The count during the watch runs this often.
+    #[serde(default = "default_kill_watch_every_ms")]
+    pub kill_watch_every_ms: u64,
+    /// A kill-loop notice repeats after this long without one.
+    #[serde(default = "default_kill_notice_ms")]
+    pub kill_notice_ms: u64,
+}
+
+fn default_kill_after_ms() -> u64 {
+    10_000
+}
+
+fn default_kill_round_ms() -> u64 {
+    1_000
+}
+
+fn default_kill_watch_ms() -> u64 {
+    30_000
+}
+
+fn default_kill_watch_every_ms() -> u64 {
+    5_000
+}
+
+fn default_kill_notice_ms() -> u64 {
+    60_000
 }
 
 fn default_ping_interval_ms() -> u64 {
@@ -622,6 +658,26 @@ impl NodeConfig {
         // The venue recommends a ping every 20 s (F20 Q2.11).
         if !(1_000..=20_000).contains(&b.ping_interval_ms) {
             return Err("[venue] ping_interval_ms must be between 1000 and 20000".into());
+        }
+        // C-KILL. A kill before the liveness rule can say down is refused;
+        // rounds of at least 1 s keep the OMS at one cancel-all per second;
+        // repeats of at least 60 s keep 12 notices in 10 minutes. The
+        // bounds are judgments (판단(모델 아님)); the defaults are design
+        // values (§7.6, table 7-8).
+        if b.kill_after_ms < b.ping_interval_ms.saturating_mul(2) || b.kill_after_ms > 60_000 {
+            return Err("[venue] kill_after_ms must be between 2 × ping_interval_ms and 60000".into());
+        }
+        if !(1_000..=10_000).contains(&b.kill_round_ms) {
+            return Err("[venue] kill_round_ms must be between 1000 and 10000".into());
+        }
+        if !(10_000..=300_000).contains(&b.kill_watch_ms) {
+            return Err("[venue] kill_watch_ms must be between 10000 and 300000".into());
+        }
+        if b.kill_watch_every_ms < 1_000 || b.kill_watch_every_ms > b.kill_watch_ms {
+            return Err("[venue] kill_watch_every_ms must be between 1000 and kill_watch_ms".into());
+        }
+        if !(60_000..=600_000).contains(&b.kill_notice_ms) {
+            return Err("[venue] kill_notice_ms must be between 60000 and 600000".into());
         }
         // Judgment (U17c): one lost update must not make the price stale.
         let p = &self.core.policy;
@@ -1096,6 +1152,52 @@ marker = "/var/lib/hl-oms/kill.marker"
         cfg.data_dir = "/var/lib/hl-oms/data".into();
         cfg.core.policy.absence_not_found_needed = 2;
         cfg.validate()
+    }
+
+    /// C-KILL. The kill fields load with their design defaults; each bound
+    /// is refused one step outside and taken at the edge.
+    #[test]
+    fn the_kill_loop_fields_are_bounded() {
+        let cfg = parse(&bybit("testnet", ""), "", None, 1).unwrap();
+        let VenueConfig::Bybit(b) = &cfg.venue else { panic!() };
+        assert_eq!(
+            (b.kill_after_ms, b.kill_round_ms, b.kill_watch_ms, b.kill_watch_every_ms, b.kill_notice_ms),
+            (10_000, 1_000, 30_000, 5_000, 60_000)
+        );
+        let edges = [
+            "ping_interval_ms = 5000\nkill_after_ms = 10000",
+            "ping_interval_ms = 1000\nkill_after_ms = 2000",
+            "kill_after_ms = 60000",
+            "kill_round_ms = 1000",
+            "kill_round_ms = 10000",
+            "kill_watch_ms = 10000\nkill_watch_every_ms = 10000",
+            "kill_watch_ms = 300000",
+            "kill_watch_every_ms = 1000",
+            "kill_notice_ms = 60000",
+            "kill_notice_ms = 600000",
+        ];
+        for more in edges {
+            assert_eq!(check_bybit(&bybit("testnet", more), None), Ok(()), "{more}");
+        }
+        let refused = [
+            ("ping_interval_ms = 5000\nkill_after_ms = 9999", "kill_after_ms"),
+            ("ping_interval_ms = 20000", "kill_after_ms"),
+            ("kill_after_ms = 60001", "kill_after_ms"),
+            ("kill_round_ms = 999", "kill_round_ms"),
+            ("kill_round_ms = 10001", "kill_round_ms"),
+            ("kill_watch_ms = 9999", "kill_watch_ms"),
+            ("kill_watch_ms = 300001", "kill_watch_ms"),
+            ("kill_watch_every_ms = 999", "kill_watch_every_ms"),
+            ("kill_watch_ms = 10000\nkill_watch_every_ms = 10001", "kill_watch_every_ms"),
+            ("kill_notice_ms = 59999", "kill_notice_ms"),
+            ("kill_notice_ms = 600001", "kill_notice_ms"),
+        ];
+        for (more, because) in refused {
+            match check_bybit(&bybit("testnet", more), None) {
+                Ok(()) => panic!("loaded, must be refused: {more}"),
+                Err(e) => assert!(e.contains(because), "{more}: {e}"),
+            }
+        }
     }
 
     #[test]

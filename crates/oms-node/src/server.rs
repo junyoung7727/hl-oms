@@ -59,6 +59,8 @@ pub struct ApiCtx {
     pub own_uid: u32,
     /// Why the gateway keeps the link down, if it says (Bybit only).
     pub gateway_block: Option<crate::venue::bybit::gateway::BlockView>,
+    /// The kill switch's process state (Bybit only, C-KILL).
+    pub gateway_kill: Option<crate::venue::bybit::gateway::KillStatusView>,
     /// The direct alerts, if `[alert]` is configured (C-ALERT).
     pub alerts: Option<Arc<crate::alerts::Alerts>>,
     connections: Arc<Semaphore>,
@@ -76,10 +78,12 @@ impl ApiCtx {
         info: status::NodeInfo,
         own_uid: u32,
         gateway_block: Option<crate::venue::bybit::gateway::BlockView>,
+        gateway_kill: Option<crate::venue::bybit::gateway::KillStatusView>,
         alerts: Option<Arc<crate::alerts::Alerts>>,
     ) -> ApiCtx {
         ApiCtx {
             gateway_block,
+            gateway_kill,
             alerts,
             connections: Arc::new(Semaphore::new(cfg.max_connections)),
             admin_connections: Arc::new(Semaphore::new(cfg.admin_max_connections)),
