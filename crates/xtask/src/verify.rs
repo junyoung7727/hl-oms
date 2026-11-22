@@ -67,6 +67,12 @@ pub fn suites(quick: bool, live: bool, extended: Option<&str>) -> Vec<Suite> {
             env: env(&[]),
         },
         Suite {
+            name: "watcher",
+            what: "the independent watcher (U19a): its own journal reader at its failure boundaries (cap, rotation, damage, latched errors), known events against the C-TAIL table, decimals, Base32Pair; conformance against oms-core and oms-journal",
+            args: &["test", "-p", "watcher", "-p", "watcher-conformance"],
+            env: env(&[]),
+        },
+        Suite {
             name: "pipeline",
             what: "commit gate with an injected flush failure (real threads, real file); the process stopped at each commit boundary; the Bybit node against fake venue servers; the direct alerts at a failed flush, a fatal exit and a clean stop (loopback fake Telegram)",
             args: &[
@@ -158,6 +164,21 @@ pub fn run(root: &Path, quick: bool, live: bool, extended: Option<String>) -> i3
         eprintln!("core purity check failed: {found:?}");
     }
 
+    // The watcher shares no code with the OMS (ADR-031): the CI script on
+    // this tree, and the planted cases that make it go red.
+    let mut scripts = serde_json::Map::new();
+    for name in ["watcher_independent", "selftest"] {
+        let ok = Command::new(root.join(format!("tools/ci/{name}.sh")))
+            .current_dir(root)
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if !ok {
+            failed = true;
+            eprintln!("tools/ci/{name}.sh failed");
+        }
+        scripts.insert(name.to_string(), serde_json::json!(if ok { "ok" } else { "failed" }));
+    }
+
     // The tests run with their crate as working directory, so the directory
     // for the extended runs has to be absolute.
     let extended = extended.map(|dir| {
@@ -218,6 +239,7 @@ pub fn run(root: &Path, quick: bool, live: bool, extended: Option<String>) -> i3
         "live_testnet": live,
         "extended": extended,
         "core_purity": match &purity { Ok(()) => serde_json::json!("ok"), Err(f) => serde_json::json!(f) },
+        "source_scripts": scripts,
         "environment": environment(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")),
         "test_data_dir": option_env!("CARGO_TARGET_TMPDIR").unwrap_or("target tmp dir of the build"),
         "suites": results,
