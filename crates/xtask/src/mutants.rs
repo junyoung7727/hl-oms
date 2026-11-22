@@ -1588,7 +1588,61 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "oms-node", "--lib", "liveness::tests::a_hello_for_another_strategy_closes_the_connection_for_the_first"],
         guards: "C-LIVE / L1",
     },
-
+    // U18b4: the monitoring gate (spec defect 9 and the socket rule).
+    Mutant {
+        id: "M173-gate-reads-w3-for-w2",
+        what: "the gate judges W3 in place of W2: a frozen W2 never unmonitors",
+        file: "crates/oms-core/src/core.rs",
+        find: "        for check in [\"W1\", \"W2\"] {",
+        replace: "        for check in [\"W1\", \"W3\"] {",
+        test: &["-p", "oms-core", "--test", "monitor", "a_heartbeat_with_w1_or_w2_older_than_10_s_unmonitors_and_cancels_60_s_later"],
+        guards: "C-LIVE / G2",
+    },
+    Mutant {
+        id: "M174-stage-two-at-once",
+        what: "stage 2 starts at unmonitored_since + 0: resting plain orders are cancelled the moment the gate closes",
+        file: "crates/oms-core/src/core.rs",
+        find: "!state.monitored && at.saturating_sub(state.since) > policy.unmonitored_cancel_us",
+        replace: "!state.monitored && at.saturating_sub(state.since) > 0",
+        test: &["-p", "oms-core", "--test", "monitor", "missing_heartbeats_unmonitor_at_30_s_and_cancel_plain_orders_at_90_s"],
+        guards: "C-LIVE / G3",
+    },
+    Mutant {
+        id: "M175-stale-w2-heartbeat-clears-the-gate",
+        what: "only W1 is judged: a heartbeat with a stale W2 opens the gate",
+        file: "crates/oms-core/src/core.rs",
+        find: "        for check in [\"W1\", \"W2\"] {",
+        replace: "        for check in [\"W1\"] {",
+        test: &["-p", "oms-core", "--test", "monitor", "the_check_age_edge_and_a_check_without_success"],
+        guards: "C-LIVE / G2",
+    },
+    Mutant {
+        id: "M176-future-check-accepted",
+        what: "a check time more than 1 s after the record time is taken: a clock that went back makes a stale check look fresh",
+        file: "crates/oms-core/src/decide.rs",
+        find: "t.filter(|t| *t > latest)",
+        replace: "t.filter(|t| *t > latest && false)",
+        test: &["-p", "oms-core", "--test", "monitor", "a_heartbeat_from_the_future_is_refused"],
+        guards: "C-LIVE / G1",
+    },
+    Mutant {
+        id: "M177-boot-keeps-the-last-heartbeat",
+        what: "a boot keeps the gate's state from before the restart: the start is monitored on an old heartbeat",
+        file: "crates/oms-core/src/core.rs",
+        find: "                    .then(|| unmonitored_from(at, \"no heartbeat since the start\"));",
+        replace: "                    .then(|| unmonitored_from(at, \"no heartbeat since the start\"))\n                    .and(self.monitor.clone());",
+        test: &["-p", "oms-core", "--test", "monitor", "the_gate_starts_unmonitored_at_boot_until_the_first_fresh_heartbeat"],
+        guards: "C-LIVE / G4",
+    },
+    Mutant {
+        id: "M178-heartbeat-on-the-admin-socket",
+        what: "the admin and trading sockets take heartbeat too: any client of the trading socket could keep the gate open",
+        file: "crates/oms-node/src/server.rs",
+        find: "        (Op::Heartbeat { .. }, false) => {",
+        replace: "        (Op::Heartbeat { .. }, false) if false => {",
+        test: &["-p", "oms-node", "--test", "monitor_node", "heartbeats_over_monitor_sock_open_the_gate_and_other_ops_are_forbidden"],
+        guards: "C-LIVE / G1",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
