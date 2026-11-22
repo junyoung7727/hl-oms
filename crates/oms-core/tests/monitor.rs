@@ -575,3 +575,86 @@ fn the_gate_values_are_bounded() {
         assert!(e.contains(because), "{because}: {e}");
     }
 }
+
+/// Stage 2 is timed from the record that closed the gate, not from the last
+/// heartbeat: a watcher that stays alive while its W2 fails keeps sending
+/// heartbeats every 5 s, and the resting plain order is still cancelled on
+/// the first tick more than 60 s after the gate closed (mut.py: stage 2
+/// measured from the last heartbeat).
+#[test]
+fn stale_heartbeats_that_keep_coming_do_not_delay_the_cancels() {
+    let (mut h, plain, reduce) = gated_with_orders();
+    let t0 = h.now + SEC;
+    fresh(&mut h, t0);
+    let (mut closed, mut cancels) = (Vec::new(), Vec::new());
+    let mut t = t0 + TICK;
+    // Bounded: 80 s of 250 ms steps.
+    while t <= t0 + 80 * SEC {
+        let out = if (t - t0) % (5 * SEC) == 0 {
+            let (out, reply) = heartbeat(&mut h, t, checks(Some(t), Some(t0), Some(t)));
+            assert_eq!(reply, Ok("recorded".to_string()));
+            out
+        } else {
+            at(&mut h, t, Input::Tick)
+        };
+        for e in &out.events {
+            match e {
+                Event::MonitorChanged { monitored, .. } => closed.push((t, *monitored)),
+                Event::CancelRequested {
+                    by: Actor::Rule(RuleId::Unmonitored),
+                    ..
+                } => cancels.push(t),
+                _ => {}
+            }
+        }
+        t += TICK;
+    }
+    let since = t0 + 15 * SEC;
+    assert_eq!(closed, vec![(since, false)]);
+    assert_eq!(cancels, vec![since + 60 * SEC + TICK]);
+    assert_eq!(rule_cancels(&h), vec![plain]);
+    assert!(h.order(reduce).cancel.is_none());
+}
+
+/// Stage 2 asks only for orders without a cancel request: a cancel that
+/// used up its attempts is not asked for again on every tick, as the margin
+/// stale cancel (`ExhaustedCancel::Leave`; mut.py: ask again).
+#[test]
+fn stage_two_does_not_ask_again_for_an_exhausted_cancel() {
+    let (mut h, plain, _) = gated_with_orders();
+    assert!(matches!(
+        h.cancel("a", plain),
+        CancelReply::Requested { .. }
+    ));
+    let max = h.core.config.policy.cancel_max_attempts;
+    let first = h.order(plain).cancel.as_ref().unwrap().attempts;
+    // Bounded: `cancel_max_attempts` answers.
+    for attempt in first..first + max {
+        h.venue(VenueInput::CancelResult {
+            order_id: plain,
+            attempt,
+            outcome: CancelOutcome::Unknown {
+                reason: "timeout".into(),
+            },
+            timing: Default::default(),
+        });
+        h.advance(SEC);
+        h.tick();
+    }
+    let c = h.order(plain).cancel.clone().unwrap();
+    assert_eq!((c.used(), c.inflight, c.confirmed), (max, false, false));
+    let from = h.now;
+    let (changes, cancels) = ticks(&mut h, from, from + 100 * SEC);
+    assert_eq!(changes.len(), 1, "the gate closed: {changes:?}");
+    assert!(h.core.monitor_cancel_due(h.now));
+    assert_eq!(
+        cancels,
+        Vec::<Ts>::new(),
+        "an exhausted cancel was asked for again"
+    );
+    let c = h.order(plain).cancel.clone().unwrap();
+    assert_eq!(
+        (c.used(), c.by),
+        (max, Actor::Strategy(StrategyId::new("a").unwrap()))
+    );
+}
