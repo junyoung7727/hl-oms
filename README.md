@@ -98,7 +98,7 @@ cargo run --release -p xtask -- docs        # 결과를 주장과 묶어 docs/ge
 | `crates/oms-sim` | 결정적 시뮬레이션과 가상 거래소 모델 | 1,700 |
 | `crates/oms-api` | 로컬 프로토콜 타입, 클라이언트, `omsctl` | 500 |
 | `crates/oms-node` | 실행 계층: 큐, 커밋 단계, 복구, 소켓 서버, HTTP, 게이트웨이(가상, Hyperliquid), `simvenue` | 7,300 |
-| `crates/watcher` | 독립 워처(U19a): OMS 코드 없이 문서로만 쓴 저널 읽기와 저널 상태, 자기 Bybit 서명·클라이언트와 지표 내보내기. 검사는 아직 없음. 의존성은 레지스트리 crate뿐 | 4,300 |
+| `crates/watcher` | 독립 워처(U19a): OMS 코드 없이 문서로만 쓴 저널 읽기와 저널 상태, 자기 Bybit 서명·클라이언트와 지표 내보내기. 검사는 아직 없음. 의존성은 레지스트리 crate뿐 | 4,450 |
 | `crates/watcher-conformance` | 워처와 OMS 코드를 함께 링크하는 유일한 곳: 적합성 시험 | 900 |
 | `crates/xtask` | 수용 시험 실행기, 변이 점검, 부하 생성기, 문서 생성기 | 2,100 |
 | `registry/` | 검토 항목, 결정, 계약, 주장, 가정, 사용자 결정의 원본(TOML) | |
