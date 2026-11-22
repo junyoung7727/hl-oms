@@ -1618,7 +1618,7 @@ const MUTANTS: &[Mutant] = &[
     },
     Mutant {
         id: "M176-future-check-accepted",
-        what: "a check time more than 1 s after the record time is taken: a clock that went back makes a stale check look fresh",
+        what: "a check time more than 1 s after the record time is taken: a watcher stamping ahead of the node's clock makes a check look fresh",
         file: "crates/oms-core/src/decide.rs",
         find: "t.filter(|t| *t > latest)",
         replace: "t.filter(|t| *t > latest && false)",
@@ -1642,6 +1642,33 @@ const MUTANTS: &[Mutant] = &[
         replace: "        (Op::Heartbeat { .. }, false) if false => {",
         test: &["-p", "oms-node", "--test", "monitor_node", "heartbeats_over_monitor_sock_open_the_gate_and_other_ops_are_forbidden"],
         guards: "C-LIVE / G1",
+    },
+    Mutant {
+        id: "M179-boot-keeps-the-unmonitored-since",
+        what: "a boot while unmonitored keeps the time since from before the restart: resting plain orders are cancelled sooner than 60 s after the start",
+        file: "crates/oms-core/src/core.rs",
+        find: "                    .then(|| unmonitored_from(at, \"no heartbeat since the start\"));",
+        replace: "                    .then(|| {\n                        let mut m = unmonitored_from(at, \"no heartbeat since the start\");\n                        if let Some(old) = self.monitor.as_ref().filter(|o| !o.monitored) {\n                            m.since = old.since;\n                        }\n                        m\n                    });",
+        test: &["-p", "oms-core", "--test", "monitor", "a_boot_while_unmonitored_times_stage_two_from_the_boot"],
+        guards: "C-LIVE / G4",
+    },
+    Mutant {
+        id: "M180-heartbeat-before-hello",
+        what: "monitor.sock takes heartbeat before hello",
+        file: "crates/oms-node/src/server.rs",
+        find: "    if !s.hello && !matches!(req.op, Op::Hello { .. } | Op::Ping) {",
+        replace: "    if !s.hello && !matches!(req.op, Op::Hello { .. } | Op::Ping | Op::Heartbeat { .. }) {",
+        test: &["-p", "oms-node", "--test", "monitor_node", "heartbeats_over_monitor_sock_open_the_gate_and_other_ops_are_forbidden"],
+        guards: "C-LIVE / G1",
+    },
+    Mutant {
+        id: "M181-any-tick-with-the-gate",
+        what: "a gated configuration takes any runtime.tick_ms: a slow tick moves the gate's 30 s and 60 s by as much",
+        file: "crates/oms-node/src/config.rs",
+        find: "        if self.core.policy.monitor.is_some() && self.runtime.tick_ms > MONITOR_TICK_MAX_MS {",
+        replace: "        if false && self.core.policy.monitor.is_some() && self.runtime.tick_ms > MONITOR_TICK_MAX_MS {",
+        test: &["-p", "oms-node", "--lib", "config::tests::the_monitoring_gate_is_validated_and_required_on_mainnet"],
+        guards: "C-LIVE / G2",
     },
 ];
 
