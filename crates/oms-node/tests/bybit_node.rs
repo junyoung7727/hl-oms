@@ -835,6 +835,20 @@ fn a_ten_second_stream_outage_latches_kill_through_a_restart_until_clear_hold_ki
         &venue,
         "kill_after_ms = 10000\nkill_watch_ms = 10000\nkill_watch_every_ms = 1000",
     );
+    // When the first cancel-all arrives, the fake reads the journal files:
+    // the latch must be there already.
+    let first_cancel_all: Arc<Mutex<Option<Vec<Event>>>> = Arc::default();
+    {
+        let (first, data) = (first_cancel_all.clone(), node.data());
+        venue.api.on_request(move |q| {
+            if q.method == "POST" && q.path() == "/v5/order/cancel-all" {
+                let mut f = first.lock().unwrap();
+                if f.is_none() {
+                    *f = Some(kill_events(&data));
+                }
+            }
+        });
+    }
     node.start(&[]);
     node.wait_ready();
     std::thread::sleep(Duration::from_millis(1_500));
@@ -870,9 +884,19 @@ fn a_ten_second_stream_outage_latches_kill_through_a_restart_until_clear_hold_ki
         matches!(&ev[..], [Event::HoldSet { source: HoldSource::Stream, note, .. }] if note.contains("private stream down for")),
         "{ev:?}"
     );
-    // The first cancel-all: the latch is on disk by then.
+    // The first cancel-all: the latch was on disk when it arrived.
     assert!(node.wait(Duration::from_secs(5), || cancel_alls() >= 1));
-    assert!(!kill_events(&node.data()).is_empty());
+    let seen = first_cancel_all.lock().unwrap().clone();
+    assert!(
+        matches!(
+            &seen.as_deref(),
+            Some([Event::HoldSet {
+                source: HoldSource::Stream,
+                ..
+            }])
+        ),
+        "the journal files when the first cancel-all arrived: {seen:?}"
+    );
     let s = node.status().unwrap();
     assert!(
         s["core"]["holds"]

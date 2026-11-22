@@ -59,7 +59,11 @@ struct State {
     /// Per path: answers in order, then the last one again.
     routes: Vec<(String, VecDeque<Answer>)>,
     requests: Vec<Request>,
+    /// Called with each request when it arrives, before it is answered.
+    hook: Option<Hook>,
 }
+
+type Hook = Arc<dyn Fn(&Request) + Send + Sync>;
 
 /// A running fake. Dropping it stops the server thread.
 pub struct FakeHttp {
@@ -140,6 +144,14 @@ impl FakeHttp {
         }
     }
 
+    /// Calls `f` with each request when it arrives, before the answer is
+    /// chosen and sent (a test sees what was true at that moment).
+    pub fn on_request(&self, f: impl Fn(&Request) + Send + Sync + 'static) {
+        if let Ok(mut s) = self.state.lock() {
+            s.hook = Some(Arc::new(f));
+        }
+    }
+
     pub fn set_default(&self, a: Answer) {
         if let Ok(mut s) = self.state.lock() {
             s.default = Some(a);
@@ -217,6 +229,10 @@ async fn serve(mut sock: TcpStream, st: Arc<Mutex<State>>) {
         let Some(req) = read_request(&mut sock, &mut buf).await else {
             return;
         };
+        let hook = st.lock().ok().and_then(|s| s.hook.clone());
+        if let Some(f) = hook {
+            f(&req);
+        }
         match next_answer(&st, req) {
             Answer::Reply(status, body) => {
                 let head = format!(
