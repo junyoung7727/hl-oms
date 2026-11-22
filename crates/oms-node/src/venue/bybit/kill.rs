@@ -282,7 +282,10 @@ impl KillLoop {
                 self.watch_checks += 1;
                 let z = self.zero_since.unwrap_or(now);
                 let end = z.saturating_add(self.t.watch_ms);
-                if now >= end {
+                // The check just answered went out at its due time: only
+                // the one due at the end ends the watch, however late its
+                // answer (a slow answer to an earlier check is not it).
+                if self.watch_due >= end {
                     self.phase = Phase::Done;
                     out.push(self.notice(NoticeKind::Final, now));
                     out.push(Action::Ended(Report {
@@ -588,6 +591,12 @@ enum Step {
 /// Runs one kill loop to its end, or until `KillStop`. A second `Kill`
 /// while it runs is logged and ignored. Each action is performed under
 /// `ctl`, so a stop ends the loop at the next await.
+///
+/// The notices go out beside the loop, one at a time in their order: a
+/// slow or hanging position read holds back no cancel-all and no count
+/// (review M1 of U18b2). The end waits for the notices before it, so the
+/// final notice comes before `KillLoopEnded`. A stop drops the notices not
+/// yet sent.
 pub async fn run<H: KillHost, C: KillClock>(
     host: &H,
     clock: &C,
@@ -601,6 +610,8 @@ pub async fn run<H: KillHost, C: KillClock>(
     let start_ms = clock.now_ms();
     let start_wall = crate::util::wall_us();
     let mut queue: std::collections::VecDeque<Action> = m.start(start_ms).into();
+    let mut notices: std::collections::VecDeque<Notice> = std::collections::VecDeque::new();
+    let mut sending: Option<std::pin::Pin<Box<_>>> = None;
     let show = |m: &KillLoop| {
         let mut v = view.lock().unwrap_or_else(|e| e.into_inner());
         *v = KillView {
@@ -621,8 +632,21 @@ pub async fn run<H: KillHost, C: KillClock>(
     };
     show(&m);
     while let Some(action) = queue.pop_front() {
+        let action = match action {
+            Action::Notice(n) => {
+                notices.push_back(n);
+                if sending.is_none() {
+                    sending = notices
+                        .pop_front()
+                        .map(|n| Box::pin(send_notice(host, ctx, n)));
+                }
+                continue;
+            }
+            a => a,
+        };
+        let after_notices = matches!(action, Action::Ended(_));
         let step = {
-            let fut = perform(host, clock, &mut m, &mut budget, ctx, action);
+            let fut = perform(host, clock, &mut m, &mut budget, action);
             tokio::pin!(fut);
             loop {
                 tokio::select! {
@@ -634,7 +658,14 @@ pub async fn run<H: KillHost, C: KillClock>(
                         Some(VenueCommand::KillStop) | None => break Step::End(RunEnd::Stopped),
                         Some(_) => {}
                     },
-                    s = &mut fut => break s,
+                    () = async {
+                        if let Some(f) = sending.as_mut() {
+                            f.await
+                        }
+                    }, if sending.is_some() => {
+                        sending = notices.pop_front().map(|n| Box::pin(send_notice(host, ctx, n)));
+                    }
+                    s = &mut fut, if !after_notices || sending.is_none() => break s,
                 }
             }
         };
@@ -656,12 +687,32 @@ pub async fn run<H: KillHost, C: KillClock>(
     RunEnd::Stopped
 }
 
+/// One notice with the position block read just before it. No read goes
+/// out while a cancel-all may not (a block, the pause): during the pause a
+/// request can lengthen a ban, and before the boot checks pass the key's
+/// account is not verified (review N2 of U18b2).
+async fn send_notice<H: KillHost>(host: &H, ctx: &NoticeContext, n: Notice) {
+    let block = match host.allowed() {
+        Err(why) => format!("포지션 조회 안 함({why}). 수량·손익 모름"),
+        Ok(()) => {
+            let rows = host.positions().await;
+            let kst = alert_direct::kst(i64::try_from(crate::util::wall_us() / 1000).unwrap_or(0));
+            match &rows {
+                Ok(r) => position_block(Ok(r), &kst),
+                Err(e) => position_block(Err(e), &kst),
+            }
+        }
+    };
+    let text = format!("{}\n{block}", n.text(ctx));
+    crate::warn!("kill loop notice", "kind": format!("{:?}", n.kind), "round": n.round);
+    host.notice(&text);
+}
+
 async fn perform<H: KillHost, C: KillClock>(
     host: &H,
     clock: &C,
     m: &mut KillLoop,
     budget: &mut RateBudget,
-    ctx: &NoticeContext,
     action: Action,
 ) -> Step {
     let next = match action {
@@ -677,22 +728,8 @@ async fn perform<H: KillHost, C: KillClock>(
             };
             m.count_done(clock.now_ms(), r)
         }
-        Action::Notice(n) => {
-            let rows = if host.quiet() {
-                Err("requests are paused".to_string())
-            } else {
-                host.positions().await
-            };
-            let kst = alert_direct::kst(i64::try_from(crate::util::wall_us() / 1000).unwrap_or(0));
-            let block = match &rows {
-                Ok(r) => position_block(Ok(r), &kst),
-                Err(e) => position_block(Err(e), &kst),
-            };
-            let text = format!("{}\n{block}", n.text(ctx));
-            crate::warn!("kill loop notice", "kind": format!("{:?}", n.kind), "round": n.round);
-            host.notice(&text);
-            Vec::new()
-        }
+        // `run` sends the notices beside the loop.
+        Action::Notice(_) => Vec::new(),
         Action::SleepUntil(t) => {
             clock.sleep_until(t).await;
             m.wake(clock.now_ms())
@@ -920,6 +957,31 @@ mod tests {
         assert_eq!(
             times(&log, |a| matches!(a, Action::Count)),
             [0, 5_000, 10_000, 12_000]
+        );
+    }
+
+    /// Review N4: the watch ends only with a check sent at or after
+    /// `z + watch_ms`. A check sent before that and answered after it is
+    /// not the last one: the check due at the end still goes out.
+    #[test]
+    fn a_slow_watch_check_answered_after_the_end_is_not_the_last_check() {
+        let mut m = KillLoop::new(T);
+        m.start(0);
+        assert_eq!(m.cancel_done(0, done()), [Action::Count]);
+        assert_eq!(m.count_done(0, Ok(0)), [Action::SleepUntil(5_000)]);
+        for t in [5_000, 10_000, 15_000, 20_000] {
+            assert_eq!(m.wake(t), [Action::Count]);
+            assert_eq!(m.count_done(t, Ok(0)), [Action::SleepUntil(t + 5_000)]);
+        }
+        assert_eq!(m.wake(25_000), [Action::Count]);
+        // Sent at 25 s, answered at 31 s.
+        assert_eq!(m.count_done(31_000, Ok(0)), [Action::SleepUntil(30_000)]);
+        assert_eq!(m.phase(), Phase::Watch);
+        assert_eq!(m.wake(31_000), [Action::Count]);
+        let a = m.count_done(31_100, Ok(0));
+        assert!(
+            matches!(&a[..], [Action::Notice(n), Action::Ended(_)] if n.kind == NoticeKind::Final),
+            "{a:?}"
         );
     }
 
@@ -1151,6 +1213,8 @@ mod tests {
         rest: Rest,
         queries: Queries,
         block: Mutex<Option<String>>,
+        /// The pause (IP ban, rejected key): no request at all.
+        quiet: std::sync::atomic::AtomicBool,
         notices: Mutex<Vec<String>>,
         alerts: Option<crate::alerts::Alerts>,
         ended: Mutex<Vec<Report>>,
@@ -1158,6 +1222,9 @@ mod tests {
 
     impl KillHost for TestHost {
         fn allowed(&self) -> Result<(), String> {
+            if self.quiet() {
+                return Err("requests are paused".into());
+            }
             match self.block.lock().unwrap().clone() {
                 Some(b) => Err(b),
                 None => Ok(()),
@@ -1165,7 +1232,7 @@ mod tests {
         }
 
         fn quiet(&self) -> bool {
-            false
+            self.quiet.load(std::sync::atomic::Ordering::SeqCst)
         }
 
         async fn cancel_all(&self) -> CancelAnswer {
@@ -1257,12 +1324,23 @@ mod tests {
             alerts: Option<crate::alerts::Alerts>,
             block: Option<&str>,
         ) -> Rig {
+            Rig::launch(api, timing, alerts, block, Duration::from_millis(500))
+        }
+
+        /// `timeout`: the REST request timeout of the fake's clients.
+        fn launch(
+            api: &FakeHttp,
+            timing: KillTiming,
+            alerts: Option<crate::alerts::Alerts>,
+            block: Option<&str>,
+            timeout: Duration,
+        ) -> Rig {
             let rest = || {
                 Rest::new(
                     &api.url(),
                     Arc::new(Credentials::new("K", "S")),
                     5000,
-                    Duration::from_millis(500),
+                    timeout,
                 )
                 .unwrap()
             };
@@ -1270,6 +1348,7 @@ mod tests {
                 rest: rest(),
                 queries: Queries::new(rest(), 7, 2000),
                 block: Mutex::new(block.map(str::to_string)),
+                quiet: Default::default(),
                 notices: Mutex::default(),
                 alerts,
                 ended: Mutex::default(),
@@ -1598,6 +1677,94 @@ mod tests {
             "{texts:#?}"
         );
         r.at_most_two_per_second();
+    }
+
+    /// Review M1: the notices go out beside the loop. A position read that
+    /// hangs (here for the whole test) holds back neither the first
+    /// cancel-all nor the one for a late order in the watch; the notices
+    /// wait for it instead, in their order.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_hanging_position_read_holds_back_no_cancel_all() {
+        let api = venue();
+        api.route(POSITIONS, [Http::Hang]);
+        api.route(
+            REALTIME,
+            [page(vec![]), page(vec![open_row(1)]), page(vec![])],
+        );
+        let mut r = Rig::launch(
+            &api,
+            KillTiming::DEFAULT,
+            None,
+            None,
+            Duration::from_secs(60),
+        );
+        r.run_to(&api, 0).await;
+        assert_eq!(r.posts, [0], "the first cancel-all waits for the notice");
+        assert_eq!(gets(&api, REALTIME), 1);
+        assert_eq!(r.view.lock().unwrap().phase, Phase::Watch);
+        // The late order at +5 s: the cancel-all goes out at once.
+        r.run_to(&api, 5_000).await;
+        assert_eq!(r.posts, [0, 5_000]);
+        assert_eq!(gets(&api, REALTIME), 3);
+        assert!(r.notices().is_empty(), "{:?}", r.notices());
+        assert_eq!(gets(&api, POSITIONS), 1, "one read at a time");
+        r.ctl.send(VenueCommand::KillStop).unwrap();
+        assert_eq!(r.end().await, RunEnd::Stopped);
+        assert!(r.notices().is_empty(), "a notice after the stop");
+    }
+
+    /// C-KILL failures: during the pause (IP ban, rejected key) no count and
+    /// no position read goes out; the round fails with the pause. Under a
+    /// block (here the account) a notice reads no position either (review
+    /// N2): the key's account may not be the configured one.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn while_requests_are_paused_no_count_and_no_position_read_go_out() {
+        let api = venue();
+        let mut r = Rig::start(&api, KillTiming::DEFAULT, None);
+        r.run_to(&api, 4_900).await;
+        assert_eq!(
+            (r.posts.clone(), gets(&api, REALTIME), gets(&api, POSITIONS)),
+            (vec![0], 1, 1)
+        );
+        r.host
+            .quiet
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        r.run_to(&api, 60_500).await;
+        assert_eq!(r.posts, [0], "a cancel-all during the pause");
+        assert_eq!(gets(&api, REALTIME), 1, "a count during the pause");
+        assert_eq!(gets(&api, POSITIONS), 1, "a position read during the pause");
+        {
+            let v = r.view.lock().unwrap().clone();
+            assert_eq!(
+                (v.phase, v.remaining, v.last_error.as_deref()),
+                (Phase::Rounds, None, Some("requests are paused"))
+            );
+        }
+        let n = r.notices();
+        assert_eq!(n.len(), 2, "start and the repeat at 60 s: {n:#?}");
+        assert!(
+            n[1].ends_with("\n포지션 조회 안 함(requests are paused). 수량·손익 모름"),
+            "{}",
+            n[1]
+        );
+
+        r.host
+            .quiet
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        *r.host.block.lock().unwrap() = Some("account: the key is of uid 9".into());
+        r.run_to(&api, 120_500).await;
+        assert_eq!(gets(&api, POSITIONS), 1, "a position read under the block");
+        let n = r.notices();
+        assert_eq!(n.len(), 3, "{n:#?}");
+        assert!(
+            n[2].ends_with("\n포지션 조회 안 함(account: the key is of uid 9). 수량·손익 모름"),
+            "{}",
+            n[2]
+        );
+        *r.host.block.lock().unwrap() = None;
+        r.run_to(&api, 160_000).await;
+        assert_eq!(r.ended().len(), 1);
+        assert_eq!(gets(&api, POSITIONS), 2, "the final notice reads again");
     }
 
     /// `KillStop` ends the loop at the next await: no notice and no input
