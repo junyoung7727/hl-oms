@@ -247,3 +247,78 @@ async fn a_request_beyond_the_guard_waits_for_the_window() {
     assert!(matches!(r, Ok(Ok(Ok(_)))), "{r:?}");
     assert_eq!(fake.requests().len(), GUARD_MAX + 1);
 }
+
+#[tokio::test]
+async fn answers_are_classified() {
+    let p = "/v5/order/realtime";
+    let cases: Vec<(Answer, &str)> = vec![
+        (Answer::Hang, "no_answer"),
+        (Answer::Close, "no_answer"),
+        (Answer::Reply(500, "oops".into()), "no_answer"),
+        (Answer::Reply(502, String::new()), "no_answer"),
+        (Answer::Reply(200, "not json".into()), "no_answer"),
+        (
+            Answer::Reply(200, r#"{"retMsg":"OK","result":{}}"#.into()),
+            "no_answer",
+        ),
+        (
+            Answer::Reply(200, r#"{"retCode":"0","result":{}}"#.into()),
+            "no_answer",
+        ),
+        (code(10016), "no_answer"),
+        (Answer::Reply(429, "slow down".into()), "rate_limited"),
+        (code(10006), "rate_limited"),
+        (code(10002), "clock"),
+        (code(10001), "refused"),
+        (code(110001), "refused"),
+        (code(-1), "refused"),
+    ];
+    for (answer, class) in cases {
+        let fake = FakeHttp::start(Answer::Close);
+        fake.route(p, [answer.clone()]);
+        let c = client(&fake);
+        let e = c.client.get(p, &[]).await.unwrap_err();
+        assert_eq!(e.class(), class, "{answer:?}: {e:?}");
+        assert_eq!(
+            c.metrics.get(
+                "watcher_request_errors_total",
+                &[("endpoint", p), ("class", class)]
+            ),
+            Some(1.0),
+            "{answer:?}"
+        );
+        // None of these stops or pauses the client: the next request goes.
+        fake.route(p, [ok("{}")]);
+        c.client.get(p, &[]).await.unwrap();
+        assert_eq!(fake.requests().len(), 2, "{answer:?}");
+        assert_eq!(c.metrics.get("watcher_auth_rejected", &[]), Some(0.0));
+    }
+    // retCode 0: the result, or null when there is none (the check decides
+    // whether it can read the rows: `unreadable`).
+    let fake = FakeHttp::start(Answer::Close);
+    let c = client(&fake);
+    fake.route(p, [ok(r#"{"list":[1]}"#)]);
+    assert_eq!(c.client.get(p, &[]).await.unwrap(), json!({"list": [1]}));
+    fake.route(
+        p,
+        [Answer::Reply(200, r#"{"retCode":0,"retMsg":"OK"}"#.into())],
+    );
+    assert_eq!(c.client.get(p, &[]).await.unwrap(), serde_json::Value::Null);
+    let e = c.client.unreadable(p, "row 3 has no orderId");
+    assert_eq!(e.class(), "unreadable");
+    assert_eq!(
+        c.metrics.get(
+            "watcher_request_errors_total",
+            &[("endpoint", p), ("class", "unreadable")]
+        ),
+        Some(1.0)
+    );
+    // Connection refused: nothing sent.
+    let c = client_of(&format!("http://{}", http_fake::dead_addr()), 300);
+    let e = c.client.get(p, &[]).await.unwrap_err();
+    assert_eq!(e.class(), "not_sent", "{e:?}");
+    assert_eq!(
+        c.metrics.get("watcher_requests_total", &[("endpoint", p)]),
+        Some(1.0)
+    );
+}

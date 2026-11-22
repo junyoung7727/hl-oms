@@ -157,14 +157,37 @@ pub const IP_BAN_PAUSE_MS: u64 = 600_000;
 /// Classifies an answer: the `result` of retCode 0 (`null` when absent),
 /// or the error.
 pub fn classify(status: u16, body: &str) -> Result<Value, RestError> {
-    if !(200..=299).contains(&status) {
-        return Err(RestError::NoAnswer(format!("HTTP {status}")));
+    let short: String = body.chars().take(200).collect();
+    match status {
+        200..=299 => {}
+        401 => {
+            return Err(RestError::Auth {
+                code: 401,
+                msg: format!("HTTP 401: {short}"),
+            });
+        }
+        403 => return Err(RestError::IpBanned(format!("HTTP 403: {short}"))),
+        429 => return Err(RestError::RateLimited(format!("HTTP 429: {short}"))),
+        _ => return Err(RestError::NoAnswer(format!("HTTP {status}: {short}"))),
     }
     let v: Value = serde_json::from_str(body)
         .map_err(|e| RestError::NoAnswer(format!("unreadable body: {e}")))?;
-    match v.get("retCode").and_then(Value::as_i64) {
-        Some(0) => Ok(v.get("result").cloned().unwrap_or(Value::Null)),
-        _ => Err(RestError::NoAnswer("x".into())),
+    let code = v
+        .get("retCode")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| RestError::NoAnswer(format!("no retCode: {short}")))?;
+    let msg = v
+        .get("retMsg")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    match code {
+        0 => Ok(v.get("result").cloned().unwrap_or(Value::Null)),
+        c if AUTH_CODES.contains(&c) => Err(RestError::Auth { code: c, msg }),
+        10006 => Err(RestError::RateLimited(msg)),
+        10002 => Err(RestError::Clock(msg)),
+        10016 => Err(RestError::NoAnswer(format!("venue error 10016: {msg}"))),
+        c => Err(RestError::Refused { code: c, msg }),
     }
 }
 
@@ -242,6 +265,14 @@ impl Client {
             log,
             stop: Mutex::new(Stop::default()),
         })
+    }
+
+    /// The error of a check that cannot read the rows of a retCode 0
+    /// answer, counted under `endpoint`.
+    pub fn unreadable(&self, endpoint: &str, why: &str) -> RestError {
+        let e = RestError::Unreadable(why.to_string());
+        self.count_error(endpoint, &e);
+        e
     }
 
     fn count_error(&self, endpoint: &str, e: &RestError) {
