@@ -323,8 +323,9 @@ fn margin_reports_with_and_without_account_mm_recover_to_the_live_state() {
     }
 }
 
-/// U18b1. The kill marker in `Boot`, the watcher's inputs, `hold_set`,
-/// `hold_cleared`, `kill_loop_ended` and the three holds of C-HOLD in the
+/// U18b1, U18b2. The kill marker in `Boot`, the watcher's inputs,
+/// `StreamLost`, `hold_set`, `hold_cleared`, `kill_loop_ended`,
+/// `kill_rearmed` and the three holds of C-HOLD in the
 /// state are optional fields and new kinds, not a schema rise: a journal
 /// with them recovers to the live state and `verify --re-decide` passes,
 /// and a state without them keeps the bytes it had.
@@ -384,9 +385,20 @@ fn kill_holds_liveness_and_heartbeats_recover_to_the_live_state() {
     // A second latch, left set, so the recovered state holds one.
     run.input(Input::Watcher(WatcherInput::Kill { detail: "W5 again".into() }));
     assert!(run.core.kill.is_some());
+    // U18b2: the stream trigger after a confirmed zero re-arms the latch
+    // (`kill_rearmed`); the new loop has not confirmed at recovery.
+    run.venue(VenueInput::KillLoopEnded {
+        outcome: KillOutcome::Confirmed,
+        rounds: 3,
+        cancel_all_calls: 3,
+        detail: "zero open orders".into(),
+    });
+    let since = run.at;
+    run.venue(VenueInput::StreamLost { since, detail: "closed by the venue".into() });
+    assert!(run.core.kill.as_ref().is_some_and(|k| k.confirmed_at.is_none()));
     let records = run.take();
     let names: Vec<&str> = records.iter().flat_map(|r| r.events.iter().map(Event::name)).collect();
-    for kind in ["hold_set", "hold_cleared", "kill_loop_ended"] {
+    for kind in ["hold_set", "hold_cleared", "kill_loop_ended", "kill_rearmed"] {
         assert!(names.contains(&kind), "{kind}: {names:?}");
     }
     write(&dir, RECORD_SCHEMA, &records);

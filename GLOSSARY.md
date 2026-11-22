@@ -161,12 +161,24 @@ The rule cancel of every resting plain order when no margin report has been acce
 _Avoid_: timeout cancel, watchdog
 
 **Kill latch** (킬 래치):
-The hold `KillLatched`: every order is refused, reduce-only included, until the operator clears it. The clear is taken only after the gateway of the running process answered the kill (`confirmed`, or `unsupported` from a gateway without cancel-all: in U18b1 the simulated venue, Hyperliquid and Bybit) and only while the OMS book has no open order (`kill_orders_open` otherwise: run cancel-all first) (C-HOLD).
+The hold `KillLatched`: every order is refused, reduce-only included, until the operator clears it. The clear is taken only after the gateway of the running process answered the kill (`confirmed` from the Bybit kill loop, or `unsupported` from a gateway without cancel-all: the simulated venue and Hyperliquid) and only while the OMS book has no open order (`kill_orders_open` otherwise: run cancel-all first) (C-HOLD).
 _Avoid_: kill flag, emergency stop
 
 **Kill loop** (킬 루프):
-What a gateway does for a `Kill` command: cancel every order at the venue until zero is confirmed (Bybit, U18b2), or answer `unsupported` when it has no cancel-all.
+What a gateway does for a `Kill` command: cancel every order at the venue until zero is confirmed (Bybit: one cancel-all per round, a count after each, 30 s of checks after the first zero, C-KILL), or answer `unsupported` when it has no cancel-all. Creates stay home while it runs.
 _Avoid_: panic cancel
+
+**Stream-outage trigger** (스트림 끊김 트리거):
+The Bybit gateway's kill trigger: the private stream down for longer than `kill_after_ms` after its last proof of life (subscribe confirmed, pong, or the first pass of the boot checks). Not armed before the boot checks pass; time waiting on the core queue is not an outage (C-KILL).
+_Avoid_: heartbeat timeout, dead-man switch
+
+**Emergency budget** (비상 예산):
+The kill loop's own rate budget for cancel-all, 2 per 1 s on the loop's clock, apart from the order budget (C-KILL).
+_Avoid_: kill rate limit
+
+**Kill re-arm** (킬 다시 무장):
+A new kill trigger after the kill loop of this process confirmed zero at the venue (not after `unsupported`): `kill_rearmed` voids the confirmation and a new loop runs; the latch keeps its first note (C-KILL).
+_Avoid_: re-latch
 
 **Kill marker** (킬 마커):
 The file the watcher writes when it kills. Read once before the boot record; anything at its path, or a path that cannot be examined, latches the kill. Removed only after a durable `clear-hold kill`.

@@ -393,9 +393,29 @@ impl Queries {
         }])
     }
 
+    /// The open orders in the kill scope (C-KILL C3): every row of every
+    /// page of `/v5/order/realtime` with `category=linear` and
+    /// `settleCoin=USDT` whose status is open, whatever its `orderLinkId`
+    /// (orders the OMS did not send count too). No whole snapshot (a
+    /// failed page, more than `MAX_PAGES` pages) is an error, never zero.
+    pub(super) async fn kill_count(&self) -> Result<usize, QueryFail> {
+        let rows = self
+            .all_pages("/v5/order/realtime", &linear(), LIMIT_ORDERS)
+            .await?;
+        let mut open = 0;
+        for r in &rows {
+            match text(r, "orderStatus") {
+                Ok("New" | "PartiallyFilled" | "Untriggered") => open += 1,
+                Ok(_) => {}
+                Err(e) => return Err(unreadable(format!("/v5/order/realtime: {e}"))),
+            }
+        }
+        Ok(open)
+    }
+
     /// Every linear USDT position (with `settleCoin` and no symbol the venue
     /// lists only positions above zero, F20 Q12.1).
-    async fn position_rows(&self) -> Result<Vec<Value>, QueryFail> {
+    pub(super) async fn position_rows(&self) -> Result<Vec<Value>, QueryFail> {
         self.all_pages("/v5/position/list", &linear(), LIMIT_POSITIONS)
             .await
     }
@@ -1126,6 +1146,80 @@ mod tests {
         let a = queries(&fake).answer(QueryReq::OpenOrders, SESSION).await;
         assert!(a.inputs.is_empty());
         assert_eq!(fake.requests().len(), MAX_PAGES);
+    }
+
+    /// C-KILL C3: the kill count is every open row of every page, whatever
+    /// its `orderLinkId` (an order the OMS did not send counts). Closed
+    /// rows do not count. A row whose status cannot be read, or a snapshot
+    /// that is not whole, is an error, never a count.
+    #[tokio::test]
+    async fn the_kill_count_is_every_open_row_of_every_page_and_never_a_guess() {
+        let fake = venue();
+        fake.route(
+            "/v5/order/realtime",
+            [
+                ok(list(
+                    vec![
+                        order(&link(1), "New", "0"),
+                        order(&link(2), "PartiallyFilled", "0.001"),
+                        order(&link(3), "Filled", "0.003"),
+                        order("manual-1", "New", "0"),
+                    ],
+                    "c1",
+                )),
+                ok(list(
+                    vec![
+                        order("", "Untriggered", "0"),
+                        order(&link(4), "Cancelled", "0"),
+                        order(&link(5), "Deactivated", "0"),
+                    ],
+                    "",
+                )),
+            ],
+        );
+        assert_eq!(queries(&fake).kill_count().await.unwrap(), 4);
+        assert_eq!(fake.requests().len(), 2, "{:?}", targets(&fake));
+
+        // A row without a readable status: an error, not one row less.
+        let mut no_status = order(&link(6), "New", "0");
+        no_status.as_object_mut().unwrap().remove("orderStatus");
+        for rows in [
+            vec![order(&link(1), "New", "0"), no_status],
+            vec![json!({"orderId": "x", "orderStatus": 7})],
+        ] {
+            let fake = venue();
+            fake.route("/v5/order/realtime", [ok(list(rows.clone(), ""))]);
+            let e = queries(&fake).kill_count().await.unwrap_err();
+            assert!(matches!(e, QueryFail::Unreadable(_)), "{rows:?}: {e}");
+        }
+
+        // More than MAX_PAGES pages: an error, not the rows seen so far.
+        let fake = venue();
+        let pages: Vec<Http> = (0..MAX_PAGES + 5)
+            .map(|i| {
+                ok(list(
+                    vec![order(&link(i as u64), "New", "0")],
+                    &format!("c{i}"),
+                ))
+            })
+            .collect();
+        fake.route("/v5/order/realtime", pages);
+        let e = queries(&fake).kill_count().await.unwrap_err();
+        assert!(e.to_string().contains("more than"), "{e}");
+        assert_eq!(fake.requests().len(), MAX_PAGES);
+        // A failed page: the error of that page.
+        let fake = venue();
+        fake.route(
+            "/v5/order/realtime",
+            [
+                ok(list(vec![order(&link(1), "New", "0")], "c1")),
+                Http::Reply(500, "{}".into()),
+            ],
+        );
+        assert!(matches!(
+            queries(&fake).kill_count().await,
+            Err(QueryFail::Rest(_))
+        ));
     }
 
     fn position(symbol: &str, side: &str, size: &str, idx: i64) -> Value {

@@ -116,6 +116,11 @@ pub enum OperatorCmd {
 /// journal. 1 KiB 판단(모델 아님), as the marker's 512 bytes.
 pub const WATCHER_DETAIL_MAX: usize = 1024;
 
+/// The reply to `watcher_kill` when the latch was confirmed and the new
+/// trigger voids the confirmation (C-KILL). It starts like the plain
+/// "already latched": in both cases the OMS sends no new order.
+pub const KILL_REARMED_REPLY: &str = "already latched; the earlier confirmation is void and a new kill loop starts";
+
 /// What the watcher (U19) tells the OMS (C-HOLD).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -226,6 +231,11 @@ pub enum VenueInput {
         cancel_all_calls: u32,
         detail: String,
     },
+    /// The private stream has been down longer than the gateway's
+    /// `kill_after` since its last proof of life (C-KILL): the kill trigger.
+    /// `since` is the wall time of that proof; `detail` the stream's last
+    /// end reason.
+    StreamLost { since: Ts, detail: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

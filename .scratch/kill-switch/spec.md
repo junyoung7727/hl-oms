@@ -192,6 +192,17 @@ Machine: `start(now)`, `cancel_done(now, Ok(CancelAll) | Err(why))`, `count_done
 
 `gateway.kill_loop` (process state, like the block view): `phase` (`idle` \| `rounds` \| `watch` \| `done` \| `stopped`), `round`, `remaining` (number or null), `cancel_all_calls`, `last_error`, `started_at`, `zero_since`, `notices`; `gateway.kill_armed` and `gateway.last_proof_age_ms`; `source: "gateway process state"`.
 
+### Amendments (U18b2 review 1)
+
+- Amendment (M1): the driver sends the notices beside the loop, one at a time in their order; a slow or hanging position read holds back no cancel-all or count ("C2 at once" in C5). The end waits for the queued notices, so the final notice still comes before `KillLoopEnded`; `KillStop` drops the notices not yet sent.
+- Amendment (N2): a notice reads no position while `allowed()` fails (a block or the pause): text `포지션 조회 안 함(<block>). 수량·손익 모름`. Before the boot checks pass the key's account is not verified.
+- Amendment (N4): the watch ends only on the check that went out at `z + watch_ms` (its due time), not on any count answered after that time.
+- Amendment (S3): `http-fake` gets an `on_request` hook; the process test reads the journal files when the first cancel-all arrives. It proves the record is in the files (written), not that it was fsynced (that order is `pipeline::a_kill_command_leaves_only_after_the_latch_is_durable`, M130).
+
+### Amendments (U18b2 review 2)
+
+- Amendment (S1, N1): at most one notice waits behind the one in flight; a newer notice takes the place of a waiting change or repeat (Start and Final are never dropped), so the end waits for at most two notices (≤ 2 × `request_timeout_ms` late); `status.gateway.kill_loop.notices` counts the notices sent, not made.
+
 ## U18b3 decisions: strategy liveness (StrategyLink)
 
 - Keys: the strategy id. Only trading-socket connections count; admin connections never do.

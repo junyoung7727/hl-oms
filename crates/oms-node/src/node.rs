@@ -189,6 +189,7 @@ pub fn run(cfg: NodeConfig) -> i32 {
             instance_id,
             boot,
         };
+        let mut gateway_kill: Option<venue::bybit::gateway::KillStatusView> = None;
         let (venue_name, wire_id_form, gateway_block): (String, WireIdForm, Option<venue::bybit::gateway::BlockView>) = match &cfg.venue {
             VenueConfig::Sim {
                 socket,
@@ -232,12 +233,22 @@ pub fn run(cfg: NodeConfig) -> i32 {
                         qty_step: spec.qty_step,
                     })
                     .collect();
-                match venue::bybit::gateway::spawn(b.clone(), symbols, ports, policy.max_inflight_sends as usize + 16) {
-                    Ok((name, block)) => {
+                // The kill loop's notices (C-KILL): through the direct
+                // alerts, or a `warn` line each without `[alert]`.
+                let notice: venue::bybit::gateway::NoticeSink = match &alerts {
+                    Some(a) => {
+                        let a = a.clone();
+                        Arc::new(move |text: &str| a.notice(text))
+                    }
+                    None => Arc::new(|text: &str| warn!("kill loop notice (no [alert]: not sent)", "text": text)),
+                };
+                match venue::bybit::gateway::spawn(b.clone(), symbols, ports, policy.max_inflight_sends as usize + 16, notice) {
+                    Ok(started) => {
                         if let Some(a) = &alerts {
-                            a.set_gateway_block(block.clone());
+                            a.set_gateway_block(started.block.clone());
                         }
-                        (name, <venue::bybit::gateway::Gateway as VenueGateway>::WIRE_ID, Some(block))
+                        gateway_kill = Some(started.kill);
+                        (started.name, <venue::bybit::gateway::Gateway as VenueGateway>::WIRE_ID, Some(started.block))
                     }
                     Err(e) => {
                         error!("cannot start the Bybit gateway", "error": e);
@@ -307,6 +318,7 @@ pub fn run(cfg: NodeConfig) -> i32 {
             node_info,
             own_uid,
             gateway_block,
+            gateway_kill,
             alerts.clone(),
         ));
         let trading_mode = if cfg.api.allowed_uids.is_empty() { 0o600 } else { 0o666 };

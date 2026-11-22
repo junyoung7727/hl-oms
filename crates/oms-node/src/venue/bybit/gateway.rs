@@ -20,6 +20,7 @@ use oms_core::*;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::checks::{self, Block, Expected, Health, SymbolSpec};
+use super::kill::{self, CancelAnswer, KillHost, KillTiming, KillView, NoticeContext, Report};
 use super::orders::{Create, Effect, Orders};
 use super::query::{Queries, QueryFail};
 use super::rest::{Credentials, IP_BAN_PAUSE, Rest, RestError};
@@ -59,6 +60,11 @@ pub struct Timing {
     /// At most one reference price per symbol this often
     /// (`ref_price_interval_ms`).
     pub ref_price: Duration,
+    /// The kill trigger: the private stream down this long after its last
+    /// proof of life (`kill_after_ms`, C-KILL).
+    pub kill_after: Duration,
+    /// The kill loop's times (`kill_*_ms`).
+    pub kill: KillTiming,
 }
 
 impl Timing {
@@ -76,6 +82,13 @@ impl Timing {
             backoff_max: Duration::from_secs(10),
             request: Duration::from_millis(cfg.request_timeout_ms),
             ref_price: Duration::from_millis(cfg.ref_price_interval_ms),
+            kill_after: Duration::from_millis(cfg.kill_after_ms),
+            kill: KillTiming {
+                round_ms: cfg.kill_round_ms,
+                watch_ms: cfg.kill_watch_ms,
+                watch_every_ms: cfg.kill_watch_every_ms,
+                notice_ms: cfg.kill_notice_ms,
+            },
         }
     }
 }
@@ -171,6 +184,48 @@ pub(crate) struct Gateway {
     /// The end of the pause after HTTP 403.
     banned_until: Mutex<Option<Instant>>,
     timing: Timing,
+    /// The kill trigger's view of the private stream (C-KILL).
+    proof: Mutex<Proof>,
+    /// Set by `Kill`, cleared by `KillStop`: no create leaves meanwhile.
+    kill_active: std::sync::atomic::AtomicBool,
+    /// `Kill` and `KillStop` to the kill task.
+    kill_tx: tokio::sync::mpsc::UnboundedSender<VenueCommand>,
+    kill_rx: Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<VenueCommand>>>,
+    kill_view: Arc<Mutex<KillView>>,
+    notice: NoticeSink,
+}
+
+/// Where the kill-loop notices go: the direct alerts, or a `warn` line
+/// without `[alert]` (the node decides).
+pub type NoticeSink = Arc<dyn Fn(&str) + Send + Sync>;
+
+/// The private stream as the kill trigger sees it (C-KILL).
+struct Proof {
+    /// The last proof of life: the link came up, a pong, or the boot
+    /// checks first passed. Moved on by the time spent waiting on the
+    /// core's queue, as the pong deadline is.
+    at: Option<tokio::time::Instant>,
+    /// The boot checks passed once: the account is the configured one.
+    armed: bool,
+    link_up: bool,
+    /// The trigger fired for this outage; a new proof re-arms it.
+    fired: bool,
+    /// Why the stream last ended, or why it does not connect.
+    last_end: String,
+}
+
+/// Longest stream end reason passed to the core (journaled).
+const STREAM_DETAIL_MAX: usize = 512;
+
+fn clipped(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_string();
+    }
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &text[..end])
 }
 
 pub(super) fn wall_ms() -> u64 {
@@ -228,6 +283,7 @@ pub(super) enum End {
 }
 
 impl Gateway {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         cfg: &BybitConfig,
         creds: Arc<Credentials>,
@@ -236,6 +292,7 @@ impl Gateway {
         input: VenueInputTx,
         instance_id: u64,
         timing: Timing,
+        notice: NoticeSink,
     ) -> Result<Gateway, String> {
         let timeout = Duration::from_millis(cfg.request_timeout_ms);
         let rest = || Rest::new(&wiring.rest, creds.clone(), cfg.recv_window_ms, timeout);
@@ -246,6 +303,7 @@ impl Gateway {
             "the boot checks have not run yet".into(),
         )));
         let trade = Arc::new(Trade::default());
+        let (kill_tx, kill_rx) = tokio::sync::mpsc::unbounded_channel();
         Ok(Gateway {
             queries: Queries::new(rest()?, instance_id, cfg.fills_lag_ms),
             orders: Orders::new(rest()?).with_trade(trade.clone()),
@@ -266,6 +324,18 @@ impl Gateway {
             health,
             banned_until: Mutex::new(None),
             timing,
+            proof: Mutex::new(Proof {
+                at: None,
+                armed: false,
+                link_up: false,
+                fired: false,
+                last_end: "the private stream has not come up since the boot checks passed".into(),
+            }),
+            kill_active: std::sync::atomic::AtomicBool::new(false),
+            kill_tx,
+            kill_rx: Mutex::new(Some(kill_rx)),
+            kill_view: Arc::default(),
+            notice,
         })
     }
 
@@ -381,6 +451,7 @@ impl Gateway {
                         info!("the Bybit boot checks passed");
                         // The boot run read the IP too.
                         self.health.set_ip(None);
+                        self.arm_kill();
                     }
                     self.record(r, Health::set_boot);
                 }
@@ -434,6 +505,9 @@ impl Gateway {
             }
             // Connect only when the link may come up.
             if self.quiet() || self.health.block().is_some() {
+                if let Err(b) = self.allowed() {
+                    self.stream_ended(&format!("not connected: {b}"));
+                }
                 tokio::time::sleep(self.timing.health_poll).await;
                 continue;
             }
@@ -446,6 +520,10 @@ impl Gateway {
                 // reconnect every half second.
                 backoff = self.timing.backoff_min;
             }
+            let why = match &end {
+                End::Retry(e) | End::Rejected(e) | End::IpBanned(e) => e.clone(),
+            };
+            self.stream_ended(&why);
             match end {
                 End::Retry(e) => warn!("the private stream ended", "error": e),
                 End::Rejected(e) => {
@@ -525,6 +603,7 @@ impl Gateway {
         *connection += 1;
         let session = session_number(boot, *connection);
         self.session.store(session, Ordering::SeqCst);
+        self.proof_of_life(true);
         info!("the private stream is subscribed", "session": session);
         self.input
             .send(VenueInput::Link {
@@ -585,6 +664,7 @@ impl Gateway {
                 stream::Frame::Pong => {
                     pong_due = None;
                     *alive = true;
+                    self.proof_of_life(true);
                     Ok(())
                 }
                 stream::Frame::Orders(rows) => self.orders(&rows, session).await,
@@ -594,13 +674,16 @@ impl Gateway {
                 }
                 stream::Frame::Subscribe(Ok(())) | stream::Frame::Other => Ok(()),
             };
+            let waited = delivering.elapsed();
             if let Some(d) = pong_due.as_mut() {
-                *d += delivering.elapsed();
+                *d += waited;
             }
+            self.proof_moved_on(waited);
             if let Err(e) = delivered {
                 break e;
             }
         };
+        self.stream_ended(&reason);
         self.input
             .send(VenueInput::Link {
                 up: false,
@@ -670,9 +753,14 @@ impl Gateway {
         }
     }
 
-    /// Whether a new order may leave now: `allowed`, and the clock.
+    /// Whether a new order may leave now: `allowed`, the clock, and no
+    /// kill loop (C-KILL C1: a create released before the latch stays
+    /// home).
     fn create_allowed(&self) -> Result<(), String> {
         self.allowed()?;
+        if self.kill_active.load(Ordering::SeqCst) {
+            return Err("kill switch active".into());
+        }
         match self.health.create_block() {
             Some(b) => Err(b.to_string()),
             None => Ok(()),
@@ -780,6 +868,161 @@ impl Gateway {
     }
 }
 
+// ---- the kill switch (C-KILL) ---------------------------------------------------
+
+impl Gateway {
+    fn proof(&self) -> std::sync::MutexGuard<'_, Proof> {
+        self.proof.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The boot checks passed for the first time: the account is the
+    /// configured sub-account, so the trigger may fire from now on. The
+    /// pass counts as a proof of life.
+    fn arm_kill(&self) {
+        let mut p = self.proof();
+        if !p.armed {
+            p.armed = true;
+            p.at = Some(tokio::time::Instant::now());
+            p.fired = false;
+        }
+    }
+
+    /// The link came up, or a pong: a new proof of life. `up` marks the
+    /// link up.
+    fn proof_of_life(&self, up: bool) {
+        let mut p = self.proof();
+        p.at = Some(tokio::time::Instant::now());
+        p.link_up = up;
+        p.fired = false;
+    }
+
+    /// Time spent waiting on the core's queue does not count: a slow core
+    /// is not an outage.
+    fn proof_moved_on(&self, waited: Duration) {
+        if let Some(at) = self.proof().at.as_mut() {
+            *at += waited;
+        }
+    }
+
+    fn stream_ended(&self, why: &str) {
+        let mut p = self.proof();
+        p.link_up = false;
+        p.last_end = why.to_string();
+    }
+
+    /// The watchdog (every `health_poll`): once per outage, when the link
+    /// is down and the last proof is older than `kill_after`, it sends
+    /// `StreamLost`. While the link is up the stream itself ends at a
+    /// missing pong, so only a down link is judged here.
+    async fn kill_watch(self: Arc<Self>) {
+        let mut tick = tokio::time::interval(self.timing.health_poll);
+        loop {
+            tick.tick().await;
+            let lost = {
+                let mut p = self.proof();
+                match p.at {
+                    Some(at) if p.armed && !p.link_up && !p.fired && at.elapsed() > self.timing.kill_after => {
+                        p.fired = true;
+                        let since = wall_us().saturating_sub(at.elapsed().as_micros() as u64);
+                        Some((since, clipped(&p.last_end, STREAM_DETAIL_MAX)))
+                    }
+                    _ => None,
+                }
+            };
+            if let Some((since, detail)) = lost {
+                error!("the private stream is down past kill_after: the kill switch latches", "kill_after_ms": self.timing.kill_after.as_millis() as u64, "detail": detail.clone());
+                if !self.input.send(VenueInput::StreamLost { since, detail }).await {
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Runs a kill loop for each `Kill`, one at a time. A `KillStop` while
+    /// idle is ignored; a `Kill` while a loop runs is ignored by the loop.
+    async fn kill_task(self: Arc<Self>, mut rx: tokio::sync::mpsc::UnboundedReceiver<VenueCommand>) {
+        while let Some(cmd) = rx.recv().await {
+            let VenueCommand::Kill { source, note, .. } = cmd else {
+                continue;
+            };
+            warn!("kill latched: the kill loop starts", "source": format!("{source:?}"), "note": note.clone());
+            let ctx = NoticeContext {
+                source,
+                note,
+                timing: self.timing.kill,
+            };
+            let clock = kill::TokioClock::new();
+            kill::run(&*self, &clock, self.timing.kill, &ctx, &mut rx, &self.kill_view).await;
+        }
+    }
+
+    /// `status.gateway` of the kill switch: process state.
+    fn kill_status(&self) -> serde_json::Value {
+        let view = self.kill_view.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let p = self.proof();
+        serde_json::json!({
+            "kill_loop": view,
+            "kill_armed": p.armed,
+            "last_proof_age_ms": p.at.map(|at| at.elapsed().as_millis() as u64),
+            "source": "gateway process state",
+        })
+    }
+}
+
+/// The venue calls of the kill loop are the gateway's, with the same block,
+/// pause and key handling as every other request.
+impl KillHost for Gateway {
+    fn allowed(&self) -> Result<(), String> {
+        Gateway::allowed(self)
+    }
+
+    fn quiet(&self) -> bool {
+        Gateway::quiet(self)
+    }
+
+    async fn cancel_all(&self) -> CancelAnswer {
+        let r = super::cancel_all(&self.rest).await;
+        if let Err(e) = &r {
+            self.note(e);
+            warn!("a kill-loop cancel-all failed", "error": e.to_string());
+        }
+        kill::cancel_answer(r)
+    }
+
+    async fn count(&self) -> Result<usize, String> {
+        self.queries.kill_count().await.map_err(|e| {
+            if let QueryFail::Rest(r) = &e {
+                self.note(r);
+            }
+            e.to_string()
+        })
+    }
+
+    async fn positions(&self) -> Result<Vec<serde_json::Value>, String> {
+        self.queries.position_rows().await.map_err(|e| {
+            if let QueryFail::Rest(r) = &e {
+                self.note(r);
+            }
+            e.to_string()
+        })
+    }
+
+    fn notice(&self, text: &str) {
+        (self.notice)(text);
+    }
+
+    async fn ended(&self, r: Report) {
+        self.input
+            .send(VenueInput::KillLoopEnded {
+                outcome: KillOutcome::Confirmed,
+                rounds: r.rounds,
+                cancel_all_calls: r.cancel_all_calls,
+                detail: r.detail,
+            })
+            .await;
+    }
+}
+
 impl VenueGateway for Gateway {
     const QUERY_CONCURRENCY: usize = 4;
     const WIRE_ID: WireIdForm = exec::WIRE_ID;
@@ -796,15 +1039,29 @@ impl VenueGateway for Gateway {
         Gateway::query(self, q)
     }
 
-    // U18b2 replaces this with the kill loop (C-KILL); until then no
-    // Bybit build confirms a kill without one.
+    /// C-KILL. The flag is set here, before the kill task sees the
+    /// command, so that a create already released stays home.
     fn kill(&self, cmd: VenueCommand) {
-        crate::venue::kill_unsupported(&self.input, "bybit", cmd);
+        match &cmd {
+            VenueCommand::Kill { .. } => self.kill_active.store(true, Ordering::SeqCst),
+            VenueCommand::KillStop => self.kill_active.store(false, Ordering::SeqCst),
+            VenueCommand::SendOrder { .. } | VenueCommand::SendCancel { .. } => return,
+        }
+        let _ = self.kill_tx.send(cmd);
     }
 
     fn spawn_tasks(self: &Arc<Self>, boot: u32) {
         tokio::spawn(self.clone().checks_loop());
         tokio::spawn(self.clone().stream_loop(boot));
+        tokio::spawn(self.clone().kill_watch());
+        let rx = self
+            .kill_rx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if let Some(rx) = rx {
+            tokio::spawn(self.clone().kill_task(rx));
+        }
         let conn = trade::Conn {
             url: self.wiring.trade_ws.clone(),
             creds: self.creds.clone(),
@@ -859,6 +1116,16 @@ impl trade::Host for Gateway {
 /// What the status API shows of the gateway: why the link may not come up.
 pub type BlockView = Arc<dyn Fn() -> Option<String> + Send + Sync>;
 
+/// What the status API shows of the kill switch (`status.gateway`).
+pub type KillStatusView = Arc<dyn Fn() -> serde_json::Value + Send + Sync>;
+
+/// A started Bybit gateway, as the node sees it.
+pub struct Started {
+    pub name: String,
+    pub block: BlockView,
+    pub kill: KillStatusView,
+}
+
 /// Starts the gateway on the configured network. The credentials are read
 /// once, here.
 pub fn spawn(
@@ -866,7 +1133,8 @@ pub fn spawn(
     symbols: Vec<SymbolSpec>,
     ports: GatewayPorts,
     max_concurrent: usize,
-) -> Result<(String, BlockView), String> {
+    notice: NoticeSink,
+) -> Result<Started, String> {
     let wiring = Wiring::of(&cfg)?;
     // Only a build with the failpoints feature (the node tests) reads it;
     // the shipped binary has no such code.
@@ -880,10 +1148,11 @@ pub fn spawn(
         Err(_) => wiring,
     };
     let creds = Arc::new(Credentials::load(&cfg.credentials_file)?);
-    spawn_with(cfg, creds, wiring, symbols, ports, max_concurrent, None)
+    spawn_with(cfg, creds, wiring, symbols, ports, max_concurrent, None, notice)
 }
 
 /// `spawn` with given credentials and endpoints (tests: loopback).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_with(
     cfg: BybitConfig,
     creds: Arc<Credentials>,
@@ -892,7 +1161,8 @@ pub(crate) fn spawn_with(
     ports: GatewayPorts,
     max_concurrent: usize,
     timing: Option<Timing>,
-) -> Result<(String, BlockView), String> {
+    notice: NoticeSink,
+) -> Result<Started, String> {
     let timing = timing.unwrap_or_else(|| Timing::of(&cfg));
     let gw = Arc::new(Gateway::new(
         &cfg,
@@ -902,12 +1172,19 @@ pub(crate) fn spawn_with(
         ports.input.clone(),
         ports.instance_id,
         timing,
+        notice,
     )?);
     info!("bybit gateway starting", "network": cfg.network.clone(), "sub_account_uid": cfg.sub_account_uid);
     let health = gw.health();
     let view: BlockView = Arc::new(move || health.create_block().map(|b| b.to_string()));
+    let status = gw.clone();
+    let kill: KillStatusView = Arc::new(move || status.kill_status());
     start(gw, ports, max_concurrent);
-    Ok((format!("bybit:{}", cfg.network), view))
+    Ok(Started {
+        name: format!("bybit:{}", cfg.network),
+        block: view,
+        kill,
+    })
 }
 
 #[cfg(test)]
@@ -1030,6 +1307,8 @@ mod tests {
         attempts: Arc<AtomicU64>,
         /// Pings that got no pong.
         unanswered: Arc<AtomicU64>,
+        /// When the last pong was written.
+        last_pong: Arc<Mutex<Option<Instant>>>,
         push: Arc<Mutex<Option<mpsc::UnboundedSender<Ctl>>>>,
         script: Arc<Mutex<std::collections::VecDeque<Script>>>,
     }
@@ -1058,12 +1337,14 @@ mod tests {
                 conns: Arc::default(),
                 attempts: Arc::default(),
                 unanswered: Arc::default(),
+                last_pong: Arc::default(),
                 push: Arc::default(),
                 script: Arc::default(),
             };
             let (mode, conns, push) = (fake.mode.clone(), fake.conns.clone(), fake.push.clone());
             let script = fake.script.clone();
             let (attempts, unanswered) = (fake.attempts.clone(), fake.unanswered.clone());
+            let last_pong = fake.last_pong.clone();
             tokio::spawn(async move {
                 while let Ok((tcp, _)) = listener.accept().await {
                     attempts.fetch_add(1, Ordering::SeqCst);
@@ -1092,6 +1373,7 @@ mod tests {
                         rx,
                         unanswered.clone(),
                         script.clone(),
+                        last_pong.clone(),
                     ));
                 }
             });
@@ -1166,6 +1448,7 @@ mod tests {
         mut ctl: mpsc::UnboundedReceiver<Ctl>,
         unanswered: Arc<AtomicU64>,
         script: Arc<Mutex<std::collections::VecDeque<Script>>>,
+        last_pong: Arc<Mutex<Option<Instant>>>,
     ) {
         let (mut write, mut read) = ws.split();
         let mut subscribes = 0usize;
@@ -1229,6 +1512,9 @@ mod tests {
                         if write.send(Message::text(a.to_string())).await.is_err() {
                             return;
                         }
+                        if v["op"] == "ping" {
+                            *last_pong.lock().unwrap() = Some(Instant::now());
+                        }
                     }
                     let confirmed = if m.trade { "auth" } else { "subscribe" };
                     let ok = if m.trade { m.auth } else { m.subscribe };
@@ -1274,6 +1560,11 @@ mod tests {
             fills_lag_ms: 2000,
             ping_interval_ms: 5000,
             ref_price_interval_ms: 5000,
+            kill_after_ms: 10_000,
+            kill_round_ms: 1_000,
+            kill_watch_ms: 30_000,
+            kill_watch_every_ms: 5_000,
+            kill_notice_ms: 60_000,
         }
     }
 
@@ -1289,6 +1580,14 @@ mod tests {
             backoff_max: Duration::from_millis(50),
             request: Duration::from_millis(300),
             ref_price: Duration::from_millis(300),
+            // Far: the tests before U18b2 never see the trigger.
+            kill_after: Duration::from_secs(60),
+            kill: KillTiming {
+                round_ms: 100,
+                watch_ms: 300,
+                watch_every_ms: 100,
+                notice_ms: 60_000,
+            },
         }
     }
 
@@ -1304,6 +1603,8 @@ mod tests {
         /// Bound ports that do not listen: WS Trade or the public stream of
         /// a rig without one.
         _held: Vec<tokio::net::TcpSocket>,
+        /// The kill loop's notices.
+        notices: Arc<Mutex<Vec<String>>>,
     }
 
     impl Drop for Rig {
@@ -1389,6 +1690,7 @@ mod tests {
         let trade_ws = url(trade, "/v5/trade");
         let public_ws = url(public, "/v5/public/linear");
         let queues = Arc::new(InputQueues::new(venue_lane, 256, 256));
+        let notices: Arc<Mutex<Vec<String>>> = Arc::default();
         let wiring = Wiring {
             rest: api.url(),
             private_ws: ws.url.clone(),
@@ -1409,6 +1711,10 @@ mod tests {
                 VenueInputTx::new(queues.clone()),
                 INSTANCE,
                 timing,
+                {
+                    let n = notices.clone();
+                    Arc::new(move |t: &str| n.lock().unwrap().push(t.to_string()))
+                },
             )
             .unwrap(),
         );
@@ -1452,6 +1758,7 @@ mod tests {
             queues,
             hold,
             _held: ports,
+            notices,
         }
     }
 
@@ -3151,5 +3458,313 @@ mod tests {
         assert_eq!(args, [want[..10].to_vec(), want[10..].to_vec()]);
         assert_eq!(public.accepted(), 1);
         queues.close();
+    }
+
+    // ---- the kill switch (U18b2, C-KILL) ------------------------------------------
+
+    fn kill_after(ms: u64) -> Timing {
+        Timing {
+            kill_after: Duration::from_millis(ms),
+            ..timing()
+        }
+    }
+
+    fn stream_lost(r: &Rig) -> Vec<(Ts, String)> {
+        r.inputs()
+            .into_iter()
+            .filter_map(|i| match i {
+                VenueInput::StreamLost { since, detail } => Some((since, detail)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The first time `f` holds, polled every 2 ms, within `limit`.
+    async fn when(r: &Rig, limit: Duration, f: impl Fn(&Rig) -> bool) -> Option<Instant> {
+        let end = Instant::now() + limit;
+        while Instant::now() < end {
+            if f(r) {
+                return Some(Instant::now());
+            }
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        None
+    }
+
+    /// The network goes half-open: no pong, and no reconnect comes up (the
+    /// fake answers nothing). Returns the time of the last pong.
+    async fn go_half_open(ws: &FakeWs) -> Instant {
+        ws.set(|m| {
+            m.pong = false;
+            m.auth = Reply::Silent;
+        });
+        for _ in 0..200 {
+            if ws.unanswered() > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        assert!(ws.unanswered() > 0, "no ping went unanswered");
+        ws.last_pong.lock().unwrap().expect("a pong before")
+    }
+
+    fn kill_cmd() -> VenueCommand {
+        VenueCommand::Kill {
+            since: 1,
+            source: HoldSource::Stream,
+            note: "private stream down".into(),
+        }
+    }
+
+    fn ended(r: &Rig) -> Vec<VenueInput> {
+        r.inputs()
+            .into_iter()
+            .filter(|i| matches!(i, VenueInput::KillLoopEnded { .. }))
+            .collect()
+    }
+
+    fn cancel_alls(api: &FakeHttp) -> usize {
+        posts(api).iter().filter(|p| *p == "/v5/order/cancel-all").count()
+    }
+
+    /// The REST venue with cancel-all, the open-order view (`open` orders
+    /// open) and the order paths.
+    fn kill_venue(open: usize) -> FakeHttp {
+        let api = order_venue();
+        api.route(
+            "/v5/order/cancel-all",
+            [ok(json!({"list": [{"orderId": "o1", "orderLinkId": ""}], "success": "1"}))],
+        );
+        let rows: Vec<Value> = (0..open)
+            .map(|i| json!({"orderId": format!("o{i}"), "orderLinkId": "", "symbol": "BTCUSDT", "orderStatus": "New"}))
+            .collect();
+        api.route(
+            "/v5/order/realtime",
+            [ok(json!({"category": "linear", "list": rows, "nextPageCursor": ""}))],
+        );
+        api
+    }
+
+    /// Done criterion (gateway part): the private stream goes half-open.
+    /// The link goes down at the missing pong; `StreamLost` comes once,
+    /// `kill_after` after the last pong and not before, with the wall time
+    /// of that pong and the stream's end reason.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_kill_fires_kill_after_the_last_pong_and_not_before() {
+        let api = rest_venue("REGULAR_MARGIN");
+        let ws = FakeWs::start(GOOD).await;
+        let r = rig_with(&api, &ws, kill_after(1_000), 256);
+        r.until("link up", up).await;
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let last = go_half_open(&ws).await;
+        let fired = when(&r, Duration::from_secs(3), |r| !stream_lost(r).is_empty())
+            .await
+            .expect("no StreamLost");
+        let after = fired - last;
+        assert!(after >= Duration::from_millis(1_000), "fired {after:?} after the last pong");
+        assert!(after < Duration::from_millis(1_200), "fired {after:?} after the last pong");
+        assert!(r.links().last().is_some_and(|l| !l.0), "the link is down: {:?}", r.links());
+        let (since, detail) = stream_lost(&r)[0].clone();
+        assert!(detail.contains("no pong within 150 ms"), "{detail}");
+        let age = Duration::from_micros(wall_us() - since);
+        let real = last.elapsed();
+        assert!(age.abs_diff(real) < Duration::from_millis(50), "since is {age:?} ago, the pong {real:?}");
+        // Once per outage.
+        tokio::time::sleep(Duration::from_millis(1_500)).await;
+        assert_eq!(stream_lost(&r).len(), 1, "{:?}", stream_lost(&r));
+        let s = r.gw.kill_status();
+        assert_eq!(s["kill_armed"], true);
+        assert!(s["last_proof_age_ms"].as_u64().unwrap() >= 2_500, "{s}");
+    }
+
+    /// A quiet stream that answers every ping never fires, however long.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_quiet_stream_that_answers_pings_never_fires_the_kill() {
+        let api = rest_venue("REGULAR_MARGIN");
+        let ws = FakeWs::start(GOOD).await;
+        let r = rig_with(&api, &ws, kill_after(400), 256);
+        r.until("link up", up).await;
+        tokio::time::sleep(Duration::from_millis(2_000)).await;
+        assert!(stream_lost(&r).is_empty(), "{:?}", stream_lost(&r));
+        assert_eq!(r.links().len(), 1, "{:?}", r.links());
+        assert!(r.gw.kill_status()["last_proof_age_ms"].as_u64().unwrap() < 400);
+    }
+
+    /// The socket closes; the reconnect is subscribed well before the
+    /// deadline and answers pings: no kill.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_reconnect_before_the_deadline_does_not_fire() {
+        let api = rest_venue("REGULAR_MARGIN");
+        let ws = FakeWs::start(GOOD).await;
+        let r = rig_with(&api, &ws, kill_after(1_000), 256);
+        r.until("link up", up).await;
+        for _ in 0..3 {
+            ws.drop_conn();
+            tokio::time::sleep(Duration::from_millis(400)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(1_500)).await;
+        assert!(r.links().iter().filter(|l| l.0).count() >= 4, "{:?}", r.links());
+        assert!(stream_lost(&r).is_empty(), "{:?}", stream_lost(&r));
+    }
+
+    /// Before the boot checks pass the account is not verified: the trigger
+    /// is not armed, however long the stream is down. The first pass arms
+    /// it, and a stream that never comes up fires `kill_after` later.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_kill_is_not_armed_before_the_boot_checks_pass() {
+        let api = rest_venue("REGULAR_MARGIN");
+        let mut wrong = key();
+        wrong["userID"] = json!(9999);
+        api.route("/v5/user/query-api", [ok(wrong)]);
+        let ws = FakeWs::start(Mode {
+            auth: Reply::Silent,
+            ..GOOD
+        })
+        .await;
+        let r = rig_with(&api, &ws, kill_after(300), 256);
+        r.until("the account block", |r| r.block().is_some_and(|b| b.starts_with("account:")))
+            .await;
+        tokio::time::sleep(Duration::from_millis(1_000)).await;
+        assert!(stream_lost(&r).is_empty(), "{:?}", stream_lost(&r));
+        let s = r.gw.kill_status();
+        assert_eq!((s["kill_armed"].clone(), s["last_proof_age_ms"].clone()), (json!(false), Value::Null));
+
+        api.route("/v5/user/query-api", [ok(key())]);
+        let passed = when(&r, Duration::from_secs(3), |r| r.gw.kill_status()["kill_armed"] == true)
+            .await
+            .expect("never armed");
+        let fired = when(&r, Duration::from_secs(3), |r| !stream_lost(r).is_empty())
+            .await
+            .expect("no StreamLost after the boot checks passed");
+        let after = fired - passed;
+        assert!(after >= Duration::from_millis(250) && after < Duration::from_millis(500), "{after:?}");
+        assert!(r.links().is_empty(), "the link never came up: {:?}", r.links());
+    }
+
+    /// Time the gateway spends waiting on a full core queue moves the last
+    /// proof on, as it moves the pong deadline: a link that goes down
+    /// after such a wait does not fire at once, only `kill_after` after
+    /// the moved proof.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn time_waiting_on_the_core_queue_does_not_fire_the_kill() {
+        let api = rest_venue("REGULAR_MARGIN");
+        let ws = FakeWs::start(GOOD).await;
+        let r = rig_with(&api, &ws, kill_after(600), 1);
+        r.until("link up", up).await;
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        go_half_open(&ws).await;
+        r.hold.store(true, Ordering::SeqCst);
+        let row: Value = serde_json::from_str::<Value>(&order_msg("BTCUSDT", &link(42), "New"))
+            .unwrap()["data"][0]
+            .clone();
+        ws.send(
+            json!({"id": "1", "topic": "order.linear", "creationTime": 1, "data": vec![row; 6]})
+                .to_string(),
+        );
+        // Longer than kill_after while the link is up and the core holds.
+        tokio::time::sleep(Duration::from_millis(1_500)).await;
+        r.hold.store(false, Ordering::SeqCst);
+        let down = when(&r, Duration::from_secs(3), |r| r.links().iter().any(|l| !l.0))
+            .await
+            .expect("the link never went down");
+        let fired = when(&r, Duration::from_secs(3), |r| !stream_lost(r).is_empty())
+            .await
+            .expect("no StreamLost");
+        let gap = fired - down;
+        assert!(gap >= Duration::from_millis(150), "fired {gap:?} after the link went down");
+    }
+
+    /// C1: a `Kill` keeps every create home from that moment, the loop
+    /// confirms zero and tells the core, and creates stay home after it
+    /// (the latch stays). Only cancel-alls go out on the order path.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn no_create_leaves_while_the_kill_loop_runs() {
+        let api = kill_venue(0);
+        let ws = FakeWs::start(GOOD).await;
+        let r = rig(&api, &ws);
+        r.until("link up", up).await;
+        r.commands.send(kill_cmd()).await.unwrap();
+        r.commands.send(order_cmd(5, "BTCUSDT")).await.unwrap();
+        r.until("the send result", |r| results(r).len() == 1).await;
+        assert!(
+            matches!(&results(&r)[0], VenueInput::SendResult { outcome: SendOutcome::NotSent { reason }, .. } if reason == "kill switch active"),
+            "{:?}",
+            results(&r)
+        );
+        r.until("the loop's end", |r| ended(r).len() == 1).await;
+        assert!(
+            matches!(&ended(&r)[0], VenueInput::KillLoopEnded { outcome: KillOutcome::Confirmed, rounds: 1, cancel_all_calls: 1, .. }),
+            "{:?}",
+            ended(&r)
+        );
+        r.commands.send(order_cmd(6, "BTCUSDT")).await.unwrap();
+        r.until("two results", |r| results(r).len() == 2).await;
+        assert!(matches!(&results(&r)[1], VenueInput::SendResult { outcome: SendOutcome::NotSent { .. }, .. }));
+        assert_eq!(posts(&api), ["/v5/order/cancel-all"]);
+        let s = r.gw.kill_status();
+        assert_eq!((s["kill_loop"]["phase"].clone(), s["kill_loop"]["remaining"].clone()), (json!("done"), json!(0)));
+        let notices = r.notices.lock().unwrap().clone();
+        assert_eq!(notices.len(), 2, "start and final: {notices:#?}");
+        assert!(notices[0].starts_with("킬 루프 시작(개인 스트림 끊김: private stream down)"), "{}", notices[0]);
+    }
+
+    /// C2 under a block: no cancel-all leaves, no count follows, and the
+    /// round says why (status and the repeat notice). Nothing is confirmed.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_blocked_gateway_sends_no_cancel_all_and_says_why() {
+        let api = kill_venue(0);
+        let mut wrong = key();
+        wrong["userID"] = json!(9999);
+        api.route("/v5/user/query-api", [ok(wrong)]);
+        let ws = FakeWs::start(GOOD).await;
+        let mut t = timing();
+        t.kill.notice_ms = 250;
+        let r = rig_with(&api, &ws, t, 256);
+        r.until("the account block", |r| r.block().is_some_and(|b| b.starts_with("account:")))
+            .await;
+        r.commands.send(kill_cmd()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        assert_eq!(cancel_alls(&api), 0);
+        let gets = |p: &str| api.requests().iter().filter(|q| q.path() == p).count();
+        assert_eq!(gets("/v5/order/realtime"), 0, "a count after a round that sent nothing");
+        assert!(ended(&r).is_empty());
+        let s = r.gw.kill_status();
+        assert!(s["kill_loop"]["round"].as_u64().unwrap() >= 5, "{s}");
+        assert!(s["kill_loop"]["last_error"].as_str().unwrap().starts_with("account:"), "{s}");
+        assert_eq!(s["kill_loop"]["remaining"], Value::Null);
+        let notices = r.notices.lock().unwrap().clone();
+        assert!(
+            notices.iter().skip(1).any(|n| n.contains("남은 미체결 모름: account:") && n.contains("마지막 오류: account:")),
+            "{notices:#?}"
+        );
+    }
+
+    /// `KillStop` ends a running loop (no more cancel-alls) and creates go
+    /// out again.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn kill_stop_ends_the_loop_and_creates_flow_again() {
+        let api = kill_venue(1);
+        let ws = FakeWs::start(GOOD).await;
+        let r = rig(&api, &ws);
+        r.until("link up", up).await;
+        r.commands.send(kill_cmd()).await.unwrap();
+        r.until("three rounds", |_| cancel_alls(&api) >= 3).await;
+        // A second Kill while the loop runs changes nothing.
+        r.commands.send(kill_cmd()).await.unwrap();
+        r.commands.send(VenueCommand::KillStop).await.unwrap();
+        r.until("stopped", |r| r.gw.kill_status()["kill_loop"]["phase"] == "stopped")
+            .await;
+        let n = cancel_alls(&api);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert_eq!(cancel_alls(&api), n, "a cancel-all after the stop");
+        assert!(ended(&r).is_empty());
+        r.commands.send(order_cmd(5, "BTCUSDT")).await.unwrap();
+        r.until("the send result", |r| results(r).len() == 1).await;
+        assert!(
+            matches!(&results(&r)[0], VenueInput::SendResult { outcome: SendOutcome::Placed { .. }, .. }),
+            "{:?}",
+            results(&r)
+        );
+        assert_eq!(rest_creates(&api), 1);
     }
 }

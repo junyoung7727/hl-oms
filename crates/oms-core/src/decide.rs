@@ -16,6 +16,17 @@ use crate::input::*;
 use crate::model::*;
 use crate::num::*;
 
+/// What a kill trigger did (C-HOLD, C-KILL).
+enum KillTrigger {
+    Latched,
+    /// Latched, and the loop of this process has not confirmed yet: the
+    /// running loop covers the new trigger.
+    AlreadyLatched,
+    /// Latched and confirmed at the venue: the confirmation is void and a
+    /// new loop runs.
+    Rearmed,
+}
+
 struct Tx<'a> {
     core: &'a mut Core,
     at: Ts,
@@ -677,18 +688,26 @@ impl Tx<'_> {
     }
 
     /// Latches the kill switch unless it is latched (C-HOLD): a later
-    /// trigger emits nothing and the first note stays. Returns whether this
-    /// call latched it.
-    fn latch_kill(&mut self, source: HoldSource, note: String) -> Result<bool, CoreFault> {
-        if self.core.kill.is_some() {
-            return Ok(false);
+    /// trigger while the loop has not confirmed emits nothing and the first
+    /// note stays. A trigger after the confirmation of this process voids
+    /// it (`kill_rearmed`, C-KILL): a new loop must confirm zero again,
+    /// since orders may have reached the venue after the last check. An
+    /// `unsupported` answer confirmed nothing at the venue and stays: the
+    /// gateway would answer the same, and `kill_orders_open` holds the clear.
+    fn latch_kill(&mut self, source: HoldSource, note: String) -> Result<KillTrigger, CoreFault> {
+        let Some(k) = &self.core.kill else {
+            self.emit(Event::HoldSet {
+                hold: HoldKind::Kill,
+                source,
+                note,
+            })?;
+            return Ok(KillTrigger::Latched);
+        };
+        if k.confirmed_at.is_none() || k.outcome != Some(KillOutcome::Confirmed) {
+            return Ok(KillTrigger::AlreadyLatched);
         }
-        self.emit(Event::HoldSet {
-            hold: HoldKind::Kill,
-            source,
-            note,
-        })?;
-        Ok(true)
+        self.emit(Event::KillRearmed { source, note })?;
+        Ok(KillTrigger::Rearmed)
     }
 
     // ---- watcher (C-HOLD) -------------------------------------------------
@@ -715,13 +734,11 @@ impl Tx<'_> {
                     Ok("held".to_string())
                 }
             }
-            WatcherInput::Kill { detail } => {
-                if self.latch_kill(HoldSource::Watcher, detail.clone())? {
-                    Ok("latched".to_string())
-                } else {
-                    Ok("already latched".to_string())
-                }
-            }
+            WatcherInput::Kill { detail } => Ok(match self.latch_kill(HoldSource::Watcher, detail.clone())? {
+                KillTrigger::Latched => "latched".to_string(),
+                KillTrigger::AlreadyLatched => "already latched".to_string(),
+                KillTrigger::Rearmed => KILL_REARMED_REPLY.to_string(),
+            }),
         };
         self.out.reply = Some(Reply::Operator(reply));
         Ok(())
@@ -864,6 +881,12 @@ impl Tx<'_> {
                     session: *session,
                     mode: mode.clone(),
                 })
+            }
+            VenueInput::StreamLost { since, detail } => {
+                let down_ms = self.at.saturating_sub(*since) / 1000;
+                let note = format!("private stream down for {down_ms} ms (no proof of life since {since}): {detail}");
+                self.latch_kill(HoldSource::Stream, note)?;
+                Ok(())
             }
             VenueInput::KillLoopEnded {
                 outcome,

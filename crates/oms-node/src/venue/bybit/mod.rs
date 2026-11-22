@@ -9,12 +9,14 @@
 //! (`trade`), the first path for orders and cancels. U17c: the reference
 //! price from the public stream (`ticker`). U17d: the account's maintenance
 //! margin and margin balance in the margin report (`query`), judged by the
-//! core's account maintenance-margin rule.
+//! core's account maintenance-margin rule. U18b2: the kill switch (`kill`):
+//! the stream-outage trigger and the cancel-all confirmation loop.
 
 pub mod answer;
 pub mod checks;
 pub mod exec;
 pub mod gateway;
+pub mod kill;
 pub mod orders;
 pub mod query;
 pub mod rest;
