@@ -7,9 +7,11 @@
 //! connection may arrive in any order. Unsolicited [`ServerMsg::Event`]s
 //! arrive after `subscribe`.
 //!
-//! Two sockets exist. The trading socket accepts the strategy operations. The
-//! admin socket additionally accepts operator operations. Which process may
-//! open which socket is decided by file permissions and the peer's user id.
+//! Two sockets exist, and a third with the monitoring gate. The trading
+//! socket accepts the strategy operations. The admin socket additionally
+//! accepts operator operations. The monitor socket accepts only `hello`,
+//! `ping` and the watcher's `heartbeat`. Which process may open which socket
+//! is decided by file permissions and the peer's user id.
 //!
 //! Amounts, prices and quantities are decimal strings; times are microseconds
 //! since the Unix epoch on the host clock.
@@ -136,6 +138,16 @@ pub enum Op {
     /// durable.
     WatcherKill {
         detail: String,
+    },
+
+    // ---- monitor socket, sent by the watcher (C-LIVE part 2) --------------
+    /// The watcher is alive: its label and, per check `W1`..`W9`, the time
+    /// of its last success in milliseconds since the epoch on the host
+    /// clock, or `null` for none yet. `W1` and `W2` must be present.
+    /// Answered `recorded` after the record is durable.
+    Heartbeat {
+        watcher: String,
+        checks: std::collections::BTreeMap<String, Option<u64>>,
     },
 }
 
@@ -270,6 +282,34 @@ mod tests {
             r#"{"id":4,"op":"watcher_mismatch","detail":"d"}"#,
             r#"{"id":4,"op":"clear_hold","reason":"operator_account","note":"n"}"#,
             r#"{"id":4,"op":"watcher_kill"}"#,
+        ] {
+            assert!(serde_json::from_str::<Request>(bad).is_err(), "{bad}");
+        }
+    }
+
+    /// U18b4. The watcher's heartbeat as C-LIVE part 2 writes it (the
+    /// watcher builds it without this crate): milliseconds or `null` per
+    /// check; a line without `checks` or with a time that is not a number
+    /// does not parse.
+    #[test]
+    fn wire_example_of_the_heartbeat() {
+        let line = r#"{"id": 7, "op": "heartbeat", "watcher": "watcher-1", "checks": {"W1": 1763700000123, "W2": 1763700000456, "W3": 1763699999000, "W4": null}}"#;
+        let r: Request = serde_json::from_str(line).unwrap();
+        assert_eq!(r.id, 7);
+        let Op::Heartbeat { watcher, checks } = r.op else {
+            panic!("{:?}", r.op)
+        };
+        assert_eq!(watcher, "watcher-1");
+        let got: Vec<(&str, Option<u64>)> = checks.iter().map(|(k, v)| (k.as_str(), *v)).collect();
+        assert_eq!(
+            got,
+            [("W1", Some(1763700000123)), ("W2", Some(1763700000456)), ("W3", Some(1763699999000)), ("W4", None)]
+        );
+        for bad in [
+            r#"{"id":8,"op":"heartbeat","watcher":"w"}"#,
+            r#"{"id":8,"op":"heartbeat","checks":{"W1":1,"W2":1}}"#,
+            r#"{"id":8,"op":"heartbeat","watcher":"w","checks":{"W1":"1","W2":1}}"#,
+            r#"{"id":8,"op":"heartbeat","watcher":"w","checks":{"W1":-1,"W2":1}}"#,
         ] {
             assert!(serde_json::from_str::<Request>(bad).is_err(), "{bad}");
         }

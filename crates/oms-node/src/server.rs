@@ -4,7 +4,9 @@
 //! file permissions, and the peer's user id is checked again on accept. A
 //! strategy connection may act only for the strategy it named in `hello` and
 //! sees only that strategy's orders. Operator operations exist only on the
-//! admin socket. Every request line is parsed into typed values before
+//! admin socket. The monitor socket (only with the monitoring gate, C-LIVE
+//! part 2) takes `hello`, `ping` and the watcher's `heartbeat`, nothing
+//! else, and `heartbeat` exists only there. Every request line is parsed into typed values before
 //! anything else happens, and nothing a client sends is interpreted as code,
 //! a path or a format string.
 //!
@@ -12,11 +14,12 @@
 //! most `window` requests are outstanding, and no further line is read until
 //! one completes; replies and events wait in a bounded buffer; a connection
 //! holds at most one subscription and must say `hello` within a time limit.
-//! The number of connections is capped, separately for the two sockets. A request that cannot enter the core's queue is
+//! The number of connections is capped, separately for each socket. A request that cannot enter the core's queue is
 //! refused at once with `overloaded` and leaves no trace in the journal.
 
 use crate::config::{ApiConfig, IngressLimits};
 use crate::liveness::{HelloOutcome, Liveness};
+use crate::monitor::{HeartbeatPace, MONITOR_MAX_CONNECTIONS};
 use crate::pipeline::Shared;
 use crate::queues::{CoreMsg, Lane};
 use crate::status;
@@ -69,6 +72,7 @@ pub struct ApiCtx {
     pub liveness: Mutex<Liveness>,
     connections: Arc<Semaphore>,
     admin_connections: Arc<Semaphore>,
+    monitor_connections: Arc<Semaphore>,
     buckets: Mutex<HashMap<(StrategyId, bool), Bucket>>,
     pub rate_limited: std::sync::atomic::AtomicU64,
     pub refused_overload: std::sync::atomic::AtomicU64,
@@ -94,6 +98,7 @@ impl ApiCtx {
             liveness: Mutex::new(liveness),
             connections: Arc::new(Semaphore::new(cfg.max_connections)),
             admin_connections: Arc::new(Semaphore::new(cfg.admin_max_connections)),
+            monitor_connections: Arc::new(Semaphore::new(MONITOR_MAX_CONNECTIONS)),
             cfg,
             limits,
             shared,
@@ -160,7 +165,17 @@ pub fn bind(path: &Path, mode: u32) -> Result<UnixListener, String> {
     Ok(listener)
 }
 
-pub async fn serve(listener: UnixListener, admin: bool, ctx: Arc<ApiCtx>) {
+/// Which socket a listener serves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SocketKind {
+    Trading,
+    Admin,
+    /// The watcher's heartbeats (C-LIVE part 2): own uid only, its own pool.
+    Monitor,
+}
+
+pub async fn serve(listener: UnixListener, kind: SocketKind, ctx: Arc<ApiCtx>) {
+    let admin = kind == SocketKind::Admin;
     loop {
         let (stream, _) = match listener.accept().await {
             Ok(s) => s,
@@ -173,24 +188,29 @@ pub async fn serve(listener: UnixListener, admin: bool, ctx: Arc<ApiCtx>) {
         let uid = stream.peer_cred().map(|c| c.uid()).ok();
         let allowed = match uid {
             Some(u) if u == ctx.own_uid => true,
-            Some(u) => !admin && ctx.cfg.allowed_uids.contains(&u),
+            Some(u) => kind == SocketKind::Trading && ctx.cfg.allowed_uids.contains(&u),
             None => false,
         };
         // The admin socket has its own pool: no number of trading connections
-        // can keep the operator from halting or cancelling.
-        let pool = if admin { &ctx.admin_connections } else { &ctx.connections };
+        // can keep the operator from halting or cancelling. So has the
+        // monitor socket: nothing else can keep the watcher out.
+        let pool = match kind {
+            SocketKind::Trading => &ctx.connections,
+            SocketKind::Admin => &ctx.admin_connections,
+            SocketKind::Monitor => &ctx.monitor_connections,
+        };
         let Ok(permit) = pool.clone().try_acquire_owned() else {
             reject(stream, "too many connections").await;
             continue;
         };
         if !allowed {
-            warn!("connection refused", "peer_uid": uid, "admin": admin);
+            warn!("connection refused", "peer_uid": uid, "admin": admin, "socket": format!("{kind:?}"));
             reject(stream, "this user may not use this socket").await;
             continue;
         }
         let ctx = ctx.clone();
         tokio::spawn(async move {
-            connection(stream, admin, ctx).await;
+            connection(stream, kind, ctx).await;
             drop(permit);
         });
     }
@@ -239,6 +259,10 @@ async fn read_line<R: AsyncBufRead + Unpin>(r: &mut R, buf: &mut Vec<u8>, max: u
 
 struct Session {
     admin: bool,
+    /// The monitor socket (C-LIVE part 2).
+    monitor: bool,
+    /// Heartbeats of this connection in the last second.
+    pace: HeartbeatPace,
     hello: bool,
     strategy: Option<StrategyId>,
     out: mpsc::Sender<ServerMsg>,
@@ -251,7 +275,7 @@ struct Session {
     link: Option<StrategyId>,
 }
 
-async fn connection(stream: UnixStream, admin: bool, ctx: Arc<ApiCtx>) {
+async fn connection(stream: UnixStream, kind: SocketKind, ctx: Arc<ApiCtx>) {
     let (read, mut write) = stream.into_split();
     let (out, mut out_rx) = mpsc::channel::<ServerMsg>(ctx.cfg.window * 2 + 64);
     let writer = tokio::spawn(async move {
@@ -264,7 +288,9 @@ async fn connection(stream: UnixStream, admin: bool, ctx: Arc<ApiCtx>) {
         }
     });
     let mut s = Session {
-        admin,
+        admin: kind == SocketKind::Admin,
+        monitor: kind == SocketKind::Monitor,
+        pace: HeartbeatPace::default(),
         hello: false,
         strategy: None,
         out,
@@ -524,6 +550,21 @@ async fn dispatch(
     if !s.hello && !matches!(req.op, Op::Hello { .. } | Op::Ping) {
         return Some(Response::err(id, ErrorCode::Unauthorized, "send hello first"));
     }
+    // The monitor socket takes `hello` without a strategy, `ping` and
+    // `heartbeat`; `heartbeat` is taken nowhere else (C-LIVE part 2).
+    match (&req.op, s.monitor) {
+        (Op::Ping, _) | (Op::Hello { strategy: None, .. }, true) | (Op::Heartbeat { .. }, true) => {}
+        (Op::Hello { .. }, true) => {
+            return Some(Response::err(id, ErrorCode::Unauthorized, "the monitor socket takes a hello without a strategy"));
+        }
+        (_, true) => {
+            return Some(Response::err(id, ErrorCode::Forbidden, "the monitor socket takes only hello, ping and heartbeat"));
+        }
+        (Op::Heartbeat { .. }, false) => {
+            return Some(Response::err(id, ErrorCode::Forbidden, "heartbeat needs the monitor socket"));
+        }
+        _ => {}
+    }
     let operator_only = |s: &Session| -> Option<Response> {
         (!s.admin).then(|| Response::err(id, ErrorCode::Forbidden, "operator operations need the admin socket"))
     };
@@ -534,7 +575,7 @@ async fn dispatch(
     match req.op {
         Op::Ping => Some(Response::ok(id, "pong")),
         Op::Hello { strategy, client } => {
-            match (&strategy, s.admin) {
+            match (&strategy, s.admin || s.monitor) {
                 (None, false) => {
                     return Some(Response::err(id, ErrorCode::Unauthorized, "name a strategy on the trading socket"));
                 }
@@ -742,6 +783,23 @@ async fn dispatch(
             let input = Input::Watcher(WatcherInput::Kill { detail });
             submit(s, ctx, Lane::Control, id, input, permit)
         }),
+        Op::Heartbeat { watcher, checks } => {
+            // A runaway watcher cannot flood the journal: the rest of a
+            // second's heartbeats are refused and recorded nowhere.
+            if !s.pace.take(Instant::now()) {
+                ctx.refused_overload.fetch_add(1, Ordering::Relaxed);
+                return Some(Response::err(
+                    id,
+                    ErrorCode::Overloaded,
+                    format!("more than {} heartbeats in a second; nothing was recorded", crate::monitor::HEARTBEATS_PER_SEC),
+                ));
+            }
+            match crate::monitor::heartbeat_input(watcher, checks) {
+                // Answered `recorded` after the record is durable.
+                Ok(input) => submit(s, ctx, Lane::Control, id, input, permit),
+                Err(why) => Some(Response::err(id, ErrorCode::BadRequest, why)),
+            }
+        }
         Op::Snapshot => operator_only(s).or_else(|| {
             ctx.shared.snapshot_requested.store(true, Ordering::SeqCst);
             Some(Response::ok(id, "snapshot requested"))

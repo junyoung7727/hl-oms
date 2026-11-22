@@ -369,6 +369,19 @@ pub fn run(cfg: NodeConfig) -> i32 {
                 return start_failed("admin_socket");
             }
         };
+        // The monitor socket exists only with the gate (C-LIVE part 2).
+        let monitor = if cfg.core.policy.monitor.is_some() {
+            match server::bind(&cfg.monitor_socket_path(), 0o600) {
+                Ok(l) => Some(l),
+                Err(e) => {
+                    error!("cannot open the monitor socket", "error": e);
+                    return start_failed("monitor_socket");
+                }
+            }
+        } else {
+            warn!("no [core.policy.monitor]: no monitoring gate, and nothing stops trading when the watcher is gone");
+            None
+        };
         if !cfg.http.listen.is_empty() {
             // Validated as a loopback address when the configuration was loaded.
             if let Ok(addr) = cfg.http.listen.parse::<std::net::SocketAddr>() {
@@ -382,8 +395,9 @@ pub fn run(cfg: NodeConfig) -> i32 {
                 info!("dashboard listening", "url": format!("http://{addr}/"));
             }
         }
-        let trading_task = tokio::spawn(server::serve(trading, false, ctx.clone()));
-        let admin_task = tokio::spawn(server::serve(admin, true, ctx.clone()));
+        let trading_task = tokio::spawn(server::serve(trading, server::SocketKind::Trading, ctx.clone()));
+        let admin_task = tokio::spawn(server::serve(admin, server::SocketKind::Admin, ctx.clone()));
+        let monitor_task = monitor.map(|l| tokio::spawn(server::serve(l, server::SocketKind::Monitor, ctx.clone())));
         info!("ready", "socket": cfg.socket_path().display().to_string(), "admin_socket": cfg.admin_socket_path().display().to_string(), "boot": boot);
 
         let mut term = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
@@ -400,6 +414,10 @@ pub fn run(cfg: NodeConfig) -> i32 {
         };
         trading_task.abort();
         admin_task.abort();
+        if let Some(t) = monitor_task {
+            t.abort();
+            let _ = std::fs::remove_file(cfg.monitor_socket_path());
+        }
         let _ = std::fs::remove_file(cfg.socket_path());
         let _ = std::fs::remove_file(cfg.admin_socket_path());
         code

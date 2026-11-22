@@ -11,6 +11,7 @@
 //! | `status`    | operational status document                                  |
 //! | `alerts`    | trading-safety alerts read from the published state (C-ALERT) |
 //! | `liveness`  | which strategies still have a live trading link (C-LIVE)     |
+//! | `monitor`   | the monitor socket's heartbeat rules and status (C-LIVE 2)   |
 //! | `http`      | read-only dashboard over loopback HTTP                       |
 //! | `node`      | wiring, startup and shutdown                                 |
 
@@ -20,6 +21,7 @@ pub mod alerts;
 pub mod config;
 pub mod http;
 pub mod liveness;
+pub mod monitor;
 pub mod node;
 pub mod pipeline;
 pub mod published;

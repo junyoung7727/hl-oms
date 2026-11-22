@@ -519,6 +519,8 @@ fn the_gate_survives_replay_and_a_boot_starts_unmonitored() {
     assert!(h.core.holds(None).contains(&HoldReason::Unmonitored));
 }
 
+type Edit = fn(&mut MonitorPolicy);
+
 /// The policy's bounds (판단(모델 아님)): each refused one step outside
 /// and taken at the edge.
 #[test]
@@ -537,7 +539,7 @@ fn the_gate_values_are_bounded() {
         }
     );
     assert_eq!(gated().validate(), Ok(()));
-    let edges: [fn(&mut MonitorPolicy); 6] = [
+    let edges: [Edit; 6] = [
         |m| m.heartbeat_max_age_us = 10 * SEC,
         |m| m.heartbeat_max_age_us = 300 * SEC,
         |m| m.check_max_age_us = 2 * SEC,
@@ -548,7 +550,7 @@ fn the_gate_values_are_bounded() {
     for f in edges {
         assert_eq!(with(f), Ok(()));
     }
-    let outside: [(fn(&mut MonitorPolicy), &str); 6] = [
+    let outside: [(Edit, &str); 6] = [
         (
             |m| m.heartbeat_max_age_us = 10 * SEC - 1,
             "heartbeat_max_age_us",

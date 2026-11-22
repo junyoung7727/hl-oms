@@ -142,6 +142,8 @@ pub fn status(ctx: &ApiCtx, strategy: Option<&StrategyId>) -> serde_json::Value 
             "kill": core.kill,
             "watcher_mismatch": core.watcher_mismatch,
             "venue_change": core.venue_change,
+            // The monitoring gate (C-LIVE part 2): `gate: false` without one.
+            "monitor": crate::monitor::status_json(core, now),
             "fill_floor": core.fill_floor,
             "margin": margin,
             "stats": core.stats,
