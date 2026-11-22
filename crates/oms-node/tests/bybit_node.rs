@@ -17,6 +17,7 @@ use oms_core::*;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
@@ -79,6 +80,11 @@ fn rest_venue() -> Arc<FakeHttp> {
     api.route("/v5/execution/list", [list(vec![])]);
     api.route("/v5/order/realtime", [list(vec![])]);
     api.route("/v5/order/history", [list(vec![])]);
+    // The kill loop's cancel-all (U18b2): nothing open to cancel.
+    api.route(
+        "/v5/order/cancel-all",
+        [ok(json!({"list": [], "success": "1"}))],
+    );
     Arc::new(api)
 }
 
@@ -110,6 +116,11 @@ struct FakeWs {
     /// Every text received, over all connections.
     got: Arc<Mutex<Vec<Value>>>,
     push: Arc<Mutex<Option<mpsc::UnboundedSender<String>>>>,
+    /// While set, the fake answers nothing (a half-open network): no
+    /// pong, and no auth or subscribe for a reconnect.
+    silent: Arc<AtomicBool>,
+    /// When the last pong was written.
+    last_pong: Arc<Mutex<Option<Instant>>>,
 }
 
 impl FakeWs {
@@ -124,8 +135,11 @@ impl FakeWs {
             url: format!("ws://{}{path}", listener.local_addr().unwrap()),
             got: Arc::default(),
             push: Arc::default(),
+            silent: Arc::default(),
+            last_pong: Arc::default(),
         };
         let (got, push) = (fake.got.clone(), fake.push.clone());
+        let (silent, last_pong) = (fake.silent.clone(), fake.last_pong.clone());
         rt.spawn(async move {
             while let Ok((tcp, _)) = listener.accept().await {
                 let Ok(ws) = tokio_tungstenite::accept_async(tcp).await else {
@@ -133,7 +147,15 @@ impl FakeWs {
                 };
                 let (tx, rx) = mpsc::unbounded_channel();
                 *push.lock().unwrap() = Some(tx);
-                tokio::spawn(serve(ws, kind, got.clone(), rx, on_order.clone()));
+                tokio::spawn(serve(
+                    ws,
+                    kind,
+                    got.clone(),
+                    rx,
+                    on_order.clone(),
+                    silent.clone(),
+                    last_pong.clone(),
+                ));
             }
         });
         fake
@@ -160,6 +182,8 @@ async fn serve(
     got: Arc<Mutex<Vec<Value>>>,
     mut ctl: mpsc::UnboundedReceiver<String>,
     on_order: Option<OnOrder>,
+    silent: Arc<AtomicBool>,
+    last_pong: Arc<Mutex<Option<Instant>>>,
 ) {
     let (mut write, mut read) = ws.split();
     loop {
@@ -179,9 +203,13 @@ async fn serve(
                     (Kind::Public, "ping") => Some(json!({"success": true, "ret_msg": "pong", "conn_id": "c", "req_id": "", "op": "ping"})),
                     _ => None,
                 };
+                let answer = answer.filter(|_| !silent.load(Ordering::SeqCst));
                 if let Some(a) = answer {
                     if write.send(Message::text(a.to_string())).await.is_err() {
                         return;
+                    }
+                    if v["op"] == "ping" {
+                        *last_pong.lock().unwrap() = Some(Instant::now());
                     }
                 }
             }
@@ -323,6 +351,11 @@ struct Node {
 
 impl Node {
     fn new(name: &str, venue: &Venue) -> Node {
+        Node::with_venue(name, venue, "")
+    }
+
+    /// `more` adds lines to `[venue]`.
+    fn with_venue(name: &str, venue: &Venue, more: &str) -> Node {
         let dir = base_dir().join(format!("bybit-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -355,6 +388,7 @@ recv_window_ms = 1000
 request_timeout_ms = 500
 ping_interval_ms = 1000
 ref_price_interval_ms = 1000
+{more}
 
 [core]
 version = 1
@@ -752,3 +786,188 @@ fn an_unanswered_create_is_found_open_by_its_order_link_id_and_never_sent_again(
     std::thread::sleep(Duration::from_millis(500));
     assert_eq!((venue.ws_creates(), venue.rest_creates()), (1, 0));
 }
+
+/// The kill events in the journal files on disk.
+fn kill_events(data: &Path) -> Vec<Event> {
+    records(data)
+        .into_iter()
+        .flat_map(|r| r.events)
+        .filter(|e| {
+            matches!(
+                e,
+                Event::HoldSet {
+                    hold: HoldKind::Kill,
+                    ..
+                } | Event::HoldCleared { .. }
+                    | Event::KillLoopEnded { .. }
+                    | Event::KillRearmed { .. }
+            )
+        })
+        .collect()
+}
+
+fn clear_kill(node: &Node, note: &str) -> Result<String, String> {
+    let mut c = Client::connect(&node.data().join("admin.sock"), None).unwrap();
+    match c.call(Op::ClearHold {
+        reason: HoldKind::Kill,
+        note: note.into(),
+    }) {
+        Ok(v) => Ok(v.as_str().unwrap_or_default().to_string()),
+        Err(oms_api::client::ClientError::Api(e)) => Err(e.message),
+        Err(e) => panic!("{e}"),
+    }
+}
+
+/// Test 4 (U18b2, C-KILL). The private stream goes half-open (the fake
+/// answers nothing more: no pong, no auth for a reconnect). With
+/// `ping_interval_ms = 1000` and `kill_after_ms = 10000`: no `hold_set` is
+/// on disk 9 s after the last pong, one with source `stream` by 11 s, and
+/// the first cancel-all finds it already in the journal files. The process
+/// is killed before its loop ends. Restarted: `kill_latched` is held, the
+/// boot record's `Kill` runs a new loop, `clear-hold` is refused
+/// `kill_unconfirmed` until that loop's `kill_loop_ended` (10 s watch),
+/// then taken, and a plain order is accepted.
+#[test]
+fn a_ten_second_stream_outage_latches_kill_through_a_restart_until_clear_hold_kill() {
+    let venue = Venue::start(Arc::new(|v: &Value| Some(placed(v))));
+    let mut node = Node::with_venue(
+        "kill",
+        &venue,
+        "kill_after_ms = 10000\nkill_watch_ms = 10000\nkill_watch_every_ms = 1000",
+    );
+    node.start(&[]);
+    node.wait_ready();
+    std::thread::sleep(Duration::from_millis(1_500));
+
+    venue.private.silent.store(true, Ordering::SeqCst);
+    std::thread::sleep(Duration::from_millis(50));
+    let last = venue.private.last_pong.lock().unwrap().expect("a pong");
+    let cancel_alls = || {
+        venue
+            .api
+            .requests()
+            .iter()
+            .filter(|q| q.method == "POST" && q.path() == "/v5/order/cancel-all")
+            .count()
+    };
+    let at_9 = last + Duration::from_secs(9);
+    while Instant::now() < at_9 {
+        assert!(
+            kill_events(&node.data()).is_empty(),
+            "latched {:?} after the last pong",
+            last.elapsed()
+        );
+        assert_eq!(cancel_alls(), 0);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let by_11 = (last + Duration::from_secs(11)).saturating_duration_since(Instant::now());
+    let latched = node.wait(by_11, || {
+        !kill_events(&node.data()).is_empty()
+    });
+    assert!(latched, "no hold_set by 11 s: {}", node.log_tail(30));
+    let ev = kill_events(&node.data());
+    assert!(
+        matches!(&ev[..], [Event::HoldSet { source: HoldSource::Stream, note, .. }] if note.contains("private stream down for")),
+        "{ev:?}"
+    );
+    // The first cancel-all: the latch is on disk by then.
+    assert!(node.wait(Duration::from_secs(5), || cancel_alls() >= 1));
+    assert!(!kill_events(&node.data()).is_empty());
+    let s = node.status().unwrap();
+    assert!(
+        s["core"]["holds"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("kill_latched")),
+        "{}",
+        s["core"]
+    );
+    assert_eq!(s["gateway"]["kill_armed"], true, "{}", s["gateway"]);
+    assert!(
+        matches!(
+            s["gateway"]["kill_loop"]["phase"].as_str(),
+            Some("rounds" | "watch")
+        ),
+        "{}",
+        s["gateway"]
+    );
+    assert!(
+        clear_kill(&node, "too early")
+            .unwrap_err()
+            .starts_with("kill_unconfirmed"),
+    );
+    // Stopped before the loop ends: the latch is in the journal, not the
+    // confirmation.
+    if let Some(mut c) = node.child.take() {
+        c.kill().unwrap();
+        c.wait().unwrap();
+    }
+    assert!(
+        !kill_events(&node.data())
+            .iter()
+            .any(|e| matches!(e, Event::KillLoopEnded { .. }))
+    );
+
+    venue.private.silent.store(false, Ordering::SeqCst);
+    let before = cancel_alls();
+    node.start(&[]);
+    assert!(node.wait(Duration::from_secs(10), || node.status().is_some()));
+    let s = node.status().unwrap();
+    assert!(
+        s["core"]["holds"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("kill_latched")),
+        "{}",
+        s["core"]
+    );
+    assert!(
+        node.wait(Duration::from_secs(10), || cancel_alls() > before),
+        "the boot loop sent no cancel-all: {}",
+        node.log_tail(30)
+    );
+    assert!(
+        clear_kill(&node, "before the loop ends")
+            .unwrap_err()
+            .starts_with("kill_unconfirmed")
+    );
+    let ended = || {
+        kill_events(&node.data()).iter().any(|e| {
+            matches!(
+                e,
+                Event::KillLoopEnded {
+                    outcome: KillOutcome::Confirmed,
+                    ..
+                }
+            )
+        })
+    };
+    assert!(
+        node.wait(Duration::from_secs(20), ended),
+        "the boot loop did not confirm: {}",
+        node.log_tail(30)
+    );
+    assert_eq!(
+        node.status().unwrap()["gateway"]["kill_loop"]["phase"],
+        "done"
+    );
+    assert_eq!(
+        clear_kill(&node, "venue checked, zero open orders"),
+        Ok("cleared".to_string())
+    );
+    node.wait_ready();
+    // A plain order is accepted after a reference price.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let refs = node.ref_prices();
+    while node.ref_prices() == refs {
+        assert!(Instant::now() < deadline, "no reference price after the restart");
+        venue.ticker_snapshot("30000");
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    let reply = node.client().new_order(order_op("k-after", 5_000)).unwrap();
+    assert!(
+        matches!(reply, NewOrderReply::Accepted { .. }),
+        "{reply:?}"
+    );
+}
+
