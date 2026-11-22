@@ -385,13 +385,13 @@ fn kill_holds_liveness_and_heartbeats_recover_to_the_live_state() {
     // A second latch, left set, so the recovered state holds one.
     run.input(Input::Watcher(WatcherInput::Kill { detail: "W5 again".into() }));
     assert!(run.core.kill.is_some());
-    // U18b2: the stream trigger after a confirmation re-arms the latch
+    // U18b2: the stream trigger after a confirmed zero re-arms the latch
     // (`kill_rearmed`); the new loop has not confirmed at recovery.
     run.venue(VenueInput::KillLoopEnded {
-        outcome: KillOutcome::Unsupported,
-        rounds: 0,
-        cancel_all_calls: 0,
-        detail: "no cancel-all".into(),
+        outcome: KillOutcome::Confirmed,
+        rounds: 3,
+        cancel_all_calls: 3,
+        detail: "zero open orders".into(),
     });
     let since = run.at;
     run.venue(VenueInput::StreamLost { since, detail: "closed by the venue".into() });
