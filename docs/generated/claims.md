@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `914b8d589d837662`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `aac3f9ab5bcd1f9c`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 주장 111건: 통과 0, 실패 0, 미실행 44, 이전 버전 결과 67.
 
@@ -2687,8 +2687,8 @@
 - 전제와 범위: 서명 함수와 질의 문자열, 수동 시계 위의 가드(1분 폭주 루프 포함), loopback 가짜 Bybit·반향·VM에 붙인 클라이언트와 내보내기(부류마다 한 번, 거절 코드 일곱 각각 10분, 403 전후, 가득 찬 가드의 대기)
 - 실제 구성요소: reqwest(rustls), hmac·sha2, 클라이언트와 등록부 코드, loopback TCP
 - 모의·시뮬레이션: Bybit, IP 반향, VictoriaMetrics(http-fake), 시계(수동)
-- 주입한 장애: 연결 거절, 응답 없음, 연결 닫힘, 5xx, 읽을 수 없는 본문, retCode 없음·문자열, 10016, 429, 10006, 10002, 다른 retCode, 거절 코드 일곱, 403(응답이 500 ms 늦음), 반향의 403, VM의 503·닫힘·500. 변이 M188, M191, M192와 mut.py 18개
-- 판정 기준과 근거: 서명이 거래소 예시·RFC 4231·Python hmac 값과 같다. 부류와 카운터가 표대로다. 거절 뒤 10분 동안 가짜가 받는 요청이 하나뿐이고 오류 줄이 하나다. 403 뒤 응답 + 599,999 ms까지 어떤 요청도 가짜에 닿지 않고 응답 + 600,000 ms에 간다. 어느 10초 창도 60 이하이고 거절된 요청은 받은 순간에 간다. 실패한 밀어 넣기는 다음 본문에 남지 않는다
+- 주입한 장애: 연결 거절, 응답 없음, 연결 닫힘, 5xx, 읽을 수 없는 본문, retCode 없음·문자열, 10016, 429, 10006, 10002, 다른 retCode, 거절 코드 일곱, 403(응답이 500 ms 늦음), 가드에서 기다리는 동안 온 10010·403, 리다이렉트 301·302·307·308, 줄바꿈이 든 긴 retMsg, 반향의 403, VM의 503·닫힘·500. 변이 M188, M191, M192와 mut.py 23개
+- 판정 기준과 근거: 서명이 거래소 예시·RFC 4231·Python hmac 값과 같다. 부류와 카운터가 표대로다. 거절 뒤 10분 동안 가짜가 받는 요청이 하나뿐이고 오류 줄이 하나다. 403 뒤 응답 + 599,999 ms까지 어떤 요청도 가짜에 닿지 않고 응답 + 600,000 ms에 간다. 어느 10초 창도 60 이하이고 거절된 요청은 받은 순간에 간다. 가드에서 기다리던 요청은 그 사이 온 키 거절·403 뒤 보내지 않는다. 리다이렉트를 따르지 않는다. 거래소의 글은 오류와 로그에 200자 한 줄로 들어간다. 실패한 밀어 넣기는 다음 본문에 남지 않는다
 - 재현: `cargo test -p watcher --test sign --test client --test metrics`
 - 뒷받침하는 것: C-WATCH 3부, ADR-031
 - 확인하지 않은 범위: 실제 Bybit와 실제 VictoriaMetrics(키가 없고 U-01 승인이 필요하다). 응답 형식은 문서와 OMS의 분류에서 왔다. 가드는 이 프로세스의 요청만 센다(OMS의 요청은 모른다). 이 클라이언트를 부르는 시작 확인(U19a4b), 검사(U19a5~), 밀어 넣기 타이머와 종료 때의 마지막 밀어 넣기(U19a7)는 아직 없다
@@ -2703,6 +2703,8 @@
 | `watcher/http_403_pauses_every_request_for_600_s` | 미실행 |  |
 | `watcher/the_guard_holds_requests_beyond_60_in_10_s` | 미실행 |  |
 | `watcher/a_request_beyond_the_guard_waits_for_the_window` | 미실행 |  |
+| `watcher/a_request_waiting_at_the_guard_sees_a_later_rejection_or_pause` | 미실행 |  |
+| `watcher/a_redirect_is_not_followed` | 미실행 |  |
 | `watcher/the_import_lines_are_victoria_metrics_json` | 미실행 |  |
 | `watcher/a_failed_push_is_dropped` | 미실행 |  |
 

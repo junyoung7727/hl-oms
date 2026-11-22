@@ -181,6 +181,7 @@
 
 - 스코프가 이름 붙인 코드는 10010, 10003, 33004다. 10004(서명), 10005(권한), 10007(인증 실패)와 HTTP 401은 OMS가 낫지 않는 것으로 보는 같은 묶음이라 더했다(소유자 질문 3, 멈추는 쪽이 안전하다). HTTP 401의 코드는 `401`로 적는다.
 - 클라이언트 안에서 다시 시도하지 않는다. 다음 라운드가 다시 시도다(스펙 "Errors at start and in a round").
+- 거래소의 글(`retMsg`, 2xx가 아닌 상태의 본문)은 오류와 로그 줄에 200자까지만, 제어 문자(줄바꿈 등)는 빈칸으로 바꿔 넣는다(U19a3 검토 1 S3). 그래서 키 거절의 오류 줄은 언제나 한 줄이다.
 
 ### 다시 보내지 않는 코드
 
@@ -214,11 +215,18 @@
 ### 알려진 한계(3부)
 
 - 실제 Bybit, 실제 VictoriaMetrics에 보낸 적이 없다. 응답 형식과 코드는 문서(gateway facts, F18, F20)와 OMS의 분류에서 왔다.
-- 요청 제한은 이 프로세스의 요청만 센다. OMS의 요청은 모른다. 60/10초는 IP 한도의 1%다(판단(모델 아님)).
+- 요청 제한은 이 프로세스의 요청만 센다. OMS의 요청은 모른다. 60/10초는 IP 한도(10초에 1,200)의 5%다. 60이라는 값은 판단(모델 아님)이다.
 - 요청 제한에서 기다리는 동안 실제 시간으로 최대 100 ms씩 잔다. 시계가 뒤로 가면 그만큼 더 기다린다(공통 결정 "Clock"의 한계와 같다).
 - 카운터는 프로세스마다 0에서 시작한다(재시작 뒤 VM의 증가율 함수가 처리한다).
+- 10004의 `retMsg`는 거래소가 서명한 문자열(`origin_string[<timestamp><api_key>…]`)을 담는다. 그래서 키 거절의 오류 줄에 API 키(비밀이 아니다. `Credentials`의 `Debug`도 찍는다)가 200자 안에서 나올 수 있다. 비밀은 어떤 오류나 로그에도 나오지 않는다.
+- 본문을 읽는 데 크기 상한이 없다. 상한은 `request_timeout_ms` × 대역폭뿐이다(OMS의 클라이언트와 같다. 반향 서비스는 소유자가 고른 https 주소다).
+- 연결 제한 3초는 `request_timeout_ms`가 3,000 이하이면(기본 2,000) 먼저 끝나는 전체 제한에 가려진다: 매달린 연결은 `not_sent`가 아니라 `no_answer`가 된다. 둘 다 그 라운드 실패라 효과는 같고 이름표만 다르다. 연결 제한의 부류는 시험하지 않았다.
+- 요청 제한에서 기다리는 요청들은 순서 없이 100 ms마다 다시 묻는다. W1의 페이지가 계속 가득 채우면 한 IP 확인이나 W3 요청이 여러 번 질 수 있다(U19a9의 예산 시험이 판단한다). 이미 보낸(가드를 지난) 요청은 그 사이 다른 응답이 키 거절이나 403 멈춤을 걸어도 나간다. 막을 수 없고, 시험은 그 응답 뒤에 묻는 요청과 그때 가드에서 기다리던 요청을 본다.
+- 재확인의 규칙(다른 `userID`, `isMaster`, 묶인 IP 없음 → `auth`처럼 재시작까지 멈춤, U19a4b)에는 클라이언트를 밖에서 래치하는 길이 필요하다. 이 부분에는 읽기(`auth_rejected()`)만 있고, 쓰기는 U19a4b가 더한다.
+- 값에 `%`를 허용하므로(거래소 커서), 깨진 퍼센트 열은 그대로 간다. 거래소가 10004로 답하면 클라이언트는 재시작까지 래치한다(멈추는 쪽이라 안전하다). 값은 코드의 상수, 검사된 설정, 거래소 커서에서만 온다.
+- IPv4 지역 주소와 프록시 없음은 loopback 가짜로 보일 수 없어 시험하지 않았다.
 - `retCode`는 2xx 본문에서만 읽는다. 401·403·429가 아닌 2xx 아닌 상태의 본문 안 retCode는 보지 않는다(`no_answer`).
 
 ### 검증(3부)
 
-`sign::the_strings_to_sign_and_signatures_match_independent_values`(거래소의 예시 문자열, RFC 4231 경우 2, 지어낸 비밀 `watcher-made-up-secret-42`로 Python `hmac`이 계산한 값; `tools/ci/secret_scan_allow.txt`에 이유와 함께), `sign::query_strings_are_sorted_and_unsafe_values_refused`, `client::every_request_carries_the_five_headers_and_the_signed_query`(Python 값과 같은 서명, 가짜가 요청을 받는 순간 카운터가 이미 올라가 있음, 보낼 수 없는 값은 아무것도 보내지 않음), `client::answers_are_classified`(부류마다 한 번, 다음 요청은 그대로 감), `client::auth_answers_are_never_retried`(10010, 10003, 33004, 10004, 10005, 10007, HTTP 401 각각: 응답 뒤 수동 시계를 10분 움직이며 매초 여섯 경로에 요청해도 가짜에 닿는 요청이 더 없고, 오류 줄은 하나), `client::http_403_pauses_every_request_for_600_s`(응답이 보낸 뒤 500 ms에 와도 멈춤은 응답부터 600초, 끝나기 1 ms 전까지 모든 경로와 반향이 보내지지 않음), `client::the_guard_holds_requests_beyond_60_in_10_s`(가드만, 수동 시계, 1분의 폭주 루프에서 어느 10초 창도 60 이하), `client::a_request_beyond_the_guard_waits_for_the_window`(클라이언트가 가득 찬 가드에서 기다리다 시계가 그 순간에 이르면 보내고, 그 요청은 기다린 뒤의 시계로 서명됨; 실제 시간), `metrics::the_import_lines_are_victoria_metrics_json`, `metrics::a_failed_push_is_dropped`. 변이: M188(10010을 다음 라운드에 다시 보냄), M191(질의 문자열을 정렬하지 않음), M192(403 멈춤 60초).
+`sign::the_strings_to_sign_and_signatures_match_independent_values`(거래소의 예시 문자열, RFC 4231 경우 2, 지어낸 비밀 `watcher-made-up-secret-42`로 Python `hmac`이 계산한 값; `tools/ci/secret_scan_allow.txt`에 이유와 함께), `sign::query_strings_are_sorted_and_unsafe_values_refused`, `client::every_request_carries_the_five_headers_and_the_signed_query`(Python 값과 같은 서명, 가짜가 요청을 받는 순간 카운터가 이미 올라가 있음, 보낼 수 없는 값은 아무것도 보내지 않음), `client::answers_are_classified`(부류마다 한 번, 다음 요청은 그대로 감; 줄바꿈이 든 긴 `retMsg`와 본문은 200자 한 줄), `client::auth_answers_are_never_retried`(10010, 10003, 33004, 10004, 10005, 10007, HTTP 401 각각: 응답 뒤 수동 시계를 10분 움직이며 매초 여섯 경로에 요청해도 가짜에 닿는 요청이 더 없고, 오류 줄은 하나), `client::http_403_pauses_every_request_for_600_s`(응답이 보낸 뒤 500 ms에 와도 멈춤은 응답부터 600초, 끝나기 1 ms 전까지 모든 경로와 반향이 보내지지 않음), `client::the_guard_holds_requests_beyond_60_in_10_s`(가드만, 수동 시계, 1분의 폭주 루프에서 어느 10초 창도 60 이하), `client::a_request_beyond_the_guard_waits_for_the_window`(클라이언트가 가득 찬 가드에서 기다리다 시계가 그 순간에 이르면 보내고, 그 요청은 기다린 뒤의 시계로 서명됨; 실제 시간), `client::a_request_waiting_at_the_guard_sees_a_later_rejection_or_pause`(가드의 마지막 자리를 받은 요청의 10010 또는 403 응답을 가짜가 다른 요청이 가드에서 기다릴 때까지 잡아 두고, 창이 끝나 깬 그 요청이 `auth`·`ip_banned`로 끝나며 가짜에 닿지 않음; 실제 시간; 검토 1 S2), `client::a_redirect_is_not_followed`(301, 302, 307, 308에 `get`과 반향 모두 `no_answer`, 리다이렉트 대상에 요청이 가지 않음; 검토 1 S1), `metrics::the_import_lines_are_victoria_metrics_json`, `metrics::a_failed_push_is_dropped`. 변이: M188(10010을 다음 라운드에 다시 보냄), M191(질의 문자열을 정렬하지 않음), M192(403 멈춤 60초).
