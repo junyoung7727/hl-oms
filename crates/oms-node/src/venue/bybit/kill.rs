@@ -1469,6 +1469,35 @@ mod tests {
         );
     }
 
+    /// C2: the block is asked again after the wait for a budget slot. A
+    /// block that appears during the wait keeps that cancel-all home and
+    /// the round fails with the block text; once it lifts the rounds send
+    /// again.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_block_that_appears_during_the_budget_wait_keeps_the_cancel_all_home() {
+        let api = venue();
+        api.route(REALTIME, [page(vec![open_row(1)])]);
+        let t = KillTiming {
+            round_ms: 100,
+            ..KillTiming::DEFAULT
+        };
+        let mut r = Rig::start(&api, t, None);
+        // Round 3 (at 200) waits for a slot until 1,000.
+        r.run_to(&api, 500).await;
+        assert_eq!(r.posts, [0, 100]);
+        *r.host.block.lock().unwrap() = Some("ip_banned: HTTP 403".into());
+        r.run_to(&api, 1_500).await;
+        assert_eq!(r.posts, [0, 100], "a cancel-all left under the block");
+        assert_eq!(
+            r.view.lock().unwrap().last_error.as_deref(),
+            Some("ip_banned: HTTP 403")
+        );
+        *r.host.block.lock().unwrap() = None;
+        r.run_to(&api, 2_500).await;
+        assert!(r.posts.len() > 2 && r.posts[2] >= 1_500, "{:?}", r.posts);
+        r.at_most_two_per_second();
+    }
+
     /// Done criterion: every notice carries the position block, read just
     /// before it: each symbol with a position, its quantity, uPnL, mark and
     /// distance to liquidation, unknown without a liquidation price; a
