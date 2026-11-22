@@ -519,6 +519,115 @@ fn the_gate_survives_replay_and_a_boot_starts_unmonitored() {
     assert!(h.core.holds(None).contains(&HoldReason::Unmonitored));
 }
 
+/// A boot while the gate is already unmonitored starts the 60 s again
+/// from the boot record: the time since from before the restart does not
+/// count, so a resting plain order is not cancelled sooner (review 1 S1).
+#[test]
+fn a_boot_while_unmonitored_times_stage_two_from_the_boot() {
+    let (mut h, plain, _) = gated_with_orders();
+    let t0 = h.now + SEC;
+    fresh(&mut h, t0);
+    ticks(&mut h, t0, t0 + 50 * SEC);
+    let before = h.core.monitor.clone().unwrap();
+    assert_eq!(
+        (before.monitored, before.since),
+        (false, t0 + 30 * SEC + TICK)
+    );
+    let boot_at = t0 + 50 * SEC + SEC;
+    at(
+        &mut h,
+        boot_at,
+        Input::Boot {
+            binary: "test".into(),
+            kill_marker: None,
+        },
+    );
+    let m = h.core.monitor.clone().unwrap();
+    assert_eq!(
+        (m.monitored, m.since, m.reason.as_str(), m.last.is_none()),
+        (false, boot_at, "no heartbeat since the start", true)
+    );
+    h.link_up_and_sync();
+    let (changes, cancels) = ticks(&mut h, boot_at, boot_at + 60 * SEC);
+    assert!(changes.is_empty(), "{changes:?}");
+    assert_eq!(
+        cancels,
+        Vec::<Ts>::new(),
+        "no cancel up to 60 s after the boot"
+    );
+    assert_eq!(rule_cancels(&h), Vec::<OrderId>::new());
+    let (_, cancels) = ticks(&mut h, boot_at + 60 * SEC, boot_at + 60 * SEC + TICK);
+    assert_eq!(cancels, vec![boot_at + 60 * SEC + TICK]);
+    assert_eq!(rule_cancels(&h), vec![plain]);
+}
+
+/// Runs `input` at record time `t` equal to the last one: the node's
+/// record time while the host clock is behind it (`pipeline.rs`, the
+/// record time never goes back).
+fn held(h: &mut H, t: Ts, input: Input) -> Output {
+    assert_eq!(t, h.now, "the record time is held");
+    h.now = t - MS;
+    h.inp(input)
+}
+
+/// A known limit (review 1 M1, C-LIVE part 2): while the host clock is
+/// behind the last record time (a backward step), every input gets the
+/// same record time and the gate's timers, which are differences of
+/// record times, stand still. A dead watcher is not noticed (no
+/// `monitor_changed`, no cancel for ten minutes of ticks); a failing watcher
+/// that reports its last success from before the step keeps the gate open,
+/// and the future rule does not refuse it. A healthy watcher stamping the
+/// new clock closes the gate, because its checks look as old as the step.
+#[test]
+fn a_clock_that_steps_back_holds_the_gates_timers() {
+    let (mut h, plain, _) = gated_with_orders();
+    let t0 = h.now + SEC;
+    fresh(&mut h, t0);
+    // A step back of ten minutes: 250 ms ticks at the held record time.
+    // Bounded: 2,400.
+    for i in 0..2_400 {
+        let out = held(&mut h, t0, Input::Tick);
+        let gate = out.events.iter().any(|e| {
+            matches!(
+                e,
+                Event::MonitorChanged { .. } | Event::CancelRequested { .. }
+            )
+        });
+        assert!(!gate, "tick {i}: {:?}", names(&out));
+    }
+    assert!(!unmonitored(&h), "a dead watcher is not noticed");
+    assert_eq!(rule_cancels(&h), Vec::<OrderId>::new());
+    // A watcher whose W1 and W2 fail since just before the step reports
+    // their last success, stamped on the old clock: taken, gate open.
+    let out = held(
+        &mut h,
+        t0,
+        Input::Watcher(WatcherInput::Heartbeat {
+            watcher: "watcher-1".into(),
+            checks: checks(Some(t0), Some(t0), None),
+        }),
+    );
+    assert_eq!(names(&out), ["watcher_heartbeat"]);
+    assert!(!unmonitored(&h));
+    // A healthy watcher on the new clock, ten minutes behind, 10 s after
+    // the step: its checks look 590 s old, the gate closes.
+    let back = t0 - 590 * SEC;
+    let out = held(
+        &mut h,
+        t0,
+        Input::Watcher(WatcherInput::Heartbeat {
+            watcher: "watcher-1".into(),
+            checks: checks(Some(back), Some(back), Some(back)),
+        }),
+    );
+    assert_eq!(names(&out), ["watcher_heartbeat", "monitor_changed"]);
+    assert!(unmonitored(&h));
+    assert!(
+        h.order(plain).cancel.is_none(),
+        "no cancel while the time is held"
+    );
+}
+
 type Edit = fn(&mut MonitorPolicy);
 
 /// The policy's bounds (판단(모델 아님)): each refused one step outside
