@@ -101,6 +101,37 @@ pub struct Policy {
     /// rules keeps the bytes it had before the section existed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub margin: Option<MarginPolicy>,
+    /// The monitoring gate (C-LIVE part 2): the watcher's heartbeats decide
+    /// whether plain orders are taken. Absent means no gate; an absent
+    /// section is not serialised.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub monitor: Option<MonitorPolicy>,
+}
+
+/// Values of the monitoring gate (C-LIVE part 2). The section is optional;
+/// see `Policy::monitor`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MonitorPolicy {
+    /// Without a heartbeat for longer than this the account is unmonitored.
+    pub heartbeat_max_age_us: u64,
+    /// A heartbeat whose W1 or W2 last succeeded longer than this before it
+    /// leaves the account unmonitored.
+    pub check_max_age_us: u64,
+    /// Unmonitored for longer than this, resting plain orders are
+    /// cancelled.
+    pub unmonitored_cancel_us: u64,
+}
+
+impl Default for MonitorPolicy {
+    fn default() -> Self {
+        // Design values: §7.5 (30 s, "60 s more"), R2 (W1/W2 > 10 s).
+        MonitorPolicy {
+            heartbeat_max_age_us: 30_000_000,
+            check_max_age_us: 10_000_000,
+            unmonitored_cancel_us: 60_000_000,
+        }
+    }
 }
 
 /// Values of the margin rules. The section is optional; see `Policy::margin`.
@@ -175,6 +206,7 @@ impl Default for Policy {
             purge_interval_us: 60_000_000,
             fill_dedup_retention_us: 86_400_000_000,
             margin: None,
+            monitor: None,
         }
     }
 }
@@ -291,6 +323,20 @@ impl CoreConfig {
             }
             if m.account_mm_rate_max_bps.is_some_and(|b| b == 0 || b >= 10_000) {
                 errs.push("policy.margin: account_mm_rate_max_bps must be 1..=9999".to_string());
+            }
+        }
+        if let Some(m) = &p.monitor {
+            // The bounds of C-LIVE part 2 (판단(모델 아님)): at least two
+            // heartbeat periods of 5 s; checks of seconds to a minute; at
+            // most ten minutes of resting orders without a watcher.
+            for (name, v, lo, hi) in [
+                ("heartbeat_max_age_us", m.heartbeat_max_age_us, 10_000_000, 300_000_000),
+                ("check_max_age_us", m.check_max_age_us, 2_000_000, 60_000_000),
+                ("unmonitored_cancel_us", m.unmonitored_cancel_us, 10_000_000, 600_000_000),
+            ] {
+                if !(lo..=hi).contains(&v) {
+                    errs.push(format!("policy.monitor: {name} must be between {lo} and {hi}"));
+                }
             }
         }
         if errs.is_empty() { Ok(()) } else { Err(errs) }

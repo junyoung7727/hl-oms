@@ -47,7 +47,7 @@ payload 하나는 JSON 객체 하나다: `{"seq": u64, "at": u64 µs(기록 시�
 | `purged` | `order_ids`의 주문 정보를 지운다(모두 닫힌 주문이다). 열린 주문은 바뀌지 않는다 | `fill_floor`보다 이른 체결 키는 잊어도 된다 | — |
 | 그 밖의 이벤트 | — | — | — |
 
-그 밖의 이벤트(링크, 결과 불명, 상태 기록, 취소, 대조, 불일치, 운영자, 저장 공간, 참조 가격, 증거금, 펀딩·변경 대기, 부재 기록, 보류와 킬 루프 `hold_set`·`hold_cleared`·`kill_loop_ended`·`kill_rearmed`, 전략 연결 `strategy_link_lost`·`strategy_link_restored`)는 세 집합을 바꾸지 않는다. 상태 화면과 알림은 이들을 쓴다. 뜻은 아래 필드 표와 각 계약 문서([C-NEW 등](order-lifecycle.md), [C-MISMATCH](reconciliation.md), [C-MARGIN](margin.md), [C-HOLD](holds.md), [C-LIVE](liveness.md))에 있다.
+그 밖의 이벤트(링크, 결과 불명, 상태 기록, 취소, 대조, 불일치, 운영자, 저장 공간, 참조 가격, 증거금, 펀딩·변경 대기, 부재 기록, 보류와 킬 루프 `hold_set`·`hold_cleared`·`kill_loop_ended`·`kill_rearmed`, 전략 연결 `strategy_link_lost`·`strategy_link_restored`, 모니터링 게이트 `watcher_heartbeat`·`monitor_changed`)는 세 집합을 바꾸지 않는다. 상태 화면과 알림은 이들을 쓴다. 뜻은 아래 필드 표와 각 계약 문서([C-NEW 등](order-lifecycle.md), [C-MISMATCH](reconciliation.md), [C-MARGIN](margin.md), [C-HOLD](holds.md), [C-LIVE](liveness.md))에 있다.
 
 포지션 = `fill_booked` + `external_fill_booked` + `venue_position_changed` + `position_adjusted` 수량의 합이다(감시자 W2, ADR-023).
 
@@ -252,6 +252,18 @@ payload 하나는 JSON 객체 하나다: `{"seq": u64, "at": u64 µs(기록 시�
 | `strategy_link_lost` | `strategy` | string | 노드가 연결을 잃은 전략(C-LIVE). 그 전략의 일반 주문을 보류하고, 같은 기록의 `cancel_requested`(`by` = `{"rule": "strategy_link"}`)가 그 전략의 걸린 일반 주문 취소를 요청한다 |
 | `strategy_link_lost` | `why` | string | 노드가 본 이유: `last trading connection closed` 또는 `no request for {ms} ms` |
 | `strategy_link_restored` | `strategy` | string | 다시 `hello`한 전략(C-LIVE). 그 전략의 보류가 풀린다 |
+| `watcher_heartbeat` | `watcher` | string | 하트비트를 보낸 워처의 이름(C-LIVE 2부, 1~64자) |
+| `watcher_heartbeat` | `checks.W1` | u64 또는 null | 워처 검사 W1(미체결 주문 대조)의 마지막 성공 시각(µs, 호스트 시계), null = 아직 성공 없음. 늘 있다. 게이트는 이 하트비트 기록의 시각에서 이 값까지가 `check_max_age_us`보다 길면 `unmonitored`로 본다 |
+| `watcher_heartbeat` | `checks.W2` | u64 또는 null | W2(포지션 대조)의 마지막 성공 시각, W1과 같은 규칙. 늘 있다 |
+| `watcher_heartbeat` | `checks.W3` | u64 또는 null | W3의 마지막 성공 시각(있을 때만). 기록하고 보여 줄 뿐 게이트는 보지 않는다 |
+| `watcher_heartbeat` | `checks.W4` | u64 또는 null | W4의 마지막 성공 시각(있을 때만). 기록하고 보여 줄 뿐 게이트는 보지 않는다 |
+| `watcher_heartbeat` | `checks.W5` | u64 또는 null | W5의 마지막 성공 시각(있을 때만). 기록하고 보여 줄 뿐 게이트는 보지 않는다 |
+| `watcher_heartbeat` | `checks.W6` | u64 또는 null | W6의 마지막 성공 시각(있을 때만). 기록하고 보여 줄 뿐 게이트는 보지 않는다 |
+| `watcher_heartbeat` | `checks.W7` | u64 또는 null | W7의 마지막 성공 시각(있을 때만). 기록하고 보여 줄 뿐 게이트는 보지 않는다 |
+| `watcher_heartbeat` | `checks.W8` | u64 또는 null | W8의 마지막 성공 시각(있을 때만). 기록하고 보여 줄 뿐 게이트는 보지 않는다 |
+| `watcher_heartbeat` | `checks.W9` | u64 또는 null | W9의 마지막 성공 시각(있을 때만). 기록하고 보여 줄 뿐 게이트는 보지 않는다 |
+| `monitor_changed` | `monitored` | bool | 모니터링 게이트의 판정이 바뀌었다(C-LIVE 2부). false: 일반 주문 보류(`unmonitored`), `unmonitored_cancel_us` 뒤 같은 규칙의 `cancel_requested`(`by` = `{"rule": "unmonitored"}`)가 걸린 일반 주문 취소를 요청한다. true: 보류가 풀린다 |
+| `monitor_changed` | `reason` | string | 판정의 이유(`no heartbeat for more than {ms} ms`, `W2 last succeeded more than {ms} ms before the heartbeat`, `W1 and W2 fresh (watcher)` 등) |
 <!-- event-fields:end -->
 
 쓰지 않는 기본값: `position_adjusted.reason`은 `operator`일 때 쓰지 않는다. `order_accepted.request.market_ref`, `request_rejected.request.market_ref`는 없을 때 쓰지 않는다. `order_acked.session`은 옛 기록에 없을 수 있다(0).

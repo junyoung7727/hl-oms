@@ -740,8 +740,65 @@ impl Tx<'_> {
                 KillTrigger::AlreadyLatched => "already latched".to_string(),
                 KillTrigger::Rearmed => KILL_REARMED_REPLY.to_string(),
             }),
+            WatcherInput::Heartbeat { watcher, checks } => self.heartbeat(watcher, checks)?,
         };
         self.out.reply = Some(Reply::Operator(reply));
+        Ok(())
+    }
+
+    // ---- the monitoring gate (C-LIVE part 2) ------------------------------
+
+    /// A heartbeat of the watcher: refused without a gate, with a wrong
+    /// shape or with a check time from the future (nothing recorded); else
+    /// recorded, and the verdict at this record time.
+    fn heartbeat(
+        &mut self,
+        watcher: &str,
+        checks: &std::collections::BTreeMap<String, Option<Ts>>,
+    ) -> Result<Result<String, String>, CoreFault> {
+        if self.core.config.policy.monitor.is_none() {
+            return Ok(Err("bad_request: no monitoring gate is configured; nothing was recorded".to_string()));
+        }
+        if let Some(why) = heartbeat_shape_refusal(watcher, checks) {
+            return Ok(Err(format!("bad_request: {why}; nothing was recorded")));
+        }
+        // A clock that went back must not make a stale check look fresh.
+        let latest = self.at.saturating_add(HEARTBEAT_AHEAD_MAX_US);
+        if let Some((check, t)) = checks.iter().find_map(|(c, t)| t.filter(|t| *t > latest).map(|t| (c, t))) {
+            return Ok(Err(format!(
+                "bad_request: {check} succeeded at {t}, more than {HEARTBEAT_AHEAD_MAX_US} µs after the record time {}; nothing was recorded",
+                self.at
+            )));
+        }
+        self.emit(Event::WatcherHeartbeat {
+            watcher: watcher.to_string(),
+            checks: checks.clone(),
+        })?;
+        self.monitor_verdict()?;
+        Ok(Ok("recorded".to_string()))
+    }
+
+    /// Records the gate's verdict at this record time when it differs from
+    /// the state. A different reason while still unmonitored records
+    /// nothing: the time since stays.
+    fn monitor_verdict(&mut self) -> Result<(), CoreFault> {
+        let Some((monitored, reason)) = self.core.monitor_verdict(self.at) else {
+            return Ok(());
+        };
+        if self.core.monitor.as_ref().is_some_and(|m| m.monitored != monitored) {
+            self.emit(Event::MonitorChanged { monitored, reason })?;
+        }
+        Ok(())
+    }
+
+    /// The gate on a tick: the verdict, then stage 2. Unmonitored for longer
+    /// than `unmonitored_cancel_us` while the link is up, every resting plain
+    /// order without a cancel request gets one, as the margin stale cancel.
+    fn monitor_tick(&mut self) -> Result<(), CoreFault> {
+        self.monitor_verdict()?;
+        if self.core.link.up && self.core.monitor_cancel_due(self.at) {
+            self.rule_cancel_plain_orders(RuleId::Unmonitored, ExhaustedCancel::Leave, None)?;
+        }
         Ok(())
     }
 
@@ -2024,6 +2081,7 @@ impl Tx<'_> {
             self.maybe_send_cancel(id)?;
         }
         self.stale_cancel()?;
+        self.monitor_tick()?;
 
         // A parked fill is given up as external when no order of ours could
         // still turn out to own it, or when it has waited too long.

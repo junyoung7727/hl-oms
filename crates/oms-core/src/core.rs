@@ -98,6 +98,10 @@ pub struct Core {
     /// `hello`. Not serialised while empty.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub strategy_link: BTreeMap<StrategyId, StrategyLinkLoss>,
+    /// The monitoring gate (C-LIVE part 2): present exactly while the
+    /// configuration has one. Not serialised while absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monitor: Option<MonitorState>,
 }
 
 impl Core {
@@ -136,6 +140,7 @@ impl Core {
             watcher_mismatch: None,
             venue_change: None,
             strategy_link: BTreeMap::new(),
+            monitor: None,
         }
     }
 
@@ -254,7 +259,60 @@ impl Core {
                 v.push(HoldReason::StrategyLink);
             }
         }
+        // The monitoring gate (C-LIVE part 2): with a gate, anything but a
+        // monitored verdict holds.
+        let gate_on = self.config.policy.monitor.is_some();
+        if gate_on && !self.monitor.as_ref().is_some_and(|m| m.monitored) {
+            v.push(HoldReason::Unmonitored);
+        }
         v
+    }
+
+    /// The monitoring gate's verdict at record time `at` (C-LIVE part 2):
+    /// monitored or not, and why. `None` without a gate. Unmonitored without
+    /// a heartbeat in this process, when the last one is older than
+    /// `heartbeat_max_age_us`, or when in it W1 or W2 had no success or one
+    /// older than `check_max_age_us` at the heartbeat's record time (the
+    /// heartbeat's own age covers the time after it; judged at `at` the
+    /// 10 s check rule would always fire before the 30 s heartbeat rule).
+    /// W3..W9 are not judged.
+    pub fn monitor_verdict(&self, at: Ts) -> Option<(bool, String)> {
+        let policy = self.config.policy.monitor.as_ref()?;
+        let state = self.monitor.as_ref()?;
+        let Some(last) = &state.last else {
+            // The reason the boot or the activation gave stays.
+            return Some((false, state.reason.clone()));
+        };
+        if at.saturating_sub(last.at) > policy.heartbeat_max_age_us {
+            return Some((false, format!("no heartbeat for more than {} ms", policy.heartbeat_max_age_us / 1_000)));
+        }
+        // A check is judged as of the heartbeat that reported it; the
+        // heartbeat's own age covers the time after it.
+        for check in ["W1", "W2"] {
+            match last.checks.get(check).copied().flatten() {
+                None => return Some((false, format!("{check} has not succeeded yet"))),
+                Some(t) if last.at.saturating_sub(t) > policy.check_max_age_us => {
+                    return Some((
+                        false,
+                        format!(
+                            "{check} last succeeded more than {} ms before the heartbeat",
+                            policy.check_max_age_us / 1_000
+                        ),
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+        Some((true, format!("W1 and W2 fresh ({})", last.watcher)))
+    }
+
+    /// Whether the gate's stage 2 is due at record time `at`: unmonitored
+    /// for longer than `unmonitored_cancel_us` (C-LIVE part 2).
+    pub fn monitor_cancel_due(&self, at: Ts) -> bool {
+        let (Some(policy), Some(state)) = (&self.config.policy.monitor, &self.monitor) else {
+            return false;
+        };
+        !state.monitored && at.saturating_sub(state.since) > policy.unmonitored_cancel_us
     }
 
     /// Whether the venue told, in the current link session, that
@@ -444,6 +502,13 @@ impl Core {
                 // can say no `hello`: its link hold goes with it (C-LIVE).
                 let strategies = &self.config.strategies;
                 self.strategy_link.retain(|s, _| strategies.contains_key(s));
+                // A gate that comes on starts unmonitored at its activation;
+                // one that goes off takes its state with it (C-LIVE part 2).
+                match (self.config.policy.monitor.is_some(), self.monitor.is_some()) {
+                    (true, false) => self.monitor = Some(unmonitored_from(at, "no heartbeat since the gate came on")),
+                    (false, true) => self.monitor = None,
+                    _ => {}
+                }
                 // A policy that comes on while the link is up has no
                 // link-up moment of its own: the stale cancel measures
                 // from here.
@@ -460,6 +525,14 @@ impl Core {
                     k.confirmed_at = None;
                     k.outcome = None;
                 }
+                // So do the watcher's heartbeats: every start is unmonitored
+                // until the first fresh one (C-LIVE part 2).
+                self.monitor = self
+                    .config
+                    .policy
+                    .monitor
+                    .is_some()
+                    .then(|| unmonitored_from(at, "no heartbeat since the start"));
             }
             Event::LinkChanged { up, session, .. } => {
                 self.link.up = *up;
@@ -1083,6 +1156,24 @@ impl Core {
             Event::StrategyLinkRestored { strategy } => {
                 self.strategy_link.remove(strategy);
             }
+            Event::WatcherHeartbeat { watcher, checks } => {
+                let Some(m) = self.monitor.as_mut() else {
+                    return fault("watcher_heartbeat without a monitoring gate");
+                };
+                m.last = Some(HeartbeatSeen {
+                    at,
+                    watcher: watcher.clone(),
+                    checks: checks.clone(),
+                });
+            }
+            Event::MonitorChanged { monitored, reason } => {
+                let Some(m) = self.monitor.as_mut() else {
+                    return fault("monitor_changed without a monitoring gate");
+                };
+                m.monitored = *monitored;
+                m.since = at;
+                m.reason = reason.clone();
+            }
         }
         Ok(())
     }
@@ -1266,5 +1357,16 @@ impl Core {
             }
         }
         Ok(())
+    }
+}
+
+/// The gate's state at a start or an activation (C-LIVE part 2):
+/// unmonitored from `at`, no heartbeat yet.
+fn unmonitored_from(at: Ts, reason: &str) -> MonitorState {
+    MonitorState {
+        monitored: false,
+        since: at,
+        reason: reason.to_string(),
+        last: None,
     }
 }

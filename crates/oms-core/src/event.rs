@@ -11,6 +11,7 @@ use crate::input::*;
 use crate::model::*;
 use crate::num::*;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -303,6 +304,15 @@ pub enum Event {
     StrategyLinkLost { strategy: StrategyId, why: String },
     /// The strategy said `hello` again: its hold is released (C-LIVE).
     StrategyLinkRestored { strategy: StrategyId },
+    /// The watcher's heartbeat was accepted (C-LIVE part 2): it becomes the
+    /// gate's last heartbeat.
+    WatcherHeartbeat {
+        watcher: String,
+        checks: BTreeMap<String, Option<Ts>>,
+    },
+    /// The monitoring gate's verdict changed (C-LIVE part 2): unmonitored
+    /// holds plain orders, monitored releases them.
+    MonitorChanged { monitored: bool, reason: String },
 }
 
 /// Stable reason codes for a refused new-order request.
@@ -500,6 +510,8 @@ impl Event {
             Event::KillRearmed { .. } => "kill_rearmed",
             Event::StrategyLinkLost { .. } => "strategy_link_lost",
             Event::StrategyLinkRestored { .. } => "strategy_link_restored",
+            Event::WatcherHeartbeat { .. } => "watcher_heartbeat",
+            Event::MonitorChanged { .. } => "monitor_changed",
         }
     }
 }
@@ -517,6 +529,7 @@ impl Input {
             Input::Watcher(w) => match w {
                 WatcherInput::Mismatch { .. } => "watcher.mismatch",
                 WatcherInput::Kill { .. } => "watcher.kill",
+                WatcherInput::Heartbeat { .. } => "watcher.heartbeat",
             },
             Input::Session(s) => match s {
                 SessionInput::Lost { .. } => "session.lost",

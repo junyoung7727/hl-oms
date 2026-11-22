@@ -121,13 +121,14 @@ fn plain_and_reduce_only(h: &mut H, key: &str) -> (Vec<RejectReason>, bool) {
 }
 
 /// TN table 7-7 with a margin policy: under the watcher's mismatch and the
-/// venue change (and, U18b3, a lost strategy link) a reduce-only order
+/// venue change (and, U18b3, a lost strategy link; U18b4, unmonitored) a
+/// reduce-only order
 /// passes and a plain one is refused;
 /// under the kill latch and the operator's halt both are refused.
 #[test]
 fn the_hold_table_of_table_7_7() {
     type Set = fn(&mut H);
-    let rows: [(HoldReason, Set, bool); 5] = [
+    let rows: [(HoldReason, Set, bool); 6] = [
         (
             HoldReason::KillLatched,
             |h| {
@@ -168,6 +169,18 @@ fn the_hold_table_of_table_7_7() {
                     strategy: sid("a"),
                     why: "last trading connection closed".into(),
                 }));
+            },
+            true,
+        ),
+        // U18b4 (C-LIVE part 2): a gate turned on by a new configuration,
+        // no heartbeat yet.
+        (
+            HoldReason::Unmonitored,
+            |h| {
+                let mut cfg = h.core.config.clone();
+                cfg.version += 1;
+                cfg.policy.monitor = Some(MonitorPolicy::default());
+                h.inp(Input::Config(Box::new(cfg)));
             },
             true,
         ),

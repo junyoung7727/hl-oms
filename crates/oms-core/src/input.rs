@@ -6,6 +6,7 @@ use crate::ids::*;
 use crate::model::*;
 use crate::num::*;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -132,6 +133,48 @@ pub enum WatcherInput {
     /// The watcher killed: every order is held, and the gateway runs its
     /// kill loop.
     Kill { detail: String },
+    /// The watcher's heartbeat on the monitor socket (C-LIVE part 2): its
+    /// label and, per check `W1`..`W9`, the time of its last success in µs
+    /// on the host clock, or `None` for no success yet. `W1` and `W2` are
+    /// present.
+    Heartbeat {
+        watcher: String,
+        checks: BTreeMap<String, Option<Ts>>,
+    },
+}
+
+/// The longest watcher label of a heartbeat, in characters (C-LIVE part
+/// 2). 판단(모델 아님).
+pub const HEARTBEAT_WATCHER_MAX: usize = 64;
+
+/// How far after the record time a check time of a heartbeat may lie
+/// (C-LIVE part 2): the watcher's clock is the host's, so only a small step
+/// is taken. A clock that went back must not make a stale check look fresh.
+/// 1 s 판단(모델 아님).
+pub const HEARTBEAT_AHEAD_MAX_US: u64 = 1_000_000;
+
+/// Why a heartbeat's shape is refused, if it is: a label that is empty,
+/// longer than `HEARTBEAT_WATCHER_MAX` characters or holds a control
+/// character; a check name outside `W1`..`W9`; `W1` or `W2` missing. The
+/// node refuses these before the core sees them, and the core again.
+pub fn heartbeat_shape_refusal(watcher: &str, checks: &BTreeMap<String, Option<Ts>>) -> Option<String> {
+    let chars = watcher.chars().count();
+    if chars == 0 || chars > HEARTBEAT_WATCHER_MAX || watcher.chars().any(char::is_control) {
+        return Some(format!(
+            "the watcher label must be 1 to {HEARTBEAT_WATCHER_MAX} characters without control characters"
+        ));
+    }
+    if let Some(bad) = checks.keys().find(|k| !is_heartbeat_check(k)) {
+        return Some(format!("unknown check {bad:?}: the checks are W1..W9"));
+    }
+    if !checks.contains_key("W1") || !checks.contains_key("W2") {
+        return Some("a heartbeat must carry W1 and W2".to_string());
+    }
+    None
+}
+
+fn is_heartbeat_check(name: &str) -> bool {
+    matches!(name.as_bytes(), [b'W', b'1'..=b'9'])
 }
 
 /// What the node tells about a strategy's trading connections (C-LIVE).
