@@ -54,6 +54,11 @@ jobs:
       - name: Build
         run: cargo build --workspace --all-targets --locked
 
+      # After the build the host platform's packages are fetched, so the
+      # script's offline `cargo metadata --filter-platform` resolves.
+      - name: Watcher depends on no OMS or market-data crate
+        run: tools/ci/watcher_independent.sh
+
       - name: Test
         run: cargo test --workspace --locked
 

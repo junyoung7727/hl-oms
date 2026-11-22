@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Proves that the two gate scripts go red on the cases they exist for and
+# Proves that the gate scripts go red on the cases they exist for and
 # stay green on the cases they must allow. Runs in a throwaway git
 # repository; it does not touch this one.
 #
@@ -34,7 +34,7 @@ mkdir -p "$repo/tools/ci" "$repo/tests/common"
 cd "$repo"
 git init -q .
 g() { git -c user.name=selftest -c user.email=selftest@invalid -c commit.gpgsign=false "$@"; }
-cp "$src/secret_scan.sh" "$src/rustfmt_added.sh" tools/ci/
+cp "$src/secret_scan.sh" "$src/rustfmt_added.sh" "$src/watcher_independent.sh" tools/ci/
 printf '# empty\n' > tools/ci/secret_scan_allow.txt
 # An existing, unformatted file that the format check must leave alone.
 printf 'pub fn  helper( ){}\n' > tests/common/mod.rs
@@ -286,6 +286,88 @@ undo
 printf 'pub fn  more( ){}\n' >> tests/common/mod.rs
 expect ok "unformatted code added to an existing file (exempt by design)" fmt
 undo
+
+# ---- watcher independence --------------------------------------------------
+# A synthetic workspace in ws/ (the fake Cargo.lock at the root of this
+# repository is no lock of any workspace), with its own copy of the
+# toolchain file. Every case starts from the base manifests, plants one
+# change and regenerates the lock, so the result is the script's.
+expect_exit() { # expect_exit <code> <label> <fixed text> <command...>
+  local want="$1" label="$2" text="$3" got=0
+  shift 3
+  "$@" > "$tmp/out.txt" 2>&1 || got=$?
+  if [[ "$got" == "$want" ]] && grep -qF -- "$text" "$tmp/out.txt" \
+    && { [[ "$want" == 0 ]] || ! grep -qF "watcher_independent: ok" "$tmp/out.txt"; }; then
+    echo "selftest: pass  (exit $want) $label"
+  else
+    echo "selftest: WRONG (wanted exit $want and \"$text\", got exit $got) $label"
+    sed 's/^/    /' "$tmp/out.txt"
+    failures=$((failures + 1))
+  fi
+}
+expect_finding() { expect_exit 1 "$@"; }
+ws_crates="watcher watcher-conformance oms-core md-core oms-journal oms-api obs-push http-fake helper"
+ws_base() {
+  rm -rf ws
+  mkdir -p ws
+  cp "$src/../../rust-toolchain.toml" ws/
+  local c list=""
+  for c in $ws_crates; do
+    list+="\"$c\", "
+    mkdir -p "ws/$c/src"
+    : > "ws/$c/src/lib.rs"
+    printf '[package]\nname = "%s"\nversion = "0.1.0"\nedition = "2024"\npublish = false\n' "$c" > "ws/$c/Cargo.toml"
+  done
+  printf '[workspace]\nresolver = "3"\nmembers = [%s]\n' "${list%, }" > ws/Cargo.toml
+  printf '\n[dev-dependencies]\nhttp-fake = { path = "../http-fake" }\n' >> ws/watcher/Cargo.toml
+  printf '\n[dev-dependencies]\nwatcher = { path = "../watcher" }\noms-core = { path = "../oms-core" }\n' >> ws/watcher-conformance/Cargo.toml
+}
+ws_lock() { (cd ws && cargo generate-lockfile --offline -q); }
+indep() { tools/ci/watcher_independent.sh ws/Cargo.toml; }
+dep() { # dep <crate> <section> <dependency>: appends a path dependency
+  if [[ -n "$2" ]]; then printf '\n[%s]\n' "$2" >> "ws/$1/Cargo.toml"; fi
+  printf '%s = { path = "../%s" }\n' "$3" "$3" >> "ws/$1/Cargo.toml"
+}
+if command -v cargo > /dev/null; then
+  ws_base && ws_lock
+  expect_exit 0 "watcher: the real shape (only watcher-conformance links oms-core)" "watcher_independent: ok" indep
+  ws_base && dep watcher dependencies oms-core && ws_lock
+  expect_finding "watcher: normal dependency oms-core" "declared: watcher -> oms-core (normal)" indep
+  ws_base && dep watcher build-dependencies md-core && ws_lock
+  expect_finding "watcher: build dependency md-core" "declared: watcher -> md-core (build)" indep
+  # The base manifest ends in [dev-dependencies]; the line joins it.
+  ws_base && dep watcher "" oms-journal && ws_lock
+  expect_finding "watcher: dev dependency oms-journal" "declared: watcher -> oms-journal (dev)" indep
+  ws_base && dep watcher "target.'cfg(unix)'.dependencies" oms-core && ws_lock
+  expect_finding "watcher: unix target dependency oms-core" "declared: watcher -> oms-core (normal, target cfg(unix))" indep
+  ws_base && dep watcher "target.'cfg(windows)'.dependencies" oms-core && ws_lock
+  expect_finding "watcher: windows target dependency oms-core (seen on the host too)" "declared: watcher -> oms-core (normal, target cfg(windows))" indep
+  ws_base && dep watcher dependencies helper && dep helper dependencies oms-api && ws_lock
+  expect_finding "watcher: oms-api reached through helper" "reachable: watcher -> helper -> oms-api" indep
+  ws_base && dep watcher dependencies obs-push && ws_lock
+  expect_finding "watcher: another workspace crate (obs-push)" "path: watcher -> obs-push (normal)" indep
+  ws_base && dep oms-api dependencies watcher && ws_lock
+  expect_finding "watcher: oms-api depends on the watcher" "reverse: oms-api -> watcher (normal)" indep
+  ws_base && ws_lock && printf '#[path = "../../oms-core/src/lib.rs"]\nmod x;\n' > ws/watcher/src/lib.rs
+  expect_finding "watcher: #[path] to OMS source" "source: watcher/src/lib.rs:1" indep
+  ws_base && ws_lock && mkdir -p ws/watcher/tests \
+    && printf '\nconst _: &str = include_str!("../../oms-journal/src/lib.rs");\n' > ws/watcher/tests/probe.rs
+  expect_finding "watcher: include_str! of OMS source in a test" "source: watcher/tests/probe.rs:2" indep
+  ws_base && ws_lock && printf '#[path = "inner.rs"]\nmod inner;\n' > ws/watcher/src/lib.rs && : > ws/watcher/src/inner.rs
+  expect_exit 0 "watcher: #[path] inside the package" "watcher_independent: ok" indep
+  ws_base && ws_lock && printf '#[cfg_attr(unix, path = "../../oms-core/src/lib.rs")]\nmod x;\n' > ws/watcher/src/lib.rs
+  expect_finding "watcher: path = in a cfg_attr" "source: watcher/src/lib.rs:1" indep
+  ws_base && ws_lock && ln -s ../../oms-core/src/lib.rs ws/watcher/src/shared.rs
+  expect_finding "watcher: symlink to OMS source" "symlink: watcher/src/shared.rs" indep
+  # The lock of the base case stays: --locked must refuse it.
+  ws_base && ws_lock && dep watcher dependencies oms-core
+  expect_exit 2 "watcher: a stale lock cannot be checked (not ok)" "watcher_independent: cannot check:" indep
+  expect_exit 2 "watcher: a manifest that does not exist" "watcher_independent: cannot check:" \
+    tools/ci/watcher_independent.sh ws/missing/Cargo.toml
+  rm -rf ws
+else
+  echo "selftest: skip  watcher independence cases (no cargo on the path)"
+fi
 
 if [[ $failures -ne 0 ]]; then
   echo "selftest: FAILED ($failures case(s))"
