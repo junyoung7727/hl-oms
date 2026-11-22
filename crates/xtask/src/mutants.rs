@@ -1550,6 +1550,44 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "oms-node", "--test", "liveness", "closing_the_last_connection_cancels_that_strategys_plain_orders_only"],
         guards: "C-LIVE / L1",
     },
+    // U18b3 review 1: the hello while a restore is in flight (S1), the
+    // start arming through the node (S2), the strategy switch (S3).
+    Mutant {
+        id: "M169-hello-answered-while-a-restore-is-in-flight",
+        what: "a second hello while the first one's restore is not yet durable is answered at once",
+        file: "crates/oms-node/src/liveness.rs",
+        find: "            restore: held_in_core || e.lost != Lost::No || e.restoring > 0,",
+        replace: "            restore: held_in_core || e.lost != Lost::No,",
+        test: &["-p", "oms-node", "--lib", "liveness::tests::a_hello_while_a_restore_is_in_flight_waits_for_it_too"],
+        guards: "C-LIVE / L5",
+    },
+    Mutant {
+        id: "M170-start-does-not-arm",
+        what: "the node never arms the liveness table at the start: resting plain orders of a strategy that does not reconnect rest for ever",
+        file: "crates/oms-node/src/node.rs",
+        find: "            liveness.start(std::time::Instant::now(), has_open_plain_orders, |s| core.strategy_link.contains_key(s));",
+        replace: "            let _ = &has_open_plain_orders;",
+        test: &["-p", "oms-node", "--test", "liveness", "after_a_restart_a_strategy_with_resting_plain_orders_is_armed_without_a_hello"],
+        guards: "C-LIVE / start",
+    },
+    Mutant {
+        id: "M171-start-arms-on-reduce-only-orders",
+        what: "the start arms the strategies with resting reduce-only orders instead of plain ones",
+        file: "crates/oms-node/src/node.rs",
+        find: ".any(|o| o.strategy == *s && !o.reduce_only)",
+        replace: ".any(|o| o.strategy == *s && o.reduce_only)",
+        test: &["-p", "oms-node", "--test", "liveness", "after_a_restart_a_strategy_with_resting_plain_orders_is_armed_without_a_hello"],
+        guards: "C-LIVE / start",
+    },
+    Mutant {
+        id: "M172-strategy-switch-keeps-the-old-strategy",
+        what: "a connection that says hello for another strategy keeps counting for the first one",
+        file: "crates/oms-node/src/liveness.rs",
+        find: "                self.closed(old, push);",
+        replace: "                let _ = old;",
+        test: &["-p", "oms-node", "--lib", "liveness::tests::a_hello_for_another_strategy_closes_the_connection_for_the_first"],
+        guards: "C-LIVE / L1",
+    },
 
 ];
 
