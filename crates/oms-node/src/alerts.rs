@@ -305,6 +305,19 @@ pub fn conditions(
             Grace::None,
         ));
     }
+    // Per strategy, as the strategy halt (C-LIVE).
+    for (s, loss) in &core.strategy_link {
+        out.push((
+            format!("strategy_link:{s}"),
+            format!(
+                "전략 {s} 연결 상실({}, {}). 그 전략의 걸린 일반 주문 취소 요청, 그 전략의 신규 일반 주문 거절({}). 걸린 감소 전용 주문은 유지. 그 전략이 다시 hello하면 풀림",
+                loss.why,
+                kst_us(loss.since),
+                reduce_only_clause(core)
+            ),
+            Grace::None,
+        ));
+    }
     let mut by_kind: BTreeMap<String, Vec<&Mismatch>> = BTreeMap::new();
     for m in core.mismatches.values().filter(|m| m.acked.is_none()) {
         by_kind.entry(snake(&m.kind)).or_default().push(m);
@@ -867,6 +880,42 @@ mod tests {
 
     fn keys(conds: &[Cond]) -> Vec<&str> {
         conds.iter().map(|c| c.key.as_str()).collect()
+    }
+
+    /// C-LIVE. A lost strategy link is a condition of its own per
+    /// strategy, at once, with the reason and the time; the text says what
+    /// a reduce-only order gets, as the other plain-only holds. The
+    /// strategy's hello ends it.
+    #[test]
+    fn a_lost_strategy_link_is_its_own_condition_at_once() {
+        for (margin, clause) in [(true, "감소 전용은 받음"), (false, "증거금 정책이 없어 감소 전용도 거절")] {
+            let mut c = core(margin);
+            let a = StrategyId::new("a").unwrap();
+            let before = keys(&conditions(&c, 2, T0, None, 30_000)).len();
+            handle(
+                &mut c,
+                Input::Session(SessionInput::Lost {
+                    strategy: a.clone(),
+                    why: "last trading connection closed".into(),
+                }),
+            );
+            let got = conditions(&c, 3, T0, None, 30_000);
+            let links: Vec<&Cond> = got.iter().filter(|g| g.key.starts_with("strategy_link")).collect();
+            assert_eq!(got.len(), before + 1, "{:?}", keys(&got));
+            assert_eq!(links.len(), 1);
+            let cond = links[0];
+            assert_eq!(cond.key, "strategy_link:a");
+            assert_eq!(cond.grace_ms, 0);
+            assert_eq!(
+                cond.text,
+                format!(
+                    "전략 a 연결 상실(last trading connection closed, {}). 그 전략의 걸린 일반 주문 취소 요청, 그 전략의 신규 일반 주문 거절({clause}). 걸린 감소 전용 주문은 유지. 그 전략이 다시 hello하면 풀림\n근거: 저널 seq 3",
+                    kst_us(T0)
+                )
+            );
+            handle(&mut c, Input::Session(SessionInput::Hello { strategy: a }));
+            assert_eq!(keys(&conditions(&c, 4, T0, None, 30_000)).len(), before);
+        }
     }
 
     /// C-HOLD, review S4. The texts of the two plain-only holds say that a

@@ -310,6 +310,27 @@ pub fn run(cfg: NodeConfig) -> i32 {
             recovery: serde_json::to_value(&report).unwrap_or_default(),
             kill_marker: marker_info,
         };
+        // Strategy liveness (C-LIVE): armed at the start only for listed
+        // strategies with open plain orders in the durable state.
+        let mut liveness = crate::liveness::Liveness::new(&cfg.liveness_ms());
+        if cfg.liveness.is_none() {
+            warn!("no [liveness] section: no strategy has liveness, and nothing cancels the orders of a strategy that dies");
+        }
+        let unlisted = cfg.strategies_without_liveness();
+        if cfg.liveness.is_some() && !unlisted.is_empty() {
+            warn!("enabled strategies without liveness: nothing cancels their orders when they die", "strategies": unlisted.join(", "));
+        }
+        {
+            let p = published.read();
+            let core = &p.core;
+            let has_open_plain_orders = |s: &StrategyId| {
+                core.open
+                    .iter()
+                    .filter_map(|id| core.order(*id))
+                    .any(|o| o.strategy == *s && !o.reduce_only)
+            };
+            liveness.start(std::time::Instant::now(), has_open_plain_orders, |s| core.strategy_link.contains_key(s));
+        }
         let own_uid = rustix::process::getuid().as_raw();
         let ctx = Arc::new(ApiCtx::new(
             cfg.api.clone(),
@@ -320,7 +341,19 @@ pub fn run(cfg: NodeConfig) -> i32 {
             gateway_block,
             gateway_kill,
             alerts.clone(),
+            liveness,
         ));
+        let (live_ctx, live_queues) = (ctx.clone(), queues.clone());
+        tokio::spawn(async move {
+            let mut t = tokio::time::interval(Duration::from_millis(crate::liveness::TICK_MS));
+            loop {
+                t.tick().await;
+                if live_queues.is_closed() {
+                    return;
+                }
+                live_ctx.liveness_tick();
+            }
+        });
         let trading_mode = if cfg.api.allowed_uids.is_empty() { 0o600 } else { 0o666 };
         let trading = match server::bind(&cfg.socket_path(), trading_mode) {
             Ok(l) => l,
