@@ -169,9 +169,13 @@ fn five_seconds_without_a_request_cancel_and_a_ping_keeps_it_alive() {
     wait_open_at_venue(&mut env, &all, Duration::from_secs(10));
 
     // Pings only, every second, for 8 s: longer than the liveness time.
+    // `last` is taken when a's last ping was answered: the node touched
+    // a's clock before that (review 1 N3).
+    let mut last = Instant::now();
     for _ in 0..8 {
         std::thread::sleep(Duration::from_secs(1));
         ping(&mut a);
+        last = Instant::now();
         ping(&mut b);
     }
     assert_eq!(
@@ -183,7 +187,6 @@ fn five_seconds_without_a_request_cancel_and_a_ping_keeps_it_alive() {
     assert_eq!(open_at_venue(&mut env), all);
 
     // `a` falls silent; `b` keeps pinging.
-    let last = Instant::now();
     let mut lost_after = None;
     while last.elapsed() < Duration::from_secs(8) {
         std::thread::sleep(Duration::from_millis(500));
@@ -327,4 +330,96 @@ fn hello_after_a_loss_is_answered_after_the_restore_is_durable() {
     );
     assert_eq!(env.journal_count("strategy_link_restored"), 2);
     assert_eq!(env.journal_count("strategy_link_lost"), 2);
+}
+
+/// Review 1 S2: the start arms a listed strategy that has resting plain
+/// orders, from the start, without a hello; a strategy with reduce-only
+/// orders only is not armed. After a hard kill (the node sees no close)
+/// and a start with no reconnect, `a` (plain + reduce-only) is lost for
+/// silence 5 s after the start and only its plain order is cancelled; `b`
+/// (reduce-only only) is not lost.
+#[test]
+fn after_a_restart_a_strategy_with_resting_plain_orders_is_armed_without_a_hello() {
+    let mut env = live_node("live-start");
+    let mut a = env.client("a");
+    let mut b = env.client("b");
+    let a_plain = rest(&mut env, &mut a, "a-plain", Side::Buy, "90", false);
+    let a_reduce = rest(&mut env, &mut a, "a-reduce", Side::Sell, "120", true);
+    let b_reduce = rest(&mut env, &mut b, "b-reduce", Side::Sell, "120", true);
+    let all = set(&[
+        &env.cloid(a_plain),
+        &env.cloid(a_reduce),
+        &env.cloid(b_reduce),
+    ]);
+    wait_open_at_venue(&mut env, &all, Duration::from_secs(10));
+    env.kill_node();
+    drop(a);
+    drop(b);
+    assert_eq!(env.journal_count("strategy_link_lost"), 0);
+
+    let started = Instant::now();
+    env.start_node();
+    env.wait_ready();
+    assert!(
+        env.wait(Duration::from_secs(15), || env
+            .journal_count("strategy_link_lost")
+            > 0),
+        "a was never lost after the start: {}",
+        env.log_tail(20)
+    );
+    assert!(
+        started.elapsed() > Duration::from_millis(5_000),
+        "lost {:?} after the start",
+        started.elapsed()
+    );
+    let left = set(&[&env.cloid(a_reduce), &env.cloid(b_reduce)]);
+    wait_open_at_venue(&mut env, &left, Duration::from_secs(10));
+    assert_eq!(rule_cancels(&env), [a_plain]);
+    let l = link(&env, "a");
+    assert_eq!(
+        (l["why"].as_str(), l["connections"].as_u64()),
+        (Some("no request for 5000 ms"), Some(0)),
+        "{l}"
+    );
+    // `b` was armed by nothing: a second later still not lost.
+    std::thread::sleep(Duration::from_secs(1));
+    assert_eq!(env.journal_count("strategy_link_lost"), 1);
+    let l = link(&env, "b");
+    assert_eq!(
+        (l["held"].as_bool(), l["last_request_age_ms"].is_null()),
+        (Some(false), true),
+        "{l}"
+    );
+}
+
+/// Review 1 S3: a connection that said hello for `a` and then says hello
+/// for `b` stops counting for `a`. It was `a`'s last connection, so `a` is
+/// lost at once for the close (not 5 s later for silence) and its plain
+/// order is cancelled; the connection counts for `b`.
+#[test]
+fn a_hello_for_another_strategy_loses_the_first_on_that_connection() {
+    let mut env = live_node("live-switch");
+    let mut c = env.client("a");
+    let a_plain = rest(&mut env, &mut c, "a-plain", Side::Buy, "90", false);
+    let one = set(&[&env.cloid(a_plain)]);
+    wait_open_at_venue(&mut env, &one, Duration::from_secs(10));
+    c.call(Op::Hello {
+        strategy: Some(StrategyId::new("b").unwrap()),
+        client: "test".into(),
+    })
+    .unwrap();
+    wait_open_at_venue(&mut env, &BTreeSet::new(), Duration::from_secs(10));
+    assert_eq!(rule_cancels(&env), [a_plain]);
+    let l = link(&env, "a");
+    assert_eq!(
+        (
+            l["why"].as_str(),
+            l["connections"].as_u64(),
+            l["held"].as_bool()
+        ),
+        (Some("last trading connection closed"), Some(0), Some(true)),
+        "{l}"
+    );
+    assert_eq!(link(&env, "b")["connections"], 1);
+    rest(&mut env, &mut c, "b-plain", Side::Buy, "90", false);
 }
