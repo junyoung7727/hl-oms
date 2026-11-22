@@ -1,6 +1,6 @@
 # ADR-031 독립 워처: OMS 코드를 쓰지 않는 저널 읽기와 그 증명
 
-상태: 채택. U19a1 구현(2026-11-23): crate `watcher`(라이브러리와 `--version`만 답하는 바이너리), `watcher-conformance`(적합성 시험), 독자 저널 읽기, 아는 이벤트, 소수, `Base32Pair`, 독립성 검사 `tools/ci/watcher_independent.sh`. U19a2 구현(2026-11-23): 저널 상태 `watcher::state::JournalState`(C-TAIL 표의 규칙만으로)와 코어와의 적합성 시나리오, 재생 속도 측정. 검사 W1~W4, Bybit 클라이언트, 하트비트는 U19a3~U19a9가 이 ADR에 절을 더한다. 계약: [C-WATCH](../contracts/watcher.md).
+상태: 채택. U19a1 구현(2026-11-23): crate `watcher`(라이브러리와 `--version`만 답하는 바이너리), `watcher-conformance`(적합성 시험), 독자 저널 읽기, 아는 이벤트, 소수, `Base32Pair`, 독립성 검사 `tools/ci/watcher_independent.sh`. U19a2 구현(2026-11-23): 저널 상태 `watcher::state::JournalState`(C-TAIL "이벤트가 바꾸는 상태" 표의 규칙만으로. 확인·결과 불명·종결 표시, 거래소 변경·펀딩 키, 체결 바닥, 보류, 일 기준값의 행은 U19a2 검토 1 M1에서 그 표에 더했다)와 코어와의 적합성 시나리오, 재생 속도 측정. 검사 W1~W4, Bybit 클라이언트, 하트비트는 U19a3~U19a9가 이 ADR에 절을 더한다. 계약: [C-WATCH](../contracts/watcher.md).
 
 ## 1. 문제와 발생 가능한 실패
 
@@ -94,7 +94,7 @@ B와 b. 커서 저장(C)은 하지 않는다.
 
 ## 9. 근거
 
-- 시험(U19a2): `crates/watcher/tests/state.rs` 10개, 적합성 `conformance::the_watcher_sets_equal_the_core_on_journals_with_every_event_kind`(이벤트 51개를 모두 쓰는 시나리오 열 개, 기록마다 코어와 비교; 주장 V-WATCH-2), 재생 측정 `replay::replay_speed_of_100000_records`. 변이 M185~M187, M210.
+- 시험(U19a2): `crates/watcher/tests/state.rs` 10개, 적합성 `conformance::the_watcher_sets_equal_the_core_on_journals_with_every_event_kind`(이벤트 51개를 모두 쓰는 시나리오 열 개, 기록마다 코어와 비교; 주장 V-WATCH-2), 재생 측정 `replay::replay_speed_of_100000_records`. 변이 M185~M187, M210, M231(검토 1 S2).
 - 시험: `crates/watcher/tests/journal.rs` 9개, `crates/watcher/src` 단위 시험 3개(`events`, `decimal`, `wire_id`), `crates/watcher/tests/binary.rs` 1개, `crates/watcher-conformance/tests/conformance.rs` 2개, `tools/ci/selftest.sh`의 워처 22건(주장 V-WATCH-1). 변이 M182~M184, M221, M230(검토 1 S3).
 - 설계 TN(암호화폐 거래 통합 설계) §7.5 독립성, `pr_plan.json` U19a, 스펙 `.scratch/watcher-core/spec.md`. 설계 문서는 저장소 밖에 있다.
 

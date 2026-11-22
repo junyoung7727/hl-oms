@@ -1,7 +1,10 @@
 //! The watcher's journal state (C-WATCH part 2), built event by event from
 //! the records of its own reader. Every rule is a row of the C-TAIL table
 //! "이벤트가 바꾸는 상태" (`docs/contracts/tail.md`); the fields are those of
-//! the C-TAIL field table. Nothing here is taken from the OMS's code.
+//! the C-TAIL field table. The watcher uses no OMS code. The rows for the
+//! ack, doubt and terminal marks, the venue-change and funding keys, the
+//! fill floor, the holds and the day base were added to C-TAIL in U19a2
+//! review 1 (M1); the conformance test checks them against the core.
 //!
 //! What it keeps: the order info from `order_accepted` until `purged` (not
 //! removed at `order_closed`: a fill may come after the close), the open
