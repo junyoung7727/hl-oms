@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `07d76e4336345684`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `bbfe48bb1f8370e6`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 주장 109건: 통과 0, 실패 0, 미실행 42, 이전 버전 결과 67.
 
@@ -115,7 +115,7 @@
 | V-GATE-2 | 게이트가 있는 설정의 booted는 감시 안 됨(no heartbeat since the start, 하트비트 없음)으로 시작한다: 재시작 전의 하트비트는 세지 않고, 첫 신선한 하트비트까지 일반 주문은 Hold(Unmonitored)로 거절되며, 하트비트가 없으면 booted의 기록 시각보다 60초 넘은 첫 틱에 걸린 일반 주문의 취소를 요청한다. 이미 감시 안 됨일 때의 부팅도 since를 부팅 시각으로 다시 정해, 그보다 60초 전에는 취소하지 않는다. 게이트를 켜는 config_activated도 활성화 시각부터 같다(no heartbeat since the gate came on), 끄는 설정은 상태와 보류를 지우고, 값만 바꾸는 설정은 상태를 그대로 둔다. W1·W2가 신선한 첫 하트비트가 monitor_changed{true}로 풀고, 그 뒤 2단계는 새 요청을 하지 않으며 이미 한 요청은 남는다. 게이트 상태는 저널에서 같은 상태로 재실행된다. 표 7-7의 시험에서 Unmonitored 줄은 일반 주문 거절, 감소 전용 받음이다(증거금 정책 있음). 프로세스에서: 재시작한 노드는 직전에 감시됨이었어도 no heartbeat since the start로 감시 안 됨이다 | 단위, 통합 | 미실행 | `cargo test -p oms-core --test monitor; cargo test -p oms-core --test holds the_hold_table` |
 | V-GATE-3 | monitor.sock은 게이트가 있을 때만 열리고(모드 0600) 자기 풀이 연결 둘이다: 셋째 연결은 거절된다. 그 소켓은 전략 없는 hello, ping, heartbeat만 받는다: status, list_open, new_order, halt, watcher_kill, snapshot은 forbidden, 전략을 단 hello는 unauthorized. heartbeat는 거래·운영 소켓에서 forbidden이고 기록되지 않는다. hello 전의 heartbeat는 unauthorized이고 기록되지 않는다. 계약의 줄(epoch ms, null 포함)은 해석되고, 기록이 내구화된 뒤 recorded로 답한다(답이 온 때 저널에 하트비트가 있다). 노드는 ms를 µs로 바꾸고(넘침은 거절), 연결마다 지난 1초에 둘을 받았으면 그 뒤를 overloaded로 거절한다(한꺼번에 보낸 넷 가운데 둘 기록). 코어는 검사 시각이 기록 시각보다 1초 넘게 뒤인 하트비트, W1·W2가 없거나 키가 W1..W9 밖이거나 이름이 1~64자가 아닌 하트비트, 게이트가 없을 때의 하트비트를 bad_request로 거절하고 아무것도 기록하지 않는다 | 단위, 통합 | 미실행 | `cargo test -p oms-node --test monitor_node; cargo test -p oms-node --lib monitor::; cargo test -p oms-core --test monitor; cargo test -p oms-api wire_example_of_the_heartbeat` |
 | V-GATE-4 | Input::Watcher(Heartbeat), watcher_heartbeat, monitor_changed, policy.monitor, core.monitor는 기록 스키마를 올리지 않는다(2 그대로): 게이트가 없으면 쓰지 않아 옛 상태와 설정의 바이트가 그대로이고, 게이트를 켜는 설정·신선한 하트비트·오래된 하트비트·2단계의 틱이 든 저널은 라이브 상태로 복구되며 verify --re-decide를 통과한다. 이벤트 필드 표가 두 이벤트의 모든 필드를 적는다(W1..W9 포함). [core.policy.monitor]의 값은 heartbeat_max_age_us 10..=300초, check_max_age_us 2..=60초, unmonitored_cancel_us 10..=600초이고, 모르는 키는 거부되며, mainnet은 표 없이 시작하지 않고 testnet과 가상 거래소는 선택이다. 표가 있으면 runtime.tick_ms는 1,000 이하다(1,001은 거부, 표가 없으면 60,000도 받음). 세 소켓 경로는 서로 달라야 한다. 알림 hold:unmonitored는 지나가는 상태의 유예(30초)를 받고 이유·시각·2단계까지 남은 초(또는 취소 중)와 증거금 정책에 따른 감소 전용 문장을 담으며, 신선한 하트비트로 해소된다. status.core.monitor는 게이트가 없으면 gate: false다 | 단위, 통합 | 미실행 | `cargo test -p oms-node --test record_schema; cargo test -p oms-node --lib alerts:: config::; cargo test -p oms-core --test event_fields; cargo test -p oms-core --test monitor the_gate_values` |
-| V-WATCH-1 | 워처 crate는 OMS와 코드를 나누지 않는다: oms-*·md-* crate를 어떤 종류(정상, 빌드, 개발)와 target으로도 선언하지 않고, 개발 의존성 http-fake 말고는 작업 공간 crate를 쓰지 않으며, 그 정상·빌드 그래프에서 OMS·시세·작업 공간 crate에 닿지 않고, watcher-conformance 말고는 아무 작업 공간 crate도 워처에 의존하지 않으며, 소스가 #[path]·include!·속성 안의 path =·심볼릭 링크로 패키지 밖의 파일을 가져오지 않는다. 검사 스크립트는 그 각각을 심으면 그 결과 줄과 종료 코드 1을 내고, 확인할 수 없을 때(맞지 않는 잠금, 없는 매니페스트)는 ok가 아니라 종료 코드 2를 낸다 | 소스 검사 | 미실행 | `tools/ci/watcher_independent.sh && tools/ci/selftest.sh` |
+| V-WATCH-1 | 워처 crate는 OMS와 코드를 나누지 않는다: oms-*·md-* crate를 어떤 종류(정상, 빌드, 개발)와 target으로도 선언하지 않고, 개발 의존성 http-fake 말고는 작업 공간 crate를 쓰지 않으며, 그 정상·빌드 그래프에서 OMS·시세·작업 공간 crate에 닿지 않고, watcher-conformance 말고는 아무 작업 공간 crate도 워처에 의존하지 않으며, 소스가 #[path]·include!·속성 안의 path =·심볼릭 링크로, 매니페스트의 target이 소스 경로로 패키지 밖의 파일을 가져오지 않는다. 검사 스크립트는 그 각각을 심으면 그 결과 줄과 종료 코드 1을 내고, 확인할 수 없을 때(맞지 않는 잠금, 없는 매니페스트)는 ok가 아니라 종료 코드 2를 낸다 | 소스 검사 | 미실행 | `tools/ci/watcher_independent.sh && tools/ci/selftest.sh` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -2630,19 +2630,19 @@
 | `node-unit/alerts::tests::unmonitored_is_a_passing_condition_with_its_cancel_time` | 미실행 |  |
 | `node-unit/without_the_gate_there_is_no_monitor_socket` | 미실행 |  |
 
-## V-WATCH-1 — 워처 crate는 OMS와 코드를 나누지 않는다: oms-*·md-* crate를 어떤 종류(정상, 빌드, 개발)와 target으로도 선언하지 않고, 개발 의존성 http-fake 말고는 작업 공간 crate를 쓰지 않으며, 그 정상·빌드 그래프에서 OMS·시세·작업 공간 crate에 닿지 않고, watcher-conformance 말고는 아무 작업 공간 crate도 워처에 의존하지 않으며, 소스가 #[path]·include!·속성 안의 path =·심볼릭 링크로 패키지 밖의 파일을 가져오지 않는다. 검사 스크립트는 그 각각을 심으면 그 결과 줄과 종료 코드 1을 내고, 확인할 수 없을 때(맞지 않는 잠금, 없는 매니페스트)는 ok가 아니라 종료 코드 2를 낸다
+## V-WATCH-1 — 워처 crate는 OMS와 코드를 나누지 않는다: oms-*·md-* crate를 어떤 종류(정상, 빌드, 개발)와 target으로도 선언하지 않고, 개발 의존성 http-fake 말고는 작업 공간 crate를 쓰지 않으며, 그 정상·빌드 그래프에서 OMS·시세·작업 공간 crate에 닿지 않고, watcher-conformance 말고는 아무 작업 공간 crate도 워처에 의존하지 않으며, 소스가 #[path]·include!·속성 안의 path =·심볼릭 링크로, 매니페스트의 target이 소스 경로로 패키지 밖의 파일을 가져오지 않는다. 검사 스크립트는 그 각각을 심으면 그 결과 줄과 종료 코드 1을 내고, 확인할 수 없을 때(맞지 않는 잠금, 없는 매니페스트)는 ok가 아니라 종료 코드 2를 낸다
 
 - 상태: **미실행**
 - 왜 중요한가: OMS의 저널 인코딩·대조·Bybit 해석의 결함을 같은 코드로 확인하면 확인이 아니다(ADR-031). 독립성은 사람의 약속이 아니라 매 변경의 CI가 지킨다
 - 수준: 소스 검사
-- 전제와 범위: 실제 트리 한 번(--locked, 호스트 플랫폼)과 합성 작업 공간의 16가지(실제 모양, 정상·빌드·개발·cfg(unix)·cfg(windows) 의존성, 거쳐서 닿는 oms-api, 다른 작업 공간 crate, 역방향, #[path], 시험의 include_str!, 패키지 안의 #[path], cfg_attr의 path =, 심볼릭 링크, 다시 만들지 않은 잠금, 없는 매니페스트)
+- 전제와 범위: 실제 트리 한 번(--locked, 호스트 플랫폼)과 합성 작업 공간의 22가지(실제 모양, 정상·빌드·개발·cfg(unix)·cfg(windows) 의존성, 거쳐서 닿는 oms-api, 다른 작업 공간 crate, 역방향, #[path], 시험의 include_str!, 패키지 안의 #[path], cfg_attr의 path =, 심볼릭 링크, 공백이 든 # [path]와 include_str !, 패키지 밖의 [lib] path·[[test]] path·build, 패키지 안의 [lib] path, 다시 만들지 않은 잠금, 없는 매니페스트)
 - 실제 구성요소: cargo metadata(1.96.0), jq, 실제 매니페스트와 잠금 파일
 - 모의·시뮬레이션: 빈 crate 아홉 개의 합성 작업 공간
-- 주입한 장애: 심은 의존성과 소스 줄, 맞지 않는 잠금 파일, 없는 매니페스트. 스크립트 자신의 결함 여섯(개발·빌드 무시, target 무시, 도달 검사 생략, 역방향 생략, cargo 실패를 ok로, 규칙 6 생략)을 손으로 심어 각각 해당 경우가 빨갛게 됨을 확인했다(U19a1 보고)
+- 주입한 장애: 심은 의존성과 소스 줄, 맞지 않는 잠금 파일, 없는 매니페스트. 스크립트 자신의 결함 여섯(개발·빌드 무시, target 무시, 도달 검사 생략, 역방향 생략, cargo 실패를 ok로, 규칙 6 생략)과 검토 1 뒤의 셋(규칙 7 생략, # [ 사이 공백 무시, include 뒤 공백 무시)을 심어 각각 해당 경우가 빨갛게 됨을 확인했다(U19a1 보고)
 - 판정 기준과 근거: 실제 트리: 종료 코드 0과 'watcher_independent: ok'. 경우마다 정확한 종료 코드와 그 결과 줄(grep -F), 결과가 있는 경우에는 ok 줄이 없음
 - 재현: `tools/ci/watcher_independent.sh && tools/ci/selftest.sh`
 - 뒷받침하는 것: C-WATCH 1부, ADR-031
-- 확인하지 않은 범위: 다른 플랫폼의 의존성을 거쳐서만 닿는 패키지(규칙 4는 호스트 그래프만 걷는다. 직접 선언은 규칙 2가 잡는다). 여러 줄에 걸친 속성 안의 path =(규칙 6은 평범한 텍스트 검색). oms-*·md-*가 아닌 이름의 OMS 코드가 레지스트리에서 오는 경우. 저널 읽기와 집합이 코어와 같다는 것은 V-WATCH-2(U19a2)
+- 확인하지 않은 범위: 다른 플랫폼의 의존성을 거쳐서만 닿는 패키지(규칙 4는 호스트 그래프만 걷는다. 직접 선언은 규칙 2가 잡는다). 여러 줄에 걸친 속성 안의 path =(규칙 6은 평범한 텍스트 검색). 개발 의존성 http-fake가 뒷날 oms-*에 의존하는 경우(규칙 4는 개발 간선을 걷지 않는다). oms-*·md-*가 아닌 이름의 OMS 코드가 레지스트리에서 오는 경우. 저널 읽기와 집합이 코어와 같다는 것은 V-WATCH-2(U19a2)
 
 | 시험 | 결과 | 비고 |
 |---|---|---|

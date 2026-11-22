@@ -145,6 +145,9 @@ No other `watcher_*` series is exported in U19a (W2 deferral shows only in `watc
 
 U19a1: crates and independence (above), the reader, known events, decimals, `Base32Pair`, the watcher's test journal writer, and the conformance tests `the_watcher_base32_pair_equals_the_core_form` and `the_watcher_reads_while_the_oms_writer_holds_the_lock`. U19a2: the journal state and the conformance scenarios.
 
+Amendment (U19a1 review 1 S1): `watcher_independent.sh` has a rule 7: every `packages[].targets[]` of the `watcher` manifest (lib, bins, tests, benches, examples, build script) must have its `src_path` inside the package directory → `watcher_independent: target: watcher <kind> <name> -> <path relative to the workspace root>`; selftest cases `[lib] path`, `[[test]] path` and `build` pointing at `../oms-core/src/lib.rs` (exit 1 and that line) and `[lib] path` inside the package (exit 0, `ok`).
+Amendment (U19a1 review 1 S2): rule 6 also matches white space between `#`, an optional `!` and `[`, and between the macro name and `!` (`# [path = …]`, `include_str !(…)`); selftest cases for both (exit 1, `source:` line). The selftest has 22 watcher cases, not 16.
+
 ### Reader (`watcher::journal`)
 - `Tail::open(data_dir) -> Tail`, `Tail::read(&mut self, cap: u64, max_records: usize) -> Result<Vec<Record>, JournalError>`. A `Record` is `{seq, at, record_schema, events: Vec<(String, serde_json::Value)>}`; `input` is not parsed.
 - It lists `journal-<20 digits>.oj`, keeps (segment first seq, byte offset, next seq) and reads frame by frame from the offset: the 16-byte frame header, then exactly that payload, until `max_records`, the cap or the end of the file (no whole-segment load and no re-read of the rest of a large segment at each call; a frame is at most 16 MiB; review 1 N4). It opens files read-only, never opens `LOCK`, never creates, renames or writes anything.
