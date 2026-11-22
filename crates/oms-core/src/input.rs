@@ -149,8 +149,10 @@ pub const HEARTBEAT_WATCHER_MAX: usize = 64;
 
 /// How far after the record time a check time of a heartbeat may lie
 /// (C-LIVE part 2): the watcher's clock is the host's, so only a small step
-/// is taken. A clock that went back must not make a stale check look fresh.
-/// 1 s 판단(모델 아님).
+/// is taken. A watcher that stamps times ahead of the node's clock (another
+/// clock, a unit error) must not make a check look fresh. A backward step
+/// of the host clock does not reach this rule: the record time stays at its
+/// high mark, so stamps lie behind it (review 1 M1). 1 s 판단(모델 아님).
 pub const HEARTBEAT_AHEAD_MAX_US: u64 = 1_000_000;
 
 /// Why a heartbeat's shape is refused, if it is: a label that is empty,

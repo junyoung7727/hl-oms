@@ -1569,44 +1569,44 @@ not_covered = "실제 텔레그램. 실행 파일 단위의 mainnet 시작 거�
 
 [[claim]]
 id = "V-GATE-1"
-statement = "모니터링 게이트는 기록 시각으로 판단한다(250 ms 틱, 엄격한 >): 하트비트가 0초에 오고 끊기면 30.0초까지 감시됨, 30.25초에 monitor_changed{false}, 그보다 60초 넘은 첫 틱(90.5초)에 걸린 일반 주문의 취소를 한 번 요청하고(규칙 unmonitored) 그 뒤 틱은 더 묻지 않는다. 5초마다 오는 하트비트에서 W1이나 W2가 0초에 멈추면 10초의 하트비트(정확히 10초)는 감시됨, 15초의 하트비트가 닫고, 하트비트가 계속 와도 취소는 닫은 기록보다 60초 넘은 첫 틱에 온다. 검사의 나이는 그것을 알린 하트비트의 시각에서 잰다. W3·W4는 기록할 뿐 판정하지 않는다. 감소 전용 주문은 취소하지 않고, 연결이 내려가 있는 동안은 묻지 않으며, 다한 취소는 다시 묻지 않는다. 프로세스에서: W2가 11초 전인 하트비트가 곧바로 닫고, 거래소의 일반 주문은 10초(unmonitored_cancel_us) 전에는 남고 그 뒤 규칙으로 취소되며 감소 전용 주문은 남는다"
+statement = "모니터링 게이트는 기록 시각으로 판단한다(250 ms 틱, 엄격한 >): 하트비트가 0초에 오고 끊기면 30.0초까지 감시됨, 30.25초에 monitor_changed{false}, 그보다 60초 넘은 첫 틱(90.5초)에 걸린 일반 주문의 취소를 한 번 요청하고(규칙 unmonitored) 그 뒤 틱은 더 묻지 않는다. 5초마다 오는 하트비트에서 W1이나 W2가 0초에 멈추면 10초의 하트비트(정확히 10초)는 감시됨, 15초의 하트비트가 닫고, 하트비트가 계속 와도 취소는 닫은 기록보다 60초 넘은 첫 틱에 온다. 검사의 나이는 그것을 알린 하트비트의 시각에서 잰다. W3·W4는 기록할 뿐 판정하지 않는다. 알려진 한계(리뷰 1 M1): 기록 시각이 멈춘 동안(호스트 시계가 뒤로 감) 틱 2,400개에도 monitor_changed와 취소가 없고, 옛 시계로 찍은 W1·W2의 하트비트는 받아들여져 게이트가 열린 채이며, 새 시계로 590초 뒤에 찍힌 하트비트는 게이트를 닫는다. 감소 전용 주문은 취소하지 않고, 연결이 내려가 있는 동안은 묻지 않으며, 다한 취소는 다시 묻지 않는다. 프로세스에서: W2가 11초 전인 하트비트가 곧바로 닫고, 거래소의 일반 주문은 10초(unmonitored_cancel_us) 전에는 남고 그 뒤 규칙으로 취소되며 감소 전용 주문은 남는다"
 why = "워처가 없어지거나 검사가 실패하면 거래가 멈춰야 하고(설계 §7.5, R2), 걸린 호가도 60초 뒤에는 취소돼야 한다. 감소 전용 주문은 포지션을 줄이는 길이다"
 level = "단위, 통합"
 scope = "코어 시험(H 하네스, 기록 시각을 정확히 넣음, 매 입력 재실행 대조), 실제 oms-node·simvenue 프로세스(실제 시간)"
 real = "oms-core의 판정·보류·틱의 규칙 취소와 apply, 노드의 틱 작업, 커밋 단계, 저널, 가상 거래소 프로세스"
 simulated = "워처(시험이 하트비트를 넣음), 거래소(simvenue), 시간(코어 시험의 기록 시각)"
-faults = "하트비트 끊김, W1·W2 멈춤, 계속 오는 오래된 하트비트, 정확히 경계의 나이, null 검사, 연결 내려감, 다한 취소"
+faults = "하트비트 끊김, W1·W2 멈춤, 계속 오는 오래된 하트비트, 정확히 경계의 나이, null 검사, 연결 내려감, 다한 취소, 멈춘 기록 시각"
 criterion = "monitor_changed와 규칙 unmonitored의 cancel_requested가 기록된 시각의 목록, 주문마다의 취소 요청, 거래소의 열린 주문 집합. 넣은 결함과 잡은 시험: W2 대신 W3(M173), 2단계를 곧바로(M174), W1만 판정(M175), 저장소 밖 mut.py의 경계 >=, 틱 시각에서 잰 검사 나이, 마지막 하트비트에서 잰 2단계, 연결 내려감에도 취소, 다한 취소를 다시 물음"
-tests = ["core/missing_heartbeats_unmonitor_at_30_s_and_cancel_plain_orders_at_90_s", "core/a_heartbeat_with_w1_or_w2_older_than_10_s_unmonitors_and_cancels_60_s_later", "core/stale_heartbeats_that_keep_coming_do_not_delay_the_cancels", "core/the_check_age_edge_and_a_check_without_success", "core/w3_and_w4_are_recorded_and_not_gated", "core/stage_two_asks_only_while_the_link_is_up", "core/stage_two_does_not_ask_again_for_an_exhausted_cancel", "node-unit/a_stale_heartbeat_unmonitors_and_the_node_cancels_resting_plain_orders_later"]
+tests = ["core/missing_heartbeats_unmonitor_at_30_s_and_cancel_plain_orders_at_90_s", "core/a_heartbeat_with_w1_or_w2_older_than_10_s_unmonitors_and_cancels_60_s_later", "core/stale_heartbeats_that_keep_coming_do_not_delay_the_cancels", "core/the_check_age_edge_and_a_check_without_success", "core/w3_and_w4_are_recorded_and_not_gated", "core/stage_two_asks_only_while_the_link_is_up", "core/stage_two_does_not_ask_again_for_an_exhausted_cancel", "core/a_clock_that_steps_back_holds_the_gates_timers", "node-unit/a_stale_heartbeat_unmonitors_and_the_node_cancels_resting_plain_orders_later"]
 repro = "cargo test -p oms-core --test monitor; cargo test -p oms-node --test monitor_node a_stale_heartbeat"
 supports = "C-LIVE 2부 G2~G4, ADR-030 §7 H"
 not_covered = "실제 워처(U19a)와 실제 거래소. 2단계 취소가 거래소에서 거절되거나 시도가 다한 경우(C-CANCEL의 경로). 프로세스 시험의 시각은 실제 시간이라 틱 단위의 정확한 시각은 코어 시험만 본다"
 
 [[claim]]
 id = "V-GATE-2"
-statement = "게이트가 있는 설정의 booted는 감시 안 됨(no heartbeat since the start, 하트비트 없음)으로 시작한다: 재시작 전의 하트비트는 세지 않고, 첫 신선한 하트비트까지 일반 주문은 Hold(Unmonitored)로 거절되며, 하트비트가 없으면 booted의 기록 시각보다 60초 넘은 첫 틱에 걸린 일반 주문의 취소를 요청한다. 게이트를 켜는 config_activated도 활성화 시각부터 같다(no heartbeat since the gate came on), 끄는 설정은 상태와 보류를 지우고, 값만 바꾸는 설정은 상태를 그대로 둔다. W1·W2가 신선한 첫 하트비트가 monitor_changed{true}로 풀고, 그 뒤 2단계는 새 요청을 하지 않으며 이미 한 요청은 남는다. 게이트 상태는 저널에서 같은 상태로 재실행된다. 표 7-7의 시험에서 Unmonitored 줄은 일반 주문 거절, 감소 전용 받음이다(증거금 정책 있음). 프로세스에서: 재시작한 노드는 직전에 감시됨이었어도 no heartbeat since the start로 감시 안 됨이다"
+statement = "게이트가 있는 설정의 booted는 감시 안 됨(no heartbeat since the start, 하트비트 없음)으로 시작한다: 재시작 전의 하트비트는 세지 않고, 첫 신선한 하트비트까지 일반 주문은 Hold(Unmonitored)로 거절되며, 하트비트가 없으면 booted의 기록 시각보다 60초 넘은 첫 틱에 걸린 일반 주문의 취소를 요청한다. 이미 감시 안 됨일 때의 부팅도 since를 부팅 시각으로 다시 정해, 그보다 60초 전에는 취소하지 않는다. 게이트를 켜는 config_activated도 활성화 시각부터 같다(no heartbeat since the gate came on), 끄는 설정은 상태와 보류를 지우고, 값만 바꾸는 설정은 상태를 그대로 둔다. W1·W2가 신선한 첫 하트비트가 monitor_changed{true}로 풀고, 그 뒤 2단계는 새 요청을 하지 않으며 이미 한 요청은 남는다. 게이트 상태는 저널에서 같은 상태로 재실행된다. 표 7-7의 시험에서 Unmonitored 줄은 일반 주문 거절, 감소 전용 받음이다(증거금 정책 있음). 프로세스에서: 재시작한 노드는 직전에 감시됨이었어도 no heartbeat since the start로 감시 안 됨이다"
 why = "재시작 전의 하트비트는 지금 워처가 살아 있다는 증거가 아니다(설계 §7.5 의도된 동작). 풀린 뒤에도 2단계가 계속 취소하면 안 된다"
 level = "단위, 통합"
 scope = "코어 시험(H 하네스와 저널 재실행), 실제 oms-node·simvenue 프로세스의 재시작 한 번"
 real = "oms-core의 booted·config_activated의 apply, 판정, 보류 표, 재실행"
 simulated = "워처(시험이 하트비트를 넣음), 거래소(simvenue)"
 faults = "재시작, 게이트를 켜고 끄는 설정, 값만 바꾸는 설정, 감시 안 됨 중의 재실행"
-criterion = "core.monitor의 값(monitored, since, reason, last), holds의 내용, 거절 사유, 재실행한 상태와의 같음, 풀린 뒤의 취소 요청 없음. 넣은 결함과 잡은 시험: 부팅이 마지막 하트비트를 남김(M177), 저장소 밖 mut.py의 보류 제거, 하트비트 때 판정 건너뜀, 켜는 설정이 상태를 만들지 않음, 끄는 설정이 상태를 남김, Unmonitored가 감소 전용도 거절"
-tests = ["core/the_gate_starts_unmonitored_at_boot_until_the_first_fresh_heartbeat", "core/a_fresh_heartbeat_monitors_again_and_stops_the_cancels", "core/a_configuration_that_turns_the_gate_on_or_off", "core/the_gate_survives_replay_and_a_boot_starts_unmonitored", "core/the_hold_table_of_table_7_7", "node-unit/a_stale_heartbeat_unmonitors_and_the_node_cancels_resting_plain_orders_later"]
+criterion = "core.monitor의 값(monitored, since, reason, last), holds의 내용, 거절 사유, 재실행한 상태와의 같음, 풀린 뒤의 취소 요청 없음. 넣은 결함과 잡은 시험: 부팅이 마지막 하트비트를 남김(M177), 감시 안 됨에서의 부팅이 옛 since를 남김(M179), 저장소 밖 mut.py의 보류 제거, 하트비트 때 판정 건너뜀, 켜는 설정이 상태를 만들지 않음, 끄는 설정이 상태를 남김, Unmonitored가 감소 전용도 거절"
+tests = ["core/the_gate_starts_unmonitored_at_boot_until_the_first_fresh_heartbeat", "core/a_fresh_heartbeat_monitors_again_and_stops_the_cancels", "core/a_configuration_that_turns_the_gate_on_or_off", "core/the_gate_survives_replay_and_a_boot_starts_unmonitored", "core/a_boot_while_unmonitored_times_stage_two_from_the_boot", "core/the_hold_table_of_table_7_7", "node-unit/a_stale_heartbeat_unmonitors_and_the_node_cancels_resting_plain_orders_later"]
 repro = "cargo test -p oms-core --test monitor; cargo test -p oms-core --test holds the_hold_table"
 supports = "C-LIVE 2부 G3·G5와 시작, C-HOLD 표 7-7의 다섯째 줄, ADR-030 §7 H5"
 not_covered = "실제 워처. 증거금 정책 없이 감소 전용도 거절되는 경우는 다른 보류와 같은 check_new_order의 규칙으로만 본다(이 게이트만의 시험은 없음)"
 
 [[claim]]
 id = "V-GATE-3"
-statement = "monitor.sock은 게이트가 있을 때만 열리고(모드 0600) 자기 풀이 연결 둘이다: 셋째 연결은 거절된다. 그 소켓은 전략 없는 hello, ping, heartbeat만 받는다: status, list_open, new_order, halt, watcher_kill, snapshot은 forbidden, 전략을 단 hello는 unauthorized. heartbeat는 거래·운영 소켓에서 forbidden이고 기록되지 않는다. 계약의 줄(epoch ms, null 포함)은 해석되고, 기록이 내구화된 뒤 recorded로 답한다(답이 온 때 저널에 하트비트가 있다). 노드는 ms를 µs로 바꾸고(넘침은 거절), 연결마다 지난 1초에 둘을 받았으면 그 뒤를 overloaded로 거절한다(한꺼번에 보낸 넷 가운데 둘 기록). 코어는 검사 시각이 기록 시각보다 1초 넘게 뒤인 하트비트, W1·W2가 없거나 키가 W1..W9 밖이거나 이름이 1~64자가 아닌 하트비트, 게이트가 없을 때의 하트비트를 bad_request로 거절하고 아무것도 기록하지 않는다"
-why = "거래 소켓의 클라이언트가 게이트를 열어 두거나 고장 난 워처가 저널을 채우면 안 되고, 시계가 뒤로 간 호스트에서 오래된 검사가 신선해 보이면 안 된다. 워처(U19a)는 계약의 줄만으로 만든다"
+statement = "monitor.sock은 게이트가 있을 때만 열리고(모드 0600) 자기 풀이 연결 둘이다: 셋째 연결은 거절된다. 그 소켓은 전략 없는 hello, ping, heartbeat만 받는다: status, list_open, new_order, halt, watcher_kill, snapshot은 forbidden, 전략을 단 hello는 unauthorized. heartbeat는 거래·운영 소켓에서 forbidden이고 기록되지 않는다. hello 전의 heartbeat는 unauthorized이고 기록되지 않는다. 계약의 줄(epoch ms, null 포함)은 해석되고, 기록이 내구화된 뒤 recorded로 답한다(답이 온 때 저널에 하트비트가 있다). 노드는 ms를 µs로 바꾸고(넘침은 거절), 연결마다 지난 1초에 둘을 받았으면 그 뒤를 overloaded로 거절한다(한꺼번에 보낸 넷 가운데 둘 기록). 코어는 검사 시각이 기록 시각보다 1초 넘게 뒤인 하트비트, W1·W2가 없거나 키가 W1..W9 밖이거나 이름이 1~64자가 아닌 하트비트, 게이트가 없을 때의 하트비트를 bad_request로 거절하고 아무것도 기록하지 않는다"
+why = "거래 소켓의 클라이언트가 게이트를 열어 두거나 고장 난 워처가 저널을 채우면 안 되고, 노드보다 앞선 시각을 찍는 워처가 검사를 신선해 보이게 하면 안 된다. 워처(U19a)는 계약의 줄만으로 만든다"
 level = "단위, 통합"
 scope = "코어 시험, 노드의 순수 함수(시간이 입력), oms-api의 줄 해석, 실제 oms-node·simvenue 프로세스(실제 소켓)"
 real = "서버의 소켓 종류·풀·op 거름·속도 한도, 줄 해석, 커밋 단계, 저널"
 simulated = "워처(시험의 클라이언트와 날 줄)"
-faults = "다른 소켓의 heartbeat, 금지된 op, 전략을 단 hello, 셋째 연결, 초당 넷, 미래 시각, 모양이 틀린 줄, 게이트 없음, 넘치는 ms"
-criterion = "답의 오류 코드, 저널의 watcher_heartbeat 수, 소켓 파일의 유무와 모드. 넣은 결함과 잡은 시험: 미래 시각을 받음(M176), 다른 소켓의 heartbeat를 받음(M178), 저장소 밖 mut.py의 속도 한도 제거, 모니터 소켓이 모든 op를 받음, 게이트 없이 소켓을 엶, ms를 µs로 바꾸지 않음, 1초 창이 100 ms, 게이트 없는 하트비트를 받음, 모양 검사 건너뜀"
+faults = "다른 소켓의 heartbeat, hello 전의 heartbeat, 금지된 op, 전략을 단 hello, 셋째 연결, 초당 넷, 미래 시각, 모양이 틀린 줄, 게이트 없음, 넘치는 ms"
+criterion = "답의 오류 코드, 저널의 watcher_heartbeat 수, 소켓 파일의 유무와 모드. 넣은 결함과 잡은 시험: 미래 시각을 받음(M176), 다른 소켓의 heartbeat를 받음(M178), hello 전의 heartbeat를 받음(M180), 저장소 밖 mut.py의 속도 한도 제거, 모니터 소켓이 모든 op를 받음, 게이트 없이 소켓을 엶, ms를 µs로 바꾸지 않음, 1초 창이 100 ms, 게이트 없는 하트비트를 받음, 모양 검사 건너뜀"
 tests = ["node-unit/heartbeats_over_monitor_sock_open_the_gate_and_other_ops_are_forbidden", "node-unit/without_the_gate_there_is_no_monitor_socket", "core/a_heartbeat_from_the_future_is_refused", "core/a_heartbeat_of_the_wrong_shape_or_without_a_gate_records_nothing", "node-unit/monitor::tests::two_heartbeats_per_second_per_connection", "node-unit/monitor::tests::a_heartbeat_line_becomes_a_core_input_in_microseconds", "api/tests::wire_example_of_the_heartbeat"]
 repro = "cargo test -p oms-node --test monitor_node; cargo test -p oms-node --lib monitor::; cargo test -p oms-core --test monitor; cargo test -p oms-api wire_example_of_the_heartbeat"
 supports = "C-LIVE 2부 G1과 소켓, C-API의 heartbeat 줄과 모니터 소켓, ADR-030 §7 H1"
@@ -1614,14 +1614,14 @@ not_covered = "다른 uid의 접속 거절(시험은 같은 uid로만 돈다, �
 
 [[claim]]
 id = "V-GATE-4"
-statement = "Input::Watcher(Heartbeat), watcher_heartbeat, monitor_changed, policy.monitor, core.monitor는 기록 스키마를 올리지 않는다(2 그대로): 게이트가 없으면 쓰지 않아 옛 상태와 설정의 바이트가 그대로이고, 게이트를 켜는 설정·신선한 하트비트·오래된 하트비트·2단계의 틱이 든 저널은 라이브 상태로 복구되며 verify --re-decide를 통과한다. 이벤트 필드 표가 두 이벤트의 모든 필드를 적는다(W1..W9 포함). [core.policy.monitor]의 값은 heartbeat_max_age_us 10..=300초, check_max_age_us 2..=60초, unmonitored_cancel_us 10..=600초이고, 모르는 키는 거부되며, mainnet은 표 없이 시작하지 않고 testnet과 가상 거래소는 선택이다. 세 소켓 경로는 서로 달라야 한다. 알림 hold:unmonitored는 지나가는 상태의 유예(30초)를 받고 이유·시각·2단계까지 남은 초(또는 취소 중)와 증거금 정책에 따른 감소 전용 문장을 담으며, 신선한 하트비트로 해소된다. status.core.monitor는 게이트가 없으면 gate: false다"
+statement = "Input::Watcher(Heartbeat), watcher_heartbeat, monitor_changed, policy.monitor, core.monitor는 기록 스키마를 올리지 않는다(2 그대로): 게이트가 없으면 쓰지 않아 옛 상태와 설정의 바이트가 그대로이고, 게이트를 켜는 설정·신선한 하트비트·오래된 하트비트·2단계의 틱이 든 저널은 라이브 상태로 복구되며 verify --re-decide를 통과한다. 이벤트 필드 표가 두 이벤트의 모든 필드를 적는다(W1..W9 포함). [core.policy.monitor]의 값은 heartbeat_max_age_us 10..=300초, check_max_age_us 2..=60초, unmonitored_cancel_us 10..=600초이고, 모르는 키는 거부되며, mainnet은 표 없이 시작하지 않고 testnet과 가상 거래소는 선택이다. 표가 있으면 runtime.tick_ms는 1,000 이하다(1,001은 거부, 표가 없으면 60,000도 받음). 세 소켓 경로는 서로 달라야 한다. 알림 hold:unmonitored는 지나가는 상태의 유예(30초)를 받고 이유·시각·2단계까지 남은 초(또는 취소 중)와 증거금 정책에 따른 감소 전용 문장을 담으며, 신선한 하트비트로 해소된다. status.core.monitor는 게이트가 없으면 gate: false다"
 why = "기존 저널과 시험이 그대로여야 하고(스펙 완료 기준), 워처(U19a)는 필드 표만으로 만든다. 모든 시작이 이 상태를 지나므로 알림은 유예를 받는다(U18a의 지나가는 상태 규칙)"
 level = "단위, 통합"
 scope = "저널 하나를 쓰고 복구·재결정, 필드 표 대조, 알림 조건, 설정 검증, 상태 문서"
 real = "oms-node 복구와 verify, 알림 조건 함수, 설정 읽기와 검증, 상태 문서"
 simulated = "입력(시험이 넣음)"
-faults = "경계 밖 값, 모르는 키, mainnet에 게이트 없음, 같은 소켓 경로"
-criterion = "RECORD_SCHEMA = 2, 다이제스트 같음, 재결정 통과, 직렬화에 monitor 없음, 필드 표의 행, 알림의 키·문장·유예, 설정 오류 문장. 넣은 결함과 잡은 시험: 저장소 밖 mut.py의 mainnet 거부 제거"
+faults = "경계 밖 값, 모르는 키, mainnet에 게이트 없음, 같은 소켓 경로, 게이트가 있는데 느린 틱"
+criterion = "RECORD_SCHEMA = 2, 다이제스트 같음, 재결정 통과, 직렬화에 monitor 없음, 필드 표의 행, 알림의 키·문장·유예, 설정 오류 문장. 넣은 결함과 잡은 시험: 게이트가 있는데 아무 틱이나 받음(M181), 저장소 밖 mut.py의 mainnet 거부 제거"
 tests = ["node-unit/kill_holds_liveness_and_heartbeats_recover_to_the_live_state", "core/the_field_table_lists_every_field_the_encoder_writes", "core/the_gate_values_are_bounded", "node-unit/config::tests::the_monitoring_gate_is_validated_and_required_on_mainnet", "node-unit/alerts::tests::unmonitored_is_a_passing_condition_with_its_cancel_time", "node-unit/without_the_gate_there_is_no_monitor_socket"]
 repro = "cargo test -p oms-node --test record_schema; cargo test -p oms-node --lib alerts:: config::; cargo test -p oms-core --test event_fields; cargo test -p oms-core --test monitor the_gate_values"
 supports = "C-LIVE 2부의 설정·상태·알림·이벤트, C-TAIL 필드 표, C-ALERT 조건 표"

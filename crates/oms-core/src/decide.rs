@@ -762,7 +762,9 @@ impl Tx<'_> {
         if let Some(why) = heartbeat_shape_refusal(watcher, checks) {
             return Ok(Err(format!("bad_request: {why}; nothing was recorded")));
         }
-        // A clock that went back must not make a stale check look fresh.
+        // A watcher stamping ahead of the node's clock must not make a check
+        // look fresh. (A backward step of the host clock holds the record
+        // time instead; the gate's timers then stand still, C-LIVE part 2.)
         let latest = self.at.saturating_add(HEARTBEAT_AHEAD_MAX_US);
         if let Some((check, t)) = checks.iter().find_map(|(c, t)| t.filter(|t| *t > latest).map(|t| (c, t))) {
             return Ok(Err(format!(
