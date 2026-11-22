@@ -77,19 +77,11 @@ async fn a_failed_push_is_dropped() {
     m.add("watcher_requests_total", &ep, 1.0);
     assert!(ex.push(&m, T0 + 1_000).await.is_err());
     // Logged once per minute, not once per failure.
-    assert_eq!(
-        lines.lock().unwrap().len(),
-        1,
-        "{:?}",
-        lines.lock().unwrap()
-    );
+    let logged = lines.lock().unwrap().clone();
+    assert_eq!(logged.len(), 1, "{logged:?}");
     assert!(ex.push(&m, T0 + 60_000).await.is_err());
-    assert_eq!(
-        lines.lock().unwrap().len(),
-        2,
-        "{:?}",
-        lines.lock().unwrap()
-    );
+    let logged = lines.lock().unwrap().clone();
+    assert_eq!(logged.len(), 2, "{logged:?}");
     m.set("watcher_auth_rejected", &[], 1.0);
     ex.push(&m, T0 + 61_000).await.unwrap();
 
