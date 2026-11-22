@@ -2482,7 +2482,13 @@ name = "watcher"
 version = "0.1.0"
 dependencies = [
  "crc32fast",
+ "hex",
+ "hmac",
+ "http-fake",
+ "reqwest",
  "serde_json",
+ "sha2",
+ "tokio",
 ]
 
 [[package]]

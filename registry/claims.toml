@@ -1656,3 +1656,18 @@ tests = ["watcher/the_watcher_sets_equal_the_core_on_journals_with_every_event_k
 repro = "cargo test -p watcher --test state && cargo test -p watcher-conformance"
 supports = "C-WATCH 2부, C-TAIL, ADR-031"
 not_covered = "fact_at과 last_change_at은 코어에 같은 값이 없어 규칙 시험으로만 본다. 코어가 쓰지 않는 기록(규칙 위반)은 적합성 시나리오에 없다. 살아 있는 키보다 높은 바닥의 booted(코어의 boot는 첫 부팅에만 바닥을 새로 정하고, 그때는 키가 없다), 아는 거래소 주문 번호 뒤의 null 확인(코어는 한 번만 확인한다), 닫힌 주문의 거래소 종결 표시(열린 주문만 비교)도 규칙 시험으로만 본다. 재생 속도(100만 건당 약 1.3초)는 측정이고 기준이 아니며, 페이지 캐시에 있는 파일로만 쟀다"
+
+[[claim]]
+id = "V-WATCH-3"
+statement = "워처의 자기 Bybit 클라이언트는 GET을 거래소 문서대로 서명하고(정렬된 질의, 보낼 수 없는 값은 보내기 전에 거절, 머리글 다섯, 보내는 순간의 시계), 응답을 부류로 나누며(not_sent, no_answer, rate_limited, clock, refused, auth, ip_banned; unreadable은 검사가 만든다), 키 거절(HTTP 401, retCode 10003·10004·10005·10007·10010·33004) 뒤에는 프로세스가 다시 시작할 때까지 Bybit에 아무 요청도 보내지 않고, HTTP 403 뒤에는 응답 순간부터 600초 동안 모든 요청과 IP 반향을 보내지 않으며, 어느 10초 창에서도 60개를 넘겨 보내지 않고 넘는 요청은 버리지 않고 기다린다. 요청은 보내기 전에 세고, 지표는 VictoriaMetrics 가져오기 JSON 한 줄씩(watcher_up 포함) 큐 없이 밀어 넣는다"
+why = "OMS의 Bybit 해석 결함을 같은 코드로 확인하면 확인이 아니다(ADR-031). 거절된 키로 계속 보내거나 403 뒤에 일찍 보내면 OMS와 같이 쓰는 IP가 더 오래 막히고, 폭주 루프는 그 IP 한도를 먹는다"
+level = "단위, 통합(loopback)"
+scope = "서명 함수와 질의 문자열, 수동 시계 위의 가드(1분 폭주 루프 포함), loopback 가짜 Bybit·반향·VM에 붙인 클라이언트와 내보내기(부류마다 한 번, 거절 코드 일곱 각각 10분, 403 전후, 가득 찬 가드의 대기)"
+real = "reqwest(rustls), hmac·sha2, 클라이언트와 등록부 코드, loopback TCP"
+simulated = "Bybit, IP 반향, VictoriaMetrics(http-fake), 시계(수동)"
+faults = "연결 거절, 응답 없음, 연결 닫힘, 5xx, 읽을 수 없는 본문, retCode 없음·문자열, 10016, 429, 10006, 10002, 다른 retCode, 거절 코드 일곱, 403(응답이 500 ms 늦음), 가드에서 기다리는 동안 온 10010·403, 리다이렉트 301·302·307·308, 줄바꿈과 U+2028·U+2029가 든 긴 retMsg, 본문이 잘린 401·403·429·500·200, 동시에 나간 두 요청의 10010, 반향의 403, VM의 503·닫힘·500. 변이 M188, M191, M192, M232, M233, M234"
+criterion = "서명이 거래소 예시·RFC 4231·Python hmac 값과 같다. 부류와 카운터가 표대로다. 거절 뒤 10분 동안 가짜가 받는 요청이 하나뿐이고 오류 줄이 하나다. 403 뒤 응답 + 599,999 ms까지 어떤 요청도 가짜에 닿지 않고 응답 + 600,000 ms에 간다. 어느 10초 창도 60 이하이고 거절된 요청은 받은 순간에 간다. 가드에서 기다리던 요청은 그 사이 온 키 거절·403 뒤 보내지 않는다. 리다이렉트를 따르지 않는다. 본문이 잘린 401·403도 래치·멈춤을 걸고 다음 요청을 보내지 않는다. 동시에 거절된 두 요청의 오류 줄은 하나다. 거래소의 글은 오류와 로그에 200자 한 줄로 들어간다. 실패한 밀어 넣기는 다음 본문에 남지 않는다"
+tests = ["watcher/the_strings_to_sign_and_signatures_match_independent_values", "watcher/query_strings_are_sorted_and_unsafe_values_refused", "watcher/every_request_carries_the_five_headers_and_the_signed_query", "watcher/answers_are_classified", "watcher/auth_answers_are_never_retried", "watcher/http_403_pauses_every_request_for_600_s", "watcher/the_guard_holds_requests_beyond_60_in_10_s", "watcher/a_request_beyond_the_guard_waits_for_the_window", "watcher/a_request_waiting_at_the_guard_sees_a_later_rejection_or_pause", "watcher/a_redirect_is_not_followed", "watcher/a_status_counts_when_its_body_is_cut", "watcher/two_rejections_in_flight_write_one_error_line", "watcher/the_import_lines_are_victoria_metrics_json", "watcher/a_failed_push_is_dropped"]
+repro = "cargo test -p watcher --test sign --test client --test metrics"
+supports = "C-WATCH 3부, ADR-031"
+not_covered = "실제 Bybit와 실제 VictoriaMetrics(키가 없고 U-01 승인이 필요하다). 응답 형식은 문서와 OMS의 분류에서 왔다. 가드는 이 프로세스의 요청만 센다(OMS의 요청은 모른다). 이 클라이언트를 부르는 시작 확인(U19a4b), 검사(U19a5~), 밀어 넣기 타이머와 종료 때의 마지막 밀어 넣기(U19a7)는 아직 없다"
