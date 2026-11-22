@@ -47,7 +47,7 @@ payload 하나는 JSON 객체 하나다: `{"seq": u64, "at": u64 µs(기록 시�
 | `purged` | `order_ids`의 주문 정보를 지운다(모두 닫힌 주문이다). 열린 주문은 바뀌지 않는다 | `fill_floor`보다 이른 체결 키는 잊어도 된다 | — |
 | 그 밖의 이벤트 | — | — | — |
 
-그 밖의 이벤트(링크, 결과 불명, 상태 기록, 취소, 대조, 불일치, 운영자, 저장 공간, 참조 가격, 증거금, 펀딩·변경 대기, 부재 기록, 보류와 킬 루프 `hold_set`·`hold_cleared`·`kill_loop_ended`·`kill_rearmed`)는 세 집합을 바꾸지 않는다. 상태 화면과 알림은 이들을 쓴다. 뜻은 아래 필드 표와 각 계약 문서([C-NEW 등](order-lifecycle.md), [C-MISMATCH](reconciliation.md), [C-MARGIN](margin.md), [C-HOLD](holds.md))에 있다.
+그 밖의 이벤트(링크, 결과 불명, 상태 기록, 취소, 대조, 불일치, 운영자, 저장 공간, 참조 가격, 증거금, 펀딩·변경 대기, 부재 기록, 보류와 킬 루프 `hold_set`·`hold_cleared`·`kill_loop_ended`·`kill_rearmed`, 전략 연결 `strategy_link_lost`·`strategy_link_restored`)는 세 집합을 바꾸지 않는다. 상태 화면과 알림은 이들을 쓴다. 뜻은 아래 필드 표와 각 계약 문서([C-NEW 등](order-lifecycle.md), [C-MISMATCH](reconciliation.md), [C-MARGIN](margin.md), [C-HOLD](holds.md), [C-LIVE](liveness.md))에 있다.
 
 포지션 = `fill_booked` + `external_fill_booked` + `venue_position_changed` + `position_adjusted` 수량의 합이다(감시자 W2, ADR-023).
 
@@ -249,6 +249,9 @@ payload 하나는 JSON 객체 하나다: `{"seq": u64, "at": u64 µs(기록 시�
 | `kill_loop_ended` | `detail` | string | 설명 문장 |
 | `kill_rearmed` | `source` | enum stream/watcher | 킬 루프의 0건 확인(`confirmed`) 뒤의 새 킬 계기(C-KILL, `unsupported` 뒤는 아님). 킬 래치의 확인을 지우고 새 킬 루프를 부른다. 래치의 첫 메모는 그대로다 |
 | `kill_rearmed` | `note` | string | 새 계기의 메모 |
+| `strategy_link_lost` | `strategy` | string | 노드가 연결을 잃은 전략(C-LIVE). 그 전략의 일반 주문을 보류하고, 같은 기록의 `cancel_requested`(`by` = `{"rule": "strategy_link"}`)가 그 전략의 걸린 일반 주문 취소를 요청한다 |
+| `strategy_link_lost` | `why` | string | 노드가 본 이유: `last trading connection closed` 또는 `no request for {ms} ms` |
+| `strategy_link_restored` | `strategy` | string | 다시 `hello`한 전략(C-LIVE). 그 전략의 보류가 풀린다 |
 <!-- event-fields:end -->
 
 쓰지 않는 기본값: `position_adjusted.reason`은 `operator`일 때 쓰지 않는다. `order_accepted.request.market_ref`, `request_rejected.request.market_ref`는 없을 때 쓰지 않는다. `order_acked.session`은 옛 기록에 없을 수 있다(0).

@@ -50,6 +50,7 @@ impl Core {
             Input::Operator(cmd) => tx.operator(cmd)?,
             Input::Venue(v) => tx.venue(v)?,
             Input::Watcher(w) => tx.watcher(w)?,
+            Input::Session(s) => tx.session(s)?,
             Input::Tick => tx.tick()?,
             Input::Storage { low, free_bytes } => {
                 if *low != tx.core.storage_low {
@@ -744,6 +745,40 @@ impl Tx<'_> {
         Ok(())
     }
 
+    // ---- strategy liveness (C-LIVE) ---------------------------------------
+
+    fn session(&mut self, s: &SessionInput) -> Result<(), CoreFault> {
+        let reply = match s {
+            SessionInput::Lost { strategy, .. } if !self.core.config.strategies.contains_key(strategy) => {
+                Err(format!("bad_request: unknown strategy {strategy}"))
+            }
+            // Held once: the first reason and time stay.
+            SessionInput::Lost { strategy, .. } if self.core.strategy_link.contains_key(strategy) => {
+                Ok("already held".to_string())
+            }
+            SessionInput::Lost { strategy, why } => {
+                self.emit(Event::StrategyLinkLost {
+                    strategy: strategy.clone(),
+                    why: why.clone(),
+                })?;
+                // That strategy's resting plain orders, in the same record.
+                // Its reduce-only orders and every other strategy's orders
+                // stay.
+                self.rule_cancel_plain_orders(RuleId::StrategyLink, ExhaustedCancel::Leave, Some(strategy))?;
+                Ok("held".to_string())
+            }
+            SessionInput::Hello { strategy } if self.core.strategy_link.contains_key(strategy) => {
+                self.emit(Event::StrategyLinkRestored {
+                    strategy: strategy.clone(),
+                })?;
+                Ok("restored".to_string())
+            }
+            SessionInput::Hello { .. } => Ok("not held".to_string()),
+        };
+        self.out.reply = Some(Reply::Operator(reply));
+        Ok(())
+    }
+
     /// Why `rebase-day` cannot be taken now, if it cannot (C-MARGIN, 기준
     /// 재설정). It does not look at REDUCING.
     fn rebase_day_refusal(&self, note: &str) -> Option<MarginRefusal> {
@@ -1040,16 +1075,25 @@ impl Tx<'_> {
         self.emit(Event::ReducingEntered { rule, detail })?;
         // The latch is new, so a cancel that ran out of attempts earlier is
         // asked for again with a new budget.
-        self.rule_cancel_plain_orders(rule, ExhaustedCancel::AskAgain)
+        self.rule_cancel_plain_orders(rule, ExhaustedCancel::AskAgain, None)
     }
 
     /// Rule cancel: `rule` asks to cancel every open plain order that has
     /// no cancel request and, if `exhausted` says so, every one whose
-    /// request used up its attempts. A reduce-only order is never asked
-    /// for: it can only lower the position.
-    fn rule_cancel_plain_orders(&mut self, rule: RuleId, exhausted: ExhaustedCancel) -> Result<(), CoreFault> {
+    /// request used up its attempts; with `only`, only that strategy's
+    /// orders. A reduce-only order is never asked for: it can only lower
+    /// the position.
+    fn rule_cancel_plain_orders(
+        &mut self,
+        rule: RuleId,
+        exhausted: ExhaustedCancel,
+        only: Option<&StrategyId>,
+    ) -> Result<(), CoreFault> {
         for id in self.open_ids() {
             let Some(o) = self.core.orders.get(&id) else { continue };
+            if only.is_some_and(|s| *s != o.strategy) {
+                continue;
+            }
             let is_plain = !o.reduce_only;
             let not_asked_yet = o.cancel.is_none();
             let asked_in_vain = exhausted == ExhaustedCancel::AskAgain && self.cancel_exhausted(id);
@@ -1941,7 +1985,7 @@ impl Tx<'_> {
         }
         // One request per order: this runs on every tick, and a cancel
         // that ran out of attempts is already with the operator.
-        self.rule_cancel_plain_orders(RuleId::MarginStale, ExhaustedCancel::Leave)
+        self.rule_cancel_plain_orders(RuleId::MarginStale, ExhaustedCancel::Leave, None)
     }
 
     fn tick(&mut self) -> Result<(), CoreFault> {

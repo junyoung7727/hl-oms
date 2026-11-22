@@ -121,12 +121,13 @@ fn plain_and_reduce_only(h: &mut H, key: &str) -> (Vec<RejectReason>, bool) {
 }
 
 /// TN table 7-7 with a margin policy: under the watcher's mismatch and the
-/// venue change a reduce-only order passes and a plain one is refused;
+/// venue change (and, U18b3, a lost strategy link) a reduce-only order
+/// passes and a plain one is refused;
 /// under the kill latch and the operator's halt both are refused.
 #[test]
 fn the_hold_table_of_table_7_7() {
     type Set = fn(&mut H);
-    let rows: [(HoldReason, Set, bool); 4] = [
+    let rows: [(HoldReason, Set, bool); 5] = [
         (
             HoldReason::KillLatched,
             |h| {
@@ -159,6 +160,17 @@ fn the_hold_table_of_table_7_7() {
             },
             true,
         ),
+        // U18b3 (C-LIVE): the hold of strategy `a`, whose orders these are.
+        (
+            HoldReason::StrategyLink,
+            |h| {
+                h.inp(Input::Session(SessionInput::Lost {
+                    strategy: sid("a"),
+                    why: "last trading connection closed".into(),
+                }));
+            },
+            true,
+        ),
     ];
     for (reason, set, reduce_only_passes) in rows {
         let mut h = trading();
@@ -169,7 +181,7 @@ fn the_hold_table_of_table_7_7() {
             "{reason:?}: nothing holds yet"
         );
         set(&mut h);
-        assert!(h.core.holds(None).contains(&reason), "{reason:?}");
+        assert!(h.core.holds(Some(&sid("a"))).contains(&reason), "{reason:?}");
         let (plain, passes) = plain_and_reduce_only(&mut h, "after");
         assert!(
             plain.contains(&RejectReason::Hold(reason.clone())),

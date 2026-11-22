@@ -273,6 +273,8 @@ pub fn hold_condition(
                 Grace::None,
             )
         }
+        // Never in `holds(None)`; covered by `strategy_link:<s>` (C-LIVE).
+        HoldReason::StrategyLink => return None,
     };
     Some(c)
 }
@@ -755,6 +757,7 @@ mod tests {
             HoldReason::KillLatched,
             HoldReason::WatcherMismatch,
             HoldReason::VenueChange,
+            HoldReason::StrategyLink,
         ];
         for h in &all {
             match h {
@@ -771,7 +774,8 @@ mod tests {
                 | HoldReason::AccountMode
                 | HoldReason::KillLatched
                 | HoldReason::WatcherMismatch
-                | HoldReason::VenueChange => {}
+                | HoldReason::VenueChange
+                | HoldReason::StrategyLink => {}
             }
         }
         all
@@ -890,7 +894,7 @@ mod tests {
         for h in every_hold_reason() {
             let got = hold_condition(&h, &c, T0, None);
             let want = match &h {
-                HoldReason::Mismatch | HoldReason::OperatorStrategy => None,
+                HoldReason::Mismatch | HoldReason::OperatorStrategy | HoldReason::StrategyLink => None,
                 HoldReason::OperatorAccount | HoldReason::Reducing => Some(Grace::None),
                 HoldReason::KillLatched | HoldReason::WatcherMismatch | HoldReason::VenueChange => Some(Grace::None),
                 HoldReason::NoConfig
