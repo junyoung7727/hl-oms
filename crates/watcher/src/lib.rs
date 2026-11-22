@@ -9,9 +9,12 @@
 //!
 //! [ADR-031]: ../../docs/adr/ADR-031-watcher.md
 
+pub mod clock;
 pub mod decimal;
 pub mod events;
 pub mod journal;
+pub mod log;
+pub mod rest;
 pub mod sign;
 pub mod state;
 pub mod wire_id;
