@@ -296,6 +296,18 @@ fn a_header_only_segment_rewritten_with_a_new_schema_is_read_again() {
 /// Damage planted into a test journal.
 type Plant = Box<dyn Fn(&TestJournal)>;
 
+/// Replaces record 4 of a filler segment by a frame of `payload` with a
+/// valid checksum and keeps record 5 after it: only the payload is wrong.
+fn replace_record_4(j: &TestJournal, payload: &[u8]) {
+    let p = j.last_segment();
+    let b = std::fs::read(&p).unwrap();
+    let (at4, at5) = (frame_offset(&p, 1, 4), frame_offset(&p, 1, 5));
+    let mut out = b[..at4].to_vec();
+    out.extend_from_slice(&frame_bytes(4, payload));
+    out.extend_from_slice(&b[at5..]);
+    std::fs::write(&p, out).unwrap();
+}
+
 #[test]
 fn a_damaged_frame_at_or_below_the_cap_stops_without_moving() {
     // Each plant damages record 4 of 1..=5 (or its segment); the good
@@ -373,6 +385,20 @@ fn a_damaged_frame_at_or_below_the_cap_stops_without_moving() {
                 b.extend_from_slice(&frame_bytes(5, &payload(5, 4_000, &[filler()])));
                 std::fs::write(&p, &b).unwrap();
             }),
+        ),
+        // Payload refusals: the frame is whole and its checksum is valid,
+        // so only the record check stops the read (review 1 S3).
+        (
+            "a record that is not JSON",
+            Box::new(|j: &TestJournal| replace_record_4(j, b"not json")),
+        ),
+        (
+            "a record whose time goes back",
+            Box::new(|j: &TestJournal| replace_record_4(j, &payload(4, 0, &[filler()]))),
+        ),
+        (
+            "a record without events",
+            Box::new(|j: &TestJournal| replace_record_4(j, br#"{"seq":4,"at":4000}"#)),
         ),
     ];
     for (label, plant) in &plants {
