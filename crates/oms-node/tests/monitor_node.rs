@@ -96,8 +96,9 @@ fn raw(path: &std::path::Path, lines: &str, n: usize) -> Vec<Value> {
 /// is forbidden. The node starts unmonitored and refuses plain orders until
 /// the first fresh heartbeat; the exact line of the contract is taken; a
 /// stale W2 closes the gate again, a check from the future is refused and
-/// recorded nowhere; more than two heartbeats in a second on one
-/// connection are refused; the socket has its own pool of two.
+/// recorded nowhere; a heartbeat before `hello` is refused; more than two
+/// heartbeats in a second on one connection are refused; the socket has
+/// its own pool of two.
 #[test]
 fn heartbeats_over_monitor_sock_open_the_gate_and_other_ops_are_forbidden() {
     let env = gated_node("monitor-gate", "");
@@ -172,6 +173,16 @@ fn heartbeats_over_monitor_sock_open_the_gate_and_other_ops_are_forbidden() {
         "{}",
         hello_a[0]
     );
+    // A heartbeat before `hello` (review 1 S2).
+    let t = now_ms();
+    let early = raw(
+        &monitor_sock(&env),
+        &format!(
+            "{{\"id\":2,\"op\":\"heartbeat\",\"watcher\":\"watcher-1\",\"checks\":{{\"W1\":{t},\"W2\":{t}}}}}\n"
+        ),
+        1,
+    );
+    assert_eq!(early[0]["error"]["code"], "unauthorized", "{}", early[0]);
     // `heartbeat` on the trading and the admin socket.
     assert_eq!(api_error(a.call(fresh())), ErrorCode::Forbidden);
     assert_eq!(api_error(env.admin().call(fresh())), ErrorCode::Forbidden);
