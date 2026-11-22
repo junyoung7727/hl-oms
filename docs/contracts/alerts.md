@@ -32,6 +32,7 @@
 | `hold:watcher_mismatch` | `WatcherMismatch`(검사 이름, 시각, 내용. 증거금 정책이 있으면 `감소 전용은 받음`, 없으면 `증거금 정책이 없어 감소 전용도 거절`) | `hold_cleared{watcher_mismatch}` | 0 |
 | `hold:venue_change` | `VenueChange`(시각, 처음의 내용. 감소 전용 문장은 `hold:watcher_mismatch`와 같다). 분류표에 없는 체결 하나는 이 조건과 `mismatch:unclassified_execution` 두 개를 함께 시작한다. 둘은 따로 해소된다 | `hold_cleared{venue_change}` | 0 |
 | `strategy_link:<s>` | `core.strategy_link`에 `s`(이유, 시각. 감소 전용 문장은 `hold:watcher_mismatch`와 같다, [C-LIVE](liveness.md)) | `strategy_link_restored{s}`(그 전략의 `hello`) | 0 |
+| `hold:unmonitored` | `Unmonitored`(이유, 시각, 감소 전용 문장은 `hold:watcher_mismatch`와 같다, 2단계까지 남은 초 또는 `걸린 일반 주문 취소 중`, [C-LIVE](liveness.md) 2부). 게이트가 있으면 모든 시작이 워처의 첫 하트비트까지 이 상태를 지난다 | `monitor_changed{true}`(신선한 하트비트) | 30초 |
 | `gateway_block` | 게이트웨이 막힘 `Some(이유)`(키 거부, IP 차단, 계좌, 확인 못 함, 시계) | `None` | 30초 |
 
 - 유예 30초는 `alert.grace_ms`다. 조건은 평가마다 계속 있어야 하고, 유예가 지난 평가(`now − 처음 본 시각 ≥ grace_ms`)에서 시작이 나간다. 한 번이라도 없으면 처음부터 다시 센다. 유예 안에 끝난 조건은 시작도 해소도 보내지 않는다.

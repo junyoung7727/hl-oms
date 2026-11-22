@@ -271,6 +271,14 @@ fn every_event() -> Vec<Event> {
             why: "w".into(),
         },
         Event::StrategyLinkRestored { strategy: sid("a") },
+        Event::WatcherHeartbeat {
+            watcher: "watcher-1".into(),
+            checks: (1..=9).map(|i| (format!("W{i}"), (i % 2 == 1).then_some(5))).collect(),
+        },
+        Event::MonitorChanged {
+            monitored: false,
+            reason: "r".into(),
+        },
     ]
 }
 
@@ -326,7 +334,9 @@ fn _every_kind_is_listed(e: &Event) {
         | Event::KillLoopEnded { .. }
         | Event::KillRearmed { .. }
         | Event::StrategyLinkLost { .. }
-        | Event::StrategyLinkRestored { .. } => {}
+        | Event::StrategyLinkRestored { .. }
+        | Event::WatcherHeartbeat { .. }
+        | Event::MonitorChanged { .. } => {}
     }
 }
 
@@ -412,7 +422,7 @@ fn the_field_table_lists_every_field_the_encoder_writes() {
             "the table lists an unknown event {e}"
         );
     }
-    assert_eq!(kinds.len(), 49, "one instance of every event kind");
+    assert_eq!(kinds.len(), 51, "one instance of every event kind");
 }
 
 /// Whether a JSON value has the kind the type column names. "… 또는 null"

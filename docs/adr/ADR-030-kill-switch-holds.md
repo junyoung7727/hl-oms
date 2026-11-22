@@ -1,6 +1,6 @@
 # ADR-030 킬 스위치, 운영자가 푸는 보류, 전략 연결 감시, 모니터링 게이트
 
-상태: 채택. 구현은 네 PR로 나눈다: U18b1(보류 셋, 킬 마커, `clear_hold`, 워처 입력, 킬 명령 — 구현됨, 2026-11-21), U18b2(Bybit 킬 루프, C-KILL — 구현됨, 2026-11-22), U18b3(전략 연결 감시, C-LIVE 1부 — 구현됨, 2026-11-22), U18b4(모니터링 게이트, C-LIVE 2부). 계약: [C-HOLD](../contracts/holds.md)(U18b1), [C-KILL](../contracts/kill.md)(U18b2), [C-LIVE](../contracts/liveness.md)(U18b3 1부). [ADR-008](ADR-008-risk-reservation.md) §7의 차단 표와 [ADR-028](ADR-028-bybit-gateway.md)(킬 트리거, `kill_scope`의 사용, U18b2)을 고친다.
+상태: 채택. 구현은 네 PR로 나눈다: U18b1(보류 셋, 킬 마커, `clear_hold`, 워처 입력, 킬 명령 — 구현됨, 2026-11-21), U18b2(Bybit 킬 루프, C-KILL — 구현됨, 2026-11-22), U18b3(전략 연결 감시, C-LIVE 1부 — 구현됨, 2026-11-22), U18b4(모니터링 게이트, C-LIVE 2부 — 구현됨, 2026-11-22). 계약: [C-HOLD](../contracts/holds.md)(U18b1), [C-KILL](../contracts/kill.md)(U18b2), [C-LIVE](../contracts/liveness.md)(U18b3 1부, U18b4 2부). [ADR-008](ADR-008-risk-reservation.md) §7의 차단 표와 [ADR-028](ADR-028-bybit-gateway.md)(킬 트리거, `kill_scope`의 사용, U18b2)을 고친다.
 
 ## 1. 문제와 발생 가능한 실패
 
@@ -127,7 +127,27 @@ G. U18b3이 만든 부분은 다음과 같다(C-LIVE 1부, 단계 L1~L5는 계�
 - **설정에서 빠진 전략의 보류는 사라진다(판단, 스펙 밖):** 걸린 주문이 있는 전략은 뺄 수 없고, `hello`할 수 없는 전략의 알림이 영원히 남지 않게 한다. `apply`에 있어 재실행이 같다.
 - **알림 문장은 증거금 정책을 따른다(판단, 스펙 문장에 더함):** U18b1 리뷰 S4와 같이 정책이 없으면 감소 전용도 거절된다고 말한다.
 
-U18b4가 정할 것(이 ADR의 결정, 계약은 그 PR에서): 저널에 남는 하트비트를 코어가 판단하는 게이트(30초에 일반 주문 거절, 90초에 걸린 일반 주문 취소).
+H. U18b4가 만든 부분은 다음과 같다(C-LIVE 2부, 단계 G1~G5는 계약에).
+
+| 단계 | 입력 | 처리 | 출력 | 실패하면 |
+|---|---|---|---|---|
+| H1 하트비트 | `monitor.sock`의 `heartbeat`(자기 uid, 연결 둘, 연결마다 1초에 둘) | 노드: 모양 검사, ms→µs. 코어: 게이트가 있고, 검사 시각이 기록 시각 + 1초보다 뒤가 아님 | `watcher_heartbeat`, 내구화 뒤 `"recorded"` | `overloaded`·`bad_request`·`forbidden`, 기록 없음 |
+| H2 판정 | 하트비트와 틱의 기록 시각 | 이 부팅에 하트비트 없음, 마지막 하트비트가 30초 넘게 전, 또는 그 하트비트에서 W1·W2가 `null`이거나 10초 넘게 이전 | 바뀌면 `monitor_changed` | 이유만 바뀌면 기록 없음 |
+| H3 1단계 | 감시 안 됨 | `Unmonitored`(일반 주문만) | 거절 | 증거금 정책이 없으면 감소 전용도 |
+| H4 2단계 | 틱, 연결 올라옴, 감시 안 됨이 60초 넘음 | 걸린 일반 주문의 규칙 취소(`RuleId::Unmonitored`, 다한 시도는 다시 묻지 않음) | `SendCancel`(내구화 뒤) | 연결이 내려가 있으면 기다림 |
+| H5 시작 | `booted`, 게이트를 켜는 `config_activated` | 감시 안 됨, 하트비트 없음으로 | — | 끄는 설정은 상태를 지운다 |
+
+결정과 이유(U18b4):
+
+- **코어가 저널의 하트비트로 판단한다:** 노드가 판단하고 전이만 기록하면 30초·10초·60초 규칙이 두 층에 살고, 재실행이 2단계의 시각(어느 틱에 어느 취소)을 다시 만들 수 없다. 값은 하트비트마다 기록 하나(5초마다, 하루 약 17,280개, 판단(모델 아님))다.
+- **검사의 나이는 그것을 알린 하트비트의 기록 시각에서 잰다(스펙 수정):** 스펙의 "`at`에서"를 틱의 시각으로 읽으면 하트비트가 끊길 때 10초 규칙이 언제나 30초 규칙보다 먼저 걸려, 완료 기준(29.75초에 감시됨, 30.25초에 감시 안 됨)이 성립하지 않는다. 하트비트 뒤의 시간은 하트비트의 나이가 잰다.
+- **엄격한 `>`와 250 ms 틱:** 정확히 30초·10초·60초는 넘지 않은 것이다. 그래서 끊긴 하트비트의 첫 취소는 스펙의 90.25초가 아니라 한 틱 뒤인 90.5초다(스펙 수정 줄).
+- **미래의 검사 시각은 거절(1초, 판단(모델 아님)):** 노드의 시계보다 앞선 시각을 찍는 워처(다른 시계, 단위 오류)가 검사를 신선해 보이게 하면 게이트가 열린다. 거절하면 30초 뒤 닫힌다(안전한 쪽). 호스트 시계가 뒤로 가는 경우는 이 규칙이 잡지 않는다(리뷰 1 M1): 기록 시각이 제자리에 머물러(ADR-002) 게이트의 시계가 멈춘다. §8 위험.
+- **게이트가 있으면 틱은 1초 이하(판단(모델 아님), 리뷰 1 S3):** 하트비트가 없다는 것과 2단계는 틱에서만 본다. 느린 틱은 30초·60초를 그만큼 늦춘다.
+- **모든 시작은 감시 안 됨(설계 §7.5 "의도된 동작"):** 재시작 전의 하트비트는 지금 워처가 살아 있다는 증거가 아니다. 첫 신선한 하트비트까지 일반 주문이 나가지 않고, 60초 뒤 걸린 일반 주문이 취소된다. 알림은 지나가는 상태의 유예(30초)를 받는다.
+- **2단계는 취소 요청이 없는 주문만(`ExhaustedCancel::Leave`):** `stale_cancel`과 같다. 틱마다 다한 취소를 다시 묻지 않는다(그 주문은 이미 `CancelStuck`으로 운영자에게 있다).
+- **자기 소켓, 자기 uid, 자기 풀:** 거래 소켓의 클라이언트(다른 uid일 수 있다)가 하트비트로 게이트를 열어 두면 안 되고, 연결이 많은 거래 소켓이 워처를 밀어내도 안 된다. 연결마다 초당 둘은 고장 난 워처가 저널을 채우지 못하게 한다(판단(모델 아님)).
+- **mainnet은 게이트 없이 시작하지 않는다(소유자 질문 1의 기본값).**
 
 ## 8. 포기한 장점, 남은 위험, 가정
 
@@ -144,7 +164,11 @@ U18b4가 정할 것(이 ADR의 결정, 계약은 그 PR에서): 저널에 남는
 - 위험(U18b3): 살아 있지만 `liveness_ms`보다 오래 아무 요청도 보내지 않는 전략은 잃음으로 친다. 전략은 그보다 짧은 간격으로 `ping`해야 한다(C-LIVE 알려진 한계).
 - 위험(U18b3): 재시작 뒤 걸린 일반 주문이 있는 적힌 전략이 `liveness_ms` 안에 다시 붙지 않으면 그 주문이 취소된다. 의도한 동작이다(죽은 전략의 호가를 남기지 않는다).
 - 포기(U18b3): 적히지 않은 전략의 주문은 그 전략이 죽어도 남는다(testnet·가상 거래소에서만 가능, mainnet은 시작하지 않는다).
-- 가정: 실제 거래소에서 이 경로를 실행한 적이 없다(가상 거래소와 코어 시험, U18b2는 loopback 가짜 Bybit와 수동 시계만, U18b3은 가상 거래소에 붙인 노드 프로세스와 시간을 입력으로 받는 표 시험).
+- 위험(U18b4): 하트비트는 워처의 말이다. OMS는 그 시각을 믿는다(같은 호스트의 시계). 틀린 시각을 보내는 워처는 게이트를 열어 둘 수 있다.
+- 위험(U18b4, 리뷰 1 M1): 호스트 시계가 Δ만큼 뒤로 가면 Δ 동안 모든 입력이 같은 기록 시각을 받아 게이트의 시계가 멈춘다. 죽은 워처도, 직전부터 W1·W2가 실패하는 워처도 최대 Δ 동안 알아채지 못하고 2단계도 멈춘다. 새 시계로 찍는 건강한 워처는 Δ가 `check_max_age_us`보다 크면 게이트를 닫는다(일반 주문 거절). 벽시계가 기록 시각보다 N초 넘게 뒤일 때 노드가 멈추거나 보류할지는 소유자 결정이다(모든 기록 시각 타이머에 걸린다). 시험 `monitor::a_clock_that_steps_back_holds_the_gates_timers`.
+- 위험(U18b4): 모든 시작이 감시 안 됨을 지난다. 워처가 늦게 뜨면 시작 30초 뒤 P1, 60초 뒤 재시작 전의 걸린 일반 주문이 취소된다. 의도한 동작이다.
+- 포기(U18b4): 전략마다의 게이트. 게이트는 계좌 전체다.
+- 가정: 실제 거래소에서 이 경로를 실행한 적이 없다(가상 거래소와 코어 시험, U18b2는 loopback 가짜 Bybit와 수동 시계만, U18b3은 가상 거래소에 붙인 노드 프로세스와 시간을 입력으로 받는 표 시험, U18b4는 기록 시각을 정확히 넣은 코어 시험과 가상 거래소에 붙인 노드 프로세스). 워처(U19a)는 아직 없다.
 
 ## 9. 근거
 
@@ -152,6 +176,7 @@ U18b4가 정할 것(이 ADR의 결정, 계약은 그 PR에서): 저널에 남는
 - 시험(U18b2): `venue::bybit::kill::tests` 20개(순수 기계 10, 수동 시계와 http-fake의 드라이버 10), `venue::bybit::query::tests::the_kill_count_is_every_open_row_of_every_page_and_never_a_guess`, `venue::bybit::gateway::tests`의 킬 시험 8개, `config::tests::the_kill_loop_fields_are_bounded`, `holds.rs`의 `a_stream_loss_latches_the_kill_and_asks_for_the_loop`, `a_new_trigger_after_the_confirmation_resets_it_and_asks_for_a_new_loop`, `a_new_trigger_after_an_unsupported_answer_records_nothing`, 프로세스 시험 `bybit_node::a_ten_second_stream_outage_latches_kill_through_a_restart_until_clear_hold_kill`. 주장 V-KILL-1~5. 넣은 결함 M141~M153(`cargo run -p xtask -- mutants --only M14`, `--only M15`)을 하나씩 돌려 모두 잡혔다(2026-11-22). 리뷰 수정의 M154~M159(알림이 루프를 붙잡음, 셈의 행, 정지·막힘 가드, 감시의 마지막 셈)도 `--only M15`로 돌렸다(결과는 U18b2 보고서). 리뷰 2의 M160(알림 큐에 상한 없음), M161(상태가 만든 알림을 셈)은 `--only M16`으로 돌려 잡혔다.
 - 넣은 결함 중 근거로 드는 것은 저장소에서 다시 돌릴 수 있는 `xtask mutants`의 M125~M140뿐이다(하나씩: `cargo run -p xtask -- mutants --only M131-`). M125~M130은 구현 때, M131~M140은 리뷰 수정 때(2026-11-21) 하나씩 돌려 모두 잡혔다. M134~M140은 구현 때 저장소 밖 스크립트로만 돌린 결함을 옮긴 것이다(리뷰 N7). 여러 파일을 바꾸는 둘(`Kill`을 `command_for` 밖에서 만듦, `venue_change`를 결정이 걸음)은 `xtask mutants`가 한 파일만 바꾸므로 옮기지 않았고, 근거로 들지 않는다.
 - 시험(U18b3): `crates/oms-core/tests/strategy_link.rs` 7개와 `holds.rs::the_hold_table_of_table_7_7`의 `StrategyLink` 줄, `liveness::tests` 9개(노드의 표, 시간이 입력), 프로세스 시험 `tests/liveness.rs` 6개(실제 oms-node·simvenue, 실제 시간, 강제 종료 뒤 시작의 무장과 다른 전략으로의 `hello` 포함), `config::tests::the_liveness_section_is_validated_and_required_on_mainnet`, `alerts::tests::a_lost_strategy_link_is_its_own_condition_at_once`, `record_schema::kill_holds_liveness_and_heartbeats_recover_to_the_live_state`(잃음·복구·잃음), `event_fields`의 두 이벤트. 주장 V-LIVE-1~4. 넣은 결함 M162~M168(`cargo run -p xtask -- mutants --only M16`)을 하나씩 돌려 모두 잡혔다(2026-11-22). 리뷰 1 뒤 M169~M172(복구가 답을 받기 전의 `hello`, 시작의 무장 둘, 다른 전략으로의 `hello`)를 더했다.
+- 시험(U18b4): `crates/oms-core/tests/monitor.rs` 16개(리뷰 1의 시작 시험과 시계 시험 포함)와 `holds.rs::the_hold_table_of_table_7_7`의 `Unmonitored` 줄, 프로세스 시험 `tests/monitor_node.rs` 3개(실제 oms-node·simvenue, 실제 시간: 소켓 규칙과 속도 한도, 거래소에서의 2단계 취소와 재시작, 게이트 없음), `monitor::tests` 2개, `config::tests::the_monitoring_gate_is_validated_and_required_on_mainnet`, `alerts::tests::unmonitored_is_a_passing_condition_with_its_cancel_time`, `record_schema::kill_holds_liveness_and_heartbeats_recover_to_the_live_state`(게이트를 켜는 설정, 신선한·오래된 하트비트, 2단계의 틱), `event_fields`의 두 이벤트, `api::tests::wire_example_of_the_heartbeat`. 주장 V-GATE-1~4. 넣은 결함 M173~M178(`cargo run -p xtask -- mutants --only M173` … `--only M178`)을 하나씩 돌려 모두 잡혔다(2026-11-22). 리뷰 1의 M179(감시 안 됨에서의 부팅이 옛 `since`를 남김), M180(`hello` 전의 하트비트를 받음), M181(게이트가 있는데 아무 틱이나 받음)도 하나씩 돌려 잡혔다(2026-11-22, U18b4 보고서).
 - 설계: 저장소 밖 `10_DESIGN_DRAFT.md` §7.5, §7.6, R2–R5, TN §7.5–§7.6 표 7-7·7-8, `pr_plan.json` U18b. 스펙: `.scratch/kill-switch/spec.md`.
 
 ## 10. 재검토 조건

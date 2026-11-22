@@ -323,10 +323,12 @@ fn margin_reports_with_and_without_account_mm_recover_to_the_live_state() {
     }
 }
 
-/// U18b1, U18b2. The kill marker in `Boot`, the watcher's inputs,
+/// U18b1, U18b2, U18b3, U18b4. The kill marker in `Boot`, the watcher's inputs,
 /// `StreamLost`, `hold_set`, `hold_cleared`, `kill_loop_ended`,
 /// `kill_rearmed` and the three holds of C-HOLD in the
-/// state are optional fields and new kinds, not a schema rise: a journal
+/// state, the strategy link, and the monitoring gate (`watcher_heartbeat`,
+/// `monitor_changed`, `policy.monitor`, `monitor` in the state)
+/// are optional fields and new kinds, not a schema rise: a journal
 /// with them recovers to the live state and `verify --re-decide` passes,
 /// and a state without them keeps the bytes it had.
 #[test]
@@ -344,7 +346,7 @@ fn kill_holds_liveness_and_heartbeats_recover_to_the_live_state() {
         c.handle(SEC, &Input::Boot { binary: "test".into(), kill_marker: None }).unwrap();
         serde_json::to_string(&c).unwrap()
     };
-    for field in ["\"kill\"", "\"watcher_mismatch\"", "\"venue_change\"", "kill_marker", "strategy_link"] {
+    for field in ["\"kill\"", "\"watcher_mismatch\"", "\"venue_change\"", "kill_marker", "strategy_link", "\"monitor\""] {
         assert!(!plain.contains(field), "{field} written while unset: {plain}");
     }
     run.input(Input::Boot {
@@ -407,9 +409,35 @@ fn kill_holds_liveness_and_heartbeats_recover_to_the_live_state() {
         assert_eq!(out.reply, Some(Reply::Operator(Ok(reply.into()))));
     }
     assert!(run.core.strategy_link.contains_key(&a));
+    // U18b4: a configuration turns the gate on; a fresh heartbeat opens
+    // it, a stale one closes it again, and a tick 61 s later is in stage 2.
+    let mut gated = config();
+    gated.version = 2;
+    gated.policy.monitor = Some(MonitorPolicy::default());
+    run.input(Input::Config(Box::new(gated)));
+    for stale in [false, true] {
+        let t = run.at + SEC;
+        let w2 = if stale { t - 11 * SEC } else { t };
+        let checks = [("W1".to_string(), Some(t)), ("W2".to_string(), Some(w2)), ("W3".to_string(), None)].into_iter().collect();
+        let out = run.input(Input::Watcher(WatcherInput::Heartbeat { watcher: "watcher-1".into(), checks }));
+        assert_eq!(out.reply, Some(Reply::Operator(Ok("recorded".into()))));
+        assert_eq!(run.core.monitor.as_ref().map(|m| m.monitored), Some(!stale));
+    }
+    run.at += 61 * SEC;
+    run.input(Input::Tick);
+    assert!(run.core.monitor_cancel_due(run.at));
     let records = run.take();
     let names: Vec<&str> = records.iter().flat_map(|r| r.events.iter().map(Event::name)).collect();
-    for kind in ["hold_set", "hold_cleared", "kill_loop_ended", "kill_rearmed", "strategy_link_lost", "strategy_link_restored"] {
+    for kind in [
+        "hold_set",
+        "hold_cleared",
+        "kill_loop_ended",
+        "kill_rearmed",
+        "strategy_link_lost",
+        "strategy_link_restored",
+        "watcher_heartbeat",
+        "monitor_changed",
+    ] {
         assert!(names.contains(&kind), "{kind}: {names:?}");
     }
     write(&dir, RECORD_SCHEMA, &records);

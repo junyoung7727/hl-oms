@@ -338,6 +338,11 @@ pub enum HoldReason {
     /// closed, or no request came for its liveness time (C-LIVE). Refuses
     /// this strategy's plain orders until the strategy says `hello` again.
     StrategyLink,
+    /// The monitoring gate is set and the watcher's last heartbeat is too
+    /// old, or its W1 or W2 was (C-LIVE part 2). Refuses plain orders until
+    /// a fresh heartbeat; after `unmonitored_cancel_us` resting plain
+    /// orders are cancelled.
+    Unmonitored,
 }
 
 impl HoldReason {
@@ -357,6 +362,8 @@ impl HoldReason {
             HoldReason::WatcherMismatch | HoldReason::VenueChange => true,
             // Its reduce-only orders can only lower the position (C-LIVE).
             HoldReason::StrategyLink => true,
+            // Reduce-only orders stay allowed (design §7.5).
+            HoldReason::Unmonitored => true,
         }
     }
 }
@@ -416,6 +423,26 @@ impl WatcherCheck {
 pub struct StrategyLinkLoss {
     pub since: Ts,
     pub why: String,
+}
+
+/// The monitoring gate's state (C-LIVE part 2), present only while the
+/// gate is configured. `since` is the record time of the last change.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MonitorState {
+    pub monitored: bool,
+    pub since: Ts,
+    pub reason: String,
+    /// The last accepted heartbeat of this process; reset by every boot.
+    pub last: Option<HeartbeatSeen>,
+}
+
+/// An accepted heartbeat (C-LIVE part 2): its record time, the watcher's
+/// label and the last success of each check (µs, `None` = none yet).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeartbeatSeen {
+    pub at: Ts,
+    pub watcher: String,
+    pub checks: BTreeMap<String, Option<Ts>>,
 }
 
 /// The kill latch (C-HOLD). Set once; a later trigger leaves it as it is.
@@ -620,6 +647,10 @@ pub enum RuleId {
     /// The node lost a strategy's link (C-LIVE). It cancels that
     /// strategy's plain orders and latches nothing beyond its hold.
     StrategyLink,
+    /// The account was unmonitored for longer than
+    /// `unmonitored_cancel_us` (C-LIVE part 2). It cancels and latches
+    /// nothing beyond the gate.
+    Unmonitored,
 }
 
 /// The REDUCING latch (C-MARGIN, 감소 전용 상태).

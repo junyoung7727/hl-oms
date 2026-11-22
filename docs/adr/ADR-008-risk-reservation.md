@@ -82,13 +82,13 @@ C. 구현은 `check_new_order`(`crates/oms-core/src/decide.rs`)와 `Book`(`model
 
 | 모든 신규 주문을 막는다 | 일반 주문만 막는다(감소 전용 주문은 통과) |
 |---|---|
-| `NoConfig`, `LinkDown`, `OperatorAccount`, `OperatorStrategy`, `StorageLow`, `KillLatched` | `Resync`, `InDoubt`, `Mismatch`, `Reducing`, `VenueSetting(종목)`, `AccountMode`, `WatcherMismatch`, `VenueChange`, `StrategyLink` |
+| `NoConfig`, `LinkDown`, `OperatorAccount`, `OperatorStrategy`, `StorageLow`, `KillLatched` | `Resync`, `InDoubt`, `Mismatch`, `Reducing`, `VenueSetting(종목)`, `AccountMode`, `WatcherMismatch`, `VenueChange`, `StrategyLink`, `Unmonitored` |
 
 오른쪽 열의 구분은 증거금 정책(`policy.margin`)이 설정됐을 때만 적용한다. 정책이 없으면 모든 차단이 감소 전용 주문을 포함한 모든 신규 주문을 막는다(개정 전과 같다). 그래서 정책 없이 기록된 저널은 다시 판단해도(`verify --re-decide`) 기록된 결과와 같다. 예외: U18b 전에 쓰였고 거래소 변경(`venue_position_changed`, `unclassified_execution_noted`, 종류가 `venue_position_change`인 `mismatch_raised`)이 있는 저널. 이 빌드는 재실행에서 `VenueChange`를 걸고, 그 뒤 옛 빌드가 받은 첫 주문을 거절하므로 차이를 보고한다([C-HOLD](../contracts/holds.md)).
 
 감소 전용 주문의 기준은 거래소의 reduce-only 표시다. OMS가 계산한 '줄이는 방향'이 아니다. 거래소가 계좌 포지션으로 판정하므로 기존 결정 O08의 우려(전략에서 축소인 주문이 계좌에서는 아닐 수 있다)가 이 표시에는 해당하지 않는다. 감소 전용 주문도 §7의 다른 검사는 모두 받는다.
 
-`Reducing`은 증거금 규칙의 티켓 04가, `VenueSetting(종목)`, `AccountMode`는 티켓 08이 추가했고 모두 위 표의 오른쪽 열에 있다. `KillLatched`(왼쪽 열: 킬 루프가 0건을 확인해야 하므로 감소 전용도 막는다), `WatcherMismatch`, `VenueChange`(오른쪽 열)는 U18b1이 추가했다([ADR-030](ADR-030-kill-switch-holds.md), [C-HOLD](../contracts/holds.md)). 셋 다 운영자의 `clear-hold`로만 풀린다. `StrategyLink`(오른쪽 열, 그 전략의 주문만)는 U18b3이 추가했고 그 전략의 `hello`가 푼다([C-LIVE](../contracts/liveness.md)). 표는 `HoldReason::refuses_only_plain_orders`(`model.rs`)에 있다.
+`Reducing`은 증거금 규칙의 티켓 04가, `VenueSetting(종목)`, `AccountMode`는 티켓 08이 추가했고 모두 위 표의 오른쪽 열에 있다. `KillLatched`(왼쪽 열: 킬 루프가 0건을 확인해야 하므로 감소 전용도 막는다), `WatcherMismatch`, `VenueChange`(오른쪽 열)는 U18b1이 추가했다([ADR-030](ADR-030-kill-switch-holds.md), [C-HOLD](../contracts/holds.md)). 셋 다 운영자의 `clear-hold`로만 풀린다. `StrategyLink`(오른쪽 열, 그 전략의 주문만)는 U18b3이 추가했고 그 전략의 `hello`가 푼다([C-LIVE](../contracts/liveness.md)). `Unmonitored`(오른쪽 열)는 U18b4가 추가했고 워처의 신선한 하트비트가 푼다(C-LIVE 2부). 표는 `HoldReason::refuses_only_plain_orders`(`model.rs`)에 있다.
 
 한도를 현재 노출 아래로 낮추는 설정 변경은 허용한다. 기존 노출은 남고 새 주문만 새 한도로 검사된다. 그 동안 I-QTY는 성립하지 않는다.
 

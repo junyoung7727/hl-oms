@@ -57,6 +57,11 @@ pub struct LivenessSection {
 pub const LIVENESS_MS_MIN: u64 = 1_000;
 pub const LIVENESS_MS_MAX: u64 = 60_000;
 
+/// The longest `runtime.tick_ms` with the monitoring gate (C-LIVE part 2):
+/// the gate notices missing heartbeats and runs stage 2 only on a tick, so
+/// its bounds are late by up to one tick. 판단(모델 아님).
+pub const MONITOR_TICK_MAX_MS: u64 = 1_000;
+
 impl LivenessSection {
     fn validate(&self, core: &CoreConfig) -> Result<(), String> {
         for (s, ms) in &self.strategies {
@@ -112,6 +117,9 @@ pub struct ApiConfig {
     pub socket: PathBuf,
     /// Admin socket.
     pub admin_socket: PathBuf,
+    /// The watcher's heartbeat socket (C-LIVE part 2). Bound only with
+    /// `[core.policy.monitor]`; mode 0600, own uid only.
+    pub monitor_socket: PathBuf,
     pub max_connections: usize,
     /// Connections on the admin socket, counted separately so that trading
     /// clients can never keep the operator out.
@@ -132,6 +140,7 @@ impl Default for ApiConfig {
         ApiConfig {
             socket: "oms.sock".into(),
             admin_socket: "admin.sock".into(),
+            monitor_socket: "monitor.sock".into(),
             max_connections: 64,
             admin_max_connections: 8,
             hello_timeout_ms: 10_000,
@@ -592,6 +601,12 @@ impl NodeConfig {
         if self.api.window == 0 || self.api.max_connections == 0 || self.api.admin_max_connections == 0 {
             return Err("[api] window, max_connections and admin_max_connections must be positive".into());
         }
+        // Binding one socket removes a stale file at its path: two sockets
+        // on one path would take each other's place.
+        let (trading, admin, monitor) = (self.socket_path(), self.admin_socket_path(), self.monitor_socket_path());
+        if trading == admin || trading == monitor || admin == monitor {
+            return Err("[api] socket, admin_socket and monitor_socket must be three different paths".into());
+        }
         if !self.http.listen.is_empty() {
             let addr: std::net::SocketAddr = self
                 .http
@@ -649,6 +664,19 @@ impl NodeConfig {
         // default: refuse).
         if self.is_mainnet() && self.kill.is_none() {
             return Err("[venue] mainnet requires [kill] marker (the kill marker, C-HOLD)".into());
+        }
+        // Nor without the monitoring gate: nothing would stop trading when
+        // the watcher is gone (C-LIVE part 2; owner question 1 of U18b).
+        if self.is_mainnet() && self.core.policy.monitor.is_none() {
+            return Err("[venue] mainnet requires [core.policy.monitor] (the monitoring gate, C-LIVE)".into());
+        }
+        // The gate notices missing heartbeats and runs stage 2 only on a
+        // tick: a slow tick would move its 30 s and 60 s by as much
+        // (C-LIVE part 2, review 1 S3; 1 s 판단(모델 아님)).
+        if self.core.policy.monitor.is_some() && self.runtime.tick_ms > MONITOR_TICK_MAX_MS {
+            return Err(format!(
+                "[runtime] tick_ms must be at most {MONITOR_TICK_MAX_MS} with [core.policy.monitor]: the gate notices missing heartbeats and cancels only on a tick"
+            ));
         }
         if let Some(l) = &self.liveness {
             l.validate(&self.core)?;
@@ -812,6 +840,10 @@ impl NodeConfig {
     pub fn admin_socket_path(&self) -> PathBuf {
         self.data_dir.join(&self.api.admin_socket)
     }
+
+    pub fn monitor_socket_path(&self) -> PathBuf {
+        self.data_dir.join(&self.api.monitor_socket)
+    }
 }
 
 #[cfg(test)]
@@ -875,6 +907,8 @@ max = "10"
 [core.policy]
 
 {margin}
+
+[core.policy.monitor]
 
 [alert]
 telegram = "/etc/hl-oms/telegram.json"
@@ -1239,6 +1273,66 @@ strategies = {{ a = 5000 }}
         // An unknown key in the table.
         let text = "data_dir = \"d\"\n[venue]\nkind = \"sim\"\nsocket = \"v.sock\"\n[core]\nversion = 1\n[liveness]\nstrategies = {}\ntick_ms = 1\n";
         assert!(toml::from_str::<NodeConfig>(text).is_err());
+    }
+
+    /// C-LIVE part 2. The gate's values are bounded by the core (each named
+    /// in the error); mainnet (Hyperliquid and Bybit) does not start without
+    /// the gate, testnet and sim do. The monitor socket is `monitor.sock`
+    /// under the data directory and may not share a path with the others.
+    #[test]
+    fn the_monitoring_gate_is_validated_and_required_on_mainnet() {
+        let with = |venue: &str, margin: Option<&str>, gate: Option<oms_core::MonitorPolicy>| {
+            let mut cfg = parse(venue, "", margin, 1).unwrap();
+            cfg.core.policy.absence_not_found_needed = if venue.contains("bybit") { 2 } else { 1 };
+            cfg.core.policy.monitor = gate;
+            cfg.validate()
+        };
+        let cfg = parse(SIM, "", None, 1).unwrap();
+        assert_eq!(cfg.core.policy.monitor, Some(oms_core::MonitorPolicy::default()));
+        assert_eq!(cfg.monitor_socket_path(), PathBuf::from("d/monitor.sock"));
+        let slow = oms_core::MonitorPolicy {
+            unmonitored_cancel_us: 600_000_001,
+            ..Default::default()
+        };
+        let e = with(SIM, None, Some(slow)).unwrap_err();
+        assert!(e.contains("[core] policy.monitor: unmonitored_cancel_us must be between"), "{e}");
+        // The gate notices missing heartbeats and runs stage 2 only on a
+        // tick: with the gate the tick is at most 1 s (review 1 S3).
+        for (tick_ms, gate, ok) in [(1_000, true, true), (1_001, true, false), (60_000, false, true)] {
+            let mut cfg = parse(SIM, "", None, 1).unwrap();
+            cfg.runtime.tick_ms = tick_ms;
+            if !gate {
+                cfg.core.policy.monitor = None;
+            }
+            match cfg.validate() {
+                Ok(()) => assert!(ok, "tick_ms {tick_ms} was taken"),
+                Err(e) => {
+                    assert!(!ok, "tick_ms {tick_ms}: {e}");
+                    assert!(e.contains("[runtime] tick_ms must be at most 1000 with [core.policy.monitor]"), "{e}");
+                }
+            }
+        }
+
+        let because = "mainnet requires [core.policy.monitor]";
+        let bybit_margin = Some("isolated = false\naccount_mm_rate_max_bps = 5000");
+        for (venue, margin) in [(hyperliquid("mainnet"), Some("")), (bybit("mainnet", "mainnet_confirmed = true"), bybit_margin)] {
+            let e = with(&venue, margin, None).unwrap_err();
+            assert!(e.contains(because), "{venue}: {e}");
+            assert_eq!(with(&venue, margin, Some(oms_core::MonitorPolicy::default())), Ok(()), "{venue}");
+        }
+        assert_eq!(with(&hyperliquid("testnet"), None, None), Ok(()));
+        assert_eq!(with(&bybit("testnet", ""), None, None), Ok(()));
+        assert_eq!(with(SIM, None, None), Ok(()));
+        // An unknown key in the table.
+        let text = "data_dir = \"d\"\n[venue]\nkind = \"sim\"\nsocket = \"v.sock\"\n[core]\nversion = 1\n[core.policy.monitor]\nheartbeat_ms = 1\n";
+        assert!(toml::from_str::<NodeConfig>(text).is_err());
+        // The monitor socket on the admin socket's path.
+        for (what, path) in [("admin", "admin.sock"), ("trading", "oms.sock")] {
+            let mut cfg = parse(SIM, "", None, 1).unwrap();
+            cfg.api.monitor_socket = path.into();
+            let e = cfg.validate().unwrap_err();
+            assert!(e.contains("three different paths"), "{what}: {e}");
+        }
     }
 
     /// C-ALERT. `OMS_TEST_TELEGRAM_API` is taken only as an http URL on a

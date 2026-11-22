@@ -275,6 +275,30 @@ pub fn hold_condition(
         }
         // Never in `holds(None)`; covered by `strategy_link:<s>` (C-LIVE).
         HoldReason::StrategyLink => return None,
+        // A passing state: every start passes through it until the
+        // watcher's first fresh heartbeat (C-LIVE part 2).
+        HoldReason::Unmonitored => {
+            let reduce_only = reduce_only_clause(core);
+            let (reason, since, stage) = match (&core.monitor, &core.config.policy.monitor) {
+                (Some(m), Some(p)) => {
+                    let stage = if core.monitor_cancel_due(now) {
+                        "걸린 일반 주문 취소 중".to_string()
+                    } else {
+                        let due = m.since.saturating_add(p.unmonitored_cancel_us);
+                        format!("{}초 뒤 걸린 일반 주문 취소", due.saturating_sub(now).div_ceil(1_000_000))
+                    };
+                    (m.reason.clone(), kst_us(m.since), stage)
+                }
+                _ => (String::new(), String::new(), String::new()),
+            };
+            (
+                "hold:unmonitored".to_string(),
+                format!(
+                    "모니터링 상실({reason}, {since}). 포지션을 늘리는 일반 주문 거절, {reduce_only}. {stage}"
+                ),
+                Grace::Passing,
+            )
+        }
     };
     Some(c)
 }
@@ -771,6 +795,7 @@ mod tests {
             HoldReason::WatcherMismatch,
             HoldReason::VenueChange,
             HoldReason::StrategyLink,
+            HoldReason::Unmonitored,
         ];
         for h in &all {
             match h {
@@ -788,7 +813,8 @@ mod tests {
                 | HoldReason::KillLatched
                 | HoldReason::WatcherMismatch
                 | HoldReason::VenueChange
-                | HoldReason::StrategyLink => {}
+                | HoldReason::StrategyLink
+                | HoldReason::Unmonitored => {}
             }
         }
         all
@@ -882,6 +908,30 @@ mod tests {
         conds.iter().map(|c| c.key.as_str()).collect()
     }
 
+    /// C-LIVE part 2. With the gate, a start is unmonitored: the condition
+    /// `hold:unmonitored` waits the passing grace, says when the resting
+    /// plain orders go, then that they are going; a fresh heartbeat ends it.
+    #[test]
+    fn unmonitored_is_a_passing_condition_with_its_cancel_time() {
+        let mut c = Core::new(7);
+        c.handle(T0, &Input::Boot { binary: "test".into(), kill_marker: None }).unwrap();
+        let mut cfg = config(true);
+        cfg.policy.monitor = Some(MonitorPolicy::default());
+        c.handle(T0, &Input::Config(Box::new(cfg))).unwrap();
+        let got = conditions(&c, 2, T0 + 1_000_000, None, 30_000);
+        let u = got.iter().find(|g| g.key == "hold:unmonitored").expect("hold:unmonitored");
+        assert_eq!(u.grace_ms, 30_000);
+        assert!(u.text.starts_with("모니터링 상실(no heartbeat since the gate came on, "), "{}", u.text);
+        assert!(u.text.contains("포지션을 늘리는 일반 주문 거절, 감소 전용은 받음. 59초 뒤 걸린 일반 주문 취소"), "{}", u.text);
+        let got = conditions(&c, 2, T0 + 60_000_001, None, 30_000);
+        let u = got.iter().find(|g| g.key == "hold:unmonitored").unwrap();
+        assert!(u.text.contains(". 걸린 일반 주문 취소 중"), "{}", u.text);
+        let t = T0 + 61_000_000;
+        let checks = [("W1".to_string(), Some(t)), ("W2".to_string(), Some(t))].into_iter().collect();
+        c.handle(t, &Input::Watcher(WatcherInput::Heartbeat { watcher: "w".into(), checks })).unwrap();
+        assert!(conditions(&c, 3, t, None, 30_000).iter().all(|g| g.key != "hold:unmonitored"));
+    }
+
     /// C-LIVE. A lost strategy link is a condition of its own per
     /// strategy, at once, with the reason and the time; the text says what
     /// a reduce-only order gets, as the other plain-only holds. The
@@ -928,7 +978,7 @@ mod tests {
             (false, "일반 주문 거절, 증거금 정책이 없어 감소 전용도 거절", "감소 전용은 받음"),
         ] {
             let c = core(margin);
-            for h in [HoldReason::WatcherMismatch, HoldReason::VenueChange] {
+            for h in [HoldReason::WatcherMismatch, HoldReason::VenueChange, HoldReason::Unmonitored] {
                 let (_, text, _) = hold_condition(&h, &c, T0, None).unwrap();
                 assert!(text.contains(want) && !text.contains(not), "margin {margin}, {h:?}: {text}");
             }
@@ -952,7 +1002,8 @@ mod tests {
                 | HoldReason::Resync
                 | HoldReason::InDoubt
                 | HoldReason::VenueSetting(_)
-                | HoldReason::AccountMode => Some(Grace::Passing),
+                | HoldReason::AccountMode
+                | HoldReason::Unmonitored => Some(Grace::Passing),
             };
             assert_eq!(got.as_ref().map(|g| g.2), want, "{h:?}");
             if let Some((key, text, _)) = got {

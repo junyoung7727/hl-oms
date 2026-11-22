@@ -4,7 +4,7 @@
 
 ## 전송과 틀
 
-- Unix 도메인 소켓. 거래용 `<data_dir>/oms.sock`, 운영용 `<data_dir>/admin.sock`.
+- Unix 도메인 소켓. 거래용 `<data_dir>/oms.sock`, 운영용 `<data_dir>/admin.sock`, 모니터링 게이트(`[core.policy.monitor]`)가 있을 때만 워처용 `<data_dir>/monitor.sock`(0600, 노드 자신의 uid만, 연결 둘, `hello`·`ping`·`heartbeat`만, [C-LIVE](liveness.md) 2부).
 - 한 줄에 JSON 객체 하나, `\n`으로 끝난다. 한 줄 최대 64 KiB.
 - 요청에는 `id`가 있고 응답이 같은 `id`를 돌려준다. 한 연결에서 여러 요청을 연달아 보낼 수 있고 응답 순서는 요청 순서와 다를 수 있다.
 - 수량·가격·금액은 십진 문자열(`"0.001"`). JSON 숫자는 거부한다. 시각은 Unix epoch 기준 마이크로초 정수.
@@ -31,6 +31,7 @@
 | `clear_hold` | 운영 | `reason`(`kill` / `watcher_mismatch` / `venue_change`), `note` | `"cleared"`, 킬 마커가 설정돼 있고 `kill`이면 `"cleared; kill marker removed"` 또는 `"cleared; kill marker NOT removed (<io kind>): the next start latches again"`. 거절이면 `bad_request`와 코드(`not_held`, `note_required`, `kill_unconfirmed`, `kill_orders_open`, `venue_change_pending`)로 시작하는 문장([C-HOLD](holds.md)) |
 | `watcher_mismatch` | 운영(워처) | `check`(`W1`..`W4`), `detail`(비지 않음, 1024바이트 이하) | `"held"` / `"already held"`. 그 밖의 `check`, 빈 `detail`, 1024바이트보다 긴 `detail`은 `bad_request`, 기록 없음([C-HOLD](holds.md)) |
 | `watcher_kill` | 운영(워처) | `detail`(비지 않음, 1024바이트 이하) | `"latched"` / `"already latched"`, 래치가 내구화된 뒤. 빈 `detail`, 1024바이트보다 긴 `detail`은 `bad_request`, 기록 없음([C-HOLD](holds.md)) |
+| `heartbeat` | 모니터 | `watcher`(1~64자), `checks`(`W1`..`W9` → epoch 밀리초 또는 `null`, `W1`·`W2`는 필수) | `"recorded"`, 기록이 내구화된 뒤. 연결마다 1초에 둘을 넘으면 `overloaded`, 모양이 틀리거나 검사 시각이 기록 시각보다 1초 넘게 뒤면 `bad_request`, 모두 기록 없음. 다른 소켓에서는 `forbidden`. 모니터 소켓은 그 밖의 op를 `forbidden`, 전략을 단 `hello`를 `unauthorized`로 답한다([C-LIVE](liveness.md) 2부) |
 | `snapshot` | 운영 | — | 문자열 |
 
 예:
@@ -79,6 +80,7 @@
 |---|---|---|
 | 전략 | 거래 소켓에 접속한 프로세스(소유자 uid 또는 `allowed_uids`) + `hello`의 전략 이름 | 그 전략의 주문·취소·조회·구독 |
 | 운영자 | 운영 소켓에 접속한 프로세스(소유자 uid) | 전부 |
+| 워처(하트비트) | 모니터 소켓에 접속한 프로세스(소유자 uid) | `hello`, `ping`, `heartbeat`만 |
 | 열람자 | loopback HTTP | 읽기 |
 
 ## 운영 명령
@@ -105,7 +107,7 @@
 
 | 상황 | 동작 |
 |---|---|
-| 접속 수가 상한에 도달 | `unauthorized`(too many connections) 한 줄을 받고 닫힌다. 거래 소켓(64)과 운영 소켓(8)은 따로 센다 |
+| 접속 수가 상한에 도달 | `unauthorized`(too many connections) 한 줄을 받고 닫힌다. 거래 소켓(64), 운영 소켓(8), 모니터 소켓(2)은 따로 센다 |
 | `hello` 없이 10초 | `unauthorized` 한 줄을 받고 닫힌다 |
 | 줄이 64 KiB를 넘음 | `bad_request` 후 연결 종료 |
 | JSON이 아니거나 필드가 틀림 | `bad_request`. 연결은 유지 |
@@ -120,6 +122,7 @@
 `api::tests::wire_examples`, `e2e::a_strategy_sees_and_cancels_only_its_own_orders`, `e2e::external_activity_is_detected_and_needs_an_operator`,
 `e2e::vertical_slice_new_partial_fill_cancel_restart`(구독 순서), `e2e::overload_is_refused_at_the_door_and_cancels_still_work`.
 전략 연결 감시: `liveness::closing_the_last_connection_cancels_that_strategys_plain_orders_only`, `liveness::five_seconds_without_a_request_cancel_and_a_ping_keeps_it_alive`, `liveness::a_second_connection_keeps_the_strategy_alive`, `liveness::hello_after_a_loss_is_answered_after_the_restore_is_durable`.
+모니터 소켓: `api::tests::wire_example_of_the_heartbeat`, `monitor_node::heartbeats_over_monitor_sock_open_the_gate_and_other_ops_are_forbidden`, `monitor_node::without_the_gate_there_is_no_monitor_socket`.
 연결과 구독의 상한: `review_node::idle_trading_connections_do_not_lock_the_operator_out`, `a_departed_subscriber_gives_its_connection_slot_back`, `one_connection_cannot_register_thousands_of_subscriptions`.
 프로세스 수준에서 실행되는 운영 명령은 `ack_mismatch`, `cancel_all`, `halt`, `status`, `clear_reduce`, `rebase_day`다. 나머지(`resume`, `resolve_order`, `adjust_position`, `snapshot`)는 코어 시험으로만 확인했다. `omsctl`은 `status`, `clear-reduce`, `rebase-day`만 시험한다(`e2e::omsctl_clear_reduce_and_rebase_day_work_end_to_end`. 실행 파일이 부르는 함수 `oms_api::ctl::run`을 부른다).
 
