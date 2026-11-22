@@ -83,6 +83,17 @@ pub struct Core {
     /// booked. Purged with the fill keys. Not serialised while empty.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub seen_unclassified: BTreeMap<FillKey, Ts>,
+    /// The kill latch (C-HOLD). Not serialised while unset, as the two
+    /// holds below.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kill: Option<KillLatch>,
+    /// A mismatch the watcher confirmed (C-HOLD).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watcher_mismatch: Option<HoldNote>,
+    /// A position change the venue made, or an execution nobody could
+    /// classify (C-HOLD). Set by the events that record them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub venue_change: Option<HoldNote>,
 }
 
 impl Core {
@@ -117,6 +128,9 @@ impl Core {
             margin: MarginState::default(),
             venue_change_wait: BTreeMap::new(),
             seen_unclassified: BTreeMap::new(),
+            kill: None,
+            watcher_mismatch: None,
+            venue_change: None,
         }
     }
 
@@ -218,6 +232,17 @@ impl Core {
                 v.push(HoldReason::AccountMode);
             }
         }
+        // The holds of C-HOLD, after the others, so that the order of the
+        // earlier reasons stays as it was.
+        if self.kill.is_some() {
+            v.push(HoldReason::KillLatched);
+        }
+        if self.watcher_mismatch.is_some() {
+            v.push(HoldReason::WatcherMismatch);
+        }
+        if self.venue_change.is_some() {
+            v.push(HoldReason::VenueChange);
+        }
         v
     }
 
@@ -295,6 +320,23 @@ impl Core {
                     venue_oid: o.venue_oid.clone(),
                 })
             }
+            // The kill loop starts from the durable latch (C-HOLD): the one
+            // just set, or one replayed from the journal at a boot, so that
+            // every process confirms zero open orders again.
+            Event::HoldSet {
+                hold: HoldKind::Kill, ..
+            }
+            | Event::Booted { .. } => {
+                let k = self.kill.as_ref()?;
+                Some(VenueCommand::Kill {
+                    since: k.since,
+                    source: k.source,
+                    note: k.note.clone(),
+                })
+            }
+            Event::HoldCleared {
+                hold: HoldKind::Kill, ..
+            } => Some(VenueCommand::KillStop),
             _ => None,
         }
     }
@@ -388,6 +430,11 @@ impl Core {
                 self.boot = *boot;
                 self.link.up = false;
                 self.fill_floor = (*fill_floor).max(self.fill_floor);
+                // A kill loop's confirmation holds for its own process only.
+                if let Some(k) = self.kill.as_mut() {
+                    k.confirmed_at = None;
+                    k.outcome = None;
+                }
             }
             Event::LinkChanged { up, session, .. } => {
                 self.link.up = *up;
@@ -740,6 +787,10 @@ impl Core {
                     },
                 );
                 self.next_mismatch_id += 1;
+                // The overflow path of a venue change raises only this.
+                if *kind == MismatchKind::VenuePositionChange {
+                    self.latch_venue_change(at, format!("{subject}: {detail}"));
+                }
             }
             Event::MismatchAcked { id, note } => {
                 let m = self
@@ -927,9 +978,26 @@ impl Core {
                 self.venue_change_wait.insert(change.instrument.clone(), at);
                 self.last_fill_at = at;
                 self.stats.venue_changes += 1;
+                self.latch_venue_change(
+                    at,
+                    format!(
+                        "the venue changed the position of {} by {} ({:?}, key {})",
+                        change.instrument, change.qty, change.kind, change.key
+                    ),
+                );
             }
-            Event::UnclassifiedExecutionNoted { key, venue_ts, .. } => {
+            Event::UnclassifiedExecutionNoted {
+                key,
+                instrument,
+                exec_type,
+                detail,
+                venue_ts,
+            } => {
                 self.seen_unclassified.insert(key.clone(), *venue_ts);
+                self.latch_venue_change(
+                    at,
+                    format!("execution {key} on {instrument} of a kind the gateway does not know: {exec_type}; {detail}"),
+                );
             }
             Event::VenueChangeSettled { instrument } => {
                 self.venue_change_wait.remove(instrument);
@@ -942,8 +1010,51 @@ impl Core {
                     last_queried_at: *queried_at,
                 });
             }
+            Event::HoldSet { hold, source, note } => match hold {
+                HoldKind::Kill => {
+                    self.kill = Some(KillLatch {
+                        since: at,
+                        source: *source,
+                        note: note.clone(),
+                        confirmed_at: None,
+                        outcome: None,
+                    });
+                }
+                HoldKind::WatcherMismatch => {
+                    self.watcher_mismatch = Some(HoldNote {
+                        since: at,
+                        source: *source,
+                        note: note.clone(),
+                    });
+                }
+                // Derived from the events that record the change; no
+                // `hold_set` sets it.
+                HoldKind::VenueChange => return fault("hold_set for a venue change"),
+            },
+            Event::HoldCleared { hold, .. } => match hold {
+                HoldKind::Kill => self.kill = None,
+                HoldKind::WatcherMismatch => self.watcher_mismatch = None,
+                HoldKind::VenueChange => self.venue_change = None,
+            },
+            Event::KillLoopEnded { outcome, .. } => {
+                if let Some(k) = self.kill.as_mut() {
+                    k.confirmed_at = Some(at);
+                    k.outcome = Some(*outcome);
+                }
+            }
         }
         Ok(())
+    }
+
+    /// Sets the venue-change hold unless it is set: the first note stays.
+    fn latch_venue_change(&mut self, at: Ts, note: String) {
+        if self.venue_change.is_none() {
+            self.venue_change = Some(HoldNote {
+                since: at,
+                source: HoldSource::Venue,
+                note,
+            });
+        }
     }
 
     // ---- invariants -------------------------------------------------------

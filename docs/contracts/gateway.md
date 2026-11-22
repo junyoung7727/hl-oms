@@ -6,14 +6,14 @@
 
 ## trait과 구동기
 
-게이트웨이는 `VenueGateway`를 구현한다: `send_order`, `send_cancel`, `query`, `spawn_tasks`(스트림 등 상시 작업, 한 번), 상수 `QUERY_CONCURRENCY`.
-`venue::start`가 상시 작업 → 명령 루프 → 조회 루프 순으로 시작한다. 명령과 조회는 하나씩 별도 작업으로 돌고, 동시에 도는 수는 명령 `max_concurrent`(진행 중 전송 상한 + 16), 조회 `QUERY_CONCURRENCY`(가상 거래소 8, Hyperliquid 4)로 묶인다. 넘치는 것은 기다리고 버리지 않는다(V-GW-SEAM-1).
+게이트웨이는 `VenueGateway`를 구현한다: `send_order`, `send_cancel`, `query`, `kill`(킬 명령, 곧바로 돌아온다, [C-HOLD](holds.md)), `spawn_tasks`(스트림 등 상시 작업, 한 번), 상수 `QUERY_CONCURRENCY`.
+`venue::start`가 상시 작업 → 명령 루프 → 조회 루프 순으로 시작한다. 명령과 조회는 하나씩 별도 작업으로 돌고, 동시에 도는 수는 명령 `max_concurrent`(진행 중 전송 상한 + 16), 조회 `QUERY_CONCURRENCY`(가상 거래소 8, Hyperliquid 4)로 묶인다. 넘치는 것은 기다리고 버리지 않는다(V-GW-SEAM-1). `Kill`과 `KillStop`은 허가를 기다리지 않고 곧바로 `kill`에 넘긴다(걸려 있는 전송이 킬을 늦추지 않는다).
 
 ## 채널
 
 | 방향 | 채널 | 내용 | 상한 |
 |---|---|---|---|
-| 커밋 단계 → 게이트웨이 | `commands` | `SendOrder`, `SendCancel` | 진행 중 전송 상한 + 열린 주문 상한 + 64 |
+| 커밋 단계 → 게이트웨이 | `commands` | `SendOrder`, `SendCancel`, `Kill { since, source, note }`(킬 래치가 내구화된 뒤, 래치 아래의 시작마다 한 번 더), `KillStop`(`clear_hold kill`이 내구화된 뒤) | 진행 중 전송 상한 + 열린 주문 상한 + 64 |
 | 대조기 → 게이트웨이 | `queries` | 상태, 체결, 열린 주문, 포지션 조회 | 256 |
 | 게이트웨이 → 코어 | venue 입력 큐 | `VenueInput` | 4096. 가득 차면 게이트웨이가 기다린다 |
 
@@ -34,6 +34,7 @@
 | G-11 | 최종 누적 수량(`cum`)은 거래소가 신뢰할 수 있게 알려 줄 때만 채운다. 아니면 비운다 | 예약을 너무 일찍 푼다 |
 | G-12 | 비밀정보(서명 키)를 입력·로그·저널에 싣지 않는다 | 키 노출 |
 | G-13 | 문서에 없는 응답에서 결론을 내지 않는다. 주문 응답이면 `Unknown`, 상태 이름이면 전달하지 않고 오류로 남긴다 | 놓인 주문을 없다고 보거나 열린 주문을 닫는다 |
+| G-14 | `Kill` 하나에 킬 루프가 끝날 때 `KillLoopEnded` 하나(`confirmed`: 0건 확인, U18b2의 Bybit). 일괄 취소가 없는 게이트웨이(가상 거래소, Hyperliquid, U18b2 전의 Bybit)는 곧바로 `KillLoopEnded { outcome: Unsupported, detail: "this gateway has no cancel-all; cancel with omsctl cancel-all" }`와 `warn`. `KillStop`은 루프를 끝낸다(루프가 없으면 무시). `kill`은 곧바로 돌아오고 명령 허가를 쓰지 않는다([C-HOLD](holds.md)) | 래치를 풀 수 없다(`kill_unconfirmed`), 또는 확인 없이 풀린다 |
 
 코어는 G-1, G-5, G-6의 위반을 시간 초과와 재확인으로 견딘다. G-2, G-3, G-7, G-8, G-13은 코어가 대신할 수 없다.
 

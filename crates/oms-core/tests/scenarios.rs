@@ -266,7 +266,7 @@ fn the_duplicate_answer_survives_restart() {
     restarted.core = h.rebuilt();
     restarted.shadow = restarted.core.clone();
     restarted.now = h.now;
-    restarted.inp(Input::Boot { binary: "test".into() });
+    restarted.inp(Input::Boot { binary: "test".into(), kill_marker: None });
     assert_eq!(restarted.new_order(r), NewOrderReply::Duplicate {
         order_id,
         phase: Phase::Working,
@@ -1110,7 +1110,7 @@ fn restart_puts_outstanding_sends_in_doubt_and_never_resends() {
     r.shadow = r.core.clone();
     r.now = h.now;
     r.session = h.session;
-    let out = r.inp(Input::Boot { binary: "test".into() });
+    let out = r.inp(Input::Boot { binary: "test".into(), kill_marker: None });
     assert!(out.commands.is_empty(), "boot must not send anything");
     assert_eq!(r.order(a).doubt.as_ref().map(|d| d.reason), Some(DoubtReason::Restart));
     assert_eq!(r.order(b).phase, Phase::Working);
@@ -1336,7 +1336,7 @@ fn reduce_only_order_is_rejected_by_every_block_all_hold() {
     // No configuration: there is no strategy and no margin policy either, so
     // the order is refused for more than one reason. The hold is among them.
     let mut h = H::new();
-    h.inp(Input::Boot { binary: "test".into() });
+    h.inp(Input::Boot { binary: "test".into(), kill_marker: None });
     let r = h.reduce_only_req("a", "k9", Side::Sell, "1", "100");
     match h.new_order(r) {
         NewOrderReply::Rejected { reasons } => {
@@ -1558,7 +1558,7 @@ fn configuration_changes_are_validated_against_existing_exposure() {
 #[test]
 fn no_configuration_means_nothing_is_accepted() {
     let mut h = H::new();
-    h.inp(Input::Boot { binary: "test".into() });
+    h.inp(Input::Boot { binary: "test".into(), kill_marker: None });
     let r = h.req("a", "k1", Side::Buy, "1", "100");
     let NewOrderReply::Rejected { reasons } = h.new_order(r) else {
         panic!()

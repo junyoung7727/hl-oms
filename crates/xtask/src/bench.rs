@@ -180,7 +180,7 @@ pub fn core_bench_case(orders: u64, margin: bool) -> Result<CoreBenchCase, Strin
         let out = core.handle(*at, &input).expect("core fault");
         (out, t.elapsed().as_nanos() as u64)
     };
-    go(&mut core, &mut at, Input::Boot { binary: "bench".into() });
+    go(&mut core, &mut at, Input::Boot { binary: "bench".into(), kill_marker: None });
     go(&mut core, &mut at, Input::Config(Box::new(bench_config(margin))));
     let session = 1;
     go(&mut core, &mut at, Input::Venue(VenueInput::Link { up: true, session, reason: String::new() }));

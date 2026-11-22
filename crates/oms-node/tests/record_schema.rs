@@ -83,6 +83,7 @@ impl Run {
 fn schema_1_history(run: &mut Run) {
     run.input(Input::Boot {
         binary: "test".into(),
+        kill_marker: None,
     });
     run.input(Input::Config(Box::new(config())));
     run.venue(VenueInput::Link {
@@ -278,6 +279,7 @@ fn margin_reports_with_and_without_account_mm_recover_to_the_live_state() {
         });
         run.input(Input::Boot {
             binary: "test".into(),
+            kill_marker: None,
         });
         run.input(Input::Config(Box::new(cfg)));
         run.venue(VenueInput::Link {
@@ -319,4 +321,143 @@ fn margin_reports_with_and_without_account_mm_recover_to_the_live_state() {
         assert_eq!(report.records, records.len() as u64);
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// U18b1. The kill marker in `Boot`, the watcher's inputs, `hold_set`,
+/// `hold_cleared`, `kill_loop_ended` and the three holds of C-HOLD in the
+/// state are optional fields and new kinds, not a schema rise: a journal
+/// with them recovers to the live state and `verify --re-decide` passes,
+/// and a state without them keeps the bytes it had.
+#[test]
+fn kill_holds_liveness_and_heartbeats_recover_to_the_live_state() {
+    assert_eq!(RECORD_SCHEMA, 2, "no record schema rise for new kinds and optional fields");
+    let dir = data_dir("holds");
+    let mut run = Run {
+        core: Core::new(INSTANCE),
+        at: 1_000 * SEC,
+        records: Vec::new(),
+        next_seq: 1,
+    };
+    let plain = {
+        let mut c = Core::new(INSTANCE);
+        c.handle(SEC, &Input::Boot { binary: "test".into(), kill_marker: None }).unwrap();
+        serde_json::to_string(&c).unwrap()
+    };
+    for field in ["\"kill\"", "\"watcher_mismatch\"", "\"venue_change\"", "kill_marker"] {
+        assert!(!plain.contains(field), "{field} written while unset: {plain}");
+    }
+    run.input(Input::Boot {
+        binary: "test".into(),
+        kill_marker: Some("marker: W5".into()),
+    });
+    run.input(Input::Config(Box::new(config())));
+    run.venue(VenueInput::Link {
+        up: true,
+        session: 1,
+        reason: "test".into(),
+    });
+    run.venue(VenueInput::KillLoopEnded {
+        outcome: KillOutcome::Unsupported,
+        rounds: 0,
+        cancel_all_calls: 0,
+        detail: "no cancel-all".into(),
+    });
+    run.input(Input::Watcher(WatcherInput::Mismatch {
+        check: WatcherCheck::W1,
+        detail: "fills differ".into(),
+    }));
+    let t = run.at;
+    run.venue(VenueInput::UnclassifiedExecution {
+        key: fkey("e1"),
+        instrument: iid("X"),
+        exec_type: "Odd".into(),
+        detail: "d".into(),
+        venue_ts: t,
+    });
+    for reason in [HoldKind::Kill, HoldKind::WatcherMismatch, HoldKind::VenueChange] {
+        let out = run.input(Input::Operator(OperatorCmd::ClearHold {
+            reason,
+            note: "checked".into(),
+        }));
+        assert_eq!(out.reply, Some(Reply::Operator(Ok("cleared".into()))), "{reason:?}");
+    }
+    // A second latch, left set, so the recovered state holds one.
+    run.input(Input::Watcher(WatcherInput::Kill { detail: "W5 again".into() }));
+    assert!(run.core.kill.is_some());
+    let records = run.take();
+    let names: Vec<&str> = records.iter().flat_map(|r| r.events.iter().map(Event::name)).collect();
+    for kind in ["hold_set", "hold_cleared", "kill_loop_ended"] {
+        assert!(names.contains(&kind), "{kind}: {names:?}");
+    }
+    write(&dir, RECORD_SCHEMA, &records);
+    let recovered = oms_node::recovery::recover(&dir, 1 << 30, "test").unwrap();
+    assert_eq!(recovered.core.digest(), run.core.digest());
+    assert_eq!(recovered.core, run.core);
+    drop(recovered);
+    let report = oms_node::recovery::verify(&dir, true).unwrap();
+    assert_eq!(report.records, records.len() as u64);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// U18b1, review S3. A snapshot written by a build before U18b (state
+/// schema 1) holds no `venue_change`, although a full replay of the same
+/// journal latches it from the venue change. This build reads state schema
+/// 2 only: the old snapshot is skipped with its reason and the journal is
+/// replayed from the start, so the hold does not depend on whether a
+/// snapshot happened to exist.
+#[test]
+fn a_snapshot_of_state_schema_1_is_skipped_and_the_journal_replays_the_venue_change() {
+    assert_eq!(oms_node::pipeline::STATE_SCHEMA, 2);
+    let dir = data_dir("state-1");
+    let mut run = Run {
+        core: Core::new(INSTANCE),
+        at: 1_000 * SEC,
+        records: Vec::new(),
+        next_seq: 1,
+    };
+    run.input(Input::Boot { binary: "old".into(), kill_marker: None });
+    run.input(Input::Config(Box::new(config())));
+    run.venue(VenueInput::Link { up: true, session: 1, reason: "test".into() });
+    let t = run.at;
+    run.venue(VenueInput::UnclassifiedExecution {
+        key: fkey("e1"),
+        instrument: iid("X"),
+        exec_type: "Odd".into(),
+        detail: "d".into(),
+        venue_ts: t,
+    });
+    assert!(run.core.venue_change.is_some());
+    let records = run.take();
+    write(&dir, RECORD_SCHEMA, &records);
+
+    // What the old build saved after the change: the same state without
+    // the hold, with a digest that matches it.
+    let mut old = run.core.clone();
+    old.venue_change = None;
+    let payload = serde_json::to_vec(&oms_node::pipeline::SnapshotState { core: old.clone(), last_at: run.at }).unwrap();
+    let info = oms_journal::SnapshotInfo {
+        format: 0,
+        state_schema: 1,
+        seq: records.last().unwrap().seq,
+        len: 0,
+        crc32: 0,
+        created_at_us: 1,
+        writer: "old".into(),
+        state_digest: old.digest(),
+    };
+    oms_journal::write_snapshot(&dir, info, &payload).unwrap();
+
+    let recovered = oms_node::recovery::recover(&dir, 1 << 30, "test").unwrap();
+    assert_eq!(recovered.report.snapshot_seq, None);
+    assert_eq!(recovered.report.snapshots_skipped.len(), 1);
+    assert!(
+        recovered.report.snapshots_skipped[0].1.contains("state schema 1 (this build reads 2)"),
+        "{:?}",
+        recovered.report.snapshots_skipped
+    );
+    assert_eq!(recovered.report.records_replayed, records.len() as u64);
+    assert!(recovered.core.venue_change.is_some(), "the hold of the full replay");
+    assert_eq!(recovered.core, run.core);
+    drop(recovered);
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -110,6 +110,7 @@ fn h_at(start: u64) -> H {
     h.now = start;
     h.inp(Input::Boot {
         binary: "test".into(),
+        kill_marker: None,
     });
     h.inp(Input::Config(Box::new(btc_config())));
     h.link_up_and_sync();

@@ -23,6 +23,21 @@ pub struct NodeInfo {
     pub wire_id_form: WireIdForm,
     pub data_dir: String,
     pub recovery: serde_json::Value,
+    pub kill_marker: KillMarkerInfo,
+}
+
+/// The kill marker of this process (C-HOLD): process state, read once at
+/// the start.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct KillMarkerInfo {
+    pub configured: bool,
+    pub path: Option<String>,
+    /// Something was at the path, or the path could not be examined, when
+    /// this process started.
+    pub present_at_boot: bool,
+    /// The path the admin handler removes after a durable clear.
+    #[serde(skip)]
+    pub file: Option<std::path::PathBuf>,
 }
 
 pub fn status(ctx: &ApiCtx, strategy: Option<&StrategyId>) -> serde_json::Value {
@@ -106,6 +121,10 @@ pub fn status(ctx: &ApiCtx, strategy: Option<&StrategyId>) -> serde_json::Value 
             "operator_halt_account": core.halt_account,
             "operator_halt_strategy": core.halt_strategy,
             "storage_low": core.storage_low,
+            // The holds of C-HOLD; null when not held.
+            "kill": core.kill,
+            "watcher_mismatch": core.watcher_mismatch,
+            "venue_change": core.venue_change,
             "fill_floor": core.fill_floor,
             "margin": margin,
             "stats": core.stats,

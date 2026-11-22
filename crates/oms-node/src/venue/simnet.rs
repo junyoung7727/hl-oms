@@ -528,6 +528,10 @@ impl VenueGateway for Gateway {
         Gateway::query(self, q)
     }
 
+    fn kill(&self, cmd: VenueCommand) {
+        super::kill_unsupported(&self.input, "sim", cmd);
+    }
+
     fn spawn_tasks(self: &Arc<Self>, boot: u32) {
         tokio::spawn(self.clone().stream_loop(boot, self.requests.socket.clone()));
     }

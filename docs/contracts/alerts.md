@@ -28,6 +28,9 @@
 | `hold:venue_setting:<i>` | `VenueSetting(i)`(거래소가 말한 값과 정책) | 설정대로 | 30초 |
 | `hold:account_mode` | `AccountMode`(거래소가 말한 모드) | 허용된 모드 | 30초 |
 | `hold:no_config` | `NoConfig` | 설정 활성 | 30초 |
+| `hold:kill_latched` | `KillLatched`(출처, 시각, 메모, 킬 루프의 확인 여부·`unsupported`. `unsupported`이면 운영자가 `cancel-all`로 취소해야 하고 장부가 빌 때까지 해제가 거절된다는 문장, [C-HOLD](holds.md)) | `hold_cleared{kill}`(운영자 `clear-hold`) | 0 |
+| `hold:watcher_mismatch` | `WatcherMismatch`(검사 이름, 시각, 내용. 증거금 정책이 있으면 `감소 전용은 받음`, 없으면 `증거금 정책이 없어 감소 전용도 거절`) | `hold_cleared{watcher_mismatch}` | 0 |
+| `hold:venue_change` | `VenueChange`(시각, 처음의 내용. 감소 전용 문장은 `hold:watcher_mismatch`와 같다). 분류표에 없는 체결 하나는 이 조건과 `mismatch:unclassified_execution` 두 개를 함께 시작한다. 둘은 따로 해소된다 | `hold_cleared{venue_change}` | 0 |
 | `gateway_block` | 게이트웨이 막힘 `Some(이유)`(키 거부, IP 차단, 계좌, 확인 못 함, 시계) | `None` | 30초 |
 
 - 유예 30초는 `alert.grace_ms`다. 조건은 평가마다 계속 있어야 하고, 유예가 지난 평가(`now − 처음 본 시각 ≥ grace_ms`)에서 시작이 나간다. 한 번이라도 없으면 처음부터 다시 센다. 유예 안에 끝난 조건은 시작도 해소도 보내지 않는다.

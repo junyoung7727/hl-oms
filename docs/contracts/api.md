@@ -28,6 +28,9 @@
 | `resolve_order` | 운영 | `order_id`, `note` | 문자열 |
 | `adjust_position` | 운영 | `instrument`, `strategy`(없으면 미귀속), `delta`, `note` | 문자열 |
 | `clear_reduce`, `rebase_day` | 운영 | `note` | 문자열. 거절이면 `bad_request`와 사유 코드로 시작하는 문장([C-MARGIN](margin.md)) |
+| `clear_hold` | 운영 | `reason`(`kill` / `watcher_mismatch` / `venue_change`), `note` | `"cleared"`, 킬 마커가 설정돼 있고 `kill`이면 `"cleared; kill marker removed"` 또는 `"cleared; kill marker NOT removed (<io kind>): the next start latches again"`. 거절이면 `bad_request`와 코드(`not_held`, `note_required`, `kill_unconfirmed`, `kill_orders_open`, `venue_change_pending`)로 시작하는 문장([C-HOLD](holds.md)) |
+| `watcher_mismatch` | 운영(워처) | `check`(`W1`..`W4`), `detail`(비지 않음, 1024바이트 이하) | `"held"` / `"already held"`. 그 밖의 `check`, 빈 `detail`, 1024바이트보다 긴 `detail`은 `bad_request`, 기록 없음([C-HOLD](holds.md)) |
+| `watcher_kill` | 운영(워처) | `detail`(비지 않음, 1024바이트 이하) | `"latched"` / `"already latched"`, 래치가 내구화된 뒤. 빈 `detail`, 1024바이트보다 긴 `detail`은 `bad_request`, 기록 없음([C-HOLD](holds.md)) |
 | `snapshot` | 운영 | — | 문자열 |
 
 예:
@@ -92,6 +95,8 @@
 | `adjust_position` | `position_adjusted` | 계좌와 지정 장부의 포지션을 증감 | 멱등이 아니다. 두 번 보내면 두 번 적용된다 |
 | `clear_reduce` | `day_base_set(operator)`, `reducing_cleared` | 감소 전용 상태를 끝내고 현재 계좌 가치를 기준 금액으로 삼는다 | 신선한 증거금 보고와 사유가 필요하다. 그 뒤 5 %를 더 잃으면 다시 걸린다([C-MARGIN](margin.md)) |
 | `rebase_day` | `day_base_set(operator)` | 현재 계좌 가치를 기준 금액으로 삼는다 | 감소 전용 상태는 그대로다. 입금 뒤에 하지 않으면 그만큼의 손실이 가려진다 |
+| `clear_hold` | `hold_cleared` | 킬 래치, 워처 불일치, 거래소 변경 가운데 하나를 푼다. 킬이면 `KillStop`이 게이트웨이로, 그다음 노드가 킬 마커를 지운다 | 강제 옵션이 없다. 킬은 이 프로세스의 게이트웨이가 답한 뒤에만, 그리고 장부에 미체결이 없을 때만(`kill_orders_open`), 거래소 변경은 변경 뒤의 포지션을 읽은 뒤에만. 불일치 항목은 따로 `ack_mismatch`([C-HOLD](holds.md)) |
+| `watcher_mismatch`, `watcher_kill` | `hold_set` | 워처가 보낸다. 일반 주문만(불일치) 또는 모든 주문(킬)을 거절하는 보류를 건다. 킬이면 `Kill`이 게이트웨이로 | 걸려 있으면 기록 없이 `already …`. 첫 메모가 남는다 |
 | `snapshot` | 없음 | 다음 커밋에서 스냅샷 요청 | 기록되지 않는다 |
 
 참조 가격(`ref_price_updated`)은 운영 명령이 아니라 게이트웨이의 입력이다.

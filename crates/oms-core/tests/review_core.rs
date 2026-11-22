@@ -254,7 +254,7 @@ fn fuzz_input(r: &mut Rng, core: &Core, now: Ts, unique_oids: bool) -> Input {
                 .unwrap_or(1);
             Input::Operator(OperatorCmd::AckMismatch { id, note: "f".into() })
         }
-        _ if r.chance(30) => Input::Boot { binary: "fuzz".into() },
+        _ if r.chance(30) => Input::Boot { binary: "fuzz".into(), kill_marker: None },
         _ => Input::Tick,
     }
 }
@@ -286,7 +286,7 @@ fn fuzz_run(seed: u64, steps: usize, unique_oids: bool) -> Result<(), String> {
     let mut bounds_ok = true;
     let mut booked: std::collections::BTreeSet<FillKey> = Default::default();
     let boot = [
-        Input::Boot { binary: "t".into() },
+        Input::Boot { binary: "t".into(), kill_marker: None },
         Input::Config(Box::new(cfg)),
         Input::Venue(VenueInput::Link {
             up: true,

@@ -319,6 +319,33 @@ fn submit(
     input: Input,
     permit: tokio::sync::OwnedSemaphorePermit,
 ) -> Option<Response> {
+    submit_then(s, ctx, lane, id, input, permit, |r| r)
+}
+
+/// Why a watcher input's `detail` is refused before the core sees it, if it
+/// is: empty, or longer than `WATCHER_DETAIL_MAX` (C-HOLD). The core refuses
+/// both again.
+fn watcher_detail_refusal(detail: &str) -> Option<String> {
+    if detail.trim().is_empty() {
+        return Some("the detail is empty; nothing was recorded".into());
+    }
+    if detail.len() > WATCHER_DETAIL_MAX {
+        return Some(format!("the detail is longer than {WATCHER_DETAIL_MAX} bytes; nothing was recorded"));
+    }
+    None
+}
+
+/// `submit`, with `after` applied to an operator reply once its record is
+/// durable, before the answer leaves.
+fn submit_then(
+    s: &Session,
+    ctx: &Arc<ApiCtx>,
+    lane: Lane,
+    id: u64,
+    input: Input,
+    permit: tokio::sync::OwnedSemaphorePermit,
+    after: impl FnOnce(Result<String, String>) -> Result<String, String> + Send + 'static,
+) -> Option<Response> {
     let (msg, rx) = CoreMsg::with_reply(input);
     if ctx.shared.queues.try_push(lane, msg).is_err() {
         ctx.refused_overload.fetch_add(1, Ordering::Relaxed);
@@ -334,8 +361,10 @@ fn submit(
         let resp = match rx.await {
             Ok(Reply::NewOrder(r)) => Response::ok(id, r),
             Ok(Reply::Cancel(r)) => Response::ok(id, r),
-            Ok(Reply::Operator(Ok(text))) => Response::ok(id, text),
-            Ok(Reply::Operator(Err(text))) => Response::err(id, ErrorCode::BadRequest, text),
+            Ok(Reply::Operator(r)) => match after(r) {
+                Ok(text) => Response::ok(id, text),
+                Err(text) => Response::err(id, ErrorCode::BadRequest, text),
+            },
             Ok(Reply::Config(_)) => Response::err(id, ErrorCode::Internal, "unexpected reply"),
             // The reply channel was dropped: the process is stopping before
             // the outcome could be confirmed. The request may or may not be
@@ -561,9 +590,48 @@ async fn dispatch(
             let input = Input::Operator(OperatorCmd::RebaseDay { note });
             submit(s, ctx, Lane::Control, id, input, permit)
         }),
+        Op::ClearHold { reason, note } => operator_only(s).or_else(|| {
+            let input = Input::Operator(OperatorCmd::ClearHold { reason, note });
+            // The marker goes only after the clear is durable: a crash in
+            // between latches the next start again (C-HOLD).
+            let marker = ctx.info.kill_marker.file.clone().filter(|_| reason == HoldKind::Kill);
+            submit_then(s, ctx, Lane::Control, id, input, permit, move |r| match (r, marker) {
+                (Ok(text), Some(path)) => Ok(format!("{text}; {}", remove_kill_marker(&path))),
+                (r, _) => r,
+            })
+        }),
+        Op::WatcherMismatch { check, detail } => operator_only(s).or_else(|| {
+            if let Some(why) = watcher_detail_refusal(&detail) {
+                return Some(Response::err(id, ErrorCode::BadRequest, why));
+            }
+            let input = Input::Watcher(WatcherInput::Mismatch { check, detail });
+            submit(s, ctx, Lane::Control, id, input, permit)
+        }),
+        Op::WatcherKill { detail } => operator_only(s).or_else(|| {
+            if let Some(why) = watcher_detail_refusal(&detail) {
+                return Some(Response::err(id, ErrorCode::BadRequest, why));
+            }
+            // Answered after the latch is durable: the watcher then knows
+            // that the OMS sends no new order (C-HOLD).
+            let input = Input::Watcher(WatcherInput::Kill { detail });
+            submit(s, ctx, Lane::Control, id, input, permit)
+        }),
         Op::Snapshot => operator_only(s).or_else(|| {
             ctx.shared.snapshot_requested.store(true, Ordering::SeqCst);
             Some(Response::ok(id, "snapshot requested"))
         }),
+    }
+}
+
+/// Removes the kill marker after a durable `clear_hold kill` (C-HOLD) and
+/// says how that went. A marker that is not there counts as removed.
+fn remove_kill_marker(path: &Path) -> String {
+    match std::fs::remove_file(path) {
+        Ok(()) => "kill marker removed".to_string(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => "kill marker removed".to_string(),
+        Err(e) => {
+            warn!("the kill marker could not be removed: the next start latches again", "path": path.display().to_string(), "error": e.to_string());
+            format!("kill marker NOT removed ({:?}): the next start latches again", e.kind())
+        }
     }
 }

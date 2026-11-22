@@ -796,6 +796,12 @@ impl VenueGateway for Gateway {
         Gateway::query(self, q)
     }
 
+    // U18b2 replaces this with the kill loop (C-KILL); until then no
+    // Bybit build confirms a kill without one.
+    fn kill(&self, cmd: VenueCommand) {
+        crate::venue::kill_unsupported(&self.input, "bybit", cmd);
+    }
+
     fn spawn_tasks(self: &Arc<Self>, boot: u32) {
         tokio::spawn(self.clone().checks_loop());
         tokio::spawn(self.clone().stream_loop(boot));

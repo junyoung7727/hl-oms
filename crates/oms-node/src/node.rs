@@ -5,8 +5,9 @@
 //! 1. Recover the state from snapshot and journal (no sends are possible).
 //! 2. Start the direct alerts, if `[alert]` is configured (C-ALERT), then
 //!    the core thread and the commit stage.
-//! 3. Submit `Boot`, then the configuration from the file. Wait until both
-//!    are durable. A configuration the core refuses stops the process.
+//! 3. Look at the kill marker, submit `Boot` with what was found there, then
+//!    the configuration from the file. Wait until both are durable. A
+//!    configuration the core refuses stops the process.
 //! 4. Start the venue gateway, the reconciler, the timer and the storage
 //!    monitor. The link is down until the gateway reports it up, and new
 //!    orders are held until reconciliation has confirmed the state.
@@ -28,12 +29,14 @@ use crate::pipeline::{self, PipelineConfig, STATE_SCHEMA, Shared, SnapshotState}
 use crate::published::Published;
 use crate::queues::{CoreMsg, InputQueues, Lane};
 use crate::server::{self, ApiCtx};
-use crate::status::NodeInfo;
+use crate::status::{KillMarkerInfo, NodeInfo};
 use crate::util::{Fatal, wall_us};
 use crate::venue::{self, GatewayPorts, VenueGateway, VenueInputTx};
 use crate::{error, info, recovery, warn};
 use oms_core::*;
 use oms_journal::SnapshotInfo;
+use std::io::Read;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::time::Duration;
@@ -116,10 +119,31 @@ pub fn run(cfg: NodeConfig) -> i32 {
         },
     );
 
+    // The kill marker is read once, before the boot record (C-HOLD).
+    let kill_marker = match &cfg.kill {
+        Some(k) => {
+            let found = read_kill_marker(&k.marker);
+            if let Some(text) = &found {
+                warn!("kill marker present: the kill switch latches", "path": k.marker.display().to_string(), "marker": text);
+            }
+            found
+        }
+        None => {
+            warn!("no [kill] section: no kill marker is looked for");
+            None
+        }
+    };
+    let marker_info = KillMarkerInfo {
+        configured: cfg.kill.is_some(),
+        path: cfg.kill.as_ref().map(|k| k.marker.display().to_string()),
+        present_at_boot: kill_marker.is_some(),
+        file: cfg.kill.as_ref().map(|k| k.marker.clone()),
+    };
+
     let code = runtime.block_on(async {
         // Step 3: boot and configuration, in that order, both durable.
         if queues
-            .try_push(Lane::Control, CoreMsg::new(Input::Boot { binary: writer_name() }))
+            .try_push(Lane::Control, CoreMsg::new(Input::Boot { binary: writer_name(), kill_marker }))
             .is_err()
         {
             return 3;
@@ -273,6 +297,7 @@ pub fn run(cfg: NodeConfig) -> i32 {
             wire_id_form,
             data_dir: cfg.data_dir.display().to_string(),
             recovery: serde_json::to_value(&report).unwrap_or_default(),
+            kill_marker: marker_info,
         };
         let own_uid = rustix::process::getuid().as_raw();
         let ctx = Arc::new(ApiCtx::new(
@@ -394,6 +419,42 @@ pub fn run(cfg: NodeConfig) -> i32 {
     code
 }
 
+/// Bytes of the marker's content that go into the boot record. Judgment,
+/// no model: enough for the watcher's reason, small in the journal.
+const MARKER_TEXT_BYTES: u64 = 512;
+
+/// What is at the kill marker path, as `Boot.kill_marker` (C-HOLD): `None`
+/// only when nothing is there. Anything there, of any file type, latches;
+/// so does a path that cannot be examined, which cannot prove that the
+/// watcher did not kill.
+pub fn read_kill_marker(path: &Path) -> Option<String> {
+    let meta = match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => return Some(format!("marker unreadable: {:?}", e.kind())),
+    };
+    if !meta.file_type().is_file() {
+        let kind = if meta.file_type().is_symlink() {
+            "a symlink"
+        } else if meta.is_dir() {
+            "a directory"
+        } else {
+            "not a regular file"
+        };
+        return Some(format!("marker: ({kind} at the marker path)"));
+    }
+    let mut bytes = Vec::new();
+    let read = std::fs::File::open(path).and_then(|f| f.take(MARKER_TEXT_BYTES).read_to_end(&mut bytes));
+    if let Err(e) = read {
+        return Some(format!("marker: (content unreadable: {:?})", e.kind()));
+    }
+    let text: String = String::from_utf8_lossy(&bytes)
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    Some(format!("marker: {}", text.trim()).trim_end().to_string())
+}
+
 /// Starts the direct alerts of `[alert]`; `None` without the section.
 fn start_alerts(cfg: &NodeConfig, published: &Arc<Published>, fatal: &Arc<Fatal>) -> Result<Option<Arc<Alerts>>, String> {
     let Some(a) = &cfg.alert else {
@@ -420,4 +481,68 @@ fn start_alerts(cfg: &NodeConfig, published: &Arc<Published>, fatal: &Arc<Fatal>
     let started = Alerts::start(ac, Arc::new(alert_direct::SystemClock), published.clone(), fatal.clone(), settings, None)?;
     info!("direct alerts on", "venue": cfg.venue_label(), "grace_ms": a.grace_ms, "repeat_ms": a.repeat_ms);
     Ok(Some(Arc::new(started)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn dir(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("marker-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// C-HOLD. Nothing at the path: no marker. A file: its first 512
+    /// bytes, control characters replaced, after `marker:`. Any other file
+    /// type latches too.
+    #[test]
+    fn the_kill_marker_is_whatever_is_at_its_path() {
+        let d = dir("kinds");
+        let m = d.join("kill.marker");
+        assert_eq!(read_kill_marker(&m), None);
+
+        std::fs::write(&m, "W5 killed\nat 12:00\t(OMS silent)\r\n").unwrap();
+        assert_eq!(read_kill_marker(&m).as_deref(), Some("marker: W5 killed at 12:00 (OMS silent)"));
+        std::fs::write(&m, "").unwrap();
+        assert_eq!(read_kill_marker(&m).as_deref(), Some("marker:"));
+        std::fs::write(&m, "x".repeat(2000)).unwrap();
+        let text = read_kill_marker(&m).unwrap();
+        assert_eq!(text, format!("marker: {}", "x".repeat(512)));
+        // Not UTF-8: read lossy.
+        std::fs::write(&m, [b'k', 0xff, b'!']).unwrap();
+        assert_eq!(read_kill_marker(&m).as_deref(), Some("marker: k\u{fffd}!"));
+
+        std::fs::remove_file(&m).unwrap();
+        std::fs::create_dir(&m).unwrap();
+        assert_eq!(read_kill_marker(&m).as_deref(), Some("marker: (a directory at the marker path)"));
+        std::fs::remove_dir(&m).unwrap();
+        // A symlink, even one that points nowhere.
+        std::os::unix::fs::symlink(d.join("nowhere"), &m).unwrap();
+        assert_eq!(read_kill_marker(&m).as_deref(), Some("marker: (a symlink at the marker path)"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// C-HOLD. A path the node cannot examine latches: it cannot prove that
+    /// the watcher did not kill. (A test run as root sees through the
+    /// permission and is skipped.)
+    #[test]
+    fn a_marker_that_cannot_be_examined_latches() {
+        if rustix::process::getuid().is_root() {
+            return;
+        }
+        let d = dir("unreadable");
+        let shut = d.join("shut");
+        std::fs::create_dir(&shut).unwrap();
+        std::fs::set_permissions(&shut, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let got = read_kill_marker(&shut.join("kill.marker"));
+        std::fs::set_permissions(&shut, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(got.as_deref(), Some("marker unreadable: PermissionDenied"));
+        // Not a directory on the way is not "nothing there" either.
+        std::fs::write(d.join("file"), "x").unwrap();
+        assert_eq!(read_kill_marker(&d.join("file/kill.marker")).as_deref(), Some("marker unreadable: NotADirectory"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }

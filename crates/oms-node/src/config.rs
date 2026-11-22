@@ -33,6 +33,42 @@ pub struct NodeConfig {
     pub core: CoreConfig,
     /// Direct Telegram alerts (C-ALERT). Absent: none.
     pub alert: Option<AlertSection>,
+    /// The kill marker (C-HOLD). Absent: no marker is looked for.
+    pub kill: Option<KillSection>,
+}
+
+/// The `[kill]` table (C-HOLD).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KillSection {
+    /// The file the watcher writes when it kills (U19b). Read once, before
+    /// the boot record; anything there latches the kill switch. Absolute,
+    /// outside the data directory, in a directory that exists.
+    pub marker: PathBuf,
+}
+
+impl KillSection {
+    fn validate(&self, data_dir: &Path) -> Result<(), String> {
+        if !self.marker.is_absolute() {
+            return Err("[kill] marker must be an absolute path".into());
+        }
+        if self.marker.components().any(|c| c == std::path::Component::ParentDir) {
+            return Err("[kill] marker must not hold `..`".into());
+        }
+        if resolved(&self.marker).starts_with(resolved(data_dir)) {
+            return Err("[kill] marker must be outside the data directory".into());
+        }
+        Ok(())
+    }
+
+    /// The marker's directory must exist when the configuration is loaded:
+    /// a marker that cannot be written there would never latch.
+    fn check_directory(&self) -> Result<(), String> {
+        match self.marker.parent() {
+            Some(dir) if dir.is_dir() => Ok(()),
+            _ => Err(format!("[kill] marker: the directory of {} does not exist", self.marker.display())),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -436,6 +472,9 @@ impl NodeConfig {
             cfg.http.static_dir = base.join(&cfg.http.static_dir);
         }
         cfg.validate()?;
+        if let Some(k) = &cfg.kill {
+            k.check_directory()?;
+        }
         // Only a build with the failpoints feature (the node tests) reads
         // it; the shipped binary has no such code.
         #[cfg(feature = "failpoints")]
@@ -532,6 +571,14 @@ impl NodeConfig {
         // (C-ALERT; owner question 1 of U18a, default: refuse).
         if self.is_mainnet() && self.alert.is_none() {
             return Err("[venue] mainnet requires [alert] (direct alerts, C-ALERT)".into());
+        }
+        if let Some(k) = &self.kill {
+            k.validate(&self.data_dir)?;
+        }
+        // Nor without the kill marker (C-HOLD; owner question 1 of U18b,
+        // default: refuse).
+        if self.is_mainnet() && self.kill.is_none() {
+            return Err("[venue] mainnet requires [kill] marker (the kill marker, C-HOLD)".into());
         }
         Ok(())
     }
@@ -713,6 +760,9 @@ max = "10"
 
 [alert]
 telegram = "/etc/hl-oms/telegram.json"
+
+[kill]
+marker = "/var/lib/hl-oms/kill.marker"
 "#
         );
         toml::from_str(&text).map_err(|e| format!("parse: {e}"))
@@ -963,6 +1013,62 @@ telegram = "/etc/hl-oms/telegram.json"
         // Mainnet without mainnet_confirmed is refused for that reason first.
         let e = without(&bybit("mainnet", ""), None).unwrap_err();
         assert!(e.contains("mainnet_confirmed"), "{e}");
+    }
+
+    /// C-HOLD. The `[kill]` table: an absolute marker path outside the data
+    /// directory, in a directory that exists at load; mainnet (Hyperliquid
+    /// and Bybit) does not start without it, elsewhere it is optional.
+    #[test]
+    fn the_kill_marker_is_validated_and_required_on_mainnet() {
+        let with = |venue: &str, margin: Option<&str>, marker: Option<&str>| {
+            let mut cfg = parse(venue, "", margin, 1).unwrap();
+            cfg.data_dir = "/var/lib/hl-oms/data".into();
+            cfg.core.policy.absence_not_found_needed = if venue.contains("bybit") { 2 } else { 1 };
+            cfg.kill = marker.map(|m| KillSection { marker: m.into() });
+            cfg.validate()
+        };
+        assert_eq!(parse(SIM, "", None, 1).unwrap().kill.unwrap().marker, PathBuf::from("/var/lib/hl-oms/kill.marker"));
+        for (marker, because) in [
+            ("kill.marker", "absolute"),
+            ("./kill.marker", "absolute"),
+            ("/var/lib/hl-oms/data/kill.marker", "outside the data directory"),
+            ("/var/lib/hl-oms/data", "outside the data directory"),
+            ("/srv/x/../../var/lib/hl-oms/data/k", "`..`"),
+        ] {
+            let e = with(SIM, None, Some(marker)).unwrap_err();
+            assert!(e.contains(because), "{marker}: {e}");
+        }
+        assert_eq!(with(SIM, None, Some("/var/lib/hl-oms/kill.marker")), Ok(()));
+
+        let because = "mainnet requires [kill]";
+        let bybit_margin = Some("isolated = false\naccount_mm_rate_max_bps = 5000");
+        for (venue, margin) in [(hyperliquid("mainnet"), Some("")), (bybit("mainnet", "mainnet_confirmed = true"), bybit_margin)] {
+            let e = with(&venue, margin, None).unwrap_err();
+            assert!(e.contains(because), "{venue}: {e}");
+            assert_eq!(with(&venue, margin, Some("/var/lib/hl-oms/kill.marker")), Ok(()), "{venue}");
+        }
+        assert_eq!(with(&hyperliquid("testnet"), None, None), Ok(()));
+        assert_eq!(with(&bybit("testnet", ""), None, None), Ok(()));
+        assert_eq!(with(SIM, None, None), Ok(()));
+        // An unknown key in the table.
+        let text = "data_dir = \"d\"\n[venue]\nkind = \"sim\"\nsocket = \"v.sock\"\n[core]\nversion = 1\n[kill]\nmarker = \"/k\"\npoll_ms = 1\n";
+        assert!(toml::from_str::<NodeConfig>(text).is_err());
+
+        // At load the marker's directory must exist.
+        let tmp = std::env::temp_dir().join(format!("kill-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let sim = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/sim.toml")).unwrap();
+        let load = |marker: &Path| {
+            let text = format!("{sim}\n[kill]\nmarker = \"{}\"\n", marker.display());
+            let path = tmp.join("oms.toml");
+            std::fs::write(&path, text).unwrap();
+            NodeConfig::load(&path)
+        };
+        let cfg = load(&tmp.join("kill.marker")).expect("loads");
+        assert_eq!(cfg.kill.unwrap().marker, tmp.join("kill.marker"));
+        let e = load(&tmp.join("missing/kill.marker")).unwrap_err();
+        assert!(e.contains("does not exist"), "{e}");
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// C-ALERT. `OMS_TEST_TELEGRAM_API` is taken only as an http URL on a

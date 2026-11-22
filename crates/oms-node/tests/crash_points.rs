@@ -6,7 +6,9 @@
 //!
 //! The stop is `abort()` from inside the commit stage, so the operating
 //! system keeps what was written: this is a process crash, not a power loss.
-//! Needs `--features failpoints`; the shipped binary has no such code.
+//! Needs `--features failpoints`; the shipped binary has no such code. The
+//! last section keeps the kill marker of C-HOLD across a refused clear (the
+//! kill answer held back) and a clear whose flush fails.
 
 #![allow(clippy::unwrap_used)]
 
@@ -496,4 +498,90 @@ fn an_exit_3_after_activation_sends_one_start_failure_notice() {
         assert!(!t.contains("no-such-dir") && !t.contains("oms.sock") && !t.contains("ABCdef") && !t.contains("telegram.json"), "{t}");
     }
     assert!(env.log_tail(10).contains("alerts delivered before the exit"), "{}", env.log_tail(10));
+}
+
+// ---- C-HOLD: the kill marker at a refused and at a failed clear ----------------
+
+/// A node whose `[kill] marker` (`<test dir>/watch/kill.marker`) exists, with
+/// the node environment `node_env`; started. Returns the marker path.
+fn marker_node(name: &str, node_env: Vec<(String, String)>) -> (Env, std::path::PathBuf) {
+    let mut env = Env::new(name);
+    let watch = env.dir.join("watch");
+    std::fs::create_dir_all(&watch).unwrap();
+    let marker = watch.join("kill.marker");
+    std::fs::write(&marker, "W5 killed").unwrap();
+    env.extra_tables = format!("[kill]\nmarker = \"{}\"\n", marker.display());
+    env.node_env = node_env;
+    env.start_node();
+    (env, marker)
+}
+
+/// Waits until the kill is latched and its confirmation is `confirmed`;
+/// returns the status.
+fn wait_kill(env: &Env, confirmed: bool) -> serde_json::Value {
+    let ok = env.wait(Duration::from_secs(20), || {
+        env.try_status()
+            .is_some_and(|s| s["core"]["kill"].is_object() && s["core"]["kill"]["confirmed_at"].is_u64() == confirmed)
+    });
+    assert!(ok, "kill (confirmed {confirmed}) never seen: {:?}\n{}", env.try_status().map(|s| s["core"].to_string()), env.log_tail(20));
+    env.status()
+}
+
+fn clear_kill(env: &Env) -> Result<serde_json::Value, ClientError> {
+    env.admin().call(oms_api::Op::ClearHold { reason: HoldKind::Kill, note: "orders checked at the venue".into() })
+}
+
+/// C-HOLD, review S2. A clear with a real note that is refused
+/// `kill_unconfirmed` (the simulated venue's answer is held back by
+/// `OMS_HOLD_KILL_ANSWER`) leaves the marker, and the next start latches
+/// again; there the clear is taken and removes the marker.
+#[test]
+fn a_clear_refused_kill_unconfirmed_leaves_the_marker_and_the_next_start_latches() {
+    let (mut env, marker) = marker_node("marker-unconfirmed", vec![("OMS_HOLD_KILL_ANSWER".into(), "1".into())]);
+    let st = wait_kill(&env, false);
+    assert_eq!(st["core"]["kill"]["source"], "marker");
+    assert!(env.wait(Duration::from_secs(5), || env.log_tail(50).contains("the kill answer is held back")), "{}", env.log_tail(20));
+    match clear_kill(&env) {
+        Err(ClientError::Api(e)) => {
+            assert_eq!(e.code, oms_api::ErrorCode::BadRequest);
+            assert!(e.message.starts_with("kill_unconfirmed"), "{}", e.message);
+        }
+        other => panic!("not refused: {other:?}"),
+    }
+    assert!(marker.exists(), "a clear refused kill_unconfirmed removed the marker");
+    assert_eq!(env.journal_count("hold_cleared"), 0);
+
+    assert_eq!(env.stop_node(), 0);
+    env.node_env.clear();
+    env.start_node();
+    let st = wait_kill(&env, true);
+    assert_eq!(st["node"]["kill_marker"]["present_at_boot"], true);
+    assert!(st["core"]["holds"].as_array().unwrap().contains(&json!("kill_latched")), "{}", st["core"]);
+    assert_eq!(clear_kill(&env).unwrap(), json!("cleared; kill marker removed"));
+    assert!(!marker.exists());
+}
+
+/// C-HOLD, review S2. The flush of an accepted clear's record fails
+/// (`OMS_CRASH_ON=clear_hold`, `sync_error_after_write`): no reply says
+/// cleared, the node stops with status 2, and the marker stays. The record
+/// that reached the file is replayed at the next start, and the marker
+/// latches that start again in its boot record.
+#[test]
+fn a_clear_whose_record_fails_to_flush_leaves_the_marker_and_the_next_start_latches() {
+    let (mut env, marker) = marker_node("marker-flush", crash_on("sync_error_after_write", "clear_hold"));
+    wait_kill(&env, true);
+    let reply = clear_kill(&env);
+    assert!(reply.is_err(), "a reply for a clear that is not durable: {reply:?}");
+    assert_eq!(env.wait_exit(Duration::from_secs(5)), Some(2), "{}", env.log_tail(10));
+    assert!(marker.exists(), "the marker was removed although the clear is not durable");
+
+    env.node_env.clear();
+    env.start_node();
+    let st = wait_kill(&env, true);
+    assert_eq!(st["core"]["kill"]["source"], "marker");
+    assert_eq!(st["node"]["kill_marker"]["present_at_boot"], true);
+    assert_eq!(env.journal_count("hold_cleared"), 1, "the record written before the failed flush");
+    assert_eq!(env.journal_count("hold_set"), 2, "the marker latched both starts");
+    assert_eq!(clear_kill(&env).unwrap(), json!("cleared; kill marker removed"));
+    assert!(!marker.exists());
 }

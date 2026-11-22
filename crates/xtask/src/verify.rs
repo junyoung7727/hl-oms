@@ -53,8 +53,8 @@ pub fn suites(quick: bool, live: bool, extended: Option<&str>) -> Vec<Suite> {
         },
         Suite {
             name: "node-unit",
-            what: "queues, histogram, Hyperliquid signing vectors and message translation; the reconciler task at its ports (pace of the margin, venue-setting and account-mode queries); the record schema (old journals replay, recovery from disk); the direct alerts in-process (conditions, grace, repeat, fatal, durable only; loopback fake Telegram)",
-            args: &["test", "-p", "oms-node", "--lib", "--test", "reconciler", "--test", "record_schema", "--test", "alerts"],
+            what: "queues, histogram, Hyperliquid signing vectors and message translation; the reconciler task at its ports (pace of the margin, venue-setting and account-mode queries); the record schema (old journals replay, recovery from disk); the direct alerts in-process (conditions, grace, repeat, fatal, durable only; loopback fake Telegram); the holds of C-HOLD through oms-node and simvenue processes (kill marker, clear-hold, the watcher's inputs)",
+            args: &["test", "-p", "oms-node", "--lib", "--test", "reconciler", "--test", "record_schema", "--test", "alerts", "--test", "holds_node"],
             env: env(&[]),
         },
         Suite {

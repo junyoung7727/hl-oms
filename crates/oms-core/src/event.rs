@@ -271,6 +271,27 @@ pub enum Event {
     VenueChangeSettled {
         instrument: InstrumentId,
     },
+    /// A hold of C-HOLD was set: the kill latch or a watcher mismatch. In
+    /// live processing a kill is followed by one `Kill` command.
+    HoldSet {
+        hold: HoldKind,
+        source: HoldSource,
+        note: String,
+    },
+    /// The operator released a hold of C-HOLD. In live processing a kill is
+    /// followed by one `KillStop` command.
+    HoldCleared {
+        hold: HoldKind,
+        note: String,
+    },
+    /// The gateway's kill loop ended (C-HOLD, C-KILL). The kill latch is
+    /// confirmed for this process; it stays set.
+    KillLoopEnded {
+        outcome: KillOutcome,
+        rounds: u32,
+        cancel_all_calls: u32,
+        detail: String,
+    },
 }
 
 /// Stable reason codes for a refused new-order request.
@@ -334,6 +355,16 @@ pub enum VenueCommand {
         instrument: InstrumentId,
         venue_oid: Option<VenueOrderId>,
     },
+    /// Start the kill loop (C-HOLD, C-KILL): cancel every order at the
+    /// venue until zero is confirmed. Released only after the latch is
+    /// durable.
+    Kill {
+        since: Ts,
+        source: HoldSource,
+        note: String,
+    },
+    /// End the kill loop: the operator cleared the latch.
+    KillStop,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -452,6 +483,9 @@ impl Event {
             Event::UnclassifiedExecutionNoted { .. } => "unclassified_execution_noted",
             Event::VenueChangeSettled { .. } => "venue_change_settled",
             Event::AbsenceNoted { .. } => "absence_noted",
+            Event::HoldSet { .. } => "hold_set",
+            Event::HoldCleared { .. } => "hold_cleared",
+            Event::KillLoopEnded { .. } => "kill_loop_ended",
         }
     }
 }
@@ -466,6 +500,10 @@ impl Input {
             Input::Operator(_) => "operator",
             Input::Tick => "tick",
             Input::Storage { .. } => "storage",
+            Input::Watcher(w) => match w {
+                WatcherInput::Mismatch { .. } => "watcher.mismatch",
+                WatcherInput::Kill { .. } => "watcher.kill",
+            },
             Input::Venue(v) => match v {
                 VenueInput::Link { .. } => "venue.link",
                 VenueInput::SendResult { .. } => "venue.send_result",
@@ -484,6 +522,7 @@ impl Input {
                 VenueInput::Funding(_) => "venue.funding",
                 VenueInput::PositionChange(_) => "venue.position_change",
                 VenueInput::UnclassifiedExecution { .. } => "venue.unclassified_execution",
+                VenueInput::KillLoopEnded { .. } => "venue.kill_loop_ended",
             },
         }
     }

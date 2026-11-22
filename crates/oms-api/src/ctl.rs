@@ -128,6 +128,15 @@ fn build(cmd: &str, args: &[String]) -> Result<Op, String> {
         "rebase-day" => Op::RebaseDay {
             note: need(args, "--note")?,
         },
+        "clear-hold" => Op::ClearHold {
+            reason: match need(args, "--reason")?.as_str() {
+                "kill" => HoldKind::Kill,
+                "watcher_mismatch" => HoldKind::WatcherMismatch,
+                "venue_change" => HoldKind::VenueChange,
+                other => return Err(format!("--reason: {other} (kill, watcher_mismatch or venue_change)")),
+            },
+            note: need(args, "--note")?,
+        },
         other => return Err(format!("unknown command {other}")),
     })
 }
@@ -155,6 +164,7 @@ pub fn run(args: &[String], events: &mut dyn std::io::Write) -> Result<String, S
         "--id",
         "--delta",
         "--target-strategy",
+        "--reason",
     ];
     let mut cmd = None;
     let mut i = 0;
@@ -186,5 +196,36 @@ pub fn run(args: &[String], events: &mut dyn std::io::Write) -> Result<String, S
         Ok(v) => Ok(serde_json::to_string_pretty(&v).unwrap_or_default()),
         Err(ClientError::Api(e)) => Err(format!("{:?}: {}", e.code, e.message)),
         Err(e) => Err(e.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(line: &str) -> Vec<String> {
+        line.split(' ').map(String::from).collect()
+    }
+
+    /// U18b1. `clear-hold` takes one of the three holds and a note.
+    #[test]
+    fn clear_hold_parses_its_reason_and_note() {
+        for (reason, kind) in [
+            ("kill", HoldKind::Kill),
+            ("watcher_mismatch", HoldKind::WatcherMismatch),
+            ("venue_change", HoldKind::VenueChange),
+        ] {
+            let a = args(&format!("--reason {reason} --note checked"));
+            assert_eq!(
+                build("clear-hold", &a),
+                Ok(Op::ClearHold {
+                    reason: kind,
+                    note: "checked".into()
+                })
+            );
+        }
+        assert!(build("clear-hold", &args("--reason reducing --note n")).unwrap_err().contains("--reason"));
+        assert_eq!(build("clear-hold", &args("--note n")), Err("missing --reason".into()));
+        assert_eq!(build("clear-hold", &args("--reason kill")), Err("missing --note".into()));
     }
 }

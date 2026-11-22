@@ -18,6 +18,9 @@
 //!   `FillsSynced { up_to }` is sent only after every fill with venue time
 //!   up to `up_to` has been delivered.
 //! - Venue input is never dropped: a full input queue makes the gateway wait.
+//! - For a `Kill` it runs its kill loop and delivers one `KillLoopEnded`
+//!   when the loop ends; a gateway without cancel-all delivers one
+//!   `KillLoopEnded { outcome: Unsupported }` at once (C-HOLD).
 
 pub mod bybit;
 pub mod hyperliquid;
@@ -92,6 +95,11 @@ pub trait VenueGateway: Send + Sync + 'static {
     /// Answers one query with venue inputs, or not at all.
     fn query(&self, q: QueryReq) -> impl Future<Output = ()> + Send;
 
+    /// Handles `VenueCommand::Kill` and `VenueCommand::KillStop` (C-HOLD).
+    /// Returns at once: the kill loop runs on its own task, not under a
+    /// command permit, so that no number of sends can delay it.
+    fn kill(&self, cmd: VenueCommand);
+
     /// Starts the long-running tasks: the event stream and anything else the
     /// gateway keeps running. `start` calls it once, synchronously, before it
     /// spawns the command loop.
@@ -110,6 +118,10 @@ pub fn start<G: VenueGateway>(gw: Arc<G>, mut ports: GatewayPorts, max_concurren
     tokio::spawn(async move {
         let permits = Arc::new(Semaphore::new(max_concurrent));
         while let Some(cmd) = ports.commands.recv().await {
+            if matches!(cmd, VenueCommand::Kill { .. } | VenueCommand::KillStop) {
+                cmd_gw.kill(cmd);
+                continue;
+            }
             let Ok(permit) = permits.clone().acquire_owned().await else {
                 return;
             };
@@ -118,6 +130,8 @@ pub fn start<G: VenueGateway>(gw: Arc<G>, mut ports: GatewayPorts, max_concurren
                 match &cmd {
                     VenueCommand::SendOrder { .. } => gw.send_order(cmd).await,
                     VenueCommand::SendCancel { .. } => gw.send_cancel(cmd).await,
+                    // Handled above, without a permit.
+                    VenueCommand::Kill { .. } | VenueCommand::KillStop => {}
                 }
                 drop(permit);
             });
@@ -155,6 +169,42 @@ impl VenueInputTx {
         self.queues.push_venue(CoreMsg::new(Input::Venue(v))).await
     }
 }
+
+/// What a gateway without cancel-all does with a kill command (C-HOLD): it
+/// answers `Kill` with `KillLoopEnded { outcome: Unsupported }`, so that the
+/// operator can clear the latch, and logs that the orders resting at the
+/// venue are the operator's to cancel. `KillStop` has no loop to end.
+pub fn kill_unsupported(input: &VenueInputTx, venue: &'static str, cmd: VenueCommand) {
+    match cmd {
+        VenueCommand::Kill { source, note, .. } => {
+            crate::warn!("kill latched, but this gateway has no cancel-all: cancel the resting orders with omsctl cancel-all", "venue": venue, "source": format!("{source:?}"), "note": note);
+            // Test-only: `OMS_HOLD_KILL_ANSWER` keeps the answer back, so a
+            // test sees a latch that is not confirmed. Only a build with the
+            // failpoints feature (the node tests) reads it.
+            #[cfg(feature = "failpoints")]
+            if std::env::var_os("OMS_HOLD_KILL_ANSWER").is_some() {
+                crate::warn!("failpoint: the kill answer is held back", "venue": venue);
+                return;
+            }
+            let input = input.clone();
+            tokio::spawn(async move {
+                input
+                    .send(VenueInput::KillLoopEnded {
+                        outcome: KillOutcome::Unsupported,
+                        rounds: 0,
+                        cancel_all_calls: 0,
+                        detail: KILL_UNSUPPORTED.into(),
+                    })
+                    .await;
+            });
+        }
+        VenueCommand::KillStop => crate::info!("kill cleared", "venue": venue),
+        VenueCommand::SendOrder { .. } | VenueCommand::SendCancel { .. } => {}
+    }
+}
+
+/// The detail of the `unsupported` answer.
+pub const KILL_UNSUPPORTED: &str = "this gateway has no cancel-all; cancel with omsctl cancel-all";
 
 /// Session numbers must grow across restarts as well as reconnects, so the
 /// boot number forms the high part.
@@ -229,6 +279,11 @@ mod tests {
 
         async fn query(&self, q: QueryReq) {
             self.op(format!("query {q:?}")).await;
+        }
+
+        fn kill(&self, cmd: VenueCommand) {
+            let what = if matches!(cmd, VenueCommand::KillStop) { "kill_stop" } else { "kill" };
+            self.log.lock().unwrap().push(what.into());
         }
 
         fn spawn_tasks(self: &Arc<Self>, boot: u32) {
