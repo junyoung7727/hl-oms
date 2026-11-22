@@ -480,6 +480,19 @@ fn in_doubt_recheck_and_missing_fills() -> H {
     });
     assert!(h.order(a).is_closed());
 
+    // In doubt before its ack; the ack clears the doubt.
+    let d = h.accept("a", "kd", Side::Buy, "1", "100");
+    h.venue(VenueInput::SendResult {
+        order_id: d,
+        outcome: SendOutcome::Unknown {
+            reason: "timeout".into(),
+        },
+        timing: Default::default(),
+    });
+    assert!(h.order(d).doubt.is_some());
+    h.status(d, VenueStatus::Open, Some("0"));
+    assert!(h.order(d).doubt.is_none() && h.core.open.contains(&d));
+
     let b = h.accept("a", "kb", Side::Buy, "1", "100");
     h.status(b, VenueStatus::Open, Some("0"));
     h.placed_open(b, "vb");
@@ -746,6 +759,30 @@ fn purge_and_restart() -> H {
         rate: "0.0001".into(),
         venue_ts: t,
     }));
+    // A venue change, settled by the next snapshot, and its hold cleared.
+    h.venue(VenueInput::PositionChange(VenuePositionChangeIn {
+        key: fkey("adl1"),
+        kind: VenueChangeKind::Adl,
+        instrument: iid("X"),
+        qty: sq("-0.5"),
+        px: px("100"),
+        venue_ts: t,
+    }));
+    let (session, queried_at) = (h.session, h.now + 1);
+    let qty = h.acct().pos;
+    h.venue(VenueInput::Positions {
+        session,
+        queried_at,
+        positions: vec![VenuePosition {
+            instrument: iid("X"),
+            qty,
+        }],
+    });
+    h.op(OperatorCmd::ClearHold {
+        reason: HoldKind::VenueChange,
+        note: "seen".into(),
+    })
+    .unwrap();
     ack_all(&mut h);
     let open = h.accept("b", "k2", Side::Buy, "1", "100");
     h.placed_open(open, "v2");
