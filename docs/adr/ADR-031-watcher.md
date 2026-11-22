@@ -1,6 +1,6 @@
 # ADR-031 독립 워처: OMS 코드를 쓰지 않는 저널 읽기와 그 증명
 
-상태: 채택. U19a1 구현(2026-11-23): crate `watcher`(라이브러리와 `--version`만 답하는 바이너리), `watcher-conformance`(적합성 시험), 독자 저널 읽기, 아는 이벤트, 소수, `Base32Pair`, 독립성 검사 `tools/ci/watcher_independent.sh`. U19a2 구현(2026-11-23): 저널 상태 `watcher::state::JournalState`(C-TAIL "이벤트가 바꾸는 상태" 표의 규칙만으로. 확인·결과 불명·종결 표시, 거래소 변경·펀딩 키, 체결 바닥, 보류, 일 기준값의 행은 U19a2 검토 1 M1에서 그 표에 더했다)와 코어와의 적합성 시나리오, 재생 속도 측정. U19a3 구현(2026-11-23): 자기 Bybit GET 서명과 REST 클라이언트(응답 분류, 다시 보내지 않는 키 거절, 403 멈춤, 요청 제한, 요청 집계), 지표 등록부와 VictoriaMetrics 가져오기 클라이언트(§7 끝). 시작 확인, 검사 W1~W4, 하트비트는 U19a4~U19a9가 이 ADR에 절을 더한다. 계약: [C-WATCH](../contracts/watcher.md).
+상태: 채택. U19a1 구현(2026-11-23): crate `watcher`(라이브러리와 `--version`만 답하는 바이너리), `watcher-conformance`(적합성 시험), 독자 저널 읽기, 아는 이벤트, 소수, `Base32Pair`, 독립성 검사 `tools/ci/watcher_independent.sh`. U19a2 구현(2026-11-23): 저널 상태 `watcher::state::JournalState`(C-TAIL "이벤트가 바꾸는 상태" 표의 규칙만으로. 확인·결과 불명·종결 표시, 거래소 변경·펀딩 키, 체결 바닥, 보류, 일 기준값의 행은 U19a2 검토 1 M1에서 그 표에 더했다)와 코어와의 적합성 시나리오, 재생 속도 측정. U19a3 구현(2026-11-23): 자기 Bybit GET 서명과 REST 클라이언트(응답 분류, 다시 보내지 않는 키 거절, 403 멈춤, 요청 제한, 요청 집계), 지표 등록부와 VictoriaMetrics 가져오기 클라이언트(§7 끝). U19a4 구현(2026-11-23): 설정 파일과 자격 파일(C-WATCH 4부; 이 ADR의 선택을 바꾸지 않는다). 시작 확인, 검사 W1~W4, 하트비트는 U19a4b~U19a9가 이 ADR에 절을 더한다. 계약: [C-WATCH](../contracts/watcher.md).
 
 ## 1. 문제와 발생 가능한 실패
 
