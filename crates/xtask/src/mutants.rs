@@ -1752,6 +1752,15 @@ const MUTANTS: &[Mutant] = &[
         guards: "C-WATCH",
     },
     Mutant {
+        id: "M193-watcher-mainnet-unconfirmed",
+        what: "the watcher's config accepts network = \"mainnet\" without mainnet_confirmed = true: a watcher meant for testnet starts against mainnet with a single changed word (deliberate defect 12 of U19a)",
+        file: "crates/watcher/src/config.rs",
+        find: "        if self.network == Network::Mainnet && !self.mainnet_confirmed {\n",
+        replace: "        if false && self.network == Network::Mainnet && !self.mainnet_confirmed {\n",
+        test: &["-p", "watcher", "--test", "config", "the_config_is_validated_and_mainnet_needs_confirmation"],
+        guards: "C-WATCH",
+    },
+    Mutant {
         id: "M210-watcher-fill-floor-goes-down",
         what: "a purged or booted record with a lower fill floor lowers the watcher's floor: the OMS keeps the maximum, so the watcher would judge keys the OMS has already forgotten",
         file: "crates/watcher/src/state.rs",
