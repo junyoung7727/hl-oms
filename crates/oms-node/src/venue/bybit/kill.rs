@@ -548,6 +548,8 @@ pub struct KillView {
     pub started_at: Option<Ts>,
     /// Wall time (µs) of the first zero of the current watch.
     pub zero_since: Option<Ts>,
+    /// The notices sent (handed to the host), not the ones made: a newer
+    /// notice can take the place of a waiting one, a stop drops the rest.
     pub notices: u32,
 }
 
@@ -594,9 +596,11 @@ enum Step {
 ///
 /// The notices go out beside the loop, one at a time in their order: a
 /// slow or hanging position read holds back no cancel-all and no count
-/// (review M1 of U18b2). The end waits for the notices before it, so the
-/// final notice comes before `KillLoopEnded`. A stop drops the notices not
-/// yet sent.
+/// (review M1 of U18b2). At most one notice waits behind the one in
+/// flight: a newer notice takes the place of a waiting change or repeat,
+/// which shows an older count (review 2 S1). The end waits for the notices
+/// before it, so the final notice comes before `KillLoopEnded`, at most two
+/// request timeouts late. A stop drops the notices not yet sent.
 pub async fn run<H: KillHost, C: KillClock>(
     host: &H,
     clock: &C,
@@ -612,7 +616,9 @@ pub async fn run<H: KillHost, C: KillClock>(
     let mut queue: std::collections::VecDeque<Action> = m.start(start_ms).into();
     let mut notices: std::collections::VecDeque<Notice> = std::collections::VecDeque::new();
     let mut sending: Option<std::pin::Pin<Box<_>>> = None;
-    let show = |m: &KillLoop| {
+    // Notices handed to the host (`status.gateway.kill_loop.notices`).
+    let mut sent: u32 = 0;
+    let show = |m: &KillLoop, sent: u32| {
         let mut v = view.lock().unwrap_or_else(|e| e.into_inner());
         *v = KillView {
             phase: m.phase(),
@@ -627,13 +633,19 @@ pub async fn run<H: KillHost, C: KillClock>(
             zero_since: m.zero_since().map(|z| {
                 start_wall.saturating_add(z.saturating_sub(start_ms).saturating_mul(1000))
             }),
-            notices: m.notices(),
+            notices: sent,
         };
     };
-    show(&m);
+    show(&m, sent);
     while let Some(action) = queue.pop_front() {
         let action = match action {
             Action::Notice(n) => {
+                if notices
+                    .back()
+                    .is_some_and(|w| matches!(w.kind, NoticeKind::Change | NoticeKind::Repeat))
+                {
+                    notices.pop_back();
+                }
                 notices.push_back(n);
                 if sending.is_none() {
                     sending = notices
@@ -663,6 +675,8 @@ pub async fn run<H: KillHost, C: KillClock>(
                             f.await
                         }
                     }, if sending.is_some() => {
+                        sent += 1;
+                        view.lock().unwrap_or_else(|e| e.into_inner()).notices = sent;
                         sending = notices.pop_front().map(|n| Box::pin(send_notice(host, ctx, n)));
                     }
                     s = &mut fut, if !after_notices || sending.is_none() => break s,
@@ -673,16 +687,16 @@ pub async fn run<H: KillHost, C: KillClock>(
             Step::Next(next) => queue.extend(next),
             Step::End(RunEnd::Stopped) => {
                 m.stop();
-                show(&m);
+                show(&m, sent);
                 crate::info!("the kill loop stopped: the kill was cleared");
                 return RunEnd::Stopped;
             }
             Step::End(RunEnd::Confirmed) => {
-                show(&m);
+                show(&m, sent);
                 return RunEnd::Confirmed;
             }
         }
-        show(&m);
+        show(&m, sent);
     }
     RunEnd::Stopped
 }
@@ -1218,6 +1232,9 @@ mod tests {
         notices: Mutex<Vec<String>>,
         alerts: Option<crate::alerts::Alerts>,
         ended: Mutex<Vec<Report>>,
+        /// When set, each position read first takes a permit: the test
+        /// decides when a notice's read may go out.
+        reads: Option<Arc<tokio::sync::Semaphore>>,
     }
 
     impl KillHost for TestHost {
@@ -1244,6 +1261,9 @@ mod tests {
         }
 
         async fn positions(&self) -> Result<Vec<Value>, String> {
+            if let Some(g) = &self.reads {
+                g.acquire().await.unwrap().forget();
+            }
             self.queries
                 .position_rows()
                 .await
@@ -1335,6 +1355,18 @@ mod tests {
             block: Option<&str>,
             timeout: Duration,
         ) -> Rig {
+            Rig::launch_gated(api, timing, alerts, block, timeout, None)
+        }
+
+        /// `reads`: the permits for the position reads (see `TestHost`).
+        fn launch_gated(
+            api: &FakeHttp,
+            timing: KillTiming,
+            alerts: Option<crate::alerts::Alerts>,
+            block: Option<&str>,
+            timeout: Duration,
+            reads: Option<Arc<tokio::sync::Semaphore>>,
+        ) -> Rig {
             let rest = || {
                 Rest::new(
                     &api.url(),
@@ -1352,6 +1384,7 @@ mod tests {
                 notices: Mutex::default(),
                 alerts,
                 ended: Mutex::default(),
+                reads,
             });
             let clock = Arc::new(ManualClock::new());
             let view = Arc::new(Mutex::new(KillView::default()));
@@ -1430,6 +1463,19 @@ mod tests {
 
         fn notices(&self) -> Vec<String> {
             self.host.notices.lock().unwrap().clone()
+        }
+
+        /// Waits at most 2 s of real time until `n` notices were sent: the
+        /// notices go out beside the loop, so `settle` does not wait for
+        /// them.
+        async fn wait_notices(&self, n: usize) {
+            for _ in 0..2_000 {
+                if self.host.notices.lock().unwrap().len() >= n {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+            panic!("{n} notices did not arrive: {:#?}", self.notices());
         }
 
         /// Every 1 s window of loop time holds at most two cancel-alls.
@@ -1713,6 +1759,78 @@ mod tests {
         assert!(r.notices().is_empty(), "a notice after the stop");
     }
 
+    /// Review 2 S1 of U18b2: while a notice's position read is slow, at
+    /// most one notice waits behind it. A newer change or repeat notice
+    /// takes the place of the one waiting (it holds the newer count), and
+    /// the final notice takes it too; the notice in flight is never dropped.
+    /// So the end waits for at most two notices, and `notices` in the
+    /// status counts the notices sent.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_slow_position_read_lets_at_most_one_notice_wait_and_the_newest_wins() {
+        let api = venue();
+        // Rounds 1-10 count 5, 4, 5, 4 …: a change notice every round.
+        let mut pages: Vec<Http> = (0..10)
+            .map(|i| page((0..5 - i % 2).map(open_row).collect()))
+            .collect();
+        pages.push(page(vec![]));
+        api.route(REALTIME, pages);
+        let reads = Arc::new(tokio::sync::Semaphore::new(0));
+        let mut r = Rig::launch_gated(
+            &api,
+            KillTiming::DEFAULT,
+            None,
+            None,
+            Duration::from_millis(500),
+            Some(reads.clone()),
+        );
+        // The start notice's read is held: rounds 1-6 make six changes.
+        r.run_to(&api, 5_500).await;
+        assert_eq!(r.posts, [0, 1_000, 2_000, 3_000, 4_000, 5_000]);
+        assert!(r.notices().is_empty());
+        reads.add_permits(2);
+        r.wait_notices(2).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let n = r.notices();
+        assert_eq!(n.len(), 2, "only the newest change waited: {n:#?}");
+        assert!(n[0].starts_with("킬 루프 시작("), "{}", n[0]);
+        assert!(
+            n[1].starts_with("킬 루프 6회차: 남은 미체결 4건"),
+            "{}",
+            n[1]
+        );
+        assert_eq!(r.view.lock().unwrap().notices, 2, "notices sent");
+
+        // Round 7's change goes out at once and its read is held; rounds
+        // 8-10 leave one change waiting, and the final notice takes its
+        // place. The end waits for the two.
+        r.run_to(&api, 39_900).await;
+        assert_eq!(gets(&api, POSITIONS), 2);
+        r.clock.advance(100);
+        for _ in 0..2_000 {
+            if r.view.lock().unwrap().phase == Phase::Done {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        assert_eq!(r.view.lock().unwrap().phase, Phase::Done);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(r.ended().is_empty(), "the end came before the final notice");
+        assert_eq!(r.notices().len(), 2);
+        reads.add_permits(10);
+        assert_eq!(r.end().await, RunEnd::Confirmed);
+        let n = r.notices();
+        assert_eq!(n.len(), 4, "{n:#?}");
+        assert!(
+            n[2].starts_with("킬 루프 7회차: 남은 미체결 5건"),
+            "{}",
+            n[2]
+        );
+        assert!(n[3].starts_with("킬 루프 정리 완료"), "{}", n[3]);
+        assert_eq!(gets(&api, POSITIONS), 4);
+        assert_eq!(r.ended().len(), 1);
+        assert_eq!(r.view.lock().unwrap().notices, 4, "notices sent");
+    }
+
     /// C-KILL failures: during the pause (IP ban, rejected key) no count and
     /// no position read goes out; the round fails with the pause. Under a
     /// block (here the account) a notice reads no position either (review
@@ -1740,6 +1858,7 @@ mod tests {
                 (Phase::Rounds, None, Some("requests are paused"))
             );
         }
+        r.wait_notices(2).await;
         let n = r.notices();
         assert_eq!(n.len(), 2, "start and the repeat at 60 s: {n:#?}");
         assert!(
@@ -1753,6 +1872,7 @@ mod tests {
             .store(false, std::sync::atomic::Ordering::SeqCst);
         *r.host.block.lock().unwrap() = Some("account: the key is of uid 9".into());
         r.run_to(&api, 120_500).await;
+        r.wait_notices(3).await;
         assert_eq!(gets(&api, POSITIONS), 1, "a position read under the block");
         let n = r.notices();
         assert_eq!(n.len(), 3, "{n:#?}");
