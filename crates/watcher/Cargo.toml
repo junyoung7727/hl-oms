@@ -1,0 +1,19 @@
+[package]
+name = "watcher"
+description = "Independent watcher of the OMS (U19a): own journal reader, own sets and own Bybit client. Depends on no oms-* or md-* crate (tools/ci/watcher_independent.sh)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "watcher"
+path = "src/main.rs"
+
+[dependencies]
+crc32fast = "1.5.2"
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

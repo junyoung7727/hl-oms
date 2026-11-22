@@ -97,6 +97,7 @@ fn suite_dirs(suite: &str) -> Option<&'static [&'static str]> {
         "sim" | "sim-extended" => &["crates/oms-sim/src", "crates/oms-sim/tests"],
         "node-unit" => &["crates/oms-node/src", "crates/oms-node/tests"],
         "alert" => &["crates/alert-direct/src", "crates/alert-direct/tests"],
+        "watcher" => &["crates/watcher/src", "crates/watcher/tests", "crates/watcher-conformance/tests"],
         "pipeline" => &["crates/oms-node/tests"],
         "e2e" | "kills-extended" => &["crates/oms-node/tests"],
         "hl-live" => &["crates/oms-node/tests"],
@@ -130,6 +131,11 @@ fn load_evidence(root: &Path) -> Evidence {
             "source/core_purity".into(),
             if p == "ok" { "passed" } else { "failed" }.into(),
         );
+    }
+    if let Some(scripts) = raw.get("source_scripts").and_then(|x| x.as_object()) {
+        for (name, r) in scripts {
+            results.insert(format!("source/{name}"), if r == "ok" { "passed" } else { "failed" }.into());
+        }
     }
     let mut perf = Vec::new();
     if let Ok(rd) = std::fs::read_dir(root.join("evidence/perf")) {

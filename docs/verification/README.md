@@ -31,6 +31,7 @@ cargo run --release -p xtask -- docs              # 결과를 주장과 묶어 �
 | `sim` | 결정적 시뮬레이션. 장애 프로파일 7종, 증거금 프로파일 2종, 깨진 가정 2종, 가상 거래소의 증거금 모형 | 코어의 실제 판단과 상태 | 저널, 게이트웨이, 네트워크, 거래소, 시계 |
 | `node-unit` | 큐, 히스토그램, Hyperliquid 서명 벡터와 메시지 해석. 대조기 태스크의 조회 간격 시험 2건(공개된 상태를 넣고 조회 채널을 읽는다). 직접 알림(`--test alerts`, U18a2): 실제 파이프라인과 알림 스레드, loopback 가짜 텔레그램, 시험이 움직이는 시계 | 서명·직렬화 코드, 대조기 태스크와 실제 시계 | 거래소 응답은 문서의 예제. 대조기 시험에는 거래소도 게이트웨이도 없다 |
 | `alert` | 직접 알림 송신기(alert-direct): 전송 규칙, 반복 규칙, 텔레그램 실패 시작, 둘째 채널과 그 텔레그램 장애 알림 | 송신 스레드, 둘째 채널 스레드, loopback HTTP | 텔레그램(http-fake), 둘째 채널, 시계 |
+| `watcher` | 독립 워처(U19a1부터): 자기 저널 읽기의 장애 경계(상한, 회전, 손상, 래치), C-TAIL 표와의 이벤트 대조, 소수, `Base32Pair`. 적합성(`watcher-conformance`): `oms-journal`이 잠금을 쥔 동안 읽기, 코어의 식별자와 같음. 이 묶음 밖에서 `source/watcher_independent`, `source/selftest`(검사 스크립트와 그 자체 시험)를 함께 기록한다 | 실제 파일, 코어가 결정한 기록 | 손상은 파일을 직접 자르고 뒤집어서 만든다 |
 | `pipeline` | 커밋 관문에 flush 실패를 주입. 커밋 경계마다 프로세스를 멈춤. 직접 알림의 flush 실패·치명 종료·정상 종료(U18a2) | 실제 스레드, 실제 파일, 실제 프로세스 | flush 실패와 중단 지점은 주입(`failpoints` 기능). 텔레그램은 loopback 가짜(`OMS_TEST_TELEGRAM_API`) |
 | `e2e` | 실제 `oms-node`와 `simvenue` 프로세스. 간격 검토의 프로세스 시험 8건 | 프로세스, 소켓, 파일 시스템, SIGKILL | 거래소 |
 | `sim-extended`, `kills-extended` | `--extended`일 때만. 시뮬레이션 seed 3000개, 실제 디스크에서 강제 종료 60회 | 위와 같다 | 위와 같다 |
