@@ -109,7 +109,9 @@ fn frames_and_headers_follow_adr_011() {
             header_bytes(&header_json(2, 2, 7)),
         ),
     ];
-    for (label, b) in cases {
+    for (label, mut b) in cases {
+        // A good frame 1 follows, so that only the header check stops the read.
+        b.extend_from_slice(&frame_bytes(1, &payload(1, 5, &[filler()])));
         let d = test_dir("adr011-header");
         std::fs::write(segment_path(&d, 1), &b).unwrap();
         let why = damaged_at(Tail::open(&d).read(1, 10), 1);
