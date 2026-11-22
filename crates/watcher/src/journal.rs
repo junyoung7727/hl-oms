@@ -75,6 +75,14 @@ pub enum JournalError {
     /// state and replays from record 1 at every start.
     NoStart,
     Io(io::ErrorKind),
+    /// A record that breaks a rule of the journal state (C-WATCH part 2):
+    /// a fill of an order the journal never accepted, a purge of an open
+    /// order, a field missing or not of its documented form, a record out
+    /// of order. Latched: the journal is not what C-TAIL says.
+    State {
+        seq: u64,
+        why: String,
+    },
 }
 
 impl JournalError {
@@ -123,6 +131,9 @@ impl fmt::Display for JournalError {
                 write!(f, "the journal's first segment does not start at record 1")
             }
             JournalError::Io(kind) => write!(f, "journal read failed: {kind}"),
+            JournalError::State { seq, why } => {
+                write!(f, "record {seq} breaks the journal state rules: {why}")
+            }
         }
     }
 }

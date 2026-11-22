@@ -4,13 +4,15 @@
 //! built from the documented frame format (ADR-011) and the C-TAIL field
 //! table, and `tools/ci/watcher_independent.sh` proves that it depends on no
 //! `oms-*` or `md-*` crate. U19a1 holds the reader, the known events, the
-//! decimals and the `Base32Pair` identifiers; the checks come in U19a5 on.
+//! decimals and the `Base32Pair` identifiers; U19a2 the journal state
+//! (orders, open set, fills, positions, holds); the checks come in U19a5 on.
 //!
 //! [ADR-031]: ../../docs/adr/ADR-031-watcher.md
 
 pub mod decimal;
 pub mod events;
 pub mod journal;
+pub mod state;
 pub mod wire_id;
 
 /// The package version, printed by `watcher --version`.
