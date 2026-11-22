@@ -16,7 +16,7 @@
 //! refused at once with `overloaded` and leaves no trace in the journal.
 
 use crate::config::{ApiConfig, IngressLimits};
-use crate::liveness::Liveness;
+use crate::liveness::{HelloOutcome, Liveness};
 use crate::pipeline::Shared;
 use crate::queues::{CoreMsg, Lane};
 use crate::status;
@@ -445,8 +445,11 @@ fn hello_answer(ctx: &ApiCtx) -> serde_json::Value {
 /// restore, or while the core holds the strategy, the hello submits
 /// `Input::Session(Hello)` and is answered only once that is durable; a
 /// loss still waiting for room in the queue goes in first. Both go on the
-/// control lane, so the core applies the loss before the restore. A full
-/// queue refuses the hello and changes nothing in the table.
+/// control lane, so the core applies the loss before the restore. While a
+/// restore is in flight, a further hello restores too, so that its answer
+/// also comes after the first restore is durable. A full queue refuses the
+/// hello and the connection does not count. The table's `hello` does all
+/// this (C-LIVE L5).
 fn trading_hello(
     s: &mut Session,
     ctx: &Arc<ApiCtx>,
@@ -456,47 +459,31 @@ fn trading_hello(
     permit: tokio::sync::OwnedSemaphorePermit,
 ) -> Option<Response> {
     let held = ctx.shared.published.read().core.strategy_link.contains_key(&strategy);
-    let mut table = ctx.liveness();
-    let plan = table.hello_plan(&strategy, held);
-    let overloaded = |ctx: &ApiCtx| {
+    let mut restored = None;
+    let outcome = ctx.liveness().hello(
+        &strategy,
+        held,
+        Instant::now(),
+        s.link.as_ref(),
+        &mut |input| push_session(&ctx.shared, input),
+        &mut |input| {
+            let (msg, rx) = CoreMsg::with_reply(input);
+            let taken = ctx.shared.queues.try_push(Lane::Control, msg).is_ok();
+            if taken {
+                restored = Some(rx);
+            }
+            taken
+        },
+    );
+    if outcome == HelloOutcome::Refused {
         ctx.refused_overload.fetch_add(1, Ordering::Relaxed);
         let (code, why) = if ctx.shared.queues.is_closed() {
             (ErrorCode::Unavailable, "the OMS is stopping")
         } else {
             (ErrorCode::Overloaded, "input queue is full; say hello again")
         };
-        Some(Response::err(id, code, why))
-    };
-    let lost_first = plan.lost_first.is_some();
-    if let Some(lost) = plan.lost_first {
-        if !push_session(&ctx.shared, lost) {
-            return overloaded(ctx);
-        }
+        return Some(Response::err(id, code, why));
     }
-    let restored = if plan.restore {
-        let (msg, rx) = CoreMsg::with_reply(Input::Session(SessionInput::Hello {
-            strategy: strategy.clone(),
-        }));
-        if ctx.shared.queues.try_push(Lane::Control, msg).is_err() {
-            if lost_first {
-                table.lost_sent(&strategy);
-            }
-            return overloaded(ctx);
-        }
-        Some(rx)
-    } else {
-        None
-    };
-    // A connection that said hello for another strategy before stops
-    // counting for that one.
-    let new_connection = s.link.as_ref() != Some(&strategy);
-    if new_connection {
-        if let Some(old) = s.link.take() {
-            table.closed(&old, &mut |input| push_session(&ctx.shared, input));
-        }
-    }
-    table.hello_done(&strategy, Instant::now(), new_connection);
-    drop(table);
     s.hello = true;
     s.strategy = Some(strategy.clone());
     s.link = Some(strategy.clone());
@@ -507,7 +494,11 @@ fn trading_hello(
     let out = s.out.clone();
     let ctx = ctx.clone();
     tokio::spawn(async move {
-        let resp = match rx.await {
+        let reply = rx.await;
+        // Before the answer leaves: a later hello is answered at once again
+        // only after this one's restore is (review 1 S1).
+        ctx.liveness().restore_answered(&strategy);
+        let resp = match reply {
             Ok(Reply::Operator(Ok(_))) => Response::ok(id, hello_answer(&ctx)),
             Ok(Reply::Operator(Err(text))) => Response::err(id, ErrorCode::BadRequest, text),
             Ok(_) => Response::err(id, ErrorCode::Internal, "unexpected reply"),

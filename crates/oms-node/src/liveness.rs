@@ -46,6 +46,11 @@ struct Entry {
     /// `hello` yet in this process, and no open plain order at the start).
     last_request: Option<Instant>,
     lost: Lost,
+    /// Restores in the queue whose answer has not come back. While one is
+    /// in flight, a further `hello` restores too: its answer then waits
+    /// for the first restore to be durable (the commit stage answers in
+    /// order).
+    restoring: u32,
 }
 
 /// What a `hello` must do before it is answered.
@@ -58,6 +63,19 @@ pub struct HelloPlan {
     /// the node reported a loss since the last restore, or the core holds
     /// the strategy.
     pub restore: bool,
+}
+
+/// What a `hello` did, for its answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HelloOutcome {
+    /// Nothing to restore: answer at once.
+    Answer,
+    /// The restore is in the queue: answer once it is answered (durable),
+    /// then call `restore_answered`.
+    AfterRestore,
+    /// The queue refused the waiting loss or the restore: the hello is
+    /// refused, and the connection does not count yet.
+    Refused,
 }
 
 /// What `status.strategies.<s>.link` shows of the table (process state).
@@ -94,6 +112,7 @@ impl Liveness {
                         connections: 0,
                         last_request: None,
                         lost: Lost::No,
+                        restoring: 0,
                     },
                 )
             })
@@ -121,10 +140,68 @@ impl Liveness {
         }
     }
 
+    /// A `hello` for `strategy` on the trading socket, on a connection that
+    /// counted for `previous` (if any). A loss that waits for room goes
+    /// into `push` first, then the restore, if one is needed, into
+    /// `push_restore`; both go on the control lane, so the core applies the
+    /// loss first. If either is refused, the table stays as it was (except
+    /// that a loss that went in is no longer waiting) and the hello is
+    /// refused. Otherwise a connection that counted for another strategy
+    /// stops counting for it (its close rule applies) and the strategy is
+    /// live from `now`.
+    pub fn hello(
+        &mut self,
+        strategy: &StrategyId,
+        held_in_core: bool,
+        now: Instant,
+        previous: Option<&StrategyId>,
+        push: &mut dyn FnMut(Input) -> bool,
+        push_restore: &mut dyn FnMut(Input) -> bool,
+    ) -> HelloOutcome {
+        let plan = self.hello_plan(strategy, held_in_core);
+        let lost_first = plan.lost_first.is_some();
+        if let Some(lost) = plan.lost_first {
+            if !push(lost) {
+                return HelloOutcome::Refused;
+            }
+        }
+        if plan.restore {
+            let restore = Input::Session(SessionInput::Hello {
+                strategy: strategy.clone(),
+            });
+            if !push_restore(restore) {
+                if lost_first {
+                    self.lost_sent(strategy);
+                }
+                return HelloOutcome::Refused;
+            }
+        }
+        let new_connection = previous != Some(strategy);
+        if new_connection {
+            if let Some(old) = previous {
+                self.closed(old, push);
+            }
+        }
+        self.hello_done(strategy, now, new_connection, plan.restore);
+        if plan.restore {
+            HelloOutcome::AfterRestore
+        } else {
+            HelloOutcome::Answer
+        }
+    }
+
+    /// The answer to a restore that `hello` put in the queue came back
+    /// (durable, or the process is stopping).
+    pub fn restore_answered(&mut self, strategy: &StrategyId) {
+        if let Some(e) = self.entries.get_mut(strategy) {
+            e.restoring = e.restoring.saturating_sub(1);
+        }
+    }
+
     /// What a `hello` for `strategy` on the trading socket must do. Also
     /// for a strategy that is not listed: a hold of the core is released
     /// all the same.
-    pub fn hello_plan(&self, strategy: &StrategyId, held_in_core: bool) -> HelloPlan {
+    fn hello_plan(&self, strategy: &StrategyId, held_in_core: bool) -> HelloPlan {
         let Some(e) = self.entries.get(strategy) else {
             return HelloPlan {
                 lost_first: None,
@@ -137,26 +214,36 @@ impl Liveness {
         };
         HelloPlan {
             lost_first,
-            restore: held_in_core || e.lost != Lost::No,
+            restore: held_in_core || e.lost != Lost::No || e.restoring > 0,
         }
     }
 
     /// The plan's inputs are in the queue (or there were none): the
     /// strategy is live from `now`. `new_connection` counts the connection;
-    /// a second `hello` on the same connection does not.
-    pub fn hello_done(&mut self, strategy: &StrategyId, now: Instant, new_connection: bool) {
+    /// a second `hello` on the same connection does not. `restoring`: a
+    /// restore went into the queue.
+    fn hello_done(
+        &mut self,
+        strategy: &StrategyId,
+        now: Instant,
+        new_connection: bool,
+        restoring: bool,
+    ) {
         if let Some(e) = self.entries.get_mut(strategy) {
             e.lost = Lost::No;
             e.last_request = Some(now);
             if new_connection {
                 e.connections += 1;
             }
+            if restoring {
+                e.restoring += 1;
+            }
         }
     }
 
     /// The plan's waiting loss went into the queue but the restore did
     /// not: the hello is refused, and the next one restores.
-    pub fn lost_sent(&mut self, strategy: &StrategyId) {
+    fn lost_sent(&mut self, strategy: &StrategyId) {
         if let Some(e) = self.entries.get_mut(strategy) {
             e.lost = Lost::Reported;
         }
@@ -228,6 +315,7 @@ fn report(strategy: &StrategyId, e: &mut Entry, why: String, push: &mut dyn FnMu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::{Cell, RefCell};
 
     fn sid(s: &str) -> StrategyId {
         StrategyId::new(s).unwrap()
@@ -241,38 +329,56 @@ mod tests {
         Liveness::new(&listed)
     }
 
-    /// The inputs a push took, and whether it takes the next ones.
+    /// The control lane: the inputs it took, in order, and whether it
+    /// takes the next ones.
     struct Queue {
-        took: Vec<Input>,
-        full: bool,
+        took: RefCell<Vec<Input>>,
+        full: Cell<bool>,
     }
 
     impl Queue {
         fn new() -> Queue {
             Queue {
-                took: Vec::new(),
-                full: false,
+                took: RefCell::new(Vec::new()),
+                full: Cell::new(false),
             }
         }
 
-        fn push(&mut self) -> impl FnMut(Input) -> bool + '_ {
+        fn push(&self) -> impl FnMut(Input) -> bool + '_ {
             |i| {
-                if self.full {
+                if self.full.get() {
                     false
                 } else {
-                    self.took.push(i);
+                    self.took.borrow_mut().push(i);
                     true
                 }
             }
         }
 
+        /// The losses it took, as (strategy, why).
         fn lost(&self) -> Vec<(String, String)> {
             self.took
+                .borrow()
+                .iter()
+                .filter_map(|i| match i {
+                    Input::Session(SessionInput::Lost { strategy, why }) => {
+                        Some((strategy.to_string(), why.clone()))
+                    }
+                    _ => None,
+                })
+                .collect()
+        }
+
+        /// Everything it took, as `lost <s>` / `hello <s>`, in order.
+        fn order(&self) -> Vec<String> {
+            self.took
+                .borrow()
                 .iter()
                 .map(|i| match i {
-                    Input::Session(SessionInput::Lost { strategy, why }) => {
-                        (strategy.to_string(), why.clone())
+                    Input::Session(SessionInput::Lost { strategy, .. }) => {
+                        format!("lost {strategy}")
                     }
+                    Input::Session(SessionInput::Hello { strategy }) => format!("hello {strategy}"),
                     other => panic!("{other:?}"),
                 })
                 .collect()
@@ -283,10 +389,9 @@ mod tests {
         t0 + Duration::from_millis(ms)
     }
 
-    fn hello(t: &mut Liveness, s: &str, at: Instant) {
-        let plan = t.hello_plan(&sid(s), false);
-        assert_eq!(plan.lost_first, None);
-        t.hello_done(&sid(s), at, true);
+    /// A `hello` for `s` on a new connection.
+    fn hello(t: &mut Liveness, q: &Queue, s: &str, at: Instant) -> HelloOutcome {
+        t.hello(&sid(s), false, at, None, &mut q.push(), &mut q.push())
     }
 
     /// The last connection's close reports one loss; a later close, tick
@@ -295,23 +400,27 @@ mod tests {
     fn the_last_close_reports_one_loss_until_the_next_hello() {
         let t0 = Instant::now();
         let mut t = table();
-        let mut q = Queue::new();
-        hello(&mut t, "a", t0);
+        let q = Queue::new();
+        assert_eq!(hello(&mut t, &q, "a", t0), HelloOutcome::Answer);
         t.closed(&sid("a"), &mut q.push());
         assert_eq!(q.lost(), [("a".to_string(), WHY_CLOSED.to_string())]);
         t.tick(ms(t0, 60_000), &mut q.push());
         t.closed(&sid("a"), &mut q.push());
-        assert_eq!(q.took.len(), 1);
-        assert!(t.hello_plan(&sid("a"), false).restore, "the hello restores");
+        assert_eq!(q.lost().len(), 1);
 
-        hello(&mut t, "a", ms(t0, 61_000));
+        assert_eq!(
+            hello(&mut t, &q, "a", ms(t0, 61_000)),
+            HelloOutcome::AfterRestore,
+            "the hello restores"
+        );
+        t.restore_answered(&sid("a"));
         assert!(!t.hello_plan(&sid("a"), false).restore);
         // The hello moved the clock on: silence is measured from it, not
         // from the first hello.
         t.tick(ms(t0, 66_000), &mut q.push());
-        assert_eq!(q.took.len(), 1, "silence is measured from the hello");
+        assert_eq!(q.lost().len(), 1, "silence is measured from the hello");
         t.closed(&sid("a"), &mut q.push());
-        assert_eq!(q.took.len(), 2, "a new loss after the hello");
+        assert_eq!(q.lost().len(), 2, "a new loss after the hello");
     }
 
     /// Silence longer than the liveness time reports a loss; exactly the
@@ -321,11 +430,11 @@ mod tests {
     fn no_request_for_liveness_ms_reports_a_loss_and_any_request_keeps_it_alive() {
         let t0 = Instant::now();
         let mut t = table();
-        let mut q = Queue::new();
-        hello(&mut t, "a", t0);
-        hello(&mut t, "b", t0);
+        let q = Queue::new();
+        hello(&mut t, &q, "a", t0);
+        hello(&mut t, &q, "b", t0);
         t.tick(ms(t0, 3_000), &mut q.push());
-        assert!(q.took.is_empty(), "b at exactly 3,000 ms is not lost");
+        assert!(q.lost().is_empty(), "b at exactly 3,000 ms is not lost");
         t.tick(ms(t0, 3_001), &mut q.push());
         assert_eq!(
             q.lost(),
@@ -333,14 +442,14 @@ mod tests {
         );
         t.request(&sid("a"), ms(t0, 4_000));
         t.tick(ms(t0, 9_000), &mut q.push());
-        assert_eq!(q.took.len(), 1, "a's request at 4 s keeps it until 9 s");
+        assert_eq!(q.lost().len(), 1, "a's request at 4 s keeps it until 9 s");
         t.tick(ms(t0, 9_001), &mut q.push());
         assert_eq!(
             q.lost()[1],
             ("a".to_string(), "no request for 5000 ms".to_string())
         );
         t.tick(ms(t0, 60_000), &mut q.push());
-        assert_eq!(q.took.len(), 2, "once until the next hello");
+        assert_eq!(q.lost().len(), 2, "once until the next hello");
         assert_eq!(
             t.view(&sid("a"), ms(t0, 9_001))
                 .unwrap()
@@ -355,16 +464,36 @@ mod tests {
     fn two_connections_count_and_only_the_last_close_reports() {
         let t0 = Instant::now();
         let mut t = table();
-        let mut q = Queue::new();
-        hello(&mut t, "a", t0);
-        hello(&mut t, "a", t0);
+        let q = Queue::new();
+        hello(&mut t, &q, "a", t0);
+        hello(&mut t, &q, "a", t0);
         // A second hello on the same connection does not count it twice.
-        t.hello_done(&sid("a"), t0, false);
-        assert_eq!(t.view(&sid("a"), t0).unwrap().connections, 2);
-        t.closed(&sid("a"), &mut q.push());
-        assert!(q.took.is_empty());
-        t.closed(&sid("a"), &mut q.push());
+        let a = sid("a");
+        t.hello(&a, false, t0, Some(&a), &mut q.push(), &mut q.push());
+        assert_eq!(t.view(&a, t0).unwrap().connections, 2);
+        t.closed(&a, &mut q.push());
+        assert!(q.lost().is_empty());
+        t.closed(&a, &mut q.push());
         assert_eq!(q.lost(), [("a".to_string(), WHY_CLOSED.to_string())]);
+    }
+
+    /// A connection that said hello for `a` and then says hello for `b`
+    /// stops counting for `a` (review 1 S3): it was `a`'s last, so `a` is
+    /// lost, before the hello for `b` is done.
+    #[test]
+    fn a_hello_for_another_strategy_closes_the_connection_for_the_first() {
+        let t0 = Instant::now();
+        let mut t = table();
+        let q = Queue::new();
+        hello(&mut t, &q, "a", t0);
+        let (a, b) = (sid("a"), sid("b"));
+        assert_eq!(
+            t.hello(&b, false, t0, Some(&a), &mut q.push(), &mut q.push()),
+            HelloOutcome::Answer
+        );
+        assert_eq!(q.lost(), [("a".to_string(), WHY_CLOSED.to_string())]);
+        assert_eq!(t.view(&a, t0).unwrap().connections, 0);
+        assert_eq!(t.view(&b, t0).unwrap().connections, 1);
     }
 
     /// A loss the queue refused waits and is offered at every tick until
@@ -373,45 +502,111 @@ mod tests {
     fn a_full_queue_is_retried_on_the_next_tick() {
         let t0 = Instant::now();
         let mut t = table();
-        let mut q = Queue::new();
-        hello(&mut t, "a", t0);
-        q.full = true;
+        let q = Queue::new();
+        hello(&mut t, &q, "a", t0);
+        q.full.set(true);
         t.closed(&sid("a"), &mut q.push());
         t.tick(ms(t0, 250), &mut q.push());
-        assert!(q.took.is_empty());
-        q.full = false;
+        assert!(q.lost().is_empty());
+        q.full.set(false);
         t.tick(ms(t0, 500), &mut q.push());
         assert_eq!(q.lost(), [("a".to_string(), WHY_CLOSED.to_string())]);
         t.tick(ms(t0, 750), &mut q.push());
-        assert_eq!(q.took.len(), 1);
+        assert_eq!(q.lost().len(), 1);
     }
 
     /// A `hello` after a loss is answered after the restore; a loss still
-    /// waiting for the queue goes first. The core's own hold asks for the
+    /// waiting for the queue goes in first, before the restore (review 1
+    /// S3). A full queue refuses the hello: the connection does not count,
+    /// and the next hello restores. The core's own hold asks for the
     /// restore too, also for a strategy that is not listed.
     #[test]
     fn hello_after_a_loss_asks_for_the_restore_and_a_waiting_loss_goes_first() {
         let t0 = Instant::now();
         let mut t = table();
-        let mut q = Queue::new();
-        hello(&mut t, "a", t0);
-        q.full = true;
-        t.closed(&sid("a"), &mut q.push());
-        let plan = t.hello_plan(&sid("a"), false);
-        assert_eq!(plan.lost_first, Some(lost_input(&sid("a"), WHY_CLOSED)));
+        let q = Queue::new();
+        let a = sid("a");
+        hello(&mut t, &q, "a", t0);
+        q.full.set(true);
+        t.closed(&a, &mut q.push());
+        let plan = t.hello_plan(&a, false);
+        assert_eq!(plan.lost_first, Some(lost_input(&a, WHY_CLOSED)));
         assert!(plan.restore);
-        // The waiting loss went in, the restore did not: the next hello
-        // still restores, with nothing waiting.
-        t.lost_sent(&sid("a"));
-        let plan = t.hello_plan(&sid("a"), false);
+        assert_eq!(hello(&mut t, &q, "a", t0), HelloOutcome::Refused);
+        assert_eq!(t.view(&a, t0).unwrap().connections, 0);
+        // The waiting loss goes in, the restore does not: refused, and the
+        // next hello still restores, with nothing waiting.
+        q.full.set(false);
+        let mut refuse = |_| false;
+        assert_eq!(
+            t.hello(&a, false, t0, None, &mut q.push(), &mut refuse),
+            HelloOutcome::Refused
+        );
+        assert_eq!(q.order(), ["lost a"]);
+        let plan = t.hello_plan(&a, false);
         assert_eq!((plan.lost_first, plan.restore), (None, true));
-        t.hello_done(&sid("a"), t0, true);
-        assert!(!t.hello_plan(&sid("a"), false).restore);
-        assert!(t.hello_plan(&sid("a"), true).restore, "held in the core");
+        assert_eq!(t.view(&a, t0).unwrap().connections, 0);
+
+        // Through `hello`: the waiting loss first, then the restore.
+        let mut t = table();
+        let q = Queue::new();
+        hello(&mut t, &q, "a", t0);
+        q.full.set(true);
+        t.closed(&a, &mut q.push());
+        q.full.set(false);
+        assert_eq!(hello(&mut t, &q, "a", t0), HelloOutcome::AfterRestore);
+        assert_eq!(q.order(), ["lost a", "hello a"]);
+        t.restore_answered(&a);
+        assert!(!t.hello_plan(&a, false).restore);
+        assert!(t.hello_plan(&a, true).restore, "held in the core");
 
         let unlisted = sid("zz");
         assert!(!t.hello_plan(&unlisted, false).restore);
         assert!(t.hello_plan(&unlisted, true).restore);
+    }
+
+    /// A second `hello` while the first one's restore is not yet answered
+    /// (review 1 S1): it restores too, so that its answer also waits for
+    /// the restore to be durable. Once every restore is answered, a hello
+    /// is answered at once again.
+    #[test]
+    fn a_hello_while_a_restore_is_in_flight_waits_for_it_too() {
+        let t0 = Instant::now();
+        let mut t = table();
+        let q = Queue::new();
+        let a = sid("a");
+        hello(&mut t, &q, "a", t0);
+        t.closed(&a, &mut q.push());
+        assert_eq!(hello(&mut t, &q, "a", t0), HelloOutcome::AfterRestore);
+        assert_eq!(
+            hello(&mut t, &q, "a", t0),
+            HelloOutcome::AfterRestore,
+            "the first restore is not answered yet"
+        );
+        // The same connection again, too.
+        assert_eq!(
+            t.hello(&a, false, t0, Some(&a), &mut q.push(), &mut q.push()),
+            HelloOutcome::AfterRestore
+        );
+        assert_eq!(q.order(), ["lost a", "hello a", "hello a", "hello a"]);
+        t.restore_answered(&a);
+        t.restore_answered(&a);
+        assert_eq!(
+            hello(&mut t, &q, "a", t0),
+            HelloOutcome::AfterRestore,
+            "one restore is still in flight"
+        );
+        t.restore_answered(&a);
+        t.restore_answered(&a);
+        assert_eq!(hello(&mut t, &q, "a", t0), HelloOutcome::Answer);
+        // A loss while a restore is in flight is reported all the same.
+        let mut t = table();
+        let q = Queue::new();
+        hello(&mut t, &q, "a", t0);
+        t.closed(&a, &mut q.push());
+        hello(&mut t, &q, "a", t0);
+        t.closed(&a, &mut q.push());
+        assert_eq!(q.order(), ["lost a", "hello a", "lost a"]);
     }
 
     /// A strategy that is not listed has no liveness: its closes and its
@@ -420,13 +615,13 @@ mod tests {
     fn a_strategy_that_is_not_listed_has_no_liveness() {
         let t0 = Instant::now();
         let mut t = table();
-        let mut q = Queue::new();
+        let q = Queue::new();
         let c = sid("c");
-        t.hello_done(&c, t0, true);
+        assert_eq!(hello(&mut t, &q, "c", t0), HelloOutcome::Answer);
         t.request(&c, t0);
         t.closed(&c, &mut q.push());
         t.tick(ms(t0, 120_000), &mut q.push());
-        assert!(q.took.is_empty());
+        assert!(q.order().is_empty());
         assert_eq!(t.view(&c, t0), None);
     }
 
@@ -436,7 +631,7 @@ mod tests {
     #[test]
     fn at_start_only_strategies_with_plain_orders_are_armed() {
         let t0 = Instant::now();
-        let mut q = Queue::new();
+        let q = Queue::new();
         let mut t = table();
         t.start(t0, |s| *s == sid("a"), |_| false);
         assert_eq!(t.view(&sid("b"), t0).unwrap().last_request_age_ms, None);
@@ -447,7 +642,7 @@ mod tests {
         );
 
         let mut t = table();
-        let mut q = Queue::new();
+        let q = Queue::new();
         t.start(t0, |_| true, |s| *s == sid("a"));
         t.tick(ms(t0, 60_000), &mut q.push());
         assert_eq!(
