@@ -9,6 +9,7 @@
 //! [ADR-031]: ../../docs/adr/ADR-031-watcher.md
 
 pub mod decimal;
+pub mod events;
 pub mod wire_id;
 
 /// The package version, printed by `watcher --version`.
