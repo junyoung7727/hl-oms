@@ -94,7 +94,7 @@ B와 b. 커서 저장(C)은 하지 않는다.
 
 ## 9. 근거
 
-- 시험: `crates/watcher/tests/journal.rs` 9개, `crates/watcher/src` 단위 시험 3개(`events`, `decimal`, `wire_id`), `crates/watcher/tests/binary.rs` 1개, `crates/watcher-conformance/tests/conformance.rs` 2개, `tools/ci/selftest.sh`의 워처 22건(주장 V-WATCH-1). 변이 M182~M184, M221.
+- 시험: `crates/watcher/tests/journal.rs` 9개, `crates/watcher/src` 단위 시험 3개(`events`, `decimal`, `wire_id`), `crates/watcher/tests/binary.rs` 1개, `crates/watcher-conformance/tests/conformance.rs` 2개, `tools/ci/selftest.sh`의 워처 22건(주장 V-WATCH-1). 변이 M182~M184, M221, M230(검토 1 S3).
 - 설계 TN(암호화폐 거래 통합 설계) §7.5 독립성, `pr_plan.json` U19a, 스펙 `.scratch/watcher-core/spec.md`. 설계 문서는 저장소 밖에 있다.
 
 ## 10. 재검토 조건
