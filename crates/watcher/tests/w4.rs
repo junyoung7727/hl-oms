@@ -814,3 +814,131 @@ fn a_round_that_reads_a_page_ends_the_run_of_failed_rounds() {
     );
     assert_eq!(r.lines_with("rounds in a row; the sweep restarts"), 0);
 }
+
+#[test]
+fn a_row_after_the_sweeps_end_is_an_unreadable_row_and_does_not_blind_w4() {
+    let (mut r, _) = rig("w4-after-end");
+    // Two sweeps answer with a Funding row 10 days after their end (the
+    // venue should filter it by endTime).
+    let ahead = T0 + 10 * DAY;
+    for _ in 0..2 {
+        r.venue.exec_script.push_back(page(
+            vec![exec("BTCUSDT", "f", "Funding", "Buy", "1", ahead)],
+            "",
+        ));
+    }
+    r.at(T0);
+    assert!(r.confirmed.is_empty());
+    assert_eq!(r.gauge("watcher_differences", "W4"), Some(1.0));
+    // A Trade the journal lacks, 2 s later.
+    r.venue.executions.push(trade("x", T0 + 2000));
+    r.at(T0 + 5000);
+    let want = format!(
+        "W4 unreadable_row BTCUSDT:f: venue row without execTime (execTime {ahead} after the sweep's end {}), journal not compared; seen 2 sweeps, execTime unknown",
+        T0 + 5000
+    );
+    assert_eq!(w4_mismatches(&r), vec![(T0 + 5000, want)]);
+    // The watermark did not move to the row's time: X is read and
+    // confirmed (under the hold the row set).
+    r.at(T0 + 10_000);
+    r.at(T0 + 15_000);
+    let w = windows(&r);
+    assert!(w.iter().all(|w| w.0 == T0 - 610_000), "{w:?}");
+    assert!(
+        r.confirmed
+            .iter()
+            .any(|c| c.1 == missing_fill("x", "13.0 s")),
+        "{:?}",
+        r.confirmed
+    );
+}
+
+#[test]
+fn a_trade_or_venue_change_of_quantity_0_is_ignored_as_the_oms_ignores_it() {
+    let (mut r, times) = rig("w4-zero-qty");
+    // The journal has none of them: the OMS books no fill and no venue
+    // change of quantity 0.
+    r.venue
+        .executions
+        .push(exec("BTCUSDT", "z", "Trade", "Buy", "0", T0 - 20_000));
+    r.venue
+        .executions
+        .push(exec("BTCUSDT", "s", "Settle", "Buy", "0", T0 - 20_000));
+    r.venue.executions.push(exec(
+        "BTCUSDT",
+        "a",
+        "AdlTrade",
+        "Sell",
+        "0.000",
+        T0 - 15_000,
+    ));
+    r.at(T0);
+    r.at(T0 + 5000);
+    assert!(r.confirmed.is_empty(), "{:?}", r.confirmed);
+    assert!(w4_mismatches(&r).is_empty());
+    assert_eq!(r.gauge("watcher_differences", "W4"), Some(0.0));
+    // Ignored rows let the watermark pass; none of them agrees.
+    assert_eq!(windows(&r)[1].0, T0 - 25_000);
+    assert!(times.lock().unwrap().is_empty());
+}
+
+#[test]
+fn an_already_held_answer_to_a_w4_send_does_not_pay_it() {
+    let (mut r, _) = rig("w4-already-held");
+    r.oms = Oms::Silent;
+    r.venue.executions.push(trade("x", T0 - 30_000));
+    run(&mut r, T0, T0 + 3000);
+    // A W1 difference, confirmed after the W4 send went out.
+    r.venue.orders = vec![row("foreign-1", "o1", "BTCUSDT", "Buy")];
+    run(&mut r, T0 + 4000, T0 + 7000);
+    let checks: Vec<Check> = r.mismatches.iter().map(|m| m.1).collect();
+    assert_eq!(checks, vec![Check::W4, Check::W1]);
+    let (w4_id, w1_id) = (r.send_ids[0], r.send_ids[1]);
+    let (d4, d1) = (r.mismatches[0].2.clone(), r.mismatches[1].2.clone());
+    // The W1 send wins the race: "held". The W4 send: "already held".
+    let now = T0 + 7000;
+    let a = r.hold(Check::W1, &d1);
+    assert_eq!(a, Ok("held".to_string()));
+    let more = r.engine.on_admin(now, Check::W1, w1_id, a);
+    r.run(now, more);
+    let a = r.hold(Check::W4, &d4);
+    assert_eq!(a, Ok("already held".to_string()));
+    let more = r.engine.on_admin(now, Check::W4, w4_id, a);
+    r.run(now, more);
+    r.venue.orders.clear();
+    r.oms = Oms::Holds;
+    r.clear(T0 + 7500);
+    // The hold note names W1 only: the W4 identity stays owed and is sent
+    // once after the clear.
+    run(&mut r, T0 + 8000, T0 + 9000);
+    assert_eq!(r.gauge("watcher_mismatch_active", "W4"), Some(1.0));
+    run(&mut r, T0 + 10_000, T0 + 30_000);
+    let w4 = w4_mismatches(&r);
+    assert_eq!(w4.len(), 2, "{w4:?}");
+    assert_eq!(w4[1].1, d4);
+    // Answered "held"; after that clear it is dismissed.
+    r.clear(T0 + 30_500);
+    run(&mut r, T0 + 31_000, T0 + 50_000);
+    assert_eq!(w4_mismatches(&r).len(), 2);
+    assert_eq!(r.gauge("watcher_mismatch_active", "W4"), Some(0.0));
+}
+
+#[test]
+fn the_restart_warn_line_is_logged_once_per_run_of_failed_rounds() {
+    let (mut r, _) = rig("w4-restart-once");
+    for _ in 0..9 {
+        r.venue
+            .exec_script
+            .push_back(Err(RestError::NoAnswer("timeout".into())));
+    }
+    for k in 0..10 {
+        r.at(T0 + k * 5000);
+    }
+    // Three restarts (rounds 3, 6 and 9), one line; the 10th round reads
+    // its page: one line that says so.
+    let starts = windows(&r).iter().filter(|w| w.2.is_none()).count();
+    assert_eq!(starts, 10);
+    assert_eq!(r.lines_with("rounds in a row; the sweep restarts"), 1);
+    assert_eq!(r.lines_with("W4 pages are read again"), 1);
+    assert_eq!(r.engine.success(Check::W4), Some(T0 + 45_000));
+}

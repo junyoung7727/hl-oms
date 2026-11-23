@@ -80,6 +80,9 @@ pub struct W4 {
     pages: u64,
     /// The window of the last sweep was cut to 7 days.
     cut: bool,
+    /// The sweep restarted after failed rounds and no page has been read
+    /// since (one warn line per run of failures).
+    restarted: bool,
     /// Each row of the last comparison: its `execTime` and, for a
     /// difference, its identity.
     compared: Vec<(Option<u64>, Option<Ident>)>,
@@ -136,6 +139,7 @@ impl W4 {
             sweep: None,
             pages: 0,
             cut: false,
+            restarted: false,
             compared: Vec::new(),
             times: Arc::new(Mutex::new(BTreeMap::new())),
         }
@@ -220,9 +224,15 @@ impl W4 {
     fn row(
         row: &Value,
         state: &JournalState,
+        end: u64,
         agreed: &mut Option<(String, u64)>,
     ) -> (Option<u64>, Option<Diff>) {
-        let exec_time = text(row, "execTime").and_then(|t| t.parse::<u64>().ok());
+        let read_time = text(row, "execTime").and_then(|t| t.parse::<u64>().ok());
+        // An `execTime` after the sweep's end is not trusted: as a
+        // watermark it would move every later window past `end` (review 1
+        // S1 of U19a8).
+        let late = read_time.filter(|&t| t > end);
+        let exec_time = read_time.filter(|&t| t <= end);
         // The OMS ignores a fill below the floor and the journal never
         // holds it.
         if exec_time
@@ -282,7 +292,12 @@ impl W4 {
         }
         if !missing.is_empty() {
             let names = missing.join(",");
-            let what = format!("venue row without {names}, journal not compared");
+            let what = match late {
+                Some(t) => format!(
+                    "venue row without {names} (execTime {t} after the sweep's end {end}), journal not compared"
+                ),
+                None => format!("venue row without {names}, journal not compared"),
+            };
             let d = Diff {
                 kind: "unreadable_row",
                 subject: key,
@@ -312,6 +327,11 @@ impl W4 {
             let d = diff("unknown_exec_type", exec_type.to_string(), what);
             return (exec_time, Some(d));
         };
+        if qty.is_zero() {
+            // The OMS books no fill and no venue change of quantity 0
+            // (`decide.rs` `on_fill`, `on_venue_change`; review 1 S2).
+            return (exec_time, None);
+        }
         if let Some(kind) = change_kind(exec_type) {
             let signed = match side {
                 Side::Buy => Ok(qty),
@@ -404,7 +424,12 @@ impl Logic for W4 {
 
     fn page(&mut self, _now_ms: u64, result: &Value) -> Page {
         self.pages += 1;
-        self.read(result).unwrap_or_else(Page::Unreadable)
+        let page = self.read(result).unwrap_or_else(Page::Unreadable);
+        if self.restarted && matches!(page, Page::Next(_) | Page::Pause | Page::Done) {
+            (self.log)("W4 pages are read again after a restart");
+            self.restarted = false;
+        }
+        page
     }
 
     fn defers(&self) -> bool {
@@ -426,21 +451,27 @@ impl Logic for W4 {
         }
         sw.failed += 1;
         if sw.failed >= RESTART_AFTER_FAILED {
-            (self.log)(&format!(
-                "warn: W4 page failed {RESTART_AFTER_FAILED} rounds in a row; the sweep restarts from page 1 with a new end"
-            ));
+            if !self.restarted {
+                (self.log)(&format!(
+                    "warn: W4 page failed {RESTART_AFTER_FAILED} rounds in a row; the sweep restarts from page 1 with a new end"
+                ));
+                self.restarted = true;
+            }
             self.restart();
         }
     }
 
-    fn compare(&mut self, _now_ms: u64, state: &JournalState) -> Vec<Diff> {
-        let rows = self.sweep.take().map(|s| s.rows).unwrap_or_default();
+    fn compare(&mut self, now_ms: u64, state: &JournalState) -> Vec<Diff> {
+        let (rows, end) = self
+            .sweep
+            .take()
+            .map_or((Vec::new(), now_ms), |s| (s.rows, s.end.unwrap_or(now_ms)));
         self.compared.clear();
         let mut out = Vec::new();
         let mut times = self.times.lock().unwrap_or_else(|e| e.into_inner());
         for r in &rows {
             let mut agreed = None;
-            let (t, d) = W4::row(r, state, &mut agreed);
+            let (t, d) = W4::row(r, state, end, &mut agreed);
             if let Some((symbol, t)) = agreed {
                 let e = times.entry(symbol).or_insert(t);
                 *e = (*e).max(t);
