@@ -17,7 +17,8 @@
 //! sighting is pending (the round may still succeed); a second sighting
 //! that is still young is deferred (the round is not a success). What a
 //! check compares is its [`Logic`]: W1 in U19a5, W2 in U19a6, W4 in U19a8,
-//! W3 later. W4 (U19a8) reads a sweep over one or more rounds (a round
+//! W3 in U19a9 (no age rule: its time is unknown, so a violation seen on
+//! two rounds in a row is confirmed). W4 (U19a8) reads a sweep over one or more rounds (a round
 //! that reaches the page cap pauses, [`Page::Pause`]), compares only when
 //! the sweep completes, never defers and confirms `unknown_exec_type` at
 //! once.
@@ -832,8 +833,18 @@ impl Engine {
 }
 
 /// `"<check> <kind> <subject>: <what>; seen 2 rounds, <age>"`; for W4
-/// `"seen <n> sweep(s), execTime <a> s old"` (U19a8).
+/// `"seen <n> sweep(s), execTime <a> s old"` (U19a8); W3 has no age rule
+/// and no age (U19a9).
 fn detail(check: Check, d: &Diff, age_ms: Option<u64>, seen: u32) -> String {
+    if check == Check::W3 {
+        return format!(
+            "{} {} {}: {}; seen {seen} rounds",
+            check.name(),
+            d.kind,
+            d.subject,
+            d.what
+        );
+    }
     let secs = |ms: u64| format!("{}.{} s", ms / 1000, ms % 1000 / 100);
     let w4 = check == Check::W4;
     let age = match (d.since, age_ms) {

@@ -8,7 +8,8 @@
 //! (orders, open set, fills, positions, holds); U19a3 the Bybit signer and
 //! client, the request guard, the clock and the metrics export; U19a4 the
 //! config; U19a4b the start checks; U19a5 the check engine and W1; U19a6
-//! W2; the other checks come in U19a8 on.
+//! W2; U19a7 the OMS links and the runtime; U19a8 W4; U19a9 W3 and W2's
+//! fallback to W4's execution times.
 //!
 //! [ADR-031]: ../../docs/adr/ADR-031-watcher.md
 
@@ -29,6 +30,7 @@ pub mod start;
 pub mod state;
 pub mod w1;
 pub mod w2;
+pub mod w3;
 pub mod w4;
 pub mod wire_id;
 
