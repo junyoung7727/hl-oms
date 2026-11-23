@@ -2048,6 +2048,33 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "w1", "an_order_listed_on_two_pages_is_one_difference"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M243-watcher-w2-size-without-side-is-flat",
+        what: "a W2 row with a size and an empty or no side is read as no position, so a position the OMS does not know is seen as flat and a journal position of 0 agrees with it (review 1 S1 of U19a6)",
+        file: "crates/watcher/src/w2.rs",
+        find: "        Some(\"\") | None if size.is_zero() => Ok(Dec::ZERO),\n",
+        replace: "        Some(\"\") | None => Ok(Dec::ZERO),\n",
+        test: &["-p", "watcher", "--test", "w2", "bad_pages_and_rows_fail_the_round"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M244-watcher-w2-partial-read-observed",
+        what: "a W2 round that read a page with a cursor stages its sizes as a complete read, so a round that loses a later page records every symbol of the later pages as flat (review 1 S2 of U19a6)",
+        file: "crates/watcher/src/w2.rs",
+        find: "        if page == Page::Done {\n",
+        replace: "        if matches!(page, Page::Done | Page::Next(_)) {\n",
+        test: &["-p", "watcher", "--test", "w2", "a_round_that_failed_between_pages_leaves_no_observation"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M245-watcher-w2-overflow-agrees",
+        what: "a W2 difference out of the decimal's range is read as agreement (an error read as no difference; review 1 N1 of U19a6)",
+        file: "crates/watcher/src/w2.rs",
+        find: "                Err(_) => \"overflow\".to_string(),\n",
+        replace: "                Err(_) => continue,\n",
+        test: &["-p", "watcher", "--test", "w2", "a_difference_too_large_to_subtract_is_still_a_difference"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
