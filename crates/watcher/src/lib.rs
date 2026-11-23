@@ -29,6 +29,7 @@ pub mod start;
 pub mod state;
 pub mod w1;
 pub mod w2;
+pub mod w4;
 pub mod wire_id;
 
 /// The package version, printed by `watcher --version`.

@@ -105,15 +105,27 @@ pub fn pos(symbol: &str, side: &str, size: &str, updated: Option<u64>) -> Value 
     r
 }
 
+/// An `/v5/execution/list` row (U19a8); `exec_time` in ms.
+pub fn exec(symbol: &str, id: &str, ty: &str, side: &str, qty: &str, exec_time: u64) -> Value {
+    json!({"symbol": symbol, "execId": id, "execType": ty, "side": side, "execQty": qty,
+        "execPrice": "100", "execFee": "0", "execTime": exec_time.to_string(),
+        "orderLinkId": "", "orderId": ""})
+}
+
 /// The model venue: its open orders, served 50 a page (a full page has a
 /// cursor `p<next index>`), and its positions, served 200 a page
-/// (U19a6); scripted answers go first, one script per path.
+/// (U19a6); its executions (U19a8), those with `startTime ≤ execTime ≤
+/// endTime` newest first (a row without a readable `execTime` in every
+/// window, last), 100 a page, cursor `e<next index>` while rows remain;
+/// scripted answers go first, one script per path.
 #[derive(Default)]
 pub struct Venue {
     pub orders: Vec<Value>,
     pub script: VecDeque<Result<Value, RestError>>,
     pub positions: Vec<Value>,
     pub pos_script: VecDeque<Result<Value, RestError>>,
+    pub executions: Vec<Value>,
+    pub exec_script: VecDeque<Result<Value, RestError>>,
     pub requests: Vec<(&'static str, Vec<(&'static str, String)>)>,
 }
 
@@ -124,6 +136,9 @@ impl Venue {
         params: &[(&'static str, String)],
     ) -> Result<Value, RestError> {
         self.requests.push((path, params.to_vec()));
+        if path == "/v5/execution/list" {
+            return self.executions(params);
+        }
         let positions = path == "/v5/position/list";
         let (script, all, n) = if positions {
             (&mut self.pos_script, &self.positions, 200)
@@ -148,6 +163,47 @@ impl Venue {
     }
 }
 
+impl Venue {
+    fn executions(&mut self, params: &[(&'static str, String)]) -> Result<Value, RestError> {
+        if let Some(a) = self.exec_script.pop_front() {
+            return a;
+        }
+        let p = |k: &str| params.iter().find(|(n, _)| *n == k).map(|(_, v)| v.clone());
+        let start: u64 = p("startTime").unwrap().parse().unwrap();
+        let end: u64 = p("endTime").unwrap().parse().unwrap();
+        let from = p("cursor").map(|c| c[1..].parse::<usize>().unwrap()).unwrap_or(0);
+        let time = |r: &Value| r["execTime"].as_str().and_then(|t| t.parse::<u64>().ok());
+        let mut rows: Vec<Value> = self
+            .executions
+            .iter()
+            .filter(|r| time(r).is_none_or(|t| start <= t && t <= end))
+            .cloned()
+            .collect();
+        rows.sort_by_key(|r| std::cmp::Reverse(time(r).map_or(0, |t| t + 1)));
+        let page_rows: Vec<Value> = rows.iter().skip(from).take(100).cloned().collect();
+        let next = if from + page_rows.len() < rows.len() {
+            format!("e{}", from + page_rows.len())
+        } else {
+            String::new()
+        };
+        page(page_rows, &next)
+    }
+
+    /// The `/v5/execution/list` requests seen.
+    pub fn exec_requests(&self) -> Vec<&Vec<(&'static str, String)>> {
+        self.requests
+            .iter()
+            .filter(|q| q.0 == "/v5/execution/list")
+            .map(|q| &q.1)
+            .collect()
+    }
+}
+
+/// The value of `key` in a request's params.
+pub fn param(params: &[(&'static str, String)], key: &str) -> Option<String> {
+    params.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone())
+}
+
 /// How the rig answers `Mismatch` (U19a7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Oms {
@@ -163,6 +219,8 @@ pub struct Rig {
     pub journal: TestJournal,
     pub metrics: Arc<Metrics>,
     pub lines: Arc<Mutex<Vec<String>>>,
+    /// The engine's log, for a check added later (U19a8).
+    pub log: watcher::log::Log,
     /// The cap of the status answers; `None`: the journal's last record.
     pub cap: Option<u64>,
     pub instance: u64,
@@ -200,7 +258,7 @@ impl Rig {
             Tail::open(&journal.dir),
             JournalState::default(),
             metrics.clone(),
-            log,
+            log.clone(),
             BOOT,
             T0,
         );
@@ -210,6 +268,7 @@ impl Rig {
             journal,
             metrics,
             lines,
+            log,
             cap: None,
             instance: INSTANCE,
             status_down: None,
