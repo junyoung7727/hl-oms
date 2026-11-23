@@ -16,7 +16,9 @@
 //! `AdlTrade`/`BustTrade`/`Delivery`/`Settle` with its venue changes,
 //! `Funding` with nothing; any other type is `unknown_exec_type`, confirmed
 //! at once (at the completed sweep). A row that lacks a field its type
-//! needs is `unreadable_row`.
+//! needs is `unreadable_row`, and so is one whose `execTime` is after the
+//! sweep's end; a `Trade` or venue-change row of quantity 0 is ignored, as
+//! the OMS books none.
 //!
 //! The watermark after a completed sweep is the newest `execTime` at or
 //! below which every row agrees, is ignored or is confirmed; it never moves
