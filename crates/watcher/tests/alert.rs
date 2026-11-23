@@ -440,7 +440,12 @@ impl Rig {
 
     /// Waits (bounded, real time) until `f` holds.
     fn until(&self, what: &str, f: impl Fn(&Rig) -> bool) {
-        let end = Instant::now() + Duration::from_secs(5);
+        self.until_within(Duration::from_secs(5), what, f);
+    }
+
+    /// Waits at most `bound` of real time until `f` holds.
+    fn until_within(&self, bound: Duration, what: &str, f: impl Fn(&Rig) -> bool) {
+        let end = Instant::now() + bound;
         while !f(self) {
             assert!(Instant::now() < end, "timed out waiting for {what}");
             std::thread::sleep(Duration::from_millis(5));
@@ -745,4 +750,37 @@ fn shutdown_flushes_within_5_s_and_counts_the_rest() {
         rig.lines().last().map(String::as_str),
         Some("warn: alert sender stopped at its bound: 3 parts not delivered are dropped")
     );
+}
+
+#[test]
+fn a_request_without_an_answer_fails_after_10_s() {
+    // Telegram (or a box on the way) takes the connection and never
+    // answers: the request timeout ends the send, the failure is counted
+    // and logged, and the part waits for the next flush (review 1 S1).
+    let hang = FakeHttp::start(Answer::Hang);
+    let mut rig = Rig::new(vec![Route::direct(&hang.url())]);
+    let t = Instant::now();
+    rig.handle.once("a");
+    assert_eq!(hang.wait_requests(1, Duration::from_secs(5)).len(), 1);
+    rig.until_within(Duration::from_secs(15), "the request timeout", |r| {
+        r.metric("watcher_alert_failures_total") == 1.0 && r.handle.next_flush().is_some()
+    });
+    let took = t.elapsed();
+    assert_eq!(alert::REQUEST_TIMEOUT_MS, 10_000);
+    assert!(
+        took >= Duration::from_millis(9_500) && took < Duration::from_millis(13_000),
+        "{took:?}"
+    );
+    assert_eq!(rig.handle.next_flush(), Some(T0 + 5_000));
+    assert_eq!(rig.metric("watcher_alerts_queued"), 1.0);
+    assert_eq!(rig.metric("watcher_alerts_delivered_total"), 0.0);
+    let lines = rig.lines();
+    let failed: Vec<&String> = lines
+        .iter()
+        .filter(|l| l.starts_with("warn: telegram send failed: route 0: "))
+        .collect();
+    assert_eq!(failed.len(), 1, "{lines:?}");
+    assert!(!failed[0].contains(SECRET), "{}", failed[0]);
+    // The last flush meets the same silence and is cut at its bound.
+    assert_eq!(rig.finish(200), 1);
 }
