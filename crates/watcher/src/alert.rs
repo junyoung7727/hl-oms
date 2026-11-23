@@ -3,7 +3,11 @@
 //! them for the OMS, without linking that crate (independence, part 1).
 //! U19b1a holds the pure parts: the bot token, the message and its split
 //! into parts, the outbox, the outcome of an answer and the repeat rule.
-//! Nothing sends yet (the sender task is U19b1b).
+//! U19b1b the sender task ([`spawn`]): two routes (DNS, then the host
+//! pinned to Telegram's address), woken by a `Notify` (a new message, or
+//! the runtime's tick when the retry flush is due on the injected clock),
+//! the alert metrics and the shutdown flush. Nothing in the runtime starts
+//! it yet (U19b1c).
 //!
 //! The token is never written to an error, a log or `Debug`.
 //!
@@ -11,6 +15,15 @@
 
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use tokio::sync::Notify;
+
+use crate::clock::Clock;
+use crate::log::Log;
+use crate::metrics::Metrics;
 
 /// The prefix of every message of the watcher (design §7.7, Q18: the
 /// same bot as the OMS, told apart by the prefix).
@@ -359,5 +372,377 @@ impl Repeat {
                 .map(|c| format!("해소: {}", c.first_text)),
             (None, None) => None,
         }
+    }
+}
+
+// ---------------------------------------------------------------- sender (U19b1b)
+
+/// The Bot API base of the production routes (PR #3).
+pub const TELEGRAM_BASE: &str = "https://api.telegram.org/";
+/// The host the second production route pins (SNI and certificate).
+pub const TELEGRAM_HOST: &str = "api.telegram.org";
+/// The address the second production route pins the host to, when DNS
+/// fails (PR #3).
+pub const TELEGRAM_PINNED: SocketAddr =
+    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(149, 154, 167, 220)), 443);
+/// Per request, real time (PR #3, design value).
+pub const REQUEST_TIMEOUT_MS: u64 = 10_000;
+/// Per connect and route, real time (PR #3, design value): a blocked first
+/// route does not use up the shutdown flush.
+pub const CONNECT_TIMEOUT_MS: u64 = 3_000;
+/// A flush that left parts is tried again this long after it ended, on the
+/// injected clock (PR #3, design value).
+pub const FLUSH_EVERY_MS: u64 = 5_000;
+/// The bound of the shutdown flush, real time (판단(모델 아님)).
+pub const FINISH_MS: u64 = 5_000;
+
+/// One way to reach the Bot API: a base URL, and optionally a host name
+/// resolved to a fixed address (the URL's host still gives SNI and the
+/// certificate). It holds no token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Route {
+    base: String,
+    resolve: Option<(String, SocketAddr)>,
+}
+
+impl Route {
+    /// `base` resolved by DNS.
+    pub fn direct(base: &str) -> Route {
+        Route {
+            base: with_slash(base),
+            resolve: None,
+        }
+    }
+
+    /// `base` whose `host` is resolved to `addr`.
+    pub fn pinned(base: &str, host: &str, addr: SocketAddr) -> Route {
+        Route {
+            base: with_slash(base),
+            resolve: Some((host.to_string(), addr)),
+        }
+    }
+
+    /// The two production routes: DNS, then `api.telegram.org` pinned to
+    /// 149.154.167.220:443.
+    pub fn telegram() -> Vec<Route> {
+        vec![
+            Route::direct(TELEGRAM_BASE),
+            Route::pinned(TELEGRAM_BASE, TELEGRAM_HOST, TELEGRAM_PINNED),
+        ]
+    }
+}
+
+fn with_slash(base: &str) -> String {
+    if base.ends_with('/') {
+        base.to_string()
+    } else {
+        format!("{base}/")
+    }
+}
+
+/// The alert series (C-WATCH part 10).
+const QUEUED: &str = "watcher_alerts_queued";
+const DELIVERED: &str = "watcher_alerts_delivered_total";
+const DROPPED: &str = "watcher_alerts_dropped_total";
+const FAILURES: &str = "watcher_alert_failures_total";
+
+struct Inner {
+    outbox: Outbox,
+    repeat: Repeat,
+    /// When the runtime's tick wakes the task again: set when a flush ended
+    /// with parts left, cleared when a flush starts.
+    next_flush: Option<u64>,
+    stop: bool,
+}
+
+struct Shared {
+    name: String,
+    clock: Arc<dyn Clock>,
+    metrics: Arc<Metrics>,
+    inner: Mutex<Inner>,
+    wake: Notify,
+}
+
+impl Shared {
+    /// The gauge and the drop counter follow the outbox.
+    fn publish(&self, i: &Inner) {
+        self.metrics.set(QUEUED, &[], i.outbox.len() as f64);
+        self.metrics
+            .set(DROPPED, &[], i.outbox.dropped_total() as f64);
+    }
+
+    fn add(&self, i: &mut Inner, body: &str) {
+        let msg = message(&self.name, self.clock.now_ms(), body);
+        i.outbox.add(&msg);
+        self.publish(i);
+        self.wake.notify_one();
+    }
+}
+
+/// What callers use: each call only takes a lock; nothing that calls it
+/// waits for the network. Clones share the one sender.
+#[derive(Clone)]
+pub struct Handle(Arc<Shared>);
+
+impl Handle {
+    /// Queues one message with the `[WATCH P1]` header and wakes the
+    /// sender.
+    pub fn once(&self, body: &str) {
+        if let Ok(mut i) = self.0.inner.lock() {
+            self.0.add(&mut i, body);
+        }
+    }
+
+    /// The condition `key` holds (`Some(text)`) or not (`None`) now: what
+    /// the repeat rule gives is queued (start, every 5 min, `해소:`).
+    pub fn set(&self, key: &str, text: Option<&str>) {
+        if let Ok(mut i) = self.0.inner.lock() {
+            let now = self.0.clock.now_ms();
+            if let Some(body) = i.repeat.set(key, text, now) {
+                self.0.add(&mut i, &body);
+            }
+        }
+    }
+
+    /// The instant on the injected clock at which the next retry flush is
+    /// due; `None` when no flush left parts.
+    pub fn next_flush(&self) -> Option<u64> {
+        self.0.inner.lock().ok().and_then(|i| i.next_flush)
+    }
+
+    /// The runtime's tick: wakes the sender when [`Handle::next_flush`] is
+    /// due at `now_ms`.
+    pub fn tick(&self, now_ms: u64) {
+        if self.next_flush().is_some_and(|t| now_ms >= t) {
+            self.0.wake.notify_one();
+        }
+    }
+}
+
+/// The sender task; [`Task::finish`] ends it.
+pub struct Task {
+    shared: Arc<Shared>,
+    join: tokio::task::JoinHandle<()>,
+    log: Log,
+}
+
+impl Task {
+    /// Shutdown: one last flush, bounded by `bound_ms` of real time; what
+    /// is left is dropped and counted in one log line. Returns the parts
+    /// left.
+    pub async fn finish(mut self, bound_ms: u64) -> usize {
+        if let Ok(mut i) = self.shared.inner.lock() {
+            i.stop = true;
+        }
+        self.shared.wake.notify_one();
+        let ended = tokio::time::timeout(Duration::from_millis(bound_ms), &mut self.join)
+            .await
+            .is_ok();
+        if !ended {
+            self.join.abort();
+        }
+        let (left, notice) = match self.shared.inner.lock() {
+            Ok(i) => (i.outbox.len(), i.outbox.dropped()),
+            Err(_) => (0, 0),
+        };
+        if left == 0 && notice == 0 {
+            (self.log)("alert sender stopped: nothing left to send");
+        } else {
+            (self.log)(&format!(
+                "warn: alert sender stopped{}: {left} parts not delivered are dropped{}",
+                if ended { "" } else { " at its bound" },
+                if notice > 0 {
+                    format!(" (and the notice of {notice} earlier drops)")
+                } else {
+                    String::new()
+                }
+            ));
+        }
+        left
+    }
+}
+
+/// Builds one client per route and starts the sender task on the current
+/// tokio runtime. `name` is the watcher's config name (the header).
+pub fn spawn(
+    name: &str,
+    routes: Vec<Route>,
+    token: Token,
+    clock: Arc<dyn Clock>,
+    metrics: Arc<Metrics>,
+    log: Log,
+) -> Result<(Handle, Task), String> {
+    if routes.is_empty() {
+        return Err("no route to Telegram".into());
+    }
+    let mut clients = Vec::new();
+    for r in &routes {
+        let mut b = reqwest::Client::builder()
+            .timeout(Duration::from_millis(REQUEST_TIMEOUT_MS))
+            .connect_timeout(Duration::from_millis(CONNECT_TIMEOUT_MS))
+            // A redirect would carry the token elsewhere.
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy();
+        if let Some((host, addr)) = &r.resolve {
+            b = b.resolve(host, *addr);
+        }
+        let c = b
+            .build()
+            .map_err(|e| format!("cannot build the Telegram client: {}", chain(e)))?;
+        clients.push((c, format!("{}bot{}/sendMessage", r.base, token.token)));
+    }
+    metrics.add(DELIVERED, &[], 0.0);
+    metrics.add(FAILURES, &[], 0.0);
+    let shared = Arc::new(Shared {
+        name: name.to_string(),
+        clock,
+        metrics,
+        inner: Mutex::new(Inner {
+            outbox: Outbox::new(OUTBOX_LIMIT),
+            repeat: Repeat::new(REPEAT_MS),
+            next_flush: None,
+            stop: false,
+        }),
+        wake: Notify::new(),
+    });
+    if let Ok(i) = shared.inner.lock() {
+        shared.publish(&i);
+    }
+    let sender = Sender {
+        shared: shared.clone(),
+        clients,
+        order: (0..routes.len()).collect(),
+        chat: token.chat_id.clone(),
+        log: log.clone(),
+    };
+    let join = tokio::spawn(sender.run());
+    Ok((Handle(shared.clone()), Task { shared, join, log }))
+}
+
+/// The error and its causes in one line, without the URL (it holds the
+/// token).
+fn chain(e: reqwest::Error) -> String {
+    let e = e.without_url();
+    let mut text = e.to_string();
+    let mut cause = std::error::Error::source(&e);
+    while let Some(c) = cause {
+        text.push_str(": ");
+        text.push_str(&c.to_string());
+        cause = c.source();
+    }
+    text
+}
+
+struct Sender {
+    shared: Arc<Shared>,
+    /// Per route: the client and the `sendMessage` URL (with the token).
+    clients: Vec<(reqwest::Client, String)>,
+    /// Route indexes in the order the next send tries them.
+    order: Vec<usize>,
+    chat: String,
+    log: Log,
+}
+
+impl Sender {
+    async fn run(mut self) {
+        loop {
+            self.shared.wake.notified().await;
+            let stop = match self.shared.inner.lock() {
+                Ok(mut i) => {
+                    i.next_flush = None;
+                    i.stop
+                }
+                Err(_) => return,
+            };
+            self.flush().await;
+            if stop {
+                return;
+            }
+        }
+    }
+
+    /// Sends parts in order, one at a time, until the outbox is settled or
+    /// a part is kept (`Retry`); then the next flush is due
+    /// [`FLUSH_EVERY_MS`] after this one ended.
+    async fn flush(&mut self) {
+        loop {
+            let part = match self.shared.inner.lock() {
+                Ok(i) => match i.outbox.next() {
+                    Some(p) => p,
+                    None => return,
+                },
+                Err(_) => return,
+            };
+            let (outcome, errors) = self.send(&part.text).await;
+            for e in &errors {
+                (self.log)(&format!("warn: telegram send failed: {e}"));
+            }
+            let m = &self.shared.metrics;
+            m.add(FAILURES, &[], errors.len() as f64);
+            if outcome == Outcome::Delivered {
+                m.add(DELIVERED, &[], 1.0);
+            }
+            let Ok(mut i) = self.shared.inner.lock() else {
+                return;
+            };
+            let go_on = i.outbox.done(&part, &outcome);
+            self.shared.publish(&i);
+            if !go_on {
+                i.next_flush = Some(self.shared.clock.now_ms().saturating_add(FLUSH_EVERY_MS));
+                return;
+            }
+        }
+    }
+
+    /// Tries the routes in order: a network error moves to the next route,
+    /// an HTTP answer decides, and the route that answered goes first next
+    /// time. The errors name the route, never the token.
+    async fn send(&mut self, text: &str) -> (Outcome, Vec<String>) {
+        let body = serde_json::json!({
+            "chat_id": self.chat,
+            "text": text,
+            "disable_web_page_preview": true,
+        })
+        .to_string();
+        let mut errors = Vec::new();
+        for n in 0..self.order.len() {
+            let r = self.order[n];
+            let Some((client, url)) = self.clients.get(r) else {
+                continue;
+            };
+            // A timeout after delivery can send twice: a duplicate is
+            // better than a lost P1 (PR #3).
+            let sent = client
+                .post(url.as_str())
+                .header("content-type", "application/json")
+                .body(body.clone())
+                .send()
+                .await;
+            let answer = match sent {
+                Ok(resp) => {
+                    let status = resp.status().as_u16();
+                    resp.bytes().await.map(|b| (status, b))
+                }
+                Err(e) => Err(e),
+            };
+            let (status, bytes) = match answer {
+                Ok(a) => a,
+                Err(e) => {
+                    errors.push(format!("route {r}: {}", chain(e)));
+                    continue;
+                }
+            };
+            self.order.remove(n);
+            self.order.insert(0, r);
+            let out = outcome(status, &bytes);
+            match &out {
+                Outcome::Delivered => {}
+                Outcome::Refused(t) => errors.push(format!("route {r}: {t} (part dropped)")),
+                Outcome::Retry(t) => errors.push(format!("route {r}: {t}")),
+            }
+            return (out, errors);
+        }
+        let last = errors.last().cloned().unwrap_or_else(|| "no route".into());
+        (Outcome::Retry(last), errors)
     }
 }
