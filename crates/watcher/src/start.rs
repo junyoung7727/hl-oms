@@ -129,8 +129,10 @@ enum Key {
 }
 
 /// Step 2's rules: a sub-account key (`isMaster == false`) of
-/// `sub_account_uid`, bound to at least one IP address and not to `*`.
-fn read_key(v: &Value, uid: u64) -> Key {
+/// `sub_account_uid`, bound to at least one IP address and not to `*`;
+/// with `[kill]` (`must_cancel`, U19b2a) also a key that can cancel
+/// ([`read_cancel_rules`]).
+fn read_key(v: &Value, uid: u64, must_cancel: bool) -> Key {
     let Some(master) = v.get("isMaster").and_then(Value::as_bool) else {
         return Key::Unreadable("isMaster is not a boolean".into());
     };
@@ -163,7 +165,76 @@ fn read_key(v: &Value, uid: u64) -> Key {
     if !ips.iter().any(|s| address(s).is_some()) {
         return Key::Fails("the API key's ips hold no IP address".into());
     }
+    if must_cancel {
+        if let Some(k) = read_cancel_rules(v) {
+            return k;
+        }
+    }
     Key::Passes(ips)
+}
+
+/// The rules of a key that must cancel (`[kill]`, U19b2a; gateway facts
+/// Q4): `readOnly == 0` (an integer), `permissions.ContractTrade` a list
+/// with `"Order"` (that `Order` allows the cancel-all is inference from the
+/// permission names, not documented), and no `"Withdraw"` in any list of
+/// `permissions`. `None` when the key passes.
+fn read_cancel_rules(v: &Value) -> Option<Key> {
+    let Some(read_only) = v.get("readOnly").and_then(Value::as_i64) else {
+        return Some(Key::Unreadable("readOnly is not an integer".into()));
+    };
+    let Some(perms) = v.get("permissions").and_then(Value::as_object) else {
+        return Some(Key::Unreadable("permissions is not an object".into()));
+    };
+    let mut lists = Vec::new();
+    for (name, list) in perms {
+        let Some(items) = list.as_array().and_then(|a| {
+            a.iter()
+                .map(Value::as_str)
+                .collect::<Option<Vec<&str>>>()
+        }) else {
+            return Some(Key::Unreadable(format!(
+                "permissions.{} is not a list of strings",
+                one_word(name)
+            )));
+        };
+        lists.push((name.as_str(), items));
+    }
+    if read_only != 0 {
+        return Some(Key::Fails(format!(
+            "the API key is read-only (readOnly {read_only}); with [kill] the watcher cancels orders and needs a read-write key"
+        )));
+    }
+    let order = lists
+        .iter()
+        .any(|(name, items)| *name == "ContractTrade" && items.contains(&"Order"));
+    if !order {
+        return Some(Key::Fails(
+            "the API key has no ContractTrade Order permission; with [kill] the watcher needs it to cancel orders"
+                .into(),
+        ));
+    }
+    if let Some((name, _)) = lists.iter().find(|(_, items)| items.contains(&"Withdraw")) {
+        return Some(Key::Fails(format!(
+            "the API key has the Withdraw permission ({}); the watcher's key must not be able to withdraw",
+            one_word(name)
+        )));
+    }
+    None
+}
+
+/// A venue key name as it goes into a line: at most 40 of `[A-Za-z0-9_]`,
+/// anything else as `?`.
+fn one_word(name: &str) -> String {
+    name.chars()
+        .take(40)
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '?'
+            }
+        })
+        .collect()
 }
 
 /// An IP address, IPv4-mapped IPv6 as IPv4.
@@ -350,6 +421,8 @@ enum Phase {
 /// a wait).
 pub struct Start {
     uid: u64,
+    /// `[kill]` is set: the key must be able to cancel (U19b2a).
+    must_cancel: bool,
     symbols: Vec<String>,
     ip_check_ms: u64,
     metrics: Arc<Metrics>,
@@ -370,6 +443,7 @@ impl Start {
     pub fn new(cfg: &Config, metrics: Arc<Metrics>, log: Log, now_ms: u64) -> Start {
         Start {
             uid: cfg.sub_account_uid,
+            must_cancel: cfg.kill.is_some(),
             symbols: cfg.symbols.clone(),
             ip_check_ms: cfg.intervals.ip_check_ms,
             metrics,
@@ -420,7 +494,7 @@ impl Start {
         self.in_flight = false;
         match self.phase.clone() {
             Phase::QueryApi => match answer {
-                Ok(v) => match read_key(&v, self.uid) {
+                Ok(v) => match read_key(&v, self.uid, self.must_cancel) {
                     Key::Passes(ips) => {
                         export_days_left(&v, now_ms, &self.metrics, &self.log);
                         self.ips = ips;
@@ -476,6 +550,7 @@ impl Start {
         let at = self.echo_at?;
         Some(IpCheck {
             uid: self.uid,
+            must_cancel: self.must_cancel,
             interval_ms: self.ip_check_ms,
             metrics: self.metrics.clone(),
             log: self.log.clone(),
@@ -562,6 +637,8 @@ enum Recheck {
 /// client's guard and are outside the reconciliation budget.
 pub struct IpCheck {
     uid: u64,
+    /// The rules of a key that must cancel apply here too (U19b2a).
+    must_cancel: bool,
     interval_ms: u64,
     metrics: Arc<Metrics>,
     log: Log,
@@ -600,7 +677,7 @@ impl IpCheck {
     pub fn on_answer(&mut self, now_ms: u64, answer: Result<Value, RestError>) -> Step {
         match self.phase {
             Recheck::Query => match answer {
-                Ok(v) => match read_key(&v, self.uid) {
+                Ok(v) => match read_key(&v, self.uid, self.must_cancel) {
                     Key::Passes(ips) => {
                         export_days_left(&v, now_ms, &self.metrics, &self.log);
                         self.ips = ips;
