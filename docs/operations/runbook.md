@@ -394,7 +394,7 @@ telegram = "/etc/oms/telegram.json"   # 절대 경로
 
 워처([C-WATCH](../contracts/watcher.md))의 검사 가운데 하나가 OMS와 거래소의 차이를 두 라운드 연속으로 보았고, 그 저널 항목이 `min_age_ms`(기본 2초)보다 오래됐다. `core.watcher_mismatch`가 검사 이름(`source`), 시각, 내용(`note` = 워처의 `detail`)을 보여 준다. 일반 주문을 거절하고 감소 전용 주문은 받는다(증거금 정책이 있을 때). 저절로 풀리지 않는다.
 
-`detail`의 모양: `<검사> <종류> <대상>: venue <거래소 쪽>, journal <저널 쪽>; seen 2 rounds, <나이>`(여럿이면 끝에 `; and N more`). `<나이>`는 `journal entry <a> s old`(저널 항목, W2에서는 저널과 거래소의 변경 시각 중 새 것), `first seen <a> s ago`(저널이 모르는 주문), `change time unknown`(어느 시각도 모름).
+`detail`의 모양: `<검사> <종류> <대상>: venue <거래소 쪽>, journal <저널 쪽>; seen 2 rounds, <나이>`(여럿이면 끝에 `; and N more`). `<나이>`는 `journal entry <a> s old`(저널 항목, W2에서는 저널과 거래소의 변경 시각 중 새 것), `first seen <a> s ago`(저널이 모르는 주문), `change time unknown`(어느 시각도 모름). W4(U19a8)는 `seen 2 sweeps, execTime <a> s old`(거래소 체결 시각; 없으면 `execTime unknown`)이고, `unknown_exec_type`은 `seen 1 sweep`이다(바로 확정). W4의 대상은 체결 키 `<symbol>:<execId>`다.
 
 | 검사·종류 | 뜻 | 볼 것 |
 |---|---|---|
@@ -404,10 +404,18 @@ telegram = "/etc/oms/telegram.json"   # 절대 경로
 | W1 `details` | 둘 다 열렸지만 종목이나 방향이 다르다 | 거래소 화면과 `get_order` |
 | W1 `missing_at_venue` | 저널에 열려 있고 확인된 주문이 거래소에 없다 | 체결됐거나 거래소가 취소했는지 거래소 화면에서, 그다음 `resolve`(7.1, §6) |
 | W2 `position` | 기호의 거래소 포지션 ≠ 저널의 합(체결 + 거래소 변경 + 조정) | 거래소 포지션과 `status`의 장부. 수동 거래나 OMS가 못 본 체결이면 `adjust` |
+| W4 `missing_fill` | 거래소의 `Trade` 체결이 저널의 체결(OMS 주문의 것이든 외부 체결이든)에 없다 | 거래소 체결 내역에서 그 `execId`. 수동 거래면 W2도 포지션을 본다(`adjust`). OMS 주문의 것이면 게이트웨이 로그(체결 동기화)와 `mismatches_unacked` |
+| W4 `fill_details` | 같은 키의 체결이 있지만 수량이나 방향이 다르다 | 거래소 체결 내역과 저널의 그 체결. OMS의 체결 해석 결함일 수 있다: 거래를 멈추고 조사한다 |
+| W4 `missing_venue_change` | 거래소의 `AdlTrade`·`BustTrade`·`Delivery`·`Settle`이 저널의 거래소 변경에 없다 | 거래소 화면의 ADL·청산·인도·정산 기록, 7.14가 함께 걸렸는지, W2의 포지션 |
+| W4 `venue_change_details` | 같은 키의 거래소 변경이 있지만 종류나 부호 있는 수량이 다르다 | 거래소 화면과 저널의 그 변경 |
+| W4 `unknown_exec_type` | 워처가 모르는 `execType`(바로 확정) | 거래소 체결 내역에서 그 행. OMS도 그것을 분류하지 못했으면 7.14가 함께 걸려 있다 |
+| W4 `unreadable_row` | 체결 행에 그 형이 필요로 하는 필드가 없다(값 = 없는 필드 이름; 키가 없으면 대상은 행의 JSON 앞 200바이트) | 거래소 체결 내역. 거래소의 응답 모양이 바뀌었을 수 있다: 워처 로그와 원본 응답 |
 
 1. 워처 로그의 `error: confirmed difference: …` 줄을 **모두** 읽는다. OMS는 첫 메모만 남긴다(C-HOLD): 보류가 이미 걸린 동안 확정된 차이는 그 메모에 없다. 워처는 그것을 빚으로 들고 있다가 `clear-hold` 뒤 한 번 보내고, 그러면 보류가 그 메모와 함께 한 번 다시 걸린다. 로그를 미리 읽어 두면 돌아오는 보류가 예상된다.
 2. 위 표대로 거래소 화면과 `status`(포지션, 열린 주문, 불일치)를 비교하고 원인을 고친다(포지션이면 `adjust`, 주문이면 `resolve`·`cancel-all`).
 3. `omsctl … clear-hold --reason watcher_mismatch --note "원인과 조치"`. W1~W3의 차이가 남아 있으면 워처가 `mismatch_resend_ms`(기본 10초) 안에 다시 보내 보류가 돌아온다. 돌아오면 1로.
+
+W4(체결)는 다르다(C-WATCH 8부). W4 차이는 지난 체결 하나에 대한 사실이라, 보류 메모(`"held"` 답)가 이름한 W4 차이는 `clear-hold` 뒤 다시 보내지 않는다(거래소 창에 그 행이 남아 있어도). 이미 걸린 보류 아래에서 확정된 W4 차이는 그 메모에 없고, 해제 뒤 한 번 보내져 보류가 그 메모와 함께 한 번 돌아온다. 그것을 푼 뒤에는 다시 오지 않는다. 그래서 해제 전에 워처 로그의 확정 줄을 모두 읽는 것(1)이 W4의 전체 목록이다. 워처를 재시작하면 W4가 거둔 것을 잊으므로, 600초(`w4_initial_lookback_ms`) 안의 같은 행이 두 훑기 뒤 보류를 한 번 더 건다. 포지션이 계속 다르면 W2가 다시 보낸다.
 
 ### 7.14 거래소가 포지션을 바꿨다 (`holds`에 `venue_change`)
 

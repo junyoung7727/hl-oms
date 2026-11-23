@@ -1,6 +1,6 @@
 # 워처 운영
 
-설계: [ADR-031](../adr/ADR-031-watcher.md). 계약: [C-WATCH](../contracts/watcher.md). 이 문서는 워처의 설정과 자격 파일(U19a4), 시작 확인과 그 거부, 시작 확인이 내보내는 지표(U19a4b), 실행과 상황별 의미(U19a7)를 적는다. U19a7부터 `watcher --config`가 돈다: W1(열린 주문)과 W2(포지션)를 검사하고, 확정된 차이를 `admin.sock`에 보내고, `monitor.sock`에 하트비트를 보낸다. W3·W4는 아직 없다(U19a8·U19a9). loopback 가짜로만 시험했고 실제 거래소에서 돌려 본 적이 없다. 서비스 설치와 알림 규칙은 U20b다.
+설계: [ADR-031](../adr/ADR-031-watcher.md). 계약: [C-WATCH](../contracts/watcher.md). 이 문서는 워처의 설정과 자격 파일(U19a4), 시작 확인과 그 거부, 시작 확인이 내보내는 지표(U19a4b), 실행과 상황별 의미(U19a7)를 적는다. U19a7부터 `watcher --config`가 돈다: W1(열린 주문)과 W2(포지션), U19a8부터 W4(체결)를 검사하고, 확정된 차이를 `admin.sock`에 보내고, `monitor.sock`에 하트비트를 보낸다. W3은 아직 없다(U19a9). loopback 가짜로만 시험했고 실제 거래소에서 돌려 본 적이 없다. 서비스 설치와 알림 규칙은 U20b다.
 
 ## 설정 파일
 
@@ -148,6 +148,9 @@ watcher --version
 | `warn: monitor.sock … not connected: …` / `… connected` | 하트비트 연결의 상태 | OMS의 `[core.policy.monitor]`, uid |
 | `error: monitor.sock heartbeat refused (…)` | OMS가 하트비트를 거절했다(1분에 한 줄). `bad_request`면 검사 시각이 OMS의 시계보다 앞섰을 수 있다 | 두 프로세스의 시계(같은 호스트), 런북 7.16 |
 | `error: …; the journal reader stops until the watcher restarts` | 저널을 더 읽지 않는다 | 런북 7.17 |
+| `warn: W4 window from … is longer than 7 days; cut to the last 7 days` / `W4 window is 7 days or shorter again` | W4의 창이 7일을 넘어 잘렸다(상태가 바뀔 때만). 오래 체결이 없거나 맞는 행이 워터마크를 움직이지 못했다. 잘린 앞쪽의 체결은 W4가 비교하지 않는다 | `watcher_differences{W4}`, 확정 줄, 거래소 체결 내역 |
+| `warn: W4 page failed 3 rounds in a row; the sweep restarts …` | 같은 커서의 쪽이 세 라운드 연달아 실패했다. 훑기를 1쪽부터 새 끝으로 다시 읽는다 | 그 앞의 `W4 round failed` 줄의 이유 |
+| `error: W4 sweep not complete after 50 rounds; …` | 훑기 하나가 50라운드에 끝나지 않았다(기본 500쪽, 50,000행). 처음부터 다시 읽는다 | 거래소의 체결량, `w4_max_pages` |
 
 ## 실행의 지표(U19a7)
 
@@ -155,6 +158,6 @@ watcher --version
 |---|---|---|
 | `watcher_up` | 밀어 넣을 때마다 1 | 없으면 워처나 밀어 넣기가 없다 |
 | `watcher_heartbeat_ok_ts` | OMS가 마지막으로 하트비트를 기록한 하트비트 시각(epoch 초) | 멈추면 `monitor.sock` 줄 |
-| `watcher_check_age_s{check}` | 검사의 마지막 성공 뒤의 초. 시작 중에는 설정을 읽은 때부터 | W1·W2가 10초를 넘으면 OMS 게이트가 닫힌다 |
+| `watcher_check_age_s{check}` | 검사의 마지막 성공 뒤의 초. 시작 중에는 설정을 읽은 때부터. W4는 끝난 훑기에서만 성공하므로 여러 라운드에 걸친 훑기 동안 오른다 | W1·W2가 10초를 넘으면 OMS 게이트가 닫힌다. W4는 게이트가 판단하지 않는다 |
 | `watcher_mismatch_active{check}` | 라운드가 아직 보는 확정된 차이와 아직 OMS에 빚진 것 | 런북 7.13 |
 | `watcher_journal_seq`, `watcher_journal_error` | 마지막으로 읽은 기록, 읽기 실패 | 런북 7.17 |

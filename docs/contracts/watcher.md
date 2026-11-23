@@ -1,8 +1,8 @@
 # C-WATCH 독립 워처
 
-상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23), 4부 구현됨(설정과 자격 파일 U19a4, 시작 확인과 IP 재확인 U19a4b, 2026-11-23), 5부 구현됨(검사 엔진과 W1, U19a5, 2026-11-23), 6부 구현됨(W2 포지션, U19a6, 2026-11-23), 7부 구현됨(OMS 연결과 실행, U19a7, 2026-11-23). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3, V-WATCH-4, V-WATCH-5, V-WATCH-6, V-WATCH-7. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
+상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23), 4부 구현됨(설정과 자격 파일 U19a4, 시작 확인과 IP 재확인 U19a4b, 2026-11-23), 5부 구현됨(검사 엔진과 W1, U19a5, 2026-11-23), 6부 구현됨(W2 포지션, U19a6, 2026-11-23), 7부 구현됨(OMS 연결과 실행, U19a7, 2026-11-23), 8부 구현됨(W4 체결, U19a8, 2026-11-23). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3, V-WATCH-4, V-WATCH-5, V-WATCH-6, V-WATCH-7, V-WATCH-8. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
 
-워처는 OMS와 코드를 나누지 않는 별도 프로그램이다. 저널을 자기 읽기로 읽고(이 문서와 [C-TAIL](tail.md), [ADR-011](../adr/ADR-011-file-format.md)만으로 썼다), 자기 키와 클라이언트로 Bybit를 조회해 OMS와 비교하고, 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고, `monitor.sock`에 하트비트를 보낸다. **U19a7부터 워처는 돈다**: `watcher --config <path>`가 설정과 자격 파일을 읽고, 시작 확인을 거쳐 OMS의 `/api/status`를 기다린 뒤 저널을 처음부터 재생하고, W1(열린 주문)과 W2(포지션)를 돌려 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고(다시 보내기 규칙, 7부), `heartbeat_ms`마다 `monitor.sock`에 하트비트를 보내고, 지표를 VictoriaMetrics로 밀어 넣는다. W3·W4는 아직 없다(하트비트에서 `null`, U19a8·U19a9). loopback 가짜와 시험 저널로만 시험했고 실제 OMS 프로세스나 실제 Bybit에 붙여 돌려 본 적이 없다(키가 없다, U-01). 서비스 설치는 U20b다.
+워처는 OMS와 코드를 나누지 않는 별도 프로그램이다. 저널을 자기 읽기로 읽고(이 문서와 [C-TAIL](tail.md), [ADR-011](../adr/ADR-011-file-format.md)만으로 썼다), 자기 키와 클라이언트로 Bybit를 조회해 OMS와 비교하고, 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고, `monitor.sock`에 하트비트를 보낸다. **U19a7부터 워처는 돈다**: `watcher --config <path>`가 설정과 자격 파일을 읽고, 시작 확인을 거쳐 OMS의 `/api/status`를 기다린 뒤 저널을 처음부터 재생하고, W1(열린 주문), W2(포지션), U19a8부터 W4(체결)를 돌려 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고(다시 보내기 규칙, 7부), `heartbeat_ms`마다 `monitor.sock`에 하트비트를 보내고, 지표를 VictoriaMetrics로 밀어 넣는다. W3은 아직 없다(하트비트에서 `null`, U19a9). loopback 가짜와 시험 저널로만 시험했고 실제 OMS 프로세스나 실제 Bybit에 붙여 돌려 본 적이 없다(키가 없다, U-01). 서비스 설치는 U20b다.
 
 | 부 | 내용 | 단위 |
 |---|---|---|
@@ -13,7 +13,8 @@
 | 5 | 검사 엔진(일정, 상태 맞추기, 라운드의 저널 읽기, 기한, 두 라운드 규칙)과 W1 열린 주문(이 문서) | U19a5 |
 | 6 | W2 포지션(거래소 쪽, 기호별 차이, 두 변경 시각과 미룸, 거래소 관찰 시각 `seen_at`)(이 문서) | U19a6 |
 | 7 | OMS 연결(`/api/status`, `admin.sock`의 다시 보내기 규칙, `monitor.sock` 하트비트)과 실행, 바이너리(이 문서) | U19a7 |
-| 8~9 | W4, W3과 예산 | U19a8~U19a9(아직 없음) |
+| 8 | W4 체결(훑기, 쪽, 다시 시작, 워터마크, 형별 행 읽기, `execType` 표, 거둠)(이 문서) | U19a8 |
+| 9 | W3과 W2의 대신 시각, 예산 | U19a9(아직 없음) |
 
 ## 1부. 독립성
 
@@ -485,12 +486,12 @@
 - **때가 됨**: 보류 꺼짐, 빚이 있거나 (W1·W2·W3만) 라운드가 아직 보는 확정된 차이가 있음, 지난 보내기의 시작(엔진이 그것을 낸 시각)부터 `mismatch_resend_ms`(기본 10초, 판단(모델 아님))가 지남 또는 지난 보내기가 없음, 그리고 그 검사의 보내기가 진행 중이 아님. 보내기 하나가 그것을 모두 싣는다: 빚을 확정한 순서로 먼저, 그다음 아직 보는 확정된 차이. `detail`은 첫 것 뒤에 `"; and N more"`, 1024바이트에서 자른다. 엔진은 `poll`과 상한까지 읽은 상태 답 뒤에 이것을 본다.
 - **진행 중 하나**(검토 4 S6): 답도 실패도 없는 보내기가 있으면 그 검사의 다음 보내기는 시작하지 않는다. 엔진은 낸 시각 + 2 × `request_timeout_ms` + 1초(판단(모델 아님)) 안에 보고가 없으면 실패로 본다(`warn: W<n> mismatch send has no report before its deadline (taken as failed)`): 잃은 보고 하나가 그 검사의 보내기를 막지 않는다. 보내기마다 번호가 있다(`Mismatch {check, send_id, detail}`, `on_admin(now, check, send_id, 답)`; 검토 1 S1). 엔진은 진행 중인 보내기의 번호를 단 답만 받으므로 `"held"`는 그 보내기가 실은 것만 갚는다. 기한이 지난 보내기의 늦은 보고(벽시계가 앞으로 뛰거나 루프가 1초 넘게 멈추면 클라이언트의 단조 시계 한도보다 먼저 엔진의 기한이 지난다)는 `debug: an answer to W<n> send <id>, which is not the send in flight, is ignored` 한 줄과 함께 버리고 아무것도 갚지 않는다. 그 뒤의 보내기가 더 많이 실었어도 그렇다(시험 `admin::a_late_report_of_one_send_pays_only_what_that_send_carried`).
 - **답**: `"held"` → 실은 것을 모두 갚는다. `"already held"` → 아무것도 갚지 않고, 보류가 꺼질 때까지 기다린다. `bad_request` → `error: W<n> mismatch send refused (bad_request: …): a watcher bug` 한 줄, 같은 속도로 다시. `overloaded`, `unavailable`, `unauthorized`, `internal`, 그 밖의 코드, 시간 초과, 없는 소켓 → `warn: W<n> mismatch send failed: …` 한 줄, 같은 속도로 다시(검토 4 N4). 진행 중 보내기가 없거나 번호가 다른 답은 `debug:` 한 줄과 함께 버린다(검토 1 S1).
-- 그래서 W1~W3은 차이가 남아 있는 동안 운영자가 `clear-hold`로 풀면 보류를 다시 건다(소유자 질문 7, 많아야 `mismatch_resend_ms`마다). 이미 걸린 보류 아래에서 확정된 차이는 그 보류가 풀린 뒤 한 번 보내지고, 새 보류의 메모가 그것을 이름한다(OMS는 첫 메모만 남긴다). W4는 U19a8에서 갚은 정체를 해제 때 거둔다(8부).
+- 그래서 W1~W3은 차이가 남아 있는 동안 운영자가 `clear-hold`로 풀면 보류를 다시 건다(소유자 질문 7, 많아야 `mismatch_resend_ms`마다). 이미 걸린 보류 아래에서 확정된 차이는 그 보류가 풀린 뒤 한 번 보내지고, 새 보류의 메모가 그것을 이름한다(OMS는 첫 메모만 남긴다). W4는 갚은 정체를 해제 때 거둔다(8부).
 - `watcher_mismatch_active{check}` = 라운드가 아직 보는 확정된 차이와 빚의 합집합의 크기(검토 4 S1). 차이가 끝나고 갚아지면 0으로 돌아온다.
 
 ### `monitor.sock` 하트비트(`oms::Monitor`)
 
-- 연결 하나를 유지한다. 없으면 하트비트 때 연결하고 `hello`(전략 없음, `client` `watcher/<name>`)의 답을 받은 뒤 `{"id":n,"op":"heartbeat","watcher":"<name>","checks":{"W1":<ms|null>,"W2":…,"W3":…,"W4":…}}`를 보낸다. 값은 엔진의 마지막 성공 시각(5부 "성공", ms)이고 성공이 없으면 `null`이다. W3·W4는 U19a9·U19a8까지 `null`이다.
+- 연결 하나를 유지한다. 없으면 하트비트 때 연결하고 `hello`(전략 없음, `client` `watcher/<name>`)의 답을 받은 뒤 `{"id":n,"op":"heartbeat","watcher":"<name>","checks":{"W1":<ms|null>,"W2":…,"W3":…,"W4":…}}`를 보낸다. 값은 엔진의 마지막 성공 시각(5부 "성공", ms)이고 성공이 없으면 `null`이다. W3은 U19a9까지 `null`이고, W4는 U19a8부터 W4의 성공 시각이다.
 - `"recorded"` → `watcher_heartbeat_ok_ts` = 그 하트비트의 시계(epoch 초).
 - 연결 실패(소켓 없음: `[core.policy.monitor]`가 없는 OMS, 거절), 끊김, `request_timeout_ms` 안에 답 없음 → 연결을 버리고 다음 하트비트에 다시 연다(검토 4 N4). 그래서 연결 시도는 하트비트마다 많아야 한 번이고, 속도는 `heartbeat_ms`마다 하나로 연결마다 초당 둘(`api.md`)보다 한참 낮다. 줄은 상태가 바뀔 때만 하나다(`monitor.sock <path> connected`, `warn: monitor.sock <path> not connected: <이유>; tried again at the next heartbeat`; 검토 3 N6).
 - 오류 답(`bad_request`: 예를 들어 OMS의 시계보다 앞선 검사 시각, `overloaded`, `unavailable`, `unauthorized`, `internal`) → 연결은 그대로, `error: monitor.sock heartbeat refused (…)` 줄은 1분에 하나까지.
@@ -501,9 +502,9 @@
 ### 실행(`runtime::run`)과 바이너리
 
 - `run(cfg, Endpoints {rest_base, ip_echo_url}, clock, log, shutdown) -> 종료 코드`. 바이너리는 두 끝점을 설정에서만 얻는다(REST 기반 주소는 `network`에서, 덮어쓰기 없음). 시험은 loopback 가짜 끝점으로 부른다.
-- **시작 순서**: 설정 시각 `boot_ms` → 자격 파일(4부) → 지표 밀어 넣기 타이머(`[telemetry] vm_url`이 있으면 `export_ms`마다, 여기서부터; 검토 2 S4) → 시작 확인(4부의 `Start`) → `/api/status` 기다림(읽을 수 있는 답까지, 실패하면 1초 뒤 다시, 줄은 10초에 하나까지, 판단(모델 아님)) → 기록 1부터 그 답의 상한까지 재생(`Tail::read` 한 번마다 루프에 양보) → 엔진(`Engine::new`가 W1을, 실행이 `add_check`로 W2를 더한다, 시작 = 재생을 마친 시각). 하트비트는 엔진과 함께 시작한다.
+- **시작 순서**: 설정 시각 `boot_ms` → 자격 파일(4부) → 지표 밀어 넣기 타이머(`[telemetry] vm_url`이 있으면 `export_ms`마다, 여기서부터; 검토 2 S4) → 시작 확인(4부의 `Start`) → `/api/status` 기다림(읽을 수 있는 답까지, 실패하면 1초 뒤 다시, 줄은 10초에 하나까지, 판단(모델 아님)) → 기록 1부터 그 답의 상한까지 재생(`Tail::read` 한 번마다 루프에 양보) → 엔진(`Engine::new`가 W1을, 실행이 `add_check`로 W2와 W4(U19a8)를 더한다, 시작 = 재생을 마친 시각). 하트비트는 엔진과 함께 시작한다.
 - IP 재확인(4부의 `IpCheck`)은 시작 확인이 끝난 뒤(`Done`, 또는 5단계 키 거절 뒤의 반향만) 계속 돈다. `/api/status`를 기다리는 동안과 재생 중에도 돌아 OMS가 내려가 있어도 `watcher_public_ip_ok`와 `watcher_api_key_days_left`가 새것이다(검토 3 N2).
-- 엔진이 돌기 전에는 실행이 `watcher_check_age_s{W1}`, `{W2}`를 `boot_ms`부터 센다(검토 3 N2). 재생 중 `watcher_journal_seq`를 쓴다.
+- 엔진이 돌기 전에는 실행이 `watcher_check_age_s{W1}`, `{W2}`, `{W4}`(U19a8)를 `boot_ms`부터 센다(검토 3 N2). 재생 중 `watcher_journal_seq`를 쓴다.
 - 시작 2단계나 5단계에서 키가 거절되면(`StayUpNoRequests`) 시작 확인은 거기 머물고, 실행은 상태 기다림, 재생, 엔진으로 간다. 클라이언트가 모든 Bybit 요청을 보내지 않고 거절하므로 라운드는 실패하고, 하트비트는 `null`이나 오래된 시각을 실어 게이트가 닫힌다(판단: 저널 지표와 하트비트가 워처가 살아 있음을 보인다).
 - 재생 중 다시 읽는 오류(`Io`, `Damaged`, `NoStart`)나 상한 아래에서 끝난 파일 → 1초 뒤 같은 자리에서 다시(줄은 상태가 바뀔 때 하나, `watcher_journal_error = 1`). 래치 오류 → 엔진을 시작하고, 엔진의 첫 라운드가 래치한다(5부).
 - **루프**: 단일 스레드 tokio. 답이 올 때와 100ms(판단(모델 아님))마다 깨어나 각 부분에 무엇이 때가 됐는지 묻는다(재생 중에는 기다리지 않는다). 요청마다 자기 태스크이고 답은 루프로 돌아온다. 진행 중 요청은 검사마다 하나(엔진), 상태, 관리 보내기(검사마다 하나), 하트비트 하나, 시작이나 재확인 하나, 밀어 넣기 하나다.
@@ -536,3 +537,67 @@
 `crates/watcher/tests/admin.rs` 7개(엔진 시험 도구의 OMS가 `watcher_mismatch`에 답하고 `hold_set`을 쓴다; 가짜 `admin.sock`), `crates/watcher/tests/heartbeat.rs` 3개(가짜 `monitor.sock`, 엔진의 하트비트를 실제 클라이언트로), `crates/watcher/tests/runtime.rs` 9개(`run`을 loopback 가짜에; 종단 시험은 실제 시간, 나머지는 수동 시계), `crates/watcher/tests/binary.rs` 1개. 완료 기준: `heartbeat::heartbeats_carry_the_success_time_of_each_check`(첫 하트비트는 모두 `null`, 그 뒤 W1·W2 = 엔진의 성공 시각, W2가 실패한 뒤 W2 시각은 그대로). 그 밖에 `admin::a_confirmed_mismatch_is_sent_once_and_again_after_a_clear`, `admin::a_confirmed_mismatch_is_sent_until_answered_even_after_the_difference_is_gone`, `admin::a_difference_confirmed_under_a_hold_is_sent_after_the_clear`, `admin::a_second_send_waits_for_the_first_answer`, `admin::a_hold_seen_off_at_a_cap_sampled_before_the_answer_does_not_send`, `admin::a_late_report_of_one_send_pays_only_what_that_send_carried`(검토 1 S1: 기한 뒤의 늦은 `"held"`는 다음 보내기가 실은 것을 갚지 않는다), `admin::the_admin_client_says_hello_and_reads_both_replies`, `heartbeat::the_heartbeat_says_hello_first_and_reconnects`, `heartbeat::a_reply_that_does_not_come_in_time_reopens_the_connection`, `runtime::the_watcher_runs_against_loopback_fakes_end_to_end`, `runtime::without_an_answering_oms_nothing_is_judged`, `runtime::the_shutdown_input_ends_cleanly`, `runtime::the_ip_recheck_runs_while_the_oms_is_down`, `runtime::the_ip_recheck_runs_during_the_boot_replay`(검토 1 S3: 상한 아래에서 끝난 저널로 재생에 머문 채 세 번의 재확인), `runtime::a_recheck_that_fails_a_start_rule_stops_every_bybit_request`(검토 1 S2: 재확인의 마스터 키 → `watcher_auth_rejected 1` 밀어 넣기, 그 뒤 Bybit 요청 없음), `runtime::a_key_rejected_at_start_is_exported`, `runtime::the_status_client_sends_the_loopback_host_and_follows_no_redirect`(`Location`이 있는 302), `runtime::a_start_refusal_ends_the_run_with_exit_code_2`(마스터 키, 0644 자격 파일), `binary::version_prints_and_anything_else_exits_2`. 변이: M199(하트비트가 W2 시각을 W1로; 고의 결함 18), M200(해제 뒤 다시 보내지 않음; 19), M201(모니터에 `hello` 없이; 20), M220(보지 않게 된 빚을 버림; 39), M226(`"already held"`가 갚음; 45), M228(첫 답 전에 둘째 보내기; 47), M246(늦은 보고가 다음 보내기가 실은 것을 갚음; 검토 1 S1).
 
 U19a7은 U19a5·U19a6 시험 몇 개의 단언을 바꿨다(시험 도구의 OMS가 이제 `watcher_mismatch`에 답하고 `hold_set`을 쓰므로, 첫 보류 아래에서 확정된 둘째 차이는 바로 보내지지 않는다): `w1::a_journal_entry_younger_than_2_s_does_not_alarm`, `engine::a_confirmed_identity_is_counted_once`, `w2::a_changing_difference_restarts_the_count`, `w2::sizes_found_at_the_first_round_have_no_seen_time`, `w2::a_difference_planted_after_the_fills_stop_is_confirmed_within_3_s`는 둘째 확정의 시각을 `Mismatch`가 아니라 확정 줄(`error: confirmed difference`, 시험 도구의 `confirmed`)에서 읽는다. 확정의 시각과 내용은 그대로다.
+
+## 8부. W4 체결(U19a8)
+
+### W4(`w4::W4`, `w4_ms`마다, 기본 5초)
+
+- **훑기**(sweep)는 창 `[start, end]`를 `GET /v5/execution/list?category=linear&settleCoin=USDT&limit=100&startTime=<start>&endTime=<end>`와 그 커서 쪽으로 읽는다. `end` = 훑기의 첫 쪽 때 시계이고 훑기 동안 바뀌지 않는다(새 체결이 커서의 행 집합을 움직이지 않게). `start = max(워터마크 − w4_overlap_ms, ⌈fill_floor / 1000⌉)`(바닥은 µs이고 ms로 **올림**, 검토 1 S7). `end − start`가 7일 이상이면 창을 `end − 7일 + 1ms`부터로 자르고(거래소의 한도, facts Q9.7), `warn: W4 window … is longer than 7 days; cut to the last 7 days` 줄은 상태(잘림/안 잘림)가 바뀔 때만 하나다(돌아오면 `W4 window is 7 days or shorter again`; 검토 1 N6).
+- **쪽**: 라운드마다 많아야 `w4_max_pages`(기본 10, 판단(모델 아님))쪽. 커서가 아직 비지 않았으면 라운드는 비교도 성공도 실패도 없이 끝나고(`Page::Pause`), 다음 라운드가 같은 `start`, `end`, 커서로 같은 훑기를 잇는다. 성공 시각은 끝난 훑기에서만 움직이므로 여러 라운드에 걸친 훑기 동안 `watcher_check_age_s{check="W4"}`가 오른다. 쪽마다 `watcher_requests_total` 하나다.
+- **훑기의 끝**(검토 1 S3): 비어 있는 첫 쪽, 또는 `nextPageCursor`가 빈 첫 쪽에서 훑기가 끝나고 그 행을 비교한다. 가득 찬 쪽(100행)에 빈 커서도 **W4만** 마지막 쪽으로 받는다(완료 기준 "1,200건 … 10쪽, 그다음 2쪽"은 마지막 커서가 빈 가득 찬 쪽 12개를 필요로 한다; 알려진 한계). 방금 보낸 커서와 같은 `nextPageCursor`는 실패한 쪽이다.
+- **실패한 쪽**(클라이언트 오류, `result.list`가 목록이 아님, `nextPageCursor`가 문자열이 아님, 바뀌지 않은 커서)은 라운드를 실패시키고, 다음 라운드가 같은 커서로 같은 쪽을 다시 읽는다. 그 쪽까지 읽은 행은 남는다. 한 훑기에서 실패한 라운드가 연달아 3번(판단(모델 아님))이면 훑기는 같은 `start`와 새 `end`로 1쪽부터 다시 시작하고 `warn:` 줄 하나를 쓴다(거래소가 더는 받지 않는 커서가 W4를 영영 멈추지 않게; 검토 1 S2). 쪽을 읽은 라운드(멈춤)는 연속을 끊는다. 50라운드(판단(모델 아님); 기본 상한에서 500쪽, 50,000행) 안에 끝나지 않은 훑기도 같은 방식으로 다시 시작하고 `error:` 줄 하나를 쓴다. 끝까지 읽은 훑기가 비교 전에 실패하면(상태, 저널, 기한) 다음 라운드는 새 훑기다(같은 워터마크에서).
+- **처음 워터마크**: 첫 훑기 때 `now − w4_initial_lookback_ms`(기본 600초), `⌈fill_floor / 1000⌉`보다 낮지 않게. 시험 도구처럼 엔진이 저널을 읽기 전의 첫 훑기는 바닥 0을 본다(실행에서는 재생이 먼저라 바닥을 안다).
+- `settleCoin=USDT`는 OMS가 보내는 대로 보내지만(`query.rs:681`) `execution/list`의 문서화된 매개변수가 아니다(facts Q9.3). W4는 그 거름에 기대지 않는다: 답에 든 USDC 계약의 체결도 다른 행과 같이 분류하고 비교한다(검토 4 N6).
+
+### 행 읽기와 `execType` 표
+
+- 먼저 분류하고, 그 형이 비교하는 필드만 읽는다(검토 1 S2; Funding과 ADL 행의 모양은 시험되지 않았다, 설계 R3 T15).
+  - 모든 행: `execId`, `symbol`, `execType`(빈 문자열이 아닌 문자열), `execTime`(ms, 10진 문자열). 키 `<symbol>:<execId>`(`gateway.md:97`).
+  - `Trade`, `AdlTrade`, `BustTrade`, `Delivery`, `Settle`: 더해서 `execQty`(소수, `-`로 시작하지 않음)와 `side`(`Buy`/`Sell`).
+  - `Funding`과 모르는 형: 더 읽지 않는다.
+- 형이 필요로 하는 필드가 없는(또는 읽을 수 없는) 행은 그 자체로 차이 `unreadable_row`다. 주제 = `execId`와 `symbol`을 읽을 수 있으면 키, 아니면 행의 JSON 텍스트를 200바이트(판단(모델 아님))에서 자른 것. 값 = 없는 필드의 이름(쉼표로). `missing_*`처럼 두 훑기 규칙을 따르고, 나이는 `execTime`을 읽을 수 있으면 그것, 아니면 늙음(소유자 질문 10과 같다).
+- 바닥(검토 1 S7): 비교 때 `execTime × 1000 < fill_floor`(그 라운드가 비교하는 저널 상태의 바닥)인 행은 무시한다. OMS도 그런 체결을 무시하고(`decide.rs:1596`) 저널은 그것을 갖지 않는다. 바닥과 같은 시각은 비교한다.
+
+| `execType` | 비교 대상 | 차이 | 값 |
+|---|---|---|---|
+| `Trade` | 저널 체결(`fill_booked`, `external_fill_booked`)을 키로 | 키 없음 `missing_fill`; 수량이나 방향이 다름 `fill_details` | 거래소의 `<side> <execQty>` |
+| `AdlTrade`, `BustTrade`, `Delivery`, `Settle` | 저널 거래소 변경을 키로, 종류 `adl`/`takeover`/`delivery`/`settle` | 키 없음 `missing_venue_change`; 종류나 부호 있는 수량이 다름 `venue_change_details` | `<kind> <부호 있는 수량>`(`Sell`은 −) |
+| `Funding` | 없음 | 무시(펀딩은 수량을 바꾸지 않는다) | — |
+| 그 밖 | — | `unknown_exec_type`: **바로 확정**, 둘째 훑기와 나이 규칙 없음 | `execType` |
+
+- "바로"는 끝난 훑기에서다: 행은 훑기가 끝날 때만 비교하므로 여러 라운드 훑기에서는 확정이 훑기 길이만큼 늦다(검토 2 N2). `detail`은 `seen 1 sweep`이다.
+- `missing_*`, `*_details`, `unreadable_row`는 훑기를 건너 두 라운드 규칙을 따르고 나이 조건은 "행의 `execTime`이 적어도 `min_age_ms` 지남"(`now − execTime ≥ min_age_ms`)이다. 한 훑기에서만 본 차이, 두 번 봤지만 어린 차이는 **훑기를 실패시키지 않는다**(W4는 OMS 게이트가 판단하지 않고, 어린 행은 워터마크가 그것을 지나지 않으므로 다음 훑기가 다시 읽는다). `detail`: `"W4 <kind> <key>: venue …, journal …; seen 2 sweeps, execTime <a> s old"`(`execTime`이 없으면 `execTime unknown`).
+- W4는 종목마다 일치한 `Trade`나 거래소 변경 행의 가장 새 `execTime`을 적는다(`W4::exec_times()`, 공유 지도). U19a9가 그것을 `updatedTime`이 없을 때 W2의 대신 시각으로 쓴다.
+
+### 워터마크
+
+- 끝난 훑기 뒤 워터마크 = `max(옛 워터마크, w)`. `w` = 그 시각 이하의 모든 비교한 행이 일치하거나, 무시되거나, 이미 확정된(또는 거둔) 가장 새 `execTime`. 확정되지 않은 차이 행(보류 중이거나 어림)이 그보다 새 행을 막는다. `execTime`을 읽을 수 없는 확정되지 않은 행은 모든 행보다 오래된 것으로 센다(검토 4 S3): 워터마크는 그대로이고 다음 훑기는 같은 `start`로 그것을 다시 읽는다. 그래서 읽을 수 없는 행은 워터마크의 조용한 멈춤이 아니라 보류로 끝난다.
+- 맞는 행이 없으면(가장 오래된 비교 행이 확정되지 않은 차이이거나 행이 없음) 워터마크는 그대로다. 뒤로 가지 않는다(검토 3 N1). 확정되지 않은 행은 그 훑기의 `start` 이후에 있고 워터마크가 그대로면 `start`도 그대로라, 다음 훑기가 다시 읽는다. 확정된 행은 더는 창을 붙잡지 않는다.
+- 행이 하나도 없는 훑기는 워터마크를 두고, 창은 7일 자름까지 자란다.
+
+### W4의 거둠(검토 3 M1, 검토 4 S2)
+
+- W4 차이는 지난 체결 하나에 대한 사실이고 바뀌지 않는다. 그래서 W4는 `clear-hold` 뒤에 그것을 다시 보내지 않는다(W1~W3은 다시 보낸다, 7부). 이 문단이 예전 문장 "W4의 해제 뒤 다시 보내기는 그만큼만 간다"를 대신한다(조용한 계좌에서는 틀린 문장이었다).
+- **거둠**: 확정된 W4 정체 `(W4, 주제, 종류, 값)`는 (가) 갚아졌고(그것을 실은 보내기가 `"held"`로 답해 그 글이 그 보류의 메모에 있다; `"already held"`나 보류를 보이는 저널은 갚지 않는다), (나) 갚은 뒤 그 답 **뒤에 낸** 상태 요청의 상한까지 읽은 저널 상태가 `holds.watcher_mismatch == false`를 보일 때 거둔다. 답 앞에 낸 상태 요청의 상한은 `hold_set` 전일 수 있어 너무 일찍 거두므로 증거가 아니다(시험 `w4::a_hold_seen_at_a_cap_sampled_before_the_answer_does_not_dismiss`).
+- 이미 걸린 보류 아래에서 확정된 정체는 빚이지 갚아진 것이 아니다: 그 보류가 풀린 뒤 한 번 보내지고, 그 보내기가 `"held"`로 답하고 새 보류가 풀린 뒤에야 거둔다(시험 `w4::a_row_confirmed_under_an_older_hold_is_sent_once_after_that_hold_is_cleared`).
+- 거둔 정체는 훑기가 그것을 보는 동안 다시 보내지도 세지도 않는다(`watcher_mismatch_active`, `watcher_differences`, `watcher_mismatches_total`에 없다). 그것을 더는 보지 않는 첫 끝난 훑기에서 잊는다. 같은 행을 그 뒤 다시 읽으면 새 차이이고 다시 두 훑기가 필요하다(안전한 쪽).
+- 같은 행의 다른 값(거래소가 행을 바꿈)은 다른 정체다: 확정되고 새로 보낸다(시험 `w4::a_dismissed_row_that_leaves_the_window_and_a_changed_value_are_sent_anew`).
+- 오래가는 포지션 차이는 여전히 W2가 다시 보낸다(검토 1 N8).
+
+### 지표(8부)
+
+- W4는 5부의 `watcher_check_age_s{W4}`, `watcher_differences{W4}`, `watcher_mismatches_total{W4}`, `watcher_mismatch_active{W4}`(거둔 정체는 세지 않는다)와 3부의 `watcher_requests_total{endpoint="/v5/execution/list"}`(쪽마다), `watcher_request_errors_total`을 쓴다. 엔진이 돌기 전에는 실행이 `watcher_check_age_s{W4}`도 `boot_ms`부터 센다. 하트비트의 `W4`는 W4의 마지막 성공 시각이다(U19a8부터; U19a9가 시험 `heartbeat::w3_and_w4_success_times_reach_the_heartbeat`를 더한다).
+
+### 알려진 한계(8부)
+
+- **가득 찬 마지막 쪽**: 거래소가 행이 더 있는데 가득 찬 쪽을 빈 커서로 끝내면 그 행은 W4가 비교하지 않는다. W2가 그 행이 만드는 포지션을 여전히 비교한다. OMS의 체결 동기화는 더 엄격하게 창을 나누지만(`gateway.md:96`) W4는 따라 하지 않는다: 나누기는 예산에 없는 쪽을 쓴다(소유자 질문 11).
+- **처음 되돌아보기**: 워처가 `w4_initial_lookback_ms`(600초)보다 오래 내려가 있었으면 시작 때 그보다 오래된 체결은 W4가 비교하지 않는다(검토 2 N3). W2가 그것이 만드는 포지션을 비교한다.
+- **거둠은 메모리에만**: 재시작하면 거둔 정체를 잊는다. 재시작의 `w4_initial_lookback_ms` 안에 있는 거둔 행은 두 훑기 뒤 다시 확정되어 보류를 한 번 더 걸고, 운영자가 한 번 더 푼다(안전한 쪽).
+- 바뀐 행의 정체는 거래소의 `<side> <execQty>`(또는 종류와 부호 있는 수량, 형, 없는 필드 이름)로 정한다. 가격이나 수수료만 바뀐 행은 같은 정체다(W4는 그것을 비교하지 않는다).
+- 끝난 훑기의 행은 비교 때까지 메모리에 있다. 50라운드 × `w4_max_pages` × 100행이 위 한도다(기본에서 50,000행, 판단(모델 아님)).
+- `execTime`(거래소 시계)과 이 호스트의 시계를 비교한다. 거래소보다 `min_age_ms` 이상 앞선 호스트 시계는 확정을 앞당긴다(5부의 한계와 같다). 거래소 시계가 워터마크에 앞서 있으면 창의 시작은 `end`를 넘지 않게 자른다.
+- W4는 loopback 모델 거래소와 시험 저널로만 시험했다. 실제 `execution/list`의 Funding·ADL 행 모양은 시험되지 않았다(설계 R3 T15; 키가 없다, U-01).
+
+### 검증(8부)
+
+`crates/watcher/tests/w4.rs` 29개(프로세스 안의 모델 거래소: 창 안의 체결을 새것부터 100개씩, 커서 `e<다음 번호>`; 시험 저널, 수동 시계). 완료 기준: `w4::funding_rows_beside_known_fills_are_no_mismatch_while_a_position_is_held`(W2와 W4가 함께 돌고, 포지션 ≠ 0, `execQty`와 `side`가 있는 펀딩 행), `w4::an_adl_trade_the_journal_lacks_is_a_mismatch`, `w4::a_round_of_250_executions_is_compared_in_full_over_3_pages`, `w4::executions_1200_are_compared_over_two_rounds_and_the_w4_age_rises_between`. 그 밖에 스펙의 U19a8 시험 18개(`w4::an_unknown_exec_type_is_a_mismatch_at_once`, `w4::the_sweep_starts_10_s_before_the_last_confirmed_exec_time`, `w4::a_row_loaded_late_inside_the_overlap_is_compared`, `w4::a_missing_trade_needs_two_sweeps`, `w4::a_failed_page_three_rounds_in_a_row_restarts_the_sweep_with_a_new_end`, `w4::an_unchanged_cursor_is_a_failed_page`, `w4::an_empty_page_ends_the_sweep`, `w4::a_funding_row_without_side_or_qty_is_ignored`, `w4::a_trade_row_without_qty_is_an_unreadable_row_and_needs_two_sweeps`, `w4::a_trade_at_the_fill_floor_millisecond_is_ignored`, `w4::an_empty_window_logs_once_per_state_change`, `w4::an_unknown_exec_type_in_a_multi_round_sweep_is_confirmed_when_the_sweep_completes`, `w4::a_confirmed_row_is_not_sent_again_after_clear_hold_in_a_quiet_account`, `w4::a_dismissed_row_that_leaves_the_window_and_a_changed_value_are_sent_anew`, `w4::a_hold_seen_at_a_cap_sampled_before_the_answer_does_not_dismiss`, `w4::the_watermark_never_moves_back`, `w4::a_row_confirmed_under_an_older_hold_is_sent_once_after_that_hold_is_cleared`, `w4::an_unconfirmed_row_without_a_readable_exec_time_holds_the_watermark`)와 더한 7개(`w4::a_sweep_not_complete_after_50_rounds_restarts`, `w4::a_trade_or_venue_change_with_other_details_is_a_difference`, `w4::a_row_without_a_key_is_named_by_its_text`, `w4::the_newest_agreeing_exec_time_is_kept_per_symbol`, `w4::a_young_difference_seen_twice_does_not_fail_the_sweep`, `w4::a_trade_at_the_floor_itself_is_compared`, `w4::a_round_that_reads_a_page_ends_the_run_of_failed_rounds`). `runtime::the_watcher_runs_against_loopback_fakes_end_to_end`는 서명된 `execution/list` 요청과 W4 성공 시각이 든 하트비트를 본다. 변이: M202(Funding을 Trade로; 고의 결함 21), M203(ADL을 체결과; 22), M204(모르는 형이 둘째 훑기를 기다림; 23), M205(쪽 상한 무시; 24), M206(겹침을 빼지 않음; 25), M207(이은 훑기가 1쪽부터; 26), M208(워터마크가 확정되지 않은 행을 지남; 27), M247(`execTime` 없는 행이 워터마크를 붙잡지 않음; 27의 둘째 형, 검토 4 S3), M215(실패한 쪽을 한없이 다시; 34), M216(`side` 없는 Funding이 읽을 수 없는 행; 35), M217(바닥을 내림; 36), M222(거둔 정체를 다시 확정하고 보냄; 41), M227(`"held"`로 답한 적 없는 정체를 해제 때 거둠; 46).
