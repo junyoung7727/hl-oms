@@ -7,8 +7,8 @@
 //! decimals and the `Base32Pair` identifiers; U19a2 the journal state
 //! (orders, open set, fills, positions, holds); U19a3 the Bybit signer and
 //! client, the request guard, the clock and the metrics export; U19a4 the
-//! config; U19a4b the start checks; U19a5 the check engine and W1; the
-//! other checks come in U19a6 on.
+//! config; U19a4b the start checks; U19a5 the check engine and W1; U19a6
+//! W2; the other checks come in U19a8 on.
 //!
 //! [ADR-031]: ../../docs/adr/ADR-031-watcher.md
 
