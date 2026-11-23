@@ -329,6 +329,11 @@ fn the_admin_client_says_hello_and_reads_both_replies() {
             1000,
         ));
         assert_eq!(got, want);
+        // The fake records a connection when the client has closed it.
+        let end = Instant::now() + Duration::from_secs(5);
+        while seen.lock().unwrap().is_empty() && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(5));
+        }
         let lines = seen.lock().unwrap().clone();
         assert_eq!(
             lines.last().unwrap(),

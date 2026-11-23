@@ -537,6 +537,29 @@ fn the_status_client_sends_the_loopback_host_and_follows_no_redirect() {
         r.header("host"),
         Some(format!("127.0.0.1:{}", fake.addr().port()).as_str())
     );
+    // A redirect to a loopback target that would answer: not followed.
+    let target = FakeHttp::start(Answer::Reply(
+        200,
+        r#"{"journal":{"durable_seq":9}}"#.into(),
+    ));
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let redirect = format!("http://{}/api/status", l.local_addr().unwrap());
+    let to = format!("{}/api/status", target.url());
+    std::thread::spawn(move || {
+        use std::io::{Read, Write};
+        for c in l.incoming().take(4) {
+            let Ok(mut c) = c else { return };
+            let mut buf = [0u8; 4096];
+            let _ = c.read(&mut buf);
+            let _ = write!(
+                c,
+                "HTTP/1.1 302 Found\r\nLocation: {to}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+        }
+    });
+    let r = watcher::oms::Status::new(&redirect, 1000).unwrap();
+    assert!(rt.block_on(r.get()).is_err());
+    assert!(target.requests().is_empty(), "{:?}", target.requests());
     for a in [
         Answer::Reply(302, String::new()),
         Answer::Reply(500, "{}".into()),
@@ -547,4 +570,41 @@ fn the_status_client_sends_the_loopback_host_and_follows_no_redirect() {
         assert!(rt.block_on(s.get()).is_err());
     }
     assert!(fake.requests().iter().all(|r| r.path() == "/api/status"));
+}
+
+#[test]
+fn a_start_refusal_ends_the_run_with_exit_code_2() {
+    let w = World::new("rt-refusal", "");
+    // A master key: refused at step 2, nothing asked after it.
+    w.bybit.route(
+        "/v5/user/query-api",
+        [ok(
+            json!({"isMaster": true, "userID": 1, "ips": ["127.0.0.1"]}),
+        )],
+    );
+    w.status_ok();
+    let mut run = w.start(Arc::new(ManualClock::new(T0)));
+    assert!(until(10, || !run.running()));
+    assert_eq!(run.shutdown(), 2);
+    assert_eq!(
+        w.lines_with("error: start refused: query-api: the API key is the master account's"),
+        1
+    );
+    assert_eq!(w.bybit.requests().len(), 1);
+    assert!(w.echo.requests().is_empty());
+    assert!(w.status.requests().is_empty());
+    assert!(w.monitor.conns().is_empty());
+    // A credentials file that is not owner-only: refused before any request.
+    let w = World::new("rt-refusal-creds", "");
+    std::fs::set_permissions(
+        &w.cfg.credentials_file,
+        std::fs::Permissions::from_mode(0o644),
+    )
+    .unwrap();
+    let mut run = w.start(Arc::new(ManualClock::new(T0)));
+    assert!(until(10, || !run.running()));
+    assert_eq!(run.shutdown(), 2);
+    assert_eq!(w.lines_with("error: credentials file"), 1);
+    assert!(w.bybit.requests().is_empty());
+    assert!(w.vm.requests().is_empty());
 }
