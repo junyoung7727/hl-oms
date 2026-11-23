@@ -2372,6 +2372,15 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "creds", "the_token_file_must_be_owner_only_outside_any_repository"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M261-watcher-pinned-route-never-tried",
+        what: "the watcher's sender stops at a network error instead of trying the pinned route (deliberate defect 7 of U19b1b)",
+        file: "crates/watcher/src/alert.rs",
+        find: "                    errors.push(format!(\"route {r}: {}\", chain(e)));\n                    continue;\n",
+        replace: "                    errors.push(format!(\"route {r}: {}\", chain(e)));\n                    break;\n",
+        test: &["-p", "watcher", "--test", "alert", "a_network_error_moves_to_the_pinned_route"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {

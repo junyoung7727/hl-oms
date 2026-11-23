@@ -1,12 +1,25 @@
-//! The pure parts of the watcher's own Telegram sender (C-WATCH part 10,
-//! U19b1a): the message header, the split into parts of at most 3,500
-//! UTF-16 units, the outbox of 50 parts, the outcome of an answer and the
-//! repeat rule; the token is never printed. Nothing here sends.
+//! The watcher's own Telegram sender (C-WATCH part 10). U19b1a, the pure
+//! parts: the message header, the split into parts of at most 3,500 UTF-16
+//! units, the outbox of 50 parts, the outcome of an answer and the repeat
+//! rule; the token is never printed. U19b1b, the sender task against
+//! loopback fakes: the two routes (a network error moves to the next, the
+//! route that answered goes first), the flush pace on the injected clock
+//! (the runtime's tick notifies the task), a retry that keeps its part,
+//! the token never in a log line, and the shutdown flush bounded in real
+//! time. Nothing here starts the runtime.
 
 #![allow(clippy::unwrap_used)]
 
-use watcher::alert::{self, MSG_LIMIT, OUTBOX_LIMIT, Outbox, Outcome, Part, Token};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use http_fake::{Answer, FakeHttp, Request, dead_addr};
+use serde_json::Value;
+use watcher::alert::{self, Handle, MSG_LIMIT, OUTBOX_LIMIT, Outbox, Outcome, Part, Route, Token};
+use watcher::clock::{Clock, ManualClock};
 use watcher::config::Config;
+use watcher::metrics::Metrics;
+use watcher::runtime::Endpoints;
 
 #[test]
 fn the_token_is_never_in_debug() {
@@ -350,4 +363,425 @@ fn the_repeat_rule_sends_start_every_5_min_and_clear() {
     }
     assert_eq!(sent, 1 + 11);
     assert!(r.set("k", None, t0 + 3_600_000).is_some());
+}
+
+// ---------------------------------------------------------------- sender task (U19b1b)
+
+const SECRET: &str = "987654:made-up_secret-of-the-bot";
+const T0: u64 = 1_795_435_200_000;
+
+fn ok() -> Answer {
+    Answer::Reply(200, r#"{"ok":true,"result":{}}"#.into())
+}
+
+fn token() -> Token {
+    Token::new(SECRET, "-1001234").unwrap()
+}
+
+/// A loopback route to `fake` through the reserved name `telegram.invalid`
+/// (never `api.telegram.org`: without the `resolve` it fails to resolve).
+fn pinned(fake: &FakeHttp) -> Route {
+    Route::pinned("http://telegram.invalid/", "telegram.invalid", fake.addr())
+}
+
+struct Rig {
+    clock: Arc<ManualClock>,
+    metrics: Arc<Metrics>,
+    lines: Arc<Mutex<Vec<String>>>,
+    handle: Handle,
+    finish: Option<tokio::sync::oneshot::Sender<u64>>,
+    finished: std::sync::mpsc::Receiver<usize>,
+    join: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Rig {
+    /// The sender on its own thread and current-thread runtime, as the
+    /// watcher runs it; the runtime ends after `finish`.
+    fn new(routes: Vec<Route>) -> Rig {
+        let clock = Arc::new(ManualClock::new(T0));
+        let metrics = Arc::new(Metrics::new("h", "w-1"));
+        let (log, lines) = watcher::log::collect();
+        let (c, m): (Arc<dyn Clock>, _) = (clock.clone(), metrics.clone());
+        let (ready_tx, ready) = std::sync::mpsc::channel();
+        let (finish, finish_rx) = tokio::sync::oneshot::channel::<u64>();
+        let (finished_tx, finished) = std::sync::mpsc::channel();
+        let join = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async move {
+                let (handle, task) = alert::spawn("w-1", routes, token(), c, m, log).unwrap();
+                ready_tx.send(handle).unwrap();
+                if let Ok(ms) = finish_rx.await {
+                    let _ = finished_tx.send(task.finish(ms).await);
+                }
+            });
+        });
+        let handle = ready.recv_timeout(Duration::from_secs(5)).unwrap();
+        Rig {
+            clock,
+            metrics,
+            lines,
+            handle,
+            finish: Some(finish),
+            finished,
+            join: Some(join),
+        }
+    }
+
+    fn metric(&self, name: &str) -> f64 {
+        self.metrics.get(name, &[]).unwrap_or(-1.0)
+    }
+
+    fn lines(&self) -> Vec<String> {
+        self.lines.lock().unwrap().clone()
+    }
+
+    /// Waits (bounded, real time) until `f` holds.
+    fn until(&self, what: &str, f: impl Fn(&Rig) -> bool) {
+        self.until_within(Duration::from_secs(5), what, f);
+    }
+
+    /// Waits at most `bound` of real time until `f` holds.
+    fn until_within(&self, bound: Duration, what: &str, f: impl Fn(&Rig) -> bool) {
+        let end = Instant::now() + bound;
+        while !f(self) {
+            assert!(Instant::now() < end, "timed out waiting for {what}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// `Task::finish(ms)` on the sender's runtime; the parts it left.
+    fn finish(&mut self, ms: u64) -> usize {
+        self.finish.take().unwrap().send(ms).unwrap();
+        let left = self.finished.recv_timeout(Duration::from_secs(30)).unwrap();
+        self.join.take().unwrap().join().unwrap();
+        left
+    }
+}
+
+fn text(r: &Request) -> String {
+    let v: Value = serde_json::from_slice(&r.body).unwrap();
+    v["text"].as_str().unwrap().to_string()
+}
+
+#[test]
+fn a_network_error_moves_to_the_pinned_route() {
+    // The production routes: DNS, then api.telegram.org pinned to
+    // 149.154.167.220:443 (the host name still gives SNI and certificate).
+    let prod = Route::telegram();
+    assert_eq!(prod.len(), 2);
+    assert_eq!(prod[0], Route::direct("https://api.telegram.org/"));
+    assert_eq!(
+        prod[1],
+        Route::pinned(
+            "https://api.telegram.org/",
+            "api.telegram.org",
+            "149.154.167.220:443".parse().unwrap()
+        )
+    );
+
+    // The binary takes them from `Endpoints::of`; there is no override.
+    let cfg = Config::from_toml(
+        r#"name = "w1"
+network = "mainnet"
+mainnet_confirmed = true
+credentials_file = "/etc/watcher/creds.toml"
+sub_account_uid = 4242
+symbols = ["BTCUSDT"]
+ip_echo_url = "https://ip.example/"
+data_dir = "/srv/oms/data"
+status_url = "http://127.0.0.1:8188/api/status"
+
+[telegram]
+token_file = "/etc/watcher/telegram.json"
+"#,
+    )
+    .unwrap();
+    assert_eq!(Endpoints::of(&cfg).telegram, prod);
+
+    let fake = FakeHttp::start(ok());
+    let dead = Route::direct(&format!("http://{}/", dead_addr()));
+    let rig = Rig::new(vec![dead, pinned(&fake)]);
+    rig.handle.once("워처 W1 불일치 확정 1건.");
+    let got = fake.wait_requests(1, Duration::from_secs(5));
+    assert_eq!(got.len(), 1);
+    let r = &got[0];
+    assert_eq!(r.method, "POST");
+    assert_eq!(r.path(), format!("/bot{SECRET}/sendMessage"));
+    assert_eq!(r.header("host"), Some("telegram.invalid"));
+    let body: Value = serde_json::from_slice(&r.body).unwrap();
+    assert_eq!(body["chat_id"], "-1001234");
+    assert_eq!(body["disable_web_page_preview"], true);
+    assert_eq!(
+        body["text"],
+        "[WATCH P1] bybit w-1 11-23 21:00:00 KST\n워처 W1 불일치 확정 1건."
+    );
+    rig.until("the delivery", |r| {
+        r.metric("watcher_alerts_delivered_total") == 1.0
+    });
+    // The dead route was tried once and failed.
+    assert_eq!(rig.metric("watcher_alert_failures_total"), 1.0);
+    assert_eq!(rig.metric("watcher_alerts_queued"), 0.0);
+
+    // The route that answered goes first next time: the dead route is not
+    // tried again.
+    rig.handle.once("두 번째");
+    let got = fake.wait_requests(2, Duration::from_secs(5));
+    assert_eq!(got.len(), 2);
+    assert!(text(&got[1]).ends_with("\n두 번째"));
+    rig.until("the second delivery", |r| {
+        r.metric("watcher_alerts_delivered_total") == 2.0
+    });
+    assert_eq!(rig.metric("watcher_alert_failures_total"), 1.0);
+}
+
+/// Real time in which a task that is not woken must send nothing
+/// (판단(모델 아님)).
+const QUIET: Duration = Duration::from_millis(300);
+
+#[test]
+fn the_sender_task_flushes_on_the_manual_clock() {
+    let fake = FakeHttp::start(ok());
+    fake.script([Answer::Reply(500, r#"{"ok":false}"#.into())]);
+    let rig = Rig::new(vec![Route::direct(&fake.url())]);
+    assert_eq!(rig.handle.next_flush(), None);
+    rig.handle.once("a");
+    assert_eq!(fake.wait_requests(1, Duration::from_secs(5)).len(), 1);
+    // The flush that left the part ended at T0: the next is due 5,000 ms
+    // later on the injected clock.
+    rig.until("the retry instant", |r| r.handle.next_flush().is_some());
+    assert_eq!(rig.handle.next_flush(), Some(T0 + 5_000));
+    assert_eq!(rig.metric("watcher_alerts_queued"), 1.0);
+
+    // A tick before it is due wakes nothing.
+    rig.clock.set(T0 + 4_999);
+    rig.handle.tick(T0 + 4_999);
+    std::thread::sleep(QUIET);
+    assert_eq!(fake.requests().len(), 1);
+    // The clock alone wakes nothing either: the task does not sleep on any
+    // timer; the runtime's tick wakes it.
+    rig.clock.set(T0 + 5_000);
+    std::thread::sleep(QUIET);
+    assert_eq!(fake.requests().len(), 1);
+
+    rig.handle.tick(T0 + 5_000);
+    let got = fake.wait_requests(2, Duration::from_secs(5));
+    assert_eq!(got.len(), 2);
+    assert_eq!(text(&got[1]), text(&got[0]));
+    rig.until("the delivery", |r| {
+        r.metric("watcher_alerts_delivered_total") == 1.0
+    });
+    assert_eq!(rig.handle.next_flush(), None);
+    assert_eq!(rig.metric("watcher_alerts_queued"), 0.0);
+    // Nothing is due any more: later ticks send nothing.
+    rig.clock.set(T0 + 60_000);
+    rig.handle.tick(T0 + 60_000);
+    std::thread::sleep(QUIET);
+    assert_eq!(fake.requests().len(), 2);
+}
+
+#[test]
+fn a_retry_keeps_the_part_for_the_next_flush() {
+    let fake = FakeHttp::start(ok());
+    fake.script([Answer::Reply(
+        502,
+        r#"{"ok":false,"description":"Bad Gateway"}"#.into(),
+    )]);
+    let rig = Rig::new(vec![Route::direct(&fake.url())]);
+    rig.handle.once("a");
+    assert_eq!(fake.wait_requests(1, Duration::from_secs(5)).len(), 1);
+    rig.until("the retry instant", |r| r.handle.next_flush().is_some());
+    // The part is kept; the flush ended at it.
+    assert_eq!(rig.metric("watcher_alerts_queued"), 1.0);
+    assert_eq!(rig.metric("watcher_alerts_delivered_total"), 0.0);
+    assert_eq!(rig.metric("watcher_alert_failures_total"), 1.0);
+
+    // A new message goes at once (it wakes the task) behind the kept part.
+    rig.handle.once("b");
+    let got = fake.wait_requests(3, Duration::from_secs(5));
+    let texts: Vec<String> = got.iter().map(text).collect();
+    assert_eq!(texts.len(), 3, "{texts:?}");
+    assert!(
+        texts[0].ends_with("\na") && texts[1].ends_with("\na"),
+        "{texts:?}"
+    );
+    assert!(texts[2].ends_with("\nb"), "{texts:?}");
+    rig.until("two deliveries", |r| {
+        r.metric("watcher_alerts_delivered_total") == 2.0
+    });
+    assert_eq!(rig.handle.next_flush(), None);
+
+    // 400 drops the part and counts it; the flush goes on to the drop
+    // notice.
+    fake.script([Answer::Reply(
+        400,
+        r#"{"ok":false,"description":"Bad Request: message is too long"}"#.into(),
+    )]);
+    rig.handle.once("c");
+    let got = fake.wait_requests(5, Duration::from_secs(5));
+    assert_eq!(got.len(), 5);
+    assert!(text(&got[3]).ends_with("\nc"));
+    assert_eq!(text(&got[4]), "[WATCH P1] 전송 실패로 알림 1개를 버림");
+    rig.until("the notice", |r| {
+        r.metric("watcher_alerts_delivered_total") == 3.0
+    });
+    assert_eq!(rig.metric("watcher_alerts_dropped_total"), 1.0);
+    assert_eq!(rig.metric("watcher_alert_failures_total"), 2.0);
+    assert_eq!(rig.metric("watcher_alerts_queued"), 0.0);
+    assert_eq!(rig.handle.next_flush(), None);
+    let lines = rig.lines();
+    assert!(
+        lines
+            .iter()
+            .any(|l| l == "warn: telegram send failed: route 0: telegram answered 502: Bad Gateway"),
+        "{lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("route 0: telegram answered 400") && l.ends_with("(part dropped)")),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn set_queues_what_the_repeat_rule_gives() {
+    let fake = FakeHttp::start(ok());
+    let rig = Rig::new(vec![Route::direct(&fake.url())]);
+    rig.handle
+        .set("auth", Some("워처 키가 거부됨: retCode 10010"));
+    rig.handle
+        .set("auth", Some("워처 키가 거부됨: retCode 10010"));
+    rig.clock.advance(300_000);
+    rig.handle
+        .set("auth", Some("워처 키가 거부됨: retCode 10003"));
+    rig.handle.set("auth", None);
+    let got = fake.wait_requests(3, Duration::from_secs(5));
+    std::thread::sleep(QUIET);
+    let texts: Vec<String> = fake.requests().iter().map(text).collect();
+    assert_eq!(got.len(), 3);
+    assert_eq!(
+        texts,
+        [
+            "[WATCH P1] bybit w-1 11-23 21:00:00 KST\n워처 키가 거부됨: retCode 10010",
+            "[WATCH P1] bybit w-1 11-23 21:05:00 KST\n워처 키가 거부됨: retCode 10003",
+            "[WATCH P1] bybit w-1 11-23 21:05:00 KST\n해소: 워처 키가 거부됨: retCode 10010",
+        ]
+    );
+}
+
+#[test]
+fn the_token_is_never_in_a_log_line() {
+    let dead = dead_addr();
+    let rig = Rig::new(vec![
+        Route::direct(&format!("http://{dead}/")),
+        Route::pinned("http://telegram.invalid/", "telegram.invalid", dead),
+    ]);
+    rig.handle.once("x");
+    rig.until("two failed routes", |r| {
+        r.metric("watcher_alert_failures_total") == 2.0
+    });
+    rig.until("the retry instant", |r| r.handle.next_flush().is_some());
+    let mut rig = rig;
+    assert_eq!(rig.finish(1_000), 1);
+    let lines = rig.lines();
+    let failed: Vec<&String> = lines
+        .iter()
+        .filter(|l| l.starts_with("warn: telegram send failed: route "))
+        .collect();
+    // The first flush and the last one (at `finish`) each tried both
+    // routes; no route answered, so the order stayed.
+    assert_eq!(failed.len(), 4, "{lines:?}");
+    for (n, l) in failed.iter().enumerate() {
+        let route = format!("warn: telegram send failed: route {}: ", n % 2);
+        assert!(l.starts_with(&route), "{l}");
+    }
+    // The cause is told (more than the route), the URL is not.
+    for l in &lines {
+        assert!(!l.contains(SECRET), "{l}");
+        assert!(!l.contains("made-up") && !l.contains("bot987654"), "{l}");
+        assert!(!l.contains("sendMessage"), "{l}");
+    }
+    assert!(
+        failed
+            .iter()
+            .all(|l| l.len() > "warn: telegram send failed: route 0: ".len() + 5)
+    );
+}
+
+#[test]
+fn shutdown_flushes_within_5_s_and_counts_the_rest() {
+    // A part kept by a failed flush goes out in the last flush, without a
+    // tick.
+    let fake = FakeHttp::start(ok());
+    fake.script([Answer::Reply(500, r#"{"ok":false}"#.into())]);
+    let mut rig = Rig::new(vec![Route::direct(&fake.url())]);
+    rig.handle.once("a");
+    rig.until("the retry instant", |r| r.handle.next_flush().is_some());
+    let t = Instant::now();
+    assert_eq!(rig.finish(alert::FINISH_MS), 0);
+    assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
+    assert_eq!(fake.requests().len(), 2);
+    assert_eq!(rig.metric("watcher_alerts_delivered_total"), 1.0);
+    assert_eq!(
+        rig.lines().last().map(String::as_str),
+        Some("alert sender stopped: nothing left to send")
+    );
+
+    // Telegram does not answer (the request timeout is 10 s): the last
+    // flush is cut at 5 s of real time and the parts left are counted.
+    let hang = FakeHttp::start(Answer::Hang);
+    let mut rig = Rig::new(vec![Route::direct(&hang.url())]);
+    rig.handle.once("a");
+    assert_eq!(hang.wait_requests(1, Duration::from_secs(5)).len(), 1);
+    rig.handle.once("b");
+    rig.handle.once("c");
+    let t = Instant::now();
+    assert_eq!(rig.finish(alert::FINISH_MS), 3);
+    let took = t.elapsed();
+    assert!(
+        took >= Duration::from_millis(4_900) && took < Duration::from_millis(7_000),
+        "{took:?}"
+    );
+    assert_eq!(hang.requests().len(), 1);
+    assert_eq!(
+        rig.lines().last().map(String::as_str),
+        Some("warn: alert sender stopped at its bound: 3 parts not delivered are dropped")
+    );
+}
+
+#[test]
+fn a_request_without_an_answer_fails_after_10_s() {
+    // Telegram (or a box on the way) takes the connection and never
+    // answers: the request timeout ends the send, the failure is counted
+    // and logged, and the part waits for the next flush (review 1 S1).
+    let hang = FakeHttp::start(Answer::Hang);
+    let mut rig = Rig::new(vec![Route::direct(&hang.url())]);
+    let t = Instant::now();
+    rig.handle.once("a");
+    assert_eq!(hang.wait_requests(1, Duration::from_secs(5)).len(), 1);
+    rig.until_within(Duration::from_secs(15), "the request timeout", |r| {
+        r.metric("watcher_alert_failures_total") == 1.0 && r.handle.next_flush().is_some()
+    });
+    let took = t.elapsed();
+    assert_eq!(alert::REQUEST_TIMEOUT_MS, 10_000);
+    assert!(
+        took >= Duration::from_millis(9_500) && took < Duration::from_millis(13_000),
+        "{took:?}"
+    );
+    assert_eq!(rig.handle.next_flush(), Some(T0 + 5_000));
+    assert_eq!(rig.metric("watcher_alerts_queued"), 1.0);
+    assert_eq!(rig.metric("watcher_alerts_delivered_total"), 0.0);
+    let lines = rig.lines();
+    let failed: Vec<&String> = lines
+        .iter()
+        .filter(|l| l.starts_with("warn: telegram send failed: route 0: "))
+        .collect();
+    assert_eq!(failed.len(), 1, "{lines:?}");
+    assert!(failed[0].ends_with("timed out"), "{}", failed[0]);
+    assert!(!failed[0].contains(SECRET), "{}", failed[0]);
+    // The last flush meets the same silence and is cut at its bound.
+    assert_eq!(rig.finish(200), 1);
 }

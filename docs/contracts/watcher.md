@@ -1,6 +1,6 @@
 # C-WATCH 독립 워처
 
-상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23), 4부 구현됨(설정과 자격 파일 U19a4, 시작 확인과 IP 재확인 U19a4b, 2026-11-23), 5부 구현됨(검사 엔진과 W1, U19a5, 2026-11-23), 6부 구현됨(W2 포지션, U19a6, 2026-11-23), 7부 구현됨(OMS 연결과 실행, U19a7, 2026-11-23), 8부 구현됨(W4 체결, U19a8, 2026-11-23), 9부 구현됨(W3 지갑과 증거금, W2의 대신 시각, 예산, U19a9, 2026-11-23), 10부 만드는 중(직접 알림의 설정, 토큰 파일과 전달 규칙 U19b1a, 2026-11-24; 송신 태스크 U19b1b, 조건 U19b1c). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md), 10~12부는 [ADR-032](../adr/ADR-032-watcher-kill-and-alerts.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3, V-WATCH-4, V-WATCH-5, V-WATCH-6, V-WATCH-7, V-WATCH-8, V-WATCH-9, V-WATCH-10, V-WATCH-11. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
+상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23), 4부 구현됨(설정과 자격 파일 U19a4, 시작 확인과 IP 재확인 U19a4b, 2026-11-23), 5부 구현됨(검사 엔진과 W1, U19a5, 2026-11-23), 6부 구현됨(W2 포지션, U19a6, 2026-11-23), 7부 구현됨(OMS 연결과 실행, U19a7, 2026-11-23), 8부 구현됨(W4 체결, U19a8, 2026-11-23), 9부 구현됨(W3 지갑과 증거금, W2의 대신 시각, 예산, U19a9, 2026-11-23), 10부 만드는 중(직접 알림의 설정, 토큰 파일과 전달 규칙 U19b1a, 2026-11-24; 송신 태스크 U19b1b, 2026-11-24; 조건과 실행 연결 U19b1c). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md), 10~12부는 [ADR-032](../adr/ADR-032-watcher-kill-and-alerts.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3, V-WATCH-4, V-WATCH-5, V-WATCH-6, V-WATCH-7, V-WATCH-8, V-WATCH-9, V-WATCH-10, V-WATCH-11. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
 
 워처는 OMS와 코드를 나누지 않는 별도 프로그램이다. 저널을 자기 읽기로 읽고(이 문서와 [C-TAIL](tail.md), [ADR-011](../adr/ADR-011-file-format.md)만으로 썼다), 자기 키와 클라이언트로 Bybit를 조회해 OMS와 비교하고, 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고, `monitor.sock`에 하트비트를 보낸다. **U19a7부터 워처는 돈다**: `watcher --config <path>`가 설정과 자격 파일을 읽고, 시작 확인을 거쳐 OMS의 `/api/status`를 기다린 뒤 저널을 처음부터 재생하고, W1(열린 주문), W2(포지션), U19a8부터 W4(체결), U19a9부터 W3(지갑과 증거금)을 돌려 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고(다시 보내기 규칙, 7부), `heartbeat_ms`마다 `monitor.sock`에 하트비트를 보내고, 지표를 VictoriaMetrics로 밀어 넣는다. 네 검사가 모두 돈다(U19a9). loopback 가짜와 시험 저널로만 시험했고 실제 OMS 프로세스나 실제 Bybit에 붙여 돌려 본 적이 없다(키가 없다, U-01). 서비스 설치는 U20b다.
 
@@ -15,7 +15,7 @@
 | 7 | OMS 연결(`/api/status`, `admin.sock`의 다시 보내기 규칙, `monitor.sock` 하트비트)과 실행, 바이너리(이 문서) | U19a7 |
 | 8 | W4 체결(훑기, 쪽, 다시 시작, 워터마크, 형별 행 읽기, `execType` 표, 거둠)(이 문서) | U19a8 |
 | 9 | W3 지갑과 증거금, W2의 대신 시각(W4의 `execTime`), 하트비트의 W3·W4, 예산 측정(이 문서) | U19a9 |
-| 10 | 직접 알림 `[WATCH P1]`: `[telegram]`, 토큰 파일, 전달 규칙(분할, 보관함, 응답의 결과, 반복 규칙)(이 문서); 송신 태스크와 조건은 U19b1b·U19b1c | U19b1a~c |
+| 10 | 직접 알림 `[WATCH P1]`: `[telegram]`, 토큰 파일, 전달 규칙(분할, 보관함, 응답의 결과, 반복 규칙), 송신 태스크(경로, 깨우기와 흘려보내기 간격, 지표, 종료 때 흘려보내기)(이 문서); 조건과 실행 연결은 U19b1c | U19b1a~c |
 
 ## 1부. 독립성
 
@@ -673,7 +673,7 @@ U19a7은 U19a5·U19a6 시험 몇 개의 단언을 바꿨다(시험 도구의 OMS
 
 ## 10부. 직접 알림 [WATCH P1](U19b1)
 
-`watcher::alert`, `watcher::creds::load_token`, `[telegram]`. 설계: [ADR-032](../adr/ADR-032-watcher-kill-and-alerts.md). 워처는 OMS가 죽어도 사람에게 닿는 자기 텔레그램 송신기를 갖는다(설계 §7.7, R2 SHOULD 6, 소유자 결정 Q7·Q18: OMS와 같은 봇, 접두어로 구별). 전달 규칙은 초안 PR #3의 것이고, `alert-direct`가 OMS를 위해 구현한 것을 **링크하지 않고** 다시 썼다(독립성 규칙 3, 1부). **U19b1a는 규칙과 토큰 파일만 만든다: 아직 아무것도 보내지 않는다.** 송신 태스크(경로, 흘려보내기 간격, 종료 때 흘려보내기)는 U19b1b, P1 조건(불일치, 키 거부, 공인 IP, 시작 거부)과 실행 연결은 U19b1c가 이 부에 더한다.
+`watcher::alert`, `watcher::creds::load_token`, `[telegram]`. 설계: [ADR-032](../adr/ADR-032-watcher-kill-and-alerts.md). 워처는 OMS가 죽어도 사람에게 닿는 자기 텔레그램 송신기를 갖는다(설계 §7.7, R2 SHOULD 6, 소유자 결정 Q7·Q18: OMS와 같은 봇, 접두어로 구별). 전달 규칙은 초안 PR #3의 것이고, `alert-direct`가 OMS를 위해 구현한 것을 **링크하지 않고** 다시 썼다(독립성 규칙 3, 1부). U19b1a가 규칙과 토큰 파일을, U19b1b가 송신 태스크(경로, 깨우기와 흘려보내기 간격, 지표, 종료 때 흘려보내기)를 만들었다. **송신 태스크는 loopback 가짜에 대해서만 시험했고 실행은 아직 그것을 띄우지 않는다: 워처는 아직 아무것도 보내지 않는다.** P1 조건(불일치, 키 거부, 공인 IP, 시작 거부)과 실행 연결은 U19b1c가 이 부에 더한다.
 
 ### `[telegram]`(U19b1a)
 
@@ -689,7 +689,7 @@ U19a7은 U19a5·U19a6 시험 몇 개의 단언을 바꿨다(시험 도구의 OMS
 - **git 저장소 안이면 거부한다**: 적힌 경로나 가리키는 곳(심볼릭 링크를 따른)의 조상 디렉터리 하나가 `.git`(디렉터리, 또는 worktree의 파일)을 가지면 `token file <path> is inside the git repository <dir>; keep the token outside any repository`. 이 검사는 내용을 읽기 전이다. 토큰이 커밋되는 것을 막는다(`alert-direct`의 규칙).
 - **오류는 파일 내용을 인용하지 않는다**: JSON 오류(내용을 인용한다)를 버리고 `is not JSON with token and chat_id`만 쓴다. 토큰 형식이 틀리면 `the token is not of the form <digits>:<letters, digits, _ or ->`이고 토큰은 적지 않는다.
 - 읽은 값 `alert::Token`의 `Debug`는 `Token { chat_id: "…", token: <hidden> }`이다. 설정의 `Debug`는 경로만 보인다.
-- 실행은 자격 파일 다음, 시작 확인 전에 한 번 읽는다(U19b1a). 거부는 종료 코드 2와 `error:` 한 줄이고 그 전에 아무 요청도 나가지 않는다. 그래서 시작 확인의 2단계가 키를 거부할 때 송신기가 이미 있다(U19b1c). 읽은 토큰은 U19b1b까지 쓰이지 않는다.
+- 실행은 자격 파일 다음, 시작 확인 전에 한 번 읽는다(U19b1a). 거부는 종료 코드 2와 `error:` 한 줄이고 그 전에 아무 요청도 나가지 않는다. 그래서 시작 확인의 2단계가 키를 거부할 때 송신기가 이미 있다(U19b1c). 읽은 토큰은 U19b1c가 송신 태스크에 줄 때까지 쓰이지 않는다.
 
 ### 전달 규칙(`watcher::alert`의 순수 부분, U19b1a)
 
@@ -707,10 +707,49 @@ U19a7은 U19a5·U19a6 시험 몇 개의 단언을 바꿨다(시험 도구의 OMS
 - 반복 규칙의 경과 시간은 `saturating_sub`다: 시계가 뒤로 가면 다음 반복이 그만큼 늦다(새 조건과 해소는 바로 간다).
 - 위의 상수(3,500, 50, 300,000 ms)는 설계 값이다(PR #3, 설계 §7.7; 설계에서도 판단).
 
+### 송신 태스크(`alert::spawn`, U19b1b)
+
+`alert::spawn(name, routes, token, clock, metrics, log) -> Result<(Handle, Task), String>`. 경로마다 클라이언트 하나를 만들고(요청 10초, 연결 3초, 리디렉션을 따르지 않음, 프록시 없음) 지금의 tokio 런타임에 태스크 하나를 띄운다. 스펙의 서명에 `name`(머리말의 워처 이름)을 더했고, 경로가 없거나 클라이언트를 만들 수 없으면 `Err`다(실행 연결 U19b1c가 다룬다). 실행은 단일 스레드라 태스크는 실행의 틱과 같은 스레드에서 돈다.
+
+| 부분 | 규칙 | 근거 |
+|---|---|---|
+| 경로 `Route` | `Route::telegram()` = DNS로 푸는 `https://api.telegram.org/`, 그다음 `api.telegram.org`를 `149.154.167.220:443`으로 고정한 것(`reqwest`의 `resolve`; SNI와 인증서는 호스트 이름). `Endpoints::of(cfg).telegram`이 이 둘이고 설정으로 바꿀 수 없다(REST 주소와 같다). `Route`는 토큰을 담지 않는다 | PR #3 `lib.rs:33-36`, `:493-546` |
+| 보내기 | 부분마다 `POST {base}bot{token}/sendMessage`, 본문 `{"chat_id", "text", "disable_web_page_preview": true}`. 경로를 순서대로 쓴다: 네트워크 오류(연결, 시간 초과, 본문 읽기 실패)는 다음 경로로, HTTP 답은 `outcome`(U19b1a)으로 결정하고 답한 경로가 다음부터 맨 앞이다. 모든 경로가 네트워크 오류면 `Retry`. 배달 뒤의 시간 초과는 같은 부분을 두 번 보낼 수 있다(잃는 것보다 낫다) | PR #3 `lib.rs:1179-1233` |
+| 넣기 | `Handle::once(body)`는 `message(name, now, body)`를 보관함에 넣고 태스크를 깨운다. `Handle::set(key, Option<text>)`는 `Repeat`(주입된 시계)이 내는 문구만 넣는다. 둘 다 잠금만 잡고 네트워크를 기다리지 않는다 | 스펙 "The sender" |
+| 깨우기 | `tokio::sync::Notify` 하나. 태스크는 어떤 타이머에도 자지 않는다. 새 메시지가 바로 깨운다(남은 부분부터 순서대로 간다). 흘려보내기가 부분을 남기고 끝나면 `next_flush` = 그 끝의 주입된 시계 + 5,000 ms이고, 실행의 틱이 `Handle::tick(now)`로 그 시각이 되면 깨운다(`now ≥ next_flush`; 실행이 부르는 것은 U19b1c). 흘려보내기가 시작할 때 `next_flush`를 지운다. 그래서 수동 시계 시험에서 태스크는 실제 시간이 아니라 시계와 틱으로 움직인다 | 스펙 "Clock and waits", 리뷰 1 N6; 5,000 ms는 PR #3의 설계 값 |
+| 흘려보내기 | 보관함의 순서대로 한 번에 하나. `Delivered`와 `Refused`는 다음 부분으로 가고, `Retry`는 그 부분을 두고 이번 흘려보내기를 끝낸다. 큐가 비면 버림 알림(U19b1a)이 같은 흘려보내기에서 간다 | PR #3 |
+| 종료 | `Task::finish(5_000)`: 멈춤을 표시하고 깨운 뒤, 마지막 흘려보내기 한 번(진행 중인 흘려보내기가 있으면 그 뒤)을 실제 시간 5,000 ms(판단(모델 아님)) 안에서 기다리고, 넘으면 태스크를 끊는다. 남은 부분은 버리고 한 줄로 센다: `alert sender stopped: nothing left to send`, 또는 `warn: alert sender stopped[ at its bound]: N parts not delivered are dropped[ (and the notice of M earlier drops)]`. 돌려주는 값은 남은 부분의 수. 실행은 U19b1c부터 부른다 | 스펙 "Shutdown (U19b1b)" |
+
+지표(라벨은 3부의 기본 `venue`, `host`, `watcher`뿐, `spawn`부터 있다):
+
+| 계열 | 형 | 뜻 |
+|---|---|---|
+| `watcher_alerts_queued` | 게이지 | 보관함의 부분 수 |
+| `watcher_alerts_delivered_total` | 카운터 | 텔레그램이 받은 부분(버림 알림 포함) |
+| `watcher_alerts_dropped_total` | 카운터 | 넘침이나 거부(400·413)로 버린 부분(`Outbox::dropped_total`) |
+| `watcher_alert_failures_total` | 카운터 | 실패한 시도: 네트워크 오류가 난 경로마다 하나, `Delivered`가 아닌 HTTP 답마다 하나(거부 포함; `alert-direct`와 같다) |
+
+- 로그: 실패한 시도마다 `warn: telegram send failed: route {i}: {원인}`(거부면 끝에 ` (part dropped)`). 원인은 `reqwest` 오류에서 URL을 뺀 것(`without_url`)과 그 원인 사슬, 또는 `outcome`의 문구라 토큰이 없다.
+- 시간: 흘려보내기 간격과 반복 규칙은 주입된 시계, 요청·연결 시간 초과와 종료 한도는 tokio의 실제 시간이다.
+
+### 알려진 한계(10부, U19b1b)
+
+- 실제 텔레그램, 실제 DNS, 실제 TLS는 시험하지 않았다. 시험은 평문 `http`의 loopback 가짜이고, 고정 경로 시험은 예약된 이름 `telegram.invalid`를 가짜의 주소로 고정한다(`resolve`가 빠지면 이름을 풀지 못할 뿐 `api.telegram.org`에 닿지 않는다). 고정 경로가 TLS에서 SNI와 인증서에 호스트 이름을 쓰는 것은 `reqwest`의 `resolve`의 동작이고 여기서 확인하지 않았다.
+- 텔레그램이 안 되는 동안 로그 줄이 흘려보내기마다(5초마다) 경로 수만큼 나온다(경로 둘이면 시간당 약 1,440줄; `alert-direct`와 같다).
+- 시계가 뒤로 가면 다음 흘려보내기가 그만큼 늦다(`next_flush`는 주입된 시계의 값이다). 새 메시지는 바로 간다.
+- 종료 한도에 끊긴 요청은 텔레그램이 이미 받았을 수 있다(로그는 그 부분을 버렸다고 센다). 첫 경로의 연결이 3초 막히면 두 번째 경로에 남는 종료 한도는 약 2초다.
+- 3xx는 따르지 않고 `Retry`다(리디렉션이 토큰을 다른 곳으로 가져가지 않게). 시험하지 않았다(`http-fake`는 `Location`을 보내지 못한다).
+- 연결 한도(3초)는 시험하지 않았다: loopback에서는 연결이 바로 되거나 바로 거부되어 막힌 연결을 만들 수 없다. 요청 한도(10초)는 답하지 않는 가짜로 시험한다(리뷰 1 S1).
+- 종료 한도에서 태스크를 `abort`하는 것은 시험하지 않았다. 바이너리는 `finish` 바로 뒤에 런타임을 끝내므로, 그것이 빠져도 끊긴 요청이 이어지는 시간은 짧다(리뷰 1 N2).
+- 송신 태스크가 `finish` 전에 끝나면(`send` 안의 패닉, 독이 든 잠금) 부르는 쪽은 모른다: `Handle::once`는 계속 받거나(잠금이 독이면 말없이 버리고) 종료 때까지 아무 줄도 없다. 지금 코드에서 그런 길은 찾지 못했다(잠금을 await 너머로 쥐지 않음). U19b1c가 실행에서 태스크가 끝났는지 보고 `error` 줄과 지표로 남긴다(리뷰 1 N1).
+- 낫지 않는 답(토큰 폐기 401·404, 봇이 채팅에서 빠짐 403)은 `Retry`라 맨 앞의 부분이 5초마다 다시 가고 뒤의 부분은 넘쳐 버려질 때까지 기다린다(PR #3의 규칙). `watcher_alert_failures_total`이 오르는데 `watcher_alerts_delivered_total`이 그대로인 것으로 보인다; 그 경보 규칙은 U20b의 몫이다(리뷰 1 N3).
+- 새 메시지는 언제나 태스크를 깨우므로, 남은 부분은 5,000 ms 간격이나 429의 `retry_after`보다 일찍 다시 간다. 그 빈도는 부르는 쪽의 빈도로 묶인다(반복 규칙은 조건마다 5분에 하나). U19b2b의 킬 루프 알림이 그 빈도를 다시 본다(리뷰 1 N4).
+- `spawn`은 경로가 없으면 `Err`다. 실행 시험의 `Endpoints.telegram`은 비어 있으므로(`crates/watcher/tests/runtime.rs`), U19b1c가 송신 태스크를 띄울 때 그 시험에 loopback 경로를 준다(리뷰 1 N5).
+
 ### 알려진 한계(10부, U19b1a)
 
 - 토큰 파일의 git 저장소 검사는 조상 디렉터리의 `.git`만 본다. `GIT_DIR`이나 `core.worktree`로 다른 곳에 둔 저장소, 읽을 수 없는 디렉터리 안의 `.git`은 보지 못한다(`alert-direct`도 같다).
-- 아직 아무것도 보내지 않는다(U19b1a). 실제 텔레그램에 보낸 적이 없고, 이후 시험도 loopback 가짜만 쓴다.
+- 아직 아무것도 보내지 않는다(U19b1a; U19b1b의 송신 태스크도 실행이 띄우지 않는다). 실제 텔레그램에 보낸 적이 없고, 이후 시험도 loopback 가짜만 쓴다.
 - 429의 `retry_after`는 읽지 않는다: 다른 실패처럼 다음 흘려보내기에 다시 보낸다(PR #3과 같다).
 - `chat_id`가 틀리면(텔레그램이 `400 Bad Request: chat not found`로 답한다고 본다; 실제 봇으로 확인하지 않음) 400은 "이 메시지의 문제"로 읽히므로 모든 부분이 `Refused`로 버려지고 세어지며, 버림 알림도 거부되어 알린 것으로 친다. 사람에게는 아무것도 닿지 않고 로그 줄과 U19b1b의 `watcher_alerts_dropped_total`만 남는다. 공백뿐인 문자열 `chat_id`(`" "`)도 받아들이고 같은 결과다. 스펙과 PR #3(`alert-direct`)의 규칙을 따랐다(리뷰 1 N1). U19b1c 또는 U20b의 몫: `watcher_alerts_dropped_total`에 대한 경보 규칙, 또는 거부되면 `error`로 남는 시작 메시지 하나.
 - `Outbox::add("")`는 빈 텍스트의 부분 하나를 넣는다(텔레그램이 400으로 거부하고 버림 알림이 따른다). 모든 실제 메시지는 `message`의 머리말로 시작하므로 송신 태스크(U19b1b)는 빈 텍스트로 `add`를 부르지 않는다(리뷰 1 N3).
@@ -718,3 +757,7 @@ U19a7은 U19a5·U19a6 시험 몇 개의 단언을 바꿨다(시험 도구의 OMS
 ### 검증(10부, U19b1a)
 
 주장 V-WATCH-11. `crates/watcher/tests/alert.rs` 6개: `alert::messages_split_at_3500_utf16_units_at_line_ends`(정확히 3,500, 하나 넘음, 한글, 이모지, 한 단위 남고 이모지, 긴 줄과 그 나머지, 정확히 두 부분, 섞인 긴 텍스트의 보존), `alert::the_outbox_keeps_50_parts_and_reports_the_drops_once`(넘침, 큐가 빈 뒤의 알림 하나, 알림 뒤에 버려진 수, 보내는 중 버려진 부분), `alert::answers_400_and_413_drop_the_part_and_other_answers_keep_it`(순수 `outcome`과 보관함; 스펙의 이름 `400_and_413_…`은 Rust 이름이 될 수 없어 앞에 `answers_`를 붙였다), `alert::the_repeat_rule_sends_start_every_5_min_and_clear`, `alert::the_token_is_never_in_debug`(`Token`과 설정의 `Debug`, 거부 문구), `alert::a_message_has_the_watch_p1_header_with_the_name_and_kst`. `config::telegram_is_validated_and_required_on_mainnet`. `creds::the_token_file_must_be_owner_only_outside_any_repository`(모드, 소유자, 링크, FIFO, 경로, 저장소 안(적힌 경로와 링크가 가리키는 곳, worktree의 `.git` 파일), 내용 규칙, 읽은 값의 `Debug`; root로 돌면 일찍 끝난다, U19a의 권한 시험처럼). 확장한 `runtime::a_start_refusal_ends_the_run_with_exit_code_2`(좋은 토큰 파일은 2단계로 이어짐, `0640` 토큰 파일은 요청 없이 종료 코드 2, testnet에 `[telegram]` 없으면 `warn` 한 줄). 변이: M255(보관함이 새 부분을 버림; 고의 결함 1), M256(400을 다시 보냄), M257(500이 부분을 버림), M258(반복 규칙이 매번 보냄), M259(mainnet이 `[telegram]` 없이 시작), M260(토큰 파일이 그룹 읽기를 받음).
+
+### 검증(10부, U19b1b)
+
+같은 주장 V-WATCH-11. `crates/watcher/tests/alert.rs`에 7개를 더했다(모두 런타임 없이 `alert::spawn`을 자기 스레드의 단일 스레드 tokio에 띄운다): `alert::a_network_error_moves_to_the_pinned_route`(첫 경로는 `dead_addr`, 둘째는 `telegram.invalid`를 가짜에 고정; 경로, 본문, `Host`, 머리말; 답한 경로가 맨 앞이 되어 죽은 경로를 다시 쓰지 않음; `Route::telegram()`과 `Endpoints::of`의 두 경로), `alert::the_token_is_never_in_a_log_line`(두 경로 모두 연결 거부: 경로마다 원인이 있는 줄, 어느 줄에도 토큰·`bot<id>`·`sendMessage` 없음, 종료 줄도), `alert::the_sender_task_flushes_on_the_manual_clock`(500 뒤 `next_flush` = 끝 + 5,000 ms, 그 1 ms 전의 틱과 틱 없는 시계 이동은 아무것도 보내지 않고 그때의 틱이 한 번 보냄, 그 뒤의 틱은 아무것도), `alert::a_retry_keeps_the_part_for_the_next_flush`(502는 부분을 두고 흘려보내기를 끝냄, 새 메시지는 바로 가되 남은 부분 뒤, 400은 버리고 세고 같은 흘려보내기에서 버림 알림, 네 지표와 로그 줄), `alert::shutdown_flushes_within_5_s_and_counts_the_rest`(남은 부분은 틱 없이 마지막 흘려보내기로 간다; 답하지 않는 가짜에서 `finish(5_000)`은 4.9~7초에 돌아오고 남은 3개를 한 줄로 센다), `alert::set_queues_what_the_repeat_rule_gives`(스펙에 없는 시험: `Handle::set`이 시작, 5분 뒤 최신 문구, `해소:`만 넣음), `alert::a_request_without_an_answer_fails_after_10_s`(리뷰 1 S1: 답하지 않는 가짜에 보낸 요청이 9.5~13초에 실패 하나와 `timed out` 줄을 남기고 부분은 남으며 `next_flush` = 시작 + 5,000 ms). 변이: M261(네트워크 오류 뒤 고정 경로를 쓰지 않음; 고의 결함 7). 시험 밖 변이 19개(U19b1b 보고; 요청 한도 셋은 리뷰 1)를 모두 잡았다.

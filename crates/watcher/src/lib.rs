@@ -11,7 +11,7 @@
 //! W2; U19a7 the OMS links and the runtime; U19a8 W4; U19a9 W3 and W2's
 //! fallback to W4's execution times. U19b1a (ADR-032) the `[telegram]`
 //! config, the token file and the pure parts of the watcher's own Telegram
-//! sender.
+//! sender; U19b1b its sender task.
 //!
 //! [ADR-031]: ../../docs/adr/ADR-031-watcher.md
 
