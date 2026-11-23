@@ -877,24 +877,35 @@ fn a_key_rejected_at_start_is_told_on_telegram() {
     );
     w.status
         .route("/api/status", [Answer::Reply(500, "{}".into())]);
+    // Telegram fails the first attempt: the part is kept.
+    w.telegram
+        .script([Answer::Reply(500, r#"{"ok":false}"#.into())]);
     let clock = Arc::new(ManualClock::new(T0));
     let mut run = w.start(clock.clone());
     assert!(until(10, || !w.sent().is_empty()), "{:?}", w.lines.lock().unwrap());
     let body = format!(
         "워처 키가 거부됨(retCode 10010: Unmatched IP, please check your API key's bound IP addresses.). {KEY_TAIL}"
     );
-    assert_eq!(w.sent(), vec![format!("[WATCH P1] bybit w-rt 11-15 07:13:20 KST\n{body}")]);
+    let first = format!("[WATCH P1] bybit w-rt 11-15 07:13:20 KST\n{body}");
+    assert_eq!(w.sent(), vec![first.clone()]);
+    // The retry is due 5,000 ms later on the injected clock; the runtime's
+    // tick wakes the sender for it, not real time.
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(w.sent().len(), 1);
+    walk(&clock, 5_100);
+    assert!(until(10, || w.sent().len() == 2));
+    assert_eq!(w.sent()[1], first);
     // The start stays at step 2: nothing more at Bybit, the watcher up, no
-    // second message before 5 min.
+    // further message before 5 min.
     walk(&clock, 10_000);
     assert_eq!(w.requests("/v5/user/query-api").len(), 1);
     assert_eq!(w.bybit.requests().len(), 1);
     assert!(run.running());
-    assert_eq!(w.sent().len(), 1);
+    assert_eq!(w.sent().len(), 2);
     // 5 min after the first: the repeat, from the runtime's tick.
     clock.advance(300_000);
-    assert!(until(10, || w.sent().len() == 2));
-    assert!(w.sent()[1].ends_with(&format!("\n{body}")));
+    assert!(until(10, || w.sent().len() == 3));
+    assert!(w.sent()[2].ends_with(&format!("\n{body}")));
     // Shutdown flushes the sender after U19a's steps.
     assert_eq!(run.shutdown(), 0);
     assert_eq!(w.lines_with("alert sender stopped: nothing left to send"), 1);
