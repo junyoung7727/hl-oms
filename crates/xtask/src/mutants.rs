@@ -1877,6 +1877,15 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "config", "the_config_is_validated_and_mainnet_needs_confirmation"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M238-watcher-key-stop-ends-the-ip-recheck",
+        what: "after a key rejected at the IP recheck the watcher asks nothing more, the echo included: watcher_public_ip_ok keeps its last 1 until restart although a changed public IP is a usual cause of 10010 (review 1 M1 of U19a4b)",
+        file: "crates/watcher/src/start.rs",
+        find: "                    self.key_stopped = true;\n                    self.phase = Recheck::EchoDue;\n                    Step::Next\n",
+        replace: "                    self.phase = Recheck::Stopped(String::new());\n                    Step::StayUpNoRequests\n",
+        test: &["-p", "watcher", "--test", "start", "a_recheck_with_another_uid_a_master_key_or_no_bound_ip_stops_every_request"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
