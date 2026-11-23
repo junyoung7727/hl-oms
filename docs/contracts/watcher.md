@@ -1,6 +1,6 @@
 # C-WATCH 독립 워처
 
-상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23), 4부 구현됨(설정과 자격 파일 U19a4, 시작 확인과 IP 재확인 U19a4b, 2026-11-23), 5부 구현됨(검사 엔진과 W1, U19a5, 2026-11-23), 6부 구현됨(W2 포지션, U19a6, 2026-11-23), 7부 구현됨(OMS 연결과 실행, U19a7, 2026-11-23), 8부 구현됨(W4 체결, U19a8, 2026-11-23), 9부 구현됨(W3 지갑과 증거금, W2의 대신 시각, 예산, U19a9, 2026-11-23). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3, V-WATCH-4, V-WATCH-5, V-WATCH-6, V-WATCH-7, V-WATCH-8, V-WATCH-9, V-WATCH-10. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
+상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23), 4부 구현됨(설정과 자격 파일 U19a4, 시작 확인과 IP 재확인 U19a4b, 2026-11-23), 5부 구현됨(검사 엔진과 W1, U19a5, 2026-11-23), 6부 구현됨(W2 포지션, U19a6, 2026-11-23), 7부 구현됨(OMS 연결과 실행, U19a7, 2026-11-23), 8부 구현됨(W4 체결, U19a8, 2026-11-23), 9부 구현됨(W3 지갑과 증거금, W2의 대신 시각, 예산, U19a9, 2026-11-23), 10부 만드는 중(직접 알림의 설정, 토큰 파일과 전달 규칙 U19b1a, 2026-11-24; 송신 태스크 U19b1b, 조건 U19b1c). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md), 10~12부는 [ADR-032](../adr/ADR-032-watcher-kill-and-alerts.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3, V-WATCH-4, V-WATCH-5, V-WATCH-6, V-WATCH-7, V-WATCH-8, V-WATCH-9, V-WATCH-10, V-WATCH-11. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
 
 워처는 OMS와 코드를 나누지 않는 별도 프로그램이다. 저널을 자기 읽기로 읽고(이 문서와 [C-TAIL](tail.md), [ADR-011](../adr/ADR-011-file-format.md)만으로 썼다), 자기 키와 클라이언트로 Bybit를 조회해 OMS와 비교하고, 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고, `monitor.sock`에 하트비트를 보낸다. **U19a7부터 워처는 돈다**: `watcher --config <path>`가 설정과 자격 파일을 읽고, 시작 확인을 거쳐 OMS의 `/api/status`를 기다린 뒤 저널을 처음부터 재생하고, W1(열린 주문), W2(포지션), U19a8부터 W4(체결), U19a9부터 W3(지갑과 증거금)을 돌려 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고(다시 보내기 규칙, 7부), `heartbeat_ms`마다 `monitor.sock`에 하트비트를 보내고, 지표를 VictoriaMetrics로 밀어 넣는다. 네 검사가 모두 돈다(U19a9). loopback 가짜와 시험 저널로만 시험했고 실제 OMS 프로세스나 실제 Bybit에 붙여 돌려 본 적이 없다(키가 없다, U-01). 서비스 설치는 U20b다.
 
@@ -15,6 +15,7 @@
 | 7 | OMS 연결(`/api/status`, `admin.sock`의 다시 보내기 규칙, `monitor.sock` 하트비트)과 실행, 바이너리(이 문서) | U19a7 |
 | 8 | W4 체결(훑기, 쪽, 다시 시작, 워터마크, 형별 행 읽기, `execType` 표, 거둠)(이 문서) | U19a8 |
 | 9 | W3 지갑과 증거금, W2의 대신 시각(W4의 `execTime`), 하트비트의 W3·W4, 예산 측정(이 문서) | U19a9 |
+| 10 | 직접 알림 `[WATCH P1]`: `[telegram]`, 토큰 파일, 전달 규칙(분할, 보관함, 응답의 결과, 반복 규칙)(이 문서); 송신 태스크와 조건은 U19b1b·U19b1c | U19b1a~c |
 
 ## 1부. 독립성
 
@@ -276,8 +277,10 @@
 | `[http]` `recv_window_ms` | 5000(OMS의 기본) | 1000~20,000(OMS와 같은 범위) |
 | `request_timeout_ms` | 2000(판단(모델 아님)) | 200~10,000 |
 | `[telemetry]` `vm_url` | 없음(아무것도 내보내지 않음) | `http://`와 loopback 주소 숫자(`127.0.0.0/8`, `[::1]`)만. 사용자, 질의, 조각 없음. 공백·제어 문자 없음: 내보내기는 적힌 글자 뒤에 `/api/v1/import`를 붙이므로, 끝에 공백이 있으면 검사는 통과해도 모든 전송이 실패한다(검토 1 S3). 거부 줄은 URL을 인용하되 `@`가 있으면(비밀번호가 있을 수 있다) 인용하지 않는다(검토 1 N2) |
+| `[telegram]` `token_file` | 표 없음(testnet만; mainnet은 거부) | 표가 있으면 필수. 절대 경로, `..` 없음, 데이터 디렉터리 밖. 파일의 규칙은 10부 "토큰 파일"(U19b1a) |
 
 - 범위는 양 끝을 포함한다. 음수는 TOML을 읽는 단계에서 거부된다.
+- mainnet은 `mainnet_confirmed = true`에 더해 `[telegram]`이 있어야 한다(U19b1a, 10부).
 - 확인 횟수(2라운드)는 설정이 아니라 상수다(스코프가 정한다). "모든 주기는 설정에"(스코프)는 `[intervals]`와 `[rules]`가 맞춘다.
 - `Config::client_config()`가 3부의 클라이언트에 REST 주소, `recv_window_ms`, `request_timeout_ms`를 준다.
 
@@ -667,3 +670,49 @@ U19a7은 U19a5·U19a6 시험 몇 개의 단언을 바꿨다(시험 도구의 OMS
 ### 검증(9부)
 
 `crates/watcher/tests/w3.rs` 4개: `w3::a_margin_rate_at_the_limit_on_two_rounds_alarms`(한도 바로 아래, 한 라운드만, 두 라운드 연속, 금액이 바뀌어도 같은 정체, 잔고 ≤ 0, 유지증거금 0, 요청 매개변수), `w3::a_daily_loss_beyond_todays_base_on_two_rounds_alarms`(95.00과 94.99, 해제 뒤 10초에 다시 보냄, 오늘의 새 기준 뒤 끝남), `w3::without_todays_base_only_the_margin_rate_is_judged`(기준 없음, 어제의 기준, 자정을 넘은 오늘의 기준), `w3::an_unreadable_wallet_fails_the_round`(UNIFIED 없음, 둘, 빈 소수, 음수 유지증거금, 지수, 목록 아님, 거래소 오류). `w2::a_missing_updated_time_falls_back_to_w4s_last_exec_time`(`updatedTime` 없는 기호, 늙은 `updatedTime`의 기호, 어느 시각도 없는 기호). `heartbeat::w3_and_w4_success_times_reach_the_heartbeat`. `runtime::the_runtime_runs_w2_w3_and_w4_and_w2_reads_w4s_exec_times`, 확장한 `runtime::the_watcher_runs_against_loopback_fakes_end_to_end`(지갑 경로, 서명된 요청, W3 시각이 든 하트비트)와 `runtime::a_key_rejected_at_start_is_exported`(엔진 전 네 검사의 나이). `crates/watcher/tests/budget.rs` 3개: `budget::at_30_executions_per_5_s_the_reconciliation_rate_in_a_simulated_minute_stays_at_or_below_2_7`, `budget::at_100_executions_per_5_s_the_rate_is_about_3_1_and_w4_keeps_up`, `budget::at_500_open_orders_the_guard_stretches_w1_rounds_below_10_s`. 변이: M251(W3이 한 라운드로 확정; 고의 결함 28), M252(한도와 같은 값이 통과), M253(다른 날의 기준으로 일 손실), M254(W2가 W4의 `execTime`을 쓰지 않음).
+
+## 10부. 직접 알림 [WATCH P1](U19b1)
+
+`watcher::alert`, `watcher::creds::load_token`, `[telegram]`. 설계: [ADR-032](../adr/ADR-032-watcher-kill-and-alerts.md). 워처는 OMS가 죽어도 사람에게 닿는 자기 텔레그램 송신기를 갖는다(설계 §7.7, R2 SHOULD 6, 소유자 결정 Q7·Q18: OMS와 같은 봇, 접두어로 구별). 전달 규칙은 초안 PR #3의 것이고, `alert-direct`가 OMS를 위해 구현한 것을 **링크하지 않고** 다시 썼다(독립성 규칙 3, 1부). **U19b1a는 규칙과 토큰 파일만 만든다: 아직 아무것도 보내지 않는다.** 송신 태스크(경로, 흘려보내기 간격, 종료 때 흘려보내기)는 U19b1b, P1 조건(불일치, 키 거부, 공인 IP, 시작 거부)과 실행 연결은 U19b1c가 이 부에 더한다.
+
+### `[telegram]`(U19b1a)
+
+- 선택 표다. 모르는 키는 거부한다(`chat_id`나 `token`을 설정에 적으면 거부: 비밀은 토큰 파일에만 둔다).
+- `token_file`: 표가 있으면 필수. 절대 경로, `..` 없음, 데이터 디렉터리 밖(가리키는 곳으로 비교, 4부의 `credentials_file`과 같은 규칙). 거부 줄은 `[telegram] token_file must …`로 시작한다.
+- **mainnet은 `[telegram]` 없이 시작하지 않는다**: `mainnet requires [telegram]: the watcher's P1 must reach a person`(OMS가 `[alert]` 없이 mainnet을 시작하지 않는 것과 같다). `mainnet_confirmed` 검사가 먼저다.
+- testnet은 없어도 된다. 그때 실행은 시작에서 `warn: no [telegram]: every [WATCH P1] is written to this log only, not sent` 한 줄을 남긴다(U19b1a). P1을 로그에 쓰는 것은 U19b1c다.
+
+### 토큰 파일(`creds::load_token(path, data_dir)`, U19b1a)
+
+- 형식은 `alert-direct`의 파일과 같은 JSON이다(운영자는 한 파일을 둘에 줄 수 있다): `{"token": "<digits>:<[A-Za-z0-9_-]+>", "chat_id": <비지 않은 문자열 또는 정수>}`. 다른 키는 읽지 않고 그대로 둔다. 소수인 `chat_id`, 빈 문자열, 객체가 아닌 JSON은 거부한다.
+- 읽는 순간 설정의 경로 규칙을 다시 적용하고, 자격 파일과 같은 파일 규칙을 여는 핸들 하나에 적용한다(4부 "자격 파일": `O_NOFOLLOW`·`O_NONBLOCK`, 일반 파일, 소유자 = 실효 uid, 권한 정확히 `0600` 또는 `0400`). 거부 줄은 `token file <path> …`로 시작한다.
+- **git 저장소 안이면 거부한다**: 적힌 경로나 가리키는 곳(심볼릭 링크를 따른)의 조상 디렉터리 하나가 `.git`(디렉터리, 또는 worktree의 파일)을 가지면 `token file <path> is inside the git repository <dir>; keep the token outside any repository`. 이 검사는 내용을 읽기 전이다. 토큰이 커밋되는 것을 막는다(`alert-direct`의 규칙).
+- **오류는 파일 내용을 인용하지 않는다**: JSON 오류(내용을 인용한다)를 버리고 `is not JSON with token and chat_id`만 쓴다. 토큰 형식이 틀리면 `the token is not of the form <digits>:<letters, digits, _ or ->`이고 토큰은 적지 않는다.
+- 읽은 값 `alert::Token`의 `Debug`는 `Token { chat_id: "…", token: <hidden> }`이다. 설정의 `Debug`는 경로만 보인다.
+- 실행은 자격 파일 다음, 시작 확인 전에 한 번 읽는다(U19b1a). 거부는 종료 코드 2와 `error:` 한 줄이고 그 전에 아무 요청도 나가지 않는다. 그래서 시작 확인의 2단계가 키를 거부할 때 송신기가 이미 있다(U19b1c). 읽은 토큰은 U19b1b까지 쓰이지 않는다.
+
+### 전달 규칙(`watcher::alert`의 순수 부분, U19b1a)
+
+시계도 네트워크도 없는 함수와 구조다. 송신 태스크(U19b1b)가 이것을 그대로 쓴다.
+
+| 부분 | 규칙 | 근거 |
+|---|---|---|
+| `message(name, now_ms, body)` | `[WATCH P1] bybit {name} {MM-DD HH:MM:SS KST}\n{body}`. `name`은 설정의 `name`, 시각은 주입된 시계(초 아래는 버림, KST = UTC+9). 접두어 `PREFIX`, 거래소 이름 `VENUE` = `bybit`는 상수 | 설계 §7.7, PR #3 |
+| `split(text, 3500)` | UTF-16 단위로 센다(한글 한 글자 1, 이모지 2). 줄 끝에서 자르고, 줄을 잇는 줄바꿈도 센다. 한 줄이 한도보다 길면 문자 단위로 자르고(이모지를 쪼개지 않는다), 그 나머지가 다음 부분을 시작한다. 빈 부분은 만들지 않는다(텍스트가 비지 않는 한) | PR #3 `split_message`; 텔레그램 한도 4,096의 여유 |
+| `Outbox`(50) | 메시지를 분할해 넣는다. 50개를 넘으면 가장 오래된 부분을 버리고 센다. 큐가 빈 뒤에만 알림 하나 `[WATCH P1] 전송 실패로 알림 N개를 버림`. 알림이 전달되거나 거부되면 그 알림이 센 수만 지우고, 그 사이에 버려진 것은 다음 알림이 센다. 보내는 중에 넘쳐서 이미 버려진 부분은 결과가 와도 두 번 지우거나 두 번 세지 않는다. `dropped_total()`은 지금까지 버린 수(U19b1b의 지표) | PR #3 `Outbox` |
+| `outcome(status, body)` | `Delivered`: 2xx이고 본문 JSON의 `"ok": true`. `Refused`: 400, 413(이 메시지의 문제: 부분을 버리고 센다). `Retry`: 그 밖의 모두(5xx, 429, `ok`가 참이 아닌 2xx, 읽을 수 없는 본문)와 네트워크 오류(부분을 두고 이번 흘려보내기를 끝낸다). 문구는 `telegram answered {status}: {description}`, 설명은 200자까지, 제어 문자는 공백. 요청을 담지 않으므로 토큰이 없다 | PR #3 |
+| `Repeat`(300,000 ms) | 키별 조건: 처음 `Some(text)`이면 바로 보냄, 지속되는 동안 마지막으로 보낸 때부터 300,000 ms마다 최신 문구로 한 번, `None`이 되면 `해소: <시작 문구>` 한 번. 다시 `Some`이면 새 시작 | 설계 §7.7, PR #3 |
+
+- **저장하지 않는다**(ADR-031의 원칙): 보관함과 반복 상태는 메모리에만 있다. 재시작하면 지속 중인 조건의 시작 문구가 한 번 더 가고, 보내지 못한 부분은 사라진다.
+- 반복 규칙의 경과 시간은 `saturating_sub`다: 시계가 뒤로 가면 다음 반복이 그만큼 늦다(새 조건과 해소는 바로 간다).
+- 위의 상수(3,500, 50, 300,000 ms)는 설계 값이다(PR #3, 설계 §7.7; 설계에서도 판단).
+
+### 알려진 한계(10부, U19b1a)
+
+- 토큰 파일의 git 저장소 검사는 조상 디렉터리의 `.git`만 본다. `GIT_DIR`이나 `core.worktree`로 다른 곳에 둔 저장소, 읽을 수 없는 디렉터리 안의 `.git`은 보지 못한다(`alert-direct`도 같다).
+- 아직 아무것도 보내지 않는다(U19b1a). 실제 텔레그램에 보낸 적이 없고, 이후 시험도 loopback 가짜만 쓴다.
+- 429의 `retry_after`는 읽지 않는다: 다른 실패처럼 다음 흘려보내기에 다시 보낸다(PR #3과 같다).
+
+### 검증(10부, U19b1a)
+
+주장 V-WATCH-11. `crates/watcher/tests/alert.rs` 6개: `alert::messages_split_at_3500_utf16_units_at_line_ends`(정확히 3,500, 하나 넘음, 한글, 이모지, 한 단위 남고 이모지, 긴 줄과 그 나머지, 정확히 두 부분, 섞인 긴 텍스트의 보존), `alert::the_outbox_keeps_50_parts_and_reports_the_drops_once`(넘침, 큐가 빈 뒤의 알림 하나, 알림 뒤에 버려진 수, 보내는 중 버려진 부분), `alert::answers_400_and_413_drop_the_part_and_other_answers_keep_it`(순수 `outcome`과 보관함; 스펙의 이름 `400_and_413_…`은 Rust 이름이 될 수 없어 앞에 `answers_`를 붙였다), `alert::the_repeat_rule_sends_start_every_5_min_and_clear`, `alert::the_token_is_never_in_debug`(`Token`과 설정의 `Debug`, 거부 문구), `alert::a_message_has_the_watch_p1_header_with_the_name_and_kst`. `config::telegram_is_validated_and_required_on_mainnet`. `creds::the_token_file_must_be_owner_only_outside_any_repository`(모드, 소유자, 링크, FIFO, 경로, 저장소 안(적힌 경로와 링크가 가리키는 곳, worktree의 `.git` 파일), 내용 규칙, 읽은 값의 `Debug`; root로 돌면 일찍 끝난다, U19a의 권한 시험처럼). 확장한 `runtime::a_start_refusal_ends_the_run_with_exit_code_2`(좋은 토큰 파일은 2단계로 이어짐, `0640` 토큰 파일은 요청 없이 종료 코드 2, testnet에 `[telegram]` 없으면 `warn` 한 줄). 변이: M255(보관함이 새 부분을 버림; 고의 결함 1), M256(400을 다시 보냄), M257(500이 부분을 버림), M258(반복 규칙이 매번 보냄), M259(mainnet이 `[telegram]` 없이 시작), M260(토큰 파일이 그룹 읽기를 받음).

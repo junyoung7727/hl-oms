@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `87ed24980e204068`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `6f6b0a46c2056ef7`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
-주장 118건: 통과 0, 실패 0, 미실행 51, 이전 버전 결과 67.
+주장 119건: 통과 0, 실패 0, 미실행 52, 이전 버전 결과 67.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -125,6 +125,7 @@
 | V-WATCH-8 | 워처의 W4는 execution/list를 고정된 끝(첫 쪽의 시계)과 시작 max(워터마크 − w4_overlap_ms, ⌈체결 바닥/1000⌉)(7일로 자름)의 창으로 훑고, 라운드마다 w4_max_pages쪽까지 읽어 더 긴 훑기는 다음 라운드가 같은 창과 커서로 이으며(성공 시각은 끝난 훑기에서만), 빈 쪽이나 빈 커서에서 끝내고, 바뀌지 않은 커서와 읽을 수 없는 쪽은 라운드를 실패시켜 같은 커서로 다시 읽되 연달아 3번이나 50라운드면 같은 시작과 새 끝으로 다시 시작한다. 행은 execType으로 먼저 나눠 Trade는 저널 체결과, AdlTrade·BustTrade·Delivery·Settle은 저널 거래소 변경과 키 <symbol>:<execId>로 비교하고, Funding은 비교하지 않으며, 모르는 형은 끝난 훑기에서 바로 확정하고, 형이 필요로 하는 필드가 없는 행과 execTime이 훑기의 끝보다 뒤인 행은 unreadable_row, 바닥 아래 행과 수량 0인 Trade·거래소 변경 행은 무시한다. 차이는 두 훑기와 execTime 나이로 확정하고 어린 차이는 훑기를 실패시키지 않는다. 워터마크는 확정되지 않은 가장 오래된 행(execTime 없는 행은 모든 행보다 오래됨) 아래의 가장 새 행으로만, 뒤로 가지 않게 움직인다. held 답(already held는 갚지 않는다)으로 갚고 그 답 뒤에 낸 상한에서 보류 꺼짐을 본 W4 정체는 거두어 다시 보내지도 세지도 않는다 | 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나) | 미실행 | `cargo test -p watcher --test w4 --test runtime` |
 | V-WATCH-9 | 워처의 W3은 w3_ms마다 wallet-balance?accountType=UNIFIED의 UNIFIED 계좌 하나(정확히 하나, 세 필드가 저널 소수, 유지증거금이 음수가 아님; 아니면 unreadable로 라운드 실패)를 OMS의 공식으로 판단한다: account_mm_rate는 maintenance > 0이고 maintenance × 10 000 ≥ account_mm_rate_max_bps × margin_balance(같으면 건다), daily_loss는 저널의 일 기준값이 오늘의 UTC 날이고 (base − totalEquity) × 10 000 > daily_loss_bps × base(오늘의 기준이 없으면 판단하지 않는다). 정체는 종류뿐이고 두 라운드 연속에서 나이 없이 확정하며, 위반이 남아 있으면 해제 뒤 다시 보낸다. W2는 W4가 마지막으로 맞춘 그 기호의 execTime이 updatedTime이나 seen_at보다 새면 그것을 거래소의 변경 시각으로 쓴다. 하트비트의 W3·W4는 그 검사의 마지막 성공 시각이고, 실행은 W2(W4의 시각 지도와 함께), W3, W4를 돌리며 엔진 전에는 네 검사의 나이를 boot_ms부터 내보낸다 | 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나) | 미실행 | `cargo test -p watcher --test w3 --test w2 --test heartbeat --test runtime` |
 | V-WATCH-10 | W1·W2·W3·W4를 설계 간격(1초, 1초, 2초, 5초)으로 돌린 모의 1분(수동 시계, 실제 rest::Guard를 거친 모델 거래소, 요청 지연 0)에서 5초에 체결 30개를 고르게 주면 대조 요청은 W1 60 + W2 60 + W3 30 + W4 12 = 162개, 초당 2.7 이하이고 차이도 실패한 라운드도 없다. 5초에 100개면 192개(초당 3.2; 정상 상태는 훑기당 4쪽, 초당 3.3)로 설계 예산을 넘지만 W4는 12 훑기를 모두 자기 라운드에서 끝내고 정상 상태의 창은 15초다. 열린 주문 500개(W1 라운드 11쪽)에서는 가드가 10초에 60을 지키며 W1 라운드를 늘리지만 하트비트마다 W1·W2의 나이는 10초 아래다 | 단위(sans-IO 엔진과 sans-IO 가드, 수동 시계) | 미실행 | `cargo test -p watcher --test budget -- --nocapture` |
+| V-WATCH-11 | 워처의 [telegram]은 token_file 하나만 받고(모르는 키 거부) mainnet은 그것 없이 시작하지 않는다(testnet은 warn 한 줄). 토큰 파일은 설정의 경로 규칙과 자격 파일의 파일 규칙(링크 아님, 일반 파일, 실효 uid 소유, 정확히 0600·0400)을 여는 핸들에 적용하고, 적힌 경로나 가리키는 곳이 git 저장소 안이면 읽기 전에 거부하며, {"token": "<digits>:<[A-Za-z0-9_-]+>", "chat_id": 비지 않은 문자열 또는 정수} 말고는 거부한다. 거부는 내용과 토큰을 인용하지 않고, 실행은 그것을 시작 확인 전에 종료 코드 2로 끝내며 요청을 보내지 않는다. 읽은 값과 설정의 Debug는 토큰을 보이지 않는다. 메시지는 [WATCH P1] bybit {name} {MM-DD HH:MM:SS KST}로 시작하고, split은 각 부분을 3,500 UTF-16 단위 이하로 줄 끝에서(긴 줄은 문자 단위로, 이모지를 쪼개지 않고) 자르며 내용을 잃지 않는다. Outbox는 50개를 넘으면 가장 오래된 부분을 버리고 세고, 큐가 빈 뒤 알림 하나로 그 수를 알리며, 보내는 중 버려진 부분을 두 번 지우거나 세지 않는다. outcome은 2xx와 ok true만 Delivered, 400·413은 Refused(버리고 셈), 나머지는 Retry(두고 흘려보내기를 끝냄)다. Repeat는 시작 한 번, 300,000 ms마다 최신 문구 한 번, 해소: <시작 문구> 한 번을 낸다 | 단위(순수 함수, 파일 시스템)와 통합(runtime::run, loopback 가짜, 실제 시간) | 미실행 | `cargo test -p watcher --test alert --test config --test creds --test runtime` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -2954,4 +2955,30 @@
 | `watcher/at_30_executions_per_5_s_the_reconciliation_rate_in_a_simulated_minute_stays_at_or_below_2_7` | 미실행 |  |
 | `watcher/at_100_executions_per_5_s_the_rate_is_about_3_1_and_w4_keeps_up` | 미실행 |  |
 | `watcher/at_500_open_orders_the_guard_stretches_w1_rounds_below_10_s` | 미실행 |  |
+
+## V-WATCH-11 — 워처의 [telegram]은 token_file 하나만 받고(모르는 키 거부) mainnet은 그것 없이 시작하지 않는다(testnet은 warn 한 줄). 토큰 파일은 설정의 경로 규칙과 자격 파일의 파일 규칙(링크 아님, 일반 파일, 실효 uid 소유, 정확히 0600·0400)을 여는 핸들에 적용하고, 적힌 경로나 가리키는 곳이 git 저장소 안이면 읽기 전에 거부하며, {"token": "<digits>:<[A-Za-z0-9_-]+>", "chat_id": 비지 않은 문자열 또는 정수} 말고는 거부한다. 거부는 내용과 토큰을 인용하지 않고, 실행은 그것을 시작 확인 전에 종료 코드 2로 끝내며 요청을 보내지 않는다. 읽은 값과 설정의 Debug는 토큰을 보이지 않는다. 메시지는 [WATCH P1] bybit {name} {MM-DD HH:MM:SS KST}로 시작하고, split은 각 부분을 3,500 UTF-16 단위 이하로 줄 끝에서(긴 줄은 문자 단위로, 이모지를 쪼개지 않고) 자르며 내용을 잃지 않는다. Outbox는 50개를 넘으면 가장 오래된 부분을 버리고 세고, 큐가 빈 뒤 알림 하나로 그 수를 알리며, 보내는 중 버려진 부분을 두 번 지우거나 세지 않는다. outcome은 2xx와 ok true만 Delivered, 400·413은 Refused(버리고 셈), 나머지는 Retry(두고 흘려보내기를 끝냄)다. Repeat는 시작 한 번, 300,000 ms마다 최신 문구 한 번, 해소: <시작 문구> 한 번을 낸다
+
+- 상태: **미실행**
+- 왜 중요한가: 토큰이 오류·로그·Debug·git 저장소에 나오면 누구나 그 봇으로 운영자 채팅에 쓸 수 있다. mainnet의 워처가 [telegram] 없이 돌면 OMS가 죽었을 때 아무도 모른다(설계 §7.7). 보관함이 새 부분을 버리면 가장 최근의 P1(대개 가장 중요한 것)을 잃고, 400을 다시 보내면 낫지 않는 메시지가 큐를 막으며, 500을 버리면 텔레그램이 잠깐 아플 때 P1을 잃는다. 반복 규칙이 매번 보내면 지속 조건 하나가 채팅을 덮는다. 4,096 UTF-16을 넘는 메시지는 텔레그램이 거부한다
+- 수준: 단위(순수 함수, 파일 시스템)와 통합(runtime::run, loopback 가짜, 실제 시간)
+- 전제와 범위: watcher::alert의 순수 부분, Config::from_toml, creds::load_token과 token_file_rules(시험 디렉터리 OMS_TEST_DIR의 파일, 링크, FIFO, .git 디렉터리와 worktree의 .git 파일), runtime::run의 시작(http-fake): 시험 9개
+- 실제 구성요소: 워처의 alert(Token, message, kst, split, Outbox, outcome, Repeat), config, creds, runtime::run
+- 모의·시뮬레이션: 텔레그램(아직 보내지 않음), Bybit(http-fake, 시작 거부 시험만), 시계(분할·보관함·반복은 시각 인자, 실행 시험은 수동 시계와 실제 100ms 틱)
+- 주입한 장애: 정확히 3,500 단위와 하나 넘음, 한글 3,500자, 이모지 1,751개, 한 단위 남고 이모지, 8,000자 한 줄, 정확히 두 부분인 줄, 섞인 긴 텍스트; 51번째 부분, 보내는 중 넘쳐 버려진 부분의 전달과 거부, 알림을 보낸 뒤의 새 버림; 200·ok false·400·413·401·429·500·502·읽을 수 없는 본문; 5분 전·5분 정각·해소·다시 시작; 그룹·다른 사용자·실행·set-id 비트, 다른 소유자, 링크, 디렉터리, FIFO, 없는 파일, 데이터 디렉터리 안(링크로 가린 경우도), 상대 경로, .., 저장소 안(.git 디렉터리, worktree의 .git 파일, 저장소를 가리키는 링크), 객체 아닌 JSON, 형식이 틀린 토큰, 빈·소수 chat_id, mainnet에 [telegram] 없음, 모르는 키, 0640 토큰 파일로 시작. 변이 M255~M260과 시험 밖 변이 15개(모두 잡힘, U19b1a 보고)
+- 판정 기준과 근거: 각 부분은 3,500 단위 이하이고 이어 붙이면 원문이며 정한 곳에서 잘린다. Outbox의 순서·len·dropped·dropped_total과 알림 문구가 정한 값이다. outcome이 정한 부류와 문구를 낸다. Repeat가 정한 시각에만 정한 문구를 낸다. 설정과 토큰 파일의 거부 줄은 정한 이유를 담고 토큰·내용을 담지 않으며 한 줄이다. 받는 파일은 정한 Token이 된다. 거부된 토큰 파일로 시작한 실행은 종료 코드 2, error 줄 하나, 요청 0개다. testnet에 [telegram]이 없으면 warn 줄이 정확히 하나다
+- 재현: `cargo test -p watcher --test alert --test config --test creds --test runtime`
+- 뒷받침하는 것: C-WATCH 10부, ADR-032
+- 확인하지 않은 범위: 아직 아무것도 보내지 않는다: 송신 태스크(경로, 흘려보내기 간격, 종료 때 흘려보내기)는 U19b1b, P1 조건은 U19b1c다. 실제 텔레그램에 보낸 적이 없다. 토큰 파일의 저장소 검사는 조상 디렉터리의 .git만 본다(GIT_DIR·core.worktree로 둔 저장소, 읽을 수 없는 디렉터리는 보지 못함). root로 돌면 권한 시험은 일찍 끝난다
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `watcher/messages_split_at_3500_utf16_units_at_line_ends` | 미실행 |  |
+| `watcher/the_outbox_keeps_50_parts_and_reports_the_drops_once` | 미실행 |  |
+| `watcher/answers_400_and_413_drop_the_part_and_other_answers_keep_it` | 미실행 |  |
+| `watcher/the_repeat_rule_sends_start_every_5_min_and_clear` | 미실행 |  |
+| `watcher/the_token_is_never_in_debug` | 미실행 |  |
+| `watcher/a_message_has_the_watch_p1_header_with_the_name_and_kst` | 미실행 |  |
+| `watcher/telegram_is_validated_and_required_on_mainnet` | 미실행 |  |
+| `watcher/the_token_file_must_be_owner_only_outside_any_repository` | 미실행 |  |
+| `watcher/a_start_refusal_ends_the_run_with_exit_code_2` | 미실행 |  |
 

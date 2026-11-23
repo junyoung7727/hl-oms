@@ -1,6 +1,6 @@
 # 워처 운영
 
-설계: [ADR-031](../adr/ADR-031-watcher.md). 계약: [C-WATCH](../contracts/watcher.md). 이 문서는 워처의 설정과 자격 파일(U19a4), 시작 확인과 그 거부, 시작 확인이 내보내는 지표(U19a4b), 실행과 상황별 의미(U19a7)를 적는다. U19a7부터 `watcher --config`가 돈다: W1(열린 주문)과 W2(포지션), U19a8부터 W4(체결), U19a9부터 W3(지갑과 증거금)을 검사하고, 확정된 차이를 `admin.sock`에 보내고, `monitor.sock`에 하트비트를 보낸다. loopback 가짜로만 시험했고 실제 거래소에서 돌려 본 적이 없다. 서비스 설치와 알림 규칙은 U20b다.
+설계: [ADR-031](../adr/ADR-031-watcher.md). 계약: [C-WATCH](../contracts/watcher.md). 이 문서는 워처의 설정과 자격 파일(U19a4), 시작 확인과 그 거부, 시작 확인이 내보내는 지표(U19a4b), 실행과 상황별 의미(U19a7), 직접 알림의 토큰 파일(U19b1a, [ADR-032](../adr/ADR-032-watcher-kill-and-alerts.md))을 적는다. U19a7부터 `watcher --config`가 돈다: W1(열린 주문)과 W2(포지션), U19a8부터 W4(체결), U19a9부터 W3(지갑과 증거금)을 검사하고, 확정된 차이를 `admin.sock`에 보내고, `monitor.sock`에 하트비트를 보낸다. loopback 가짜로만 시험했고 실제 거래소에서 돌려 본 적이 없다. 서비스 설치와 알림 규칙은 U20b다.
 
 ## 설정 파일
 
@@ -29,6 +29,9 @@ status_url = "http://127.0.0.1:8188/api/status"   # loopback, 포트 필수, 80�
 
 [telemetry]                                       # 없으면 아무것도 내보내지 않음
 vm_url = "http://127.0.0.1:8428"                  # http, loopback 주소 숫자만
+
+[telegram]                                        # mainnet은 필수(U19b1a), testnet은 없으면 warn 한 줄
+token_file = "/etc/hl-oms/watcher-telegram.json"  # 데이터 디렉터리 밖, git 저장소 밖, 0600 또는 0400
 ```
 
 | 필드 | 기본 | 받는 값(범위는 판단(모델 아님)) |
@@ -60,6 +63,7 @@ vm_url = "http://127.0.0.1:8428"                  # http, loopback 주소 숫자
 | `[http] recv_window_ms` | 5000 | 1000~20,000 |
 | `[http] request_timeout_ms` | 2000(판단(모델 아님)) | 200~10,000 |
 | `[telemetry] vm_url` | 없음 | `http://`, loopback 주소 숫자(`localhost`는 안 됨), 공백·제어 문자 없음(끝의 공백도) |
+| `[telegram] token_file` | 표 없음 | 표가 있으면 필수. 절대 경로, `..` 없음, `data_dir` 밖. **mainnet은 `[telegram]` 없이 시작하지 않는다**(`mainnet requires [telegram]: the watcher's P1 must reach a person`). 다른 키(`chat_id`, `token`)는 거부: 비밀은 토큰 파일에만 |
 
 기본값의 근거(설계 §7.5, 스코프, OMS의 값)와 거부의 이유는 [C-WATCH 4부](../contracts/watcher.md)에 있다.
 
@@ -80,6 +84,26 @@ api_secret = "..."
 - 두 키만 둔다. 다른 키가 있거나 하나가 비면 시작하지 않는다.
 - 워처를 돌리는 사용자가 소유하고 권한은 `0600` 또는 `0400`이어야 한다. 심볼릭 링크는 받지 않는다(링크가 아닌 파일 경로를 적는다). OMS 데이터 디렉터리 안에 두지 않는다.
 - 오류 줄은 파일 내용을 인용하지 않는다. 그래도 저장소, 로그, 메시지에 이 파일을 붙이지 않는다.
+
+## 토큰 파일(U19b1a)
+
+워처 자신의 텔레그램 송신기가 쓰는 봇 토큰과 채팅이다(C-WATCH 10부, ADR-032). OMS의 `[alert]` 파일(`alert-direct`)과 형식이 같아 같은 파일을 가리켜도 된다(같은 봇, 메시지는 `[WATCH P1]`로 구별).
+
+```sh
+install -m 600 /dev/null /etc/hl-oms/watcher-telegram.json   # 워처를 돌릴 사용자로
+$EDITOR /etc/hl-oms/watcher-telegram.json
+```
+
+```json
+{"token": "<봇 id 숫자>:<토큰>", "chat_id": -1001234567890}
+```
+
+- `token`은 `<숫자>:<영문·숫자·_·->`, `chat_id`는 비지 않은 문자열이나 정수. 다른 키는 읽지 않는다.
+- 자격 파일과 같은 규칙: 워처를 돌리는 사용자가 소유, 권한 정확히 `0600` 또는 `0400`, 심볼릭 링크 아님, OMS 데이터 디렉터리 밖.
+- **git 저장소 안에 두지 않는다**: 파일이나 링크가 가리키는 곳의 위 디렉터리 어디에 `.git`이 있으면 시작하지 않는다(`token file … is inside the git repository …`).
+- 워처는 이 파일을 시작 때 한 번, 시작 확인 전에 읽는다. 규칙에 맞지 않으면 종료 코드 2와 `error: token file …` 한 줄이고 거래소에 아무것도 묻지 않는다. 파일을 바꾸면 워처를 다시 시작한다.
+- 오류 줄과 로그는 토큰을 적지 않는다. 그래도 저장소, 로그, 메시지에 이 파일을 붙이지 않는다.
+- U19b1a의 워처는 토큰을 읽기만 하고 아직 보내지 않는다(송신은 U19b1b, P1 조건은 U19b1c).
 
 ## 워처 키
 
