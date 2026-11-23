@@ -9,6 +9,7 @@
 //!
 //! [ADR-032]: ../../docs/adr/ADR-032-watcher-kill-and-alerts.md
 
+use std::collections::VecDeque;
 use std::fmt;
 
 /// The prefix of every message of the watcher (design §7.7, Q18: the
@@ -19,6 +20,8 @@ pub const VENUE: &str = "bybit";
 /// Telegram's limit is 4,096 UTF-16 units per message; this leaves room
 /// (PR #3).
 pub const MSG_LIMIT: usize = 3500;
+/// Parts kept for delivery (PR #3).
+pub const OUTBOX_LIMIT: usize = 50;
 
 /// The bot token and the chat of the token file (PR #3 format,
 /// `{"token": "<digits>:<chars>", "chat_id": …}`; read by
@@ -145,4 +148,158 @@ pub fn split(text: &str, limit: usize) -> Vec<String> {
         parts.push(cur);
     }
     parts
+}
+
+/// The outcome of one send to Telegram.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Outcome {
+    Delivered,
+    /// Telegram refused this message for good (400, 413: it is about this
+    /// message): drop the part and count it.
+    Refused(String),
+    /// Anything else, and a network error: keep the part and end this
+    /// flush.
+    Retry(String),
+}
+
+/// The outcome of Telegram's answer `status` with `body` (PR #3):
+/// `Delivered` for a 2xx answer whose body is JSON with `"ok": true`,
+/// `Refused` for 400 and 413, `Retry` for everything else. The text names
+/// the status and Telegram's `description` in one line of at most 200
+/// characters; it never holds the request, so never the token.
+pub fn outcome(status: u16, body: &[u8]) -> Outcome {
+    let data = serde_json::from_slice::<serde_json::Value>(body).unwrap_or_default();
+    if (200..300).contains(&status) && data["ok"].as_bool() == Some(true) {
+        return Outcome::Delivered;
+    }
+    let description: String = data["description"]
+        .as_str()
+        .unwrap_or("")
+        .chars()
+        .take(200)
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let text = format!("telegram answered {status}: {description}");
+    match status {
+        400 | 413 => Outcome::Refused(text),
+        _ => Outcome::Retry(text),
+    }
+}
+
+/// One part handed out for sending; `id = None` is the drop notice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Part {
+    pub id: Option<u64>,
+    pub text: String,
+    /// The drops a notice reports.
+    pub count: u64,
+}
+
+/// Parts not yet delivered (PR #3 `Outbox`). Overflow drops the oldest
+/// and counts it; once the queue is empty, one notice reports the count.
+#[derive(Debug)]
+pub struct Outbox {
+    queue: VecDeque<(u64, String)>,
+    next_id: u64,
+    limit: usize,
+    dropped: u64,
+    dropped_total: u64,
+}
+
+impl Outbox {
+    pub fn new(limit: usize) -> Outbox {
+        Outbox {
+            queue: VecDeque::new(),
+            next_id: 0,
+            limit: limit.max(1),
+            dropped: 0,
+            dropped_total: 0,
+        }
+    }
+
+    /// Adds a message, split into parts of at most [`MSG_LIMIT`] units.
+    pub fn add(&mut self, msg: &str) {
+        for p in split(msg, MSG_LIMIT) {
+            self.queue.push_back((self.next_id, p));
+            self.next_id += 1;
+        }
+        while self.queue.len() > self.limit {
+            self.queue.pop_front();
+            self.count_drop();
+        }
+    }
+
+    fn count_drop(&mut self) {
+        self.dropped += 1;
+        self.dropped_total += 1;
+    }
+
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.queue.is_empty()
+    }
+
+    /// Drops not yet reported by a notice.
+    pub fn dropped(&self) -> u64 {
+        self.dropped
+    }
+
+    pub fn dropped_total(&self) -> u64 {
+        self.dropped_total
+    }
+
+    /// Nothing to send: no part and no notice owed.
+    pub fn settled(&self) -> bool {
+        self.queue.is_empty() && self.dropped == 0
+    }
+
+    /// The next part to send, or the drop notice
+    /// `[WATCH P1] 전송 실패로 알림 N개를 버림` when the queue is empty.
+    pub fn next(&self) -> Option<Part> {
+        match self.queue.front() {
+            Some((id, t)) => Some(Part {
+                id: Some(*id),
+                text: t.clone(),
+                count: 0,
+            }),
+            None if self.dropped > 0 => Some(Part {
+                id: None,
+                text: format!("{PREFIX} 전송 실패로 알림 {}개를 버림", self.dropped),
+                count: self.dropped,
+            }),
+            None => None,
+        }
+    }
+
+    /// Applies the outcome of sending `part`; `false` ends the flush. A
+    /// part that overflow dropped while it was being sent is not removed
+    /// twice nor counted twice.
+    pub fn done(&mut self, part: &Part, outcome: &Outcome) -> bool {
+        let front = part.id.is_some() && self.queue.front().map(|(id, _)| *id) == part.id;
+        match (outcome, part.id) {
+            (Outcome::Retry(_), _) => false,
+            (Outcome::Delivered, Some(_)) => {
+                if front {
+                    self.queue.pop_front();
+                }
+                true
+            }
+            (Outcome::Refused(_), Some(_)) => {
+                if front {
+                    self.queue.pop_front();
+                    self.count_drop();
+                }
+                true
+            }
+            // The notice: delivered or refused, its count is told or
+            // cannot be; drops after it was handed out stay owed.
+            (_, None) => {
+                self.dropped = self.dropped.saturating_sub(part.count);
+                true
+            }
+        }
+    }
 }
