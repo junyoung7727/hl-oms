@@ -1,5 +1,6 @@
-//! The binary of U19a1: `--version` only; everything else is refused
-//! without touching the network or a file.
+//! The binary: `--version`, and the refusals that come before anything
+//! touches the network (usage, a config file that cannot be read). No
+//! test starts it with a config (it would call a real Bybit host).
 
 use std::process::Command;
 
@@ -24,10 +25,13 @@ fn version_prints_and_anything_else_exits_2() {
         let out = Command::new(exe).args(args).output().expect("run watcher");
         assert_eq!(out.status.code(), Some(2), "{args:?}");
         let err = String::from_utf8_lossy(&out.stderr);
-        assert!(
-            err.contains("not built yet: the checks arrive in U19a5–U19a7"),
-            "{args:?}: {err}"
-        );
+        let want = if args.len() == 2 {
+            "watcher: config /nonexistent/watcher.toml: "
+        } else {
+            "watcher: usage: watcher --config <path> | watcher --version"
+        };
+        assert!(err.starts_with(want), "{args:?}: {err}");
+        assert_eq!(err.lines().count(), 1, "{args:?}: {err}");
         assert!(out.stdout.is_empty(), "{args:?}");
     }
 }

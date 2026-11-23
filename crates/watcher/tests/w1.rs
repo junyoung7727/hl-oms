@@ -106,9 +106,16 @@ fn a_journal_entry_younger_than_2_s_does_not_alarm() {
         CLOSED,
         "journal entry 2.9 s old",
     );
-    let want = format!("{want}; and 1 more");
-    assert_eq!(r.mismatches[1], (T0 + 3000, Check::W1, want));
-    assert_eq!(r.mismatches.len(), 2);
+    let missing = detail(
+        "missing_at_venue",
+        &link(3),
+        "venue not open, journal open and acked",
+        "journal entry 2.9 s old",
+    );
+    // Confirmed at T0 + 3 s; their send waits for the hold the first send
+    // set (U19a7).
+    assert_eq!(r.confirmed[1..], [(T0 + 3000, want), (T0 + 3000, missing)]);
+    assert_eq!(r.mismatches.len(), 1);
 }
 
 #[test]

@@ -1,15 +1,62 @@
-//! `watcher --version`. The checks, the config and the runtime arrive in
-//! U19a5–U19a7; until then every other invocation is refused with exit
-//! code 2, without touching the network or a file.
+//! `watcher --config <path>` and `watcher --version`. This file only reads
+//! the flags and the config file and wires SIGTERM and SIGINT to the
+//! shutdown input of [`watcher::runtime::run`]; everything else is the
+//! library's. The REST base comes only from the config's `network`.
 
 use std::process::ExitCode;
+use std::sync::Arc;
+
+use watcher::config::Config;
+use watcher::runtime::{Endpoints, run};
+
+const USAGE: &str = "usage: watcher --config <path> | watcher --version";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.len() == 1 && args[0] == "--version" {
-        println!("watcher {}", watcher::VERSION);
-        return ExitCode::SUCCESS;
-    }
-    eprintln!("watcher: not built yet: the checks arrive in U19a5–U19a7");
-    ExitCode::from(2)
+    let path = match args.as_slice() {
+        [v] if v == "--version" => {
+            println!("watcher {}", watcher::VERSION);
+            return ExitCode::SUCCESS;
+        }
+        [c, path] if c == "--config" => path.clone(),
+        _ => {
+            eprintln!("watcher: {USAGE}");
+            return ExitCode::from(2);
+        }
+    };
+    let cfg = match Config::load(std::path::Path::new(&path)) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("watcher: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let rt = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("watcher: the tokio runtime: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let code = rt.block_on(async {
+        use tokio::signal::unix::{SignalKind, signal};
+        let (term, int) = (signal(SignalKind::terminate()), signal(SignalKind::interrupt()));
+        let (Ok(mut term), Ok(mut int)) = (term, int) else {
+            eprintln!("watcher: cannot listen for SIGTERM and SIGINT");
+            return 2;
+        };
+        let shutdown = async move {
+            tokio::select! {
+                _ = term.recv() => {}
+                _ = int.recv() => {}
+            }
+        };
+        let ep = Endpoints::of(&cfg);
+        let clock = Arc::new(watcher::clock::SystemClock);
+        run(cfg, ep, clock, watcher::log::stderr(), shutdown).await
+    });
+    ExitCode::from(code)
 }

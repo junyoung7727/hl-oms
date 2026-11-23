@@ -16,9 +16,19 @@
 //! and, at this round, its time is at least `min_age_ms` old. A first
 //! sighting is pending (the round may still succeed); a second sighting
 //! that is still young is deferred (the round is not a success). What a
-//! check compares is its [`Logic`]: W1 in U19a5, the others later.
+//! check compares is its [`Logic`]: W1 in U19a5, W2 in U19a6, the others
+//! later.
+//!
+//! Sending (U19a7): a confirmed difference is **owed** until a send that
+//! carried it is answered `"held"` (`on_admin`); nothing else pays it. A
+//! send of a check is due while the hold is off (the journal state shows
+//! no `watcher_mismatch` hold, read up to the cap of a status request
+//! emitted after the latest `"held"`/`"already held"` answer of that
+//! check), the check owes a difference or (W1–W3) still sees a confirmed
+//! one, `mismatch_resend_ms` passed since the previous send started, and
+//! no send of the check is in flight. One send carries all of them.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -37,6 +47,10 @@ use crate::w1::W1;
 pub const DEADLINE_EXTRA_MS: u64 = 11_000;
 /// `watcher_mismatch.detail` is at most this many bytes (`api.md`).
 pub const DETAIL_MAX: usize = 1024;
+/// A send without a report is taken as failed at its emission +
+/// 2 × `request_timeout_ms` (the client's bound of a whole send) + this
+/// (판단(모델 아님)).
+pub const SEND_EXTRA_MS: u64 = 1_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Check {
@@ -57,6 +71,12 @@ impl Check {
             Check::W4 => "W4",
         }
     }
+
+    /// A confirmed difference that a round still sees is sent again after
+    /// an operator's clear (W1–W3); W4's are dismissed instead (U19a8).
+    fn resends_while_seen(self) -> bool {
+        self != Check::W4
+    }
 }
 
 /// A signed GET of Bybit.
@@ -75,8 +95,13 @@ pub enum Action {
     },
     /// `GET /api/status`; the answer goes to `on_status` with this id.
     Status { req_id: u64 },
-    /// `watcher_mismatch` to `admin.sock` (the resend rule is U19a7's).
-    Mismatch { check: Check, detail: String },
+    /// `watcher_mismatch` to `admin.sock`; its answer goes to `on_admin`
+    /// with this `send_id` (review 1 S1 of U19a7).
+    Mismatch {
+        check: Check,
+        send_id: u64,
+        detail: String,
+    },
     /// `heartbeat` to `monitor.sock`: each check's last success (ms).
     Heartbeat { checks: Vec<(Check, Option<u64>)> },
 }
@@ -153,6 +178,13 @@ struct Open {
     deadline: u64,
 }
 
+/// The one send of a check in flight: what it carried.
+struct Sending {
+    id: u64,
+    carried: Vec<Ident>,
+    deadline: u64,
+}
+
 struct Slot {
     logic: Box<dyn Logic>,
     interval_ms: u64,
@@ -161,8 +193,17 @@ struct Slot {
     success_ms: Option<u64>,
     /// The differences of the last completed round → their first sighting.
     seen: BTreeMap<Ident, u64>,
-    /// Confirmed and still seen.
-    confirmed: BTreeSet<Ident>,
+    /// Confirmed and still seen → the detail at the confirmation.
+    confirmed: BTreeMap<Ident, String>,
+    /// Confirmed and not yet paid by a `"held"` answer, in the order of
+    /// confirmation, with the detail at the confirmation.
+    owed: Vec<(Ident, String)>,
+    sending: Option<Sending>,
+    /// When the previous send started.
+    last_send_ms: Option<u64>,
+    /// The first request id after the latest `"held"`/`"already held"`
+    /// answer: only a status request from it on shows the hold off.
+    hold_answer_req: Option<u64>,
     /// The reason of the last failed round, until a round succeeds.
     failing: Option<String>,
 }
@@ -174,14 +215,18 @@ pub struct Engine {
     log: Log,
     min_age_ms: u64,
     request_timeout_ms: u64,
+    resend_ms: u64,
     heartbeat_ms: u64,
     boot_ms: u64,
     start_ms: u64,
     next_heartbeat: u64,
     next_req: u64,
+    next_send: u64,
     slots: Vec<Slot>,
     latched: Option<JournalError>,
     journal_failing: bool,
+    /// The newest status request whose cap the journal state reached.
+    caught_up_req: u64,
 }
 
 impl Engine {
@@ -205,14 +250,17 @@ impl Engine {
             log,
             min_age_ms: cfg.rules.min_age_ms,
             request_timeout_ms: cfg.http.request_timeout_ms,
+            resend_ms: cfg.rules.mismatch_resend_ms,
             heartbeat_ms: cfg.intervals.heartbeat_ms,
             boot_ms,
             start_ms,
             next_heartbeat: start_ms,
             next_req: 1,
+            next_send: 1,
             slots: Vec::new(),
             latched: None,
             journal_failing: false,
+            caught_up_req: 0,
         };
         e.add_check(Box::new(W1::default()), cfg.intervals.w1_ms);
         e
@@ -230,7 +278,11 @@ impl Engine {
             round: None,
             success_ms: None,
             seen: BTreeMap::new(),
-            confirmed: BTreeSet::new(),
+            confirmed: BTreeMap::new(),
+            owed: Vec::new(),
+            sending: None,
+            last_send_ms: None,
+            hold_answer_req: None,
             failing: None,
         });
     }
@@ -277,6 +329,17 @@ impl Engine {
                 let req = s.logic.first();
                 self.emit_venue(i, now, req, &mut out);
             }
+        }
+        for i in 0..self.slots.len() {
+            let s = &mut self.slots[i];
+            if s.sending.as_ref().is_some_and(|x| now >= x.deadline) {
+                s.sending = None;
+                (self.log)(&format!(
+                    "warn: {} mismatch send has no report before its deadline (taken as failed)",
+                    s.logic.check().name()
+                ));
+            }
+            self.send(i, now, &mut out);
         }
         if now >= self.next_heartbeat {
             self.next_heartbeat = now + self.heartbeat_ms;
@@ -331,6 +394,123 @@ impl Engine {
         out
     }
 
+    /// The answer to the send `send_id` of `check`: the `result` of
+    /// `watcher_mismatch`, or why there is none (`<code>: <message>` for an
+    /// error reply). Only `"held"` pays what the send carried. The answer
+    /// of a send that is not the one in flight (its deadline passed, and a
+    /// later send may carry more) is ignored and pays nothing.
+    pub fn on_admin(
+        &mut self,
+        now: u64,
+        check: Check,
+        send_id: u64,
+        answer: Result<String, String>,
+    ) -> Vec<Action> {
+        let mut out = Vec::new();
+        let Some(i) = self.slots.iter().position(|s| s.logic.check() == check) else {
+            return out;
+        };
+        let after = self.next_req;
+        let s = &mut self.slots[i];
+        if s.sending.as_ref().is_none_or(|x| x.id != send_id) {
+            (self.log)(&format!(
+                "debug: an answer to {} send {send_id}, which is not the send in flight, is ignored",
+                check.name()
+            ));
+            return out;
+        }
+        let Some(sent) = s.sending.take() else {
+            return out;
+        };
+        match answer.as_deref() {
+            Ok("held") => {
+                s.owed.retain(|(id, _)| !sent.carried.contains(id));
+                s.hold_answer_req = Some(after);
+            }
+            Ok("already held") => s.hold_answer_req = Some(after),
+            Ok(other) => (self.log)(&format!(
+                "error: {} mismatch send: unexpected answer {other:?}; sent again later",
+                check.name()
+            )),
+            Err(e) if e.starts_with("bad_request") => (self.log)(&format!(
+                "error: {} mismatch send refused ({e}): a watcher bug; sent again later",
+                check.name()
+            )),
+            Err(e) => (self.log)(&format!(
+                "warn: {} mismatch send failed: {e}; sent again later",
+                check.name()
+            )),
+        }
+        self.set_active(i);
+        self.send(i, now, &mut out);
+        out
+    }
+
+    /// The hold is off for the sends of slot `i`: the journal state shows
+    /// none, read up to the cap of a status request emitted after the
+    /// latest `"held"`/`"already held"` answer of the check.
+    fn hold_off(&self, i: usize) -> bool {
+        !self.state.holds.watcher_mismatch
+            && self.slots[i]
+                .hold_answer_req
+                .is_none_or(|a| self.caught_up_req >= a)
+    }
+
+    /// Starts the send of slot `i` if it is due.
+    fn send(&mut self, i: usize, now: u64, out: &mut Vec<Action>) {
+        if self.slots[i].sending.is_some() || !self.hold_off(i) {
+            return;
+        }
+        let timeout = self.request_timeout_ms;
+        let s = &mut self.slots[i];
+        if s.last_send_ms.is_some_and(|t| now.saturating_sub(t) < self.resend_ms) {
+            return;
+        }
+        let check = s.logic.check();
+        let send_id = self.next_send;
+        let mut carried: Vec<(Ident, String)> = s.owed.clone();
+        if check.resends_while_seen() {
+            for (id, d) in &s.confirmed {
+                if !carried.iter().any(|(c, _)| c == id) {
+                    carried.push((id.clone(), d.clone()));
+                }
+            }
+        }
+        let Some((_, first)) = carried.first() else {
+            return;
+        };
+        let mut detail = first.clone();
+        if carried.len() > 1 {
+            detail.push_str(&format!("; and {} more", carried.len() - 1));
+        }
+        s.last_send_ms = Some(now);
+        self.next_send += 1;
+        s.sending = Some(Sending {
+            id: send_id,
+            carried: carried.into_iter().map(|(id, _)| id).collect(),
+            deadline: now + 2 * timeout + SEND_EXTRA_MS,
+        });
+        out.push(Action::Mismatch {
+            check,
+            send_id,
+            detail: cut(detail, DETAIL_MAX),
+        });
+    }
+
+    /// `watcher_mismatch_active`: the confirmed differences a round still
+    /// sees and the owed ones.
+    fn set_active(&self, i: usize) {
+        let s = &self.slots[i];
+        let owed_only = s
+            .owed
+            .iter()
+            .filter(|(id, _)| !s.confirmed.contains_key(id))
+            .count();
+        let active = (s.confirmed.len() + owed_only) as f64;
+        let c = [("check", s.logic.check().name())];
+        self.metrics.set("watcher_mismatch_active", &c, active);
+    }
+
     /// The answer to a `Status` request: the body of `/api/status` as
     /// JSON, or why there is none (the OMS did not answer, not JSON).
     pub fn on_status(
@@ -345,7 +525,13 @@ impl Engine {
             return out;
         };
         match self.read_to(answer, seq_at_send) {
-            Ok(()) => self.judge(i, now, &mut out),
+            Ok(()) => {
+                self.caught_up_req = self.caught_up_req.max(req_id);
+                self.judge(i, now);
+                for j in 0..self.slots.len() {
+                    self.send(j, now, &mut out);
+                }
+            }
             Err(why) => self.fail(i, why),
         }
         out
@@ -489,7 +675,7 @@ impl Engine {
     }
 
     /// The comparison of a round and the two-round rule.
-    fn judge(&mut self, i: usize, now: u64, out: &mut Vec<Action>) {
+    fn judge(&mut self, i: usize, now: u64) {
         let min_age = self.min_age_ms;
         let s = &mut self.slots[i];
         s.round = None;
@@ -505,7 +691,7 @@ impl Engine {
             }
             let before = s.seen.get(&id).copied();
             seen.insert(id.clone(), before.unwrap_or(now));
-            if s.confirmed.contains(&id) {
+            if s.confirmed.contains_key(&id) {
                 continue;
             }
             open += 1;
@@ -529,31 +715,24 @@ impl Engine {
         }
         s.seen = seen;
         let still = &s.seen;
-        s.confirmed.retain(|id| still.contains_key(id));
+        s.confirmed.retain(|id, _| still.contains_key(id));
         let c = [("check", check.name())];
-        for (id, line) in &confirmed {
-            s.confirmed.insert(id.clone());
+        for (id, line) in confirmed {
+            s.confirmed.insert(id.clone(), line.clone());
+            if !s.owed.iter().any(|(o, _)| *o == id) {
+                s.owed.push((id, line.clone()));
+            }
             self.metrics.add("watcher_mismatches_total", &c, 1.0);
             (self.log)(&format!("error: confirmed difference: {line}"));
         }
         self.metrics.set("watcher_differences", &c, open as f64);
-        let active = s.confirmed.len() as f64;
-        self.metrics.set("watcher_mismatch_active", &c, active);
+        self.set_active(i);
+        let s = &mut self.slots[i];
         if !deferred {
             s.success_ms = Some(now);
             if s.failing.take().is_some() {
                 (self.log)(&format!("{} rounds succeed again", check.name()));
             }
-        }
-        if let Some((_, first)) = confirmed.first() {
-            let mut detail = first.clone();
-            if confirmed.len() > 1 {
-                detail.push_str(&format!("; and {} more", confirmed.len() - 1));
-            }
-            out.push(Action::Mismatch {
-                check,
-                detail: cut(detail, DETAIL_MAX),
-            });
         }
     }
 }

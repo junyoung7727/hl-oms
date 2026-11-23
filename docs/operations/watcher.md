@@ -1,6 +1,6 @@
 # 워처 운영
 
-설계: [ADR-031](../adr/ADR-031-watcher.md). 계약: [C-WATCH](../contracts/watcher.md). 이 문서는 워처의 설정과 자격 파일(U19a4), 시작 확인과 그 거부, 시작 확인이 내보내는 지표(U19a4b)를 적는다. **워처는 아직 실행되지 않는다**: 바이너리는 `--version`에만 답하고, 검사(U19a5~), 실행과 상황별 의미(U19a7)는 아직 없다. 시작 확인은 만들어졌지만 그것을 돌리는 실행 코드는 U19a7이다. 서비스 설치와 알림 규칙은 U20b다.
+설계: [ADR-031](../adr/ADR-031-watcher.md). 계약: [C-WATCH](../contracts/watcher.md). 이 문서는 워처의 설정과 자격 파일(U19a4), 시작 확인과 그 거부, 시작 확인이 내보내는 지표(U19a4b), 실행과 상황별 의미(U19a7)를 적는다. U19a7부터 `watcher --config`가 돈다: W1(열린 주문)과 W2(포지션)를 검사하고, 확정된 차이를 `admin.sock`에 보내고, `monitor.sock`에 하트비트를 보낸다. W3·W4는 아직 없다(U19a8·U19a9). loopback 가짜로만 시험했고 실제 거래소에서 돌려 본 적이 없다. 서비스 설치와 알림 규칙은 U20b다.
 
 ## 설정 파일
 
@@ -121,3 +121,40 @@ api_secret = "..."
 | `watcher_api_key_days_left` | 키 만료까지 남은 날(내림, 만료 뒤 음수). IP에 묶인 키처럼 만료가 해당 없으면 없음 | 값이 있으면 키가 IP에 묶이지 않았거나 비밀번호가 바뀐 것이다(Bybit 문서). 만료 전에 키를 바꾼다 |
 | `watcher_public_ip_ok` | 1: 이 호스트의 공인 IP가 키의 IP 목록(마지막으로 통과한 것)에 있음. 0: 없음, 확인 실패, 또는 키가 시작 규칙에 더는 맞지 않음. 키 거절 뒤에도 반향으로 계속 쓴다. 시작 2단계에서 키가 거절되면 없음 | 0이면 경고 줄(또는 규칙 위반의 오류 줄)로 원인을 본다. IP가 바뀌었으면 키의 IP 목록을 고친다 |
 | `watcher_auth_rejected` | 1: 키 거절이나 시작 규칙 위반으로 모든 Bybit 요청이 멈췄음 | 오류 줄로 원인을 보고 키를 고친 뒤 재시작 |
+
+## 실행(U19a7)
+
+```sh
+watcher --config /etc/hl-oms/watcher.toml     # OMS와 같은 사용자로
+watcher --version
+```
+
+- **같은 uid**: `admin.sock`과 `monitor.sock`은 노드 자신의 uid만 받는다(`oms-node/src/server.rs:188-191`). 그래서 워처는 OMS를 돌리는 사용자로 돌고, 두 프로세스는 서로의 자격 파일을 읽을 수 있다. 알려진 한계이고 U20b(서비스 배치)에 넘긴다.
+- OMS에 `[core.policy.monitor]`가 없으면 `monitor.sock`이 없다. 워처는 하트비트마다 한 번 연결을 시도하고, 상태가 바뀔 때만 `warn: monitor.sock … not connected …` 한 줄을 쓴다.
+- 시작 순서: 설정과 키 파일 → 지표 밀어 넣기(여기서부터) → 시작 확인(위) → `/api/status` 기다림(1초마다 다시, `warn: waiting for /api/status: …`는 10초에 하나) → 저널을 기록 1부터 재생(`the OMS answers /api/status: replaying the journal up to record N`, `boot replay done at record N; the checks start`) → 검사와 하트비트. IP 재확인은 시작 확인 뒤 내내 돈다(OMS가 내려가 있어도).
+- 재생 중과 OMS를 기다리는 동안에는 하트비트가 없다. 그동안 OMS의 게이트는 감시 안 됨이다(런북 7.16). 재생은 기록 100만 건에 약 1.3초다(C-WATCH 2부).
+- 종료: SIGTERM이나 SIGINT. 새 라운드 없이 진행 중 요청을 `request_timeout_ms`까지 기다리고, 지표를 한 번 더 밀어 넣고, 모니터 연결을 닫고 코드 0으로 끝난다. 아무것도 저장하지 않는다(다음 시작이 처음부터 다시 읽는다).
+- 종료 코드 2: 사용법, 설정 파일, 키 파일, 시작 규칙(위의 표). 이유는 stderr 한 줄(`watcher: …` 또는 `watcher: error: …`).
+- 로그는 stderr의 한 줄씩이다(`watcher: ` 뒤). `error:`와 `warn:`으로 시작하는 줄이 운영자가 볼 것이다.
+
+## 상황별 의미(U19a7)
+
+| 로그 줄(앞부분) | 뜻 | 할 일 |
+|---|---|---|
+| `error: confirmed difference: <detail>` | 검사가 차이를 확정했다. 보류가 꺼져 있으면 `admin.sock`에 보낸다 | 런북 7.13 |
+| `warn: W<n> mismatch send failed: …` | 보내기가 답을 받지 못했다(소켓 없음, 시간 초과, `overloaded` 등). 차이는 빚으로 남고 `mismatch_resend_ms` 뒤 다시 간다 | OMS가 떠 있는지, 같은 uid인지 |
+| `error: W<n> mismatch send refused (bad_request…` | OMS가 줄을 거절했다. 워처의 결함이다 | 줄과 함께 보고한다 |
+| `warn: W<n> round failed: …` | 그 검사의 라운드가 실패했다(거래소 오류, `/api/status`, 저널). 이유가 바뀔 때만 쓰고, 다시 성공하면 `W<n> rounds succeed again` | 런북 7.17 |
+| `warn: monitor.sock … not connected: …` / `… connected` | 하트비트 연결의 상태 | OMS의 `[core.policy.monitor]`, uid |
+| `error: monitor.sock heartbeat refused (…)` | OMS가 하트비트를 거절했다(1분에 한 줄). `bad_request`면 검사 시각이 OMS의 시계보다 앞섰을 수 있다 | 두 프로세스의 시계(같은 호스트), 런북 7.16 |
+| `error: …; the journal reader stops until the watcher restarts` | 저널을 더 읽지 않는다 | 런북 7.17 |
+
+## 실행의 지표(U19a7)
+
+| 이름 | 뜻 | 볼 것 |
+|---|---|---|
+| `watcher_up` | 밀어 넣을 때마다 1 | 없으면 워처나 밀어 넣기가 없다 |
+| `watcher_heartbeat_ok_ts` | OMS가 마지막으로 하트비트를 기록한 하트비트 시각(epoch 초) | 멈추면 `monitor.sock` 줄 |
+| `watcher_check_age_s{check}` | 검사의 마지막 성공 뒤의 초. 시작 중에는 설정을 읽은 때부터 | W1·W2가 10초를 넘으면 OMS 게이트가 닫힌다 |
+| `watcher_mismatch_active{check}` | 라운드가 아직 보는 확정된 차이와 아직 OMS에 빚진 것 | 런북 7.13 |
+| `watcher_journal_seq`, `watcher_journal_error` | 마지막으로 읽은 기록, 읽기 실패 | 런북 7.17 |

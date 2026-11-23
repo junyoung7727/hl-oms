@@ -6,6 +6,7 @@
 #![allow(dead_code, clippy::unwrap_used)]
 
 pub mod rig;
+pub mod sock;
 
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -88,6 +89,8 @@ pub struct TestJournal {
     pub next_seq: u64,
     /// First sequence of every segment, in order.
     pub segments: Vec<u64>,
+    /// The `at` (µs) of the last record appended.
+    pub last_at: u64,
 }
 
 impl TestJournal {
@@ -97,6 +100,7 @@ impl TestJournal {
             instance: 7,
             next_seq: 1,
             segments: Vec::new(),
+            last_at: 0,
         }
     }
 
@@ -107,6 +111,7 @@ impl TestJournal {
             instance: 7,
             next_seq: 1,
             segments: Vec::new(),
+            last_at: 0,
         }
     }
 
@@ -145,6 +150,7 @@ impl TestJournal {
         let seq = self.next_seq;
         self.append_frame(seq, &payload(seq, at, events));
         self.next_seq += 1;
+        self.last_at = self.last_at.max(at);
         seq
     }
 
