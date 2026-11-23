@@ -6,6 +6,7 @@
 #![allow(dead_code, clippy::unwrap_used)]
 
 pub mod rig;
+pub mod sock;
 
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
