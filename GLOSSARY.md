@@ -189,7 +189,7 @@ The operator's `clear-hold` of one hold of C-HOLD (`kill`, `watcher_mismatch`, `
 _Avoid_: unhold, override
 
 **Watcher** (워처):
-The separate program (crate and binary `watcher`) that checks the OMS against the venue with code of its own: its own journal reader built from ADR-011 and C-TAIL only, its own sets, its own Bybit key and client. It depends on no `oms-*` or `md-*` crate and on no other workspace crate; only the test crate `watcher-conformance` links it with OMS code, and `tools/ci/watcher_independent.sh` checks this on every change (ADR-031, C-WATCH). It keeps no state and replays the journal from record 1 at every start. U19a1 built the reader, U19a2 the journal state, U19a3 its own Bybit signer and client and its metrics export, U19a4 its config and credentials files, U19a4b its start checks (query-api, the public IP, the settle coin of every symbol) and the IP recheck as sans-IO steps, U19a5 the sans-IO check engine and W1 (open orders), U19a6 W2 (positions), U19a7 the links to the OMS (`/api/status`, `watcher_mismatch` on `admin.sock` with the resend rule, the heartbeat on `monitor.sock`) and the runtime and binary `watcher --config`, U19a8 W4 (executions); W3 comes in U19a9.
+The separate program (crate and binary `watcher`) that checks the OMS against the venue with code of its own: its own journal reader built from ADR-011 and C-TAIL only, its own sets, its own Bybit key and client. It depends on no `oms-*` or `md-*` crate and on no other workspace crate; only the test crate `watcher-conformance` links it with OMS code, and `tools/ci/watcher_independent.sh` checks this on every change (ADR-031, C-WATCH). It keeps no state and replays the journal from record 1 at every start. U19a1 built the reader, U19a2 the journal state, U19a3 its own Bybit signer and client and its metrics export, U19a4 its config and credentials files, U19a4b its start checks (query-api, the public IP, the settle coin of every symbol) and the IP recheck as sans-IO steps, U19a5 the sans-IO check engine and W1 (open orders), U19a6 W2 (positions), U19a7 the links to the OMS (`/api/status`, `watcher_mismatch` on `admin.sock` with the resend rule, the heartbeat on `monitor.sock`) and the runtime and binary `watcher --config`, U19a8 W4 (executions), U19a9 W3 (wallet and margin), W2's use of W4's execution times and the budget measurement.
 _Avoid_: monitor (the monitoring gate is the OMS's), checker, reconciler (that is the OMS's own)
 
 **Watcher journal state** (워처 저널 상태):
@@ -219,6 +219,10 @@ _Avoid_: cursor (the venue's page cursor is another thing), checkpoint (nothing 
 **Request guard (watcher)** (요청 제한(워처)):
 The watcher client's own limit: at most 60 requests in any 10 s window, all Bybit paths and the IP echo together (판단(모델 아님)). A sans-IO part on the injected clock (`watcher::rest::Guard::admit(now)`) that lets a request go or names the earliest instant it may go; a request beyond the limit waits, it is not dropped. It protects the IP limit that the OMS shares from a runaway loop of the watcher; it does not count the OMS's own requests (C-WATCH part 3).
 _Avoid_: rate limiter (that is the venue's), budget (the 2.7 req/s design budget of the checks, U19a9)
+
+**Reconciliation budget (watcher)** (대조 예산(워처)):
+The design's request rate of the watcher's checks: W1 1 + W2 1 + W3 0.5 + W4 0.2 = 2.7 requests per second, when W1 and W2 read one page a round and W4 one page a sweep (design §7.5). It is measured (`crates/watcher/tests/budget.rs`), not enforced; the request guard is the hard bound. With 30 executions per 5 s it is met (162 requests a minute); with 100 per 5 s the scope's W4 rules (10 s overlap, every cursor) make it about 3.2 to 3.3 (owner question 1; C-WATCH part 9).
+_Avoid_: rate limit, guard (that is the hard bound of 60 per 10 s)
 
 **Watcher mismatch** (워처 불일치):
 The hold `WatcherMismatch`, set when a check of the watcher (W1–W4) confirms a difference. Refuses plain orders until released.

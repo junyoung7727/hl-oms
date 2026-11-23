@@ -66,6 +66,11 @@ impl World {
         bybit.route("/v5/order/realtime", [empty_page()]);
         bybit.route("/v5/position/list", [empty_page()]);
         bybit.route("/v5/execution/list", [empty_page()]);
+        bybit.route(
+            "/v5/account/wallet-balance",
+            [ok(json!({"list": [{"accountType": "UNIFIED", "totalEquity": "1000",
+                "totalMaintenanceMargin": "0", "totalMarginBalance": "1000"}]}))],
+        );
         let echo = FakeHttp::start(Answer::Reply(200, "127.0.0.1\n".into()));
         let status = FakeHttp::start(Answer::Reply(404, "{}".into()));
         let vm = FakeHttp::start(Answer::Reply(204, String::new()));
@@ -238,6 +243,31 @@ fn walk(clock: &ManualClock, ms: u64) {
     }
 }
 
+/// Walks the clock to the `k`-th IP recheck after the start (ip_check_ms =
+/// 10 s). The recheck is due 10 s after the loop read the last echo answer,
+/// and that answer can reach the loop after the fake saw the request and
+/// after the walk went on (a loaded machine): none is sent in the first
+/// 9.9 s, then the walk goes on in steps until query-api and the echo are
+/// both asked, at most 10 s more (판단(모델 아님)). The exact pace is
+/// start.rs's.
+fn walk_to_recheck(w: &World, clock: &ManualClock, k: usize) {
+    let asked = || {
+        (
+            w.requests("/v5/user/query-api").len(),
+            w.echo.requests().len(),
+        )
+    };
+    walk(clock, 9_900);
+    assert_eq!(asked(), (k, k), "recheck {k} before 10 s");
+    for _ in 0..100 {
+        walk(clock, 100);
+        if until(1, || asked() == (k + 1, k + 1)) {
+            return;
+        }
+    }
+    panic!("recheck {k}: {:?}", asked());
+}
+
 fn heartbeats(m: &FakeSock) -> Vec<Value> {
     m.conns()
         .iter()
@@ -260,7 +290,7 @@ fn mismatch_lines(a: &FakeSock) -> Vec<Value> {
 fn the_watcher_runs_against_loopback_fakes_end_to_end() {
     let mut w = World::new(
         "rt-e2e",
-        "[intervals]\nw1_ms = 500\nw2_ms = 500\nw4_ms = 1000\nheartbeat_ms = 1000\n\
+        "[intervals]\nw1_ms = 500\nw2_ms = 500\nw3_ms = 1000\nw4_ms = 1000\nheartbeat_ms = 1000\n\
          [rules]\nmin_age_ms = 500\nmismatch_resend_ms = 1000\n\
          [http]\nrequest_timeout_ms = 1000\n",
     );
@@ -279,18 +309,19 @@ fn the_watcher_runs_against_loopback_fakes_end_to_end() {
             "list": [ours(1, "BTCUSDT", "Buy")]}))],
     );
     let mut run = w.start(Arc::new(SystemClock));
-    // The start checks, then rounds of W1, W2 and W4, heartbeats with the
-    // success times, the mismatch at admin.sock and the metrics pushes.
+    // The start checks, then rounds of W1, W2, W3 and W4, heartbeats with
+    // the success times, the mismatch at admin.sock and the metrics pushes.
     assert!(
         until(20, || {
             let hb = heartbeats(&w.monitor);
             hb.iter().any(|h| {
                 h["checks"]["W1"].is_u64()
                     && h["checks"]["W2"].is_u64()
+                    && h["checks"]["W3"].is_u64()
                     && h["checks"]["W4"].is_u64()
             })
         }),
-        "no heartbeat with W1, W2 and W4: {:?}",
+        "no heartbeat with W1, W2, W3 and W4: {:?}",
         heartbeats(&w.monitor)
     );
     assert!(until(10, || !mismatch_lines(&w.admin).is_empty()));
@@ -322,13 +353,15 @@ fn the_watcher_runs_against_loopback_fakes_end_to_end() {
     );
     assert!(hb.iter().all(|h| h["watcher"] == "w-rt"));
     // Every Bybit request is signed; the start asked query-api and the
-    // settle coin; the checks read open orders, positions and executions.
+    // settle coin; the checks read open orders, positions, executions and
+    // the wallet.
     for p in [
         "/v5/user/query-api",
         "/v5/market/instruments-info",
         "/v5/order/realtime",
         "/v5/position/list",
         "/v5/execution/list",
+        "/v5/account/wallet-balance",
     ] {
         let r = w.requests(p);
         assert!(!r.is_empty(), "{p}");
@@ -467,12 +500,7 @@ fn the_ip_recheck_runs_while_the_oms_is_down() {
     assert_eq!(w.requests("/v5/user/query-api").len(), 1);
     assert_eq!(w.echo.requests().len(), 1);
     for k in 1..=3 {
-        walk(&clock, 10_000);
-        assert!(
-            until(10, || w.requests("/v5/user/query-api").len() == 1 + k
-                && w.echo.requests().len() == 1 + k),
-            "recheck {k}"
-        );
+        walk_to_recheck(&w, &clock, k);
     }
     // No engine round and no heartbeat while the OMS is down.
     assert!(w.requests("/v5/order/realtime").is_empty());
@@ -508,12 +536,7 @@ fn the_ip_recheck_runs_during_the_boot_replay() {
     assert_eq!(w.requests("/v5/user/query-api").len(), 1);
     assert_eq!(w.echo.requests().len(), 1);
     for k in 1..=3 {
-        walk(&clock, 10_000);
-        assert!(
-            until(10, || w.requests("/v5/user/query-api").len() == 1 + k
-                && w.echo.requests().len() == 1 + k),
-            "recheck {k}"
-        );
+        walk_to_recheck(&w, &clock, k);
     }
     // Still in the replay: no engine round, no heartbeat.
     assert_eq!(w.lines_with("read again in 1 s"), 1);
@@ -604,7 +627,62 @@ fn a_key_rejected_at_start_is_exported() {
     assert_eq!(w.bybit.requests().len(), 1);
     assert!(run.running());
     assert_eq!(w.lines_with("Bybit rejected the key (401)"), 1);
+    // Before the engine runs, every check's age counts from the config
+    // load (U19a7; W3 from U19a9).
+    let last = w.pushes().pop().unwrap();
+    for c in ["W1", "W2", "W3", "W4"] {
+        let age = format!(r#"{{"metric":{{"__name__":"watcher_check_age_s","check":"{c}","#);
+        assert!(last.contains(&age), "{c}: {last}");
+    }
     drop(run);
+}
+
+#[test]
+fn the_runtime_runs_w2_w3_and_w4_and_w2_reads_w4s_exec_times() {
+    // The checks the runtime adds after the boot replay, on the engine rig
+    // and a manual clock (default intervals: W2 1 s, W3 2 s, W4 5 s).
+    let mut r = common::rig::Rig::new("rt-checks");
+    let cfg = common::rig::config();
+    for (logic, interval) in watcher::runtime::checks(&cfg, &r.log) {
+        r.engine.add_check(logic, interval);
+    }
+    // A fill the journal booked 60 s ago, listed by the venue with an
+    // execTime 100 ms before T0; the venue holds 2 without updatedTime,
+    // the journal 1.
+    let fill = json!({"external_fill_booked": {"fill": {"fee": "0", "instrument": "BTCUSDT",
+        "key": "BTCUSDT:x", "order_id": null, "px": "100", "qty": "1", "side": "buy",
+        "venue_oid": null, "venue_ts": (T0 - 100) * 1000}}});
+    r.write(T0 - 60_000, &[fill]);
+    r.venue.executions = vec![common::rig::exec("BTCUSDT", "x", "Trade", "Buy", "1", T0 - 100)];
+    r.venue.positions = vec![common::rig::pos("BTCUSDT", "Buy", "2", None)];
+    r.venue.wallet = vec![common::rig::account("1000", "0", "1000")];
+    r.at(T0);
+    for c in watcher::engine::Check::ALL {
+        assert_eq!(r.engine.success(c), Some(T0), "{c:?}");
+    }
+    // W4's execTime defers W2 at +1 s; confirmed at +2 s. Each check at
+    // its own interval (review 1 S1): W3 every 2 s, W4 every 5 s, neither
+    // at another check's pace.
+    use watcher::engine::Check::{W3, W4};
+    let mut seen = Vec::new();
+    for t in (1..=5).map(|s| T0 + s * 1000) {
+        r.at(t);
+        if t == T0 + 1000 {
+            assert!(r.confirmed.is_empty(), "{:?}", r.confirmed);
+        }
+        seen.push((r.engine.success(W3), r.engine.success(W4)));
+    }
+    let d = "W2 position BTCUSDT: venue 2, journal 1; seen 2 rounds, journal entry 2.1 s old";
+    assert_eq!(r.confirmed, vec![(T0 + 2000, d.to_string())]);
+    let want = [
+        (T0, T0),
+        (T0 + 2000, T0),
+        (T0 + 2000, T0),
+        (T0 + 4000, T0),
+        (T0 + 4000, T0 + 5000),
+    ];
+    let want: Vec<_> = want.iter().map(|&(a, b)| (Some(a), Some(b))).collect();
+    assert_eq!(seen, want, "(W3, W4) success at +1..+5 s");
 }
 
 #[test]

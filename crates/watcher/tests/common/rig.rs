@@ -112,12 +112,20 @@ pub fn exec(symbol: &str, id: &str, ty: &str, side: &str, qty: &str, exec_time: 
         "orderLinkId": "", "orderId": ""})
 }
 
+/// A `/v5/account/wallet-balance` account row of type UNIFIED (U19a9).
+pub fn account(equity: &str, maintenance: &str, margin_balance: &str) -> Value {
+    json!({"accountType": "UNIFIED", "totalEquity": equity,
+        "totalMaintenanceMargin": maintenance, "totalMarginBalance": margin_balance,
+        "totalWalletBalance": margin_balance, "coin": []})
+}
+
 /// The model venue: its open orders, served 50 a page (a full page has a
 /// cursor `p<next index>`), and its positions, served 200 a page
 /// (U19a6); its executions (U19a8), those with `startTime ≤ execTime ≤
 /// endTime` newest first (a row without a readable `execTime` in every
 /// window, last), 100 a page, cursor `e<next index>` while rows remain;
-/// scripted answers go first, one script per path.
+/// its wallet accounts (U19a9), one page; scripted answers go first, one
+/// script per path.
 #[derive(Default)]
 pub struct Venue {
     pub orders: Vec<Value>,
@@ -126,6 +134,8 @@ pub struct Venue {
     pub pos_script: VecDeque<Result<Value, RestError>>,
     pub executions: Vec<Value>,
     pub exec_script: VecDeque<Result<Value, RestError>>,
+    pub wallet: Vec<Value>,
+    pub wallet_script: VecDeque<Result<Value, RestError>>,
     pub requests: Vec<(&'static str, Vec<(&'static str, String)>)>,
 }
 
@@ -138,6 +148,12 @@ impl Venue {
         self.requests.push((path, params.to_vec()));
         if path == "/v5/execution/list" {
             return self.executions(params);
+        }
+        if path == "/v5/account/wallet-balance" {
+            if let Some(a) = self.wallet_script.pop_front() {
+                return a;
+            }
+            return Ok(json!({"list": self.wallet}));
         }
         let positions = path == "/v5/position/list";
         let (script, all, n) = if positions {

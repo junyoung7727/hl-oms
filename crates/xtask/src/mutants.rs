@@ -2282,6 +2282,42 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "w4", "an_already_held_answer_to_a_w4_send_does_not_pay_it"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M251-watcher-w3-one-round-confirms",
+        what: "a W3 violation is confirmed at its first round instead of on two rounds in a row (deliberate defect 28 of U19a9)",
+        file: "crates/watcher/src/w3.rs",
+        find: "    fn at_once(&self, _kind: &str) -> bool {\n        false\n    }",
+        replace: "    fn at_once(&self, _kind: &str) -> bool {\n        true\n    }",
+        test: &["-p", "watcher", "--test", "w3", "a_margin_rate_at_the_limit_on_two_rounds_alarms"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M252-watcher-w3-limit-itself-passes",
+        what: "W3 compares with > instead of >=: a margin rate exactly at the limit passes, and a daily loss exactly at the limit alarms (U19a9)",
+        file: "crates/watcher/src/w3.rs",
+        find: "Some(left >= right)",
+        replace: "Some(left > right)",
+        test: &["-p", "watcher", "--test", "w3", "a_margin_rate_at_the_limit_on_two_rounds_alarms"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M253-watcher-w3-any-day-base",
+        what: "W3 judges the daily loss against a day base of another UTC day (U19a9, owner question 6)",
+        file: "crates/watcher/src/w3.rs",
+        find: "state.day_base.filter(|b| b.day == now_ms / DAY_MS)",
+        replace: "state.day_base.filter(|b| b.day <= now_ms / DAY_MS)",
+        test: &["-p", "watcher", "--test", "w3", "without_todays_base_only_the_margin_rate_is_judged"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M254-watcher-w2-ignores-w4-exec-time",
+        what: "W2 does not take W4's newest agreeing execTime as the venue's change time, so a difference with fills still arriving is confirmed young (U19a9)",
+        file: "crates/watcher/src/w2.rs",
+        find: ".max(exec_times.get(symbol).copied());",
+        replace: ".max(exec_times.get(symbol).copied().filter(|_| false));",
+        test: &["-p", "watcher", "--test", "w2", "a_missing_updated_time_falls_back_to_w4s_last_exec_time"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {

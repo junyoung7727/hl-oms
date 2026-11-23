@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use watcher::engine::Check;
 use watcher::rest::RestError;
 use watcher::w2::{PATH, W2};
+use watcher::w4::W4;
 
 /// A rig that runs W2 beside W1.
 fn rig(name: &str) -> Rig {
@@ -512,4 +513,61 @@ fn a_difference_planted_after_the_fills_stop_is_confirmed_within_3_s() {
     assert_eq!(w2_mismatches(&r).len(), 1);
     assert_eq!(r.gauge("watcher_mismatches_total", "W2"), Some(11.0));
     assert!(r.mismatches.iter().all(|m| m.1 == Check::W2));
+}
+
+#[test]
+fn a_missing_updated_time_falls_back_to_w4s_last_exec_time() {
+    // W2 every 1 s and W4 every 5 s on one rig: W2 reads W4's newest
+    // agreeing execTime per symbol.
+    let mut r = Rig::new("w2-w4-time");
+    let w4 = W4::new(&config().rules, r.log.clone());
+    let w2 = W2::with_exec_times(w4.exec_times());
+    r.engine.add_check(Box::new(w2), 1000);
+    r.engine.add_check(Box::new(w4), 5000);
+    // BTCUSDT and ETHUSDT: the journal booked one fill each 60 s ago, which
+    // the venue lists with an execTime 100 ms before T0 (the record time
+    // and the venue's execTime come from two clocks). The venue holds 2:
+    // BTCUSDT without updatedTime (its size found at the first round, so
+    // no seen time either), ETHUSDT with an updatedTime 60 s old. SOLUSDT:
+    // a venue position without updatedTime and without a W4 time.
+    r.write(
+        T0 - 60_000,
+        &[
+            ext("BTCUSDT:x", "BTCUSDT", "1", (T0 - 100) * 1000),
+            ext("ETHUSDT:y", "ETHUSDT", "1", (T0 - 100) * 1000),
+        ],
+    );
+    r.venue.executions = vec![
+        exec("BTCUSDT", "x", "Trade", "Buy", "1", T0 - 100),
+        exec("ETHUSDT", "y", "Trade", "Buy", "1", T0 - 100),
+    ];
+    r.venue.positions = vec![
+        pos("BTCUSDT", "Buy", "2", None),
+        pos("ETHUSDT", "Buy", "2", Some(T0 - 60_000)),
+        pos("SOLUSDT", "Buy", "1", None),
+    ];
+    // At T0 W2 compares before W4's first sweep: no W4 time yet. Every
+    // difference is a first sighting.
+    r.at(T0);
+    assert_eq!(r.engine.success(Check::W2), Some(T0));
+    assert_eq!(r.gauge("watcher_differences", "W2"), Some(3.0));
+    // At +1 s the W4 time (1.1 s old) is younger than 2 s: BTCUSDT (no
+    // updatedTime) and ETHUSDT (an older updatedTime) are deferred; the
+    // round is no success. SOLUSDT has no time at all: old, confirmed.
+    r.at(T0 + 1000);
+    let sol = detail("SOLUSDT", "1", "0", "change time unknown");
+    assert_eq!(r.confirmed, vec![(T0 + 1000, sol.clone())]);
+    assert_eq!(r.engine.success(Check::W2), Some(T0));
+    // At +2 s the W4 time is 2.1 s old: both are confirmed.
+    r.at(T0 + 2000);
+    let age = "journal entry 2.1 s old";
+    assert_eq!(
+        r.confirmed,
+        vec![
+            (T0 + 1000, sol),
+            (T0 + 2000, detail("BTCUSDT", "2", "1", age)),
+            (T0 + 2000, detail("ETHUSDT", "2", "1", age)),
+        ]
+    );
+    assert_eq!(r.engine.success(Check::W2), Some(T0 + 2000));
 }

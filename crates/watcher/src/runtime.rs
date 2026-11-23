@@ -2,7 +2,7 @@
 //! that carries out what the sans-IO parts ask. Boot: credentials → the
 //! metrics push timer (from here on) → the start checks ([`Start`]) → the
 //! wait for `/api/status` → the replay of the journal from record 1 to its
-//! cap → the engine (W1, W2 and W4). The IP recheck ([`IpCheck`]) runs from
+//! cap → the engine (W1, W2, W3 and W4; W2 reads W4's execution times). The IP recheck ([`IpCheck`]) runs from
 //! the end of the start on, also while the watcher waits for the OMS and
 //! replays. Every timer reads the injected clock; the loop wakes every
 //! [`TICK_MS`] of real time (and at every answer) and asks each part what
@@ -21,7 +21,7 @@ use tokio::task::JoinSet;
 
 use crate::clock::Clock;
 use crate::config::Config;
-use crate::engine::{Action, Check, Engine};
+use crate::engine::{Action, Check, Engine, Logic};
 use crate::journal::{MAX_RECORDS, Tail};
 use crate::log::Log;
 use crate::metrics::{Exporter, Metrics};
@@ -30,6 +30,7 @@ use crate::rest::{Client, ClientConfig, RestError};
 use crate::start::{self, IpCheck, Start, Step};
 use crate::state::JournalState;
 use crate::w2::W2;
+use crate::w3::W3;
 use crate::w4::W4;
 
 /// The loop asks every part what is due at least this often (real time,
@@ -86,6 +87,18 @@ enum Phase {
         failing: bool,
     },
     Run(Engine),
+}
+
+/// The checks the engine runs beside W1, each with its interval: W2 (it
+/// reads W4's newest agreeing `execTime` per symbol), W3 and W4.
+pub fn checks(cfg: &Config, log: &Log) -> Vec<(Box<dyn Logic>, u64)> {
+    let w4 = W4::new(&cfg.rules, log.clone());
+    let w2 = W2::with_exec_times(w4.exec_times());
+    vec![
+        (Box::new(w2), cfg.intervals.w2_ms),
+        (Box::new(W3::new(&cfg.w3)), cfg.intervals.w3_ms),
+        (Box::new(w4), cfg.intervals.w4_ms),
+    ]
 }
 
 /// The cap of a boot status answer, if it is usable.
@@ -379,7 +392,7 @@ impl Runtime {
         }
         // Before the engine runs, the ages count from the config load.
         let age = now.saturating_sub(self.boot_ms) as f64 / 1000.0;
-        for c in [Check::W1, Check::W2, Check::W4] {
+        for c in Check::ALL {
             self.metrics
                 .set("watcher_check_age_s", &[("check", c.name())], age);
         }
@@ -454,9 +467,9 @@ impl Runtime {
             self.boot_ms,
             now,
         );
-        e.add_check(Box::new(W2::default()), self.cfg.intervals.w2_ms);
-        let w4 = W4::new(&self.cfg.rules, self.log.clone());
-        e.add_check(Box::new(w4), self.cfg.intervals.w4_ms);
+        for (logic, interval) in checks(&self.cfg, &self.log) {
+            e.add_check(logic, interval);
+        }
         self.phase = Phase::Run(e);
     }
 

@@ -394,7 +394,7 @@ telegram = "/etc/oms/telegram.json"   # 절대 경로
 
 워처([C-WATCH](../contracts/watcher.md))의 검사 가운데 하나가 OMS와 거래소의 차이를 두 라운드 연속으로 보았고, 그 저널 항목이 `min_age_ms`(기본 2초)보다 오래됐다. `core.watcher_mismatch`가 검사 이름(`source`), 시각, 내용(`note` = 워처의 `detail`)을 보여 준다. 일반 주문을 거절하고 감소 전용 주문은 받는다(증거금 정책이 있을 때). 저절로 풀리지 않는다.
 
-`detail`의 모양: `<검사> <종류> <대상>: venue <거래소 쪽>, journal <저널 쪽>; seen 2 rounds, <나이>`(여럿이면 끝에 `; and N more`). `<나이>`는 `journal entry <a> s old`(저널 항목, W2에서는 저널과 거래소의 변경 시각 중 새 것), `first seen <a> s ago`(저널이 모르는 주문), `change time unknown`(어느 시각도 모름). W4(U19a8)는 `seen 2 sweeps, execTime <a> s old`(거래소 체결 시각; 없으면 `execTime unknown`)이고, `unknown_exec_type`은 `seen 1 sweep`이다(바로 확정). W4의 대상은 체결 키 `<symbol>:<execId>`다.
+`detail`의 모양: `<검사> <종류> <대상>: venue <거래소 쪽>, journal <저널 쪽>; seen 2 rounds, <나이>`(여럿이면 끝에 `; and N more`). `<나이>`는 `journal entry <a> s old`(저널 항목, W2에서는 저널과 거래소의 변경 시각 중 새 것; 거래소 쪽은 `updatedTime`, 처음 본 시각, U19a9부터 W4가 맞춘 `execTime`), `first seen <a> s ago`(저널이 모르는 주문), `change time unknown`(어느 시각도 모름). W4(U19a8)는 `seen 2 sweeps, execTime <a> s old`(거래소 체결 시각; 없으면 `execTime unknown`)이고, `unknown_exec_type`은 `seen 1 sweep`이다(바로 확정). W4의 대상은 체결 키 `<symbol>:<execId>`다.
 
 | 검사·종류 | 뜻 | 볼 것 |
 |---|---|---|
@@ -409,11 +409,15 @@ telegram = "/etc/oms/telegram.json"   # 절대 경로
 | W4 `missing_venue_change` | 거래소의 `AdlTrade`·`BustTrade`·`Delivery`·`Settle`이 저널의 거래소 변경에 없다 | 거래소 화면의 ADL·청산·인도·정산 기록, 7.14가 함께 걸렸는지, W2의 포지션 |
 | W4 `venue_change_details` | 같은 키의 거래소 변경이 있지만 종류나 부호 있는 수량이 다르다 | 거래소 화면과 저널의 그 변경 |
 | W4 `unknown_exec_type` | 워처가 모르는 `execType`(바로 확정) | 거래소 체결 내역에서 그 행. OMS도 그것을 분류하지 못했으면 7.14가 함께 걸려 있다 |
+| W3 `account_mm_rate` | 통합 계좌의 유지증거금 ÷ 증거금 잔고가 `[w3] account_mm_rate_max_bps`(기본 5000 bp = 50 %) 이상이다(두 라운드 연속, OMS와 같은 공식). `detail`에 `totalMaintenanceMargin`, `totalMarginBalance`가 있다 | 거래소 화면의 계좌 위험, OMS의 `core.margin`. 보통 OMS도 같은 규칙(`account_mm`)으로 감소 전용 상태다: 아래 W3 순서 |
+| W3 `daily_loss` | 저널의 오늘 UTC 일 기준값보다 `totalEquity`가 `[w3] daily_loss_bps`(기본 500 bp) 넘게 낮다(두 라운드 연속) | OMS의 `core.margin.day_base`와 감소 전용 상태(`daily_loss`). 입금·출금도 손실로 읽힌다(C-MARGIN) |
 | W4 `unreadable_row` | 체결 행에 그 형이 필요로 하는 필드가 없다(값 = 없는 필드 이름; 키가 없으면 대상은 행의 JSON 앞 200바이트). `execTime`이 훑기의 끝보다 뒤인 행도 이것이다(값 `execTime`, `what`에 `execTime <t> after the sweep's end <end>`: 거래소가 `endTime`을 어겼거나 시계가 크게 다르다) | 거래소 체결 내역. 거래소의 응답 모양이 바뀌었을 수 있다: 워처 로그와 원본 응답 |
 
 1. 워처 로그의 `error: confirmed difference: …` 줄을 **모두** 읽는다. OMS는 첫 메모만 남긴다(C-HOLD): 보류가 이미 걸린 동안 확정된 차이는 그 메모에 없다. 워처는 그것을 빚으로 들고 있다가 `clear-hold` 뒤 한 번 보내고, 그러면 보류가 그 메모와 함께 한 번 다시 걸린다. 로그를 미리 읽어 두면 돌아오는 보류가 예상된다.
 2. 위 표대로 거래소 화면과 `status`(포지션, 열린 주문, 불일치)를 비교하고 원인을 고친다(포지션이면 `adjust`, 주문이면 `resolve`·`cancel-all`).
 3. `omsctl … clear-hold --reason watcher_mismatch --note "원인과 조치"`. W1~W3의 차이가 남아 있으면 워처가 `mismatch_resend_ms`(기본 10초) 안에 다시 보내 보류가 돌아온다. 돌아오면 1로.
+
+W3(지갑과 증거금, C-WATCH 9부)은 OMS의 한도와 같은 공식이라, OMS가 일 손실이나 계좌 유지증거금률로 감소 전용 상태에 들어가면 W3도 보통 이 보류를 건다. 위반이 남아 있는 동안 `clear-hold`하면 워처가 10초 안에 다시 보내 보류가 돌아온다. 순서: (a) 먼저 OMS 자신의 감소 상태를 정리한다(7.8: 포지션을 줄이고 `clear-reduce`로, 입출금이 원인이면 7.9의 `rebase-day`로 오늘의 새 기준을 기록한다). (b) 워처 로그에서 W3 확정 줄이 더 오지 않고 `watcher_mismatch_active{check="W3"}`가 0인지 본다(일 손실은 저널에 오늘의 새 `day_base_set`이 오거나 UTC 날짜가 바뀌면 끝난다; 계좌 유지증거금률은 거래소의 비율이 한도 아래로 내려와야 끝난다). (c) 그다음 `clear-hold --reason watcher_mismatch`. 순서를 바꾸면 보류가 곧 돌아온다.
 
 W4(체결)는 다르다(C-WATCH 8부). W4 차이는 지난 체결 하나에 대한 사실이라, 보류 메모(`"held"` 답)가 이름한 W4 차이는 `clear-hold` 뒤 다시 보내지 않는다(거래소 창에 그 행이 남아 있어도). 이미 걸린 보류 아래에서 확정된 W4 차이는 그 메모에 없고, 해제 뒤 한 번 보내져 보류가 그 메모와 함께 한 번 돌아온다. 그것을 푼 뒤에는 다시 오지 않는다. 그래서 해제 전에 워처 로그의 확정 줄을 모두 읽는 것(1)이 W4의 전체 목록이다. 워처를 재시작하면 W4가 거둔 것을 잊으므로, 600초(`w4_initial_lookback_ms`) 안의 같은 행이 두 훑기 뒤 보류를 한 번 더 건다. 포지션이 계속 다르면 W2가 다시 보낸다.
 
