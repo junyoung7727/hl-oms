@@ -126,6 +126,12 @@ pub trait Logic {
     fn page(&mut self, now_ms: u64, result: &Value) -> Page;
     /// The differences between the complete venue read and the journal.
     fn compare(&mut self, now_ms: u64, state: &JournalState) -> Vec<Diff>;
+    /// A known time younger than `min_age_ms` defers the round even at a
+    /// difference's first sighting (W2, design R5); W1 waits for the
+    /// second.
+    fn young_defers_at_first_sighting(&self) -> bool {
+        false
+    }
 }
 
 /// `(kind, subject, value)`; the check is the slot's.
@@ -488,6 +494,7 @@ impl Engine {
         let s = &mut self.slots[i];
         s.round = None;
         let check = s.logic.check();
+        let strict = s.logic.young_defers_at_first_sighting();
         let mut seen = BTreeMap::new();
         let (mut open, mut deferred) = (0usize, false);
         let mut confirmed = Vec::new();
@@ -502,6 +509,10 @@ impl Engine {
                 continue;
             }
             open += 1;
+            // A strict check (W2) defers a young first sighting too.
+            deferred |= before.is_none()
+                && strict
+                && matches!(d.since, Since::At(at) if now.saturating_sub(at) < min_age);
             // A first sighting is pending.
             let Some(first) = before else { continue };
             let since = match d.since {

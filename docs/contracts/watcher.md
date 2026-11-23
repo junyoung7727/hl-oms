@@ -1,8 +1,8 @@
 # C-WATCH 독립 워처
 
-상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23), 4부 구현됨(설정과 자격 파일 U19a4, 시작 확인과 IP 재확인 U19a4b, 2026-11-23), 5부 구현됨(검사 엔진과 W1, U19a5, 2026-11-23). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3, V-WATCH-4, V-WATCH-5. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
+상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23), 4부 구현됨(설정과 자격 파일 U19a4, 시작 확인과 IP 재확인 U19a4b, 2026-11-23), 5부 구현됨(검사 엔진과 W1, U19a5, 2026-11-23), 6부 구현됨(W2 포지션, U19a6, 2026-11-23). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3, V-WATCH-4, V-WATCH-5, V-WATCH-6. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
 
-워처는 OMS와 코드를 나누지 않는 별도 프로그램이다. 저널을 자기 읽기로 읽고(이 문서와 [C-TAIL](tail.md), [ADR-011](../adr/ADR-011-file-format.md)만으로 썼다), 자기 키와 클라이언트로 Bybit를 조회해 OMS와 비교하고, 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고, `monitor.sock`에 하트비트를 보낸다. **U19a5까지는 저널 읽기, 저널 상태, 독립성 검사, Bybit 서명·클라이언트와 지표 내보내기, 설정 파일과 자격 파일 읽기, 시작 확인과 IP 재확인의 sans-IO 단계, 그리고 sans-IO 검사 엔진과 W1(열린 주문)만 있다. W2~W4와 이 부분들을 부르는 실행 코드(U19a7)는 아직 없어 워처는 아직 아무것도 감시하지 않는다(엔진의 하트비트와 불일치 행동을 보낼 곳이 없다).** 바이너리는 `watcher --version`에만 답하고, 그 밖의 호출은 "not built yet: the checks arrive in U19a5–U19a7"를 찍고 코드 2로 끝난다(네트워크도 파일도 건드리지 않는다).
+워처는 OMS와 코드를 나누지 않는 별도 프로그램이다. 저널을 자기 읽기로 읽고(이 문서와 [C-TAIL](tail.md), [ADR-011](../adr/ADR-011-file-format.md)만으로 썼다), 자기 키와 클라이언트로 Bybit를 조회해 OMS와 비교하고, 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고, `monitor.sock`에 하트비트를 보낸다. **U19a6까지는 저널 읽기, 저널 상태, 독립성 검사, Bybit 서명·클라이언트와 지표 내보내기, 설정 파일과 자격 파일 읽기, 시작 확인과 IP 재확인의 sans-IO 단계, sans-IO 검사 엔진과 W1(열린 주문), 그리고 W2(포지션)만 있다. W3·W4와 이 부분들을 부르는 실행 코드(U19a7)는 아직 없어 워처는 아직 아무것도 감시하지 않는다(엔진의 하트비트와 불일치 행동을 보낼 곳이 없다).** 바이너리는 `watcher --version`에만 답하고, 그 밖의 호출은 "not built yet: the checks arrive in U19a5–U19a7"를 찍고 코드 2로 끝난다(네트워크도 파일도 건드리지 않는다).
 
 | 부 | 내용 | 단위 |
 |---|---|---|
@@ -11,7 +11,8 @@
 | 3 | Bybit 서명과 클라이언트, 응답 분류, 요청 제한, 지표 | U19a3(이 문서) |
 | 4 | 설정과 자격 파일, 시작 확인과 IP 재확인(이 문서) | U19a4, U19a4b |
 | 5 | 검사 엔진(일정, 상태 맞추기, 라운드의 저널 읽기, 기한, 두 라운드 규칙)과 W1 열린 주문(이 문서) | U19a5 |
-| 6~9 | W2, OMS 연결과 실행, W4, W3과 예산 | U19a6~U19a9(아직 없음) |
+| 6 | W2 포지션(거래소 쪽, 기호별 차이, 두 변경 시각과 미룸, 거래소 관찰 시각 `seen_at`)(이 문서) | U19a6 |
+| 7~9 | OMS 연결과 실행, W4, W3과 예산 | U19a7~U19a9(아직 없음) |
 
 ## 1부. 독립성
 
@@ -408,10 +409,60 @@
 - 실패 이유에 숫자가 든 줄(`the journal read stopped at record N, below the cap M`)은 이유가 라운드마다 바뀌므로 밀린 동안 라운드마다(1초에 한 줄) 쓴다. 빠르기는 묶여 있고 메모리는 자라지 않는다(검토 1 N7).
 - 저널에서 지워진(`purged`) 주문이 거래소에 열려 있으면 그 정보가 없으므로 `closed_in_journal`이 아니라 `foreign`으로 보인다. 둘 다 차이이고 종류만 다르다(판단(모델 아님): 지운 번호를 따로 기억하면 메모리가 묶이지 않는다).
 - 래치된 읽기 뒤의 라운드는 거래소에도 묻지 않는다. 래치의 신호는 `watcher_journal_error = 1`, 오류 한 줄, 자라는 `watcher_check_age_s`이고, OMS의 게이트는 W1·W2가 10초 넘게 성공하지 않으면 닫힌다.
-- 두 검사의 라운드가 함께 열린 경우(상태 답의 순서)는 W1과 시험의 대역 검사(`/v5/position/list` 한 쪽, 늘 일치)로 시험했다. W2는 U19a6이다.
+- 두 검사의 라운드가 함께 열린 경우(상태 답의 순서)는 U19a5에서 W1과 시험의 대역 검사로 시험했고, U19a6부터 W1과 실제 W2(빈 쪽, 일치)로 시험한다.
 - W1은 같은 `orderLinkId`를 가진 거래소 행 둘을 따로 판단한다(Bybit에서 열린 주문의 `orderLinkId`는 유일하다고 보지만 문서로 확인하지 않았다, 판단(모델 아님)).
 - 거래소 응답의 모양은 문서(gateway facts Q10)와 OMS의 쪽 규칙에서 왔다. 실제 Bybit에서 돌려 본 적이 없다(키가 없다, U-01).
 
 ### 검증(5부)
 
 `crates/watcher/tests/w1.rs` 13개와 `crates/watcher/tests/engine.rs` 10개(엔진 시험 도구 `tests/common/rig.rs`: 프로세스 안의 모델 거래소, 시험 저널 쓰기, 수동 시계, 지연 0의 답). 완료 기준: `w1::a_one_round_difference_does_not_alarm`(보았다, 안 보았다, 보았다를 되풀이해도 울리지 않음), `w1::a_two_round_difference_older_than_2_s_alarms`(첫 라운드 1.5초로 어리고 확정 라운드 2.5초), `w1::a_journal_entry_younger_than_2_s_does_not_alarm`(정확히 2초는 확정, 1µs 모자라면 미룸; `closed_in_journal`과 `missing_at_venue` 모두). 그 밖에 `w1::an_unacked_order_missing_at_the_venue_is_not_compared`, `w1::a_foreign_order_at_the_venue_is_a_mismatch`(빈 `orderLinkId`, 남의 형식, 다른 인스턴스, 모르는 주문 번호; 첫 sighting부터 2초), `w1::an_order_closed_in_the_journal_and_open_at_the_venue_is_a_mismatch`(`details` 둘 포함), `w1::the_venue_is_read_before_the_journal`(51개 주문, 두 쪽; 상태 요청은 마지막 쪽 뒤), `w1::a_difference_whose_order_keeps_receiving_events_is_confirmed_by_its_fact_age`, `w1::a_young_difference_seen_twice_defers_the_round`, `w1::a_full_page_without_a_cursor_or_an_unchanged_cursor_fails_the_round`(빈 커서의 가득 찬 쪽, 같은 커서, 필드 없는 행, 목록 아닌 `list`, 21쪽, 커서 있는 빈 쪽), `w1::an_order_ended_at_the_venue_in_the_journal_and_not_listed_agrees`, `w1::an_order_ended_in_the_journal_and_still_open_at_the_venue_is_open_after_terminal`, `w1::an_order_listed_on_two_pages_is_one_difference`(검토 1 S2), `engine::a_late_round_runs_once_and_rounds_do_not_overlap`, `engine::the_first_rounds_and_heartbeat_are_due_at_start`, `engine::a_retried_journal_error_heals_and_a_latched_one_fails_every_round`, `engine::a_status_of_another_instance_or_a_cap_below_the_read_before_the_request_stops_the_reader`, `engine::status_answers_in_reverse_order_are_each_used_by_their_own_round`, `engine::the_detail_is_at_most_1024_bytes`, `engine::a_confirmed_identity_is_counted_once`, `engine::a_request_without_an_answer_fails_its_round_at_the_deadline_and_a_late_answer_is_ignored`, `engine::mismatch_active_counts_the_confirmed_differences_a_round_still_sees`, `engine::a_failed_round_keeps_the_sightings_of_the_last_completed_round`(거래소 실패와 OMS 무응답, 검토 1 S1). 변이: M194(한 라운드가 확정; 고의 결함 13), M195(나이를 첫 라운드에서 봄; 14), M198(확인되지 않은 주문을 비교; 17), M211(상태 답을 다른 라운드가 씀; 30), M212(W1 나이를 저널의 마지막 기록에서; 31), M213(두 번 본 어린 차이를 성공으로; 32), M214(커서 없는 가득 찬 쪽을 받음; 33), M219(거래소 종결 주문을 `missing_at_venue`로; 38), M224(기한 지난 요청이 라운드를 열어 둠; 43), M229(`watcher_mismatch_active`가 내려가지 않음; 48), M239(나이를 보지 않음; 14의 둘째 꼴), M240(내려감을 지금의 `last_seq`와 비교; 30의 둘째 꼴), M241(실패한 라운드가 지난 sighting을 지움; 검토 1 S1), M242(한 라운드의 같은 정체를 두 번 셈; 검토 1 S2).
+
+## 6부. W2 포지션(U19a6)
+
+### W2(`w2::W2`, `w2_ms`마다, 기본 1초)
+
+- 거래소: `GET /v5/position/list?category=linear&settleCoin=USDT&limit=200`과 `cursor` 쪽들, 라운드에 5쪽까지(판단(모델 아님)). 5쪽째에도 커서가 있으면 라운드 실패(`more than 1000 positions`). 쪽 규칙은 W1과 같다(5부: 커서가 빈 가득 찬 쪽과 방금 보낸 커서는 `unreadable`, 커서가 있는 빈 쪽은 따른다). 행마다 `symbol`(문자열), `size`(소수: 지수, `+`, 9자리 이상의 소수는 거절. 크기는 음수가 아니고 부호는 `side`가 준다: `-`로 시작하는 크기는 `unreadable`), `side`(`Buy` +, `Sell` −, `""`이나 없음은 크기가 0일 때만 0이고 크기가 있으면 `unreadable`, 그 밖의 값은 `unreadable`; 검토 1 S1, OMS의 규칙 `oms-node/src/venue/bybit/query.rs` `signed_size`와 같다), `updatedTime`(ms 문자열, 선택. 숫자로 읽히지 않으면 없는 것으로 본다). 한 기호의 행이 둘 이상이면(헤지 모드, 쪽을 넘어서도) `unreadable`이다(OMS도 헤지 모드를 거부한다, `oms-node/src/venue/bybit/checks.rs:313-326`). `result.list`가 목록이 아니거나 `nextPageCursor`가 문자열이 아니어도 `unreadable`이다.
+- 저널: 종목별 포지션 = 체결 + 외부 체결 + 거래소 변경 + 조정(2부, C-TAIL). 주차된 체결은 세지 않는다(소유자 질문 4). 저널의 종목 이름은 거래소의 `symbol`과 같다고 본다(W1과 같다).
+- 차이: 어느 한쪽에 있는 기호마다 `d = 거래소 − 저널`. `d = 0`이면 일치, 아니면 차이 `(W2, position, <기호>, d)`. `d`가 소수의 범위(i128, 10^8 배)를 넘으면 값이 `overflow`인 차이다(일치로 읽지 않는다, 검토 1 N1). `d`가 정체의 값이라 다른 `d`는 다른 차이이고 처음부터 센다. `detail`: `W2 position <기호>: venue <거래소 크기>, journal <저널 포지션>; seen 2 rounds, journal entry <a> s old`(`<a>`는 아래 두 시각 중 새 것의 나이; 둘 다 모르면 `change time unknown`).
+
+### 두 변경 시각과 미룸
+
+- 두 시각을 본다. 저널의 `last_change_at`: 그 종목의 마지막 `fill_booked`·`external_fill_booked`·`venue_position_changed`·`position_adjusted` 기록 시각(2부; µs를 ms로 올림, 실제보다 늙게 보지 않는다). 거래소의 최근 변경 시각(아래). 판단에는 둘 중 알려진 것의 새 것을 쓴다.
+- 시각이 **어리다**: 알려져 있고 `now − t < min_age_ms`(기본 2,000ms). **모르는 시각은 늙음**이다: 저널이 그 종목을 바꾼 적이 없음(수동 거래, 옮겨진 포지션, OMS가 보지 못한 체결)과 거래소 시각이 없음 모두(검토 2 M2, 소유자 질문 10). 그래서 저널이 한 번도 바꾸지 않은 종목의 거래소 포지션은 두 번째 라운드에 확정된다. `Option`으로 시각을 가진 구현은 "알려져 있고 어림"을 시험해야 하고 "알려져 있고 늙음"을 시험하면 안 된다.
+- 규칙(W1보다 엄격, 설계 R5 SHOULD 2): 시각이 어리면 **첫 sighting이어도 미룸**이다. 라운드는 성공이 아니고 그 차이는 `watcher_differences`에 남는다(다음 라운드가 같은 `d`를 보면 두 번째 sighting이다). 어리지 않고 지난 완료 라운드에 같은 `d`가 있었으면 확정, 아니면 보류 중이고 라운드는 성공한다. 엔진에는 `engine::Logic::young_defers_at_first_sighting()`(기본 거짓, W2만 참) 하나로 들어간다. 일정, 두 라운드 규칙, 확정과 지표는 5부의 엔진 그대로다.
+- 체결이 이어지는 동안 W2는 성공하지 않아 `watcher_check_age_s{check="W2"}`만 자라고 하트비트의 W2 시각은 마지막 성공에 머문다. 10초를 넘는 미룸은 OMS의 모니터링 게이트가 다룬다(설계 R5, C-LIVE 2부). W2 미룸만의 지표는 없다(범위).
+
+### 거래소 관찰 시각 `seen_at`(검토 3 S1)
+
+- `settleCoin=USDT`이고 `symbol`이 없으면 `position/list`는 크기가 0보다 큰 행만 준다(gateway facts Q12.1). 그래서 막 0이 된 포지션에는 행도 `updatedTime`도 없다. 바로 닫힌 순간에 그렇다. W2는 기호마다 `{크기, seen_at}`를 둔다: 모든 쪽을 읽은 마지막 라운드의 부호 있는 크기(행이 없으면 0)와, 그 크기를 처음 본 라운드의 시각(그 라운드의 비교 시계, 5부 "성공").
+- 모든 쪽을 읽은 첫 라운드의 크기는 `seen_at`이 없다. 시작 때 찾은 상태이지 본 변경이 아니다. 그 뒤 다른 크기를 읽은 라운드가 `seen_at`을 자기 시각으로 한다.
+- 모든 쪽을 읽은 뒤 비교 전에 실패한 라운드(`/api/status` 무응답, 저널 오류, 상태 요청의 기한)도 크기를 남기고, 시각은 마지막 거래소 답의 시계다(검토 4 N2). OMS가 내려가 있는 동안 본 변경은 OMS가 다시 답할 때 이미 늙었고 다시 어려지지 않는다. 남기는 일은 다음 라운드의 첫 요청에서 한다(그 사이 아무도 이 목록을 읽지 않는다). 쪽 중간에 실패했거나 읽을 수 없는 쪽이 있던 라운드는 아무것도 남기지 않는다(시험 `w2::a_round_that_failed_between_pages_leaves_no_observation`, 검토 1 S2).
+- 거래소의 최근 변경 시각 = 행의 `updatedTime`(있고 읽히면), 아니면 `seen_at`. U19a9에서 W4가 마지막으로 맞춘 그 기호의 `execTime`이 더 새면 그것이 더해진다. 셋 다 없을 때만(첫 라운드부터 크기가 그대로이고 `updatedTime`이 없음) 모름, 곧 늙음이다.
+- 그래서 거래소에서 닫힌 포지션(t에 닫힘, 그것을 처음 0으로 본 라운드 r ≤ t + 1초)은 `now − r < 2초`인 동안 미룬다. `updatedTime` 있는 0 아닌 행과 같다. `updatedTime` 없이 라운드마다 크기가 바뀌면 라운드마다 어려 미루므로, 아무것도 확정하지 않는 동안 W2가 신선한 성공을 보고하지 않고 게이트가 10초에 닫힌다.
+- 목록에는 거래소가 완전한 읽기에서 보인 모든 기호가 하나씩 있고 거래소의 linear 기호 수로 묶인다(판단(모델 아님): 수백 개). 저널에만 있는 기호는 항목이 없고, 그것은 `{0, 없음}` 항목과 같다(검토 1 N2).
+
+### 3초 완료 기준
+
+- 수동 시계와 지연 0의 답에서, 체결이 멈춘 뒤 심은 차이(`updatedTime` = 심은 순간, 저널은 따라가지 않음)는 라운드 시작(거래소 읽기 전)에 심으면 +2,000ms, 라운드의 거래소 읽기 1ms 뒤에 심으면 +2,999ms에 확정된다. 첫 라운드는 어려서 미루고, 나이가 2초 이상인 첫 라운드가 지난 라운드와 같은 `d`로 확정한다. 요청 지연은 수동 시계에서 0이고 기준에 들지 않는다. `updatedTime`이 없으면 `seen_at`(변경 뒤 많아야 한 간격)이 쓰여 확정은 변경 뒤 많아야 1,000 + 2,000ms다.
+
+### 지표(6부)
+
+새 지표는 없다. W2는 5부의 `watcher_check_age_s{check="W2"}`, `watcher_differences{check="W2"}`, `watcher_mismatches_total{check="W2"}`, `watcher_mismatch_active{check="W2"}`와 3부의 `watcher_request_errors_total{endpoint="/v5/position/list",class="unreadable"}`를 쓴다.
+
+### 알려진 한계(6부)
+
+- 실행 코드(U19a7)가 아직 없다. `Engine::new`는 지금도 W1만 더하고(5부), U19a7의 실행 코드가 `Engine::add_check(Box::new(W2::default()), w2_ms)`로 W2를 더한다. U19a6 뒤에도 워처는 아무것도 감시하지 않는다.
+- 호스트 시계가 거래소보다 `min_age_ms`(2초) 이상 앞서면 모든 거래소 시각(`updatedTime`)이 늙어 보인다(`recv_window` 5초 안이면 그런 시계도 서명을 통과한다). 효과는 더 이른 확정이지 놓친 확정이 아니다(검토 3 N7). 시계가 뒤로 가는 한계(5부)와 함께 본다.
+- `updatedTime`의 뜻("Position updated timestamp (ms)", gateway facts Q12.7)은 문서에서만 왔다. 크기가 아닌 것(가격, 증거금, 펀딩)이 그것을 옮기는지는 모른다. 옮긴다면 미룸이 늘 뿐 확정을 놓치지는 않는다.
+- 라운드 도중 포지션이 바뀌어 한 기호가 두 쪽에 실리면 헤지 모드와 구별하지 못해 그 라운드는 `unreadable`이다(다음 라운드가 다시 읽는다; 판단(모델 아님): 쪽이 둘 이상인 계좌, 곧 200개 넘는 포지션에서만 생긴다).
+- `updatedTime`이 있으면 `seen_at`보다 오래되어도 그것을 쓴다(스펙의 규칙). 실제 `updatedTime`이 크기 변경에 움직이지 않거나 `"0"`이면 막 바뀐 크기를 늙게 보아 첫 sighting의 미룸을 건너뛰고, 차이는 한 라운드 뒤 확정한다(OMS가 1초 넘게 늦게 기록하면 거짓 보류; 검토 1 N4). testnet에서 확인할 항목이다.
+- `positionIdx`는 읽지 않는다. 헤지 모드에서 한쪽만 열린 계좌는 행 하나라 통과하지만 부호 있는 크기는 맞고, OMS는 시작 때 헤지 모드를 거부한다(`checks.rs:319-326`). `side`가 문자열 `"None"`이면 `unreadable`이다(안전한 쪽). Bybit가 이 계좌 종류에 그 문자열을 보내는지는 확인하지 않았다(검토 1 N6).
+- `detail`의 `journal entry <a> s old`는 새 시각이 거래소의 것일 때도 그 말을 쓴다(5부의 형식; 운영자에게 보이는 문구는 U19a7에서 정한다, 검토 1 N3).
+- 시험 도구의 답은 지연 0이라 시험은 비교 시계와 마지막 거래소 답의 시계를 구별하지 못한다(검토 1 N5).
+- W2는 크기만 비교한다(진입가, 레버리지, 증거금은 아니다).
+- 주차된 체결은 세지 않으므로 약 3초 넘게 주차된 체결은 W2 확정을 부를 수 있다(소유자 질문 4; 보류는 안전한 쪽).
+- 실제 Bybit의 `position/list` 응답으로 돌려 본 적이 없다(키가 없다, U-01). 행의 모양은 gateway facts Q12와 스펙에서 왔다.
+
+### 검증(6부)
+
+`crates/watcher/tests/w2.rs` 14개(5부의 엔진 시험 도구; 모델 거래소에 포지션 목록과 쪽마다의 스크립트, 상태 무응답을 더했다). 완료 기준: `w2::five_fills_per_second_for_60_s_give_no_mismatch`(모델 거래소가 200ms마다 체결하고 시험 저널이 300ms 뒤에 기록, 판단(모델 아님); 60초 동안 `Mismatch` 0개, W2 성공은 T0에 머물고 `watcher_check_age_s{W2}` = 60, 체결이 멈추면 다시 성공), `w2::a_difference_planted_after_the_fills_stop_is_confirmed_within_3_s`(라운드의 위상 0~900ms를 100ms 간격으로, 그리고 읽기 1ms 뒤; 확정은 +2,000~+3,000ms이고 위상마다 정확한 값). 그 밖에 `w2::a_changing_difference_restarts_the_count`(거래소가 모르는 저널 포지션 포함), `w2::a_deferred_round_is_not_a_success`(하트비트의 W2 시각), `w2::a_venue_position_in_a_symbol_the_journal_never_changed_is_confirmed_on_the_second_round`(검토 2 M2; 요청 매개변수), `w2::a_young_journal_change_defers_even_at_the_first_sighting`(정확히 2초는 늙음, 1µs 모자라면 어림), `w2::hedge_mode_rows_are_unreadable`(한 쪽, 두 쪽), `w2::bad_pages_and_rows_fail_the_round`(커서 없는 가득 찬 쪽, 같은 커서, 모르는 방향, 지수 크기, 기호 없음, 크기 있는 빈 방향과 없는 방향, 음수 크기(검토 1 S1), 6쪽, 거래소 오류, 크기 0인 빈 방향, 커서 있는 빈 쪽), `w2::a_closed_venue_position_defers_until_2_s_after_it_was_first_seen_flat`, `w2::a_difference_that_changes_every_round_without_a_venue_time_is_not_a_success`(검토 3 S1), `w2::sizes_found_at_the_first_round_have_no_seen_time`(무응답과 읽을 수 없는 쪽 뒤의 첫 읽기), `w2::a_size_seen_by_a_round_that_then_fails_keeps_its_seen_time`(검토 4 N2), `w2::a_round_that_failed_between_pages_leaves_no_observation`(검토 1 S2), `w2::a_difference_too_large_to_subtract_is_still_a_difference`(검토 1 N1). `engine::status_answers_in_reverse_order_are_each_used_by_their_own_round`는 U19a6부터 W1과 실제 W2로 돈다. 변이: M196(W2가 다른 두 값을 확정; 고의 결함 15), M197(미룬 W2 라운드를 성공으로; 16), M218(저널 시각이 없으면 어림으로; 37), M223(행이 없는 기호에 `seen_at`이 없음; 42), M243(크기 있는 빈 방향을 포지션 없음으로; 검토 1 S1), M244(커서 있는 쪽까지의 읽기를 완전한 읽기로; 검토 1 S2), M245(범위를 넘은 차이를 일치로; 검토 1 N1).

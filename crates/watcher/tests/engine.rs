@@ -8,9 +8,9 @@
 mod common;
 
 use common::rig::*;
-use serde_json::{Value, json};
-use watcher::engine::{Action, Check, DEADLINE_EXTRA_MS, Diff, Logic, Page, VenueRequest, cut};
-use watcher::state::JournalState;
+use serde_json::json;
+use watcher::engine::{Action, Check, DEADLINE_EXTRA_MS, cut};
+use watcher::w2::W2;
 
 fn venue_ids(a: &[Action]) -> Vec<u64> {
     a.iter()
@@ -161,32 +161,10 @@ fn a_request_without_an_answer_fails_its_round_at_the_deadline_and_a_late_answer
     assert_eq!(r.engine.success(Check::W1), Some(t1 + deadline));
 }
 
-/// A second check that reads one page and never differs: W2 arrives in
-/// U19a6, so this test pairs W1 with a stand-in.
-struct Stub;
-
-impl Logic for Stub {
-    fn check(&self) -> Check {
-        Check::W2
-    }
-    fn first(&mut self) -> VenueRequest {
-        VenueRequest {
-            path: "/v5/position/list",
-            params: vec![],
-        }
-    }
-    fn page(&mut self, _: u64, _: &Value) -> Page {
-        Page::Done
-    }
-    fn compare(&mut self, _: u64, _: &JournalState) -> Vec<Diff> {
-        vec![]
-    }
-}
-
 #[test]
 fn status_answers_in_reverse_order_are_each_used_by_their_own_round() {
     let mut r = Rig::new("engine-reverse");
-    r.engine.add_check(Box::new(Stub), 1000);
+    r.engine.add_check(Box::new(W2::default()), 1000);
     r.write(T0 - 1000, &open(1));
     r.write(T0 - 1000, &open(2));
     let [w1, w2] = venue_ids(&r.engine.poll(T0))[..] else {

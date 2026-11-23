@@ -93,12 +93,24 @@ pub fn page(rows: Vec<Value>, cursor: &str) -> Result<Value, RestError> {
     Ok(json!({"category": "linear", "list": rows, "nextPageCursor": cursor}))
 }
 
+/// A `/v5/position/list` row (U19a6); `updated`: `updatedTime` (ms).
+pub fn pos(symbol: &str, side: &str, size: &str, updated: Option<u64>) -> Value {
+    let mut r = json!({"symbol": symbol, "side": side, "size": size, "positionIdx": 0});
+    if let Some(t) = updated {
+        r["updatedTime"] = json!(t.to_string());
+    }
+    r
+}
+
 /// The model venue: its open orders, served 50 a page (a full page has a
-/// cursor `p<next index>`); scripted answers go first.
+/// cursor `p<next index>`), and its positions, served 200 a page
+/// (U19a6); scripted answers go first, one script per path.
 #[derive(Default)]
 pub struct Venue {
     pub orders: Vec<Value>,
     pub script: VecDeque<Result<Value, RestError>>,
+    pub positions: Vec<Value>,
+    pub pos_script: VecDeque<Result<Value, RestError>>,
     pub requests: Vec<(&'static str, Vec<(&'static str, String)>)>,
 }
 
@@ -109,7 +121,13 @@ impl Venue {
         params: &[(&'static str, String)],
     ) -> Result<Value, RestError> {
         self.requests.push((path, params.to_vec()));
-        if let Some(a) = self.script.pop_front() {
+        let positions = path == "/v5/position/list";
+        let (script, all, n) = if positions {
+            (&mut self.pos_script, &self.positions, 200)
+        } else {
+            (&mut self.script, &self.orders, 50)
+        };
+        if let Some(a) = script.pop_front() {
             return a;
         }
         let from = params
@@ -117,9 +135,9 @@ impl Venue {
             .find(|(k, _)| *k == "cursor")
             .map(|(_, v)| v[1..].parse::<usize>().unwrap())
             .unwrap_or(0);
-        let rows: Vec<Value> = self.orders.iter().skip(from).take(50).cloned().collect();
-        let next = if rows.len() == 50 {
-            format!("p{}", from + 50)
+        let rows: Vec<Value> = all.iter().skip(from).take(n).cloned().collect();
+        let next = if rows.len() == n {
+            format!("p{}", from + n)
         } else {
             String::new()
         };
@@ -136,6 +154,8 @@ pub struct Rig {
     /// The cap of the status answers; `None`: the journal's last record.
     pub cap: Option<u64>,
     pub instance: u64,
+    /// Set: the OMS does not answer `/api/status` (U19a6).
+    pub status_down: Option<String>,
     pub mismatches: Vec<(u64, Check, String)>,
     pub heartbeats: Vec<Beat>,
 }
@@ -164,6 +184,7 @@ impl Rig {
             lines,
             cap: None,
             instance: INSTANCE,
+            status_down: None,
             mismatches: Vec::new(),
             heartbeats: Vec::new(),
         }
@@ -203,8 +224,11 @@ impl Rig {
                     self.engine.on_venue(now, req_id, answer)
                 }
                 Action::Status { req_id } => {
-                    let s = self.status();
-                    self.engine.on_status(now, req_id, Ok(s))
+                    let s = match &self.status_down {
+                        Some(why) => Err(why.clone()),
+                        None => Ok(self.status()),
+                    };
+                    self.engine.on_status(now, req_id, s)
                 }
                 Action::Mismatch { check, detail } => {
                     self.mismatches.push((now, check, detail));
