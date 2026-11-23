@@ -203,3 +203,50 @@ fn bad_pages_and_rows_fail_the_round() {
     assert_eq!(r.engine.success(Check::W2), Some(T0 + 7000));
     assert_eq!(r.gauge("watcher_differences", "W2"), Some(0.0));
 }
+
+#[test]
+fn a_young_journal_change_defers_even_at_the_first_sighting() {
+    let mut r = rig("w2-young-first");
+    // The venue's time is old, the journal's is 0.5 s old.
+    r.write(T0 - 500, &[adj("BTCUSDT", "1")]);
+    r.venue.positions = vec![pos("BTCUSDT", "Buy", "2", Some(T0 - 60_000))];
+    r.at(T0);
+    assert_eq!(r.engine.success(Check::W2), None);
+    assert_eq!(r.gauge("watcher_differences", "W2"), Some(1.0));
+    r.at(T0 + 1000);
+    assert_eq!(r.engine.success(Check::W2), None);
+    assert!(w2_mismatches(&r).is_empty());
+    r.at(T0 + 2000);
+    let want = detail("BTCUSDT", "2", "1", "journal entry 2.5 s old");
+    assert_eq!(w2_mismatches(&r), vec![(T0 + 2000, want)]);
+    assert_eq!(r.engine.success(Check::W2), Some(T0 + 2000));
+    // A known time exactly 2 s old is old: a first sighting is pending.
+    r.write(T0 + 1000, &[adj("ETHUSDT", "1")]);
+    r.at(T0 + 3000);
+    assert_eq!(r.engine.success(Check::W2), Some(T0 + 3000));
+    assert_eq!(r.gauge("watcher_differences", "W2"), Some(1.0));
+}
+
+#[test]
+fn a_deferred_round_is_not_a_success() {
+    let mut r = rig("w2-deferred");
+    r.at(T0);
+    assert_eq!(r.engine.success(Check::W2), Some(T0));
+    // The venue moves 100 ms before every round and the journal never
+    // follows: every round is deferred, none confirms.
+    for k in 1..=5 {
+        let size = k.to_string();
+        let t = T0 + k * 1000;
+        r.venue.positions = vec![pos("BTCUSDT", "Buy", &size, Some(t - 100))];
+        r.at(t);
+        assert_eq!(r.engine.success(Check::W2), Some(T0), "round {k}");
+    }
+    assert!(r.mismatches.is_empty());
+    assert_eq!(r.gauge("watcher_check_age_s", "W2"), Some(5.0));
+    assert_eq!(r.gauge("watcher_differences", "W2"), Some(1.0));
+    // The heartbeat carries W2's last success, not the deferred rounds.
+    let (at, checks) = r.heartbeats.last().unwrap();
+    assert_eq!(*at, T0 + 5000);
+    assert!(checks.contains(&(Check::W2, Some(T0))));
+    assert!(checks.contains(&(Check::W1, Some(T0 + 4000))));
+}

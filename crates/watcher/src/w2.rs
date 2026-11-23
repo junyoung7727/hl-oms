@@ -129,6 +129,10 @@ impl Logic for W2 {
         self.read(result).unwrap_or_else(Page::Unreadable)
     }
 
+    fn young_defers_at_first_sighting(&self) -> bool {
+        true
+    }
+
     fn compare(&mut self, _now_ms: u64, state: &JournalState) -> Vec<Diff> {
         let symbols: BTreeSet<&String> = self.rows.keys().chain(state.positions.keys()).collect();
         let mut out = Vec::new();
