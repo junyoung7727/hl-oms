@@ -8,7 +8,7 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use watcher::config::{Config, Network};
+use watcher::config::{Config, Kill, Network};
 
 /// The required fields and nothing else.
 const MIN: &str = r#"name = "w1"
@@ -607,4 +607,60 @@ fn telegram_is_validated_and_required_on_mainnet() {
     );
     assert!(ok(&with_data(&dir.join("t.json"))).telegram.is_some());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn kill_loop_fields_are_validated() {
+    // Without the section: no kill (the key rules of step 2 are not read).
+    assert_eq!(ok(MIN).kill, None);
+    // An empty section takes the defaults (table 7-8 C4, C5).
+    let k = ok(&format!("{MIN}\n[kill]\n")).kill.unwrap();
+    assert_eq!(
+        k,
+        Kill {
+            round_ms: 1000,
+            watch_ms: 30_000,
+            watch_every_ms: 5000,
+            notice_ms: 60_000,
+        }
+    );
+    let kill = |body: &str| format!("{MIN}\n[kill]\n{body}\n");
+    // Every bound itself is accepted, one step beyond it refused.
+    for (field, lo, hi) in [
+        ("round_ms", 1000, 10_000),
+        ("watch_ms", 10_000, 300_000),
+        ("notice_ms", 60_000, 600_000),
+    ] {
+        for v in [lo, hi] {
+            ok(&kill(&format!("{field} = {v}\nwatch_every_ms = 1000")));
+        }
+        for v in [lo - 1, hi + 1] {
+            refused(
+                &kill(&format!("{field} = {v}\nwatch_every_ms = 1000")),
+                &format!("[kill] {field} must be between {lo} and {hi}"),
+            );
+        }
+    }
+    // watch_every_ms: 1,000 up to watch_ms.
+    ok(&kill("watch_every_ms = 1000"));
+    ok(&kill("watch_ms = 20000\nwatch_every_ms = 20000"));
+    refused(
+        &kill("watch_every_ms = 999"),
+        "[kill] watch_every_ms must be between 1000 and 30000",
+    );
+    refused(
+        &kill("watch_ms = 20000\nwatch_every_ms = 20001"),
+        "[kill] watch_every_ms must be between 1000 and 20000",
+    );
+    let k = ok(&kill("round_ms = 2000\nwatch_ms = 60000\nwatch_every_ms = 10000\nnotice_ms = 120000"))
+        .kill
+        .unwrap();
+    assert_eq!(
+        (k.round_ms, k.watch_ms, k.watch_every_ms, k.notice_ms),
+        (2000, 60_000, 10_000, 120_000)
+    );
+    // Unknown keys and wrong types are refused.
+    refused(&kill("bogus = 1"), "bogus");
+    refused(&kill("round_ms = \"1000\""), "round_ms");
+    refused(&kill("round_ms = -1"), "round_ms");
 }

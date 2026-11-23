@@ -59,6 +59,37 @@ pub struct Config {
     /// `[telegram]` (U19b1a): the watcher's own sender of `[WATCH P1]`;
     /// required on mainnet, optional on testnet.
     pub telegram: Option<Telegram>,
+    /// `[kill]` (U19b2a: the loop timings): the watcher's own cancel-all
+    /// confirmation loop. With it the key must be able to cancel (start
+    /// step 2). U19b3a adds the marker, the unit and the stop fields.
+    pub kill: Option<Kill>,
+}
+
+/// `[kill]`, the loop fields (C-WATCH part 11): the same defaults and
+/// ranges as the OMS's `kill_*` fields, written again here. The defaults
+/// are table 7-8's design values (C4, C5).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Kill {
+    /// A cancel-all every `round_ms` until zero open orders are confirmed.
+    pub round_ms: u64,
+    /// After the first zero, the watch lasts `watch_ms`.
+    pub watch_ms: u64,
+    /// A count every `watch_every_ms` during the watch.
+    pub watch_every_ms: u64,
+    /// At most one progress notice per `notice_ms`.
+    pub notice_ms: u64,
+}
+
+impl Default for Kill {
+    fn default() -> Kill {
+        Kill {
+            round_ms: 1000,
+            watch_ms: 30_000,
+            watch_every_ms: 5000,
+            notice_ms: 60_000,
+        }
+    }
 }
 
 /// `[intervals]`: how often each check, the heartbeat, the IP recheck and
@@ -190,6 +221,7 @@ struct File {
     #[serde(default)]
     telemetry: Telemetry,
     telegram: Option<Telegram>,
+    kill: Option<Kill>,
 }
 
 /// The default `host` label: `/etc/hostname`, else `"unknown"`.
@@ -236,6 +268,7 @@ impl Config {
             http: f.http,
             telemetry: f.telemetry,
             telegram: f.telegram,
+            kill: f.kill,
         };
         cfg.validate()?;
         Ok(cfg)
@@ -363,6 +396,21 @@ impl Config {
         }
         if let Some(u) = &self.telemetry.vm_url {
             check_vm_url(u)?;
+        }
+        if let Some(k) = &self.kill {
+            // `round_ms` ≥ 1 s keeps the watcher at ≤ 1 cancel-all per
+            // second; `notice_ms` ≥ 60 s keeps the 12-in-10-min bound. The
+            // ranges are 판단(모델 아님).
+            for (field, v, lo, hi) in [
+                ("round_ms", k.round_ms, 1000, 10_000),
+                ("watch_ms", k.watch_ms, 10_000, 300_000),
+                ("watch_every_ms", k.watch_every_ms, 1000, k.watch_ms),
+                ("notice_ms", k.notice_ms, 60_000, 600_000),
+            ] {
+                if !(lo..=hi).contains(&v) {
+                    return Err(format!("[kill] {field} must be between {lo} and {hi}"));
+                }
+            }
         }
         Ok(())
     }
