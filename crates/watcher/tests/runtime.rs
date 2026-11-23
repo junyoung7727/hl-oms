@@ -483,7 +483,9 @@ fn a_key_rejected_at_start_is_exported() {
         "/v5/user/query-api",
         [Answer::Reply(401, "{\"retCode\":10003}".into())],
     );
-    w.status_ok();
+    // The OMS is down too: nothing but the export shows the state.
+    w.status
+        .route("/api/status", [Answer::Reply(500, "{}".into())]);
     let clock = Arc::new(ManualClock::new(T0));
     let run = w.start(clock.clone());
     let rejected = r#"{"metric":{"__name__":"watcher_auth_rejected","host":"h","venue":"bybit","watcher":"w-rt"},"values":[1.0]"#;
