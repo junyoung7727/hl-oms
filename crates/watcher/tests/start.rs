@@ -511,3 +511,233 @@ async fn a_traded_symbol_that_does_not_settle_in_usdt_refuses_the_start() {
     }
     assert_eq!(echo.requests().len(), 4);
 }
+
+/// Every answer that is neither `auth` nor a readable refusal, as the
+/// client gives it or (for `unreadable`) as the start reads it, with the
+/// wait it must give: 5 s after the answer, after a 403 the 600 s pause.
+fn retried() -> Vec<(&'static str, Result<Value, RestError>, u64)> {
+    vec![
+        (
+            "not_sent",
+            Err(RestError::NotSent("connect".into())),
+            RETRY_MS,
+        ),
+        (
+            "no_answer",
+            Err(RestError::NoAnswer("HTTP 502".into())),
+            RETRY_MS,
+        ),
+        (
+            "rate_limited",
+            Err(RestError::RateLimited("10006".into())),
+            RETRY_MS,
+        ),
+        ("clock", Err(RestError::Clock("10002".into())), RETRY_MS),
+        (
+            "refused",
+            Err(RestError::Refused {
+                code: 10001,
+                msg: "params error".into(),
+            }),
+            RETRY_MS,
+        ),
+        (
+            "ip_banned",
+            Err(RestError::IpBanned("HTTP 403".into())),
+            IP_BAN_PAUSE_MS,
+        ),
+    ]
+}
+
+/// Drives a retried answer at `at` and the wait after it: no request
+/// before the instant, the same request at it.
+fn retry_case(
+    s: &mut S,
+    at: u64,
+    req: &Request,
+    answer: Result<Value, RestError>,
+    wait: u64,
+    case: &str,
+) {
+    let before = lines(&s.lines).len();
+    let step = s.start.on_answer(at, answer);
+    assert_eq!(
+        step,
+        Step::Wait {
+            until_ms: at + wait
+        },
+        "{case}"
+    );
+    let l = lines(&s.lines);
+    assert_eq!(l.len(), before + 1, "{case}: one line: {l:?}");
+    assert!(l[before].starts_with("start: "), "{case}: {l:?}");
+    assert!(
+        l[before].ends_with(&format!("asked again at {} ms", at + wait)),
+        "{case}: {l:?}"
+    );
+    for t in [at, at + 1, at + RETRY_MS - 1, at + wait - 1] {
+        assert_eq!(s.start.poll(t), None, "{case}: at +{}", t - at);
+    }
+    take(&mut s.start, at + wait, req);
+}
+
+#[test]
+fn query_api_answers_other_than_auth_or_a_refusal_retry_every_5_s() {
+    let mut cases = retried();
+    // Readable as JSON but not as the key: unreadable, counted by the start.
+    for (case, v) in [
+        ("no fields", json!({})),
+        ("isMaster a string", {
+            let mut k = good_key();
+            k["isMaster"] = json!("false");
+            k
+        }),
+        ("userID a string", {
+            let mut k = good_key();
+            k["userID"] = json!("4242");
+            k
+        }),
+        ("ips a string", key(UID, false, json!(IP), None)),
+        ("ips with a number", key(UID, false, json!([IP, 1]), None)),
+        ("null result", Value::Null),
+    ] {
+        cases.push((case, Ok(v), RETRY_MS));
+    }
+    let unreadable = cases.iter().filter(|c| c.1.is_ok()).count() as f64;
+    let metrics = Arc::new(Metrics::new("h1", "w1"));
+    for (case, answer, wait) in cases {
+        let (log, lines) = watcher::log::collect();
+        let mut s = S {
+            start: Start::new(&config(&["BTCUSDT"], 60_000), metrics.clone(), log, T0),
+            metrics: metrics.clone(),
+            lines,
+        };
+        take(&mut s.start, T0, &query_api());
+        // The answer comes 300 ms after the request: the wait runs from it.
+        retry_case(&mut s, T0 + 300, &query_api(), answer, wait, case);
+        // Twice in a row: the pace stays the same.
+        let at = T0 + 300 + wait + 40;
+        retry_case(
+            &mut s,
+            at,
+            &query_api(),
+            Err(RestError::NoAnswer("timeout".into())),
+            RETRY_MS,
+            case,
+        );
+        // The start does not go on before a readable answer, then does.
+        assert_eq!(
+            s.start.on_answer(at + RETRY_MS, Ok(good_key())),
+            Step::Next,
+            "{case}"
+        );
+        take(&mut s.start, at + RETRY_MS, &Request::Echo);
+    }
+    assert_eq!(
+        metrics.get(
+            "watcher_request_errors_total",
+            &[("endpoint", QUERY_API), ("class", "unreadable")]
+        ),
+        Some(unreadable)
+    );
+}
+
+#[test]
+fn settle_coin_answers_other_than_auth_or_a_refusal_retry_every_5_s() {
+    let mut cases = retried();
+    for (case, v) in [
+        ("no list", json!({"category": "linear"})),
+        ("list an object", json!({"category": "linear", "list": {}})),
+        ("null result", Value::Null),
+    ] {
+        cases.push((case, Ok(v), RETRY_MS));
+    }
+    for (case, answer, wait) in cases {
+        let mut s = start_of(&["BTCUSDT", "ETHUSDT"], T0);
+        to_symbols(&mut s, T0, good_key(), IP);
+        take(&mut s.start, T0, &instruments("BTCUSDT"));
+        assert_eq!(
+            s.start
+                .on_answer(T0 + 20, Ok(instrument("BTCUSDT", "USDT"))),
+            Step::Next
+        );
+        // The second symbol fails: the same symbol is asked again, not the first.
+        take(&mut s.start, T0 + 20, &instruments("ETHUSDT"));
+        retry_case(
+            &mut s,
+            T0 + 250,
+            &instruments("ETHUSDT"),
+            answer,
+            wait,
+            case,
+        );
+        let at = T0 + 250 + wait;
+        assert_eq!(
+            s.start.on_answer(at, Ok(instrument("ETHUSDT", "USDT"))),
+            Step::Done,
+            "{case}"
+        );
+        assert_eq!(s.start.poll(at + IP_BAN_PAUSE_MS), None, "{case}");
+        assert!(s.start.ip_check().is_some(), "{case}");
+    }
+}
+
+#[tokio::test]
+async fn an_auth_answer_at_start_stays_up_without_requests() {
+    let echo = FakeHttp::start(Answer::Reply(200, IP.into()));
+    let echo_url = format!("{}/ip", echo.url());
+    // Rejected at query-api (step 2) and at the settle coin (step 5).
+    for (case, at_query, answer, want_requests) in [
+        ("query-api 10010", true, code(10010), 1),
+        ("query-api 10003", true, code(10003), 1),
+        ("query-api 33004", true, code(33004), 1),
+        (
+            "query-api HTTP 401",
+            true,
+            Answer::Reply(401, String::new()),
+            1,
+        ),
+        ("instruments-info 10004", false, code(10004), 2),
+    ] {
+        let fake = FakeHttp::start(code(10016));
+        if at_query {
+            fake.route(QUERY_API, [answer]);
+        } else {
+            fake.route(QUERY_API, [ok(&good_key())]);
+            fake.route(INSTRUMENTS, [answer]);
+        }
+        let c = client(&fake);
+        let metrics = Arc::new(Metrics::new("h1", "w1"));
+        let (log, start_lines) = watcher::log::collect();
+        let mut start = Start::new(&config(&["BTCUSDT"], 60_000), metrics, log, T0);
+        assert_eq!(
+            drive(&mut start, &c, &echo_url).await,
+            Step::StayUpNoRequests,
+            "{case}"
+        );
+        // No exit and no request: the start asks nothing for 10 minutes of
+        // the clock, and the client would send nothing either.
+        for _ in 0..600 {
+            c.clock.advance(1000);
+            assert_eq!(start.poll(c.clock.now_ms()), None, "{case}");
+        }
+        let e = c.client.get(QUERY_API, &[]).await.unwrap_err();
+        assert_eq!(e.class(), "auth", "{case}");
+        assert_eq!(fake.requests().len(), want_requests, "{case}");
+        assert!(start.ip_check().is_none(), "{case}");
+        // Visible: the gauge, and the client's one error line; the start
+        // itself adds no line.
+        assert_eq!(
+            c.metrics.get("watcher_auth_rejected", &[]),
+            Some(1.0),
+            "{case}"
+        );
+        let l = lines(&c.lines);
+        assert_eq!(l.len(), 1, "{case}: {l:?}");
+        assert!(
+            l[0].starts_with("error: Bybit rejected the key"),
+            "{case}: {l:?}"
+        );
+        assert!(lines(&start_lines).is_empty(), "{case}");
+    }
+}
