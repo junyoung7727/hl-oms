@@ -102,7 +102,7 @@ B와 b. 커서 저장(C)은 하지 않는다.
 
 ## 9. 근거
 
-- 시험(U19a7): `crates/watcher/tests/admin.rs` 6개, `heartbeat.rs` 3개, `runtime.rs` 7개(loopback 가짜와 가짜 소켓; 종단 시험 하나는 실제 시간), `binary.rs` 1개(주장 V-WATCH-7). 변이 M199~M201, M220, M226, M228.
+- 시험(U19a7): `crates/watcher/tests/admin.rs` 7개, `heartbeat.rs` 3개, `runtime.rs` 9개(loopback 가짜와 가짜 소켓; 종단 시험 하나는 실제 시간), `binary.rs` 1개(주장 V-WATCH-7). 변이 M199~M201, M220, M226, M228, M246(검토 1).
 - 시험(U19a5): `crates/watcher/tests/w1.rs` 13개, `crates/watcher/tests/engine.rs` 10개(프로세스 안의 모델 거래소, 시험 저널, 수동 시계; 주장 V-WATCH-5). 변이 M194, M195, M198, M211~M214, M219, M224, M229, M239~M242(검토 1).
 - 시험(U19a6): `crates/watcher/tests/w2.rs` 14개(같은 시험 도구에 포지션 목록; 주장 V-WATCH-6). 변이 M196, M197, M218, M223, M243~M245(검토 1). 검토 1에서 크기 있는 빈·없는 방향과 음수 크기를 `unreadable`로 했다(OMS의 규칙과 같다). 대안 "스펙대로 빈 방향은 0"은 OMS가 모르는 포지션을 평평하게 읽는다.
 - 시험(U19a4b): `crates/watcher/tests/start.rs` 13개(수동 시계의 sans-IO 단계, 요청 없음을 보일 곳은 loopback 가짜 Bybit·반향과 실제 클라이언트; 주장 V-WATCH-4). 변이 M189, M190, M225, M238(검토 1 M1).

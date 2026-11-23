@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `5d1f9f7ce77e6569`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `39060de7d60f5f51`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 주장 115건: 통과 0, 실패 0, 미실행 48, 이전 버전 결과 67.
 
@@ -121,7 +121,7 @@
 | V-WATCH-4 | 워처의 설정 파일은 스펙 표의 모든 필드를 그 기본값과 검사대로 읽는다: 모르는 키와 표는 거부하고, mainnet은 mainnet_confirmed = true일 때만 받으며, 범위는 양 끝을 포함하고, status_url과 vm_url은 loopback만, ip_echo_url은 https만, 자격 파일은 절대 경로이고 ..이 없으며 링크를 따라 봐도 데이터 디렉터리 밖이다. 자격 파일은 링크를 따르지 않고 FIFO를 기다리지 않는 한 핸들로, 이 프로세스의 uid가 소유하고 권한이 정확히 0600 또는 0400인 일반 파일일 때만, api_key와 api_secret 둘만 비어 있지 않게 읽는다. 모든 거부는 한 줄이고, 자격 파일의 오류는 내용을 인용하지 않으며 비밀은 어디에도 찍히지 않는다. 시작 확인(U19a4b)은 query-api의 마스터 키, 다른 userID, IP에 묶이지 않은 키([]·*)와 행이 없거나 USDT로 정산되지 않는 기호를 종료 2의 이유 한 줄로 거부하고, 키 거절(auth)이면 끝내지 않고 요청 없이 떠 있으며, 그 밖의 답은 답의 시각 + 5초(403이면 + 600초)에 다시 묻는다. watcher_api_key_days_left는 expiredAt까지의 날을 내림하고 해당 없음(없음, null, 1970-01-02 이하)이면 내보내지 않는다. watcher_public_ip_ok는 반향의 주소가 마지막으로 통과한 ips에 있을 때만 1이다. IP 재확인은 지난 재확인의 마지막 답 + ip_check_ms마다 돌고, 실패하면 0으로 두고 남은 날을 지키며, 시작 규칙에 더는 맞지 않는 키는 재시작까지 모든 Bybit 요청을 멈추고 0으로 둔다. 재확인이나 5단계에서 키가 거절되면 Bybit에는 묻지 않고 반향만 ip_check_ms마다 이어 간다. 요청이 답을 기다리지 않을 때 온 답은 아무것도 바꾸지 않는다 | 단위 | 미실행 | `cargo test -p watcher --test config --test creds --test start` |
 | V-WATCH-5 | 워처의 검사 엔진은 첫 라운드와 첫 하트비트를 start_ms에 내고, 한 검사의 라운드를 겹치지 않으며 늦은 라운드는 한 번만 돌린다. 라운드는 거래소 쪽을 모두 읽은 뒤에만 그 라운드만의 상태 요청을 내고, 그 답은 물은 라운드만 쓰며, 그 상한까지 저널을 읽은 뒤 비교한다. 다른 인스턴스의 상태와 그 요청을 낼 때 읽은 기록보다 낮은 상한은 읽기를 재시작까지 래치하고 그 뒤 라운드는 아무것도 묻지 않는다. 다시 읽는 저널 오류는 다음 라운드에 낫고 watcher_journal_error를 0으로 돌린다. 기한(낸 시각 + request_timeout_ms + 11초)까지 답이 없는 요청은 라운드를 실패로 닫고 늦은 답은 버린다. 차이는 지난 완료 라운드와 이번 라운드에 같은 정체로 있고 이번 라운드에서 min_age_ms 이상 늙었을 때만 확정되며(실패한 라운드는 지난 완료 라운드의 sighting을 바꾸지 않는다), 두 번 보았지만 어린 차이는 라운드를 성공으로 치지 않는다. 확정은 정체마다 한 번 세고(한 라운드에 두 번 실린 정체도 하나) 1024바이트 이하의 detail을 실은 Mismatch 하나를 내며, watcher_mismatch_active는 라운드가 그것을 보지 않으면 내려간다. W1은 OMS의 쪽 규칙대로 열린 주문을 읽고(커서 없는 가득 찬 쪽, 같은 커서, 필드 없는 행은 unreadable, 20쪽 한도), 모르는 주문(foreign), 저널에서 닫힘, 거래소 종결 뒤에도 열림, 종목·방향 다름, 확인된 주문의 거래소 부재를 차이로 보고, 확인되지 않았거나 결과 불명이거나 거래소 종결된 주문의 부재는 비교하지 않는다. 나이는 주문의 fact_at(다른 이벤트로 움직이지 않음) 또는 첫 sighting이다 | 단위(sans-IO, 수동 시계) | 미실행 | `cargo test -p watcher --test w1 --test engine` |
 | V-WATCH-6 | 워처의 W2는 position/list(category=linear, settleCoin=USDT, 200개씩 5쪽까지)를 W1의 쪽 규칙으로 읽고(커서 없는 가득 찬 쪽, 같은 커서, 한 기호의 두 행(헤지 모드), 모르는 방향, 소수가 아닌 크기, 크기 있는 빈·없는 방향, 음수 크기, 기호 없는 행은 unreadable, 6쪽째는 실패), 기호마다 d = 거래소 − 저널(체결 + 외부 체결 + 거래소 변경 + 조정)을 차이 (W2, position, 기호, d)로 본다(범위를 넘은 d는 값 overflow인 차이). 다른 d는 처음부터 센다. 저널의 마지막 변경 시각과 거래소의 최근 변경 시각(updatedTime, 없으면 그 크기를 처음 본 라운드 seen_at) 중 알려진 것이 min_age_ms보다 어리면 첫 sighting이어도 미루고 라운드는 성공이 아니며, 모르는 시각은 늙음이라 저널이 바꾼 적 없는 기호의 거래소 포지션은 두 번째 라운드에 확정된다. 행이 없는 기호는 크기 0으로 보아 막 닫힌 포지션도 처음 0으로 본 라운드부터 2초 미루고, 첫 완전한 읽기의 크기에는 seen_at이 없으며, 모든 쪽을 읽은 뒤 실패한 라운드의 크기는 마지막 거래소 답의 시각으로 남고, 쪽 사이에서 실패한 라운드는 아무것도 남기지 않는다. 초당 5번의 체결이 60초 이어지는 동안 Mismatch가 없고, 체결이 멈춘 뒤 심은 차이는 라운드의 어느 위상에서도 3초 안에 확정된다 | 단위(sans-IO, 수동 시계) | 미실행 | `cargo test -p watcher --test w2` |
-| V-WATCH-7 | 워처의 엔진은 확정된 차이를 그것을 실은 보내기가 "held"로 답할 때까지 빚으로 두고("already held", 보류를 보이는 저널, 실패는 갚지 않고, 라운드가 더 보지 않아도 확정 때의 detail로 보낸다), 저널 상태가 그 검사의 최근 held/already held 답 뒤에 낸 상태 요청의 상한에서 보류 꺼짐을 보일 때, 지난 보내기 시작부터 mismatch_resend_ms가 지났을 때, 그 검사의 보내기가 진행 중이 아닐 때만 보낸다(보고가 없는 보내기는 낸 시각 + 2 × request_timeout_ms + 1초에 실패). W1·W2는 라운드가 아직 보는 확정된 차이를 해제 뒤 다시 보낸다. admin.sock 클라이언트는 hello 다음 watcher_mismatch를 보내고 두 답을 읽는다. monitor.sock 클라이언트는 연결 하나를 유지하고 hello를 먼저, 그다음 W1~W4의 성공 시각(없으면 null)을 보내며, 끊김·답 없음 뒤 다음 하트비트에 다시 연다. 실행은 설정을 읽은 때부터 지표를 밀어 넣고, 시작 확인, /api/status 기다림, 재생 동안에도 IP를 다시 확인하며, OMS가 답하지 않으면 아무것도 판단하지 않고, 시작 거부는 코드 2, shutdown 입력은 새 라운드 없이 마지막 밀어 넣기와 모니터 연결 닫음 뒤 0으로 끝난다 | 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나) | 미실행 | `cargo test -p watcher --test admin --test heartbeat --test runtime --test binary` |
+| V-WATCH-7 | 워처의 엔진은 확정된 차이를 그것을 실은 보내기가 "held"로 답할 때까지 빚으로 두고("already held", 보류를 보이는 저널, 실패는 갚지 않고, 라운드가 더 보지 않아도 확정 때의 detail로 보낸다), 저널 상태가 그 검사의 최근 held/already held 답 뒤에 낸 상태 요청의 상한에서 보류 꺼짐을 보일 때, 지난 보내기 시작부터 mismatch_resend_ms가 지났을 때, 그 검사의 보내기가 진행 중이 아닐 때만 보낸다(보고가 없는 보내기는 낸 시각 + 2 × request_timeout_ms + 1초에 실패하고, 그 뒤에 온 늦은 보고는 번호가 달라 아무것도 갚지 않는다). W1·W2는 라운드가 아직 보는 확정된 차이를 해제 뒤 다시 보낸다. admin.sock 클라이언트는 hello 다음 watcher_mismatch를 보내고 두 답을 읽는다. monitor.sock 클라이언트는 연결 하나를 유지하고 hello를 먼저, 그다음 W1~W4의 성공 시각(없으면 null)을 보내며, 끊김·답 없음 뒤 다음 하트비트에 다시 연다. 실행은 설정을 읽은 때부터 지표를 밀어 넣고, 시작 확인, /api/status 기다림, 재생 동안에도 IP를 다시 확인하고, 재확인에서 시작 규칙에 맞지 않는 키는 모든 Bybit 요청을 멈추며, OMS가 답하지 않으면 아무것도 판단하지 않고, 시작 거부는 코드 2, shutdown 입력은 새 라운드 없이 마지막 밀어 넣기와 모니터 연결 닫음 뒤 0으로 끝난다 | 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나) | 미실행 | `cargo test -p watcher --test admin --test heartbeat --test runtime --test binary` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -2818,15 +2818,15 @@
 | `watcher/a_round_that_failed_between_pages_leaves_no_observation` | 미실행 |  |
 | `watcher/a_difference_too_large_to_subtract_is_still_a_difference` | 미실행 |  |
 
-## V-WATCH-7 — 워처의 엔진은 확정된 차이를 그것을 실은 보내기가 "held"로 답할 때까지 빚으로 두고("already held", 보류를 보이는 저널, 실패는 갚지 않고, 라운드가 더 보지 않아도 확정 때의 detail로 보낸다), 저널 상태가 그 검사의 최근 held/already held 답 뒤에 낸 상태 요청의 상한에서 보류 꺼짐을 보일 때, 지난 보내기 시작부터 mismatch_resend_ms가 지났을 때, 그 검사의 보내기가 진행 중이 아닐 때만 보낸다(보고가 없는 보내기는 낸 시각 + 2 × request_timeout_ms + 1초에 실패). W1·W2는 라운드가 아직 보는 확정된 차이를 해제 뒤 다시 보낸다. admin.sock 클라이언트는 hello 다음 watcher_mismatch를 보내고 두 답을 읽는다. monitor.sock 클라이언트는 연결 하나를 유지하고 hello를 먼저, 그다음 W1~W4의 성공 시각(없으면 null)을 보내며, 끊김·답 없음 뒤 다음 하트비트에 다시 연다. 실행은 설정을 읽은 때부터 지표를 밀어 넣고, 시작 확인, /api/status 기다림, 재생 동안에도 IP를 다시 확인하며, OMS가 답하지 않으면 아무것도 판단하지 않고, 시작 거부는 코드 2, shutdown 입력은 새 라운드 없이 마지막 밀어 넣기와 모니터 연결 닫음 뒤 0으로 끝난다
+## V-WATCH-7 — 워처의 엔진은 확정된 차이를 그것을 실은 보내기가 "held"로 답할 때까지 빚으로 두고("already held", 보류를 보이는 저널, 실패는 갚지 않고, 라운드가 더 보지 않아도 확정 때의 detail로 보낸다), 저널 상태가 그 검사의 최근 held/already held 답 뒤에 낸 상태 요청의 상한에서 보류 꺼짐을 보일 때, 지난 보내기 시작부터 mismatch_resend_ms가 지났을 때, 그 검사의 보내기가 진행 중이 아닐 때만 보낸다(보고가 없는 보내기는 낸 시각 + 2 × request_timeout_ms + 1초에 실패하고, 그 뒤에 온 늦은 보고는 번호가 달라 아무것도 갚지 않는다). W1·W2는 라운드가 아직 보는 확정된 차이를 해제 뒤 다시 보낸다. admin.sock 클라이언트는 hello 다음 watcher_mismatch를 보내고 두 답을 읽는다. monitor.sock 클라이언트는 연결 하나를 유지하고 hello를 먼저, 그다음 W1~W4의 성공 시각(없으면 null)을 보내며, 끊김·답 없음 뒤 다음 하트비트에 다시 연다. 실행은 설정을 읽은 때부터 지표를 밀어 넣고, 시작 확인, /api/status 기다림, 재생 동안에도 IP를 다시 확인하고, 재확인에서 시작 규칙에 맞지 않는 키는 모든 Bybit 요청을 멈추며, OMS가 답하지 않으면 아무것도 판단하지 않고, 시작 거부는 코드 2, shutdown 입력은 새 라운드 없이 마지막 밀어 넣기와 모니터 연결 닫음 뒤 0으로 끝난다
 
 - 상태: **미실행**
 - 왜 중요한가: 빚을 잃으면 OMS의 메모가 이름하지 않는 차이가 사라지고, 답 앞의 상한으로 보류 꺼짐을 믿으면 보류가 걸린 줄 모르고 보내거나 거둔다. 진행 중 보내기가 둘이면 held가 무엇을 갚는지 모른다. 하트비트가 다른 검사의 시각을 실으면 게이트가 틀리게 열리고, hello 없는 하트비트는 거절된다. OMS가 내려간 동안 판단하면 저널 없이 확정한다
 - 수준: 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나)
-- 전제와 범위: 엔진 시험 도구(모델 거래소, 시험 저널, 시험 도구의 OMS가 watcher_mismatch에 답하고 hold_set을 씀), 가짜 admin.sock·monitor.sock(UnixListener), runtime::run과 http-fake의 Bybit·반향·/api/status·VictoriaMetrics, 바이너리의 --version과 네트워크 전 거부: 시험 17개
+- 전제와 범위: 엔진 시험 도구(모델 거래소, 시험 저널, 시험 도구의 OMS가 watcher_mismatch에 답하고 hold_set을 씀), 가짜 admin.sock·monitor.sock(UnixListener), runtime::run과 http-fake의 Bybit·반향·/api/status·VictoriaMetrics, 바이너리의 --version과 네트워크 전 거부: 시험 20개
 - 실제 구성요소: 워처의 Engine, W1, W2, oms::admin_send, oms::Monitor, oms::Status, runtime::run, rest::Client, start::Start·IpCheck, metrics::Exporter, ADR-011 형식으로 쓴 저널 파일, Unix 소켓과 loopback HTTP
 - 모의·시뮬레이션: OMS(소켓 답과 hold_set을 쓰는 시험 도구, /api/status), Bybit와 IP 반향과 VM(http-fake), 시계(수동, 종단 시험만 실제)
-- 주입한 장애: 첫 보내기 실패(unavailable), 사라진 차이, 다른 보내기가 건 보류, 저널이 아직 못 본 보류와 already held, 늦은 첫 답, 보고 없는 보내기, 답 앞에 낸 상태 요청의 상한, 없는 소켓, bad_request·overloaded 답, 닫힌 연결, 답 없는 하트비트, W2만 실패, 상태 500·무응답, 401 키, 마스터 키, 0644 자격 파일, Location 있는 302. 변이 M199, M200, M201, M220, M226, M228과 시험 밖 변이 22개(모두 잡힘, U19a7 보고)
+- 주입한 장애: 첫 보내기 실패(unavailable), 사라진 차이, 다른 보내기가 건 보류, 저널이 아직 못 본 보류와 already held, 늦은 첫 답, 보고 없는 보내기, 기한 뒤에 온 늦은 held, 상한 아래에서 끝난 재생, 재확인의 마스터 키, 답 앞에 낸 상태 요청의 상한, 없는 소켓, bad_request·overloaded 답, 닫힌 연결, 답 없는 하트비트, W2만 실패, 상태 500·무응답, 401 키, 마스터 키, 0644 자격 파일, Location 있는 302. 변이 M199, M200, M201, M220, M226, M228, M246과 시험 밖 변이 25개(모두 잡힘, U19a7 보고와 검토 1 수정)
 - 판정 기준과 근거: 보내기는 정한 시각(라운드)에만, 정한 detail로, 정한 수만큼 온다. 하트비트 줄의 W1·W2는 그 순간 엔진의 성공 시각과 같고 첫 것은 모두 null. 소켓 줄은 hello가 먼저이고 정확히 그 문자열이다. 종단 시험에서 W1·W2가 있는 하트비트, W1 불일치, 서명된 네 경로, watcher_up이 든 밀어 넣기, 코드 0
 - 재현: `cargo test -p watcher --test admin --test heartbeat --test runtime --test binary`
 - 뒷받침하는 것: C-WATCH 7부, ADR-031, C-LIVE 2부, C-HOLD
@@ -2839,6 +2839,7 @@
 | `watcher/a_difference_confirmed_under_a_hold_is_sent_after_the_clear` | 미실행 |  |
 | `watcher/a_second_send_waits_for_the_first_answer` | 미실행 |  |
 | `watcher/a_hold_seen_off_at_a_cap_sampled_before_the_answer_does_not_send` | 미실행 |  |
+| `watcher/a_late_report_of_one_send_pays_only_what_that_send_carried` | 미실행 |  |
 | `watcher/the_admin_client_says_hello_and_reads_both_replies` | 미실행 |  |
 | `watcher/heartbeats_carry_the_success_time_of_each_check` | 미실행 |  |
 | `watcher/the_heartbeat_says_hello_first_and_reconnects` | 미실행 |  |
@@ -2847,6 +2848,8 @@
 | `watcher/without_an_answering_oms_nothing_is_judged` | 미실행 |  |
 | `watcher/the_shutdown_input_ends_cleanly` | 미실행 |  |
 | `watcher/the_ip_recheck_runs_while_the_oms_is_down` | 미실행 |  |
+| `watcher/the_ip_recheck_runs_during_the_boot_replay` | 미실행 |  |
+| `watcher/a_recheck_that_fails_a_start_rule_stops_every_bybit_request` | 미실행 |  |
 | `watcher/a_key_rejected_at_start_is_exported` | 미실행 |  |
 | `watcher/the_status_client_sends_the_loopback_host_and_follows_no_redirect` | 미실행 |  |
 | `watcher/a_start_refusal_ends_the_run_with_exit_code_2` | 미실행 |  |
