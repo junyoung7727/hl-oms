@@ -752,3 +752,65 @@ fn a_row_confirmed_under_an_older_hold_is_sent_once_after_that_hold_is_cleared()
     assert_eq!(r.mismatches.len(), 2);
     assert_eq!(r.gauge("watcher_mismatch_active", "W4"), Some(0.0));
 }
+
+#[test]
+fn a_young_difference_seen_twice_does_not_fail_the_sweep() {
+    let mut cfg = config();
+    cfg.rules.min_age_ms = 10_000;
+    let (mut r, _) = rig_with("w4-young", &cfg);
+    r.venue.executions.push(trade("x", T0 - 1000));
+    r.at(T0);
+    // Seen twice, 6 s old: not confirmed, and the sweep is a success.
+    r.at(T0 + 5000);
+    assert!(r.confirmed.is_empty());
+    assert_eq!(r.engine.success(Check::W4), Some(T0 + 5000));
+    assert_eq!(r.gauge("watcher_differences", "W4"), Some(1.0));
+    // The watermark did not pass it: read again, and confirmed.
+    r.at(T0 + 10_000);
+    assert_eq!(
+        w4_mismatches(&r),
+        vec![(T0 + 10_000, missing_fill("x", "11.0 s"))]
+    );
+}
+
+#[test]
+fn a_trade_at_the_floor_itself_is_compared() {
+    let (mut r, _) = rig("w4-floor-equal");
+    let floor_us = (T0 - 20_000) * 1000;
+    rec(
+        &mut r,
+        T0 - 30_000,
+        &[ev("booted", json!({"fill_floor": floor_us}))],
+    );
+    r.venue.executions.push(trade("f", T0 - 20_000));
+    r.at(T0);
+    r.at(T0 + 5000);
+    assert_eq!(windows(&r)[1].0, T0 - 20_000);
+    assert_eq!(
+        w4_mismatches(&r),
+        vec![(T0 + 5000, missing_fill("f", "25.0 s"))]
+    );
+}
+
+#[test]
+fn a_round_that_reads_a_page_ends_the_run_of_failed_rounds() {
+    let (mut r, _) = rig_with("w4-failed-run", &one_page());
+    let fail = || Err(RestError::NoAnswer("timeout".into()));
+    let s = &mut r.venue.exec_script;
+    s.push_back(page(vec![trade("a", T0 - 9000)], "c1"));
+    s.push_back(fail());
+    s.push_back(fail());
+    s.push_back(page(vec![trade("b", T0 - 8000)], "c2"));
+    s.push_back(fail());
+    for k in 0..6 {
+        r.at(T0 + k * 5000);
+    }
+    // Failed, failed, read, failed: no run of 3, so the sweep goes on.
+    let cursors: Vec<Option<String>> = windows(&r).into_iter().map(|w| w.2).collect();
+    let c = |s: &str| Some(s.to_string());
+    assert_eq!(
+        cursors,
+        vec![None, c("c1"), c("c1"), c("c1"), c("c2"), c("c2")]
+    );
+    assert_eq!(r.lines_with("rounds in a row; the sweep restarts"), 0);
+}
