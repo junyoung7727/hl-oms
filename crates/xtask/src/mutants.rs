@@ -1976,6 +1976,42 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "start", "a_recheck_with_another_uid_a_master_key_or_no_bound_ip_stops_every_request"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M239-watcher-age-not-judged",
+        what: "the watcher confirms a difference seen in two rounds without judging its age, so a journal entry younger than min_age_ms alarms while fills are still arriving (deliberate defect 14 of U19a, its second form; review 1 N3 of U19a5)",
+        file: "crates/watcher/src/engine.rs",
+        find: "if since.is_some_and(|t| now.saturating_sub(t) < min_age) {",
+        replace: "if false && since.is_some() {",
+        test: &["-p", "watcher", "--test", "w1", "a_journal_entry_younger_than_2_s_does_not_alarm"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M240-watcher-went-back-against-the-current-seq",
+        what: "the watcher latches \"durable sequence went back\" when a status cap is below the state's current last_seq instead of below the last_seq at the request, so a round whose cap another round already read past stops the reader (deliberate defect 30 of U19a, its second form; review 1 N3 of U19a5)",
+        file: "crates/watcher/src/engine.rs",
+        find: "if cap < seq_at_send {",
+        replace: "if cap < self.state.last_seq {",
+        test: &["-p", "watcher", "--test", "engine", "status_answers_in_reverse_order_are_each_used_by_their_own_round"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M241-watcher-failed-round-forgets-sightings",
+        what: "a failed round clears the sightings of the last completed round, so every venue or OMS hiccup restarts the two-round count and a flaky venue delays a confirmation without bound (review 1 S1 of U19a5)",
+        file: "crates/watcher/src/engine.rs",
+        find: "        let s = &mut self.slots[i];\n        s.round = None;\n        if s.failing",
+        replace: "        let s = &mut self.slots[i];\n        s.round = None;\n        s.seen.clear();\n        if s.failing",
+        test: &["-p", "watcher", "--test", "engine", "a_failed_round_keeps_the_sightings_of_the_last_completed_round"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M242-watcher-identity-twice-in-a-round",
+        what: "one identity seen twice in a round (an order listed on two pages while orders move) counts twice in watcher_differences and watcher_mismatches_total, and its Mismatch says \"and 1 more\" (review 1 S2 of U19a5)",
+        file: "crates/watcher/src/engine.rs",
+        find: "            if seen.contains_key(&id) {\n                continue;\n            }\n",
+        replace: "",
+        test: &["-p", "watcher", "--test", "w1", "an_order_listed_on_two_pages_is_one_difference"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
