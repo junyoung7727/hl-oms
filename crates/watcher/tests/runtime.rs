@@ -660,12 +660,29 @@ fn the_runtime_runs_w2_w3_and_w4_and_w2_reads_w4s_exec_times() {
     for c in watcher::engine::Check::ALL {
         assert_eq!(r.engine.success(c), Some(T0), "{c:?}");
     }
-    // W4's execTime defers W2 at +1 s; confirmed at +2 s.
-    r.at(T0 + 1000);
-    assert!(r.confirmed.is_empty(), "{:?}", r.confirmed);
-    r.at(T0 + 2000);
+    // W4's execTime defers W2 at +1 s; confirmed at +2 s. Each check at
+    // its own interval (review 1 S1): W3 every 2 s, W4 every 5 s, neither
+    // at another check's pace.
+    use watcher::engine::Check::{W3, W4};
+    let mut seen = Vec::new();
+    for t in (1..=5).map(|s| T0 + s * 1000) {
+        r.at(t);
+        if t == T0 + 1000 {
+            assert!(r.confirmed.is_empty(), "{:?}", r.confirmed);
+        }
+        seen.push((r.engine.success(W3), r.engine.success(W4)));
+    }
     let d = "W2 position BTCUSDT: venue 2, journal 1; seen 2 rounds, journal entry 2.1 s old";
     assert_eq!(r.confirmed, vec![(T0 + 2000, d.to_string())]);
+    let want = [
+        (T0, T0),
+        (T0 + 2000, T0),
+        (T0 + 2000, T0),
+        (T0 + 4000, T0),
+        (T0 + 4000, T0 + 5000),
+    ];
+    let want: Vec<_> = want.iter().map(|&(a, b)| (Some(a), Some(b))).collect();
+    assert_eq!(seen, want, "(W3, W4) success at +1..+5 s");
 }
 
 #[test]
