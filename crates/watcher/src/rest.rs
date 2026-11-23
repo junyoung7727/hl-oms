@@ -154,6 +154,10 @@ impl std::fmt::Display for RestError {
 /// not accepted, and retrying does not change that.
 pub const AUTH_CODES: [i64; 6] = [10003, 10004, 10005, 10007, 10010, 33004];
 
+/// The code of a key stop that no venue answer made: the IP recheck found
+/// that the key no longer passes the start rules ([`Client::stop_key`]).
+pub const OWN_RULE_CODE: i64 = -1;
+
 /// How long no request (Bybit or the IP echo) goes out after HTTP 403
 /// (F18 L186: "wait for at least 10 minutes").
 pub const IP_BAN_PAUSE_MS: u64 = 600_000;
@@ -304,8 +308,29 @@ impl Client {
         self.stop.lock().ok()?.auth
     }
 
+    /// Stops every later Bybit request until restart, as a rejected key
+    /// does, for a rule of the watcher's own: the IP recheck found that the
+    /// key no longer passes the start rules (U19a4b). The code is
+    /// [`OWN_RULE_CODE`]; `watcher_auth_rejected` is 1 and one error line
+    /// names `reason`, the first time only (a key stop that came first
+    /// stays as it is).
+    pub fn stop_key(&self, reason: &str) {
+        let Ok(mut s) = self.stop.lock() else {
+            return;
+        };
+        if s.auth.is_none() {
+            s.auth = Some(OWN_RULE_CODE);
+            self.metrics.set("watcher_auth_rejected", &[], 1.0);
+            (self.log)(&format!(
+                "error: {}; every Bybit request stops until the watcher restarts",
+                one_line(reason)
+            ));
+        }
+    }
+
     /// The end (ms) of the last 403 pause, if there was one. The start
-    /// checks wait for it before their retry (U19a4b).
+    /// checks (U19a4b) do not read it: they wait 600 s from the 403 answer
+    /// they got, which is this instant for a 403 they sent.
     pub fn paused_until(&self) -> Option<u64> {
         self.stop.lock().ok()?.paused_until
     }

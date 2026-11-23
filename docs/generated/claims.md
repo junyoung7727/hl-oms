@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `b7c1c3aaad41c12b`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `df26944acbb49c32`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 주장 112건: 통과 0, 실패 0, 미실행 45, 이전 버전 결과 67.
 
@@ -118,7 +118,7 @@
 | V-WATCH-1 | 워처 crate는 OMS와 코드를 나누지 않는다: oms-*·md-* crate를 어떤 종류(정상, 빌드, 개발)와 target으로도 선언하지 않고, 개발 의존성 http-fake 말고는 작업 공간 crate를 쓰지 않으며, 그 정상·빌드 그래프에서 OMS·시세·작업 공간 crate에 닿지 않고, watcher-conformance 말고는 아무 작업 공간 crate도 워처에 의존하지 않으며, 소스가 #[path]·include!·속성 안의 path =·심볼릭 링크로, 매니페스트의 target이 소스 경로로 패키지 밖의 파일을 가져오지 않는다. 검사 스크립트는 그 각각을 심으면 그 결과 줄과 종료 코드 1을 내고, 확인할 수 없을 때(맞지 않는 잠금, 없는 매니페스트)는 ok가 아니라 종료 코드 2를 낸다 | 소스 검사 | 미실행 | `tools/ci/watcher_independent.sh && tools/ci/selftest.sh` |
 | V-WATCH-2 | 워처의 독자 읽기와 저널 상태가 코어와 같은 집합을 세운다: 코어가 결정하고 oms-journal이 쓴 저널을 기록마다 읽어, 열린 주문 집합, 열린 주문마다 종목·방향·수량·전략·클라이언트 ID·거래소 주문 번호·누적 체결·결과 불명·거래소 종결, 종목마다 포지션, 체결·거래소 변경·펀딩 키와 그 거래소 시각, 체결 바닥, 킬 보류와 워처 불일치 보류, 일 기준값이 같은 기록을 재생한 코어와 같다. 시나리오들이 C-TAIL 표의 이벤트를 모두 쓴다. 닫힌 주문의 정보는 purged까지 남아 늦은 체결의 방향과 종목을 주고, 펀딩은 포지션을 바꾸지 않으며, 체결 바닥은 내려가지 않고 booted는 키를 잊지 않으며, 규칙에 맞지 않는 기록(모르는 주문의 체결, 열린 주문의 purged, 형식이 틀린 필드, 순서가 어긋난 기록)은 래치되는 오류다 | 단위, 통합 | 미실행 | `cargo test -p watcher --test state && cargo test -p watcher-conformance` |
 | V-WATCH-3 | 워처의 자기 Bybit 클라이언트는 GET을 거래소 문서대로 서명하고(정렬된 질의, 보낼 수 없는 값은 보내기 전에 거절, 머리글 다섯, 보내는 순간의 시계), 응답을 부류로 나누며(not_sent, no_answer, rate_limited, clock, refused, auth, ip_banned; unreadable은 검사가 만든다), 키 거절(HTTP 401, retCode 10003·10004·10005·10007·10010·33004) 뒤에는 프로세스가 다시 시작할 때까지 Bybit에 아무 요청도 보내지 않고, HTTP 403 뒤에는 응답 순간부터 600초 동안 모든 요청과 IP 반향을 보내지 않으며, 어느 10초 창에서도 60개를 넘겨 보내지 않고 넘는 요청은 버리지 않고 기다린다. 요청은 보내기 전에 세고, 지표는 VictoriaMetrics 가져오기 JSON 한 줄씩(watcher_up 포함) 큐 없이 밀어 넣는다 | 단위, 통합(loopback) | 미실행 | `cargo test -p watcher --test sign --test client --test metrics` |
-| V-WATCH-4 | 워처의 설정 파일은 스펙 표의 모든 필드를 그 기본값과 검사대로 읽는다: 모르는 키와 표는 거부하고, mainnet은 mainnet_confirmed = true일 때만 받으며, 범위는 양 끝을 포함하고, status_url과 vm_url은 loopback만, ip_echo_url은 https만, 자격 파일은 절대 경로이고 ..이 없으며 링크를 따라 봐도 데이터 디렉터리 밖이다. 자격 파일은 링크를 따르지 않고 FIFO를 기다리지 않는 한 핸들로, 이 프로세스의 uid가 소유하고 권한이 정확히 0600 또는 0400인 일반 파일일 때만, api_key와 api_secret 둘만 비어 있지 않게 읽는다. 모든 거부는 한 줄이고, 자격 파일의 오류는 내용을 인용하지 않으며 비밀은 어디에도 찍히지 않는다 | 단위 | 미실행 | `cargo test -p watcher --test config --test creds` |
+| V-WATCH-4 | 워처의 설정 파일은 스펙 표의 모든 필드를 그 기본값과 검사대로 읽는다: 모르는 키와 표는 거부하고, mainnet은 mainnet_confirmed = true일 때만 받으며, 범위는 양 끝을 포함하고, status_url과 vm_url은 loopback만, ip_echo_url은 https만, 자격 파일은 절대 경로이고 ..이 없으며 링크를 따라 봐도 데이터 디렉터리 밖이다. 자격 파일은 링크를 따르지 않고 FIFO를 기다리지 않는 한 핸들로, 이 프로세스의 uid가 소유하고 권한이 정확히 0600 또는 0400인 일반 파일일 때만, api_key와 api_secret 둘만 비어 있지 않게 읽는다. 모든 거부는 한 줄이고, 자격 파일의 오류는 내용을 인용하지 않으며 비밀은 어디에도 찍히지 않는다. 시작 확인(U19a4b)은 query-api의 마스터 키, 다른 userID, IP에 묶이지 않은 키([]·*)와 행이 없거나 USDT로 정산되지 않는 기호를 종료 2의 이유 한 줄로 거부하고, 키 거절(auth)이면 끝내지 않고 요청 없이 떠 있으며, 그 밖의 답은 답의 시각 + 5초(403이면 + 600초)에 다시 묻는다. watcher_api_key_days_left는 expiredAt까지의 날을 내림하고 해당 없음(없음, null, 1970-01-02 이하)이면 내보내지 않는다. watcher_public_ip_ok는 반향의 주소가 마지막으로 통과한 ips에 있을 때만 1이다. IP 재확인은 지난 재확인의 마지막 답 + ip_check_ms마다 돌고, 실패하면 0으로 두고 남은 날을 지키며, 시작 규칙에 더는 맞지 않는 키는 재시작까지 모든 Bybit 요청을 멈추고 0으로 둔다. 재확인이나 5단계에서 키가 거절되면 Bybit에는 묻지 않고 반향만 ip_check_ms마다 이어 간다. 요청이 답을 기다리지 않을 때 온 답은 아무것도 바꾸지 않는다 | 단위 | 미실행 | `cargo test -p watcher --test config --test creds --test start` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -2711,23 +2711,36 @@
 | `watcher/the_import_lines_are_victoria_metrics_json` | 미실행 |  |
 | `watcher/a_failed_push_is_dropped` | 미실행 |  |
 
-## V-WATCH-4 — 워처의 설정 파일은 스펙 표의 모든 필드를 그 기본값과 검사대로 읽는다: 모르는 키와 표는 거부하고, mainnet은 mainnet_confirmed = true일 때만 받으며, 범위는 양 끝을 포함하고, status_url과 vm_url은 loopback만, ip_echo_url은 https만, 자격 파일은 절대 경로이고 ..이 없으며 링크를 따라 봐도 데이터 디렉터리 밖이다. 자격 파일은 링크를 따르지 않고 FIFO를 기다리지 않는 한 핸들로, 이 프로세스의 uid가 소유하고 권한이 정확히 0600 또는 0400인 일반 파일일 때만, api_key와 api_secret 둘만 비어 있지 않게 읽는다. 모든 거부는 한 줄이고, 자격 파일의 오류는 내용을 인용하지 않으며 비밀은 어디에도 찍히지 않는다
+## V-WATCH-4 — 워처의 설정 파일은 스펙 표의 모든 필드를 그 기본값과 검사대로 읽는다: 모르는 키와 표는 거부하고, mainnet은 mainnet_confirmed = true일 때만 받으며, 범위는 양 끝을 포함하고, status_url과 vm_url은 loopback만, ip_echo_url은 https만, 자격 파일은 절대 경로이고 ..이 없으며 링크를 따라 봐도 데이터 디렉터리 밖이다. 자격 파일은 링크를 따르지 않고 FIFO를 기다리지 않는 한 핸들로, 이 프로세스의 uid가 소유하고 권한이 정확히 0600 또는 0400인 일반 파일일 때만, api_key와 api_secret 둘만 비어 있지 않게 읽는다. 모든 거부는 한 줄이고, 자격 파일의 오류는 내용을 인용하지 않으며 비밀은 어디에도 찍히지 않는다. 시작 확인(U19a4b)은 query-api의 마스터 키, 다른 userID, IP에 묶이지 않은 키([]·*)와 행이 없거나 USDT로 정산되지 않는 기호를 종료 2의 이유 한 줄로 거부하고, 키 거절(auth)이면 끝내지 않고 요청 없이 떠 있으며, 그 밖의 답은 답의 시각 + 5초(403이면 + 600초)에 다시 묻는다. watcher_api_key_days_left는 expiredAt까지의 날을 내림하고 해당 없음(없음, null, 1970-01-02 이하)이면 내보내지 않는다. watcher_public_ip_ok는 반향의 주소가 마지막으로 통과한 ips에 있을 때만 1이다. IP 재확인은 지난 재확인의 마지막 답 + ip_check_ms마다 돌고, 실패하면 0으로 두고 남은 날을 지키며, 시작 규칙에 더는 맞지 않는 키는 재시작까지 모든 Bybit 요청을 멈추고 0으로 둔다. 재확인이나 5단계에서 키가 거절되면 Bybit에는 묻지 않고 반향만 ip_check_ms마다 이어 간다. 요청이 답을 기다리지 않을 때 온 답은 아무것도 바꾸지 않는다
 
 - 상태: **미실행**
-- 왜 중요한가: 틀린 키 이름이 기본값으로 조용히 바뀌거나 단어 하나로 mainnet에 붙거나, 다른 사용자가 읽을 수 있는 키 파일이나 OMS 데이터 디렉터리 안의 키 파일로 시작하면 워처의 독립성과 키 분리(설계 §7.4)가 깨진다. 거부의 이유가 여러 줄이면 시작 거부 한 줄(스펙)을 지키지 못한다
+- 왜 중요한가: 틀린 키 이름이 기본값으로 조용히 바뀌거나 단어 하나로 mainnet에 붙거나, 다른 사용자가 읽을 수 있는 키 파일이나 OMS 데이터 디렉터리 안의 키 파일로 시작하면 워처의 독립성과 키 분리(설계 §7.4)가 깨진다. 거부의 이유가 여러 줄이면 시작 거부 한 줄(스펙)을 지키지 못한다. 마스터 키나 다른 계정의 키, USDC 기호로 시작하면 워처가 OMS와 다른 계정이나 자기 조회(category=linear, settleCoin=USDT)가 보지 못하는 주문을 본다. 남은 날을 올리면 만료 경보가 하루 늦고, 403 뒤 일찍 다시 물으면 OMS와 함께 쓰는 IP의 차단을 늘린다
 - 수준: 단위
-- 전제와 범위: 필수 필드만의 설정과 기본값, 필드마다의 거부와 수용(범위 16개의 양 끝과 그 밖), 파일 읽기, 링크로 가린 디렉터리와 ..로 쓴 소켓. OMS_TEST_DIR 아래 실제 파일의 권한 열둘, 다른 소유자(메타데이터 규칙 함수, 그리고 root가 소유한 /etc/hostname을 creds::load로), 심볼릭 링크, 디렉터리, FIFO, 내용 여덟 가지, 데이터 디렉터리 안·링크로 가린 경우
-- 실제 구성요소: toml·serde, 파일 시스템(open O_NOFOLLOW|O_NONBLOCK, fstat, canonicalize), rustix geteuid
-- 모의·시뮬레이션: 시험이 만든 다른 소유자의 파일(root만 만들 수 있어 규칙 함수에 다른 uid를 주고, 실제 파일은 /etc/hostname으로 본다)
-- 주입한 장애: 모르는 키·표, 빠진 필수 필드, 틀린 형식의 값, mainnet 미확인, 범위 밖, loopback 아닌 주소, 앞뒤 공백·탭·줄바꿈이 든 URL, 사용자가 든 URL, 상대 경로와 .., 데이터 디렉터리 안의 자격 파일(링크로 가린 경우 포함), 같은 곳을 가리키는 두 소켓, 권한 0644 등 열, 다른 소유자의 실제 파일, 링크, 디렉터리, FIFO, 빈 키, 다른 키, TOML 아님, UTF-8 아님. 변이 M193, M235~M237
-- 판정 기준과 근거: 받는 설정은 표의 값이고 거부는 그 이유를 담은 한 줄이다. 자격 파일은 0600·0400만 받고 나머지 경우마다 그 이유로 거부하며, 어떤 오류에도 비밀 문자열이 없다. FIFO는 5초 안에 거부된다
-- 재현: `cargo test -p watcher --test config --test creds`
-- 뒷받침하는 것: C-WATCH 4부, ADR-031
-- 확인하지 않은 범위: 시험이 만든 다른 소유자의 파일(root가 필요하다; 규칙 함수와 /etc/hostname으로 본다, 그 파일이 없거나 시험의 uid가 소유하면 건너뛴다), root로 돈 시험(바로 끝난다), 끊어진 심볼릭 링크로 같은 곳을 가리키는 두 소켓. 자격 파일이 있는 디렉터리의 권한, 상위 디렉터리의 링크, 읽은 뒤의 경로 변경, 키 값의 모양. 워처 키에 출금 권한이 없다는 것(운영 문서에만 적었다). 시작 확인과 IP 재확인(U19a4b), 바이너리가 설정을 읽는 것(U19a7)은 아직 없다
+- 전제와 범위: 필수 필드만의 설정과 기본값, 필드마다의 거부와 수용(범위 16개의 양 끝과 그 밖), 파일 읽기, 링크로 가린 디렉터리와 ..로 쓴 소켓. OMS_TEST_DIR 아래 실제 파일의 권한 열둘, 다른 소유자(메타데이터 규칙 함수, 그리고 root가 소유한 /etc/hostname을 creds::load로), 심볼릭 링크, 디렉터리, FIFO, 내용 여덟 가지, 데이터 디렉터리 안·링크로 가린 경우. 시작 확인과 IP 재확인의 sans-IO 단계를 수동 시계로, 부류마다의 답과 기다림, 거부 뒤와 키 거절 뒤의 요청 없음은 loopback 가짜 Bybit·반향과 실제 클라이언트로
+- 실제 구성요소: toml·serde, 파일 시스템(open O_NOFOLLOW|O_NONBLOCK, fstat, canonicalize), rustix geteuid, 워처 자신의 Client(시작 확인 시험의 http-fake 경로)
+- 모의·시뮬레이션: 시험이 만든 다른 소유자의 파일(root만 만들 수 있어 규칙 함수에 다른 uid를 주고, 실제 파일은 /etc/hostname으로 본다). 거래소 query-api·instruments-info 답(문서의 예로 만든 가짜)과 IP 반향
+- 주입한 장애: 모르는 키·표, 빠진 필수 필드, 틀린 형식의 값, mainnet 미확인, 범위 밖, loopback 아닌 주소, 앞뒤 공백·탭·줄바꿈이 든 URL, 사용자가 든 URL, 상대 경로와 .., 데이터 디렉터리 안의 자격 파일(링크로 가린 경우 포함), 같은 곳을 가리키는 두 소켓, 권한 0644 등 열, 다른 소유자의 실제 파일, 링크, 디렉터리, FIFO, 빈 키, 다른 키, TOML 아님, UTF-8 아님. 변이 M193, M235~M237. 시작 확인: 마스터 키, 다른 uid, ips []·*·주소 없음, 읽을 수 없는 키 답 여섯, USDC·소문자·빈 정산 코인, 기호 없음, 부류마다의 실패(not_sent, no_answer, rate_limited, clock, refused, ip_banned, unreadable), 키 거절 다섯(10010, 10003, 33004, HTTP 401, 5단계 10004), 읽을 수 없는 expiredAt 열하나, 반향 실패·주소 아닌 본문, 재확인의 실패·규칙 위반·10010(그 뒤 반향만, 바뀐 IP), 기다리는 요청 없이 온 답. 변이 M189, M190, M225, M238
+- 판정 기준과 근거: 받는 설정은 표의 값이고 거부는 그 이유를 담은 한 줄이다. 자격 파일은 0600·0400만 받고 나머지 경우마다 그 이유로 거부하며, 어떤 오류에도 비밀 문자열이 없다. FIFO는 5초 안에 거부된다. 시작: 거부는 정한 이유 한 줄이고 그 뒤 요청이 없다. 다시 묻기는 Wait {until_ms} = 답 + 5,000ms(403은 + 600,000ms)이고 그 전에는 poll이 요청을 내지 않는다. expiredAt = 지금 + 10일이면 10, + 10일 − 1시간이면 9. 재확인은 지난 마지막 답 + ip_check_ms에 query-api를 낸다. 규칙 위반 뒤 모든 경로가 보내지지 않고 auth로 끝나며 가짜에 요청이 더 오지 않고 watcher_public_ip_ok = 0이다. 키 거절 뒤에는 ip_check_ms마다 반향 하나만 가고, 같은 IP면 1, 다른 IP면 0이다. 기다리는 요청 없이 온 답 뒤에는 같은 Step, 같은 다음 요청과 시각이다
+- 재현: `cargo test -p watcher --test config --test creds --test start`
+- 뒷받침하는 것: C-WATCH 4부(설정, 자격 파일, 시작 확인, IP 재확인), ADR-031
+- 확인하지 않은 범위: 시험이 만든 다른 소유자의 파일(root가 필요하다; 규칙 함수와 /etc/hostname으로 본다, 그 파일이 없거나 시험의 uid가 소유하면 건너뛴다), root로 돈 시험(바로 끝난다), 끊어진 심볼릭 링크로 같은 곳을 가리키는 두 소켓. 자격 파일이 있는 디렉터리의 권한, 상위 디렉터리의 링크, 읽은 뒤의 경로 변경, 키 값의 모양. 워처 키에 출금 권한이 없다는 것(운영 문서에만 적었다). 시작 확인과 재확인을 실제 Bybit와 실제 반향에 대해 돌린 적은 없다(키가 없다, U-01). 묶이지 않은 키의 ips 모양(Q4에 없음), readOnly와 permissions(보지 않음). 바이너리와 실행 코드가 시작 확인을 돌리는 것, OMS가 꺼진 동안의 재확인(U19a7)
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
 | `watcher/the_config_is_validated_and_mainnet_needs_confirmation` | 미실행 |  |
 | `watcher/the_config_file_is_read_and_its_refusals_name_the_file` | 미실행 |  |
 | `watcher/the_credentials_file_must_be_owner_only_and_outside_the_data_dir` | 미실행 |  |
+| `watcher/a_traded_symbol_that_does_not_settle_in_usdt_refuses_the_start` | 미실행 |  |
+| `watcher/a_key_that_expires_in_10_days_gives_days_left_10` | 미실행 |  |
+| `watcher/a_symbol_missing_from_instruments_info_refuses_the_start` | 미실행 |  |
+| `watcher/a_master_key_another_uid_or_a_key_bound_to_no_ip_refuses_the_start` | 미실행 |  |
+| `watcher/the_documented_epoch_expiry_exports_no_days_left` | 미실행 |  |
+| `watcher/the_public_ip_is_rechecked_every_60_s` | 미실행 |  |
+| `watcher/query_api_answers_other_than_auth_or_a_refusal_retry_every_5_s` | 미실행 |  |
+| `watcher/an_echo_failure_or_a_body_that_is_not_an_address_gives_public_ip_ok_0` | 미실행 |  |
+| `watcher/settle_coin_answers_other_than_auth_or_a_refusal_retry_every_5_s` | 미실행 |  |
+| `watcher/an_auth_answer_at_start_stays_up_without_requests` | 미실행 |  |
+| `watcher/a_failed_recheck_sets_public_ip_ok_0_and_keeps_days_left` | 미실행 |  |
+| `watcher/a_recheck_with_another_uid_a_master_key_or_no_bound_ip_stops_every_request` | 미실행 |  |
+| `watcher/an_answer_without_a_request_in_flight_changes_nothing` | 미실행 |  |
 

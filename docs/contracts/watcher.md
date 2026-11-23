@@ -1,15 +1,15 @@
 # C-WATCH 독립 워처
 
-상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23), 4부 중 설정과 자격 파일 구현됨(U19a4, 2026-11-23). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3, V-WATCH-4. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
+상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23), 4부 구현됨(설정과 자격 파일 U19a4, 시작 확인과 IP 재확인 U19a4b, 2026-11-23). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3, V-WATCH-4. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
 
-워처는 OMS와 코드를 나누지 않는 별도 프로그램이다. 저널을 자기 읽기로 읽고(이 문서와 [C-TAIL](tail.md), [ADR-011](../adr/ADR-011-file-format.md)만으로 썼다), 자기 키와 클라이언트로 Bybit를 조회해 OMS와 비교하고, 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고, `monitor.sock`에 하트비트를 보낸다. **U19a4까지는 저널 읽기, 저널 상태, 독립성 검사, Bybit 서명·클라이언트와 지표 내보내기, 설정 파일과 자격 파일 읽기만 있다. 시작 확인, 검사(W1~W4), 하트비트는 아직 없어 워처는 아직 아무것도 감시하지 않고, 클라이언트와 설정을 부르는 코드도 아직 없다.** 바이너리는 `watcher --version`에만 답하고, 그 밖의 호출은 "not built yet: the checks arrive in U19a5–U19a7"를 찍고 코드 2로 끝난다(네트워크도 파일도 건드리지 않는다).
+워처는 OMS와 코드를 나누지 않는 별도 프로그램이다. 저널을 자기 읽기로 읽고(이 문서와 [C-TAIL](tail.md), [ADR-011](../adr/ADR-011-file-format.md)만으로 썼다), 자기 키와 클라이언트로 Bybit를 조회해 OMS와 비교하고, 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고, `monitor.sock`에 하트비트를 보낸다. **U19a4b까지는 저널 읽기, 저널 상태, 독립성 검사, Bybit 서명·클라이언트와 지표 내보내기, 설정 파일과 자격 파일 읽기, 시작 확인과 IP 재확인의 sans-IO 단계만 있다. 검사(W1~W4)와 하트비트는 아직 없어 워처는 아직 아무것도 감시하지 않고, 이 부분들을 부르는 실행 코드(U19a7)도 아직 없다.** 바이너리는 `watcher --version`에만 답하고, 그 밖의 호출은 "not built yet: the checks arrive in U19a5–U19a7"를 찍고 코드 2로 끝난다(네트워크도 파일도 건드리지 않는다).
 
 | 부 | 내용 | 단위 |
 |---|---|---|
 | 1 | 독립성과 그 검사, 저널 읽기, 아는 이벤트, 소수, `Base32Pair` | U19a1(이 문서) |
 | 2 | 저널 상태(주문, 열린 주문, 체결, 포지션, 보류, 기준일), 재생 속도 | U19a2(이 문서) |
 | 3 | Bybit 서명과 클라이언트, 응답 분류, 요청 제한, 지표 | U19a3(이 문서) |
-| 4 | 설정과 자격 파일(이 문서), 시작 확인과 IP 재확인(아직 없음) | U19a4, U19a4b |
+| 4 | 설정과 자격 파일, 시작 확인과 IP 재확인(이 문서) | U19a4, U19a4b |
 | 5~9 | 검사 엔진과 W1, W2, OMS 연결과 실행, W4, W3과 예산 | U19a5~U19a9(아직 없음) |
 
 ## 1부. 독립성
@@ -192,7 +192,7 @@
 
 ### 403 멈춤
 
-- HTTP 403을 받으면 **그 응답을 받은 순간의 시계 + 600,000 ms**까지 모든 Bybit 요청과 IP 반향이 멈춘다(F18 L186 "최소 10분", OMS와 같은 값). 그 사이의 요청은 보내지 않고 세지 않고 `ip_banned`로 끝난다. 끝나는 순간(`Client::paused_until()`)부터 다시 보낸다. 시작 확인의 재시도(U19a4b)가 이 순간을 기다린다.
+- HTTP 403을 받으면 **그 응답을 받은 순간의 시계 + 600,000 ms**까지 모든 Bybit 요청과 IP 반향이 멈춘다(F18 L186 "최소 10분", OMS와 같은 값). 그 사이의 요청은 보내지 않고 세지 않고 `ip_banned`로 끝난다. 끝나는 순간(`Client::paused_until()`)부터 다시 보낸다. 시작 확인의 재시도(U19a4b)는 이 값을 읽지 않고 자기가 받은 403 답의 시각 + 600초를 기다린다. 자기가 보낸 403이면 같은 순간이다(검토 1 N1).
 - 반향 서비스 자신의 403은 Bybit의 차단이 아니다: 반향의 2xx가 아닌 상태는 모두 `no_answer`다.
 
 ### 요청 제한(가드)
@@ -234,7 +234,7 @@
 
 ## 4부. 설정과 자격 파일
 
-`watcher::config`, `watcher::creds`. `watcher --config <path>`가 읽을 TOML 파일 하나와 그 파일이 가리키는 자격 파일 하나다. **이 부분은 두 파일을 읽고 검사만 한다.** 바이너리는 아직 이것을 부르지 않는다(실행은 U19a7). 시작 확인(query-api, 공인 IP, 정산 코인)과 IP 재확인은 U19a4b다. 거부는 시작 거부가 된다: 종료 코드 2와 이유 한 줄이다(스펙 "Errors at start and in a round"). 읽기는 파일을 쓰지 않고 네트워크를 쓰지 않는다. 운영자가 보는 같은 표와 예는 [운영 문서](../operations/watcher.md)에 있다.
+`watcher::config`, `watcher::creds`, `watcher::start`. `watcher --config <path>`가 읽을 TOML 파일 하나와 그 파일이 가리키는 자격 파일 하나, 그리고 그 뒤의 시작 확인(query-api, 공인 IP, 정산 코인)과 IP 재확인(아래 "시작 확인", "IP 재확인", U19a4b)이다. 바이너리는 아직 이것을 부르지 않는다(실행은 U19a7). 거부는 시작 거부가 된다: 종료 코드 2와 이유 한 줄이다(스펙 "Errors at start and in a round"). 읽기는 파일을 쓰지 않고 네트워크를 쓰지 않는다. 운영자가 보는 같은 표와 예는 [운영 문서](../operations/watcher.md)에 있다.
 
 ### 설정 파일(`config::Config::load(path)`, `Config::from_toml(text)`)
 
@@ -285,6 +285,42 @@
 - 그 핸들의 메타데이터: 일반 파일, 소유자 = 이 프로세스의 실효 uid(`geteuid`), 권한 정확히 `0600` 또는 `0400`(그룹·다른 사용자 비트, 소유자 실행 비트, set-id·sticky 비트가 있으면 거부; OMS의 `& 0o077` 규칙보다 좁다. 스펙의 표대로다).
 - **오류는 파일 내용을 인용하지 않는다**: TOML 오류(줄을 인용한다)를 버리고 "is not TOML with api_key and api_secret and nothing else"만 쓴다. 경로는 적는다. 비밀은 어디에도 찍히지 않는다(`Credentials`의 `Debug`는 `<hidden>`).
 
+### 시작 확인(`start::Start`, U19a4b)
+
+설정과 자격 파일(1단계) 다음의 2~5단계다. 하나의 sans-IO 단계 기계이고 시계를 읽지도 자지도 않는다(스펙 "Clock"): `Start::new(cfg, metrics, log, now)`, `poll(now) -> Option<Request>`(다음 요청, 기다리는 중이거나 요청이 답을 기다리는 중이거나 끝났으면 `None`), `on_answer(now, 답) -> Step`. `Step`은 `Wait {until_ms}`, `Next`, `Refuse {reason}`(종료 코드 2와 이 한 줄), `StayUpNoRequests`(`auth`), `Done`이다. 요청은 `Request::Venue {path, params}`(서명된 Bybit GET) 또는 `Request::Echo`(`ip_echo_url`의 서명 없는 GET, 답은 다듬은 본문의 JSON 문자열)이고 `start::send(client, echo_url, req)`가 3부의 클라이언트로 보낸다. U19a7의 실행 코드가 이 기계를 돌린다. 시험은 수동 시계로 돌린다.
+
+| 단계 | 요청 | 통과 | 거부(종료 2) |
+|---|---|---|---|
+| 2 | `GET /v5/user/query-api` | `isMaster == false`, `userID == sub_account_uid`, `ips`가 문자열 목록이고 IP 주소가 하나 이상, `*` 없음 | 마스터 키, 다른 `userID`, IP에 묶이지 않은 키(`[]` 또는 `*`가 든 목록), 주소가 하나도 없는 `ips` |
+| 3 | (2단계의 답) | `watcher_api_key_days_left` = `floor((expiredAt − now) / 86,400초)`, 만료 뒤에는 음수 | 없음(아래) |
+| 4 | `GET ip_echo_url` | `watcher_public_ip_ok` = 본문 주소가 `ips`에 있으면 1 | 없음(아래) |
+| 5 | 기호마다 `GET /v5/market/instruments-info?category=linear&symbol=<s>` | 그 기호의 행이 있고 `settleCoin == "USDT"` | 행 없음(`<s> is not in instruments-info for category linear; the watcher's scope is linear/USDT`), 다른 코인(`<s> settles in <coin>; the watcher's scope is linear/USDT`) |
+
+- 거부 이유는 한 줄이고 2단계의 것은 `query-api: `로 시작한다(예: `query-api: the API key belongs to user 4243; the config says sub_account_uid 4242`). 거부의 줄은 실행 코드가 찍는다. 기계는 거부 때 아무 줄도 쓰지 않고, 거부 뒤에는 어떤 요청도 내지 않는다.
+- **`auth`**(키 거절, 3부): 끝내지 않는다. 클라이언트가 이미 재시작까지 모든 Bybit 요청을 멈췄고(`watcher_auth_rejected = 1`, 오류 한 줄), 기계는 `StayUpNoRequests`를 내고 그 뒤 아무것도 묻지 않는다. 검사가 성공하지 않으니 OMS의 게이트가 닫힌다. 내보내기(설정을 읽은 뒤부터)와 로그로 보인다. 재시작 루프로 다시 보내지 않는다.
+- **그 밖의 답**(`not_sent`, `no_answer`, `rate_limited`, `clock`, `refused`, 그리고 retCode 0이지만 규칙으로 읽을 수 없는 답 `unreadable`: 필드가 없거나 형이 다름): 한 줄(`start: <단계> failed (<class>): …; asked again at <ms> ms`)을 쓰고 **답의 시각 + 5,000ms**(판단(모델 아님))에 같은 요청을 다시 낸다. **`ip_banned`**(HTTP 403)이면 **답의 시각 + 600,000ms**, 곧 클라이언트의 멈춤이 끝날 때다(검토 3 S2). 각 단계는 읽을 수 있는 답을 얻기 전에는 다음으로 가지 않는다. 5단계에서는 실패한 그 기호를 다시 묻는다(앞의 기호는 다시 묻지 않는다). `unreadable`은 기계가 `watcher_request_errors_total{endpoint,class="unreadable"}`로 센다(나머지는 클라이언트가 센다).
+- 3단계 `expiredAt`: RFC 3339 UTC `YYYY-MM-DDTHH:MM:SSZ`만 읽는다(자기 해석기 `start::rfc3339_utc_ms`; 소수 초는 받고 버린다. 시차 표기, 소문자, 공백, 없는 날짜는 읽지 않는다). 필드가 없거나 `null`이거나 `1970-01-02T00:00:00Z` 이하(문서의 "해당 없음" 예가 epoch)이면 내보내지 않는다(게이지를 지운다). 읽을 수 없으면 내보내지 않고 경고 한 줄. 어느 경우도 거부가 아니다.
+- 4단계: 반향 본문(다듬음)이 IPv4나 IPv6 주소이고 `ips`의 한 주소와 같으면 1(IPv4에 대응된 IPv6는 IPv4로 비교). 다르면 0과 경고 한 줄. 반향이 실패하거나(클라이언트의 어느 부류든, 403 멈춤 중 포함) 본문이 주소가 아니어도 0과 경고 한 줄이다: 모르는 IP는 맞는 IP가 아니다(검토 2 S3). 거부가 아니고 시작은 이어진다. 묶인 IP가 다르면 Bybit가 10010으로 답하고 워처는 스스로 멈춘다(3부).
+- 5단계의 요청에는 `settleCoin`이 없다(instruments-info에는 그 거르개가 없다, gateway facts Q8.2). 행은 `symbol`이 같은 것을 고른다.
+- `Done` 뒤 `Start::ip_check()`가 재확인을 준다. 첫 재확인은 4단계의 반향이 답한 시각 + `ip_check_ms`다(5단계가 그보다 오래 걸리면 바로). 5단계에서 키가 거절된 뒤(`StayUpNoRequests`)에도 `ip_check()`는 반향만 묻는 재확인을 준다(2단계의 `ips`를 알고 있으므로; 검토 1 M1). 2단계에서 거절되면 `ips`를 모르므로 재확인이 없고 `watcher_public_ip_ok`는 내보내지 않는다. U19a7의 실행 코드는 `Done`과 `StayUpNoRequests` 뒤 둘 다 `ip_check()`를 돌린다.
+
+### IP 재확인(`start::IpCheck`, U19a4b)
+
+- `ip_check_ms`(기본 60,000)마다 query-api를 다시 묻고(IP 목록이 바뀔 수 있다), 통과하면 바로 반향을 묻는다. `watcher_public_ip_ok`와 `watcher_api_key_days_left`를 새로 쓴다. 다음 재확인은 **이번 재확인의 마지막 답 + `ip_check_ms`**다. 같은 sans-IO 모양이다(`poll(now)`, `on_answer(now, 답) -> Step`, 다음 시각은 `Wait {until_ms}`).
+- query-api가 실패하면(`auth` 말고 어느 부류든, `unreadable` 포함): `watcher_public_ip_ok = 0`과 경고 한 줄, `watcher_api_key_days_left`는 지난 값을 그대로 둔다, 반향은 묻지 않는다, 다음 재확인은 보통 간격으로. 반향이 실패하거나 본문이 주소가 아니면 0과 경고 한 줄(그 앞의 query-api가 준 남은 날은 새로 쓴다).
+- `auth`: 클라이언트가 멈췄다(3부). 재확인은 `Next`를 내고 **반향만** 이어 간다: 바로 한 번, 그 뒤 마지막 답 + `ip_check_ms`마다. 비교하는 목록은 마지막으로 통과한 query-api의 `ips`다(첫 재확인이면 2단계의 것). 반향은 Bybit 요청이 아니고(3부), 10010의 흔한 원인이 바뀐 공인 IP라 `watcher_public_ip_ok`가 그것을 보여 줘야 한다(검토 1 M1). query-api는 다시 묻지 않으니 `watcher_api_key_days_left`는 마지막 값으로 남는다.
+- 읽을 수 있는 query-api 답이 시작 규칙에 맞지 않으면(다른 `userID`, `isMaster = true`, 묶인 IP 없음 `[]`·`*`): `Step::StopRequests {reason}`. `start::apply(client, step)`이 `Client::stop_key(reason)`을 불러 **재시작까지 모든 Bybit 요청을 멈춘다**. 키 거절과 같은 래치이고 코드는 `rest::OWN_RULE_CODE`(-1, 거래소의 코드가 아님)다. `watcher_auth_rejected = 1`, 규칙을 적은 오류 한 줄(`error: the key no longer passes the start check: query-api: …; every Bybit request stops until the watcher restarts`)은 처음 한 번만이다(소유자 질문 13, 안전한 쪽). `watcher_public_ip_ok = 0`이 된다(통과하는 목록이 없으니 맞는 IP가 아니다, 검토 1 M1; 따로 경고 줄은 없다, 오류 줄이 이유다). 재확인은 그 뒤 반향도 묻지 않는다.
+- 요청이 답을 기다리지 않는 때 들어온 답(앞선 `poll` 없는 답)은 아무것도 바꾸지 않는다: `Start`와 `IpCheck` 둘 다 지금의 `Step`을 돌려주고 다음 요청과 그 시각, 게이지를 그대로 둔다(검토 1 S1, 시험 `start::an_answer_without_a_request_in_flight_changes_nothing`).
+- 이 요청들은 대조 예산(2.7 req/s)의 밖(분당 query-api 1, 반향 1)이고 요청 제한(3부) 안이다. U19a7의 실행 코드는 5단계가 끝난 뒤부터, `/api/status`를 기다리는 동안과 처음 재생 중에도 이것을 돌린다(검토 3 N2; 그 시험은 U19a7).
+
+### 지표(4부)
+
+| 이름 | 종류 | 뜻 |
+|---|---|---|
+| `watcher_api_key_days_left` | 게이지 | `expiredAt`까지 남은 날, 내림. 해당 없음(없음, `null`, epoch)이나 읽을 수 없으면 없음 |
+| `watcher_public_ip_ok` | 게이지 0/1 | 반향이 본 공인 IP가 키의 `ips`(마지막으로 통과한 query-api의 것)에 있음. 반향 실패, 주소 아닌 본문, 실패한 재확인, 시작 규칙에 더는 맞지 않는 재확인은 0. 키 거절 뒤에도 반향만으로 계속 쓴다. 2단계에서 키가 거절되면 없음 |
+| `watcher_auth_rejected` | 게이지 0/1 | 3부의 키 거절 또는 시작 규칙에 더는 맞지 않는 재확인이 모든 Bybit 요청을 멈췄음 |
+
 ### 알려진 한계(4부)
 
 - 다른 소유자의 실제 파일은 시험이 만들지 못한다(root만 만든다). 그래서 소유자 규칙은 규칙 함수(`creds::file_rules`)에 다른 uid를 주어 보고, `creds::load`로는 root가 소유한 `/etc/hostname`을 읽어 본다(검토 1 S4; 그 파일이 없거나 시험의 uid가 소유하면 이 경우만 건너뛴다). root로 돌리면 자격 시험은 바로 끝난다(OMS의 권한 시험과 같다).
@@ -294,8 +330,18 @@
 - `status_url`의 포트 80을 거부하는 것은 판단(모델 아님)이다: URL 형식이 `http`의 기본 포트 `:80`을 지우므로 클라이언트가 보내는 `Host`에 포트가 없고, 대시보드는 포트 없는 `Host`를 거부한다(`127.0.0.1:<port>`만 받는다). `vm_url`의 `localhost`를 거부하는 것도 판단(모델 아님)이다(이름은 다른 주소로 풀릴 수 있다).
 - 경로 비교는 존재하는 가장 긴 앞부분만 파일 시스템으로 푼다. 끊어진 심볼릭 링크(가리키는 곳이 아직 없는 링크)는 따르지 못하므로, `admin_socket`이 아직 없는 `monitor.sock`을 가리키는 링크면 두 소켓은 다르게 보인다(검토 1 N4). OMS가 엉뚱한 소켓으로 온 요청을 거부한다.
 - 데이터 디렉터리와 두 소켓이 있는지는 보지 않는다. OMS가 꺼져 있어도 워처는 시작해서 기다린다(U19a7).
-- 워처 키에 출금 권한이 없어야 한다(설계 §7.4). 시작 확인은 이것을 보지 않는다(OMS도 자기 키에 대해 보지 않는다). [운영 문서](../operations/watcher.md)에 적었다.
+- 워처 키에 출금 권한이 없어야 한다(설계 §7.4). 시작 확인은 이것을 보지 않는다(OMS도 자기 키에 대해 보지 않는다). [운영 문서](../operations/watcher.md)에 적었다. `readOnly`와 `permissions`도 보지 않는다(워처는 U19a에서 조회만 한다).
+- 시작 확인과 재확인은 loopback 가짜와 문서의 예(gateway facts Q4, Q8)로만 시험했다. 묶이지 않은 키의 query-api `ips`가 `["*"]`인지 `[]`인지는 문서로 정해지지 않았다(Q4): 둘 다 거부한다. CIDR 같은 주소가 아닌 항목은 주소와 맞지 않는 것으로 보고, 주소가 하나도 없는 목록은 거부한다(판단(모델 아님)).
+- 403 뒤의 다시 묻기는 "그 답의 시각 + 600초"다. 다른 요청이 먼저 403을 받아 이미 멈춘 동안 보내지 않고 돌아온 `ip_banned`에도 같은 600초를 기다린다. 멈춤보다 늦게 다시 물을 수는 있어도 일찍 묻지는 않는다(안전한 쪽, 판단(모델 아님)).
+- `Step::StopRequests`는 스스로 아무것도 멈추지 않는다. 호출자가 `start::apply(client, step)`을 불러야 클라이언트가 멈춘다(검토 1 N2). U19a7의 실행 코드가 부르고, 그 시험(실행 코드를 거친 규칙 위반 재확인 뒤 어느 경로로도 요청 없음)은 U19a7의 몫이다.
+- `Start`와 `IpCheck`는 답을 기다리는 요청에 기한을 두지 않는다(검토 1 N3). 3부의 클라이언트는 언제나 답한다(시간 초과, 요청 제한). 그래서 실행 코드(U19a7)가 보낸 요청의 답을 버리지 않는 한 멈추지 않는다. 답을 잃으면(작업이 취소되면) 게이지가 조용히 그대로 남는다.
+- 거래 중이 아닌 기호를 instruments-info가 기본 목록에서 빼는지는 확인하지 않았다(실제 호스트를 부르지 않았다, gateway facts가 정하지 않는다; 검토 1 N4). 빼면 그 기호의 행이 없어 시작이 종료 2로 거부된다(스펙의 "행이 있어야 한다", 거부하는 쪽). 계정에 그 기호의 포지션이 남아 있어도 워처는 재시작을 되풀이한다. 운영자는 `symbols`에서 그 기호를 빼거나 OMS로 정리한다.
+- 2단계의 거부는 시작 때의 규칙이다. 재확인의 같은 규칙 위반은 끝내지 않고 요청을 멈춘다(소유자 질문 13). 재확인의 query-api가 계속 실패하면 공인 IP는 0으로 남고 남은 날은 마지막 값으로 남는다. 키가 그 사이 만료돼도 남은 날은 마지막 값에서 줄지 않는다(내보내는 값이 답을 받은 시각의 계산이다).
+- 키가 거절된 뒤(재확인이나 5단계)에는 query-api를 묻지 않으므로 `watcher_api_key_days_left`는 마지막으로 통과한 답의 값에서 다시 줄지 않는다. `days_left`의 문턱에 거는 경보(U20b)는 이 상태에서 울리지 않는다. 이때의 신호는 `watcher_auth_rejected = 1`이다(검토 2 N2).
+- `watcher_auth_rejected = 1`과 `watcher_public_ip_ok = 0`이 함께 보이는 원인은 셋이다: 바뀐 공인 IP, 실패한 반향(반향 서비스 고장이나 403 멈춤), 시작 규칙 위반. 두 게이지만으로 "IP가 바뀌었다"고 말할 수 없다. 경보 문구(U20b)는 원인을 단정하지 말고 경고·오류 줄을 보라고 적는다(검토 2 N3).
 
 ### 검증(4부)
 
 `config::the_config_is_validated_and_mainnet_needs_confirmation`(필수 필드만의 기본값 전부, `mainnet`은 `mainnet_confirmed = true`일 때만, 최상위·표마다 모르는 키와 모르는 표, 필수 필드 여덟 각각 없음, 한 줄 오류와 줄 번호, 이름의 문자 수(`é` 64개는 받음), 기호의 모양·개수·중복, `https` 반향, 경로 규칙(상대, `..`, 데이터 디렉터리 안·자신·`.`·`..`로 쓴 데이터 디렉터리), `status_url` 15가지 거부와 세 가지 수용, `ip_echo_url`의 사용자·앞뒤 공백·줄바꿈·탭, 소켓의 기본·절대·같음(`.`, 링크로 가린 디렉터리, `..`; 검토 1 S2), 빠진 필드의 거부 줄에 줄 번호와 키가 없음(검토 1 S1), `host` 1~255자, 범위 16개의 양 끝과 그 밖 하나씩, 한 표의 두 필드, `vm_url` 세 가지 수용과 열두 가지 거부(조각, 앞뒤 공백, 탭, 줄바꿈 포함; 검토 1 S3), 비밀번호가 든 `vm_url`을 인용하지 않음), `config::the_config_file_is_read_and_its_refusals_name_the_file`, `creds::the_credentials_file_must_be_owner_only_and_outside_the_data_dir`(`0600`·`0400`은 받고 `0644`·`0640`·`0604`·`0660`·`0610`·`0700`·`0500`·`4600`·`2600`·`1600`은 거부, 다른 소유자(규칙 함수, 그리고 `creds::load`로 root의 `/etc/hostname`), 좋은 파일로 가는 심볼릭 링크, 디렉터리, FIFO(5초 안에 거부), 없는 파일, 내용 일곱 가지와 UTF-8 아닌 파일(어떤 오류에도 비밀이 없음), 데이터 디렉터리 안, `..`, 상대 경로, 데이터 디렉터리를 가리키는 링크(자격 쪽, 데이터 쪽), 다른 디렉터리를 가리키는 링크는 받음). 변이: M193(`mainnet_confirmed` 없이 `mainnet`을 받음; 스펙의 고의 결함 12), M235(두 소켓을 적힌 대로 비교), M236(자격 파일의 소유자를 자기 자신과 비교), M237(끝에 공백이 있는 `vm_url`을 받음; 검토 1).
+
+시작 확인과 IP 재확인(U19a4b, `crates/watcher/tests/start.rs` 13개, 수동 시계, 클라이언트가 필요한 곳은 loopback 가짜 `http-fake`): `start::a_traded_symbol_that_does_not_settle_in_usdt_refuses_the_start`(USDC, 소문자 `usdt`, 빈 코인은 거부, 그 뒤 세 번째 기호도 아무 요청도 없음; 모두 USDT면 `Done`), `start::a_symbol_missing_from_instruments_info_refuses_the_start`, `start::a_master_key_another_uid_or_a_key_bound_to_no_ip_refuses_the_start`(마스터, 다른 uid, `[]`, `["*"]`, 주소와 `*`, 주소 없음; 대응된 IPv6는 받음), `start::a_key_that_expires_in_10_days_gives_days_left_10`(+10일은 10, +10일 − 1시간은 9, 소수 초, 만료 1시간 뒤 −1, 윤일), `start::the_documented_epoch_expiry_exports_no_days_left`(없음, `null`, epoch, 1970-01-02 이하; 읽을 수 없는 형식 열하나는 경고 한 줄), `start::an_echo_failure_or_a_body_that_is_not_an_address_gives_public_ip_ok_0`, `start::query_api_answers_other_than_auth_or_a_refusal_retry_every_5_s`(부류마다 `Wait {until_ms}` = 답 + 5,000ms, 403은 + 600,000ms, 그 전에는 요청 없음, 읽을 수 없는 답 여섯 가지를 셈), `start::settle_coin_answers_other_than_auth_or_a_refusal_retry_every_5_s`, `start::an_auth_answer_at_start_stays_up_without_requests`(10010, 10003, 33004, HTTP 401, 5단계의 10004; 시계 10분 동안 가짜에 요청 없음), `start::the_public_ip_is_rechecked_every_60_s`, `start::a_failed_recheck_sets_public_ip_ok_0_and_keeps_days_left`, `start::a_recheck_with_another_uid_a_master_key_or_no_bound_ip_stops_every_request`(멈춘 뒤 모든 경로가 보내지 않고 `auth`, 오류 한 줄, `watcher_public_ip_ok = 0`; 재확인의 10010 뒤에는 반향만 60초마다, 같은 IP는 1·다른 IP는 0, Bybit에는 요청 없음), `start::an_answer_without_a_request_in_flight_changes_nothing`(첫 요청 전, 기다림 중, 거부·`Done`·키 거절 뒤, 쉬는 재확인, 반향 차례, 키 거절 뒤 반향만, 규칙 위반 뒤; 검토 1 S1). 5단계의 키 거절 뒤 반향만의 재확인은 `start::an_auth_answer_at_start_stays_up_without_requests`가 본다(첫 반향은 4단계 반향의 답 + 60초에 처음 묻고, 그 1ms 전에는 묻지 않는다; 검토 2 S1). 변이: M189(정산 코인을 보지 않음; 고의 결함 8), M190(남은 날을 올림; 고의 결함 9), M225(403 뒤 5초에 다시 물음; 고의 결함 44), M238(재확인의 키 거절 뒤 반향도 묻지 않음; 검토 1 M1).

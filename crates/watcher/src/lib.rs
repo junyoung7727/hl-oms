@@ -21,6 +21,7 @@ pub mod log;
 pub mod metrics;
 pub mod rest;
 pub mod sign;
+pub mod start;
 pub mod state;
 pub mod wire_id;
 
