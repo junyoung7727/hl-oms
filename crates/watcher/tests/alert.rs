@@ -891,6 +891,17 @@ fn mismatch_notices_drain_tells_what_the_pace_holds() {
     assert!(n.poll(T0 + 1_000_000).is_empty());
 }
 
+#[test]
+fn the_start_refusal_reason_is_cut_to_200_characters() {
+    // Review 1 S3: `워처 시작 거부: {reason cut to 200}` counts characters.
+    let tail = ". 워처가 꺼짐: W1~W4와 W5가 돌지 않음";
+    let reason = format!("{}{}", "가".repeat(199), "나b".repeat(51));
+    let body = alert::refusal_text(&reason);
+    assert_eq!(body, format!("워처 시작 거부: {}나{tail}", "가".repeat(199)));
+    let short = "query-api: the API key is the master account's";
+    assert_eq!(alert::refusal_text(short), format!("워처 시작 거부: {short}{tail}"));
+}
+
 /// A client that never sends (its base is never asked), on `clock`.
 fn idle_client(clock: Arc<ManualClock>) -> watcher::rest::Client {
     bybit_client("http://127.0.0.1:9", clock)
