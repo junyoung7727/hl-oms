@@ -61,12 +61,15 @@ pub enum Step {
     Next,
     /// A start rule failed: the watcher exits with code 2 and this line.
     Refuse { reason: String },
-    /// The key was rejected (`auth`): the client sends no Bybit request
-    /// again, the watcher stays up and asks nothing more.
+    /// The key was rejected (`auth`) during the start: the client sends no
+    /// Bybit request again, the watcher stays up and the start asks
+    /// nothing more. After a rejection at step 5, [`Start::ip_check`] gives
+    /// a recheck that asks the echo only.
     StayUpNoRequests,
     /// A recheck found that the key no longer passes the start rules:
     /// every Bybit request stops until restart, as for `auth`
-    /// ([`apply`] tells the client). The recheck asks nothing more.
+    /// ([`apply`] tells the client), and `watcher_public_ip_ok` is 0. The
+    /// recheck asks nothing more.
     StopRequests { reason: String },
     /// Every start check passed; [`Start::ip_check`] gives the recheck.
     Done,
@@ -423,20 +426,26 @@ impl Start {
     }
 
     /// The recheck, once every start check passed: the first is due
-    /// `ip_check_ms` after the echo of step 4 answered.
+    /// `ip_check_ms` after the echo of step 4 answered. After a key
+    /// rejected at step 5 a recheck of the echo alone against step 2's
+    /// IPs (review 1 M1), so that a changed public IP still shows.
     pub fn ip_check(&self) -> Option<IpCheck> {
-        match (&self.phase, self.echo_at) {
-            (Phase::Done, Some(at)) => Some(IpCheck {
-                uid: self.uid,
-                interval_ms: self.ip_check_ms,
-                metrics: self.metrics.clone(),
-                log: self.log.clone(),
-                next_due: at.saturating_add(self.ip_check_ms),
-                phase: Recheck::Idle,
-                ips: Vec::new(),
-            }),
-            _ => None,
-        }
+        let key_stopped = match self.phase {
+            Phase::Done => false,
+            Phase::StayedUp => true,
+            _ => return None,
+        };
+        let at = self.echo_at?;
+        Some(IpCheck {
+            uid: self.uid,
+            interval_ms: self.ip_check_ms,
+            metrics: self.metrics.clone(),
+            log: self.log.clone(),
+            next_due: at.saturating_add(self.ip_check_ms),
+            phase: Recheck::Idle,
+            ips: self.ips.clone(),
+            key_stopped,
+        })
     }
 
     fn next_symbol(&mut self, i: usize) -> Step {
@@ -485,7 +494,7 @@ impl Start {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Recheck {
     /// Waiting for `next_due`.
     Idle,
@@ -495,20 +504,23 @@ enum Recheck {
     EchoDue,
     /// The echo in flight.
     Echo,
-    /// The key was rejected or no longer passes the start rules: nothing
-    /// is asked until restart.
-    Stopped,
+    /// The key no longer passes the start rules (the reason): nothing is
+    /// asked until restart.
+    Stopped(String),
 }
 
 /// Step 6: every `ip_check_ms`, query-api again (the IP list may change)
 /// and then the echo, refreshing `watcher_api_key_days_left` and
 /// `watcher_public_ip_ok`. The next recheck is due `ip_check_ms` after the
 /// previous one's last answer. A failed recheck (any class but `auth`)
-/// sets `watcher_public_ip_ok = 0` and keeps the days left; `auth` stops
-/// it (the client latched the key stop); a readable query-api answer
-/// that fails a start rule stops every Bybit request until restart
-/// ([`Step::StopRequests`]). These requests go through the client's guard
-/// and are outside the reconciliation budget.
+/// sets `watcher_public_ip_ok = 0` and keeps the days left. After `auth`
+/// (the client latched the key stop) it asks the echo alone, at once and
+/// then at the same pace, against the last IPs that passed: the echo is
+/// not a Bybit request, and a changed public IP is a usual cause of 10010
+/// (review 1 M1). A readable query-api answer that fails a start rule
+/// stops every Bybit request until restart ([`Step::StopRequests`]) and
+/// sets `watcher_public_ip_ok = 0`. These requests go through the
+/// client's guard and are outside the reconciliation budget.
 pub struct IpCheck {
     uid: u64,
     interval_ms: u64,
@@ -516,7 +528,10 @@ pub struct IpCheck {
     log: Log,
     next_due: u64,
     phase: Recheck,
+    /// The key's IPs of the last query-api that passed.
     ips: Vec<String>,
+    /// The key was rejected: the echo alone.
+    key_stopped: bool,
 }
 
 impl IpCheck {
@@ -524,6 +539,10 @@ impl IpCheck {
     /// before the next recheck is due, and after a stop.
     pub fn poll(&mut self, now_ms: u64) -> Option<Request> {
         match self.phase {
+            Recheck::Idle if now_ms >= self.next_due && self.key_stopped => {
+                self.phase = Recheck::Echo;
+                Some(Request::Echo)
+            }
             Recheck::Idle if now_ms >= self.next_due => {
                 self.phase = Recheck::Query;
                 Some(query_api())
@@ -549,12 +568,11 @@ impl IpCheck {
                         Step::Next
                     }
                     Key::Fails(why) => {
-                        self.phase = Recheck::Stopped;
-                        Step::StopRequests {
-                            reason: format!(
-                                "the key no longer passes the start check: query-api: {why}"
-                            ),
-                        }
+                        let reason =
+                            format!("the key no longer passes the start check: query-api: {why}");
+                        self.metrics.set(PUBLIC_IP_OK, &[], 0.0);
+                        self.phase = Recheck::Stopped(reason.clone());
+                        Step::StopRequests { reason }
                     }
                     Key::Unreadable(why) => {
                         let e = unreadable(&self.metrics, QUERY_API, why);
@@ -562,8 +580,9 @@ impl IpCheck {
                     }
                 },
                 Err(RestError::Auth { .. }) => {
-                    self.phase = Recheck::Stopped;
-                    Step::StayUpNoRequests
+                    self.key_stopped = true;
+                    self.phase = Recheck::EchoDue;
+                    Step::Next
                 }
                 Err(e) => self.failed(now_ms, e),
             },
@@ -571,7 +590,9 @@ impl IpCheck {
                 export_public_ip(&answer, &self.ips, &self.metrics, &self.log);
                 self.wait(now_ms)
             }
-            Recheck::Stopped => Step::StayUpNoRequests,
+            Recheck::Stopped(ref reason) => Step::StopRequests {
+                reason: reason.clone(),
+            },
             Recheck::EchoDue => Step::Next,
             Recheck::Idle => Step::Wait {
                 until_ms: self.next_due,

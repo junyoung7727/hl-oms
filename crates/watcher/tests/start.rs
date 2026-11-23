@@ -614,13 +614,46 @@ async fn an_auth_answer_at_start_stays_up_without_requests() {
         assert_eq!(fake.requests().len(), seen, "{case}");
         // No exit and no request.
         nothing_sent(&c, &fake, |t| s.start.poll(t), case).await;
-        assert!(s.start.ip_check().is_none(), "{case}");
         // Visible: the gauge and the client's one error line; the start
         // itself adds no line.
         let head = "error: Bybit rejected the key";
         one_line(&c.lines, head, "until the watcher restarts", case);
         assert!(lines(&s.lines).is_empty(), "{case}");
+        // At step 5 the key's IPs are known (step 4): the public IP is
+        // still watched, with the echo only. At step 2 nothing is known.
+        match s.start.ip_check() {
+            None => assert!(at_query, "{case}"),
+            Some(mut check) => {
+                assert!(!at_query, "{case}");
+                echo_only(&c, &fake, &mut check, &s.metrics, case).await;
+            }
+        }
     }
+}
+
+/// A recheck after a key stop: every `ip_check_ms` after its last answer it
+/// asks the echo only (no Bybit request reaches `fake`) and compares it with
+/// the key's last IPs that passed: 1 for the bound address, then 0 for
+/// another one.
+async fn echo_only(c: &C, fake: &FakeHttp, check: &mut IpCheck, m: &Metrics, case: &str) {
+    let (seen, echoes) = (fake.requests().len(), c.echo.requests().len());
+    let other = Answer::Reply(200, "198.51.100.4\n".into());
+    c.echo
+        .route("/ip", [Answer::Reply(200, format!("{IP}\n")), other]);
+    for ip_ok in [1.0, 0.0] {
+        let now = c.clock.now_ms();
+        let req = check.poll(now);
+        assert_eq!(req, Some(Request::Echo), "{case}");
+        assert_eq!(check.poll(now), None, "{case}");
+        let step = check.on_answer(now, c.ask(&Request::Echo).await);
+        assert_eq!(step, wait(now + 60_000), "{case}");
+        assert_eq!(m.get(PUBLIC_IP_OK, &[]), Some(ip_ok), "{case}");
+        assert_eq!(check.poll(now + 59_999), None, "{case}");
+        c.clock.set(now + 60_000);
+    }
+    assert_eq!(fake.requests().len(), seen, "{case}");
+    assert_eq!(c.echo.requests().len(), echoes + 2, "{case}");
+    assert_eq!(c.metrics.get("watcher_auth_rejected", &[]), Some(1.0));
 }
 
 /// A start of one symbol run to the end on answers: query-api at `T0`
@@ -793,6 +826,8 @@ async fn a_recheck_with_another_uid_a_master_key_or_no_bound_ip_stops_every_requ
         );
         apply(&c.client, &step);
         assert_eq!(c.client.auth_rejected(), Some(OWN_RULE_CODE), "{case}");
+        // The echo's address is in no list that passes: not ok.
+        assert_eq!(c.metrics.get(PUBLIC_IP_OK, &[]), Some(0.0), "{case}");
         // Every Bybit request stops until restart, as for a rejected key;
         // the recheck asks nothing more (no echo either).
         assert_eq!(fake.requests().len(), 3, "{case}");
@@ -803,13 +838,103 @@ async fn a_recheck_with_another_uid_a_master_key_or_no_bound_ip_stops_every_requ
         let line = format!("error: {reason}; every Bybit request stops until the watcher restarts");
         assert_eq!(lines(&c.lines), [line], "{case}");
     }
-    // A rejected key at the recheck: as at start, the client stopped; the
-    // recheck asks nothing more.
+    // A rejected key at the recheck: as at start, the client stopped. A
+    // changed public IP is a usual cause of 10010, so the recheck goes on
+    // with its echo at once and then the echo alone (review 1 M1).
     let (fake, c, mut check) = first_recheck(code(10010)).await;
     let req = check.poll(c.clock.now_ms()).unwrap();
     let step = check.on_answer(c.clock.now_ms(), c.ask(&req).await);
-    assert_eq!(step, Step::StayUpNoRequests);
+    assert_eq!(step, Step::Next);
     assert_eq!(c.client.auth_rejected(), Some(10010));
     assert_eq!(fake.requests().len(), 3);
-    nothing_sent(&c, &fake, |t| check.poll(t), "10010").await;
+    let metrics = c.metrics.clone();
+    echo_only(&c, &fake, &mut check, &metrics, "10010").await;
+    for p in [QUERY_API, "/v5/position/list"] {
+        assert_eq!(c.client.get(p, &[]).await.unwrap_err().class(), "auth");
+    }
+    assert_eq!(fake.requests().len(), 3);
+}
+
+#[test]
+fn an_answer_without_a_request_in_flight_changes_nothing() {
+    let stray = || Ok(good_key());
+    // Before the first request: query-api is still the first.
+    let mut s = start_of(&["BTCUSDT"]);
+    assert_eq!(s.start.on_answer(T0, stray()), Step::Next);
+    // During a wait: the same wait, the same request at the same instant.
+    take(&mut s.start, T0, &query_api());
+    let until = T0 + 100 + RETRY_MS;
+    assert_eq!(
+        s.start.on_answer(T0 + 100, Err(err("no_answer"))),
+        wait(until)
+    );
+    assert_eq!(s.start.on_answer(T0 + 200, stray()), wait(until));
+    asks_nothing(&mut s.start, &[until - 1], "wait");
+    assert_eq!(
+        answer(&mut s.start, until, &query_api(), stray()),
+        Step::Next
+    );
+    take(&mut s.start, until, &Request::Echo);
+    assert_eq!(s.start.on_answer(until, Ok(json!(IP))), Step::Next);
+    take(&mut s.start, until, &instruments("BTCUSDT"));
+    let row = || Ok(instrument("BTCUSDT", "USDT"));
+    assert_eq!(s.start.on_answer(until, row()), Step::Done);
+    // After the end: the same end, nothing asked.
+    assert_eq!(s.start.on_answer(until + 1, row()), Step::Done);
+    asks_nothing(&mut s.start, &[until + 1], "done");
+    let mut r = start_of(&["BTCUSDT"]);
+    let master = Ok(key(UID, true, json!([IP]), None));
+    let refused = refuse(&format!("query-api: {MASTER}"));
+    assert_eq!(answer(&mut r.start, T0, &query_api(), master), refused);
+    assert_eq!(r.start.on_answer(T0 + 1, stray()), refused);
+    asks_nothing(&mut r.start, &[T0 + 1, T0 + 600_000], "refused");
+    let mut u = start_of(&["BTCUSDT"]);
+    let rejected = Err(RestError::Auth {
+        code: 10010,
+        msg: "m".into(),
+    });
+    let step = answer(&mut u.start, T0, &query_api(), rejected);
+    assert_eq!(step, Step::StayUpNoRequests);
+    assert_eq!(u.start.on_answer(T0 + 1, stray()), Step::StayUpNoRequests);
+    asks_nothing(&mut u.start, &[T0 + 1, T0 + 600_000], "stayed up");
+
+    // An idle recheck: the same due instant, and no gauge changed.
+    let (s, mut check) = rechecked(T0 + 1_000, T0 + 1_500, 60_000);
+    let due = T0 + 61_000;
+    assert_eq!(check.on_answer(T0 + 2_000, stray()), wait(due));
+    assert_eq!(
+        check.on_answer(T0 + 2_000, Ok(json!("198.51.100.4"))),
+        wait(due)
+    );
+    assert_eq!(s.metrics.get(PUBLIC_IP_OK, &[]), Some(1.0));
+    assert_eq!(s.metrics.get(DAYS_LEFT, &[]), Some(10.0));
+    assert_eq!(check.poll(due - 1), None);
+    take_check(&mut check, due, &query_api());
+    // The echo due: still the echo.
+    assert_eq!(check.on_answer(due, stray()), Step::Next);
+    assert_eq!(check.on_answer(due, stray()), Step::Next);
+    take_check(&mut check, due, &Request::Echo);
+    assert_eq!(check.on_answer(due, Ok(json!(IP))), wait(due + 60_000));
+    // After a key stop: the echo alone, at the same instants.
+    take_check(&mut check, due + 60_000, &query_api());
+    let rejected = Err(RestError::Auth {
+        code: 10010,
+        msg: "m".into(),
+    });
+    let at = due + 60_000;
+    assert_eq!(check.on_answer(at, rejected), Step::Next);
+    take_check(&mut check, at, &Request::Echo);
+    assert_eq!(check.on_answer(at, Ok(json!(IP))), wait(at + 60_000));
+    assert_eq!(check.on_answer(at + 1, stray()), wait(at + 60_000));
+    assert_eq!(check.poll(at + 59_999), None);
+    take_check(&mut check, at + 60_000, &Request::Echo);
+    // After a rule stop: the same stop, nothing asked.
+    let (_s, mut check) = rechecked(T0 + 1_000, T0 + 1_500, 60_000);
+    take_check(&mut check, due, &query_api());
+    let step = check.on_answer(due, Ok(key(UID, true, json!([IP]), None)));
+    assert!(matches!(step, Step::StopRequests { .. }), "{step:?}");
+    assert_eq!(check.on_answer(due + 1, stray()), step);
+    for t in [due + 1, due + 60_000, due + 600_000] {
+        assert_eq!(check.poll(t), None);
+    }
 }

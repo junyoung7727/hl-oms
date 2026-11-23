@@ -329,7 +329,8 @@ impl Client {
     }
 
     /// The end (ms) of the last 403 pause, if there was one. The start
-    /// checks wait for it before their retry (U19a4b).
+    /// checks (U19a4b) do not read it: they wait 600 s from the 403 answer
+    /// they got, which is this instant for a 403 they sent.
     pub fn paused_until(&self) -> Option<u64> {
         self.stop.lock().ok()?.paused_until
     }
