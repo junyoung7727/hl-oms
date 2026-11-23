@@ -1,5 +1,6 @@
 //! The watcher's own Bybit v5 REST client (C-WATCH part 3), written from
-//! the venue's documentation, not from the OMS's code: signed GETs, the
+//! the venue's documentation, not from the OMS's code: signed GETs, the one
+//! signed POST (the cancel-all of the kill loop, C-WATCH part 11), the
 //! answer classes, the never-retried key rejection, the 403 pause, the
 //! request guard and the request counters. The checks call it; it never
 //! retries inside a call (the next round is the retry).
@@ -225,6 +226,52 @@ pub struct ClientConfig {
 /// the address Bybit sees.
 pub const LOCAL_ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 
+/// The path of the watcher's one signed POST (U19b2a): cancel every open
+/// order of the account in linear/USDT (gateway facts Q11).
+pub const CANCEL_ALL: &str = "/v5/order/cancel-all";
+
+/// Its body: the signed string and the body sent are these bytes. No
+/// `orderFilter`, so every kind of order is cancelled (Q11.2). There is no
+/// other body and no generic POST: no path of the watcher can create or
+/// amend an order.
+pub const CANCEL_ALL_BODY: &str = r#"{"category":"linear","settleCoin":"USDT"}"#;
+
+/// A cancel-all that Bybit accepted: the length of `result.list` (at most
+/// 500 per call, Q11.3; the cancel runs asynchronously, Q11.5, so only a
+/// count of the open orders afterwards tells what is left).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CancelAll {
+    pub cancelled: usize,
+}
+
+/// The `result` of a cancel-all: `success` absent or `"1"` with a list is
+/// accepted; `"0"` is refused; anything else is unreadable.
+fn read_cancel_all(v: &Value) -> Result<CancelAll, RestError> {
+    match v.get("success") {
+        None => {}
+        Some(Value::String(s)) if s == "1" => {}
+        Some(Value::String(s)) if s == "0" => {
+            return Err(RestError::Refused {
+                code: 0,
+                msg: "cancel-all answered success 0".into(),
+            });
+        }
+        Some(other) => {
+            return Err(RestError::Unreadable(format!(
+                "cancel-all: success is {}",
+                one_line(&other.to_string())
+            )));
+        }
+    }
+    let list = v
+        .get("list")
+        .and_then(Value::as_array)
+        .ok_or_else(|| RestError::Unreadable("cancel-all: result.list is not a list".into()))?;
+    Ok(CancelAll {
+        cancelled: list.len(),
+    })
+}
+
 /// The `endpoint` label of the IP echo (its URL is config, not a label).
 pub const ECHO: &str = "ip_echo";
 
@@ -232,7 +279,7 @@ pub const ECHO: &str = "ip_echo";
 /// while it waits at the guard (판단(모델 아님)).
 const GUARD_POLL_MS: u64 = 100;
 
-/// The signed GET client. One per process: the guard, the key rejection
+/// The signed client. One per process: the guard, the key rejection
 /// and the 403 pause hold for every request it sends, from any task.
 pub struct Client {
     base: String,
@@ -483,14 +530,7 @@ impl Client {
             self.recv_window_ms,
             &q,
         );
-        let rb = self
-            .http
-            .get(url)
-            .header("X-BAPI-API-KEY", &self.creds.api_key)
-            .header("X-BAPI-TIMESTAMP", ts.to_string())
-            .header("X-BAPI-RECV-WINDOW", self.recv_window_ms.to_string())
-            .header("X-BAPI-SIGN", sig)
-            .header("X-BAPI-SIGN-TYPE", "2");
+        let rb = self.signed(self.http.get(url), ts, sig);
         let res = match self.send(rb).await {
             Ok((status, body)) => classify(status, &body),
             Err(e) => Err(e),
@@ -500,6 +540,49 @@ impl Client {
             self.after(path, e);
         }
         res
+    }
+
+    /// The cancel-all (U19b2a): the only signed request that is not a GET
+    /// and the only POST to the REST base. The path and the body are the
+    /// constants [`CANCEL_ALL`] and [`CANCEL_ALL_BODY`]; the signature is
+    /// over the body sent. It waits at the guard and the 403 pause and is
+    /// refused after a rejected key like every Bybit request, and counts in
+    /// `watcher_requests_total{endpoint="/v5/order/cancel-all"}`.
+    pub async fn cancel_all(&self) -> Result<CancelAll, RestError> {
+        self.turn(true).await?;
+        self.metrics
+            .add("watcher_requests_total", &[("endpoint", CANCEL_ALL)], 1.0);
+        let ts = self.clock.now_ms();
+        let sig = sign::post_signature(
+            &self.creds.api_secret,
+            ts,
+            &self.creds.api_key,
+            self.recv_window_ms,
+            CANCEL_ALL_BODY,
+        );
+        let rb = self
+            .http
+            .post(format!("{}{CANCEL_ALL}", self.base))
+            .header("Content-Type", "application/json")
+            .body(CANCEL_ALL_BODY);
+        let res = match self.send(self.signed(rb, ts, sig)).await {
+            Ok((status, body)) => classify(status, &body).and_then(|v| read_cancel_all(&v)),
+            Err(e) => Err(e),
+        };
+        if let Err(e) = &res {
+            self.count_error(CANCEL_ALL, e);
+            self.after(CANCEL_ALL, e);
+        }
+        res
+    }
+
+    /// The five headers of a signed request.
+    fn signed(&self, rb: reqwest::RequestBuilder, ts: u64, sig: String) -> reqwest::RequestBuilder {
+        rb.header("X-BAPI-API-KEY", &self.creds.api_key)
+            .header("X-BAPI-TIMESTAMP", ts.to_string())
+            .header("X-BAPI-RECV-WINDOW", self.recv_window_ms.to_string())
+            .header("X-BAPI-SIGN", sig)
+            .header("X-BAPI-SIGN-TYPE", "2")
     }
 
     /// The HTTP status and body; `NotSent` when the connection failed,
