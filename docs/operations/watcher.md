@@ -32,6 +32,9 @@ vm_url = "http://127.0.0.1:8428"                  # http, loopback 주소 숫자
 
 [telegram]                                        # mainnet은 필수(U19b1a), testnet은 없으면 warn 한 줄
 token_file = "/etc/hl-oms/watcher-telegram.json"  # 데이터 디렉터리 밖, git 저장소 밖, 0600 또는 0400
+
+# [kill]                                          # U19b2a: 루프 필드만. U19b3a가 marker, oms_unit을 더할 때까지 완성되지 않음
+# round_ms = 1000  watch_ms = 30000  watch_every_ms = 5000  notice_ms = 60000
 ```
 
 | 필드 | 기본 | 받는 값(범위는 판단(모델 아님)) |
@@ -64,6 +67,7 @@ token_file = "/etc/hl-oms/watcher-telegram.json"  # 데이터 디렉터리 밖, 
 | `[http] request_timeout_ms` | 2000(판단(모델 아님)) | 200~10,000 |
 | `[telemetry] vm_url` | 없음 | `http://`, loopback 주소 숫자(`localhost`는 안 됨), 공백·제어 문자 없음(끝의 공백도) |
 | `[telegram] token_file` | 표 없음 | 표가 있으면 필수. 절대 경로, `..` 없음, `data_dir` 밖. **mainnet은 `[telegram]` 없이 시작하지 않는다**(`mainnet requires [telegram]: the watcher's P1 must reach a person`). 다른 키(`chat_id`, `token`)는 거부: 비밀은 토큰 파일에만 |
+| `[kill]` | 표 없음 | 워처 자신의 일괄 취소 확인 루프(C-WATCH 11부). 표가 있으면 키가 취소할 수 있어야 한다(아래 "워처 키"). U19b2a의 필드: `round_ms` 1,000(1,000~10,000), `watch_ms` 30,000(10,000~300,000), `watch_every_ms` 5,000(1,000~`watch_ms`), `notice_ms` 60,000(60,000~600,000); 기본값은 표 7-8의 설계 값, 범위는 판단(모델 아님). 모르는 키는 거부. **이 표는 U19b3a가 `marker`와 `oms_unit`을 더할 때까지 완성되지 않는다**: U19b2a에서 맞는 `[kill]`은 U19b3a 뒤에는 거부된다(그 사이에 배포하지 않는다). U19b2a의 워처는 아직 일괄 취소를 보내지 않는다 |
 
 기본값의 근거(설계 §7.5, 스코프, OMS의 값)와 거부의 이유는 [C-WATCH 4부](../contracts/watcher.md)에 있다.
 
@@ -109,8 +113,9 @@ $EDITOR /etc/hl-oms/watcher-telegram.json
 ## 워처 키
 
 - **OMS의 키와 다른 워처 전용 키**를 같은 하위 계정(`sub_account_uid`)에 만든다(설계 §7.4).
-- **출금 권한을 주지 않는다**(설계 §7.4). 워처의 시작 확인은 이것을 보지 않는다(OMS도 자기 키에 대해 보지 않는다). 키를 만들 때 사람이 확인한다.
-- 권한은 조회와, U19b의 일괄 취소를 쓸 때 주문 권한만 준다. U19a의 워처는 조회만 한다.
+- **읽기·쓰기 키**(`readOnly` 0)로 만들고 **`ContractTrade`의 `Order` 권한**을 준다: 워처는 자기 키로 일괄 취소(`POST /v5/order/cancel-all`)를 보낸다(C-WATCH 11부). 워처가 보내는 서명된 POST는 이것 하나이고 주문을 만들거나 고치는 길은 없다. `Order`가 일괄 취소를 허락한다는 것은 권한 이름에서 한 추론이다(testnet에서 확인할 것).
+- **출금 권한을 주지 않는다**(설계 §7.4). `Withdraw`는 마스터 전용이라 하위 계정 키에는 없어야 한다.
+- `[kill]`이 있으면 시작 2단계와 60초마다의 재확인이 세 가지를 본다(U19b2a): `readOnly`가 0이 아니면, `ContractTrade`에 `Order`가 없으면, 어느 권한 목록에든 `Withdraw`가 있으면 시작하지 않는다(종료 2, 줄은 `query-api: the API key is read-only …`, `… has no ContractTrade Order permission …`, `… has the Withdraw permission (<목록>) …`). 재확인에서 맞지 않으면 재시작까지 모든 Bybit 요청과 일괄 취소가 멈춘다(`watcher_auth_rejected` 1, `[WATCH P1] 워처 키가 시작 규칙을 더는 지키지 않음`). `[kill]`이 없으면(testnet) 이것을 보지 않는다: 그 워처는 조회만 하므로 읽기 전용 키도 되고, 출금 권한은 키를 만들 때 사람이 확인한다.
 - 키를 IP에 묶는다(설계 §7.4). 묶지 않은 키는 시작 확인이 거부한다(U19a4b).
 
 ## 시작 확인과 거부(U19a4b)
@@ -123,6 +128,9 @@ $EDITOR /etc/hl-oms/watcher-telegram.json
 | 키 | 〃 | `query-api: the API key belongs to user 4243; the config says sub_account_uid 4242` | `sub_account_uid`를 OMS와 같은 하위 계정으로, 또는 그 계정의 키로 |
 | 키 | 〃 | `query-api: the API key is bound to no IP address (ips [] or "*"); bind it to this host's address` | 키를 이 호스트의 공인 IP에 묶는다 |
 | 키 | 〃 | `query-api: the API key's ips hold no IP address` | 〃 |
+| 키(`[kill]`이 있을 때, U19b2a) | 〃 | `query-api: the API key is read-only (readOnly 1); with [kill] the watcher cancels orders and needs a read-write key` | 읽기·쓰기 키로 만든다 |
+| 키(〃) | 〃 | `query-api: the API key has no ContractTrade Order permission; with [kill] the watcher needs it to cancel orders` | 키에 `ContractTrade`의 `Order`를 준다 |
+| 키(〃) | 〃 | `query-api: the API key has the Withdraw permission (Wallet); the watcher's key must not be able to withdraw` | 출금 권한이 없는 새 키를 만든다 |
 | 기호 | 기호마다 `GET /v5/market/instruments-info?category=linear&symbol=<s>` | `BTCPERP settles in USDC; the watcher's scope is linear/USDT` | `symbols`에서 USDT로 정산되지 않는 기호를 뺀다 |
 | 기호 | 〃 | `BTCUSDT is not in instruments-info for category linear; the watcher's scope is linear/USDT` | 기호 이름을 확인한다 |
 
