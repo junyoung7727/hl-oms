@@ -1,5 +1,5 @@
-//! The watcher's own Bybit v5 GET signing (C-WATCH part 3): the string to
-//! sign, the HMAC-SHA256 and the query string. The expected values do not
+//! The watcher's own Bybit v5 signing (C-WATCH part 3): the strings a GET
+//! and the one POST sign, the HMAC-SHA256 and the query string. The expected values do not
 //! come from the code under test: the venue's published example strings,
 //! RFC 4231 test case 2, and HMAC values computed with Python's `hmac`
 //! module for a made-up secret (not a key; allow-listed in
@@ -7,7 +7,9 @@
 
 #![allow(clippy::unwrap_used)]
 
-use watcher::sign::{hmac_hex, prehash, query_string, signature};
+use watcher::sign::{
+    hmac_hex, post_prehash, post_signature, prehash, query_string, signature,
+};
 
 #[test]
 fn the_strings_to_sign_and_signatures_match_independent_values() {
@@ -81,4 +83,49 @@ fn query_strings_are_sorted_and_unsafe_values_refused() {
     }
     assert!(query_string(&[("sym bol", "x".into())]).is_err());
     assert!(query_string(&[("a=b", "x".into())]).is_err());
+}
+
+#[test]
+fn the_post_string_to_sign_matches_the_published_example_and_independent_values() {
+    // The venue's POST example, copied exactly (gateway facts F20 Q1.10):
+    // the body is signed as the bytes given, spaces included.
+    assert_eq!(
+        post_prehash(1658385579423, "XXXXXXXXXX", 5000, r#"{"category": "option"}"#),
+        r#"1658385579423XXXXXXXXXX5000{"category": "option"}"#
+    );
+    // Python: hmac.new(b"watcher-made-up-secret-42", prehash, sha256).
+    let secret = "watcher-made-up-secret-42";
+    assert_eq!(
+        post_signature(
+            secret,
+            1658385579423,
+            "XXXXXXXXXX",
+            5000,
+            r#"{"category": "option"}"#
+        ),
+        "5e1bc32d2043b15cdf856e42986af413e272178c5e33408686b16f44f5333596"
+    );
+    // The watcher's one POST body (`rest::CANCEL_ALL_BODY`).
+    assert_eq!(
+        post_signature(
+            secret,
+            1_700_000_000_000,
+            "WKEY",
+            5000,
+            r#"{"category":"linear","settleCoin":"USDT"}"#
+        ),
+        "df293dce1c898148cb8c548eaa8d9d5180068daaa25acc3b6b028df594ab0f96"
+    );
+    // A body with other bytes (a re-serialised one with spaces) signs to
+    // another value: the signature is over the bytes, not the meaning.
+    assert_ne!(
+        post_signature(
+            secret,
+            1_700_000_000_000,
+            "WKEY",
+            5000,
+            r#"{"category": "linear", "settleCoin": "USDT"}"#
+        ),
+        "df293dce1c898148cb8c548eaa8d9d5180068daaa25acc3b6b028df594ab0f96"
+    );
 }
