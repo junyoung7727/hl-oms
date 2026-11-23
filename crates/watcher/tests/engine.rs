@@ -405,3 +405,38 @@ fn mismatch_active_counts_the_confirmed_differences_a_round_still_sees() {
     assert_eq!(r.gauge("watcher_mismatch_active", "W1"), Some(0.0));
     assert_eq!(r.gauge("watcher_mismatches_total", "W1"), Some(2.0));
 }
+
+#[test]
+fn a_failed_round_keeps_the_sightings_of_the_last_completed_round() {
+    let mut r = Rig::new("engine-failed-keeps");
+    closed_but_listed(&mut r, &[1]);
+    r.at(T0);
+    assert_eq!(r.gauge("watcher_differences", "W1"), Some(1.0));
+    // A venue failure, then an OMS that does not answer.
+    r.venue
+        .script
+        .push_back(Err(watcher::rest::RestError::NoAnswer("timeout".into())));
+    r.at(T0 + 1000);
+    let [id] = venue_ids(&r.engine.poll(T0 + 2000))[..] else {
+        panic!()
+    };
+    let answer = r.venue.answer(watcher::w1::PATH, &[]);
+    let s = status_id(&r.engine.on_venue(T0 + 2000, id, answer));
+    r.engine
+        .on_status(T0 + 2000, s, Err("connection refused".to_string()));
+    assert!(r.mismatches.is_empty());
+    assert_eq!(r.engine.success(Check::W1), Some(T0));
+    assert_eq!(r.gauge("watcher_differences", "W1"), Some(1.0));
+    // The sighting of T0 is still the last completed round's: this
+    // completed round confirms.
+    r.at(T0 + 3000);
+    let [(at, Check::W1, d)] = &r.mismatches[..] else {
+        panic!("{:?}", r.mismatches)
+    };
+    assert_eq!(*at, T0 + 3000);
+    assert!(
+        d.starts_with("W1 closed_in_journal ") && d.ends_with("journal entry 13.0 s old"),
+        "{d}"
+    );
+    assert_eq!(r.gauge("watcher_mismatches_total", "W1"), Some(1.0));
+}

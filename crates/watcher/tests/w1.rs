@@ -83,14 +83,17 @@ fn a_two_round_difference_older_than_2_s_alarms() {
 #[test]
 fn a_journal_entry_younger_than_2_s_does_not_alarm() {
     let mut r = Rig::new("w1-young");
-    r.write(T0 - 10_000, &[&open(1)[..], &open(2)[..]].concat());
-    // Order 2 closed at T0, order 1 a microsecond later.
+    let orders = [&open(1)[..], &open(2)[..], &[accepted(3, "BTCUSDT", "buy")]];
+    r.write(T0 - 10_000, &orders.concat());
+    // Order 2 closed at T0, order 1 a microsecond later; order 3, not at
+    // the venue, acked a microsecond later too (`missing_at_venue`).
     r.write(T0, &[of("order_closed", 2)]);
-    r.journal.append(T0 * 1000 + 1, &[of("order_closed", 1)]);
+    r.journal
+        .append(T0 * 1000 + 1, &[of("order_closed", 1), acked(3)]);
     r.venue.orders = vec![ours(1, "BTCUSDT", "Buy"), ours(2, "BTCUSDT", "Buy")];
     rounds(&mut r, 0..2);
     assert!(r.mismatches.is_empty());
-    // At T0 + 2 s order 2 is exactly 2 s old; order 1 is not yet.
+    // At T0 + 2 s order 2 is exactly 2 s old; orders 1 and 3 are not yet.
     r.at(T0 + 2000);
     let old = "journal entry 2.0 s old";
     let want = detail("closed_in_journal", &link(2), CLOSED, old);
@@ -103,6 +106,7 @@ fn a_journal_entry_younger_than_2_s_does_not_alarm() {
         CLOSED,
         "journal entry 2.9 s old",
     );
+    let want = format!("{want}; and 1 more");
     assert_eq!(r.mismatches[1], (T0 + 3000, Check::W1, want));
     assert_eq!(r.mismatches.len(), 2);
 }
@@ -386,4 +390,30 @@ fn an_order_ended_in_the_journal_and_still_open_at_the_venue_is_open_after_termi
         "journal entry 2.5 s old",
     );
     assert_eq!(r.mismatches, vec![(T0 + 2000, Check::W1, want)]);
+}
+
+#[test]
+fn an_order_listed_on_two_pages_is_one_difference() {
+    let mut r = Rig::new("w1-two-pages");
+    for id in 1..=49 {
+        r.write(T0 - 10_000, &open(id));
+    }
+    // Orders move between pages while W1 pages: the foreign order is the
+    // first row of page 1 and the row of page 2.
+    let foreign = row("x", "v900", "BTCUSDT", "Buy");
+    r.venue.orders = vec![foreign.clone()];
+    r.venue
+        .orders
+        .extend((1..=49).map(|id| ours(id, "BTCUSDT", "Buy")));
+    r.venue.orders.push(foreign);
+    r.at(T0);
+    assert_eq!(r.venue.requests.len(), 2);
+    assert_eq!(r.gauge("watcher_differences", "W1"), Some(1.0));
+    rounds(&mut r, 1..3);
+    let what = "venue BTCUSDT Buy orderLinkId \"x\", journal no such order";
+    let want = detail("foreign", "v900", what, "first seen 2.0 s ago");
+    assert_eq!(r.mismatches, vec![(T0 + 2000, Check::W1, want)]);
+    assert_eq!(r.gauge("watcher_mismatches_total", "W1"), Some(1.0));
+    assert_eq!(r.gauge("watcher_mismatch_active", "W1"), Some(1.0));
+    assert_eq!(r.gauge("watcher_differences", "W1"), Some(0.0));
 }
