@@ -609,9 +609,18 @@ async fn an_auth_answer_at_start_stays_up_without_requests() {
         }
         let c = client(&fake);
         let mut s = start_of(&["BTCUSDT"]);
+        let echo_at = c.clock.now_ms();
         let step = c.drive(&mut s.start).await;
         assert_eq!(step, Step::StayUpNoRequests, "{case}");
         assert_eq!(fake.requests().len(), seen, "{case}");
+        // No wait: step 4's echo, if asked, answered at `echo_at`. The
+        // first echo-only recheck is due 60 s after it (review 2 S1).
+        assert_eq!(c.clock.now_ms(), echo_at, "{case}");
+        if let Some(mut check) = s.start.ip_check() {
+            assert_eq!(check.poll(echo_at + 59_999), None, "{case}");
+            let req = check.poll(echo_at + 60_000);
+            assert_eq!(req, Some(Request::Echo), "{case}");
+        }
         // No exit and no request.
         nothing_sent(&c, &fake, |t| s.start.poll(t), case).await;
         // Visible: the gauge and the client's one error line; the start
