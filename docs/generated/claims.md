@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `d2d4b1861d97638e`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `5890157f33bc5964`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 주장 116건: 통과 0, 실패 0, 미실행 49, 이전 버전 결과 67.
 
@@ -122,7 +122,7 @@
 | V-WATCH-5 | 워처의 검사 엔진은 첫 라운드와 첫 하트비트를 start_ms에 내고, 한 검사의 라운드를 겹치지 않으며 늦은 라운드는 한 번만 돌린다. 라운드는 거래소 쪽을 모두 읽은 뒤에만 그 라운드만의 상태 요청을 내고, 그 답은 물은 라운드만 쓰며, 그 상한까지 저널을 읽은 뒤 비교한다. 다른 인스턴스의 상태와 그 요청을 낼 때 읽은 기록보다 낮은 상한은 읽기를 재시작까지 래치하고 그 뒤 라운드는 아무것도 묻지 않는다. 다시 읽는 저널 오류는 다음 라운드에 낫고 watcher_journal_error를 0으로 돌린다. 기한(낸 시각 + request_timeout_ms + 11초)까지 답이 없는 요청은 라운드를 실패로 닫고 늦은 답은 버린다. 차이는 지난 완료 라운드와 이번 라운드에 같은 정체로 있고 이번 라운드에서 min_age_ms 이상 늙었을 때만 확정되며(실패한 라운드는 지난 완료 라운드의 sighting을 바꾸지 않는다), 두 번 보았지만 어린 차이는 라운드를 성공으로 치지 않는다. 확정은 정체마다 한 번 세고(한 라운드에 두 번 실린 정체도 하나) 1024바이트 이하의 detail을 실은 Mismatch 하나를 내며, watcher_mismatch_active는 라운드가 그것을 보지 않으면 내려간다. W1은 OMS의 쪽 규칙대로 열린 주문을 읽고(커서 없는 가득 찬 쪽, 같은 커서, 필드 없는 행은 unreadable, 20쪽 한도), 모르는 주문(foreign), 저널에서 닫힘, 거래소 종결 뒤에도 열림, 종목·방향 다름, 확인된 주문의 거래소 부재를 차이로 보고, 확인되지 않았거나 결과 불명이거나 거래소 종결된 주문의 부재는 비교하지 않는다. 나이는 주문의 fact_at(다른 이벤트로 움직이지 않음) 또는 첫 sighting이다 | 단위(sans-IO, 수동 시계) | 미실행 | `cargo test -p watcher --test w1 --test engine` |
 | V-WATCH-6 | 워처의 W2는 position/list(category=linear, settleCoin=USDT, 200개씩 5쪽까지)를 W1의 쪽 규칙으로 읽고(커서 없는 가득 찬 쪽, 같은 커서, 한 기호의 두 행(헤지 모드), 모르는 방향, 소수가 아닌 크기, 크기 있는 빈·없는 방향, 음수 크기, 기호 없는 행은 unreadable, 6쪽째는 실패), 기호마다 d = 거래소 − 저널(체결 + 외부 체결 + 거래소 변경 + 조정)을 차이 (W2, position, 기호, d)로 본다(범위를 넘은 d는 값 overflow인 차이). 다른 d는 처음부터 센다. 저널의 마지막 변경 시각과 거래소의 최근 변경 시각(updatedTime, 없으면 그 크기를 처음 본 라운드 seen_at) 중 알려진 것이 min_age_ms보다 어리면 첫 sighting이어도 미루고 라운드는 성공이 아니며, 모르는 시각은 늙음이라 저널이 바꾼 적 없는 기호의 거래소 포지션은 두 번째 라운드에 확정된다. 행이 없는 기호는 크기 0으로 보아 막 닫힌 포지션도 처음 0으로 본 라운드부터 2초 미루고, 첫 완전한 읽기의 크기에는 seen_at이 없으며, 모든 쪽을 읽은 뒤 실패한 라운드의 크기는 마지막 거래소 답의 시각으로 남고, 쪽 사이에서 실패한 라운드는 아무것도 남기지 않는다. 초당 5번의 체결이 60초 이어지는 동안 Mismatch가 없고, 체결이 멈춘 뒤 심은 차이는 라운드의 어느 위상에서도 3초 안에 확정된다 | 단위(sans-IO, 수동 시계) | 미실행 | `cargo test -p watcher --test w2` |
 | V-WATCH-7 | 워처의 엔진은 확정된 차이를 그것을 실은 보내기가 "held"로 답할 때까지 빚으로 두고("already held", 보류를 보이는 저널, 실패는 갚지 않고, 라운드가 더 보지 않아도 확정 때의 detail로 보낸다), 저널 상태가 그 검사의 최근 held/already held 답 뒤에 낸 상태 요청의 상한에서 보류 꺼짐을 보일 때, 지난 보내기 시작부터 mismatch_resend_ms가 지났을 때, 그 검사의 보내기가 진행 중이 아닐 때만 보낸다(보고가 없는 보내기는 낸 시각 + 2 × request_timeout_ms + 1초에 실패하고, 그 뒤에 온 늦은 보고는 번호가 달라 아무것도 갚지 않는다). W1·W2는 라운드가 아직 보는 확정된 차이를 해제 뒤 다시 보낸다. admin.sock 클라이언트는 hello 다음 watcher_mismatch를 보내고 두 답을 읽는다. monitor.sock 클라이언트는 연결 하나를 유지하고 hello를 먼저, 그다음 W1~W4의 성공 시각(없으면 null)을 보내며, 끊김·답 없음 뒤 다음 하트비트에 다시 연다. 실행은 설정을 읽은 때부터 지표를 밀어 넣고, 시작 확인, /api/status 기다림, 재생 동안에도 IP를 다시 확인하고, 재확인에서 시작 규칙에 맞지 않는 키는 모든 Bybit 요청을 멈추며, OMS가 답하지 않으면 아무것도 판단하지 않고, 시작 거부는 코드 2, shutdown 입력은 새 라운드 없이 마지막 밀어 넣기와 모니터 연결 닫음 뒤 0으로 끝난다 | 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나) | 미실행 | `cargo test -p watcher --test admin --test heartbeat --test runtime --test binary` |
-| V-WATCH-8 | 워처의 W4는 execution/list를 고정된 끝(첫 쪽의 시계)과 시작 max(워터마크 − w4_overlap_ms, ⌈체결 바닥/1000⌉)(7일로 자름)의 창으로 훑고, 라운드마다 w4_max_pages쪽까지 읽어 더 긴 훑기는 다음 라운드가 같은 창과 커서로 이으며(성공 시각은 끝난 훑기에서만), 빈 쪽이나 빈 커서에서 끝내고, 바뀌지 않은 커서와 읽을 수 없는 쪽은 라운드를 실패시켜 같은 커서로 다시 읽되 연달아 3번이나 50라운드면 같은 시작과 새 끝으로 다시 시작한다. 행은 execType으로 먼저 나눠 Trade는 저널 체결과, AdlTrade·BustTrade·Delivery·Settle은 저널 거래소 변경과 키 <symbol>:<execId>로 비교하고, Funding은 비교하지 않으며, 모르는 형은 끝난 훑기에서 바로 확정하고, 형이 필요로 하는 필드가 없는 행은 unreadable_row, 바닥 아래 행은 무시한다. 차이는 두 훑기와 execTime 나이로 확정하고 어린 차이는 훑기를 실패시키지 않는다. 워터마크는 확정되지 않은 가장 오래된 행(execTime 없는 행은 모든 행보다 오래됨) 아래의 가장 새 행으로만, 뒤로 가지 않게 움직인다. held 답으로 갚고 그 답 뒤에 낸 상한에서 보류 꺼짐을 본 W4 정체는 거두어 다시 보내지도 세지도 않는다 | 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나) | 미실행 | `cargo test -p watcher --test w4 --test runtime` |
+| V-WATCH-8 | 워처의 W4는 execution/list를 고정된 끝(첫 쪽의 시계)과 시작 max(워터마크 − w4_overlap_ms, ⌈체결 바닥/1000⌉)(7일로 자름)의 창으로 훑고, 라운드마다 w4_max_pages쪽까지 읽어 더 긴 훑기는 다음 라운드가 같은 창과 커서로 이으며(성공 시각은 끝난 훑기에서만), 빈 쪽이나 빈 커서에서 끝내고, 바뀌지 않은 커서와 읽을 수 없는 쪽은 라운드를 실패시켜 같은 커서로 다시 읽되 연달아 3번이나 50라운드면 같은 시작과 새 끝으로 다시 시작한다. 행은 execType으로 먼저 나눠 Trade는 저널 체결과, AdlTrade·BustTrade·Delivery·Settle은 저널 거래소 변경과 키 <symbol>:<execId>로 비교하고, Funding은 비교하지 않으며, 모르는 형은 끝난 훑기에서 바로 확정하고, 형이 필요로 하는 필드가 없는 행과 execTime이 훑기의 끝보다 뒤인 행은 unreadable_row, 바닥 아래 행과 수량 0인 Trade·거래소 변경 행은 무시한다. 차이는 두 훑기와 execTime 나이로 확정하고 어린 차이는 훑기를 실패시키지 않는다. 워터마크는 확정되지 않은 가장 오래된 행(execTime 없는 행은 모든 행보다 오래됨) 아래의 가장 새 행으로만, 뒤로 가지 않게 움직인다. held 답(already held는 갚지 않는다)으로 갚고 그 답 뒤에 낸 상한에서 보류 꺼짐을 본 W4 정체는 거두어 다시 보내지도 세지도 않는다 | 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나) | 미실행 | `cargo test -p watcher --test w4 --test runtime` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -2856,15 +2856,15 @@
 | `watcher/a_start_refusal_ends_the_run_with_exit_code_2` | 미실행 |  |
 | `watcher/version_prints_and_anything_else_exits_2` | 미실행 |  |
 
-## V-WATCH-8 — 워처의 W4는 execution/list를 고정된 끝(첫 쪽의 시계)과 시작 max(워터마크 − w4_overlap_ms, ⌈체결 바닥/1000⌉)(7일로 자름)의 창으로 훑고, 라운드마다 w4_max_pages쪽까지 읽어 더 긴 훑기는 다음 라운드가 같은 창과 커서로 이으며(성공 시각은 끝난 훑기에서만), 빈 쪽이나 빈 커서에서 끝내고, 바뀌지 않은 커서와 읽을 수 없는 쪽은 라운드를 실패시켜 같은 커서로 다시 읽되 연달아 3번이나 50라운드면 같은 시작과 새 끝으로 다시 시작한다. 행은 execType으로 먼저 나눠 Trade는 저널 체결과, AdlTrade·BustTrade·Delivery·Settle은 저널 거래소 변경과 키 <symbol>:<execId>로 비교하고, Funding은 비교하지 않으며, 모르는 형은 끝난 훑기에서 바로 확정하고, 형이 필요로 하는 필드가 없는 행은 unreadable_row, 바닥 아래 행은 무시한다. 차이는 두 훑기와 execTime 나이로 확정하고 어린 차이는 훑기를 실패시키지 않는다. 워터마크는 확정되지 않은 가장 오래된 행(execTime 없는 행은 모든 행보다 오래됨) 아래의 가장 새 행으로만, 뒤로 가지 않게 움직인다. held 답으로 갚고 그 답 뒤에 낸 상한에서 보류 꺼짐을 본 W4 정체는 거두어 다시 보내지도 세지도 않는다
+## V-WATCH-8 — 워처의 W4는 execution/list를 고정된 끝(첫 쪽의 시계)과 시작 max(워터마크 − w4_overlap_ms, ⌈체결 바닥/1000⌉)(7일로 자름)의 창으로 훑고, 라운드마다 w4_max_pages쪽까지 읽어 더 긴 훑기는 다음 라운드가 같은 창과 커서로 이으며(성공 시각은 끝난 훑기에서만), 빈 쪽이나 빈 커서에서 끝내고, 바뀌지 않은 커서와 읽을 수 없는 쪽은 라운드를 실패시켜 같은 커서로 다시 읽되 연달아 3번이나 50라운드면 같은 시작과 새 끝으로 다시 시작한다. 행은 execType으로 먼저 나눠 Trade는 저널 체결과, AdlTrade·BustTrade·Delivery·Settle은 저널 거래소 변경과 키 <symbol>:<execId>로 비교하고, Funding은 비교하지 않으며, 모르는 형은 끝난 훑기에서 바로 확정하고, 형이 필요로 하는 필드가 없는 행과 execTime이 훑기의 끝보다 뒤인 행은 unreadable_row, 바닥 아래 행과 수량 0인 Trade·거래소 변경 행은 무시한다. 차이는 두 훑기와 execTime 나이로 확정하고 어린 차이는 훑기를 실패시키지 않는다. 워터마크는 확정되지 않은 가장 오래된 행(execTime 없는 행은 모든 행보다 오래됨) 아래의 가장 새 행으로만, 뒤로 가지 않게 움직인다. held 답(already held는 갚지 않는다)으로 갚고 그 답 뒤에 낸 상한에서 보류 꺼짐을 본 W4 정체는 거두어 다시 보내지도 세지도 않는다
 
 - 상태: **미실행**
-- 왜 중요한가: 쪽 상한이 없으면 큰 창이 예산을 넘기고, 이은 훑기가 1쪽부터면 끝나지 않는다. 겹침이 없으면 늦게 실린 행을 놓치고, 워터마크가 확정되지 않은 행을 지나면 그 행을 다시 읽지 않는다. Funding을 체결로 보거나 ADL을 체결과 맞추면 맞는 저널에서 보류가 걸린다. 모르는 형이 두 번째 훑기를 기다리면 OMS가 분류하지 못한 실행의 확정이 늦다. 해제 뒤 W4를 다시 보내면 조용한 계좌에서 운영자가 보류를 풀 수 없고, 답 앞의 상한이나 held 없이 거두면 어느 메모에도 없는 차이가 사라진다
+- 왜 중요한가: 쪽 상한이 없으면 큰 창이 예산을 넘기고, 이은 훑기가 1쪽부터면 끝나지 않는다. 겹침이 없으면 늦게 실린 행을 놓치고, 워터마크가 확정되지 않은 행을 지나면 그 행을 다시 읽지 않는다. Funding을 체결로 보거나 ADL을 체결과 맞추면 맞는 저널에서 보류가 걸린다. 모르는 형이 두 번째 훑기를 기다리면 OMS가 분류하지 못한 실행의 확정이 늦다. 해제 뒤 W4를 다시 보내면 조용한 계좌에서 운영자가 보류를 풀 수 없고, 답 앞의 상한이나 held 없이 거두면 어느 메모에도 없는 차이가 사라진다. 끝 뒤의 execTime을 워터마크로 믿으면 그 뒤 창이 [end, end]가 되어 W4가 조용히 멈추고, 수량 0 행을 비교하면 OMS가 기록하지 않는 행으로 거짓 보류가 걸린다
 - 수준: 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나)
-- 전제와 범위: 엔진 시험 도구(프로세스 안의 모델 거래소의 체결 목록: 창 안을 새것부터 100개씩, 커서 e<번호>; 시험 저널; 시험 도구의 OMS가 watcher_mismatch에 답하고 hold_set을 씀), 종단 시험의 http-fake execution/list: 시험 30개
+- 전제와 범위: 엔진 시험 도구(프로세스 안의 모델 거래소의 체결 목록: 창 안을 새것부터 100개씩, 커서 e<번호>; 시험 저널; 시험 도구의 OMS가 watcher_mismatch에 답하고 hold_set을 씀), 종단 시험의 http-fake execution/list: 시험 34개
 - 실제 구성요소: 워처의 Engine, W4, W1, W2, ADR-011 형식으로 쓴 저널 파일, 종단 시험의 runtime::run과 rest::Client
 - 모의·시뮬레이션: Bybit execution/list(모델 거래소와 대본 쪽), OMS(시험 도구), 시계(수동, 종단 시험만 실제)
-- 주입한 장애: 250행 3쪽, 1,200행 12쪽(마지막 쪽 가득 참·빈 커서), 빈 쪽, 바뀌지 않은 커서, 연달아 실패한 쪽 3번, 멈춘 라운드 사이의 실패, 50라운드 안 끝난 훑기, 7일 넘는 빈 창, 늦게 실린 행, 사라진 새 행(워터마크 뒤로), 펀딩 행(수량·방향 있음과 없음), ADL·BustTrade(있음·없음·다른 종류), 다른 수량의 체결, 모르는 형(한 쪽과 여러 라운드), 수량·키·execTime 없는 행, 바닥 아래와 바닥 위 행, 어린 차이 두 번, 해제 뒤 조용한 계좌, 창을 떠났다 돌아온 행, 바뀐 값, 답 앞에 낸 상한, 다른 검사의 보류 아래 확정. 변이 M202~M208, M215~M217, M222, M227, M247과 시험 밖 변이 22개(모두 잡힘, U19a8 보고)
+- 주입한 장애: 250행 3쪽, 1,200행 12쪽(마지막 쪽 가득 참·빈 커서), 빈 쪽, 바뀌지 않은 커서, 연달아 실패한 쪽 3번, 멈춘 라운드 사이의 실패, 50라운드 안 끝난 훑기, 7일 넘는 빈 창, 늦게 실린 행, 사라진 새 행(워터마크 뒤로), 펀딩 행(수량·방향 있음과 없음), ADL·BustTrade(있음·없음·다른 종류), 다른 수량의 체결, 모르는 형(한 쪽과 여러 라운드), 수량·키·execTime 없는 행, 바닥 아래와 바닥 위 행, 어린 차이 두 번, 해제 뒤 조용한 계좌, 창을 떠났다 돌아온 행, 바뀐 값, 답 앞에 낸 상한, 다른 검사의 보류 아래 확정, 끝 뒤의 execTime, 수량 0인 Trade·Settle·AdlTrade, W1의 held 뒤 W4의 already held, 연달아 실패한 라운드 9번. 변이 M202~M208, M215~M217, M222, M227, M247~M250과 시험 밖 변이 27개(모두 잡힘, U19a8 보고)
 - 판정 기준과 근거: W4의 Mismatch는 정한 훑기(라운드)에만, 정한 detail로, 정한 수만큼 온다. 요청의 startTime·endTime·cursor가 규칙의 값과 같고, 쪽 수가 정한 수이며, W4의 성공 시각과 watcher_check_age_s{W4}·watcher_differences{W4}·watcher_mismatch_active{W4}가 정한 값이다
 - 재현: `cargo test -p watcher --test w4 --test runtime`
 - 뒷받침하는 것: C-WATCH 8부, ADR-031
@@ -2901,5 +2901,9 @@
 | `watcher/a_young_difference_seen_twice_does_not_fail_the_sweep` | 미실행 |  |
 | `watcher/a_trade_at_the_floor_itself_is_compared` | 미실행 |  |
 | `watcher/a_round_that_reads_a_page_ends_the_run_of_failed_rounds` | 미실행 |  |
+| `watcher/a_row_after_the_sweeps_end_is_an_unreadable_row_and_does_not_blind_w4` | 미실행 |  |
+| `watcher/a_trade_or_venue_change_of_quantity_0_is_ignored_as_the_oms_ignores_it` | 미실행 |  |
+| `watcher/an_already_held_answer_to_a_w4_send_does_not_pay_it` | 미실행 |  |
+| `watcher/the_restart_warn_line_is_logged_once_per_run_of_failed_rounds` | 미실행 |  |
 | `watcher/the_watcher_runs_against_loopback_fakes_end_to_end` | 미실행 |  |
 

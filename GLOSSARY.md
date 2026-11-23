@@ -213,7 +213,7 @@ One read of the venue's executions by W4 (`watcher::w4`, C-WATCH part 8) over a 
 _Avoid_: round (a sweep may take several rounds), scan, page
 
 **Watermark (W4)** (워터마크(W4)):
-The `execTime` W4's next window starts from (less the overlap): after a completed sweep, the newest `execTime` at or below which every compared row agrees, is ignored or is confirmed; it never moves back. An unconfirmed difference, or an unconfirmed row without a readable `execTime`, holds it, so the next sweep reads that row again. Memory only: at start it is `now − w4_initial_lookback_ms` (C-WATCH part 8).
+The `execTime` W4's next window starts from (less the overlap): after a completed sweep, the newest `execTime` at or below which every compared row agrees, is ignored or is confirmed; it never moves back. An unconfirmed difference, or an unconfirmed row without a readable `execTime`, holds it, so the next sweep reads that row again. It never passes the `end` of the sweep that read it: a row whose `execTime` is after that `end` is `unreadable_row`. Memory only: at start it is `now − w4_initial_lookback_ms` (C-WATCH part 8).
 _Avoid_: cursor (the venue's page cursor is another thing), checkpoint (nothing is persisted)
 
 **Request guard (watcher)** (요청 제한(워처)):

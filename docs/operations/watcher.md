@@ -149,7 +149,8 @@ watcher --version
 | `error: monitor.sock heartbeat refused (…)` | OMS가 하트비트를 거절했다(1분에 한 줄). `bad_request`면 검사 시각이 OMS의 시계보다 앞섰을 수 있다 | 두 프로세스의 시계(같은 호스트), 런북 7.16 |
 | `error: …; the journal reader stops until the watcher restarts` | 저널을 더 읽지 않는다 | 런북 7.17 |
 | `warn: W4 window from … is longer than 7 days; cut to the last 7 days` / `W4 window is 7 days or shorter again` | W4의 창이 7일을 넘어 잘렸다(상태가 바뀔 때만). 오래 체결이 없거나 맞는 행이 워터마크를 움직이지 못했다. 잘린 앞쪽의 체결은 W4가 비교하지 않는다 | `watcher_differences{W4}`, 확정 줄, 거래소 체결 내역 |
-| `warn: W4 page failed 3 rounds in a row; the sweep restarts …` | 같은 커서의 쪽이 세 라운드 연달아 실패했다. 훑기를 1쪽부터 새 끝으로 다시 읽는다 | 그 앞의 `W4 round failed` 줄의 이유 |
+| `warn: W4 page failed 3 rounds in a row; the sweep restarts …` | 같은 커서의 쪽이 세 라운드 연달아 실패했다(또는 저널 읽기가 래치되어 라운드마다 실패한다). 훑기를 1쪽부터 새 끝으로 다시 읽는다. 실패가 이어지는 동안 한 번만 쓴다 | 그 앞의 `W4 round failed` 줄의 이유 |
+| `W4 pages are read again after a restart` | 위 줄 뒤 W4가 쪽을 다시 읽었다(상태가 바뀔 때 한 줄) | — |
 | `error: W4 sweep not complete after 50 rounds; …` | 훑기 하나가 50라운드에 끝나지 않았다(기본 500쪽, 50,000행). 처음부터 다시 읽는다 | 거래소의 체결량, `w4_max_pages` |
 
 ## 실행의 지표(U19a7)

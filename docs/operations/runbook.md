@@ -409,7 +409,7 @@ telegram = "/etc/oms/telegram.json"   # 절대 경로
 | W4 `missing_venue_change` | 거래소의 `AdlTrade`·`BustTrade`·`Delivery`·`Settle`이 저널의 거래소 변경에 없다 | 거래소 화면의 ADL·청산·인도·정산 기록, 7.14가 함께 걸렸는지, W2의 포지션 |
 | W4 `venue_change_details` | 같은 키의 거래소 변경이 있지만 종류나 부호 있는 수량이 다르다 | 거래소 화면과 저널의 그 변경 |
 | W4 `unknown_exec_type` | 워처가 모르는 `execType`(바로 확정) | 거래소 체결 내역에서 그 행. OMS도 그것을 분류하지 못했으면 7.14가 함께 걸려 있다 |
-| W4 `unreadable_row` | 체결 행에 그 형이 필요로 하는 필드가 없다(값 = 없는 필드 이름; 키가 없으면 대상은 행의 JSON 앞 200바이트) | 거래소 체결 내역. 거래소의 응답 모양이 바뀌었을 수 있다: 워처 로그와 원본 응답 |
+| W4 `unreadable_row` | 체결 행에 그 형이 필요로 하는 필드가 없다(값 = 없는 필드 이름; 키가 없으면 대상은 행의 JSON 앞 200바이트). `execTime`이 훑기의 끝보다 뒤인 행도 이것이다(값 `execTime`, `what`에 `execTime <t> after the sweep's end <end>`: 거래소가 `endTime`을 어겼거나 시계가 크게 다르다) | 거래소 체결 내역. 거래소의 응답 모양이 바뀌었을 수 있다: 워처 로그와 원본 응답 |
 
 1. 워처 로그의 `error: confirmed difference: …` 줄을 **모두** 읽는다. OMS는 첫 메모만 남긴다(C-HOLD): 보류가 이미 걸린 동안 확정된 차이는 그 메모에 없다. 워처는 그것을 빚으로 들고 있다가 `clear-hold` 뒤 한 번 보내고, 그러면 보류가 그 메모와 함께 한 번 다시 걸린다. 로그를 미리 읽어 두면 돌아오는 보류가 예상된다.
 2. 위 표대로 거래소 화면과 `status`(포지션, 열린 주문, 불일치)를 비교하고 원인을 고친다(포지션이면 `adjust`, 주문이면 `resolve`·`cancel-all`).
