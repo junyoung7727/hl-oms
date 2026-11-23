@@ -45,6 +45,9 @@ fn set(key: &str, value: Option<&str>) -> String {
     out
 }
 
+/// A `[telegram]` section with a good path (U19b1a), for mainnet configs.
+const TELEGRAM: &str = "\n[telegram]\ntoken_file = \"/etc/watcher/telegram.json\"\n";
+
 fn ok(text: &str) -> Config {
     match Config::from_toml(text) {
         Ok(c) => c,
@@ -137,7 +140,7 @@ fn the_config_is_validated_and_mainnet_needs_confirmation() {
     refused(&unconfirmed, "mainnet requires mainnet_confirmed = true");
     let confirmed =
         set("network", Some("\"mainnet\"")).replace("name = ", "mainnet_confirmed = true\nname = ");
-    let m = ok(&confirmed);
+    let m = ok(&format!("{confirmed}{TELEGRAM}"));
     assert_eq!((m.network, m.mainnet_confirmed), (Network::Mainnet, true));
     assert_eq!(m.client_config().base, "https://api.bybit.com");
     // The confirmation does not change a testnet config.
@@ -531,5 +534,77 @@ fn the_config_file_is_read_and_its_refusals_name_the_file() {
     let missing = dir.join("missing.toml");
     let e = Config::load(&missing).unwrap_err();
     assert!(e.contains(&missing.display().to_string()), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn telegram_is_validated_and_required_on_mainnet() {
+    // Optional on testnet: no section, no sender.
+    assert_eq!(ok(MIN).telegram, None);
+    let t = ok(&format!("{MIN}{TELEGRAM}"));
+    assert_eq!(
+        t.telegram.as_ref().map(|t| t.token_file.as_path()),
+        Some(Path::new("/etc/watcher/telegram.json"))
+    );
+
+    // Mainnet refuses a config without it, with the spec's line, and
+    // takes the same config with it.
+    let mainnet = set("network", Some("\"mainnet\""))
+        .replace("name = ", "mainnet_confirmed = true\nname = ");
+    refused(
+        &mainnet,
+        "mainnet requires [telegram]: the watcher's P1 must reach a person",
+    );
+    let m = ok(&format!("{mainnet}{TELEGRAM}"));
+    assert_eq!(m.network, Network::Mainnet);
+    assert!(m.telegram.is_some());
+    // An unconfirmed mainnet is still refused for the confirmation first.
+    refused(
+        &format!("{}{TELEGRAM}", set("network", Some("\"mainnet\""))),
+        "mainnet requires mainnet_confirmed = true",
+    );
+
+    // `token_file` is required in the section; unknown keys are refused.
+    refused(&format!("{MIN}\n[telegram]\n"), "missing field `token_file`");
+    refused(
+        &format!("{MIN}{TELEGRAM}chat_id = 1\n"),
+        "unknown field `chat_id`",
+    );
+    refused(
+        &format!("{MIN}{TELEGRAM}token = \"1:a\"\n"),
+        "unknown field `token`",
+    );
+    let path = |p: &str| format!("{MIN}\n[telegram]\ntoken_file = \"{p}\"\n");
+    // Absolute, no `..`, outside the data directory (by where it points).
+    refused(&path("telegram.json"), "[telegram] token_file must be an absolute path");
+    refused(
+        &path("/etc/watcher/../watcher/telegram.json"),
+        "[telegram] token_file must not hold `..`",
+    );
+    for inside in [
+        "/srv/oms/data/telegram.json",
+        "/srv/oms/data",
+        "/srv/oms/data/sub/t.json",
+        "/srv/oms/./data/t.json",
+    ] {
+        refused(
+            &path(inside),
+            "[telegram] token_file must be outside the data directory",
+        );
+    }
+    let dir = common::test_dir("config-telegram");
+    let data = dir.join("data");
+    std::fs::create_dir_all(&data).unwrap();
+    let alias = dir.join("alias");
+    std::os::unix::fs::symlink(&data, &alias).unwrap();
+    let with_data = |tok: &Path| {
+        set("data_dir", Some(&format!("\"{}\"", data.display())))
+            + &format!("\n[telegram]\ntoken_file = \"{}\"\n", tok.display())
+    };
+    refused(
+        &with_data(&alias.join("t.json")),
+        "[telegram] token_file must be outside the data directory",
+    );
+    assert!(ok(&with_data(&dir.join("t.json"))).telegram.is_some());
     let _ = std::fs::remove_dir_all(&dir);
 }

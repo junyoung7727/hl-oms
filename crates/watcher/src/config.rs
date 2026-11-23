@@ -56,6 +56,9 @@ pub struct Config {
     pub w3: W3,
     pub http: Http,
     pub telemetry: Telemetry,
+    /// `[telegram]` (U19b1a): the watcher's own sender of `[WATCH P1]`;
+    /// required on mainnet, optional on testnet.
+    pub telegram: Option<Telegram>,
 }
 
 /// `[intervals]`: how often each check, the heartbeat, the IP recheck and
@@ -150,6 +153,14 @@ pub struct Telemetry {
     pub vm_url: Option<String>,
 }
 
+/// `[telegram]`: the token file of the watcher's own Telegram sender
+/// (C-WATCH part 10). The file is read by [`crate::creds::load_token`].
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Telegram {
+    pub token_file: PathBuf,
+}
+
 /// The file as written: the optional fields stay optional until defaults
 /// are applied, so an explicit empty value is not taken for the default.
 #[derive(Deserialize)]
@@ -178,6 +189,7 @@ struct File {
     http: Http,
     #[serde(default)]
     telemetry: Telemetry,
+    telegram: Option<Telegram>,
 }
 
 /// The default `host` label: `/etc/hostname`, else `"unknown"`.
@@ -223,6 +235,7 @@ impl Config {
             w3: f.w3,
             http: f.http,
             telemetry: f.telemetry,
+            telegram: f.telegram,
         };
         cfg.validate()?;
         Ok(cfg)
@@ -248,10 +261,16 @@ impl Config {
         if self.network == Network::Mainnet && !self.mainnet_confirmed {
             return Err("mainnet requires mainnet_confirmed = true".into());
         }
+        if self.network == Network::Mainnet && self.telegram.is_none() {
+            return Err("mainnet requires [telegram]: the watcher's P1 must reach a person".into());
+        }
         if !self.data_dir.is_absolute() {
             return Err("data_dir must be an absolute path".into());
         }
         check_credentials_path(&self.credentials_file, &self.data_dir)?;
+        if let Some(t) = &self.telegram {
+            check_token_path(&t.token_file, &self.data_dir)?;
+        }
         if self.sub_account_uid == 0 {
             return Err("sub_account_uid must be the sub-account's UID (> 0)".into());
         }
@@ -372,14 +391,24 @@ impl Config {
 /// data directory (compared by where both point, symlinks followed where
 /// they exist). [`crate::creds::load`] applies them again at the read.
 pub fn check_credentials_path(file: &Path, data_dir: &Path) -> Result<(), String> {
+    check_path("credentials_file", file, data_dir)
+}
+
+/// The path rules of `[telegram] token_file`, the same as those of
+/// `credentials_file`. [`crate::creds::load_token`] applies them again.
+pub fn check_token_path(file: &Path, data_dir: &Path) -> Result<(), String> {
+    check_path("[telegram] token_file", file, data_dir)
+}
+
+fn check_path(field: &str, file: &Path, data_dir: &Path) -> Result<(), String> {
     if !file.is_absolute() {
-        return Err("credentials_file must be an absolute path".into());
+        return Err(format!("{field} must be an absolute path"));
     }
     if file.components().any(|c| c == Component::ParentDir) {
-        return Err("credentials_file must not hold `..`".into());
+        return Err(format!("{field} must not hold `..`"));
     }
     if resolved(file).starts_with(resolved(data_dir)) {
-        return Err("credentials_file must be outside the data directory".into());
+        return Err(format!("{field} must be outside the data directory"));
     }
     Ok(())
 }
