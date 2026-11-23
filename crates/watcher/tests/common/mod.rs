@@ -5,6 +5,8 @@
 
 #![allow(dead_code, clippy::unwrap_used)]
 
+pub mod rig;
+
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 

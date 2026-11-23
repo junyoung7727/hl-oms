@@ -83,6 +83,13 @@ pub enum JournalError {
         seq: u64,
         why: String,
     },
+    /// The OMS's durable sequence `cap` is below record `read`, which the
+    /// watcher had read before it asked (the engine, C-WATCH part 5): the
+    /// OMS publishes another journal. Latched.
+    WentBack {
+        cap: u64,
+        read: u64,
+    },
 }
 
 impl JournalError {
@@ -133,6 +140,12 @@ impl fmt::Display for JournalError {
             JournalError::Io(kind) => write!(f, "journal read failed: {kind}"),
             JournalError::State { seq, why } => {
                 write!(f, "record {seq} breaks the journal state rules: {why}")
+            }
+            JournalError::WentBack { cap, read } => {
+                write!(
+                    f,
+                    "the OMS's durable sequence {cap} is below record {read}, read before it was asked: another journal"
+                )
             }
         }
     }
