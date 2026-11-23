@@ -114,6 +114,12 @@ pub enum Action {
     },
     /// `heartbeat` to `monitor.sock`: each check's last success (ms).
     Heartbeat { checks: Vec<(Check, Option<u64>)> },
+    /// The identities of `check` that this round confirmed, one detail
+    /// each (cut to [`DETAIL_MAX`] bytes), emitted where
+    /// `watcher_mismatches_total` counts them and before the send that
+    /// carries them: the runtime's mismatch P1 (U19b1c). A resend never
+    /// emits it.
+    Confirmed { check: Check, details: Vec<String> },
 }
 
 /// What a check makes of one venue page.
@@ -600,7 +606,7 @@ impl Engine {
             Ok(()) => {
                 self.caught_up_req = self.caught_up_req.max(req_id);
                 self.dismiss();
-                self.judge(i, now);
+                self.judge(i, now, &mut out);
                 for j in 0..self.slots.len() {
                     self.send(j, now, &mut out);
                 }
@@ -748,8 +754,9 @@ impl Engine {
         self.metrics.set("watcher_journal_error", &[], 1.0);
     }
 
-    /// The comparison of a round and the two-round rule.
-    fn judge(&mut self, i: usize, now: u64) {
+    /// The comparison of a round and the two-round rule; what it confirms
+    /// goes to `out` as one [`Action::Confirmed`].
+    fn judge(&mut self, i: usize, now: u64, out: &mut Vec<Action>) {
         let min_age = self.min_age_ms;
         let s = &mut self.slots[i];
         s.round = None;
@@ -805,6 +812,7 @@ impl Engine {
         let confirmed_now = &s.confirmed;
         s.paid.retain(|(id, _)| confirmed_now.contains_key(id));
         let c = [("check", check.name())];
+        let mut details = Vec::new();
         for (id, line) in confirmed {
             s.confirmed.insert(id.clone(), line.clone());
             if !s.owed.iter().any(|(o, _)| *o == id) {
@@ -812,6 +820,10 @@ impl Engine {
             }
             self.metrics.add("watcher_mismatches_total", &c, 1.0);
             (self.log)(&format!("error: confirmed difference: {line}"));
+            details.push(cut(line, DETAIL_MAX));
+        }
+        if !details.is_empty() {
+            out.push(Action::Confirmed { check, details });
         }
         self.metrics.set("watcher_differences", &c, open as f64);
         self.set_active(i);

@@ -740,3 +740,57 @@ async fn a_request_waiting_at_the_guard_sees_a_later_rejection_or_pause() {
         assert_eq!(fake.requests().len(), GUARD_MAX, "{class}");
     }
 }
+
+/// U19b1c: the text of the key stop for the `auth` P1, kept from the
+/// answer (or the rule) that latched it; nothing later changes it.
+#[tokio::test]
+async fn auth_stop_keeps_the_first_text() {
+    // A retCode: its retMsg, as one line of at most 200 characters.
+    let fake = FakeHttp::start(ok("{}"));
+    let long = format!("error sign!\norigin_string[{}]", "y".repeat(400));
+    fake.route(
+        "/v5/user/query-api",
+        [Answer::Reply(
+            200,
+            json!({"retCode": 10004, "retMsg": long}).to_string(),
+        )],
+    );
+    let c = client(&fake);
+    assert_eq!(c.client.auth_stop(), None);
+    c.client.get("/v5/user/query-api", &[]).await.unwrap_err();
+    let s = c.client.auth_stop().unwrap();
+    assert_eq!((s.code, s.http), (10004, false));
+    assert!(s.text.starts_with("error sign! origin_string[yyy"), "{s:?}");
+    assert_eq!(s.text.chars().count(), 200);
+    // A later stop of the watcher's own and later refused requests do not
+    // change it.
+    c.client.stop_key("the key no longer passes the start check");
+    c.client.get("/v5/order/realtime", &linear()).await.unwrap_err();
+    assert_eq!(c.client.auth_stop(), Some(s));
+    assert_eq!(c.client.auth_rejected(), Some(10004));
+
+    // HTTP 401: `http`, the body as the text.
+    let fake = FakeHttp::start(ok("{}"));
+    fake.route(
+        "/v5/user/query-api",
+        [Answer::Reply(401, "invalid api key".into())],
+    );
+    let c = client(&fake);
+    c.client.get("/v5/user/query-api", &[]).await.unwrap_err();
+    let s = c.client.auth_stop().unwrap();
+    assert_eq!((s.code, s.http, s.text.as_str()), (401, true, "invalid api key"));
+
+    // The rule stop: code -1 and its reason; a second stop does not change
+    // it, nor does a later rejection (nothing is sent after a stop).
+    let fake = FakeHttp::start(code(10010));
+    let c = client(&fake);
+    c.client.stop_key("query-api: the API key is the master account's\nnow");
+    c.client.stop_key("another reason");
+    c.client.get("/v5/order/realtime", &linear()).await.unwrap_err();
+    let s = c.client.auth_stop().unwrap();
+    assert_eq!(
+        (s.code, s.http, s.text.as_str()),
+        (-1, false, "query-api: the API key is the master account's now")
+    );
+    assert!(fake.requests().is_empty());
+}

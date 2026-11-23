@@ -9,6 +9,7 @@
 - `[alert]` 설정이 있을 때만 동작한다. 없으면 알림이 없고 시작할 때 `warn` 한 줄, `status.alerts = {"configured": false}`. mainnet(`mainnet_confirmed = true`, Hyperliquid·Bybit)은 `[alert]` 없이 시작하지 않는다.
 - 읽는 상태: 공개된 읽기 모델(`Published`, 내구화된 기록만)과 게이트웨이 막힘(Bybit만). 상태 소유자는 커밋 단계다. 알림 스레드는 저널도 코어도 쓰지 않는다.
 - 이 계약은 저널 이벤트를 정의하지 않는다(`events = []`).
+- `[WATCH P1]`은 이 계약의 알림이 아니다: 워처가 자기 송신기로 보낸다([C-WATCH](watcher.md) 10부). OMS는 그것을 만들지도 보내지도 않는다. 같은 봇일 수 있고 접두어로 구별한다.
 
 ### 조건 표
 

@@ -421,3 +421,64 @@ fn a_failed_round_keeps_the_sightings_of_the_last_completed_round() {
     );
     assert_eq!(r.gauge("watcher_mismatches_total", "W1"), Some(1.0));
 }
+
+#[test]
+fn a_confirmation_emits_one_confirmed_action_per_identity() {
+    // U19b1c: the engine tells the runtime what it confirmed, so that one
+    // [WATCH P1] goes per confirmation, not per `watcher_mismatch` send.
+    let mut r = Rig::new("engine-confirmed");
+    let a = row("", "v901", "BTCUSDT", "Buy");
+    let b = row("", "v902", "BTCUSDT", "Sell");
+    r.venue.orders = vec![a.clone(), b.clone()];
+    r.at(T0);
+    r.at(T0 + 1000);
+    assert!(r.confirmations.is_empty());
+    // Both are confirmed in the round at +2 s: one action, one detail per
+    // identity, each the engine's detail of the confirmation.
+    r.at(T0 + 2000);
+    let what = |s: &str| format!("venue BTCUSDT {s} orderLinkId \"\", journal no such order");
+    let d = |id: &str, s: &str| {
+        format!(
+            "W1 foreign {id}: {}; seen 2 rounds, first seen 2.0 s ago",
+            what(s)
+        )
+    };
+    assert_eq!(
+        r.confirmations,
+        vec![(T0 + 2000, Check::W1, vec![d("v901", "Buy"), d("v902", "Sell")])]
+    );
+    // It comes before the send that carries them.
+    let at = |f: &dyn Fn(&Action) -> bool| r.actions.iter().position(|(_, x)| f(x)).unwrap();
+    let confirmed = at(&|x| matches!(x, Action::Confirmed { .. }));
+    let sent = at(&|x| matches!(x, Action::Mismatch { .. }));
+    assert!(confirmed < sent, "{:?}", r.actions);
+    // Later rounds that still see them confirm nothing new.
+    for k in 3..10 {
+        r.at(T0 + k * 1000);
+    }
+    assert_eq!(r.confirmations.len(), 1);
+    // An operator clears the hold: the resend carries them again; no new
+    // confirmation.
+    r.clear(T0 + 10_000);
+    for k in 10..13 {
+        r.at(T0 + k * 1000);
+    }
+    assert!(r.mismatches.len() >= 2, "{:?}", r.mismatches);
+    assert_eq!(r.confirmations.len(), 1);
+    // v902 goes away and comes back: it is confirmed again (the counter's
+    // own rule), alone.
+    r.venue.orders = vec![a.clone()];
+    r.at(T0 + 13_000);
+    r.venue.orders = vec![a, b];
+    for k in 14..18 {
+        r.at(T0 + k * 1000);
+    }
+    assert_eq!(r.confirmations.len(), 2, "{:?}", r.confirmations);
+    let (_, check, details) = &r.confirmations[1];
+    assert_eq!(*check, Check::W1);
+    assert_eq!(details.len(), 1);
+    assert!(details[0].starts_with("W1 foreign v902: "), "{details:?}");
+    // One detail per count of `watcher_mismatches_total`.
+    let n: usize = r.confirmations.iter().map(|c| c.2.len()).sum();
+    assert_eq!(r.gauge("watcher_mismatches_total", "W1"), Some(n as f64));
+}

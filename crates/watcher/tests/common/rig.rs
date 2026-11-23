@@ -255,6 +255,10 @@ pub struct Rig {
     /// difference` line) with the clock it came at: the two-round rule's
     /// result, whether or not a send carried it at once (U19a7).
     pub confirmed: Vec<(u64, String)>,
+    /// Each `Confirmed` action (U19b1c): when, the check, the details.
+    pub confirmations: Vec<(u64, Check, Vec<String>)>,
+    /// Every action the rig carried out, in order, with its clock (U19b1c).
+    pub actions: Vec<(u64, Action)>,
 }
 
 impl Rig {
@@ -295,6 +299,8 @@ impl Rig {
             admin_script: VecDeque::new(),
             held: false,
             confirmed: Vec::new(),
+            confirmations: Vec::new(),
+            actions: Vec::new(),
         }
     }
 
@@ -355,6 +361,7 @@ impl Rig {
         while let Some(a) = queue.pop_front() {
             steps += 1;
             assert!(steps < 10_000, "the rig does not settle");
+            self.actions.push((now, a.clone()));
             let more = match a {
                 Action::Venue {
                     req_id,
@@ -390,6 +397,10 @@ impl Rig {
                 }
                 Action::Heartbeat { checks } => {
                     self.heartbeats.push((now, checks));
+                    vec![]
+                }
+                Action::Confirmed { check, details } => {
+                    self.confirmations.push((now, check, details));
                     vec![]
                 }
             };

@@ -2381,6 +2381,33 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "alert", "a_network_error_moves_to_the_pinned_route"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M262-watcher-mismatch-p1-per-send",
+        what: "the watcher's mismatch P1 is collected at every watcher_mismatch send instead of once per confirmation (deliberate defect 8 of U19b1c)",
+        file: "crates/watcher/src/alert.rs",
+        find: "        if let Action::Confirmed { check, details } = a {\n            self.notices.add(*check, details);\n        }\n",
+        replace: "        if let Action::Mismatch { check, detail, .. } = a {\n            self.notices.add(*check, std::slice::from_ref(detail));\n        }\n",
+        test: &["-p", "watcher", "--test", "alert", "a_confirmed_mismatch_sends_one_watch_p1"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M263-watcher-mismatch-pace-ignored",
+        what: "the watcher's 60 s mismatch P1 pace per check is ignored (deliberate defect 9 of U19b1c)",
+        file: "crates/watcher/src/alert.rs",
+        find: "                    .is_some_and(|t| now_ms.saturating_sub(t) < MISMATCH_PACE_MS)\n",
+        replace: "                    .is_some_and(|t| now_ms.saturating_sub(t) < MISMATCH_PACE_MS && false)\n",
+        test: &["-p", "watcher", "--test", "alert", "mismatch_notices_are_at_most_one_per_check_per_60_s_and_collect_the_rest"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M264-watcher-auth-p1-only-10010",
+        what: "a key rejection other than retCode 10010 sends no auth P1 (deliberate defect 10 of U19b1c)",
+        file: "crates/watcher/src/alert.rs",
+        find: "        let auth = client.auth_stop();\n",
+        replace: "        let auth = client.auth_stop().filter(|s| s.code == 10010);\n",
+        test: &["-p", "watcher", "--test", "alert", "an_auth_answer_sends_one_watch_p1_at_once"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
