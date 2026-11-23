@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `df26944acbb49c32`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `0485040acb5c166e`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
-주장 112건: 통과 0, 실패 0, 미실행 45, 이전 버전 결과 67.
+주장 113건: 통과 0, 실패 0, 미실행 46, 이전 버전 결과 67.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -119,6 +119,7 @@
 | V-WATCH-2 | 워처의 독자 읽기와 저널 상태가 코어와 같은 집합을 세운다: 코어가 결정하고 oms-journal이 쓴 저널을 기록마다 읽어, 열린 주문 집합, 열린 주문마다 종목·방향·수량·전략·클라이언트 ID·거래소 주문 번호·누적 체결·결과 불명·거래소 종결, 종목마다 포지션, 체결·거래소 변경·펀딩 키와 그 거래소 시각, 체결 바닥, 킬 보류와 워처 불일치 보류, 일 기준값이 같은 기록을 재생한 코어와 같다. 시나리오들이 C-TAIL 표의 이벤트를 모두 쓴다. 닫힌 주문의 정보는 purged까지 남아 늦은 체결의 방향과 종목을 주고, 펀딩은 포지션을 바꾸지 않으며, 체결 바닥은 내려가지 않고 booted는 키를 잊지 않으며, 규칙에 맞지 않는 기록(모르는 주문의 체결, 열린 주문의 purged, 형식이 틀린 필드, 순서가 어긋난 기록)은 래치되는 오류다 | 단위, 통합 | 미실행 | `cargo test -p watcher --test state && cargo test -p watcher-conformance` |
 | V-WATCH-3 | 워처의 자기 Bybit 클라이언트는 GET을 거래소 문서대로 서명하고(정렬된 질의, 보낼 수 없는 값은 보내기 전에 거절, 머리글 다섯, 보내는 순간의 시계), 응답을 부류로 나누며(not_sent, no_answer, rate_limited, clock, refused, auth, ip_banned; unreadable은 검사가 만든다), 키 거절(HTTP 401, retCode 10003·10004·10005·10007·10010·33004) 뒤에는 프로세스가 다시 시작할 때까지 Bybit에 아무 요청도 보내지 않고, HTTP 403 뒤에는 응답 순간부터 600초 동안 모든 요청과 IP 반향을 보내지 않으며, 어느 10초 창에서도 60개를 넘겨 보내지 않고 넘는 요청은 버리지 않고 기다린다. 요청은 보내기 전에 세고, 지표는 VictoriaMetrics 가져오기 JSON 한 줄씩(watcher_up 포함) 큐 없이 밀어 넣는다 | 단위, 통합(loopback) | 미실행 | `cargo test -p watcher --test sign --test client --test metrics` |
 | V-WATCH-4 | 워처의 설정 파일은 스펙 표의 모든 필드를 그 기본값과 검사대로 읽는다: 모르는 키와 표는 거부하고, mainnet은 mainnet_confirmed = true일 때만 받으며, 범위는 양 끝을 포함하고, status_url과 vm_url은 loopback만, ip_echo_url은 https만, 자격 파일은 절대 경로이고 ..이 없으며 링크를 따라 봐도 데이터 디렉터리 밖이다. 자격 파일은 링크를 따르지 않고 FIFO를 기다리지 않는 한 핸들로, 이 프로세스의 uid가 소유하고 권한이 정확히 0600 또는 0400인 일반 파일일 때만, api_key와 api_secret 둘만 비어 있지 않게 읽는다. 모든 거부는 한 줄이고, 자격 파일의 오류는 내용을 인용하지 않으며 비밀은 어디에도 찍히지 않는다. 시작 확인(U19a4b)은 query-api의 마스터 키, 다른 userID, IP에 묶이지 않은 키([]·*)와 행이 없거나 USDT로 정산되지 않는 기호를 종료 2의 이유 한 줄로 거부하고, 키 거절(auth)이면 끝내지 않고 요청 없이 떠 있으며, 그 밖의 답은 답의 시각 + 5초(403이면 + 600초)에 다시 묻는다. watcher_api_key_days_left는 expiredAt까지의 날을 내림하고 해당 없음(없음, null, 1970-01-02 이하)이면 내보내지 않는다. watcher_public_ip_ok는 반향의 주소가 마지막으로 통과한 ips에 있을 때만 1이다. IP 재확인은 지난 재확인의 마지막 답 + ip_check_ms마다 돌고, 실패하면 0으로 두고 남은 날을 지키며, 시작 규칙에 더는 맞지 않는 키는 재시작까지 모든 Bybit 요청을 멈추고 0으로 둔다. 재확인이나 5단계에서 키가 거절되면 Bybit에는 묻지 않고 반향만 ip_check_ms마다 이어 간다. 요청이 답을 기다리지 않을 때 온 답은 아무것도 바꾸지 않는다 | 단위 | 미실행 | `cargo test -p watcher --test config --test creds --test start` |
+| V-WATCH-5 | 워처의 검사 엔진은 첫 라운드와 첫 하트비트를 start_ms에 내고, 한 검사의 라운드를 겹치지 않으며 늦은 라운드는 한 번만 돌린다. 라운드는 거래소 쪽을 모두 읽은 뒤에만 그 라운드만의 상태 요청을 내고, 그 답은 물은 라운드만 쓰며, 그 상한까지 저널을 읽은 뒤 비교한다. 다른 인스턴스의 상태와 그 요청을 낼 때 읽은 기록보다 낮은 상한은 읽기를 재시작까지 래치하고 그 뒤 라운드는 아무것도 묻지 않는다. 다시 읽는 저널 오류는 다음 라운드에 낫고 watcher_journal_error를 0으로 돌린다. 기한(낸 시각 + request_timeout_ms + 11초)까지 답이 없는 요청은 라운드를 실패로 닫고 늦은 답은 버린다. 차이는 지난 완료 라운드와 이번 라운드에 같은 정체로 있고 이번 라운드에서 min_age_ms 이상 늙었을 때만 확정되며, 두 번 보았지만 어린 차이는 라운드를 성공으로 치지 않는다. 확정은 정체마다 한 번 세고 1024바이트 이하의 detail을 실은 Mismatch 하나를 내며, watcher_mismatch_active는 라운드가 그것을 보지 않으면 내려간다. W1은 OMS의 쪽 규칙대로 열린 주문을 읽고(커서 없는 가득 찬 쪽, 같은 커서, 필드 없는 행은 unreadable, 20쪽 한도), 모르는 주문(foreign), 저널에서 닫힘, 거래소 종결 뒤에도 열림, 종목·방향 다름, 확인된 주문의 거래소 부재를 차이로 보고, 확인되지 않았거나 결과 불명이거나 거래소 종결된 주문의 부재는 비교하지 않는다. 나이는 주문의 fact_at(다른 이벤트로 움직이지 않음) 또는 첫 sighting이다 | 단위(sans-IO, 수동 시계) | 미실행 | `cargo test -p watcher --test w1 --test engine` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -2743,4 +2744,42 @@
 | `watcher/a_failed_recheck_sets_public_ip_ok_0_and_keeps_days_left` | 미실행 |  |
 | `watcher/a_recheck_with_another_uid_a_master_key_or_no_bound_ip_stops_every_request` | 미실행 |  |
 | `watcher/an_answer_without_a_request_in_flight_changes_nothing` | 미실행 |  |
+
+## V-WATCH-5 — 워처의 검사 엔진은 첫 라운드와 첫 하트비트를 start_ms에 내고, 한 검사의 라운드를 겹치지 않으며 늦은 라운드는 한 번만 돌린다. 라운드는 거래소 쪽을 모두 읽은 뒤에만 그 라운드만의 상태 요청을 내고, 그 답은 물은 라운드만 쓰며, 그 상한까지 저널을 읽은 뒤 비교한다. 다른 인스턴스의 상태와 그 요청을 낼 때 읽은 기록보다 낮은 상한은 읽기를 재시작까지 래치하고 그 뒤 라운드는 아무것도 묻지 않는다. 다시 읽는 저널 오류는 다음 라운드에 낫고 watcher_journal_error를 0으로 돌린다. 기한(낸 시각 + request_timeout_ms + 11초)까지 답이 없는 요청은 라운드를 실패로 닫고 늦은 답은 버린다. 차이는 지난 완료 라운드와 이번 라운드에 같은 정체로 있고 이번 라운드에서 min_age_ms 이상 늙었을 때만 확정되며, 두 번 보았지만 어린 차이는 라운드를 성공으로 치지 않는다. 확정은 정체마다 한 번 세고 1024바이트 이하의 detail을 실은 Mismatch 하나를 내며, watcher_mismatch_active는 라운드가 그것을 보지 않으면 내려간다. W1은 OMS의 쪽 규칙대로 열린 주문을 읽고(커서 없는 가득 찬 쪽, 같은 커서, 필드 없는 행은 unreadable, 20쪽 한도), 모르는 주문(foreign), 저널에서 닫힘, 거래소 종결 뒤에도 열림, 종목·방향 다름, 확인된 주문의 거래소 부재를 차이로 보고, 확인되지 않았거나 결과 불명이거나 거래소 종결된 주문의 부재는 비교하지 않는다. 나이는 주문의 fact_at(다른 이벤트로 움직이지 않음) 또는 첫 sighting이다
+
+- 상태: **미실행**
+- 왜 중요한가: 한 번 본 차이나 막 기록된 저널 항목으로 울리면 체결이 오가는 중에 거짓 보류가 걸리고, 두 번 본 어린 차이를 성공으로 치면 하트비트가 아무것도 확정하지 않는 동안 신선한 W1을 알린다. 저널을 거래소보다 먼저 읽거나 다른 라운드의 상한을 쓰면 OMS가 방금 보낸 주문을 모르는 주문으로 본다. 답 하나를 잃어 라운드가 영영 열리면 검사가 멈춘다
+- 수준: 단위(sans-IO, 수동 시계)
+- 전제와 범위: 엔진 시험 도구(프로세스 안의 모델 거래소, 시험 저널 쓰기, 지연 0의 답 또는 시험이 손으로 답함): W1 시험 12개, 엔진 시험 9개. 두 검사의 라운드가 함께 열린 경우는 W1과 시험의 대역 검사(한 쪽, 늘 일치)
+- 실제 구성요소: 워처의 Engine, W1, Tail, JournalState, 지표 등록부, ADR-011 형식으로 쓴 저널 파일
+- 모의·시뮬레이션: Bybit의 order/realtime 쪽(모델 거래소와 스크립트한 쪽), OMS의 /api/status(시험 저널의 마지막 기록 또는 정한 상한), 시계(수동), W2(대역)
+- 주입한 장애: 한 라운드만 보인 차이, 보였다 안 보였다 하는 차이, 1.5초·1µs 모자란·정확히 2초인 저널 항목, 확인되지 않음·결과 불명·거래소 종결 주문, 빈·남의·다른 인스턴스·모르는 orderLinkId, 종목·방향 다름, 두 쪽 사이에 저널에 들어온 51개 주문, 250ms마다 같은 주문의 체결, 커서 없는 가득 찬 쪽, 같은 커서, orderId 없는 행, 목록 아닌 list, 21쪽, 커서 있는 빈 쪽, 답 없는 거래소·상태 요청, 기한 뒤의 늦은 답, 상태 요청에 온 거래소 답, 거꾸로 온 상태 답, 답 없음·durable_seq 없음·16자리가 아닌 instance_id, 다른 인스턴스, 내려간 상한, 파일보다 높은 상한(빠진 세그먼트), 모르는 이벤트, 1200바이트의 orderLinkId, 30개 동시 확정, 실패한 라운드. 변이 M194, M195, M198, M211~M214, M219, M224, M229와 시험 밖 변이 25개(모두 잡힘, U19a5 보고)
+- 판정 기준과 근거: 확정은 정한 라운드(시각)에만 오고 Mismatch의 detail이 정확히 그 문자열이다. 그 전 라운드에는 Mismatch가 없다. 미룬 라운드 뒤 성공 시각과 하트비트의 W1이 움직이지 않는다. 상태 요청은 마지막 쪽의 답 뒤에만 나온다. 기한 1ms 전에는 라운드가 열려 있고 기한에 실패한다. 래치 뒤 다섯 라운드 동안 거래소 요청이 없고 래치 줄은 하나다. detail은 1024바이트 이하이고 글자 경계에서 잘린다
+- 재현: `cargo test -p watcher --test w1 --test engine`
+- 뒷받침하는 것: C-WATCH 5부, ADR-031
+- 확인하지 않은 범위: 실행 코드가 엔진을 돌리는 것, Mismatch를 admin.sock에 보내는 것과 다시 보내기·빚, 하트비트를 monitor.sock에 보내는 것(U19a7). W2와 함께 열린 라운드는 대역 검사로만 보았다(U19a6). 실제 Bybit의 order/realtime 응답(키가 없다, U-01)과 열린 주문의 orderLinkId 유일성(문서로 확인하지 않음). 지워진(purged) 주문은 foreign으로 보인다(종류만 다르다). 시계가 뒤로 가는 경우는 saturating_sub으로 멈추는 것을 코드로만 본다
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `watcher/a_one_round_difference_does_not_alarm` | 미실행 |  |
+| `watcher/a_two_round_difference_older_than_2_s_alarms` | 미실행 |  |
+| `watcher/a_journal_entry_younger_than_2_s_does_not_alarm` | 미실행 |  |
+| `watcher/an_unacked_order_missing_at_the_venue_is_not_compared` | 미실행 |  |
+| `watcher/a_foreign_order_at_the_venue_is_a_mismatch` | 미실행 |  |
+| `watcher/an_order_closed_in_the_journal_and_open_at_the_venue_is_a_mismatch` | 미실행 |  |
+| `watcher/the_venue_is_read_before_the_journal` | 미실행 |  |
+| `watcher/a_difference_whose_order_keeps_receiving_events_is_confirmed_by_its_fact_age` | 미실행 |  |
+| `watcher/a_young_difference_seen_twice_defers_the_round` | 미실행 |  |
+| `watcher/a_full_page_without_a_cursor_or_an_unchanged_cursor_fails_the_round` | 미실행 |  |
+| `watcher/an_order_ended_at_the_venue_in_the_journal_and_not_listed_agrees` | 미실행 |  |
+| `watcher/an_order_ended_in_the_journal_and_still_open_at_the_venue_is_open_after_terminal` | 미실행 |  |
+| `watcher/a_late_round_runs_once_and_rounds_do_not_overlap` | 미실행 |  |
+| `watcher/the_first_rounds_and_heartbeat_are_due_at_start` | 미실행 |  |
+| `watcher/a_retried_journal_error_heals_and_a_latched_one_fails_every_round` | 미실행 |  |
+| `watcher/a_status_of_another_instance_or_a_cap_below_the_read_before_the_request_stops_the_reader` | 미실행 |  |
+| `watcher/status_answers_in_reverse_order_are_each_used_by_their_own_round` | 미실행 |  |
+| `watcher/the_detail_is_at_most_1024_bytes` | 미실행 |  |
+| `watcher/a_confirmed_identity_is_counted_once` | 미실행 |  |
+| `watcher/a_request_without_an_answer_fails_its_round_at_the_deadline_and_a_late_answer_is_ignored` | 미실행 |  |
+| `watcher/mismatch_active_counts_the_confirmed_differences_a_round_still_sees` | 미실행 |  |
 
