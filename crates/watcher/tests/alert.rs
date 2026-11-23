@@ -780,6 +780,7 @@ fn a_request_without_an_answer_fails_after_10_s() {
         .filter(|l| l.starts_with("warn: telegram send failed: route 0: "))
         .collect();
     assert_eq!(failed.len(), 1, "{lines:?}");
+    assert!(failed[0].ends_with("timed out"), "{}", failed[0]);
     assert!(!failed[0].contains(SECRET), "{}", failed[0]);
     // The last flush meets the same silence and is cut at its bound.
     assert_eq!(rig.finish(200), 1);
