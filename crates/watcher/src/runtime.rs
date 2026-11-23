@@ -152,6 +152,14 @@ pub async fn run(
             return 2;
         }
     };
+    // Read once, before the start checks (U19b1a); the sender that uses
+    // it comes with U19b1b/U19b1c.
+    if let Some(t) = &cfg.telegram {
+        if let Err(e) = crate::creds::load_token(&t.token_file, &cfg.data_dir) {
+            log(&format!("error: {e}"));
+            return 2;
+        }
+    }
     let metrics = Arc::new(Metrics::new(&cfg.host, &cfg.name));
     let timeout = cfg.http.request_timeout_ms;
     let exporter = match &cfg.telemetry.vm_url {

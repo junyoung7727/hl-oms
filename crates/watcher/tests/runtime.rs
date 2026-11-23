@@ -746,7 +746,13 @@ fn the_status_client_sends_the_loopback_host_and_follows_no_redirect() {
 
 #[test]
 fn a_start_refusal_ends_the_run_with_exit_code_2() {
-    let w = World::new("rt-refusal", "");
+    // A good token file (U19b1a) is read and the start goes on to step 2.
+    let tok_dir = common::test_dir("rt-refusal-t");
+    let tok = tok_dir.join("t.json");
+    std::fs::write(&tok, r#"{"token": "1:made-up", "chat_id": 1}"#).unwrap();
+    std::fs::set_permissions(&tok, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let telegram = format!("[telegram]\ntoken_file = \"{}\"\n", tok.display());
+    let w = World::new("rt-refusal", &telegram);
     // A master key: refused at step 2, nothing asked after it.
     w.bybit.route(
         "/v5/user/query-api",
@@ -779,4 +785,17 @@ fn a_start_refusal_ends_the_run_with_exit_code_2() {
     assert_eq!(w.lines_with("error: credentials file"), 1);
     assert!(w.bybit.requests().is_empty());
     assert!(w.vm.requests().is_empty());
+    // A token file that is not owner-only: refused before any request,
+    // the token not quoted.
+    std::fs::set_permissions(&tok, std::fs::Permissions::from_mode(0o640)).unwrap();
+    let w = World::new("rt-refusal-tok", &telegram);
+    let mut run = w.start(Arc::new(ManualClock::new(T0)));
+    assert!(until(10, || !run.running()));
+    assert_eq!(run.shutdown(), 2);
+    assert_eq!(w.lines_with("error: token file"), 1);
+    assert_eq!(w.lines_with("must have mode 0600 or 0400"), 1);
+    assert_eq!(w.lines_with("made-up"), 0);
+    assert!(w.bybit.requests().is_empty());
+    assert!(w.vm.requests().is_empty());
+    let _ = std::fs::remove_dir_all(&tok_dir);
 }
