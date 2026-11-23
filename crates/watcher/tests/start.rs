@@ -741,3 +741,318 @@ async fn an_auth_answer_at_start_stays_up_without_requests() {
         assert!(lines(&start_lines).is_empty(), "{case}");
     }
 }
+
+/// A start of one symbol run to the end on answers: query-api at `T0`
+/// (key expiring in 10 days), the echo answered at `echo_at`, the settle
+/// coin at `done_at`; its recheck.
+fn rechecked(echo_at: u64, done_at: u64) -> (S, IpCheck) {
+    let mut s = start_of(&["BTCUSDT"], T0);
+    take(&mut s.start, T0, &query_api());
+    let k = key(UID, false, json!([IP]), Some("2023-11-24T22:13:20Z"));
+    assert_eq!(s.start.on_answer(T0, Ok(k)), Step::Next);
+    take(&mut s.start, T0, &Request::Echo);
+    assert_eq!(s.start.on_answer(echo_at, Ok(json!(IP))), Step::Next);
+    take(&mut s.start, echo_at, &instruments("BTCUSDT"));
+    assert_eq!(
+        s.start
+            .on_answer(done_at, Ok(instrument("BTCUSDT", "USDT"))),
+        Step::Done
+    );
+    assert_eq!(s.metrics.get(DAYS_LEFT, &[]), Some(10.0));
+    assert_eq!(s.metrics.get(PUBLIC_IP_OK, &[]), Some(1.0));
+    let check = s.start.ip_check().unwrap();
+    (s, check)
+}
+
+/// Takes the recheck's request due at `now`: it must be `want`, and no
+/// second one is due while it has no answer.
+fn take_check(c: &mut IpCheck, now: u64, want: &Request) {
+    assert_eq!(c.poll(now).as_ref(), Some(want), "at +{}", now - T0);
+    assert_eq!(c.poll(now), None, "a request in flight is not asked again");
+}
+
+#[test]
+fn the_public_ip_is_rechecked_every_60_s() {
+    let echo_at = T0 + 1_000;
+    let (s, mut check) = rechecked(echo_at, T0 + 1_500);
+    // The first recheck is due 60 s after step 4's echo answered.
+    for t in [T0 + 1_500, echo_at + 59_999] {
+        assert_eq!(check.poll(t), None, "at +{}", t - T0);
+    }
+    let mut due = echo_at + 60_000;
+    // Each later one 60 s after the previous recheck's last answer; the
+    // key's list and expiry are read again every time.
+    let rounds: [(Value, &str, &str, f64, f64); 4] = [
+        (json!([IP]), "2023-11-24T22:13:20Z", IP, 1.0, 9.0),
+        (
+            json!(["198.51.100.4"]),
+            "2023-11-24T22:13:20Z",
+            IP,
+            0.0,
+            9.0,
+        ),
+        (
+            json!(["198.51.100.4"]),
+            "2023-12-24T22:13:20Z",
+            "198.51.100.4",
+            1.0,
+            39.0,
+        ),
+        (
+            json!([IP, "198.51.100.4"]),
+            "1970-01-01T00:00:00Z",
+            IP,
+            1.0,
+            f64::NAN,
+        ),
+    ];
+    for (i, (ips, expired_at, echo, ok, days)) in rounds.into_iter().enumerate() {
+        assert_eq!(check.poll(due - 1), None, "round {i}");
+        take_check(&mut check, due, &query_api());
+        let at = due + 200;
+        let k = key(UID, false, ips, Some(expired_at));
+        assert_eq!(check.on_answer(at, Ok(k)), Step::Next, "round {i}");
+        take_check(&mut check, at, &Request::Echo);
+        let last = at + 150;
+        assert_eq!(
+            check.on_answer(last, Ok(json!(echo))),
+            Step::Wait {
+                until_ms: last + 60_000
+            },
+            "round {i}"
+        );
+        assert_eq!(s.metrics.get(PUBLIC_IP_OK, &[]), Some(ok), "round {i}");
+        if days.is_nan() {
+            assert_eq!(s.metrics.get(DAYS_LEFT, &[]), None, "round {i}");
+        } else {
+            assert_eq!(s.metrics.get(DAYS_LEFT, &[]), Some(days), "round {i}");
+        }
+        due = last + 60_000;
+    }
+    // One warn line, for the round whose IP was not bound.
+    let l = lines(&s.lines);
+    assert_eq!(l.len(), 1, "{l:?}");
+    assert_eq!(
+        l[0],
+        "warn: public IP 203.0.113.7 is not among the key's bound IPs; watcher_public_ip_ok = 0"
+    );
+
+    // A start whose step 5 took longer than the interval: the first
+    // recheck is due at once, still counted from the echo.
+    let (_s, mut check) = rechecked(T0 + 1_000, T0 + 90_000);
+    take_check(&mut check, T0 + 90_000, &query_api());
+
+    // The recheck uses the configured interval.
+    let metrics = Arc::new(Metrics::new("h1", "w1"));
+    let (log, _l) = watcher::log::collect();
+    let mut st = Start::new(&config(&["BTCUSDT"], 10_000), metrics, log, T0);
+    take(&mut st, T0, &query_api());
+    st.on_answer(T0, Ok(good_key()));
+    take(&mut st, T0, &Request::Echo);
+    st.on_answer(T0, Ok(json!(IP)));
+    take(&mut st, T0, &instruments("BTCUSDT"));
+    st.on_answer(T0, Ok(instrument("BTCUSDT", "USDT")));
+    let mut check = st.ip_check().unwrap();
+    assert_eq!(check.poll(T0 + 9_999), None);
+    take_check(&mut check, T0 + 10_000, &query_api());
+}
+
+#[test]
+fn a_failed_recheck_sets_public_ip_ok_0_and_keeps_days_left() {
+    let mut cases = retried();
+    for (case, v) in [
+        ("unreadable: no fields", json!({})),
+        ("unreadable: ips a string", key(UID, false, json!(IP), None)),
+    ] {
+        cases.push((case, Ok(v), RETRY_MS));
+    }
+    for (case, answer, _) in cases {
+        let (s, mut check) = rechecked(T0 + 1_000, T0 + 1_500);
+        let due = T0 + 61_000;
+        take_check(&mut check, due, &query_api());
+        // A failed query-api: 0, days kept, no echo, the next recheck at
+        // the normal pace.
+        let at = due + 300;
+        assert_eq!(
+            check.on_answer(at, answer),
+            Step::Wait {
+                until_ms: at + 60_000
+            },
+            "{case}"
+        );
+        assert_eq!(s.metrics.get(PUBLIC_IP_OK, &[]), Some(0.0), "{case}");
+        assert_eq!(s.metrics.get(DAYS_LEFT, &[]), Some(10.0), "{case}");
+        let l = lines(&s.lines);
+        assert_eq!(l.len(), 1, "{case}: {l:?}");
+        assert!(
+            l[0].starts_with("warn: IP recheck: query-api failed ("),
+            "{case}: {l:?}"
+        );
+        assert!(l[0].ends_with("watcher_public_ip_ok = 0"), "{case}: {l:?}");
+        for t in [at, at + 59_999] {
+            assert_eq!(check.poll(t), None, "{case}");
+        }
+        take_check(&mut check, at + 60_000, &query_api());
+        // The next recheck passes: 1 again.
+        assert_eq!(
+            check.on_answer(at + 60_000, Ok(good_key())),
+            Step::Next,
+            "{case}"
+        );
+        take_check(&mut check, at + 60_000, &Request::Echo);
+        check.on_answer(at + 60_000, Ok(json!(IP)));
+        assert_eq!(s.metrics.get(PUBLIC_IP_OK, &[]), Some(1.0), "{case}");
+    }
+    // A failed echo after a good query-api: 0 with one line, the days
+    // refreshed from that query-api, the next recheck at the normal pace.
+    for (case, answer) in [
+        (
+            "no answer",
+            Err(RestError::NoAnswer("IP echo HTTP 500".into())),
+        ),
+        ("not an address", Ok(json!("nope"))),
+        (
+            "paused",
+            Err(RestError::IpBanned("not sent: paused".into())),
+        ),
+    ] {
+        let (s, mut check) = rechecked(T0 + 1_000, T0 + 1_500);
+        take_check(&mut check, T0 + 61_000, &query_api());
+        let k = key(UID, false, json!([IP]), Some("2023-11-23T22:13:20Z"));
+        check.on_answer(T0 + 61_000, Ok(k));
+        take_check(&mut check, T0 + 61_000, &Request::Echo);
+        assert_eq!(
+            check.on_answer(T0 + 61_100, answer),
+            Step::Wait {
+                until_ms: T0 + 121_100
+            },
+            "{case}"
+        );
+        assert_eq!(s.metrics.get(PUBLIC_IP_OK, &[]), Some(0.0), "{case}");
+        assert_eq!(s.metrics.get(DAYS_LEFT, &[]), Some(8.0), "{case}");
+        assert_eq!(lines(&s.lines).len(), 1, "{case}");
+        assert_eq!(check.poll(T0 + 121_099), None, "{case}");
+        take_check(&mut check, T0 + 121_100, &query_api());
+    }
+}
+
+#[tokio::test]
+async fn a_recheck_with_another_uid_a_master_key_or_no_bound_ip_stops_every_request() {
+    let echo = FakeHttp::start(Answer::Reply(200, IP.into()));
+    let echo_url = format!("{}/ip", echo.url());
+    let rule = "the key no longer passes the start check: query-api: ";
+    for (case, recheck, reason) in [
+        (
+            "another uid",
+            key(4243, false, json!([IP]), None),
+            format!(
+                "{rule}the API key belongs to user 4243; the config says sub_account_uid {UID}"
+            ),
+        ),
+        (
+            "master",
+            key(UID, true, json!([IP]), None),
+            format!(
+                "{rule}the API key is the master account's; the watcher needs a sub-account key"
+            ),
+        ),
+        (
+            "no bound ip",
+            key(UID, false, json!([]), None),
+            format!(
+                "{rule}the API key is bound to no IP address (ips [] or \"*\"); bind it to this host's address"
+            ),
+        ),
+        (
+            "star",
+            key(UID, false, json!(["*"]), None),
+            format!(
+                "{rule}the API key is bound to no IP address (ips [] or \"*\"); bind it to this host's address"
+            ),
+        ),
+    ] {
+        let fake = FakeHttp::start(ok(&json!({"list": []})));
+        fake.route(QUERY_API, [ok(&good_key()), ok(&recheck)]);
+        fake.route(INSTRUMENTS, [ok(&instrument("BTCUSDT", "USDT"))]);
+        let c = client(&fake);
+        let metrics = Arc::new(Metrics::new("h1", "w1"));
+        let (log, start_lines) = watcher::log::collect();
+        let mut start = Start::new(&config(&["BTCUSDT"], 60_000), metrics, log, T0);
+        assert_eq!(drive(&mut start, &c, &echo_url).await, Step::Done, "{case}");
+        let mut check = start.ip_check().unwrap();
+        c.clock.advance(60_000);
+        let req = check.poll(c.clock.now_ms()).unwrap();
+        assert_eq!(req, query_api(), "{case}");
+        let answer = watcher::start::send(&c.client, &echo_url, &req).await;
+        let step = check.on_answer(c.clock.now_ms(), answer);
+        assert_eq!(
+            step,
+            Step::StopRequests {
+                reason: reason.clone()
+            },
+            "{case}"
+        );
+        watcher::start::apply(&c.client, &step);
+        let sent = fake.requests().len();
+        assert_eq!(sent, 3, "{case}");
+        // Every Bybit request stops until restart, as for a rejected key.
+        assert_eq!(
+            c.client.auth_rejected(),
+            Some(watcher::rest::OWN_RULE_CODE),
+            "{case}"
+        );
+        assert_eq!(
+            c.metrics.get("watcher_auth_rejected", &[]),
+            Some(1.0),
+            "{case}"
+        );
+        for p in [
+            QUERY_API,
+            INSTRUMENTS,
+            "/v5/order/realtime",
+            "/v5/position/list",
+        ] {
+            let e = c.client.get(p, &[]).await.unwrap_err();
+            assert_eq!(e.class(), "auth", "{case} {p}");
+        }
+        // The recheck asks nothing more (no echo either), for 10 minutes.
+        for _ in 0..20 {
+            c.clock.advance(30_000);
+            assert_eq!(check.poll(c.clock.now_ms()), None, "{case}");
+        }
+        assert_eq!(fake.requests().len(), sent, "{case}");
+        // One error line naming the rule; a second apply adds none.
+        watcher::start::apply(&c.client, &step);
+        let l = lines(&c.lines);
+        assert_eq!(
+            l,
+            [format!(
+                "error: {reason}; every Bybit request stops until the watcher restarts"
+            )],
+            "{case}"
+        );
+        assert!(lines(&start_lines).is_empty(), "{case}");
+    }
+
+    // A rejected key at the recheck: as at start, the client stopped; the
+    // recheck asks nothing more.
+    let fake = FakeHttp::start(ok(&json!({"list": []})));
+    fake.route(QUERY_API, [ok(&good_key()), code(10010)]);
+    fake.route(INSTRUMENTS, [ok(&instrument("BTCUSDT", "USDT"))]);
+    let c = client(&fake);
+    let (log, _l) = watcher::log::collect();
+    let mut start = Start::new(&config(&["BTCUSDT"], 60_000), c.metrics.clone(), log, T0);
+    assert_eq!(drive(&mut start, &c, &echo_url).await, Step::Done);
+    let mut check = start.ip_check().unwrap();
+    c.clock.advance(60_000);
+    let req = check.poll(c.clock.now_ms()).unwrap();
+    let answer = watcher::start::send(&c.client, &echo_url, &req).await;
+    assert_eq!(
+        check.on_answer(c.clock.now_ms(), answer),
+        Step::StayUpNoRequests
+    );
+    c.clock.advance(600_000);
+    assert_eq!(check.poll(c.clock.now_ms()), None);
+    assert_eq!(c.client.auth_rejected(), Some(10010));
+    assert_eq!(fake.requests().len(), 3);
+}

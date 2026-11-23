@@ -488,13 +488,38 @@ impl Start {
     }
 }
 
-/// The IP recheck (step 6), stub until slice 3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Recheck {
+    /// Waiting for `next_due`.
+    Idle,
+    /// query-api in flight.
+    Query,
+    /// query-api passed; the echo is due now.
+    EchoDue,
+    /// The echo in flight.
+    Echo,
+    /// The key was rejected or no longer passes the start rules: nothing
+    /// is asked until restart.
+    Stopped,
+}
+
+/// Step 6: every `ip_check_ms`, query-api again (the IP list may change)
+/// and then the echo, refreshing `watcher_api_key_days_left` and
+/// `watcher_public_ip_ok`. The next recheck is due `ip_check_ms` after the
+/// previous one's last answer. A failed recheck (any class but `auth`)
+/// sets `watcher_public_ip_ok = 0` and keeps the days left; `auth` stops
+/// it (the client latched the key stop); a readable query-api answer
+/// that fails a start rule stops every Bybit request until restart
+/// ([`Step::StopRequests`]). These requests go through the client's guard
+/// and are outside the reconciliation budget.
 pub struct IpCheck {
-    _uid: u64,
-    _interval_ms: u64,
-    _metrics: Arc<Metrics>,
-    _log: Log,
-    _next_due: u64,
+    uid: u64,
+    interval_ms: u64,
+    metrics: Arc<Metrics>,
+    log: Log,
+    next_due: u64,
+    phase: Recheck,
+    ips: Vec<String>,
 }
 
 impl IpCheck {
@@ -506,19 +531,93 @@ impl IpCheck {
         first_due_ms: u64,
     ) -> IpCheck {
         IpCheck {
-            _uid: uid,
-            _interval_ms: interval_ms,
-            _metrics: metrics,
-            _log: log,
-            _next_due: first_due_ms,
+            uid,
+            interval_ms,
+            metrics,
+            log,
+            next_due: first_due_ms,
+            phase: Recheck::Idle,
+            ips: Vec::new(),
         }
     }
 
-    pub fn poll(&mut self, _now_ms: u64) -> Option<Request> {
-        None
+    /// The request due at `now_ms`, or `None` while one is in flight,
+    /// before the next recheck is due, and after a stop.
+    pub fn poll(&mut self, now_ms: u64) -> Option<Request> {
+        match self.phase {
+            Recheck::Idle if now_ms >= self.next_due => {
+                self.phase = Recheck::Query;
+                Some(query_api())
+            }
+            Recheck::EchoDue => {
+                self.phase = Recheck::Echo;
+                Some(Request::Echo)
+            }
+            _ => None,
+        }
     }
 
-    pub fn on_answer(&mut self, _now_ms: u64, _answer: Result<Value, RestError>) -> Step {
-        Step::Done
+    /// The answer at `now_ms` to the request in flight. An answer without
+    /// a request in flight changes nothing.
+    pub fn on_answer(&mut self, now_ms: u64, answer: Result<Value, RestError>) -> Step {
+        match self.phase {
+            Recheck::Query => match answer {
+                Ok(v) => match read_key(&v, self.uid) {
+                    Key::Passes(ips) => {
+                        export_days_left(&v, now_ms, &self.metrics, &self.log);
+                        self.ips = ips;
+                        self.phase = Recheck::EchoDue;
+                        Step::Next
+                    }
+                    Key::Fails(why) => {
+                        self.phase = Recheck::Stopped;
+                        Step::StopRequests {
+                            reason: format!(
+                                "the key no longer passes the start check: query-api: {why}"
+                            ),
+                        }
+                    }
+                    Key::Unreadable(why) => {
+                        count_unreadable(&self.metrics, QUERY_API);
+                        self.failed(now_ms, RestError::Unreadable(why))
+                    }
+                },
+                Err(RestError::Auth { .. }) => {
+                    self.phase = Recheck::Stopped;
+                    Step::StayUpNoRequests
+                }
+                Err(e) => self.failed(now_ms, e),
+            },
+            Recheck::Echo => {
+                export_public_ip(&answer, &self.ips, &self.metrics, &self.log);
+                self.wait(now_ms)
+            }
+            Recheck::Stopped => Step::StayUpNoRequests,
+            Recheck::EchoDue => Step::Next,
+            Recheck::Idle => Step::Wait {
+                until_ms: self.next_due,
+            },
+        }
+    }
+
+    /// A failed query-api: `watcher_public_ip_ok = 0` with one warn line,
+    /// the days left kept, no echo, the next recheck at the normal pace.
+    fn failed(&mut self, now_ms: u64, e: RestError) -> Step {
+        self.metrics.set(PUBLIC_IP_OK, &[], 0.0);
+        let step = self.wait(now_ms);
+        (self.log)(&format!(
+            "warn: IP recheck: query-api failed ({}): {e}; the next recheck at {} ms; watcher_public_ip_ok = 0",
+            e.class(),
+            self.next_due
+        ));
+        step
+    }
+
+    fn wait(&mut self, now_ms: u64) -> Step {
+        self.phase = Recheck::Idle;
+        self.next_due = now_ms.saturating_add(self.interval_ms);
+        Step::Wait {
+            until_ms: self.next_due,
+        }
     }
 }
