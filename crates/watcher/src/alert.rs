@@ -9,7 +9,7 @@
 //!
 //! [ADR-032]: ../../docs/adr/ADR-032-watcher-kill-and-alerts.md
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 
 /// The prefix of every message of the watcher (design §7.7, Q18: the
@@ -22,6 +22,8 @@ pub const VENUE: &str = "bybit";
 pub const MSG_LIMIT: usize = 3500;
 /// Parts kept for delivery (PR #3).
 pub const OUTBOX_LIMIT: usize = 50;
+/// The repeat period of a lasting condition (design §7.7).
+pub const REPEAT_MS: u64 = 300_000;
 
 /// The bot token and the chat of the token file (PR #3 format,
 /// `{"token": "<digits>:<chars>", "chat_id": …}`; read by
@@ -300,6 +302,62 @@ impl Outbox {
                 self.dropped = self.dropped.saturating_sub(part.count);
                 true
             }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Cond {
+    first_text: String,
+    last_sent_ms: u64,
+}
+
+/// The repeat rule of design §7.7: once at start, every `period_ms` while
+/// the condition lasts (with the latest text), once at clear
+/// (`해소: <start text>`). In memory only: a restart sends a lasting
+/// condition's start text once more. Elapsed time is `saturating_sub`, so
+/// a clock that steps back holds the repeat.
+#[derive(Debug)]
+pub struct Repeat {
+    period_ms: u64,
+    conds: BTreeMap<String, Cond>,
+}
+
+impl Repeat {
+    pub fn new(period_ms: u64) -> Repeat {
+        Repeat {
+            period_ms: period_ms.max(1),
+            conds: BTreeMap::new(),
+        }
+    }
+
+    /// The condition `key` holds (`Some(text)`) or not (`None`) at
+    /// `now_ms`; the body to send now, if any.
+    pub fn set(&mut self, key: &str, text: Option<&str>, now_ms: u64) -> Option<String> {
+        match (text, self.conds.get_mut(key)) {
+            (Some(t), None) => {
+                self.conds.insert(
+                    key.to_string(),
+                    Cond {
+                        first_text: t.to_string(),
+                        last_sent_ms: now_ms,
+                    },
+                );
+                Some(t.to_string())
+            }
+            (Some(t), Some(c)) => {
+                if now_ms.saturating_sub(c.last_sent_ms) >= self.period_ms {
+                    c.last_sent_ms = now_ms;
+                    Some(t.to_string())
+                } else {
+                    None
+                }
+            }
+            (None, Some(_)) => self
+                .conds
+                .remove(key)
+                .map(|c| format!("해소: {}", c.first_text)),
+            (None, None) => None,
         }
     }
 }

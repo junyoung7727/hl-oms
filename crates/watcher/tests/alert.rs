@@ -288,3 +288,52 @@ fn the_outbox_keeps_50_parts_and_reports_the_drops_once() {
     assert!(b.settled());
     assert_eq!(b.dropped_total(), 14);
 }
+
+#[test]
+fn the_repeat_rule_sends_start_every_5_min_and_clear() {
+    assert_eq!(alert::REPEAT_MS, 300_000);
+    let t0 = 1_795_435_200_000;
+    let mut r = alert::Repeat::new(alert::REPEAT_MS);
+    // Once at start.
+    assert_eq!(r.set("auth", Some("A1"), t0), Some("A1".into()));
+    // Nothing while it lasts, until 5 min after the last send.
+    for dt in [0, 1, 1000, 150_000, 299_999] {
+        assert_eq!(r.set("auth", Some("A1"), t0 + dt), None, "+{dt}");
+    }
+    // Then the latest text, and the next 5 min from that send.
+    assert_eq!(r.set("auth", Some("A2"), t0 + 300_000), Some("A2".into()));
+    assert_eq!(r.set("auth", Some("A2"), t0 + 599_999), None);
+    // A late caller gets the repeat once, and the next is 5 min after it.
+    assert_eq!(r.set("auth", Some("A3"), t0 + 700_000), Some("A3".into()));
+    assert_eq!(r.set("auth", Some("A3"), t0 + 999_999), None);
+    assert_eq!(r.set("auth", Some("A3"), t0 + 1_000_000), Some("A3".into()));
+    // A clock that steps back holds the repeat (saturating).
+    assert_eq!(r.set("auth", Some("A3"), t0), None);
+    // Once at clear, with the start text; not again.
+    assert_eq!(r.set("auth", None, t0 + 1_000_001), Some("해소: A1".into()));
+    assert_eq!(r.set("auth", None, t0 + 1_000_002), None);
+    // A condition that holds again starts again, at once.
+    assert_eq!(r.set("auth", Some("B"), t0 + 1_000_003), Some("B".into()));
+    assert_eq!(r.set("auth", None, t0 + 1_000_004), Some("해소: B".into()));
+    // Never held: no clear.
+    assert_eq!(r.set("public_ip", None, t0), None);
+    // Conditions are apart: one key's repeat does not move another's.
+    assert_eq!(r.set("public_ip", Some("P"), t0), Some("P".into()));
+    assert_eq!(r.set("auth", Some("Q"), t0 + 100_000), Some("Q".into()));
+    assert_eq!(
+        r.set("public_ip", Some("P"), t0 + 300_000),
+        Some("P".into())
+    );
+    assert_eq!(r.set("auth", Some("Q"), t0 + 300_000), None);
+    assert_eq!(r.set("auth", Some("Q"), t0 + 400_000), Some("Q".into()));
+    // Bound (spec U19b1c, 1 + ⌊T / 5 min⌋ + 1): polled every 100 ms for
+    // T = 3,599,900 ms, a lasting condition gives 1 + 11 messages, and one
+    // more at clear.
+    let mut r = alert::Repeat::new(alert::REPEAT_MS);
+    let mut sent = 0;
+    for step in 0..36_000 {
+        sent += usize::from(r.set("k", Some("x"), t0 + step * 100).is_some());
+    }
+    assert_eq!(sent, 1 + 11);
+    assert!(r.set("k", None, t0 + 3_600_000).is_some());
+}
