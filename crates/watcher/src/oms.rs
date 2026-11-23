@@ -322,3 +322,43 @@ impl Monitor {
         }
     }
 }
+
+/// The `/api/status` client: GET of `status_url` (loopback only, U19a4),
+/// so the `Host` header is `127.0.0.1:<port>` or `[::1]:<port>`, as the
+/// dashboard requires; no redirect, no proxy, `request_timeout_ms`. The
+/// body as JSON; the engine reads `journal.durable_seq` and
+/// `core.instance_id` from it.
+pub struct Status {
+    url: String,
+    http: reqwest::Client,
+}
+
+impl Status {
+    pub fn new(url: &str, timeout_ms: u64) -> Result<Status, String> {
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_millis(timeout_ms))
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .build()
+            .map_err(|e| e.to_string())?;
+        Ok(Status {
+            url: url.to_string(),
+            http,
+        })
+    }
+
+    pub async fn get(&self) -> Result<Value, String> {
+        let r = self
+            .http
+            .get(&self.url)
+            .send()
+            .await
+            .map_err(|e| format!("no answer: {e}"))?;
+        let status = r.status().as_u16();
+        if !(200..=299).contains(&status) {
+            return Err(format!("HTTP {status}"));
+        }
+        let body = r.text().await.map_err(|e| format!("no answer: {e}"))?;
+        serde_json::from_str(&body).map_err(|e| format!("not JSON: {e}"))
+    }
+}
