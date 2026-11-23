@@ -245,11 +245,25 @@ pub struct Client {
     stop: Mutex<Stop>,
 }
 
+/// What stopped every Bybit request until restart (U19b1c, the `auth`
+/// P1): the code ([`OWN_RULE_CODE`] for [`Client::stop_key`]), whether it
+/// was HTTP 401, and the text of the first answer that latched it (its
+/// `retMsg`, the 401's body, or the rule's reason), one line of at most 200
+/// characters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthStop {
+    pub code: i64,
+    pub http: bool,
+    pub text: String,
+}
+
 #[derive(Default)]
 struct Stop {
     guard: Guard,
     /// The code that stopped every Bybit request until restart.
     auth: Option<i64>,
+    /// The same stop with its text, set with `auth` and never changed.
+    auth_stop: Option<AuthStop>,
     /// The end of the last 403 pause (the clock at the answer + 600 s).
     paused_until: Option<u64>,
 }
@@ -308,6 +322,12 @@ impl Client {
         self.stop.lock().ok()?.auth
     }
 
+    /// The stop of every Bybit request with its first text, if any
+    /// (U19b1c).
+    pub fn auth_stop(&self) -> Option<AuthStop> {
+        self.stop.lock().ok()?.auth_stop.clone()
+    }
+
     /// Stops every later Bybit request until restart, as a rejected key
     /// does, for a rule of the watcher's own: the IP recheck found that the
     /// key no longer passes the start rules (U19a4b). The code is
@@ -320,6 +340,11 @@ impl Client {
         };
         if s.auth.is_none() {
             s.auth = Some(OWN_RULE_CODE);
+            s.auth_stop = Some(AuthStop {
+                code: OWN_RULE_CODE,
+                http: false,
+                text: one_line(reason),
+            });
             self.metrics.set("watcher_auth_rejected", &[], 1.0);
             (self.log)(&format!(
                 "error: {}; every Bybit request stops until the watcher restarts",
@@ -365,6 +390,15 @@ impl Client {
         match e {
             RestError::Auth { code, msg } if s.auth.is_none() => {
                 s.auth = Some(*code);
+                let http = *code == 401;
+                s.auth_stop = Some(AuthStop {
+                    code: *code,
+                    http,
+                    text: match msg.strip_prefix("HTTP 401: ") {
+                        Some(body) if http => body.to_string(),
+                        _ => msg.clone(),
+                    },
+                });
                 self.metrics.set("watcher_auth_rejected", &[], 1.0);
                 (self.log)(&format!(
                     "error: Bybit rejected the key ({code}) at {path}: {msg}; every Bybit request stops until the watcher restarts"
