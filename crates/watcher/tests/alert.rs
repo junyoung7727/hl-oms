@@ -97,6 +97,12 @@ fn messages_split_at_3500_utf16_units_at_line_ends() {
     let parts = split(&emoji);
     assert_eq!(parts, ["😀".repeat(1750), "😀".to_string()]);
     assert!(parts.iter().all(|p| units(p) <= 3500));
+    // One unit left and a two-unit character next: the character goes to
+    // the next part (3,499 units, not 3,501).
+    let odd = format!("a{}", "😀".repeat(1750));
+    let parts = split(&odd);
+    assert_eq!(parts, [format!("a{}", "😀".repeat(1749)), "😀".to_string()]);
+    assert_eq!(units(&parts[0]), 3499);
     // An overlong line is cut by characters, after the part before it;
     // its rest starts the next part and takes the following lines.
     let text = format!("x\n{}\nz", "y".repeat(8000));
