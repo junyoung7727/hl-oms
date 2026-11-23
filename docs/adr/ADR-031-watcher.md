@@ -102,7 +102,7 @@ B와 b. 커서 저장(C)은 하지 않는다.
 ## 9. 근거
 
 - 시험(U19a5): `crates/watcher/tests/w1.rs` 13개, `crates/watcher/tests/engine.rs` 10개(프로세스 안의 모델 거래소, 시험 저널, 수동 시계; 주장 V-WATCH-5). 변이 M194, M195, M198, M211~M214, M219, M224, M229, M239~M242(검토 1).
-- 시험(U19a6): `crates/watcher/tests/w2.rs` 12개(같은 시험 도구에 포지션 목록; 주장 V-WATCH-6). 변이 M196, M197, M218, M223.
+- 시험(U19a6): `crates/watcher/tests/w2.rs` 14개(같은 시험 도구에 포지션 목록; 주장 V-WATCH-6). 변이 M196, M197, M218, M223, M243~M245(검토 1). 검토 1에서 크기 있는 빈·없는 방향과 음수 크기를 `unreadable`로 했다(OMS의 규칙과 같다). 대안 "스펙대로 빈 방향은 0"은 OMS가 모르는 포지션을 평평하게 읽는다.
 - 시험(U19a4b): `crates/watcher/tests/start.rs` 13개(수동 시계의 sans-IO 단계, 요청 없음을 보일 곳은 loopback 가짜 Bybit·반향과 실제 클라이언트; 주장 V-WATCH-4). 변이 M189, M190, M225, M238(검토 1 M1).
 - 시험(U19a3): `crates/watcher/tests/sign.rs` 2개, `client.rs` 10개(검토 1에서 리다이렉트를 따르지 않음과 가드에서 기다린 요청이 그 사이의 키 거절·403을 봄을, 검토 2에서 본문이 잘린 상태와 동시에 온 두 거절을 더함), `metrics.rs` 2개(loopback 가짜와 수동 시계; 주장 V-WATCH-3). 변이 M188, M191, M192, M232, M233, M234.
 - 시험(U19a2): `crates/watcher/tests/state.rs` 10개, 적합성 `conformance::the_watcher_sets_equal_the_core_on_journals_with_every_event_kind`(이벤트 51개를 모두 쓰는 시나리오 열 개, 기록마다 코어와 비교; 주장 V-WATCH-2), 재생 측정 `replay::replay_speed_of_100000_records`. 변이 M185~M187, M210, M231(검토 1 S2).
