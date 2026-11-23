@@ -93,7 +93,7 @@ ADR-031 §2의 "잠금을 잡지 않고, 파일을 쓰지 않는다(C-TAIL)"와 
 ## 9. 근거
 
 - 시험(U19b1a): `crates/watcher/tests/alert.rs` 6개(`alert::messages_split_at_3500_utf16_units_at_line_ends`, `alert::the_outbox_keeps_50_parts_and_reports_the_drops_once`, `alert::answers_400_and_413_drop_the_part_and_other_answers_keep_it`, `alert::the_repeat_rule_sends_start_every_5_min_and_clear`, `alert::the_token_is_never_in_debug`, `alert::a_message_has_the_watch_p1_header_with_the_name_and_kst`), `config::telegram_is_validated_and_required_on_mainnet`, `creds::the_token_file_must_be_owner_only_outside_any_repository`, 확장한 `runtime::a_start_refusal_ends_the_run_with_exit_code_2`(주장 V-WATCH-11). 변이 M255~M260.
-- 시험(U19b1b): 같은 파일에 6개(`alert::a_network_error_moves_to_the_pinned_route`, `alert::the_token_is_never_in_a_log_line`, `alert::the_sender_task_flushes_on_the_manual_clock`, `alert::a_retry_keeps_the_part_for_the_next_flush`, `alert::shutdown_flushes_within_5_s_and_counts_the_rest`, `alert::set_queues_what_the_repeat_rule_gives`), 변이 M261. 주장 V-WATCH-11.
+- 시험(U19b1b): 같은 파일에 6개(`alert::a_network_error_moves_to_the_pinned_route`, `alert::the_token_is_never_in_a_log_line`, `alert::the_sender_task_flushes_on_the_manual_clock`, `alert::a_retry_keeps_the_part_for_the_next_flush`, `alert::shutdown_flushes_within_5_s_and_counts_the_rest`, `alert::set_queues_what_the_repeat_rule_gives`), 리뷰 1 뒤 하나 더(`alert::a_request_without_an_answer_fails_after_10_s`, 요청 한도 10초), 변이 M261. 연결 한도 3초와 종료 한도의 `abort`는 시험하지 않았다(C-WATCH 10부 알려진 한계). 주장 V-WATCH-11.
 - 설계: `10_DESIGN_DRAFT.md` §7.5(W5), §7.6(킬 스위치 표), §7.7(직접 알림), R1(C1~C5), R2 SHOULD 4~6, R3 SHOULD 6, R5 SHOULD 1·4(저장소 밖, 스펙 `.scratch/watcher-kill/spec.md`가 줄을 인용한다).
 
 ## 10. 재검토 조건

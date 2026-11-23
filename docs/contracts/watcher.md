@@ -739,6 +739,12 @@ U19a7은 U19a5·U19a6 시험 몇 개의 단언을 바꿨다(시험 도구의 OMS
 - 시계가 뒤로 가면 다음 흘려보내기가 그만큼 늦다(`next_flush`는 주입된 시계의 값이다). 새 메시지는 바로 간다.
 - 종료 한도에 끊긴 요청은 텔레그램이 이미 받았을 수 있다(로그는 그 부분을 버렸다고 센다). 첫 경로의 연결이 3초 막히면 두 번째 경로에 남는 종료 한도는 약 2초다.
 - 3xx는 따르지 않고 `Retry`다(리디렉션이 토큰을 다른 곳으로 가져가지 않게). 시험하지 않았다(`http-fake`는 `Location`을 보내지 못한다).
+- 연결 한도(3초)는 시험하지 않았다: loopback에서는 연결이 바로 되거나 바로 거부되어 막힌 연결을 만들 수 없다. 요청 한도(10초)는 답하지 않는 가짜로 시험한다(리뷰 1 S1).
+- 종료 한도에서 태스크를 `abort`하는 것은 시험하지 않았다. 바이너리는 `finish` 바로 뒤에 런타임을 끝내므로, 그것이 빠져도 끊긴 요청이 이어지는 시간은 짧다(리뷰 1 N2).
+- 송신 태스크가 `finish` 전에 끝나면(`send` 안의 패닉, 독이 든 잠금) 부르는 쪽은 모른다: `Handle::once`는 계속 받거나(잠금이 독이면 말없이 버리고) 종료 때까지 아무 줄도 없다. 지금 코드에서 그런 길은 찾지 못했다(잠금을 await 너머로 쥐지 않음). U19b1c가 실행에서 태스크가 끝났는지 보고 `error` 줄과 지표로 남긴다(리뷰 1 N1).
+- 낫지 않는 답(토큰 폐기 401·404, 봇이 채팅에서 빠짐 403)은 `Retry`라 맨 앞의 부분이 5초마다 다시 가고 뒤의 부분은 넘쳐 버려질 때까지 기다린다(PR #3의 규칙). `watcher_alert_failures_total`이 오르는데 `watcher_alerts_delivered_total`이 그대로인 것으로 보인다; 그 경보 규칙은 U20b의 몫이다(리뷰 1 N3).
+- 새 메시지는 언제나 태스크를 깨우므로, 남은 부분은 5,000 ms 간격이나 429의 `retry_after`보다 일찍 다시 간다. 그 빈도는 부르는 쪽의 빈도로 묶인다(반복 규칙은 조건마다 5분에 하나). U19b2b의 킬 루프 알림이 그 빈도를 다시 본다(리뷰 1 N4).
+- `spawn`은 경로가 없으면 `Err`다. 실행 시험의 `Endpoints.telegram`은 비어 있으므로(`crates/watcher/tests/runtime.rs`), U19b1c가 송신 태스크를 띄울 때 그 시험에 loopback 경로를 준다(리뷰 1 N5).
 
 ### 알려진 한계(10부, U19b1a)
 
@@ -754,4 +760,4 @@ U19a7은 U19a5·U19a6 시험 몇 개의 단언을 바꿨다(시험 도구의 OMS
 
 ### 검증(10부, U19b1b)
 
-같은 주장 V-WATCH-11. `crates/watcher/tests/alert.rs`에 6개를 더했다(모두 런타임 없이 `alert::spawn`을 자기 스레드의 단일 스레드 tokio에 띄운다): `alert::a_network_error_moves_to_the_pinned_route`(첫 경로는 `dead_addr`, 둘째는 `telegram.invalid`를 가짜에 고정; 경로, 본문, `Host`, 머리말; 답한 경로가 맨 앞이 되어 죽은 경로를 다시 쓰지 않음; `Route::telegram()`과 `Endpoints::of`의 두 경로), `alert::the_token_is_never_in_a_log_line`(두 경로 모두 연결 거부: 경로마다 원인이 있는 줄, 어느 줄에도 토큰·`bot<id>`·`sendMessage` 없음, 종료 줄도), `alert::the_sender_task_flushes_on_the_manual_clock`(500 뒤 `next_flush` = 끝 + 5,000 ms, 그 1 ms 전의 틱과 틱 없는 시계 이동은 아무것도 보내지 않고 그때의 틱이 한 번 보냄, 그 뒤의 틱은 아무것도), `alert::a_retry_keeps_the_part_for_the_next_flush`(502는 부분을 두고 흘려보내기를 끝냄, 새 메시지는 바로 가되 남은 부분 뒤, 400은 버리고 세고 같은 흘려보내기에서 버림 알림, 네 지표와 로그 줄), `alert::shutdown_flushes_within_5_s_and_counts_the_rest`(남은 부분은 틱 없이 마지막 흘려보내기로 간다; 답하지 않는 가짜에서 `finish(5_000)`은 4.9~7초에 돌아오고 남은 3개를 한 줄로 센다), `alert::set_queues_what_the_repeat_rule_gives`(스펙에 없는 시험: `Handle::set`이 시작, 5분 뒤 최신 문구, `해소:`만 넣음). 변이: M261(네트워크 오류 뒤 고정 경로를 쓰지 않음; 고의 결함 7). 시험 밖 변이 16개(U19b1b 보고)를 모두 잡았다.
+같은 주장 V-WATCH-11. `crates/watcher/tests/alert.rs`에 7개를 더했다(모두 런타임 없이 `alert::spawn`을 자기 스레드의 단일 스레드 tokio에 띄운다): `alert::a_network_error_moves_to_the_pinned_route`(첫 경로는 `dead_addr`, 둘째는 `telegram.invalid`를 가짜에 고정; 경로, 본문, `Host`, 머리말; 답한 경로가 맨 앞이 되어 죽은 경로를 다시 쓰지 않음; `Route::telegram()`과 `Endpoints::of`의 두 경로), `alert::the_token_is_never_in_a_log_line`(두 경로 모두 연결 거부: 경로마다 원인이 있는 줄, 어느 줄에도 토큰·`bot<id>`·`sendMessage` 없음, 종료 줄도), `alert::the_sender_task_flushes_on_the_manual_clock`(500 뒤 `next_flush` = 끝 + 5,000 ms, 그 1 ms 전의 틱과 틱 없는 시계 이동은 아무것도 보내지 않고 그때의 틱이 한 번 보냄, 그 뒤의 틱은 아무것도), `alert::a_retry_keeps_the_part_for_the_next_flush`(502는 부분을 두고 흘려보내기를 끝냄, 새 메시지는 바로 가되 남은 부분 뒤, 400은 버리고 세고 같은 흘려보내기에서 버림 알림, 네 지표와 로그 줄), `alert::shutdown_flushes_within_5_s_and_counts_the_rest`(남은 부분은 틱 없이 마지막 흘려보내기로 간다; 답하지 않는 가짜에서 `finish(5_000)`은 4.9~7초에 돌아오고 남은 3개를 한 줄로 센다), `alert::set_queues_what_the_repeat_rule_gives`(스펙에 없는 시험: `Handle::set`이 시작, 5분 뒤 최신 문구, `해소:`만 넣음), `alert::a_request_without_an_answer_fails_after_10_s`(리뷰 1 S1: 답하지 않는 가짜에 보낸 요청이 9.5~13초에 실패 하나와 `timed out` 줄을 남기고 부분은 남으며 `next_flush` = 시작 + 5,000 ms). 변이: M261(네트워크 오류 뒤 고정 경로를 쓰지 않음; 고의 결함 7). 시험 밖 변이 19개(U19b1b 보고; 요청 한도 셋은 리뷰 1)를 모두 잡았다.
