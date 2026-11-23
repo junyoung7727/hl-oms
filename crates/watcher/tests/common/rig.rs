@@ -154,6 +154,8 @@ pub struct Rig {
     /// The cap of the status answers; `None`: the journal's last record.
     pub cap: Option<u64>,
     pub instance: u64,
+    /// Set: the OMS does not answer `/api/status` (U19a6).
+    pub status_down: Option<String>,
     pub mismatches: Vec<(u64, Check, String)>,
     pub heartbeats: Vec<Beat>,
 }
@@ -182,6 +184,7 @@ impl Rig {
             lines,
             cap: None,
             instance: INSTANCE,
+            status_down: None,
             mismatches: Vec::new(),
             heartbeats: Vec::new(),
         }
@@ -221,8 +224,11 @@ impl Rig {
                     self.engine.on_venue(now, req_id, answer)
                 }
                 Action::Status { req_id } => {
-                    let s = self.status();
-                    self.engine.on_status(now, req_id, Ok(s))
+                    let s = match &self.status_down {
+                        Some(why) => Err(why.clone()),
+                        None => Ok(self.status()),
+                    };
+                    self.engine.on_status(now, req_id, s)
                 }
                 Action::Mismatch { check, detail } => {
                     self.mismatches.push((now, check, detail));

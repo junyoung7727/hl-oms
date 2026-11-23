@@ -8,6 +8,13 @@
 //! journal's last change of the symbol and the venue's latest change: a
 //! known time younger than `min_age_ms` defers the round, even at the
 //! first sighting; a time that is not known is old.
+//!
+//! The venue's latest change is the row's `updatedTime`, else `seen_at`:
+//! the first round that saw the symbol's current size. The list holds
+//! only rows with size > 0, so a position that went flat has no row and
+//! no `updatedTime`, exactly when it just closed; `seen_at` gives it a
+//! time. The sizes of the first complete read have no `seen_at` (the state
+//! found at start, not a change seen).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -28,13 +35,21 @@ struct Row {
     updated: Option<u64>,
 }
 
-/// The read of one round.
+/// The read of one round, and what the rounds saw.
 #[derive(Default)]
 pub struct W2 {
     rows: BTreeMap<String, Row>,
     pages: usize,
     /// The cursor of the last request ("" for the first page).
     cursor: String,
+    /// Symbol → the size at the last complete read (an absent row is 0)
+    /// and `seen_at`, the time of the first read that saw it.
+    seen: BTreeMap<String, (Dec, Option<u64>)>,
+    /// A complete read happened.
+    primed: bool,
+    /// The clock at the last page of a complete read whose sizes are not
+    /// yet in `seen`.
+    unseen: Option<u64>,
 }
 
 fn request(cursor: &str) -> VenueRequest {
@@ -68,6 +83,21 @@ fn signed(row: &Value) -> Result<Dec, String> {
 }
 
 impl W2 {
+    /// Takes the complete read into `seen` at `t`.
+    fn observe(&mut self, t: u64) {
+        self.unseen = None;
+        let at = self.primed.then_some(t);
+        self.primed = true;
+        let symbols: BTreeSet<String> = self.seen.keys().chain(self.rows.keys()).cloned().collect();
+        for symbol in symbols {
+            let size = self.rows.get(&symbol).map_or(Dec::ZERO, |r| r.size);
+            let e = self.seen.entry(symbol).or_insert((Dec::ZERO, None));
+            if e.0 != size {
+                *e = (size, at);
+            }
+        }
+    }
+
     fn read(&mut self, result: &Value) -> Result<Page, String> {
         let list = result
             .get("list")
@@ -118,22 +148,34 @@ impl Logic for W2 {
     }
 
     fn first(&mut self) -> VenueRequest {
+        // The last round read every page and failed before its comparison
+        // (status, journal): its sizes count, at its last venue answer.
+        if let Some(t) = self.unseen {
+            self.observe(t);
+        }
         self.rows.clear();
         self.pages = 0;
         self.cursor.clear();
         request("")
     }
 
-    fn page(&mut self, _now_ms: u64, result: &Value) -> Page {
+    fn page(&mut self, now_ms: u64, result: &Value) -> Page {
         self.pages += 1;
-        self.read(result).unwrap_or_else(Page::Unreadable)
+        let page = self.read(result).unwrap_or_else(Page::Unreadable);
+        if page == Page::Done {
+            self.unseen = Some(now_ms);
+        }
+        page
     }
 
     fn young_defers_at_first_sighting(&self) -> bool {
         true
     }
 
-    fn compare(&mut self, _now_ms: u64, state: &JournalState) -> Vec<Diff> {
+    fn compare(&mut self, now_ms: u64, state: &JournalState) -> Vec<Diff> {
+        if self.unseen.is_some() {
+            self.observe(now_ms);
+        }
         let symbols: BTreeSet<&String> = self.rows.keys().chain(state.positions.keys()).collect();
         let mut out = Vec::new();
         for symbol in symbols {
@@ -148,7 +190,8 @@ impl Logic for W2 {
             }
             // µs rounded up: an age is never taken as older than it is.
             let journal_at = state.last_change_at.get(symbol).map(|t| t.div_ceil(1000));
-            let venue_at = row.and_then(|r| r.updated);
+            let seen_at = self.seen.get(symbol).and_then(|s| s.1);
+            let venue_at = row.and_then(|r| r.updated).or(seen_at);
             let since = match journal_at.max(venue_at) {
                 Some(t) => Since::At(t),
                 None => Since::Unknown,

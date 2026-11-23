@@ -250,3 +250,95 @@ fn a_deferred_round_is_not_a_success() {
     assert!(checks.contains(&(Check::W2, Some(T0))));
     assert!(checks.contains(&(Check::W1, Some(T0 + 4000))));
 }
+
+#[test]
+fn sizes_found_at_the_first_round_have_no_seen_time() {
+    let mut r = rig("w2-first-sizes");
+    r.venue.positions = vec![pos("BTCUSDT", "Buy", "1", None)];
+    // The first round fails before it read every page: the next one is
+    // the first read, and its sizes are the state found at start.
+    r.venue
+        .pos_script
+        .push_back(Err(RestError::NoAnswer("timeout".into())));
+    r.at(T0);
+    r.at(T0 + 1000);
+    assert_eq!(r.engine.success(Check::W2), Some(T0 + 1000));
+    r.at(T0 + 2000);
+    let want = detail("BTCUSDT", "1", "0", "change time unknown");
+    assert_eq!(w2_mismatches(&r), vec![(T0 + 2000, want)]);
+    // A size that appears later was seen to change: its time is the round
+    // that first saw it, and it defers for 2 s.
+    r.venue.positions.push(pos("ETHUSDT", "Buy", "1", None));
+    r.at(T0 + 3000);
+    r.at(T0 + 4000);
+    assert_eq!(r.engine.success(Check::W2), Some(T0 + 2000));
+    r.at(T0 + 5000);
+    let want = detail("ETHUSDT", "1", "0", "journal entry 2.0 s old");
+    assert_eq!(w2_mismatches(&r)[1..], [(T0 + 5000, want)]);
+    assert_eq!(r.engine.success(Check::W2), Some(T0 + 5000));
+}
+
+#[test]
+fn a_closed_venue_position_defers_until_2_s_after_it_was_first_seen_flat() {
+    let mut r = rig("w2-closed");
+    r.write(T0 - 60_000, &[adj("BTCUSDT", "1"), adj("ETHUSDT", "1")]);
+    r.venue.positions = vec![
+        pos("BTCUSDT", "Buy", "1", Some(T0 - 60_000)),
+        pos("ETHUSDT", "Buy", "1", Some(T0 - 60_000)),
+    ];
+    r.at(T0);
+    assert_eq!(r.engine.success(Check::W2), Some(T0));
+    // Both close at the venue at T0 + 0.5 s: no row, no updatedTime. The
+    // journal books ETHUSDT's close at T0 + 1.5 s and never BTCUSDT's.
+    r.venue.positions.clear();
+    r.at(T0 + 1000);
+    r.write(T0 + 1500, &[adj("ETHUSDT", "-1")]);
+    r.at(T0 + 2000);
+    assert_eq!(r.engine.success(Check::W2), Some(T0));
+    assert!(r.mismatches.is_empty());
+    r.at(T0 + 3000);
+    let want = detail("BTCUSDT", "0", "1", "journal entry 2.0 s old");
+    assert_eq!(w2_mismatches(&r), vec![(T0 + 3000, want)]);
+    assert_eq!(r.gauge("watcher_mismatches_total", "W2"), Some(1.0));
+    assert_eq!(r.engine.success(Check::W2), Some(T0 + 3000));
+}
+
+#[test]
+fn a_difference_that_changes_every_round_without_a_venue_time_is_not_a_success() {
+    let mut r = rig("w2-changes-no-time");
+    r.venue.positions = vec![pos("BTCUSDT", "Buy", "1", None)];
+    r.at(T0);
+    assert_eq!(r.engine.success(Check::W2), Some(T0));
+    // A new size at every round, without updatedTime: each is young.
+    for k in 1..=6 {
+        let size = (k + 1).to_string();
+        r.venue.positions = vec![pos("BTCUSDT", "Buy", &size, None)];
+        r.at(T0 + k * 1000);
+    }
+    assert_eq!(r.engine.success(Check::W2), Some(T0));
+    assert!(r.mismatches.is_empty());
+    assert_eq!(r.gauge("watcher_check_age_s", "W2"), Some(6.0));
+}
+
+#[test]
+fn a_size_seen_by_a_round_that_then_fails_keeps_its_seen_time() {
+    let mut r = rig("w2-seen-then-fails");
+    r.at(T0);
+    assert_eq!(r.engine.success(Check::W2), Some(T0));
+    // The venue opens a position the journal never books, while the OMS
+    // does not answer: the rounds read every page and then fail.
+    r.venue.positions = vec![pos("BTCUSDT", "Buy", "1", None)];
+    r.status_down = Some("connection refused".into());
+    for k in 1..=3 {
+        r.at(T0 + k * 1000);
+    }
+    assert_eq!(r.engine.success(Check::W2), Some(T0));
+    r.status_down = None;
+    // The size was first seen at T0 + 1 s: 3 s old at the first round the
+    // OMS answers, so that round is pending, not deferred.
+    r.at(T0 + 4000);
+    assert_eq!(r.engine.success(Check::W2), Some(T0 + 4000));
+    r.at(T0 + 5000);
+    let want = detail("BTCUSDT", "1", "0", "journal entry 4.0 s old");
+    assert_eq!(w2_mismatches(&r), vec![(T0 + 5000, want)]);
+}
