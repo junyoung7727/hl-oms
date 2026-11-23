@@ -11,7 +11,7 @@
 //! the OMS's start checks.
 
 use std::net::IpAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 
@@ -38,6 +38,27 @@ const DAY_MS: i64 = 86_400_000;
 
 pub const DAYS_LEFT: &str = "watcher_api_key_days_left";
 pub const PUBLIC_IP_OK: &str = "watcher_public_ip_ok";
+
+/// Why `watcher_public_ip_ok` is 0 (U19b1c, the `public_ip` P1): a cell
+/// shared by [`Start`], its [`IpCheck`] and the runtime. `Some(why)` is set
+/// with every 0 of the echo (an address outside the key's list, an echo
+/// that failed or gave no address) and of a failed recheck query-api,
+/// `None` with the 1. The rule stop of a recheck sets the 0 but not this
+/// cell: the `auth` P1 tells that stop with its reason.
+#[derive(Debug, Clone, Default)]
+pub struct PublicIp(Arc<Mutex<Option<String>>>);
+
+impl PublicIp {
+    pub fn get(&self) -> Option<String> {
+        self.0.lock().ok()?.clone()
+    }
+
+    fn set(&self, why: Option<String>) {
+        if let Ok(mut w) = self.0.lock() {
+            *w = why;
+        }
+    }
+}
 
 /// A request of a start step or a recheck.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -243,6 +264,7 @@ fn export_public_ip(
     ips: &[String],
     metrics: &Metrics,
     log: &Log,
+    cell: &PublicIp,
 ) {
     let why = match answer {
         Err(e) => format!("unknown: the IP echo failed ({}): {e}", e.class()),
@@ -253,6 +275,7 @@ fn export_public_ip(
             ),
             Some(ip) if ips.iter().any(|s| address(s) == Some(ip)) => {
                 metrics.set(PUBLIC_IP_OK, &[], 1.0);
+                cell.set(None);
                 return;
             }
             Some(ip) => format!("{ip} is not among the key's bound IPs"),
@@ -260,6 +283,7 @@ fn export_public_ip(
     };
     metrics.set(PUBLIC_IP_OK, &[], 0.0);
     log(&format!("warn: public IP {why}; watcher_public_ip_ok = 0"));
+    cell.set(Some(why));
 }
 
 /// An instruments-info answer for `symbol`, read against step 5's rule.
@@ -338,6 +362,7 @@ pub struct Start {
     ips: Vec<String>,
     /// The clock at the echo's answer (step 4).
     echo_at: Option<u64>,
+    public_ip: PublicIp,
 }
 
 impl Start {
@@ -354,7 +379,14 @@ impl Start {
             not_before: now_ms,
             ips: Vec::new(),
             echo_at: None,
+            public_ip: PublicIp::default(),
         }
+    }
+
+    /// The cell that tells why the public IP is not ok, shared with the
+    /// recheck (U19b1c).
+    pub fn public_ip(&self) -> PublicIp {
+        self.public_ip.clone()
     }
 
     /// The request due at `now_ms`, or `None` while one is in flight,
@@ -404,7 +436,13 @@ impl Start {
                 Err(e) => self.retry(now_ms, "query-api", e),
             },
             Phase::Echo => {
-                export_public_ip(&answer, &self.ips, &self.metrics, &self.log);
+                export_public_ip(
+                    &answer,
+                    &self.ips,
+                    &self.metrics,
+                    &self.log,
+                    &self.public_ip,
+                );
                 self.echo_at = Some(now_ms);
                 self.next_symbol(0)
             }
@@ -445,6 +483,7 @@ impl Start {
             phase: Recheck::Idle,
             ips: self.ips.clone(),
             key_stopped,
+            public_ip: self.public_ip.clone(),
         })
     }
 
@@ -532,6 +571,7 @@ pub struct IpCheck {
     ips: Vec<String>,
     /// The key was rejected: the echo alone.
     key_stopped: bool,
+    public_ip: PublicIp,
 }
 
 impl IpCheck {
@@ -587,7 +627,13 @@ impl IpCheck {
                 Err(e) => self.failed(now_ms, e),
             },
             Recheck::Echo => {
-                export_public_ip(&answer, &self.ips, &self.metrics, &self.log);
+                export_public_ip(
+                    &answer,
+                    &self.ips,
+                    &self.metrics,
+                    &self.log,
+                    &self.public_ip,
+                );
                 self.wait(now_ms)
             }
             Recheck::Stopped(ref reason) => Step::StopRequests {
@@ -604,6 +650,10 @@ impl IpCheck {
     /// the days left kept, no echo, the next recheck at the normal pace.
     fn failed(&mut self, now_ms: u64, e: RestError) -> Step {
         self.metrics.set(PUBLIC_IP_OK, &[], 0.0);
+        self.public_ip.set(Some(format!(
+            "unknown: the IP recheck's query-api failed ({}): {e}",
+            e.class()
+        )));
         let step = self.wait(now_ms);
         (self.log)(&format!(
             "warn: IP recheck: query-api failed ({}): {e}; the next recheck at {} ms; watcher_public_ip_ok = 0",

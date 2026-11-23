@@ -10,13 +10,15 @@
 
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use http_fake::{Answer, FakeHttp, Request, dead_addr};
 use serde_json::Value;
 use watcher::alert::{
-    self, Handle, MSG_LIMIT, MismatchNotices, OUTBOX_LIMIT, Outbox, Outcome, Part, Route, Token,
+    self, Alerts, Handle, MSG_LIMIT, MismatchNotices, OUTBOX_LIMIT, Outbox, Outcome, Part, Route, Token,
 };
 use watcher::clock::{Clock, ManualClock};
 use watcher::config::Config;
@@ -863,4 +865,231 @@ fn mismatch_notices_are_at_most_one_per_check_per_60_s_and_collect_the_rest() {
     }
     let name = "워".repeat(64);
     assert_eq!(alert::split(&alert::message(&name, T0, body), MSG_LIMIT).len(), 1);
+}
+
+/// A client that never sends (its base is never asked), on `clock`.
+fn idle_client(clock: Arc<ManualClock>) -> watcher::rest::Client {
+    bybit_client("http://127.0.0.1:9", clock)
+}
+
+fn bybit_client(base: &str, clock: Arc<ManualClock>) -> watcher::rest::Client {
+    let cfg = watcher::rest::ClientConfig {
+        base: base.to_string(),
+        recv_window_ms: 5000,
+        request_timeout_ms: 2000,
+    };
+    let (log, _) = watcher::log::collect();
+    watcher::rest::Client::new(
+        &cfg,
+        watcher::rest::Credentials::new("WKEY", "watcher-made-up-secret-42"),
+        clock,
+        Arc::new(Metrics::new("h", "w-1")),
+        log,
+    )
+    .unwrap()
+}
+
+fn current_thread() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+}
+
+const KEY_TAIL: &str = "워처의 Bybit 요청이 모두 멈춤(재시작 전까지): W1~W4는 성공하지 않아 OMS가 일반 주문을 막고, 워처의 일괄 취소(W5)도 나갈 수 없음. 키·IP 목록을 확인하고 워처를 다시 시작";
+
+#[test]
+fn an_auth_answer_sends_one_watch_p1_at_once() {
+    let rt = current_thread();
+    let cases = [
+        (
+            Answer::Reply(200, r#"{"retCode":10010,"retMsg":"Unmatched IP"}"#.into()),
+            "retCode 10010: Unmatched IP",
+        ),
+        (
+            Answer::Reply(200, r#"{"retCode":10003,"retMsg":"API key is invalid."}"#.into()),
+            "retCode 10003: API key is invalid.",
+        ),
+        (
+            Answer::Reply(200, r#"{"retCode":33004,"retMsg":"api key expire"}"#.into()),
+            "retCode 33004: api key expire",
+        ),
+        (
+            Answer::Reply(401, "invalid api key".into()),
+            "HTTP 401: invalid api key",
+        ),
+    ];
+    for (answer, form) in cases {
+        let bybit = FakeHttp::start(Answer::Reply(404, "{}".into()));
+        bybit.route("/v5/user/query-api", [answer]);
+        let fake = FakeHttp::start(ok());
+        let rig = Rig::new(vec![Route::direct(&fake.url())]);
+        let client = bybit_client(&bybit.url(), rig.clock.clone());
+        let ip = watcher::start::PublicIp::default();
+        let mut alerts = Alerts::telegram(rig.handle.clone());
+        alerts.poll(T0, &client, &ip);
+        std::thread::sleep(QUIET);
+        assert!(fake.requests().is_empty(), "{form}");
+        // The answer latches the key stop: the next poll (the runtime's next
+        // tick) sends one message.
+        rt.block_on(client.get("/v5/user/query-api", &[]))
+            .unwrap_err();
+        rig.clock.set(T0 + 100);
+        alerts.poll(T0 + 100, &client, &ip);
+        let got = fake.wait_requests(1, Duration::from_secs(5));
+        assert_eq!(got.len(), 1, "{form}");
+        let want = format!("[WATCH P1] bybit w-1 11-23 21:00:00 KST\n워처 키가 거부됨({form}). {KEY_TAIL}");
+        assert_eq!(text(&got[0]), want);
+        // Every tick asks again: nothing more until 5 min after it.
+        for t in [T0 + 200, T0 + 60_000, T0 + 300_099] {
+            rig.clock.set(t);
+            alerts.poll(t, &client, &ip);
+        }
+        std::thread::sleep(QUIET);
+        assert_eq!(fake.requests().len(), 1, "{form}");
+        rig.clock.set(T0 + 300_100);
+        alerts.poll(T0 + 300_100, &client, &ip);
+        let got = fake.wait_requests(2, Duration::from_secs(5));
+        assert_eq!(got.len(), 2, "{form}");
+        assert!(text(&got[1]).ends_with(&format!("워처 키가 거부됨({form}). {KEY_TAIL}")));
+    }
+    // The rule stop has its own first sentence and the same tail.
+    let fake = FakeHttp::start(ok());
+    let rig = Rig::new(vec![Route::direct(&fake.url())]);
+    let client = idle_client(rig.clock.clone());
+    client.stop_key("the key no longer passes the start check: query-api: the API key is the master account's");
+    let mut alerts = Alerts::telegram(rig.handle.clone());
+    alerts.poll(T0, &client, &watcher::start::PublicIp::default());
+    let got = fake.wait_requests(1, Duration::from_secs(5));
+    assert!(
+        text(&got[0]).ends_with(&format!(
+            "\n워처 키가 시작 규칙을 더는 지키지 않음(the key no longer passes the start check: query-api: the API key is the master account's). {KEY_TAIL}"
+        )),
+        "{}",
+        text(&got[0])
+    );
+}
+
+const IP_TAIL: &str = "Bybit가 10010으로 거부할 수 있음(그러면 워처 키 거부 P1이 따름). 이 호스트의 공인 IP와 키 설정을 확인";
+
+#[test]
+fn public_ip_ok_0_sends_one_watch_p1_and_a_clear() {
+    use serde_json::json;
+    use watcher::start::{Start, Step};
+    let fake = FakeHttp::start(ok());
+    let rig = Rig::new(vec![Route::direct(&fake.url())]);
+    let client = idle_client(rig.clock.clone());
+    let cfg = common::rig::config();
+    let metrics = Arc::new(Metrics::new("h", "w-1"));
+    let (log, _) = watcher::log::collect();
+    let mut s = Start::new(&cfg, metrics.clone(), log, T0);
+    let ip = s.public_ip();
+    let mut alerts = Alerts::telegram(rig.handle.clone());
+    let key = json!({"isMaster": false, "userID": 1, "ips": ["127.0.0.1"]});
+    // Start step 4: the echo shows an address outside the key's list.
+    s.poll(T0).unwrap();
+    assert_eq!(s.on_answer(T0, Ok(key.clone())), Step::Next);
+    s.poll(T0).unwrap();
+    s.on_answer(T0, Ok(Value::String("10.0.0.9".into())));
+    assert_eq!(metrics.get("watcher_public_ip_ok", &[]), Some(0.0));
+    let why = "10.0.0.9 is not among the key's bound IPs";
+    assert_eq!(ip.get().as_deref(), Some(why));
+    alerts.poll(T0, &client, &ip);
+    let got = fake.wait_requests(1, Duration::from_secs(5));
+    let first = format!("워처의 공인 IP가 키의 IP 목록에 없음({why}). {IP_TAIL}");
+    assert_eq!(text(&got[0]), format!("[WATCH P1] bybit w-1 11-23 21:00:00 KST\n{first}"));
+    for t in [T0 + 100, T0 + 1_000, T0 + 59_000] {
+        rig.clock.set(t);
+        alerts.poll(t, &client, &ip);
+    }
+    std::thread::sleep(QUIET);
+    assert_eq!(fake.requests().len(), 1);
+    // Step 5, then the recheck finds the address in the list: one clear.
+    s.poll(T0).unwrap();
+    let instruments = json!({"list": [{"symbol": "BTCUSDT", "settleCoin": "USDT"}]});
+    assert_eq!(s.on_answer(T0, Ok(instruments)), Step::Done);
+    let mut check = s.ip_check().unwrap();
+    let at = T0 + cfg.intervals.ip_check_ms;
+    check.poll(at).unwrap();
+    check.on_answer(at, Ok(key));
+    check.poll(at).unwrap();
+    check.on_answer(at, Ok(Value::String("127.0.0.1".into())));
+    assert_eq!(metrics.get("watcher_public_ip_ok", &[]), Some(1.0));
+    assert_eq!(ip.get(), None);
+    rig.clock.set(at);
+    alerts.poll(at, &client, &ip);
+    let got = fake.wait_requests(2, Duration::from_secs(5));
+    assert!(text(&got[1]).ends_with(&format!("\n해소: {first}")), "{}", text(&got[1]));
+    // A recheck whose query-api fails is a 0 too: a new start with its why.
+    let at = at + cfg.intervals.ip_check_ms;
+    check.poll(at).unwrap();
+    check.on_answer(
+        at,
+        Err(watcher::rest::RestError::NoAnswer("HTTP 502: x".into())),
+    );
+    assert_eq!(metrics.get("watcher_public_ip_ok", &[]), Some(0.0));
+    rig.clock.set(at);
+    alerts.poll(at, &client, &ip);
+    let got = fake.wait_requests(3, Duration::from_secs(5));
+    assert!(
+        text(&got[2]).contains(
+            "\n워처의 공인 IP가 키의 IP 목록에 없음(unknown: the IP recheck's query-api failed (no_answer): no answer: HTTP 502: x). "
+        ),
+        "{}",
+        text(&got[2])
+    );
+    std::thread::sleep(QUIET);
+    assert_eq!(fake.requests().len(), 3);
+}
+
+#[test]
+fn a_confirmed_mismatch_sends_one_watch_p1() {
+    // Done criterion (U19b1c): the engine rig confirms a W1 difference, the
+    // runtime's P1 glue gives it to the sender, which delivers it to a
+    // loopback fake Telegram.
+    use common::rig::row;
+    let fake = FakeHttp::start(ok());
+    let rig = Rig::new(vec![Route::direct(&fake.url())]);
+    let client = idle_client(rig.clock.clone());
+    let ip = watcher::start::PublicIp::default();
+    let mut alerts = Alerts::telegram(rig.handle.clone());
+    let mut e = common::rig::Rig::new("alert-mismatch");
+    e.venue.orders = vec![row("x", "v900", "BTCUSDT", "Buy")];
+    let mut fed = 0;
+    let mut step = |e: &mut common::rig::Rig, alerts: &mut Alerts, t: u64| {
+        rig.clock.set(t);
+        e.at(t);
+        for (_, a) in &e.actions[fed..] {
+            alerts.on_action(a);
+        }
+        fed = e.actions.len();
+        alerts.poll(t, &client, &ip);
+    };
+    let t0 = common::rig::T0;
+    for k in 0..3 {
+        step(&mut e, &mut alerts, t0 + k * 1000);
+    }
+    assert_eq!(e.confirmed.len(), 1);
+    let detail = &e.confirmed[0].1;
+    assert!(detail.starts_with("W1 foreign v900: "), "{detail}");
+    let got = fake.wait_requests(1, Duration::from_secs(5));
+    assert_eq!(got.len(), 1);
+    let t = text(&got[0]);
+    assert!(t.starts_with("[WATCH P1] bybit w-1 "), "{t}");
+    assert!(
+        t.ends_with(&format!("\n{}{detail}", head("W1", 1))),
+        "{t}"
+    );
+    // Later rounds that still see it, and the resend after an operator's
+    // clear, send no further message (well past the 60 s pace).
+    for k in 3..10 {
+        step(&mut e, &mut alerts, t0 + k * 1000);
+    }
+    e.clear(t0 + 10_000);
+    for k in 10..80 {
+        step(&mut e, &mut alerts, t0 + k * 1000);
+    }
+    assert!(e.mismatches.len() >= 2, "{:?}", e.mismatches);
+    std::thread::sleep(QUIET);
+    assert_eq!(fake.requests().len(), 1);
 }
