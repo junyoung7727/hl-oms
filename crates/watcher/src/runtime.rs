@@ -21,7 +21,7 @@ use tokio::task::JoinSet;
 
 use crate::clock::Clock;
 use crate::config::Config;
-use crate::engine::{Action, Check, Engine};
+use crate::engine::{Action, Check, Engine, Logic};
 use crate::journal::{MAX_RECORDS, Tail};
 use crate::log::Log;
 use crate::metrics::{Exporter, Metrics};
@@ -87,6 +87,18 @@ enum Phase {
         failing: bool,
     },
     Run(Engine),
+}
+
+/// The checks the engine runs beside W1, each with its interval: W2 (it
+/// reads W4's newest agreeing `execTime` per symbol), W3 and W4.
+pub fn checks(cfg: &Config, log: &Log) -> Vec<(Box<dyn Logic>, u64)> {
+    let w4 = W4::new(&cfg.rules, log.clone());
+    let w2 = W2::with_exec_times(w4.exec_times());
+    vec![
+        (Box::new(w2), cfg.intervals.w2_ms),
+        (Box::new(W3::new(&cfg.w3)), cfg.intervals.w3_ms),
+        (Box::new(w4), cfg.intervals.w4_ms),
+    ]
 }
 
 /// The cap of a boot status answer, if it is usable.
@@ -455,11 +467,9 @@ impl Runtime {
             self.boot_ms,
             now,
         );
-        let w4 = W4::new(&self.cfg.rules, self.log.clone());
-        let w2 = W2::with_exec_times(w4.exec_times());
-        e.add_check(Box::new(w2), self.cfg.intervals.w2_ms);
-        e.add_check(Box::new(W3::new(&self.cfg.w3)), self.cfg.intervals.w3_ms);
-        e.add_check(Box::new(w4), self.cfg.intervals.w4_ms);
+        for (logic, interval) in checks(&self.cfg, &self.log) {
+            e.add_check(logic, interval);
+        }
         self.phase = Phase::Run(e);
     }
 

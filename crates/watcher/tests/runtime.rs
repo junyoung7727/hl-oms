@@ -612,7 +612,45 @@ fn a_key_rejected_at_start_is_exported() {
     assert_eq!(w.bybit.requests().len(), 1);
     assert!(run.running());
     assert_eq!(w.lines_with("Bybit rejected the key (401)"), 1);
+    // Before the engine runs, every check's age counts from the config
+    // load (U19a7; W3 from U19a9).
+    let last = w.pushes().pop().unwrap();
+    for c in ["W1", "W2", "W3", "W4"] {
+        let age = format!(r#"{{"metric":{{"__name__":"watcher_check_age_s","check":"{c}","#);
+        assert!(last.contains(&age), "{c}: {last}");
+    }
     drop(run);
+}
+
+#[test]
+fn the_runtime_runs_w2_w3_and_w4_and_w2_reads_w4s_exec_times() {
+    // The checks the runtime adds after the boot replay, on the engine rig
+    // and a manual clock (default intervals: W2 1 s, W3 2 s, W4 5 s).
+    let mut r = common::rig::Rig::new("rt-checks");
+    let cfg = common::rig::config();
+    for (logic, interval) in watcher::runtime::checks(&cfg, &r.log) {
+        r.engine.add_check(logic, interval);
+    }
+    // A fill the journal booked 60 s ago, listed by the venue with an
+    // execTime 100 ms before T0; the venue holds 2 without updatedTime,
+    // the journal 1.
+    let fill = json!({"external_fill_booked": {"fill": {"fee": "0", "instrument": "BTCUSDT",
+        "key": "BTCUSDT:x", "order_id": null, "px": "100", "qty": "1", "side": "buy",
+        "venue_oid": null, "venue_ts": (T0 - 100) * 1000}}});
+    r.write(T0 - 60_000, &[fill]);
+    r.venue.executions = vec![common::rig::exec("BTCUSDT", "x", "Trade", "Buy", "1", T0 - 100)];
+    r.venue.positions = vec![common::rig::pos("BTCUSDT", "Buy", "2", None)];
+    r.venue.wallet = vec![common::rig::account("1000", "0", "1000")];
+    r.at(T0);
+    for c in watcher::engine::Check::ALL {
+        assert_eq!(r.engine.success(c), Some(T0), "{c:?}");
+    }
+    // W4's execTime defers W2 at +1 s; confirmed at +2 s.
+    r.at(T0 + 1000);
+    assert!(r.confirmed.is_empty(), "{:?}", r.confirmed);
+    r.at(T0 + 2000);
+    let d = "W2 position BTCUSDT: venue 2, journal 1; seen 2 rounds, journal entry 2.1 s old";
+    assert_eq!(r.confirmed, vec![(T0 + 2000, d.to_string())]);
 }
 
 #[test]
