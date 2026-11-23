@@ -139,6 +139,7 @@ fn messages_split_at_3500_utf16_units_at_line_ends() {
     let full = "x".repeat(3500);
     assert_eq!(split(&format!("{full}\n\ny")), [full.as_str(), "y"]);
     assert_eq!(split("\n\nabc"), ["abc"]);
+    assert_eq!(split(&format!("{full}\n")), [full.as_str()]);
     assert_eq!(split("a\n\nb"), ["a\n\nb"]);
 }
 
