@@ -123,7 +123,7 @@ impl Logic for W1 {
         Check::W1
     }
 
-    fn first(&mut self) -> VenueRequest {
+    fn first(&mut self, _now_ms: u64, _state: &JournalState) -> VenueRequest {
         *self = W1::default();
         request("")
     }
