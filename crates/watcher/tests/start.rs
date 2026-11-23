@@ -13,21 +13,29 @@ use serde_json::{Value, json};
 use watcher::clock::{Clock, ManualClock};
 use watcher::config::Config;
 use watcher::metrics::Metrics;
-use watcher::rest::{Client, ClientConfig, Credentials, IP_BAN_PAUSE_MS, RestError};
+use watcher::rest::{Client, ClientConfig, Credentials, IP_BAN_PAUSE_MS, OWN_RULE_CODE, RestError};
 use watcher::start::{
     DAYS_LEFT, INSTRUMENTS, IpCheck, PUBLIC_IP_OK, QUERY_API, RETRY_MS, Request, Start, Step,
+    apply, send,
 };
 
 /// 2023-11-14T22:13:20Z.
 const T0: u64 = 1_700_000_000_000;
 const UID: u64 = 4242;
 const IP: &str = "203.0.113.7";
+const MASTER: &str = "the API key is the master account's; the watcher needs a sub-account key";
+const OTHER_UID: &str = "the API key belongs to user 4243; the config says sub_account_uid 4242";
+const WARN_IP: &str = "warn: public IP ";
+const IP_OK_0: &str = "watcher_public_ip_ok = 0";
+const UNBOUND: &str =
+    "the API key is bound to no IP address (ips [] or \"*\"); bind it to this host's address";
+
+type Lines = Arc<Mutex<Vec<String>>>;
 
 fn config(symbols: &[&str], ip_check_ms: u64) -> Config {
     let list: Vec<String> = symbols.iter().map(|s| format!("{s:?}")).collect();
-    Config::from_toml(&format!(
-        r#"
-name = "w1"
+    let text = format!(
+        r#"name = "w1"
 network = "testnet"
 credentials_file = "/nonexistent-watcher-start/creds.toml"
 sub_account_uid = {UID}
@@ -36,26 +44,29 @@ ip_echo_url = "https://ip.example/"
 data_dir = "/nonexistent-watcher-start/data"
 status_url = "http://127.0.0.1:8188/api/status"
 host = "h1"
-
 [intervals]
 ip_check_ms = {ip_check_ms}
 "#,
         list.join(", ")
-    ))
-    .unwrap()
+    );
+    Config::from_toml(&text).unwrap()
 }
 
-/// A start of `symbols` at `now`, its metrics and the lines it logs.
+/// A start of `symbols` at `T0` (recheck every 60 s), its metrics and the
+/// lines it logs.
 struct S {
     start: Start,
     metrics: Arc<Metrics>,
-    lines: Arc<Mutex<Vec<String>>>,
+    lines: Lines,
 }
 
-fn start_of(symbols: &[&str], now: u64) -> S {
-    let metrics = Arc::new(Metrics::new("h1", "w1"));
+fn start_of(symbols: &[&str]) -> S {
+    start_with(symbols, 60_000, Arc::new(Metrics::new("h1", "w1")))
+}
+
+fn start_with(symbols: &[&str], ip_check_ms: u64, metrics: Arc<Metrics>) -> S {
     let (log, lines) = watcher::log::collect();
-    let start = Start::new(&config(symbols, 60_000), metrics.clone(), log, now);
+    let start = Start::new(&config(symbols, ip_check_ms), metrics.clone(), log, T0);
     S {
         start,
         metrics,
@@ -63,8 +74,25 @@ fn start_of(symbols: &[&str], now: u64) -> S {
     }
 }
 
-fn lines(l: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
+fn unreadable(m: &Metrics, endpoint: &str) -> Option<f64> {
+    m.get(
+        "watcher_request_errors_total",
+        &[("endpoint", endpoint), ("class", "unreadable")],
+    )
+}
+
+fn lines(l: &Lines) -> Vec<String> {
     l.lock().unwrap().clone()
+}
+
+/// Exactly one line, starting with `head` and ending with `tail`.
+fn one_line(l: &Lines, head: &str, tail: &str, case: &str) {
+    let l = lines(l);
+    assert_eq!(l.len(), 1, "{case}: {l:?}");
+    assert!(
+        l[0].starts_with(head) && l[0].ends_with(tail),
+        "{case}: {l:?}"
+    );
 }
 
 /// A query-api `result`.
@@ -85,9 +113,13 @@ fn good_key() -> Value {
     key(UID, false, json!([IP]), Some("1970-01-01T00:00:00Z"))
 }
 
+fn bound(ips: Value) -> Value {
+    key(UID, false, ips, None)
+}
+
 /// An instruments-info `result` with one row.
 fn instrument(symbol: &str, coin: &str) -> Value {
-    json!({"category": "linear", "list": [{"symbol": symbol, "settleCoin": coin, "status": "Trading"}], "nextPageCursor": ""})
+    json!({"category": "linear", "list": [{"symbol": symbol, "settleCoin": coin}], "nextPageCursor": ""})
 }
 
 fn query_api() -> Request {
@@ -98,10 +130,49 @@ fn query_api() -> Request {
 }
 
 fn instruments(symbol: &str) -> Request {
+    let params = vec![("category", "linear".into()), ("symbol", symbol.into())];
     Request::Venue {
         path: INSTRUMENTS,
-        params: vec![("category", "linear".into()), ("symbol", symbol.into())],
+        params,
     }
+}
+
+fn wait(until_ms: u64) -> Step {
+    Step::Wait { until_ms }
+}
+
+fn refuse(reason: &str) -> Step {
+    Step::Refuse {
+        reason: reason.into(),
+    }
+}
+
+/// An error of `class` as the client gives it.
+fn err(class: &str) -> RestError {
+    let m = format!("made-up {class}");
+    match class {
+        "not_sent" => RestError::NotSent(m),
+        "no_answer" => RestError::NoAnswer(m),
+        "rate_limited" => RestError::RateLimited(m),
+        "clock" => RestError::Clock(m),
+        "refused" => RestError::Refused {
+            code: 10001,
+            msg: m,
+        },
+        "ip_banned" => RestError::IpBanned(m),
+        _ => panic!("{class}"),
+    }
+}
+
+type Case = (String, Result<Value, RestError>, u64);
+
+/// Every client class that is neither `auth` nor a readable answer, and
+/// the wait after it: 5 s, after a 403 the 600 s pause.
+fn retried_cases() -> Vec<Case> {
+    let classes = "not_sent no_answer rate_limited clock refused ip_banned";
+    let wait = |c: &str| [RETRY_MS, IP_BAN_PAUSE_MS][usize::from(c == "ip_banned")];
+    let case = |c: &str| (c.to_string(), Err(err(c)), wait(c));
+    classes.split(' ').map(case).collect()
 }
 
 /// Takes the request due at `now`; it must be `want`, and no second
@@ -111,110 +182,93 @@ fn take(s: &mut Start, now: u64, want: &Request) {
     assert_eq!(s.poll(now), None, "a request in flight is not asked again");
 }
 
-/// Runs a start through query-api and the echo at `now` (answers at the
-/// same instant), up to the first instruments-info request.
-fn to_symbols(s: &mut S, now: u64, key: Value, echo: &str) {
-    take(&mut s.start, now, &query_api());
-    assert_eq!(s.start.on_answer(now, Ok(key)), Step::Next);
-    take(&mut s.start, now, &Request::Echo);
-    assert_eq!(s.start.on_answer(now, Ok(json!(echo))), Step::Next);
+/// Asks and answers the request due at `now`; returns the step.
+fn answer(s: &mut Start, now: u64, want: &Request, a: Result<Value, RestError>) -> Step {
+    take(s, now, want);
+    s.on_answer(now, a)
+}
+
+/// Runs a start through query-api and the echo at `T0`, up to the first
+/// instruments-info request.
+fn to_symbols(s: &mut S) {
+    for (req, a) in [(query_api(), good_key()), (Request::Echo, json!(IP))] {
+        assert_eq!(answer(&mut s.start, T0, &req, Ok(a)), Step::Next);
+    }
+}
+
+/// Nothing is asked at any of `ats`.
+fn asks_nothing(s: &mut Start, ats: &[u64], case: &str) {
+    for &at in ats {
+        assert_eq!(s.poll(at), None, "{case}: at +{}", at - T0);
+    }
 }
 
 #[test]
 fn a_symbol_missing_from_instruments_info_refuses_the_start() {
+    let reason = "BTCUSDT is not in instruments-info for category linear; the watcher's scope is linear/USDT";
+    let empty = json!({"category": "linear", "list": [], "nextPageCursor": ""});
     for (case, result) in [
-        (
-            "empty list",
-            json!({"category": "linear", "list": [], "nextPageCursor": ""}),
-        ),
-        ("another symbol only", instrument("ETHUSDT", "USDT")),
+        ("empty list", empty),
+        ("another symbol", instrument("ETHUSDT", "USDT")),
     ] {
-        let mut s = start_of(&["BTCUSDT"], T0);
-        to_symbols(&mut s, T0, good_key(), IP);
+        let mut s = start_of(&["BTCUSDT"]);
+        to_symbols(&mut s);
         take(&mut s.start, T0, &instruments("BTCUSDT"));
-        let step = s.start.on_answer(T0 + 10, Ok(result));
-        assert_eq!(
-            step,
-            Step::Refuse {
-                reason: "BTCUSDT is not in instruments-info for category linear; the watcher's scope is linear/USDT".into()
-            },
-            "{case}"
-        );
-        // Nothing is asked after a refusal.
-        for at in [T0 + 10, T0 + 10 + RETRY_MS, T0 + 3_600_000] {
-            assert_eq!(s.start.poll(at), None, "{case}");
-        }
+        let at = T0 + 10;
+        assert_eq!(s.start.on_answer(at, Ok(result)), refuse(reason), "{case}");
+        asks_nothing(&mut s.start, &[at, at + RETRY_MS, T0 + 3_600_000], case);
         assert!(s.start.ip_check().is_none(), "{case}");
     }
 }
 
 #[test]
 fn a_master_key_another_uid_or_a_key_bound_to_no_ip_refuses_the_start() {
-    let master =
-        "query-api: the API key is the master account's; the watcher needs a sub-account key";
-    let other = format!(
-        "query-api: the API key belongs to user 4243; the config says sub_account_uid {UID}"
-    );
-    let unbound = "query-api: the API key is bound to no IP address (ips [] or \"*\"); bind it to this host's address";
-    let no_address = "query-api: the API key's ips hold no IP address";
-    for (case, v, reason) in [
-        (
-            "master",
-            key(UID, true, json!([IP]), None),
-            master.to_string(),
-        ),
-        ("other uid", key(4243, false, json!([IP]), None), other),
-        (
-            "no ips",
-            key(UID, false, json!([]), None),
-            unbound.to_string(),
-        ),
-        (
-            "star",
-            key(UID, false, json!(["*"]), None),
-            unbound.to_string(),
-        ),
-        (
-            "an ip and a star",
-            key(UID, false, json!([IP, " * "]), None),
-            unbound.to_string(),
-        ),
+    for (case, v, why) in [
+        ("master", key(UID, true, json!([IP]), None), MASTER),
+        ("other uid", key(4243, false, json!([IP]), None), OTHER_UID),
+        ("no ips", bound(json!([])), UNBOUND),
+        ("star", bound(json!(["*"])), UNBOUND),
+        ("an ip and a star", bound(json!([IP, " * "])), UNBOUND),
         (
             "no address",
-            key(UID, false, json!(["host.example"]), None),
-            no_address.to_string(),
+            bound(json!(["a.example"])),
+            "the API key's ips hold no IP address",
         ),
     ] {
-        let mut s = start_of(&["BTCUSDT"], T0);
+        let mut s = start_of(&["BTCUSDT"]);
         take(&mut s.start, T0, &query_api());
-        assert_eq!(
-            s.start.on_answer(T0 + 5, Ok(v)),
-            Step::Refuse { reason },
-            "{case}"
+        let want = refuse(&format!("query-api: {why}"));
+        let at = T0 + 5;
+        assert_eq!(s.start.on_answer(at, Ok(v)), want, "{case}");
+        asks_nothing(
+            &mut s.start,
+            &[at, at + RETRY_MS, at + IP_BAN_PAUSE_MS],
+            case,
         );
-        for at in [T0 + 5, T0 + 5 + RETRY_MS, T0 + IP_BAN_PAUSE_MS] {
-            assert_eq!(s.start.poll(at), None, "{case}: nothing after a refusal");
-        }
         // The refusal is the runtime's one line (exit 2); the start logs nothing.
         assert!(lines(&s.lines).is_empty(), "{case}: {:?}", lines(&s.lines));
         assert_eq!(s.metrics.get(PUBLIC_IP_OK, &[]), None, "{case}");
     }
-    // The good key: one bound address, mapped or not, goes on to the echo.
-    for ips in [
-        json!([IP]),
-        json!(["198.51.100.1", IP]),
-        json!([format!("::ffff:{IP}")]),
-    ] {
-        let mut s = start_of(&["BTCUSDT"], T0);
-        take(&mut s.start, T0, &query_api());
-        assert_eq!(
-            s.start
-                .on_answer(T0, Ok(key(UID, false, ips.clone(), None))),
-            Step::Next,
-            "{ips}"
-        );
+    // One bound address among others, mapped or not, goes on to the echo.
+    let mapped = format!("::ffff:{IP}");
+    for ips in [json!([IP]), json!(["198.51.100.1", IP]), json!([mapped])] {
+        let mut s = start_of(&["BTCUSDT"]);
+        let step = answer(&mut s.start, T0, &query_api(), Ok(bound(ips.clone())));
+        assert_eq!(step, Step::Next, "{ips}");
         take(&mut s.start, T0, &Request::Echo);
     }
+}
+
+/// A start whose query-api at `T0` says `expired_at` (`Value` as written).
+fn days_of(expired_at: Option<Value>) -> S {
+    let mut s = start_of(&["BTCUSDT"]);
+    s.metrics.set(DAYS_LEFT, &[], 5.0);
+    let mut v = bound(json!([IP]));
+    if let Some(e) = expired_at {
+        v["expiredAt"] = e;
+    }
+    assert_eq!(answer(&mut s.start, T0, &query_api(), Ok(v)), Step::Next);
+    s
 }
 
 #[test]
@@ -229,56 +283,34 @@ fn a_key_that_expires_in_10_days_gives_days_left_10() {
         ("2023-11-14T21:13:20Z", -1.0),
         ("2024-02-29T00:00:00Z", 106.0),
     ] {
-        let mut s = start_of(&["BTCUSDT"], T0);
-        take(&mut s.start, T0, &query_api());
-        let v = key(UID, false, json!([IP]), Some(expired_at));
-        assert_eq!(s.start.on_answer(T0, Ok(v)), Step::Next, "{expired_at}");
+        let s = days_of(Some(json!(expired_at)));
         assert_eq!(s.metrics.get(DAYS_LEFT, &[]), Some(days), "{expired_at}");
         assert!(lines(&s.lines).is_empty(), "{expired_at}");
     }
     // The export carries it.
-    let mut s = start_of(&["BTCUSDT"], T0);
-    take(&mut s.start, T0, &query_api());
-    s.start.on_answer(
-        T0,
-        Ok(key(UID, false, json!([IP]), Some("2023-11-24T22:13:20Z"))),
-    );
+    let s = days_of(Some(json!("2023-11-24T22:13:20Z")));
     let body = s.metrics.import_lines(T0);
-    assert!(
-        body.contains(r#"{"metric":{"__name__":"watcher_api_key_days_left","host":"h1","venue":"bybit","watcher":"w1"},"values":[10.0]"#),
-        "{body}"
-    );
+    let line = r#"{"metric":{"__name__":"watcher_api_key_days_left","host":"h1","venue":"bybit","watcher":"w1"},"values":[10.0]"#;
+    assert!(body.contains(line), "{body}");
 }
 
 #[test]
 fn the_documented_epoch_expiry_exports_no_days_left() {
     // Not exported, without a line: absent, null, the documented epoch,
     // and anything up to 1970-01-02T00:00:00Z.
-    for expired_at in [
+    for e in [
         None,
         Some(Value::Null),
         Some(json!("1970-01-01T00:00:00Z")),
         Some(json!("1970-01-01T23:59:59.999Z")),
         Some(json!("1970-01-02T00:00:00Z")),
     ] {
-        let mut s = start_of(&["BTCUSDT"], T0);
-        s.metrics.set(DAYS_LEFT, &[], 5.0);
-        take(&mut s.start, T0, &query_api());
-        let mut v = key(UID, false, json!([IP]), None);
-        if let Some(e) = &expired_at {
-            v["expiredAt"] = e.clone();
-        }
-        assert_eq!(s.start.on_answer(T0, Ok(v)), Step::Next, "{expired_at:?}");
-        assert_eq!(s.metrics.get(DAYS_LEFT, &[]), None, "{expired_at:?}");
-        assert!(lines(&s.lines).is_empty(), "{expired_at:?}");
+        let s = days_of(e.clone());
+        assert_eq!(s.metrics.get(DAYS_LEFT, &[]), None, "{e:?}");
+        assert!(lines(&s.lines).is_empty(), "{e:?}");
     }
     // One second later it applies (and the key has long expired).
-    let mut s = start_of(&["BTCUSDT"], T0);
-    take(&mut s.start, T0, &query_api());
-    s.start.on_answer(
-        T0,
-        Ok(key(UID, false, json!([IP]), Some("1970-01-02T00:00:01Z"))),
-    );
+    let s = days_of(Some(json!("1970-01-02T00:00:01Z")));
     assert_eq!(s.metrics.get(DAYS_LEFT, &[]), Some(-19675.0));
     // Unreadable: not exported, one warn line each, and the start goes on.
     for bad in [
@@ -294,87 +326,58 @@ fn the_documented_epoch_expiry_exports_no_days_left() {
         json!(""),
         json!(1700864000),
     ] {
-        let mut s = start_of(&["BTCUSDT"], T0);
-        s.metrics.set(DAYS_LEFT, &[], 5.0);
-        take(&mut s.start, T0, &query_api());
-        let mut v = key(UID, false, json!([IP]), None);
-        v["expiredAt"] = bad.clone();
-        assert_eq!(s.start.on_answer(T0, Ok(v)), Step::Next, "{bad}");
+        let mut s = days_of(Some(bad.clone()));
         assert_eq!(s.metrics.get(DAYS_LEFT, &[]), None, "{bad}");
-        let l = lines(&s.lines);
-        assert_eq!(l.len(), 1, "{bad}: {l:?}");
-        assert!(l[0].starts_with("warn: query-api: expiredAt "), "{l:?}");
-        assert!(
-            l[0].ends_with("cannot be read; watcher_api_key_days_left is not exported"),
-            "{l:?}"
-        );
+        let tail = "cannot be read; watcher_api_key_days_left is not exported";
+        let head = "warn: query-api: expiredAt ";
+        one_line(&s.lines, head, tail, &bad.to_string());
         take(&mut s.start, T0, &Request::Echo);
     }
 }
 
 #[test]
 fn an_echo_failure_or_a_body_that_is_not_an_address_gives_public_ip_ok_0() {
-    let ok = |b: &str| Ok(json!(b));
-    let cases: Vec<(&str, Result<Value, RestError>, f64)> = vec![
-        ("the address", ok(IP), 1.0),
-        ("mapped", ok(&format!("::ffff:{IP}")), 1.0),
-        ("another address", ok("198.51.100.9"), 0.0),
-        ("not an address", ok("<html>203.0.113.7</html>"), 0.0),
-        ("empty", ok(""), 0.0),
-        (
-            "no answer",
-            Err(RestError::NoAnswer("IP echo HTTP 500".into())),
-            0.0,
-        ),
-        (
-            "not sent",
-            Err(RestError::NotSent("connection refused".into())),
-            0.0,
-        ),
-        (
-            "paused",
-            Err(RestError::IpBanned("not sent: paused".into())),
-            0.0,
-        ),
+    let body = |b: &str| Ok(json!(b));
+    for (case, a, want) in [
+        ("the address", body(IP), 1.0),
+        ("mapped", body(&format!("::ffff:{IP}")), 1.0),
+        ("another address", body("198.51.100.9"), 0.0),
+        ("not an address", body("<html>203.0.113.7</html>"), 0.0),
+        ("empty", body(""), 0.0),
+        ("no answer", Err(err("no_answer")), 0.0),
+        ("not sent", Err(err("not_sent")), 0.0),
+        ("paused", Err(err("ip_banned")), 0.0),
         ("not a string", Ok(json!(42)), 0.0),
-    ];
-    for (case, answer, want) in cases {
-        let mut s = start_of(&["BTCUSDT"], T0);
-        take(&mut s.start, T0, &query_api());
-        s.start.on_answer(T0, Ok(good_key()));
+    ] {
+        let mut s = start_of(&["BTCUSDT"]);
+        answer(&mut s.start, T0, &query_api(), Ok(good_key()));
         take(&mut s.start, T0, &Request::Echo);
         // Not a refusal: the start goes on to the settle coin at once.
-        assert_eq!(s.start.on_answer(T0 + 7, answer), Step::Next, "{case}");
+        assert_eq!(s.start.on_answer(T0 + 7, a), Step::Next, "{case}");
         assert_eq!(s.metrics.get(PUBLIC_IP_OK, &[]), Some(want), "{case}");
-        let l = lines(&s.lines);
         if want == 1.0 {
-            assert!(l.is_empty(), "{case}: {l:?}");
+            assert!(lines(&s.lines).is_empty(), "{case}");
         } else {
-            assert_eq!(l.len(), 1, "{case}: {l:?}");
-            assert!(l[0].starts_with("warn: public IP "), "{case}: {l:?}");
-            assert!(l[0].ends_with("watcher_public_ip_ok = 0"), "{case}: {l:?}");
+            one_line(&s.lines, WARN_IP, IP_OK_0, case);
         }
         take(&mut s.start, T0 + 7, &instruments("BTCUSDT"));
     }
     // A bound IPv4-mapped address matches a plain IPv4 echo.
-    let mut s = start_of(&["BTCUSDT"], T0);
-    take(&mut s.start, T0, &query_api());
-    s.start.on_answer(
-        T0,
-        Ok(key(UID, false, json!([format!("::ffff:{IP}")]), None)),
-    );
-    take(&mut s.start, T0, &Request::Echo);
-    s.start.on_answer(T0, Ok(json!(IP)));
+    let mut s = start_of(&["BTCUSDT"]);
+    let k = Ok(bound(json!([format!("::ffff:{IP}")])));
+    answer(&mut s.start, T0, &query_api(), k);
+    answer(&mut s.start, T0, &Request::Echo, Ok(json!(IP)));
     assert_eq!(s.metrics.get(PUBLIC_IP_OK, &[]), Some(1.0));
 }
 
-/// A client of the fake on a manual clock at `T0`, with its metrics and
-/// the lines it logs.
+/// A client of a fake Bybit on a manual clock at `T0`, its metrics, the
+/// lines it logs, and an echo fake that answers `IP`.
 struct C {
     client: Client,
     clock: Arc<ManualClock>,
     metrics: Arc<Metrics>,
-    lines: Arc<Mutex<Vec<String>>>,
+    lines: Lines,
+    echo: FakeHttp,
 }
 
 fn client(fake: &FakeHttp) -> C {
@@ -386,378 +389,253 @@ fn client(fake: &FakeHttp) -> C {
         recv_window_ms: 5000,
         request_timeout_ms: 1000,
     };
-    let client = Client::new(
-        &cfg,
-        Credentials::new("WKEY", "watcher-made-up-secret-42"),
-        clock.clone(),
-        metrics.clone(),
-        log,
-    )
-    .unwrap();
+    let creds = Credentials::new("WKEY", "watcher-made-up-secret-42");
+    let client = Client::new(&cfg, creds, clock.clone(), metrics.clone(), log).unwrap();
+    let echo = FakeHttp::start(Answer::Reply(200, format!("{IP}\n")));
     C {
         client,
         clock,
         metrics,
         lines,
+        echo,
+    }
+}
+
+impl C {
+    fn echo_url(&self) -> String {
+        format!("{}/ip", self.echo.url())
+    }
+
+    /// Sends the request and gives the answer at the clock after it.
+    async fn ask(&self, req: &Request) -> Result<Value, RestError> {
+        send(&self.client, &self.echo_url(), req).await
+    }
+
+    /// Drives `start` through the client until it refuses, finishes or
+    /// stays up without requests; a wait moves the clock to its instant.
+    /// At most 50 steps.
+    async fn drive(&self, start: &mut Start) -> Step {
+        for _ in 0..50 {
+            let now = self.clock.now_ms();
+            let req = start.poll(now).expect("a request");
+            let a = self.ask(&req).await;
+            match start.on_answer(self.clock.now_ms(), a) {
+                Step::Next => {}
+                Step::Wait { until_ms } => self.clock.set(until_ms),
+                end => return end,
+            }
+        }
+        panic!("the start did not end in 50 steps");
     }
 }
 
 fn ok(result: &Value) -> Answer {
-    Answer::Reply(
-        200,
-        format!(r#"{{"retCode":0,"retMsg":"OK","result":{result},"time":1}}"#),
-    )
+    let body = format!(r#"{{"retCode":0,"retMsg":"OK","result":{result},"time":1}}"#);
+    Answer::Reply(200, body)
 }
 
 fn code(c: i64) -> Answer {
-    Answer::Reply(
-        200,
-        format!(r#"{{"retCode":{c},"retMsg":"m{c}","result":{{}},"time":1}}"#),
-    )
+    let body = format!(r#"{{"retCode":{c},"retMsg":"m{c}","result":{{}},"time":1}}"#);
+    Answer::Reply(200, body)
 }
 
-/// Drives `start` through the client until it refuses, finishes or stays
-/// up without requests; a wait moves the manual clock to its instant. At
-/// most 50 steps.
-async fn drive(start: &mut Start, c: &C, echo_url: &str) -> Step {
-    for _ in 0..50 {
-        let now = c.clock.now_ms();
-        let Some(req) = start.poll(now) else {
-            panic!("no request at +{} ms", now - T0);
-        };
-        let answer = watcher::start::send(&c.client, echo_url, &req).await;
-        match start.on_answer(c.clock.now_ms(), answer) {
-            Step::Next => {}
-            Step::Wait { until_ms } => c.clock.set(until_ms),
-            end => return end,
-        }
-    }
-    panic!("the start did not end in 50 steps");
+fn targets(fake: &FakeHttp) -> Vec<String> {
+    fake.requests().iter().map(|r| r.target.clone()).collect()
 }
 
 #[tokio::test]
 async fn a_traded_symbol_that_does_not_settle_in_usdt_refuses_the_start() {
-    let echo = FakeHttp::start(Answer::Reply(200, format!("{IP}\n")));
-    let echo_url = format!("{}/ip", echo.url());
-    for (coin, end) in [
-        (
-            "USDC",
-            Some("BTCPERP settles in USDC; the watcher's scope is linear/USDT"),
-        ),
-        (
-            "usdt",
-            Some("BTCPERP settles in usdt; the watcher's scope is linear/USDT"),
-        ),
-        (
-            "",
-            Some("BTCPERP settles in \"\"; the watcher's scope is linear/USDT"),
-        ),
+    let scope = "; the watcher's scope is linear/USDT";
+    for (coin, why) in [
+        ("USDC", Some("BTCPERP settles in USDC")),
+        ("usdt", Some("BTCPERP settles in usdt")),
+        ("", Some("BTCPERP settles in \"\"")),
         ("USDT", None),
     ] {
         let fake = FakeHttp::start(code(10016));
         fake.route(QUERY_API, [ok(&good_key())]);
-        fake.route(
-            INSTRUMENTS,
-            [
-                ok(&instrument("BTCUSDT", "USDT")),
-                ok(&instrument("BTCPERP", coin)),
-                ok(&instrument("ETHUSDT", "USDT")),
-            ],
-        );
+        let rows = [("BTCUSDT", "USDT"), ("BTCPERP", coin), ("ETHUSDT", "USDT")];
+        fake.route(INSTRUMENTS, rows.map(|(s, c)| ok(&instrument(s, c))));
         let c = client(&fake);
-        let metrics = Arc::new(Metrics::new("h1", "w1"));
-        let (log, _lines) = watcher::log::collect();
-        let mut start = Start::new(
-            &config(&["BTCUSDT", "BTCPERP", "ETHUSDT"], 60_000),
-            metrics.clone(),
-            log,
-            T0,
-        );
-        let step = drive(&mut start, &c, &echo_url).await;
-        let targets: Vec<String> = fake.requests().iter().map(|r| r.target.clone()).collect();
-        match end {
-            Some(reason) => {
-                assert_eq!(
-                    step,
-                    Step::Refuse {
-                        reason: reason.into()
-                    },
-                    "{coin}"
-                );
-                // No check request after it: query-api and the first two
-                // symbols, nothing for the third, nothing later.
-                assert_eq!(
-                    targets,
-                    [
-                        "/v5/user/query-api".to_string(),
-                        "/v5/market/instruments-info?category=linear&symbol=BTCUSDT".into(),
-                        "/v5/market/instruments-info?category=linear&symbol=BTCPERP".into(),
-                    ],
-                    "{coin}"
-                );
-                for at in [T0 + RETRY_MS, T0 + 600_000] {
-                    assert_eq!(start.poll(at), None, "{coin}");
-                }
-                assert!(start.ip_check().is_none(), "{coin}");
-            }
-            None => {
-                assert_eq!(step, Step::Done);
-                assert_eq!(targets.len(), 4, "{targets:?}");
-                assert_eq!(start.poll(T0 + 600_000), None);
-                assert!(start.ip_check().is_some());
-            }
-        }
-        assert_eq!(metrics.get(PUBLIC_IP_OK, &[]), Some(1.0), "{coin}");
+        let mut s = start_of(&["BTCUSDT", "BTCPERP", "ETHUSDT"]);
+        let step = c.drive(&mut s.start).await;
+        assert_eq!(s.metrics.get(PUBLIC_IP_OK, &[]), Some(1.0), "{coin}");
+        assert_eq!(c.echo.requests().len(), 1, "{coin}");
+        let Some(why) = why else {
+            assert_eq!(step, Step::Done);
+            assert_eq!(targets(&fake).len(), 4);
+            assert!(s.start.ip_check().is_some());
+            continue;
+        };
+        assert_eq!(step, refuse(&format!("{why}{scope}")), "{coin}");
+        // No check request after it: query-api and the first two symbols,
+        // nothing for the third, nothing later.
+        let info = "/v5/market/instruments-info?category=linear&symbol=";
+        let symbols = ["BTCUSDT", "BTCPERP"].map(|s| format!("{info}{s}"));
+        let want = [&[QUERY_API.to_string()][..], &symbols].concat();
+        assert_eq!(targets(&fake), want, "{coin}");
+        asks_nothing(&mut s.start, &[T0 + RETRY_MS, T0 + 600_000], coin);
+        assert!(s.start.ip_check().is_none(), "{coin}");
     }
-    assert_eq!(echo.requests().len(), 4);
 }
 
-/// Every answer that is neither `auth` nor a readable refusal, as the
-/// client gives it or (for `unreadable`) as the start reads it, with the
-/// wait it must give: 5 s after the answer, after a 403 the 600 s pause.
-fn retried() -> Vec<(&'static str, Result<Value, RestError>, u64)> {
-    vec![
-        (
-            "not_sent",
-            Err(RestError::NotSent("connect".into())),
-            RETRY_MS,
-        ),
-        (
-            "no_answer",
-            Err(RestError::NoAnswer("HTTP 502".into())),
-            RETRY_MS,
-        ),
-        (
-            "rate_limited",
-            Err(RestError::RateLimited("10006".into())),
-            RETRY_MS,
-        ),
-        ("clock", Err(RestError::Clock("10002".into())), RETRY_MS),
-        (
-            "refused",
-            Err(RestError::Refused {
-                code: 10001,
-                msg: "params error".into(),
-            }),
-            RETRY_MS,
-        ),
-        (
-            "ip_banned",
-            Err(RestError::IpBanned("HTTP 403".into())),
-            IP_BAN_PAUSE_MS,
-        ),
-    ]
-}
-
-/// Drives a retried answer at `at` and the wait after it: no request
-/// before the instant, the same request at it.
-fn retry_case(
-    s: &mut S,
-    at: u64,
-    req: &Request,
-    answer: Result<Value, RestError>,
-    wait: u64,
-    case: &str,
-) {
+/// Gives a retried answer at `at` to the request in flight: one line, a
+/// wait of `wait`, no request before its end and `req` again at it.
+fn retried(s: &mut S, at: u64, req: &Request, a: Result<Value, RestError>, wait: u64, case: &str) {
     let before = lines(&s.lines).len();
-    let step = s.start.on_answer(at, answer);
-    assert_eq!(
-        step,
-        Step::Wait {
-            until_ms: at + wait
-        },
-        "{case}"
-    );
+    assert_eq!(s.start.on_answer(at, a), self::wait(at + wait), "{case}");
     let l = lines(&s.lines);
     assert_eq!(l.len(), before + 1, "{case}: one line: {l:?}");
-    assert!(l[before].starts_with("start: "), "{case}: {l:?}");
+    let tail = format!("asked again at {} ms", at + wait);
     assert!(
-        l[before].ends_with(&format!("asked again at {} ms", at + wait)),
+        l[before].starts_with("start: ") && l[before].ends_with(&tail),
         "{case}: {l:?}"
     );
-    for t in [at, at + 1, at + RETRY_MS - 1, at + wait - 1] {
-        assert_eq!(s.start.poll(t), None, "{case}: at +{}", t - at);
-    }
+    let end = at + wait;
+    asks_nothing(&mut s.start, &[at, at + RETRY_MS - 1, end - 1], case);
     take(&mut s.start, at + wait, req);
 }
 
 #[test]
 fn query_api_answers_other_than_auth_or_a_refusal_retry_every_5_s() {
-    let mut cases = retried();
+    let mut cases = retried_cases();
     // Readable as JSON but not as the key: unreadable, counted by the start.
+    let mut master_text = good_key();
+    master_text["isMaster"] = json!("false");
+    let mut uid_text = good_key();
+    uid_text["userID"] = json!("4242");
     for (case, v) in [
         ("no fields", json!({})),
-        ("isMaster a string", {
-            let mut k = good_key();
-            k["isMaster"] = json!("false");
-            k
-        }),
-        ("userID a string", {
-            let mut k = good_key();
-            k["userID"] = json!("4242");
-            k
-        }),
-        ("ips a string", key(UID, false, json!(IP), None)),
-        ("ips with a number", key(UID, false, json!([IP, 1]), None)),
+        ("isMaster a string", master_text),
+        ("userID a string", uid_text),
+        ("ips a string", bound(json!(IP))),
+        ("ips with a number", bound(json!([IP, 1]))),
         ("null result", Value::Null),
     ] {
-        cases.push((case, Ok(v), RETRY_MS));
+        cases.push((case.into(), Ok(v), RETRY_MS));
     }
-    let unreadable = cases.iter().filter(|c| c.1.is_ok()).count() as f64;
     let metrics = Arc::new(Metrics::new("h1", "w1"));
-    for (case, answer, wait) in cases {
-        let (log, lines) = watcher::log::collect();
-        let mut s = S {
-            start: Start::new(&config(&["BTCUSDT"], 60_000), metrics.clone(), log, T0),
-            metrics: metrics.clone(),
-            lines,
-        };
+    for (case, a, wait) in cases {
+        let mut s = start_with(&["BTCUSDT"], 60_000, metrics.clone());
         take(&mut s.start, T0, &query_api());
         // The answer comes 300 ms after the request: the wait runs from it.
-        retry_case(&mut s, T0 + 300, &query_api(), answer, wait, case);
+        retried(&mut s, T0 + 300, &query_api(), a, wait, &case);
         // Twice in a row: the pace stays the same.
         let at = T0 + 300 + wait + 40;
-        retry_case(
-            &mut s,
-            at,
-            &query_api(),
-            Err(RestError::NoAnswer("timeout".into())),
-            RETRY_MS,
-            case,
-        );
+        let again = Err(err("no_answer"));
+        retried(&mut s, at, &query_api(), again, RETRY_MS, &case);
         // The start does not go on before a readable answer, then does.
-        assert_eq!(
-            s.start.on_answer(at + RETRY_MS, Ok(good_key())),
-            Step::Next,
-            "{case}"
-        );
-        take(&mut s.start, at + RETRY_MS, &Request::Echo);
+        let at = at + RETRY_MS;
+        assert_eq!(s.start.on_answer(at, Ok(good_key())), Step::Next, "{case}");
+        take(&mut s.start, at, &Request::Echo);
     }
-    assert_eq!(
-        metrics.get(
-            "watcher_request_errors_total",
-            &[("endpoint", QUERY_API), ("class", "unreadable")]
-        ),
-        Some(unreadable)
-    );
+    assert_eq!(unreadable(&metrics, QUERY_API), Some(6.0));
 }
 
 #[test]
 fn settle_coin_answers_other_than_auth_or_a_refusal_retry_every_5_s() {
-    let mut cases = retried();
+    let mut cases = retried_cases();
     for (case, v) in [
         ("no list", json!({"category": "linear"})),
         ("list an object", json!({"category": "linear", "list": {}})),
         ("null result", Value::Null),
     ] {
-        cases.push((case, Ok(v), RETRY_MS));
+        cases.push((case.into(), Ok(v), RETRY_MS));
     }
-    for (case, answer, wait) in cases {
-        let mut s = start_of(&["BTCUSDT", "ETHUSDT"], T0);
-        to_symbols(&mut s, T0, good_key(), IP);
-        take(&mut s.start, T0, &instruments("BTCUSDT"));
+    let metrics = Arc::new(Metrics::new("h1", "w1"));
+    for (case, a, wait) in cases {
+        let mut s = start_with(&["BTCUSDT", "ETHUSDT"], 60_000, metrics.clone());
+        to_symbols(&mut s);
+        let row = Ok(instrument("BTCUSDT", "USDT"));
         assert_eq!(
-            s.start
-                .on_answer(T0 + 20, Ok(instrument("BTCUSDT", "USDT"))),
+            answer(&mut s.start, T0, &instruments("BTCUSDT"), row),
             Step::Next
         );
-        // The second symbol fails: the same symbol is asked again, not the first.
+        // The second symbol fails: it is asked again, not the first.
         take(&mut s.start, T0 + 20, &instruments("ETHUSDT"));
-        retry_case(
-            &mut s,
-            T0 + 250,
-            &instruments("ETHUSDT"),
-            answer,
-            wait,
-            case,
-        );
+        retried(&mut s, T0 + 250, &instruments("ETHUSDT"), a, wait, &case);
         let at = T0 + 250 + wait;
-        assert_eq!(
-            s.start.on_answer(at, Ok(instrument("ETHUSDT", "USDT"))),
-            Step::Done,
-            "{case}"
-        );
-        assert_eq!(s.start.poll(at + IP_BAN_PAUSE_MS), None, "{case}");
+        let last = s.start.on_answer(at, Ok(instrument("ETHUSDT", "USDT")));
+        assert_eq!(last, Step::Done, "{case}");
+        asks_nothing(&mut s.start, &[at + IP_BAN_PAUSE_MS], &case);
         assert!(s.start.ip_check().is_some(), "{case}");
     }
+    assert_eq!(unreadable(&metrics, INSTRUMENTS), Some(3.0));
+}
+
+/// After a key stop, no Bybit request reaches `fake` (it saw `seen`) for
+/// 10 minutes of the clock while `poll` is asked every 30 s; the gauge is 1.
+async fn nothing_sent(
+    c: &C,
+    fake: &FakeHttp,
+    mut poll: impl FnMut(u64) -> Option<Request>,
+    case: &str,
+) {
+    let seen = fake.requests().len();
+    for _ in 0..20 {
+        c.clock.advance(30_000);
+        assert_eq!(poll(c.clock.now_ms()), None, "{case}");
+    }
+    for p in [
+        QUERY_API,
+        INSTRUMENTS,
+        "/v5/order/realtime",
+        "/v5/position/list",
+    ] {
+        let e = c.client.get(p, &[]).await.unwrap_err();
+        assert_eq!(e.class(), "auth", "{case} {p}");
+    }
+    assert_eq!(fake.requests().len(), seen, "{case}");
+    let rejected = c.metrics.get("watcher_auth_rejected", &[]);
+    assert_eq!(rejected, Some(1.0), "{case}");
 }
 
 #[tokio::test]
 async fn an_auth_answer_at_start_stays_up_without_requests() {
-    let echo = FakeHttp::start(Answer::Reply(200, IP.into()));
-    let echo_url = format!("{}/ip", echo.url());
     // Rejected at query-api (step 2) and at the settle coin (step 5).
-    for (case, at_query, answer, want_requests) in [
+    for (case, at_query, rejection, seen) in [
         ("query-api 10010", true, code(10010), 1),
         ("query-api 10003", true, code(10003), 1),
         ("query-api 33004", true, code(33004), 1),
-        (
-            "query-api HTTP 401",
-            true,
-            Answer::Reply(401, String::new()),
-            1,
-        ),
+        ("query-api HTTP 401", true, Answer::Reply(401, "".into()), 1),
         ("instruments-info 10004", false, code(10004), 2),
     ] {
         let fake = FakeHttp::start(code(10016));
         if at_query {
-            fake.route(QUERY_API, [answer]);
+            fake.route(QUERY_API, [rejection]);
         } else {
             fake.route(QUERY_API, [ok(&good_key())]);
-            fake.route(INSTRUMENTS, [answer]);
+            fake.route(INSTRUMENTS, [rejection]);
         }
         let c = client(&fake);
-        let metrics = Arc::new(Metrics::new("h1", "w1"));
-        let (log, start_lines) = watcher::log::collect();
-        let mut start = Start::new(&config(&["BTCUSDT"], 60_000), metrics, log, T0);
-        assert_eq!(
-            drive(&mut start, &c, &echo_url).await,
-            Step::StayUpNoRequests,
-            "{case}"
-        );
-        // No exit and no request: the start asks nothing for 10 minutes of
-        // the clock, and the client would send nothing either.
-        for _ in 0..600 {
-            c.clock.advance(1000);
-            assert_eq!(start.poll(c.clock.now_ms()), None, "{case}");
-        }
-        let e = c.client.get(QUERY_API, &[]).await.unwrap_err();
-        assert_eq!(e.class(), "auth", "{case}");
-        assert_eq!(fake.requests().len(), want_requests, "{case}");
-        assert!(start.ip_check().is_none(), "{case}");
-        // Visible: the gauge, and the client's one error line; the start
+        let mut s = start_of(&["BTCUSDT"]);
+        let step = c.drive(&mut s.start).await;
+        assert_eq!(step, Step::StayUpNoRequests, "{case}");
+        assert_eq!(fake.requests().len(), seen, "{case}");
+        // No exit and no request.
+        nothing_sent(&c, &fake, |t| s.start.poll(t), case).await;
+        assert!(s.start.ip_check().is_none(), "{case}");
+        // Visible: the gauge and the client's one error line; the start
         // itself adds no line.
-        assert_eq!(
-            c.metrics.get("watcher_auth_rejected", &[]),
-            Some(1.0),
-            "{case}"
-        );
-        let l = lines(&c.lines);
-        assert_eq!(l.len(), 1, "{case}: {l:?}");
-        assert!(
-            l[0].starts_with("error: Bybit rejected the key"),
-            "{case}: {l:?}"
-        );
-        assert!(lines(&start_lines).is_empty(), "{case}");
+        let head = "error: Bybit rejected the key";
+        one_line(&c.lines, head, "until the watcher restarts", case);
+        assert!(lines(&s.lines).is_empty(), "{case}");
     }
 }
 
 /// A start of one symbol run to the end on answers: query-api at `T0`
 /// (key expiring in 10 days), the echo answered at `echo_at`, the settle
 /// coin at `done_at`; its recheck.
-fn rechecked(echo_at: u64, done_at: u64) -> (S, IpCheck) {
-    let mut s = start_of(&["BTCUSDT"], T0);
-    take(&mut s.start, T0, &query_api());
+fn rechecked(echo_at: u64, done_at: u64, ip_check_ms: u64) -> (S, IpCheck) {
+    let metrics = Arc::new(Metrics::new("h1", "w1"));
+    let mut s = start_with(&["BTCUSDT"], ip_check_ms, metrics);
     let k = key(UID, false, json!([IP]), Some("2023-11-24T22:13:20Z"));
-    assert_eq!(s.start.on_answer(T0, Ok(k)), Step::Next);
+    assert_eq!(answer(&mut s.start, T0, &query_api(), Ok(k)), Step::Next);
     take(&mut s.start, T0, &Request::Echo);
     assert_eq!(s.start.on_answer(echo_at, Ok(json!(IP))), Step::Next);
     take(&mut s.start, echo_at, &instruments("BTCUSDT"));
-    assert_eq!(
-        s.start
-            .on_answer(done_at, Ok(instrument("BTCUSDT", "USDT"))),
-        Step::Done
-    );
+    let row = Ok(instrument("BTCUSDT", "USDT"));
+    assert_eq!(s.start.on_answer(done_at, row), Step::Done);
     assert_eq!(s.metrics.get(DAYS_LEFT, &[]), Some(10.0));
     assert_eq!(s.metrics.get(PUBLIC_IP_OK, &[]), Some(1.0));
     let check = s.start.ip_check().unwrap();
@@ -774,285 +652,164 @@ fn take_check(c: &mut IpCheck, now: u64, want: &Request) {
 #[test]
 fn the_public_ip_is_rechecked_every_60_s() {
     let echo_at = T0 + 1_000;
-    let (s, mut check) = rechecked(echo_at, T0 + 1_500);
+    let (s, mut check) = rechecked(echo_at, T0 + 1_500, 60_000);
     // The first recheck is due 60 s after step 4's echo answered.
-    for t in [T0 + 1_500, echo_at + 59_999] {
-        assert_eq!(check.poll(t), None, "at +{}", t - T0);
-    }
+    assert_eq!(check.poll(T0 + 1_500), None);
+    assert_eq!(check.poll(echo_at + 59_999), None);
     let mut due = echo_at + 60_000;
     // Each later one 60 s after the previous recheck's last answer; the
     // key's list and expiry are read again every time.
-    let rounds: [(Value, &str, &str, f64, f64); 4] = [
-        (json!([IP]), "2023-11-24T22:13:20Z", IP, 1.0, 9.0),
+    let other = "198.51.100.4";
+    for (i, (ips, expired_at, echo, ip_ok, days)) in [
+        (json!([IP]), "2023-11-24T22:13:20Z", IP, 1.0, Some(9.0)),
+        (json!([other]), "2023-11-24T22:13:20Z", IP, 0.0, Some(9.0)),
         (
-            json!(["198.51.100.4"]),
-            "2023-11-24T22:13:20Z",
-            IP,
-            0.0,
-            9.0,
-        ),
-        (
-            json!(["198.51.100.4"]),
+            json!([other]),
             "2023-12-24T22:13:20Z",
-            "198.51.100.4",
+            other,
             1.0,
-            39.0,
+            Some(39.0),
         ),
-        (
-            json!([IP, "198.51.100.4"]),
-            "1970-01-01T00:00:00Z",
-            IP,
-            1.0,
-            f64::NAN,
-        ),
-    ];
-    for (i, (ips, expired_at, echo, ok, days)) in rounds.into_iter().enumerate() {
+        (json!([IP, other]), "1970-01-01T00:00:00Z", IP, 1.0, None),
+    ]
+    .into_iter()
+    .enumerate()
+    {
         assert_eq!(check.poll(due - 1), None, "round {i}");
         take_check(&mut check, due, &query_api());
-        let at = due + 200;
         let k = key(UID, false, ips, Some(expired_at));
-        assert_eq!(check.on_answer(at, Ok(k)), Step::Next, "round {i}");
-        take_check(&mut check, at, &Request::Echo);
-        let last = at + 150;
+        assert_eq!(check.on_answer(due + 200, Ok(k)), Step::Next, "round {i}");
+        take_check(&mut check, due + 200, &Request::Echo);
+        let (last, echo) = (due + 350, Ok(json!(echo)));
         assert_eq!(
-            check.on_answer(last, Ok(json!(echo))),
-            Step::Wait {
-                until_ms: last + 60_000
-            },
+            check.on_answer(last, echo),
+            wait(last + 60_000),
             "round {i}"
         );
-        assert_eq!(s.metrics.get(PUBLIC_IP_OK, &[]), Some(ok), "round {i}");
-        if days.is_nan() {
-            assert_eq!(s.metrics.get(DAYS_LEFT, &[]), None, "round {i}");
-        } else {
-            assert_eq!(s.metrics.get(DAYS_LEFT, &[]), Some(days), "round {i}");
-        }
+        assert_eq!(s.metrics.get(PUBLIC_IP_OK, &[]), Some(ip_ok), "round {i}");
+        assert_eq!(s.metrics.get(DAYS_LEFT, &[]), days, "round {i}");
         due = last + 60_000;
     }
     // One warn line, for the round whose IP was not bound.
-    let l = lines(&s.lines);
-    assert_eq!(l.len(), 1, "{l:?}");
-    assert_eq!(
-        l[0],
-        "warn: public IP 203.0.113.7 is not among the key's bound IPs; watcher_public_ip_ok = 0"
-    );
+    let not_bound =
+        "warn: public IP 203.0.113.7 is not among the key's bound IPs; watcher_public_ip_ok = 0";
+    assert_eq!(lines(&s.lines), [not_bound]);
 
     // A start whose step 5 took longer than the interval: the first
     // recheck is due at once, still counted from the echo.
-    let (_s, mut check) = rechecked(T0 + 1_000, T0 + 90_000);
+    let (_s, mut check) = rechecked(T0 + 1_000, T0 + 90_000, 60_000);
     take_check(&mut check, T0 + 90_000, &query_api());
-
-    // The recheck uses the configured interval.
-    let metrics = Arc::new(Metrics::new("h1", "w1"));
-    let (log, _l) = watcher::log::collect();
-    let mut st = Start::new(&config(&["BTCUSDT"], 10_000), metrics, log, T0);
-    take(&mut st, T0, &query_api());
-    st.on_answer(T0, Ok(good_key()));
-    take(&mut st, T0, &Request::Echo);
-    st.on_answer(T0, Ok(json!(IP)));
-    take(&mut st, T0, &instruments("BTCUSDT"));
-    st.on_answer(T0, Ok(instrument("BTCUSDT", "USDT")));
-    let mut check = st.ip_check().unwrap();
+    // The configured interval.
+    let (_s, mut check) = rechecked(T0, T0, 10_000);
     assert_eq!(check.poll(T0 + 9_999), None);
     take_check(&mut check, T0 + 10_000, &query_api());
 }
 
 #[test]
 fn a_failed_recheck_sets_public_ip_ok_0_and_keeps_days_left() {
-    let mut cases = retried();
-    for (case, v) in [
-        ("unreadable: no fields", json!({})),
-        ("unreadable: ips a string", key(UID, false, json!(IP), None)),
-    ] {
-        cases.push((case, Ok(v), RETRY_MS));
-    }
-    for (case, answer, _) in cases {
-        let (s, mut check) = rechecked(T0 + 1_000, T0 + 1_500);
-        let due = T0 + 61_000;
-        take_check(&mut check, due, &query_api());
+    let mut cases = retried_cases();
+    cases.push(("unreadable: no fields".into(), Ok(json!({})), 0));
+    cases.push(("unreadable: ips a string".into(), Ok(bound(json!(IP))), 0));
+    for (case, a, _) in cases {
+        let (s, mut check) = rechecked(T0 + 1_000, T0 + 1_500, 60_000);
+        take_check(&mut check, T0 + 61_000, &query_api());
         // A failed query-api: 0, days kept, no echo, the next recheck at
-        // the normal pace.
-        let at = due + 300;
-        assert_eq!(
-            check.on_answer(at, answer),
-            Step::Wait {
-                until_ms: at + 60_000
-            },
-            "{case}"
-        );
+        // the normal pace (also after a 403: the client's pause answers it).
+        let at = T0 + 61_300;
+        assert_eq!(check.on_answer(at, a), wait(at + 60_000), "{case}");
         assert_eq!(s.metrics.get(PUBLIC_IP_OK, &[]), Some(0.0), "{case}");
         assert_eq!(s.metrics.get(DAYS_LEFT, &[]), Some(10.0), "{case}");
-        let l = lines(&s.lines);
-        assert_eq!(l.len(), 1, "{case}: {l:?}");
-        assert!(
-            l[0].starts_with("warn: IP recheck: query-api failed ("),
-            "{case}: {l:?}"
+        one_line(
+            &s.lines,
+            "warn: IP recheck: query-api failed (",
+            IP_OK_0,
+            &case,
         );
-        assert!(l[0].ends_with("watcher_public_ip_ok = 0"), "{case}: {l:?}");
-        for t in [at, at + 59_999] {
-            assert_eq!(check.poll(t), None, "{case}");
-        }
+        let counted = case.starts_with("unreadable").then_some(1.0);
+        assert_eq!(unreadable(&s.metrics, QUERY_API), counted, "{case}");
+        assert_eq!(check.poll(at), None, "{case}");
+        assert_eq!(check.poll(at + 59_999), None, "{case}");
         take_check(&mut check, at + 60_000, &query_api());
         // The next recheck passes: 1 again.
-        assert_eq!(
-            check.on_answer(at + 60_000, Ok(good_key())),
-            Step::Next,
-            "{case}"
-        );
-        take_check(&mut check, at + 60_000, &Request::Echo);
-        check.on_answer(at + 60_000, Ok(json!(IP)));
+        let at = at + 60_000;
+        assert_eq!(check.on_answer(at, Ok(good_key())), Step::Next, "{case}");
+        take_check(&mut check, at, &Request::Echo);
+        check.on_answer(at, Ok(json!(IP)));
         assert_eq!(s.metrics.get(PUBLIC_IP_OK, &[]), Some(1.0), "{case}");
     }
     // A failed echo after a good query-api: 0 with one line, the days
     // refreshed from that query-api, the next recheck at the normal pace.
-    for (case, answer) in [
-        (
-            "no answer",
-            Err(RestError::NoAnswer("IP echo HTTP 500".into())),
-        ),
+    for (case, a) in [
+        ("no answer", Err(err("no_answer"))),
         ("not an address", Ok(json!("nope"))),
-        (
-            "paused",
-            Err(RestError::IpBanned("not sent: paused".into())),
-        ),
+        ("paused", Err(err("ip_banned"))),
     ] {
-        let (s, mut check) = rechecked(T0 + 1_000, T0 + 1_500);
+        let (s, mut check) = rechecked(T0 + 1_000, T0 + 1_500, 60_000);
         take_check(&mut check, T0 + 61_000, &query_api());
         let k = key(UID, false, json!([IP]), Some("2023-11-23T22:13:20Z"));
         check.on_answer(T0 + 61_000, Ok(k));
         take_check(&mut check, T0 + 61_000, &Request::Echo);
-        assert_eq!(
-            check.on_answer(T0 + 61_100, answer),
-            Step::Wait {
-                until_ms: T0 + 121_100
-            },
-            "{case}"
-        );
+        let at = T0 + 61_100;
+        assert_eq!(check.on_answer(at, a), wait(at + 60_000), "{case}");
         assert_eq!(s.metrics.get(PUBLIC_IP_OK, &[]), Some(0.0), "{case}");
         assert_eq!(s.metrics.get(DAYS_LEFT, &[]), Some(8.0), "{case}");
-        assert_eq!(lines(&s.lines).len(), 1, "{case}");
+        one_line(&s.lines, WARN_IP, IP_OK_0, case);
         assert_eq!(check.poll(T0 + 121_099), None, "{case}");
         take_check(&mut check, T0 + 121_100, &query_api());
     }
 }
 
-#[tokio::test]
-async fn a_recheck_with_another_uid_a_master_key_or_no_bound_ip_stops_every_request() {
-    let echo = FakeHttp::start(Answer::Reply(200, IP.into()));
-    let echo_url = format!("{}/ip", echo.url());
-    let rule = "the key no longer passes the start check: query-api: ";
-    for (case, recheck, reason) in [
-        (
-            "another uid",
-            key(4243, false, json!([IP]), None),
-            format!(
-                "{rule}the API key belongs to user 4243; the config says sub_account_uid {UID}"
-            ),
-        ),
-        (
-            "master",
-            key(UID, true, json!([IP]), None),
-            format!(
-                "{rule}the API key is the master account's; the watcher needs a sub-account key"
-            ),
-        ),
-        (
-            "no bound ip",
-            key(UID, false, json!([]), None),
-            format!(
-                "{rule}the API key is bound to no IP address (ips [] or \"*\"); bind it to this host's address"
-            ),
-        ),
-        (
-            "star",
-            key(UID, false, json!(["*"]), None),
-            format!(
-                "{rule}the API key is bound to no IP address (ips [] or \"*\"); bind it to this host's address"
-            ),
-        ),
-    ] {
-        let fake = FakeHttp::start(ok(&json!({"list": []})));
-        fake.route(QUERY_API, [ok(&good_key()), ok(&recheck)]);
-        fake.route(INSTRUMENTS, [ok(&instrument("BTCUSDT", "USDT"))]);
-        let c = client(&fake);
-        let metrics = Arc::new(Metrics::new("h1", "w1"));
-        let (log, start_lines) = watcher::log::collect();
-        let mut start = Start::new(&config(&["BTCUSDT"], 60_000), metrics, log, T0);
-        assert_eq!(drive(&mut start, &c, &echo_url).await, Step::Done, "{case}");
-        let mut check = start.ip_check().unwrap();
-        c.clock.advance(60_000);
-        let req = check.poll(c.clock.now_ms()).unwrap();
-        assert_eq!(req, query_api(), "{case}");
-        let answer = watcher::start::send(&c.client, &echo_url, &req).await;
-        let step = check.on_answer(c.clock.now_ms(), answer);
-        assert_eq!(
-            step,
-            Step::StopRequests {
-                reason: reason.clone()
-            },
-            "{case}"
-        );
-        watcher::start::apply(&c.client, &step);
-        let sent = fake.requests().len();
-        assert_eq!(sent, 3, "{case}");
-        // Every Bybit request stops until restart, as for a rejected key.
-        assert_eq!(
-            c.client.auth_rejected(),
-            Some(watcher::rest::OWN_RULE_CODE),
-            "{case}"
-        );
-        assert_eq!(
-            c.metrics.get("watcher_auth_rejected", &[]),
-            Some(1.0),
-            "{case}"
-        );
-        for p in [
-            QUERY_API,
-            INSTRUMENTS,
-            "/v5/order/realtime",
-            "/v5/position/list",
-        ] {
-            let e = c.client.get(p, &[]).await.unwrap_err();
-            assert_eq!(e.class(), "auth", "{case} {p}");
-        }
-        // The recheck asks nothing more (no echo either), for 10 minutes.
-        for _ in 0..20 {
-            c.clock.advance(30_000);
-            assert_eq!(check.poll(c.clock.now_ms()), None, "{case}");
-        }
-        assert_eq!(fake.requests().len(), sent, "{case}");
-        // One error line naming the rule; a second apply adds none.
-        watcher::start::apply(&c.client, &step);
-        let l = lines(&c.lines);
-        assert_eq!(
-            l,
-            [format!(
-                "error: {reason}; every Bybit request stops until the watcher restarts"
-            )],
-            "{case}"
-        );
-        assert!(lines(&start_lines).is_empty(), "{case}");
-    }
-
-    // A rejected key at the recheck: as at start, the client stopped; the
-    // recheck asks nothing more.
+/// A fake whose query-api answers a good key, then `recheck`; a client of
+/// it; the recheck after a start run through it, at its first due time.
+async fn first_recheck(recheck: Answer) -> (FakeHttp, C, IpCheck) {
     let fake = FakeHttp::start(ok(&json!({"list": []})));
-    fake.route(QUERY_API, [ok(&good_key()), code(10010)]);
+    fake.route(QUERY_API, [ok(&good_key()), recheck]);
     fake.route(INSTRUMENTS, [ok(&instrument("BTCUSDT", "USDT"))]);
     let c = client(&fake);
-    let (log, _l) = watcher::log::collect();
-    let mut start = Start::new(&config(&["BTCUSDT"], 60_000), c.metrics.clone(), log, T0);
-    assert_eq!(drive(&mut start, &c, &echo_url).await, Step::Done);
-    let mut check = start.ip_check().unwrap();
+    let mut s = start_with(&["BTCUSDT"], 60_000, c.metrics.clone());
+    assert_eq!(c.drive(&mut s.start).await, Step::Done);
+    assert!(lines(&s.lines).is_empty());
+    let check = s.start.ip_check().unwrap();
     c.clock.advance(60_000);
+    (fake, c, check)
+}
+
+#[tokio::test]
+async fn a_recheck_with_another_uid_a_master_key_or_no_bound_ip_stops_every_request() {
+    for (case, recheck, why) in [
+        ("other uid", key(4243, false, json!([IP]), None), OTHER_UID),
+        ("master", key(UID, true, json!([IP]), None), MASTER),
+        ("no bound ip", bound(json!([])), UNBOUND),
+        ("star", bound(json!(["*"])), UNBOUND),
+    ] {
+        let (fake, c, mut check) = first_recheck(ok(&recheck)).await;
+        let req = check.poll(c.clock.now_ms()).unwrap();
+        assert_eq!(req, query_api(), "{case}");
+        let step = check.on_answer(c.clock.now_ms(), c.ask(&req).await);
+        let reason = format!("the key no longer passes the start check: query-api: {why}");
+        assert!(
+            matches!(&step, Step::StopRequests { reason: r } if *r == reason),
+            "{case}: {step:?}"
+        );
+        apply(&c.client, &step);
+        assert_eq!(c.client.auth_rejected(), Some(OWN_RULE_CODE), "{case}");
+        // Every Bybit request stops until restart, as for a rejected key;
+        // the recheck asks nothing more (no echo either).
+        assert_eq!(fake.requests().len(), 3, "{case}");
+        nothing_sent(&c, &fake, |t| check.poll(t), case).await;
+        assert_eq!(c.echo.requests().len(), 1, "{case}");
+        // One error line naming the rule; a second apply adds none.
+        apply(&c.client, &step);
+        let line = format!("error: {reason}; every Bybit request stops until the watcher restarts");
+        assert_eq!(lines(&c.lines), [line], "{case}");
+    }
+    // A rejected key at the recheck: as at start, the client stopped; the
+    // recheck asks nothing more.
+    let (fake, c, mut check) = first_recheck(code(10010)).await;
     let req = check.poll(c.clock.now_ms()).unwrap();
-    let answer = watcher::start::send(&c.client, &echo_url, &req).await;
-    assert_eq!(
-        check.on_answer(c.clock.now_ms(), answer),
-        Step::StayUpNoRequests
-    );
-    c.clock.advance(600_000);
-    assert_eq!(check.poll(c.clock.now_ms()), None);
+    let step = check.on_answer(c.clock.now_ms(), c.ask(&req).await);
+    assert_eq!(step, Step::StayUpNoRequests);
     assert_eq!(c.client.auth_rejected(), Some(10010));
     assert_eq!(fake.requests().len(), 3);
+    nothing_sent(&c, &fake, |t| check.poll(t), "10010").await;
 }

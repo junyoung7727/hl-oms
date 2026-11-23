@@ -300,12 +300,12 @@ fn retry_at(now_ms: u64, e: &RestError) -> u64 {
     }
 }
 
-fn count_unreadable(metrics: &Metrics, endpoint: &str) {
-    metrics.add(
-        "watcher_request_errors_total",
-        &[("endpoint", endpoint), ("class", "unreadable")],
-        1.0,
-    );
+/// The error of a retCode 0 answer that the start rules cannot read,
+/// counted under `endpoint` (by the check, not the client).
+fn unreadable(metrics: &Metrics, endpoint: &str, why: String) -> RestError {
+    let labels = [("endpoint", endpoint), ("class", "unreadable")];
+    metrics.add("watcher_request_errors_total", &labels, 1.0);
+    RestError::Unreadable(why)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -394,8 +394,8 @@ impl Start {
                     }
                     Key::Fails(why) => self.refuse(format!("query-api: {why}")),
                     Key::Unreadable(why) => {
-                        count_unreadable(&self.metrics, QUERY_API);
-                        self.retry(now_ms, "query-api", RestError::Unreadable(why))
+                        let e = unreadable(&self.metrics, QUERY_API, why);
+                        self.retry(now_ms, "query-api", e)
                     }
                 },
                 Err(e) => self.retry(now_ms, "query-api", e),
@@ -406,21 +406,16 @@ impl Start {
                 self.next_symbol(0)
             }
             Phase::Symbol(i) => {
-                let symbol = self.symbols[i].clone();
+                let what = format!("instruments-info {}", self.symbols[i]);
+                let answer = answer.map(|v| read_settle(&v, &self.symbols[i]));
                 match answer {
-                    Ok(v) => match read_settle(&v, &symbol) {
-                        Key::Passes(_) => self.next_symbol(i + 1),
-                        Key::Fails(why) => self.refuse(why),
-                        Key::Unreadable(why) => {
-                            count_unreadable(&self.metrics, INSTRUMENTS);
-                            self.retry(
-                                now_ms,
-                                &format!("instruments-info {symbol}"),
-                                RestError::Unreadable(why),
-                            )
-                        }
-                    },
-                    Err(e) => self.retry(now_ms, &format!("instruments-info {symbol}"), e),
+                    Ok(Key::Passes(_)) => self.next_symbol(i + 1),
+                    Ok(Key::Fails(why)) => self.refuse(why),
+                    Ok(Key::Unreadable(why)) => {
+                        let e = unreadable(&self.metrics, INSTRUMENTS, why);
+                        self.retry(now_ms, &what, e)
+                    }
+                    Err(e) => self.retry(now_ms, &what, e),
                 }
             }
             Phase::Done | Phase::StayedUp | Phase::Refused(_) => self.current(now_ms),
@@ -431,13 +426,15 @@ impl Start {
     /// `ip_check_ms` after the echo of step 4 answered.
     pub fn ip_check(&self) -> Option<IpCheck> {
         match (&self.phase, self.echo_at) {
-            (Phase::Done, Some(at)) => Some(IpCheck::new(
-                self.uid,
-                self.ip_check_ms,
-                self.metrics.clone(),
-                self.log.clone(),
-                at.saturating_add(self.ip_check_ms),
-            )),
+            (Phase::Done, Some(at)) => Some(IpCheck {
+                uid: self.uid,
+                interval_ms: self.ip_check_ms,
+                metrics: self.metrics.clone(),
+                log: self.log.clone(),
+                next_due: at.saturating_add(self.ip_check_ms),
+                phase: Recheck::Idle,
+                ips: Vec::new(),
+            }),
             _ => None,
         }
     }
@@ -523,24 +520,6 @@ pub struct IpCheck {
 }
 
 impl IpCheck {
-    fn new(
-        uid: u64,
-        interval_ms: u64,
-        metrics: Arc<Metrics>,
-        log: Log,
-        first_due_ms: u64,
-    ) -> IpCheck {
-        IpCheck {
-            uid,
-            interval_ms,
-            metrics,
-            log,
-            next_due: first_due_ms,
-            phase: Recheck::Idle,
-            ips: Vec::new(),
-        }
-    }
-
     /// The request due at `now_ms`, or `None` while one is in flight,
     /// before the next recheck is due, and after a stop.
     pub fn poll(&mut self, now_ms: u64) -> Option<Request> {
@@ -578,8 +557,8 @@ impl IpCheck {
                         }
                     }
                     Key::Unreadable(why) => {
-                        count_unreadable(&self.metrics, QUERY_API);
-                        self.failed(now_ms, RestError::Unreadable(why))
+                        let e = unreadable(&self.metrics, QUERY_API, why);
+                        self.failed(now_ms, e)
                     }
                 },
                 Err(RestError::Auth { .. }) => {
