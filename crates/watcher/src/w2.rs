@@ -14,7 +14,9 @@
 //! only rows with size > 0, so a position that went flat has no row and
 //! no `updatedTime`, exactly when it just closed; `seen_at` gives it a
 //! time. The sizes of the first complete read have no `seen_at` (the state
-//! found at start, not a change seen).
+//! found at start, not a change seen). From U19a9 W4's newest agreeing
+//! `execTime` of the symbol replaces that time when it is newer
+//! ([`W2::with_exec_times`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -23,6 +25,7 @@ use serde_json::Value;
 use crate::decimal::Dec;
 use crate::engine::{Check, Diff, Logic, Page, Since, VenueRequest};
 use crate::state::JournalState;
+use crate::w4::ExecTimes;
 
 pub const PATH: &str = "/v5/position/list";
 pub const PAGE_LIMIT: usize = 200;
@@ -50,6 +53,8 @@ pub struct W2 {
     /// The clock at the last page of a complete read whose sizes are not
     /// yet in `seen`.
     unseen: Option<u64>,
+    /// W4's newest agreeing `execTime` per symbol (U19a9).
+    exec_times: Option<ExecTimes>,
 }
 
 fn request(cursor: &str) -> VenueRequest {
@@ -90,6 +95,15 @@ fn signed(row: &Value) -> Result<Dec, String> {
 }
 
 impl W2 {
+    /// W2 that also takes W4's newest agreeing `execTime` of a symbol as a
+    /// venue change time when it is newer than `updatedTime` or `seen_at`.
+    pub fn with_exec_times(exec_times: ExecTimes) -> W2 {
+        W2 {
+            exec_times: Some(exec_times),
+            ..W2::default()
+        }
+    }
+
     /// Takes the complete read into `seen` at `t`.
     fn observe(&mut self, t: u64) {
         self.unseen = None;
@@ -184,6 +198,11 @@ impl Logic for W2 {
             self.observe(now_ms);
         }
         let symbols: BTreeSet<&String> = self.rows.keys().chain(state.positions.keys()).collect();
+        let exec_times = self
+            .exec_times
+            .as_ref()
+            .map(|t| t.lock().unwrap_or_else(|e| e.into_inner()).clone())
+            .unwrap_or_default();
         let mut out = Vec::new();
         for symbol in symbols {
             let row = self.rows.get(symbol);
@@ -199,7 +218,11 @@ impl Logic for W2 {
             // µs rounded up: an age is never taken as older than it is.
             let journal_at = state.last_change_at.get(symbol).map(|t| t.div_ceil(1000));
             let seen_at = self.seen.get(symbol).and_then(|s| s.1);
-            let venue_at = row.and_then(|r| r.updated).or(seen_at);
+            // W4's newest agreeing execTime when it is newer (U19a9).
+            let venue_at = row
+                .and_then(|r| r.updated)
+                .or(seen_at)
+                .max(exec_times.get(symbol).copied());
             let since = match journal_at.max(venue_at) {
                 Some(t) => Since::At(t),
                 None => Since::Unknown,
