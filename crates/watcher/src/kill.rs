@@ -387,7 +387,7 @@ pub async fn read_positions(
         |why: &str| Positions::Failed(client.unreadable(POSITIONS, why).class().into());
     let mut rows = Vec::new();
     let mut cursor = String::new();
-    for page in 1..=POSITION_MAX_PAGES {
+    for _ in 0..POSITION_MAX_PAGES {
         let mut params = vec![
             ("category", "linear".to_string()),
             ("settleCoin", "USDT".to_string()),
@@ -419,9 +419,6 @@ pub async fn read_positions(
         }
         if next == cursor {
             return unreadable("nextPageCursor is the cursor just sent");
-        }
-        if page == POSITION_MAX_PAGES {
-            break;
         }
         cursor = next.to_string();
     }
