@@ -6,8 +6,10 @@
 //! U19b1b the sender task ([`spawn`]): two routes (DNS, then the host
 //! pinned to Telegram's address), woken by a `Notify` (a new message, or
 //! the runtime's tick when the retry flush is due on the injected clock),
-//! the alert metrics and the shutdown flush. Nothing in the runtime starts
-//! it yet (U19b1c).
+//! the alert metrics and the shutdown flush. U19b1c the P1 conditions
+//! ([`Alerts`]: the mismatch messages, the key stop, the public IP, the
+//! start refusal) and their texts; the runtime starts the sender before
+//! the start checks and drives `Alerts` at every tick.
 //!
 //! The token is never written to an error, a log or `Debug`.
 //!
@@ -530,6 +532,11 @@ pub struct Task {
 }
 
 impl Task {
+    /// The task ended (before [`Task::finish`]: a bug).
+    pub fn ended(&self) -> bool {
+        self.join.is_finished()
+    }
+
     /// Shutdown: one last flush, bounded by `bound_ms` of real time; what
     /// is left is dropped and counted in one log line. Returns the parts
     /// left.

@@ -1,15 +1,20 @@
 //! The runtime (C-WATCH part 7, U19a7): the single-threaded tokio loop
-//! that carries out what the sans-IO parts ask. Boot: credentials → the
-//! metrics push timer (from here on) → the start checks ([`Start`]) → the
+//! that carries out what the sans-IO parts ask. Boot: credentials and the
+//! token file → the metrics push timer and the alert sender (from here on;
+//! U19b1c) → the start checks ([`Start`]) → the
 //! wait for `/api/status` → the replay of the journal from record 1 to its
 //! cap → the engine (W1, W2, W3 and W4; W2 reads W4's execution times). The IP recheck ([`IpCheck`]) runs from
 //! the end of the start on, also while the watcher waits for the OMS and
 //! replays. Every timer reads the injected clock; the loop wakes every
 //! [`TICK_MS`] of real time (and at every answer) and asks each part what
 //! is due. Each request runs on its own task and its answer comes back to
-//! the loop. Shutdown: no new round, the requests in flight get at most
+//! the loop. Every tick also drives the P1 conditions ([`Alerts`], C-WATCH
+//! part 10): the key stop, the public IP and the mismatch confirmations; a
+//! start refusal sends one P1 and flushes the sender before exit 2.
+//! Shutdown: no new round, the requests in flight get at most
 //! `request_timeout_ms`, one last metrics push, the monitor connection
-//! closes, exit 0. Nothing is persisted.
+//! closes, the sender flushes for at most [`FINISH_MS`], exit 0. Nothing is
+//! persisted.
 
 use std::future::Future;
 use std::sync::Arc;
@@ -19,7 +24,7 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
-use crate::alert::Route;
+use crate::alert::{self, Alerts, FINISH_MS, Route, Task};
 use crate::clock::Clock;
 use crate::config::Config;
 use crate::engine::{Action, Check, Engine, Logic};
@@ -28,7 +33,7 @@ use crate::log::Log;
 use crate::metrics::{Exporter, Metrics};
 use crate::oms::{Monitor, Status, admin_send};
 use crate::rest::{Client, ClientConfig, RestError};
-use crate::start::{self, IpCheck, Start, Step};
+use crate::start::{self, IpCheck, PublicIp, Start, Step};
 use crate::state::JournalState;
 use crate::w2::W2;
 use crate::w3::W3;
@@ -45,8 +50,8 @@ pub const STATUS_LOG_MS: u64 = 10_000;
 
 /// Where the watcher sends: the binary takes them from the config (the
 /// REST base from `network` only) and the two Telegram routes from
-/// [`Route::telegram`], with no override; tests give loopback fakes.
-/// Nothing in the runtime uses `telegram` yet (U19b1c).
+/// [`Route::telegram`], with no override; tests give loopback fakes. The
+/// sender uses `telegram` when the config has `[telegram]` (U19b1c).
 #[derive(Debug, Clone)]
 pub struct Endpoints {
     pub rest_base: String,
@@ -138,6 +143,13 @@ struct Runtime {
     pushing: bool,
     /// Set by a start refusal: the exit code 2.
     refused: bool,
+    /// The P1 conditions (U19b1c).
+    alerts: Alerts,
+    /// The sender task, `None` without `[telegram]`.
+    alert_task: Option<Task>,
+    /// Set once the sender task ended before the shutdown.
+    sender_ended: bool,
+    public_ip: PublicIp,
 }
 
 /// Runs the watcher until `shutdown` resolves; the exit code (0, or 2 for
@@ -157,18 +169,21 @@ pub async fn run(
             return 2;
         }
     };
-    // Read once, before the start checks (U19b1a); the sender that uses
-    // it comes with U19b1b/U19b1c.
-    match &cfg.telegram {
-        Some(t) => {
-            if let Err(e) = crate::creds::load_token(&t.token_file, &cfg.data_dir) {
+    // Read once, before the start checks (U19b1a).
+    let token = match &cfg.telegram {
+        Some(t) => match crate::creds::load_token(&t.token_file, &cfg.data_dir) {
+            Ok(tok) => Some(tok),
+            Err(e) => {
                 log(&format!("error: {e}"));
                 return 2;
             }
-        }
+        },
         // Testnet only: the config refuses mainnet without it.
-        None => log("warn: no [telegram]: every [WATCH P1] is written to this log only, not sent"),
-    }
+        None => {
+            log("warn: no [telegram]: every [WATCH P1] is written to this log only, not sent");
+            None
+        }
+    };
     let metrics = Arc::new(Metrics::new(&cfg.host, &cfg.name));
     let timeout = cfg.http.request_timeout_ms;
     let exporter = match &cfg.telemetry.vm_url {
@@ -200,6 +215,25 @@ pub async fn run(
             return 2;
         }
     };
+    // The sender is up before the start checks, so that a key rejected at
+    // step 2 is told (U19b1c).
+    let (alerts, alert_task) = match token {
+        Some(tok) => match alert::spawn(
+            &cfg.name,
+            ep.telegram.clone(),
+            tok,
+            clock.clone(),
+            metrics.clone(),
+            log.clone(),
+        ) {
+            Ok((h, t)) => (Alerts::telegram(h), Some(t)),
+            Err(e) => {
+                log(&format!("error: the alert sender: {e}"));
+                return 2;
+            }
+        },
+        None => (Alerts::log_only(log.clone(), clock.clone()), None),
+    };
     let (tx, mut rx) = mpsc::unbounded_channel();
     // At most one heartbeat waits: a slow monitor link drops beats, it
     // does not pile them up.
@@ -213,6 +247,7 @@ pub async fn run(
     );
     let heartbeat = tokio::spawn(heartbeats(monitor, beats_rx, clock.clone()));
     let start = Start::new(&cfg, metrics.clone(), log.clone(), boot_ms);
+    let public_ip = start.public_ip();
     let mut rt = Runtime {
         echo_url: ep.ip_echo_url,
         clock,
@@ -230,6 +265,10 @@ pub async fn run(
         next_push: boot_ms,
         pushing: false,
         refused: false,
+        alerts,
+        alert_task,
+        sender_ended: false,
+        public_ip,
         cfg,
     };
     let mut shutdown = std::pin::pin!(shutdown);
@@ -245,11 +284,22 @@ pub async fn run(
         while rt.tasks.try_join_next().is_some() {}
         if rt.refused {
             rt.tasks.abort_all();
+            // The refusal P1 is queued: flush it before the exit.
+            finish_alerts(rt.alert_task.take()).await;
             return 2;
         }
     }
+    let task = rt.alert_task.take();
     rt.stop(heartbeat).await;
+    finish_alerts(task).await;
     0
+}
+
+/// The sender's last flush, bounded by [`FINISH_MS`] of real time.
+async fn finish_alerts(task: Option<Task>) {
+    if let Some(t) = task {
+        t.finish(FINISH_MS).await;
+    }
 }
 
 /// The heartbeat task: one beat at a time over the persistent connection;
@@ -325,6 +375,7 @@ impl Runtime {
         match step {
             Step::Refuse { reason } => {
                 (self.log)(&format!("error: start refused: {reason}"));
+                self.alerts.once(&alert::refusal_text(&reason));
                 self.refused = true;
             }
             Step::Done | Step::StayUpNoRequests => {
@@ -379,6 +430,8 @@ impl Runtime {
     /// What is due now.
     fn tick(&mut self) {
         let now = self.clock.now_ms();
+        self.alerts.poll(now, &self.client, &self.public_ip);
+        self.watch_sender();
         self.push_if_due(now);
         if let Some(req) = self.ip.as_mut().and_then(|ip| ip.poll(now)) {
             let (c, url) = (self.client.clone(), self.echo_url.clone());
@@ -412,6 +465,18 @@ impl Runtime {
         for c in Check::ALL {
             self.metrics
                 .set("watcher_check_age_s", &[("check", c.name())], age);
+        }
+    }
+
+    /// A sender task that ended before the shutdown (a bug: a panic or a
+    /// poisoned lock) sends nothing more; one error line (U19b1b review 1
+    /// N1).
+    fn watch_sender(&mut self) {
+        if !self.sender_ended && self.alert_task.as_ref().is_some_and(Task::ended) {
+            self.sender_ended = true;
+            (self.log)(
+                "error: the alert sender task ended: no [WATCH P1] is sent until the watcher restarts",
+            );
         }
     }
 
@@ -493,6 +558,7 @@ impl Runtime {
     /// Carries out the engine's actions.
     fn exec(&mut self, actions: Vec<Action>) {
         for a in actions {
+            self.alerts.on_action(&a);
             match a {
                 Action::Venue {
                     req_id,
@@ -519,7 +585,7 @@ impl Runtime {
                         Msg::Admin(check, send_id, r)
                     });
                 }
-                // The mismatch P1 (U19b1c): wired with the sender.
+                // The mismatch P1, given to `alerts` above (U19b1c).
                 Action::Confirmed { .. } => {}
                 Action::Heartbeat { checks } => {
                     if self.beats.try_send(checks).is_err() {

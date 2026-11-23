@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use watcher::alert::Route;
 use watcher::clock::{Clock, ManualClock, SystemClock};
 use watcher::config::Config;
 use watcher::runtime::{Endpoints, run};
@@ -40,6 +41,9 @@ struct World {
     echo: FakeHttp,
     status: FakeHttp,
     vm: FakeHttp,
+    /// The Telegram Bot API (U19b1c); used when the config has
+    /// `[telegram]`.
+    telegram: FakeHttp,
     admin: FakeSock,
     monitor: FakeSock,
     journal: TestJournal,
@@ -74,6 +78,7 @@ impl World {
         let echo = FakeHttp::start(Answer::Reply(200, "127.0.0.1\n".into()));
         let status = FakeHttp::start(Answer::Reply(404, "{}".into()));
         let vm = FakeHttp::start(Answer::Reply(204, String::new()));
+        let telegram = FakeHttp::start(Answer::Reply(200, r#"{"ok":true,"result":{}}"#.into()));
         let mut journal = TestJournal::new(name);
         journal.segment(2);
         // Short names: a socket path has at most 107 bytes (review 1 N2).
@@ -114,6 +119,7 @@ vm_url = "{}"
             echo,
             status,
             vm,
+            telegram,
             admin,
             monitor,
             journal,
@@ -140,7 +146,7 @@ vm_url = "{}"
         Endpoints {
             rest_base: self.bybit.url(),
             ip_echo_url: format!("{}/", self.echo.url()),
-            telegram: Vec::new(),
+            telegram: vec![Route::direct(&self.telegram.url())],
         }
     }
 
@@ -182,6 +188,18 @@ vm_url = "{}"
             .iter()
             .filter(|l| l.contains(pat))
             .count()
+    }
+
+    /// The texts the fake Telegram got so far.
+    fn sent(&self) -> Vec<String> {
+        self.telegram
+            .requests()
+            .iter()
+            .map(|r| {
+                let v: Value = serde_json::from_slice(&r.body).unwrap();
+                v["text"].as_str().unwrap().to_string()
+            })
+            .collect()
     }
 
     /// The VM import bodies so far.
@@ -580,7 +598,14 @@ fn a_recheck_that_fails_a_start_rule_stops_every_bybit_request() {
         w.lines.lock().unwrap()
     );
     assert_eq!(
-        w.lines_with("the key no longer passes the start check: query-api"),
+        w.lines_with("error: the key no longer passes the start check: query-api"),
+        1
+    );
+    // Without [telegram] the auth P1 is one warn line (U19b1c).
+    assert_eq!(
+        w.lines_with(
+            "warn: [WATCH P1] (no [telegram]: not sent) 워처 키가 시작 규칙을 더는 지키지 않음(the key no longer passes the start check: query-api"
+        ),
         1
     );
     // Requests already on the wire may end; after that nothing reaches
@@ -792,7 +817,9 @@ fn a_start_refusal_ends_the_run_with_exit_code_2() {
         ),
         1
     );
-    assert_eq!(w.lines_with("no [telegram]"), 1);
+    // ... and, from U19b1c, the refusal P1 as a log line.
+    assert_eq!(w.lines_with("no [telegram]"), 2);
+    assert_eq!(w.lines_with("warn: [WATCH P1] (no [telegram]: not sent) 워처 시작 거부"), 1);
     assert_eq!(w.bybit.requests().len(), 1);
     // A credentials file that is not owner-only: refused before any request.
     let w = World::new("rt-refusal-creds", "");
@@ -820,4 +847,157 @@ fn a_start_refusal_ends_the_run_with_exit_code_2() {
     assert!(w.bybit.requests().is_empty());
     assert!(w.vm.requests().is_empty());
     let _ = std::fs::remove_dir_all(&tok_dir);
+}
+
+/// An owner-only token file in a fresh directory and the `[telegram]`
+/// section that names it (U19b1c).
+fn telegram_section(name: &str) -> (std::path::PathBuf, String) {
+    let dir = common::test_dir(name);
+    let tok = dir.join("t.json");
+    std::fs::write(&tok, r#"{"token": "1:made-up", "chat_id": 1}"#).unwrap();
+    std::fs::set_permissions(&tok, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let section = format!("[telegram]\ntoken_file = \"{}\"\n", tok.display());
+    (dir, section)
+}
+
+const KEY_TAIL: &str = "워처의 Bybit 요청이 모두 멈춤(재시작 전까지): W1~W4는 성공하지 않아 OMS가 일반 주문을 막고, 워처의 일괄 취소(W5)도 나갈 수 없음. 키·IP 목록을 확인하고 워처를 다시 시작";
+
+#[test]
+fn a_key_rejected_at_start_is_told_on_telegram() {
+    // U19b1c: the sender is up before the start checks, so a key rejected
+    // at step 2 is told while the start stays there.
+    let (dir, tg) = telegram_section("rt-key-tg-t");
+    let w = World::new("rt-key-tg", &tg);
+    w.bybit.route(
+        "/v5/user/query-api",
+        [Answer::Reply(
+            200,
+            r#"{"retCode":10010,"retMsg":"Unmatched IP, please check your API key's bound IP addresses."}"#.into(),
+        )],
+    );
+    w.status
+        .route("/api/status", [Answer::Reply(500, "{}".into())]);
+    let clock = Arc::new(ManualClock::new(T0));
+    let mut run = w.start(clock.clone());
+    assert!(until(10, || !w.sent().is_empty()), "{:?}", w.lines.lock().unwrap());
+    let body = format!(
+        "워처 키가 거부됨(retCode 10010: Unmatched IP, please check your API key's bound IP addresses.). {KEY_TAIL}"
+    );
+    assert_eq!(w.sent(), vec![format!("[WATCH P1] bybit w-rt 11-15 07:13:20 KST\n{body}")]);
+    // The start stays at step 2: nothing more at Bybit, the watcher up, no
+    // second message before 5 min.
+    walk(&clock, 10_000);
+    assert_eq!(w.requests("/v5/user/query-api").len(), 1);
+    assert_eq!(w.bybit.requests().len(), 1);
+    assert!(run.running());
+    assert_eq!(w.sent().len(), 1);
+    // 5 min after the first: the repeat, from the runtime's tick.
+    clock.advance(300_000);
+    assert!(until(10, || w.sent().len() == 2));
+    assert!(w.sent()[1].ends_with(&format!("\n{body}")));
+    // Shutdown flushes the sender after U19a's steps.
+    assert_eq!(run.shutdown(), 0);
+    assert_eq!(w.lines_with("alert sender stopped: nothing left to send"), 1);
+    assert_eq!(w.lines_with("no [telegram]"), 0);
+    assert_eq!(w.lines_with("made-up"), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_start_refusal_after_the_sender_is_up_sends_one_watch_p1() {
+    let master = || {
+        ok(json!({"isMaster": true, "userID": 1, "ips": ["127.0.0.1"]}))
+    };
+    let body = "워처 시작 거부: query-api: the API key is the master account's; the watcher needs a sub-account key. 워처가 꺼짐: W1~W4와 W5가 돌지 않음";
+    let (dir, tg) = telegram_section("rt-refusal-tg-t");
+    let w = World::new("rt-refusal-tg", &tg);
+    w.bybit.route("/v5/user/query-api", [master()]);
+    let mut run = w.start(Arc::new(ManualClock::new(T0)));
+    assert!(until(10, || !run.running()));
+    assert_eq!(run.shutdown(), 2);
+    // One message reached the fake before the exit.
+    let sent = w.sent();
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert!(sent[0].starts_with("[WATCH P1] bybit w-rt "), "{}", sent[0]);
+    assert!(sent[0].ends_with(&format!("\n{body}")), "{}", sent[0]);
+    assert_eq!(w.lines_with("error: start refused: query-api"), 1);
+    assert_eq!(w.lines_with("alert sender stopped: nothing left to send"), 1);
+
+    // Telegram does not answer: the exit waits for the flush at most 5 s.
+    let w = World::new("rt-refusal-tg-hang", &tg);
+    w.bybit.route("/v5/user/query-api", [master()]);
+    w.telegram.script([Answer::Hang]);
+    let started = Instant::now();
+    let mut run = w.start(Arc::new(ManualClock::new(T0)));
+    assert!(until(15, || !run.running()));
+    let took = started.elapsed();
+    assert_eq!(run.shutdown(), 2);
+    assert!(
+        took >= Duration::from_millis(4_500) && took < Duration::from_secs(9),
+        "{took:?}"
+    );
+    assert_eq!(w.telegram.requests().len(), 1);
+    assert_eq!(
+        w.lines_with("warn: alert sender stopped at its bound: 1 parts not delivered are dropped"),
+        1
+    );
+
+    // Without [telegram] (testnet): the same P1 is one warn line.
+    let w = World::new("rt-refusal-notg-p1", "");
+    w.bybit.route("/v5/user/query-api", [master()]);
+    let mut run = w.start(Arc::new(ManualClock::new(T0)));
+    assert!(until(10, || !run.running()));
+    assert_eq!(run.shutdown(), 2);
+    assert_eq!(
+        w.lines_with(&format!("warn: [WATCH P1] (no [telegram]: not sent) {body}")),
+        1
+    );
+    assert!(w.telegram.requests().is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_confirmed_mismatch_is_told_on_telegram_once() {
+    // U19b1c, end to end through the runtime: a foreign order at the fake
+    // venue is confirmed by W1 and sent to admin.sock; one [WATCH P1]
+    // reaches the fake Telegram, and the rounds that still see it send no
+    // more.
+    let (dir, tg) = telegram_section("rt-mismatch-tg-t");
+    let mut w = World::new(
+        "rt-mismatch-tg",
+        &format!(
+            "[intervals]\nw1_ms = 500\nw2_ms = 500\nw3_ms = 1000\nw4_ms = 1000\nheartbeat_ms = 1000\n\
+             [rules]\nmin_age_ms = 500\nmismatch_resend_ms = 1000\n\
+             [http]\nrequest_timeout_ms = 1000\n{tg}"
+        ),
+    );
+    let now_us = SystemClock.now_ms() * 1000;
+    w.journal.append(now_us - 10_000_000, &[ev_filler()]);
+    w.status_ok();
+    w.bybit.route(
+        "/v5/order/realtime",
+        [ok(json!({"category": "linear", "nextPageCursor": "",
+            "list": [row("x", "v900", "BTCUSDT", "Buy")]}))],
+    );
+    let mut run = w.start(Arc::new(SystemClock));
+    assert!(until(20, || !mismatch_lines(&w.admin).is_empty()));
+    assert!(until(10, || !w.sent().is_empty()));
+    let detail = mismatch_lines(&w.admin)[0]["detail"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(detail.starts_with("W1 foreign v900: "), "{detail}");
+    // Rounds go on for 3 s (6 W1 rounds) that still see it.
+    std::thread::sleep(Duration::from_secs(3));
+    let sent = w.sent();
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert!(sent[0].starts_with("[WATCH P1] bybit w-rt "), "{}", sent[0]);
+    assert!(
+        sent[0].contains("\n워처 W1 불일치 확정 1건. OMS에 일반 주문 차단(watcher_mismatch)을 보내기 시작함"),
+        "{}",
+        sent[0]
+    );
+    assert!(sent[0].ends_with(&detail), "{}", sent[0]);
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
 }
