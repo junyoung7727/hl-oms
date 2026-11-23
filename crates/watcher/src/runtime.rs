@@ -19,6 +19,7 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
+use crate::alert::Route;
 use crate::clock::Clock;
 use crate::config::Config;
 use crate::engine::{Action, Check, Engine, Logic};
@@ -42,12 +43,15 @@ pub const STATUS_RETRY_MS: u64 = 1_000;
 /// ... and writes a line at most this often (판단(모델 아님)).
 pub const STATUS_LOG_MS: u64 = 10_000;
 
-/// Where the watcher sends: the binary takes both from the config (the
-/// REST base from `network` only, no override); tests give loopback fakes.
+/// Where the watcher sends: the binary takes them from the config (the
+/// REST base from `network` only) and the two Telegram routes from
+/// [`Route::telegram`], with no override; tests give loopback fakes.
+/// Nothing in the runtime uses `telegram` yet (U19b1c).
 #[derive(Debug, Clone)]
 pub struct Endpoints {
     pub rest_base: String,
     pub ip_echo_url: String,
+    pub telegram: Vec<Route>,
 }
 
 impl Endpoints {
@@ -55,6 +59,7 @@ impl Endpoints {
         Endpoints {
             rest_base: cfg.network.rest_base().to_string(),
             ip_echo_url: cfg.ip_echo_url.clone(),
+            telegram: Route::telegram(),
         }
     }
 }

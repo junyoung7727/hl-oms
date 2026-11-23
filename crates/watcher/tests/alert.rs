@@ -19,6 +19,7 @@ use watcher::alert::{self, Handle, MSG_LIMIT, OUTBOX_LIMIT, Outbox, Outcome, Par
 use watcher::clock::{Clock, ManualClock};
 use watcher::config::Config;
 use watcher::metrics::Metrics;
+use watcher::runtime::Endpoints;
 
 #[test]
 fn the_token_is_never_in_debug() {
@@ -475,6 +476,25 @@ fn a_network_error_moves_to_the_pinned_route() {
             "149.154.167.220:443".parse().unwrap()
         )
     );
+
+    // The binary takes them from `Endpoints::of`; there is no override.
+    let cfg = Config::from_toml(
+        r#"name = "w1"
+network = "mainnet"
+mainnet_confirmed = true
+credentials_file = "/etc/watcher/creds.toml"
+sub_account_uid = 4242
+symbols = ["BTCUSDT"]
+ip_echo_url = "https://ip.example/"
+data_dir = "/srv/oms/data"
+status_url = "http://127.0.0.1:8188/api/status"
+
+[telegram]
+token_file = "/etc/watcher/telegram.json"
+"#,
+    )
+    .unwrap();
+    assert_eq!(Endpoints::of(&cfg).telegram, prod);
 
     let fake = FakeHttp::start(ok());
     let dead = Route::direct(&format!("http://{}/", dead_addr()));

@@ -140,6 +140,7 @@ vm_url = "{}"
         Endpoints {
             rest_base: self.bybit.url(),
             ip_echo_url: format!("{}/", self.echo.url()),
+            telegram: Vec::new(),
         }
     }
 
