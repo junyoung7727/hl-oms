@@ -772,6 +772,27 @@ fn a_start_refusal_ends_the_run_with_exit_code_2() {
     assert!(w.echo.requests().is_empty());
     assert!(w.status.requests().is_empty());
     assert!(w.monitor.conns().is_empty());
+    assert_eq!(w.lines_with("no [telegram]"), 0);
+    // Testnet without `[telegram]`: one warn line at start, before the
+    // start checks (U19b1a); the start goes on to step 2 as above.
+    let w = World::new("rt-refusal-notg", "");
+    w.bybit.route(
+        "/v5/user/query-api",
+        [ok(
+            json!({"isMaster": true, "userID": 1, "ips": ["127.0.0.1"]}),
+        )],
+    );
+    let mut run = w.start(Arc::new(ManualClock::new(T0)));
+    assert!(until(10, || !run.running()));
+    assert_eq!(run.shutdown(), 2);
+    assert_eq!(
+        w.lines_with(
+            "warn: no [telegram]: every [WATCH P1] is written to this log only, not sent"
+        ),
+        1
+    );
+    assert_eq!(w.lines_with("no [telegram]"), 1);
+    assert_eq!(w.bybit.requests().len(), 1);
     // A credentials file that is not owner-only: refused before any request.
     let w = World::new("rt-refusal-creds", "");
     std::fs::set_permissions(
