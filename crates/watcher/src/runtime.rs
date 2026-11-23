@@ -152,6 +152,18 @@ pub async fn run(
             return 2;
         }
     };
+    // Read once, before the start checks (U19b1a); the sender that uses
+    // it comes with U19b1b/U19b1c.
+    match &cfg.telegram {
+        Some(t) => {
+            if let Err(e) = crate::creds::load_token(&t.token_file, &cfg.data_dir) {
+                log(&format!("error: {e}"));
+                return 2;
+            }
+        }
+        // Testnet only: the config refuses mainnet without it.
+        None => log("warn: no [telegram]: every [WATCH P1] is written to this log only, not sent"),
+    }
     let metrics = Arc::new(Metrics::new(&cfg.host, &cfg.name));
     let timeout = cfg.http.request_timeout_ms;
     let exporter = match &cfg.telemetry.vm_url {
