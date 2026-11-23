@@ -75,22 +75,22 @@ fn messages_split_at_3500_utf16_units_at_line_ends() {
     assert_eq!(split("a\nb"), ["a\nb"]);
     // Whole lines fill a part up to the limit, the line end included.
     let line = "x".repeat(1000);
-    let text = vec![line.as_str(); 7].join("\n");
+    let text = [line.as_str(); 7].join("\n");
     let parts = split(&text);
     assert_eq!(parts.len(), 3);
-    assert_eq!(parts[0], vec![line.as_str(); 3].join("\n"));
+    assert_eq!(parts[0], [line.as_str(); 3].join("\n"));
     assert_eq!(parts[2], line);
     assert_eq!(parts.join("\n"), text);
     // Exactly 3,500 units is one part; one more cuts at the line end.
     let exact = format!("{}\n{}", "a".repeat(1749), "b".repeat(1750));
     assert_eq!(units(&exact), 3500);
-    assert_eq!(split(&exact), [exact.clone()]);
+    assert_eq!(split(&exact), [exact.as_str()]);
     let over = format!("{exact}b");
     assert_eq!(split(&over), ["a".repeat(1749), "b".repeat(1751)]);
     // UTF-16 units, not bytes or characters: a Hangul syllable is one
     // unit (three bytes), an emoji two (one character).
     let hangul = "가".repeat(3500);
-    assert_eq!(split(&hangul), [hangul.clone()]);
+    assert_eq!(split(&hangul), [hangul.as_str()]);
     let parts = split(&format!("{hangul}가"));
     assert_eq!(parts, [hangul.clone(), "가".to_string()]);
     let emoji = "😀".repeat(1751);
