@@ -214,7 +214,7 @@ fn bad_pages_and_rows_fail_the_round() {
     // An empty side is no position; an empty page with a cursor is
     // followed; a short page without one ends the read.
     r.venue.pos_script.extend([
-        page(vec![pos("BTCUSDT", "", "0", None)], "c2"),
+        page(vec![pos("BTCUSDT", "", "1", None)], "c2"),
         page(vec![], "c3"),
         page(vec![], ""),
     ]);
@@ -244,6 +244,11 @@ fn a_young_journal_change_defers_even_at_the_first_sighting() {
     r.at(T0 + 3000);
     assert_eq!(r.engine.success(Check::W2), Some(T0 + 3000));
     assert_eq!(r.gauge("watcher_differences", "W2"), Some(1.0));
+    // 1 µs short of 2 s is young (µs rounded up to ms, never older).
+    r.journal
+        .append((T0 + 2000) * 1000 + 1, &[adj("SOLUSDT", "1")]);
+    r.at(T0 + 4000);
+    assert_eq!(r.engine.success(Check::W2), Some(T0 + 3000));
 }
 
 #[test]
@@ -274,27 +279,30 @@ fn a_deferred_round_is_not_a_success() {
 fn sizes_found_at_the_first_round_have_no_seen_time() {
     let mut r = rig("w2-first-sizes");
     r.venue.positions = vec![pos("BTCUSDT", "Buy", "1", None)];
-    // The first round fails before it read every page: the next one is
-    // the first read, and its sizes are the state found at start.
-    r.venue
-        .pos_script
-        .push_back(Err(RestError::NoAnswer("timeout".into())));
+    // The first rounds fail before they read every page (no answer, an
+    // unreadable page without BTCUSDT): the third one is the first read,
+    // and its sizes are the state found at start.
+    r.venue.pos_script.extend([
+        Err(RestError::NoAnswer("timeout".into())),
+        page(vec![json!({"side": "Buy", "size": "1"})], ""),
+    ]);
     r.at(T0);
     r.at(T0 + 1000);
-    assert_eq!(r.engine.success(Check::W2), Some(T0 + 1000));
     r.at(T0 + 2000);
+    assert_eq!(r.engine.success(Check::W2), Some(T0 + 2000));
+    r.at(T0 + 3000);
     let want = detail("BTCUSDT", "1", "0", "change time unknown");
-    assert_eq!(w2_mismatches(&r), vec![(T0 + 2000, want)]);
+    assert_eq!(w2_mismatches(&r), vec![(T0 + 3000, want)]);
     // A size that appears later was seen to change: its time is the round
     // that first saw it, and it defers for 2 s.
     r.venue.positions.push(pos("ETHUSDT", "Buy", "1", None));
-    r.at(T0 + 3000);
     r.at(T0 + 4000);
-    assert_eq!(r.engine.success(Check::W2), Some(T0 + 2000));
     r.at(T0 + 5000);
+    assert_eq!(r.engine.success(Check::W2), Some(T0 + 3000));
+    r.at(T0 + 6000);
     let want = detail("ETHUSDT", "1", "0", "journal entry 2.0 s old");
-    assert_eq!(w2_mismatches(&r)[1..], [(T0 + 5000, want)]);
-    assert_eq!(r.engine.success(Check::W2), Some(T0 + 5000));
+    assert_eq!(w2_mismatches(&r)[1..], [(T0 + 6000, want)]);
+    assert_eq!(r.engine.success(Check::W2), Some(T0 + 6000));
 }
 
 #[test]
