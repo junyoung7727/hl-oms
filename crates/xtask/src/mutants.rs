@@ -2129,6 +2129,15 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "admin", "a_second_send_waits_for_the_first_answer"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M246-watcher-late-report-pays-the-next-send",
+        what: "the report of a send taken as failed at its deadline is read as the answer of the next send of the check, so its \"held\" pays what the next send carried though no hold note names it (review 1 S1 of U19a7)",
+        file: "crates/watcher/src/engine.rs",
+        find: "        if s.sending.as_ref().is_none_or(|x| x.id != send_id) {\n",
+        replace: "        if s.sending.is_none() {\n",
+        test: &["-p", "watcher", "--test", "admin", "a_late_report_of_one_send_pays_only_what_that_send_carried"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
