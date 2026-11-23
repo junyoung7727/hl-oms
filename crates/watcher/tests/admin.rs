@@ -183,7 +183,9 @@ fn a_second_send_waits_for_the_first_answer() {
     assert_eq!(r.gauge("watcher_mismatches_total", "W1"), Some(2.0));
     // The first send's "held" pays what it carried, not the second.
     let held = r.hold(Check::W1, &a);
-    let more = r.engine.on_admin(T0 + 9_500, Check::W1, held);
+    let more = r
+        .engine
+        .on_admin(T0 + 9_500, Check::W1, r.send_ids[0], held);
     assert!(more.is_empty(), "{more:?}");
     r.venue.orders.retain(|o| o["orderId"] == "va");
     rounds(&mut r, 10..15);
@@ -201,6 +203,62 @@ fn a_second_send_waits_for_the_first_answer() {
     rounds(&mut r, 36..37);
     assert_eq!(w1(&r)[2], (T0 + 36_000, format!("{b}; and 1 more")));
     assert_eq!(r.lines_with("warn: W1 mismatch send has no report"), 1);
+}
+
+#[test]
+fn a_late_report_of_one_send_pays_only_what_that_send_carried() {
+    let cfg =
+        config_with("[rules]\nmismatch_resend_ms = 1000\n[http]\nrequest_timeout_ms = 10000\n");
+    let mut r = Rig::with_config("admin-late-report", &cfg);
+    r.oms = Oms::Silent;
+    r.venue.orders = vec![row("a", "va", "BTCUSDT", "Buy")];
+    rounds(&mut r, 0..3);
+    let a = foreign_detail("va", "a", "2.0 s");
+    assert_eq!(w1(&r), vec![(T0 + 2000, a.clone())]);
+    // B is confirmed while send 1 (A) has no report; send 1 is taken as
+    // failed at emission + 2 × request_timeout_ms + 1 s, and send 2 then
+    // carries A and B.
+    r.venue.orders.push(row("b", "vb", "BTCUSDT", "Buy"));
+    rounds(&mut r, 3..24);
+    assert_eq!(w1(&r).len(), 2);
+    assert_eq!(w1(&r)[1], (T0 + 23_000, format!("{a}; and 1 more")));
+    // Send 1's report comes now: "held", the hold's note names A only. It
+    // belongs to no send in flight and pays nothing, not what send 2
+    // carried.
+    let held = r.hold(Check::W1, &a);
+    assert_eq!(held, Ok("held".to_string()));
+    assert_eq!(r.send_ids, vec![1, 2]);
+    let more = r.engine.on_admin(T0 + 23_100, Check::W1, 1, held);
+    assert!(more.is_empty(), "{more:?}");
+    assert_eq!(r.gauge("watcher_mismatch_active", "W1"), Some(2.0));
+    assert_eq!(
+        r.lines_with("debug: an answer to W1 send 1, which is not the send in flight"),
+        1
+    );
+    // Send 2's own report: "already held", which pays nothing either.
+    let already = r.hold(Check::W1, &a);
+    let more = r.engine.on_admin(T0 + 23_200, Check::W1, 2, already);
+    assert!(more.is_empty(), "{more:?}");
+    assert_eq!(r.gauge("watcher_mismatch_active", "W1"), Some(2.0));
+    // Both orders leave the venue; the hold is read, nothing is sent.
+    r.venue.orders.clear();
+    rounds(&mut r, 24..30);
+    assert_eq!(w1(&r).len(), 2);
+    assert_eq!(r.gauge("watcher_mismatch_active", "W1"), Some(2.0));
+    // After the clear A and B go once more, and the new hold names A and B.
+    r.clear(T0 + 30_000);
+    rounds(&mut r, 30..31);
+    assert_eq!(w1(&r)[2], (T0 + 30_000, format!("{a}; and 1 more")));
+    let held = r.hold(Check::W1, &w1(&r)[2].1);
+    assert!(
+        r.engine
+            .on_admin(T0 + 30_100, Check::W1, 3, held)
+            .is_empty()
+    );
+    assert_eq!(r.gauge("watcher_mismatch_active", "W1"), Some(0.0));
+    r.clear(T0 + 31_000);
+    rounds(&mut r, 31..40);
+    assert_eq!(w1(&r).len(), 3);
 }
 
 #[test]
@@ -229,7 +287,8 @@ fn a_hold_seen_off_at_a_cap_sampled_before_the_answer_does_not_send() {
     let cap_before = r.journal.next_seq - 1;
     // ...the send is answered "held" (hold_set written)...
     let held = r.hold(Check::W1, &closed_detail());
-    assert!(r.engine.on_admin(T0 + 2100, Check::W1, held).is_empty());
+    let id = r.send_ids[0];
+    assert!(r.engine.on_admin(T0 + 2100, Check::W1, id, held).is_empty());
     // ...and the early status's cap predates the hold_set: the hold looks
     // off there, but that cap proves nothing about the answer.
     r.cap = Some(cap_before);

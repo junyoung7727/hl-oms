@@ -95,8 +95,13 @@ pub enum Action {
     },
     /// `GET /api/status`; the answer goes to `on_status` with this id.
     Status { req_id: u64 },
-    /// `watcher_mismatch` to `admin.sock`; its answer goes to `on_admin`.
-    Mismatch { check: Check, detail: String },
+    /// `watcher_mismatch` to `admin.sock`; its answer goes to `on_admin`
+    /// with this `send_id` (review 1 S1 of U19a7).
+    Mismatch {
+        check: Check,
+        send_id: u64,
+        detail: String,
+    },
     /// `heartbeat` to `monitor.sock`: each check's last success (ms).
     Heartbeat { checks: Vec<(Check, Option<u64>)> },
 }
@@ -175,6 +180,7 @@ struct Open {
 
 /// The one send of a check in flight: what it carried.
 struct Sending {
+    id: u64,
     carried: Vec<Ident>,
     deadline: u64,
 }
@@ -215,6 +221,7 @@ pub struct Engine {
     start_ms: u64,
     next_heartbeat: u64,
     next_req: u64,
+    next_send: u64,
     slots: Vec<Slot>,
     latched: Option<JournalError>,
     journal_failing: bool,
@@ -249,6 +256,7 @@ impl Engine {
             start_ms,
             next_heartbeat: start_ms,
             next_req: 1,
+            next_send: 1,
             slots: Vec::new(),
             latched: None,
             journal_failing: false,
@@ -386,13 +394,16 @@ impl Engine {
         out
     }
 
-    /// The answer to the send of `check` in flight: the `result` of
+    /// The answer to the send `send_id` of `check`: the `result` of
     /// `watcher_mismatch`, or why there is none (`<code>: <message>` for an
-    /// error reply). Only `"held"` pays what the send carried.
+    /// error reply). Only `"held"` pays what the send carried. The answer
+    /// of a send that is not the one in flight (its deadline passed, and a
+    /// later send may carry more) is ignored and pays nothing.
     pub fn on_admin(
         &mut self,
         now: u64,
         check: Check,
+        send_id: u64,
         answer: Result<String, String>,
     ) -> Vec<Action> {
         let mut out = Vec::new();
@@ -401,11 +412,14 @@ impl Engine {
         };
         let after = self.next_req;
         let s = &mut self.slots[i];
-        let Some(sent) = s.sending.take() else {
+        if s.sending.as_ref().is_none_or(|x| x.id != send_id) {
             (self.log)(&format!(
-                "debug: an answer to a {} send, which no send in flight owns, is ignored",
+                "debug: an answer to {} send {send_id}, which is not the send in flight, is ignored",
                 check.name()
             ));
+            return out;
+        }
+        let Some(sent) = s.sending.take() else {
             return out;
         };
         match answer.as_deref() {
@@ -453,6 +467,7 @@ impl Engine {
             return;
         }
         let check = s.logic.check();
+        let send_id = self.next_send;
         let mut carried: Vec<(Ident, String)> = s.owed.clone();
         if check.resends_while_seen() {
             for (id, d) in &s.confirmed {
@@ -469,12 +484,15 @@ impl Engine {
             detail.push_str(&format!("; and {} more", carried.len() - 1));
         }
         s.last_send_ms = Some(now);
+        self.next_send += 1;
         s.sending = Some(Sending {
+            id: send_id,
             carried: carried.into_iter().map(|(id, _)| id).collect(),
             deadline: now + 2 * timeout + SEND_EXTRA_MS,
         });
         out.push(Action::Mismatch {
             check,
+            send_id,
             detail: cut(detail, DETAIL_MAX),
         });
     }

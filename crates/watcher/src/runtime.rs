@@ -64,7 +64,7 @@ enum Msg {
     BootStatus(Result<Value, String>),
     Venue(u64, Result<Value, RestError>),
     Status(u64, Result<Value, String>),
-    Admin(Check, Result<String, String>),
+    Admin(Check, u64, Result<String, String>),
     Pushed,
 }
 
@@ -277,9 +277,9 @@ impl Runtime {
                     self.exec(out);
                 }
             }
-            Msg::Admin(check, a) => {
+            Msg::Admin(check, send_id, a) => {
                 if let Phase::Run(e) = &mut self.phase {
-                    let out = e.on_admin(now, check, a);
+                    let out = e.on_admin(now, check, send_id, a);
                     self.exec(out);
                 }
             }
@@ -473,13 +473,17 @@ impl Runtime {
                     let s = self.status.clone();
                     self.spawn(async move { Msg::Status(req_id, s.get().await) });
                 }
-                Action::Mismatch { check, detail } => {
+                Action::Mismatch {
+                    check,
+                    send_id,
+                    detail,
+                } => {
                     let path = self.cfg.admin_socket.clone();
                     let name = self.cfg.name.clone();
                     let timeout = self.cfg.http.request_timeout_ms;
                     self.spawn(async move {
                         let r = admin_send(&path, &name, check, &detail, timeout).await;
-                        Msg::Admin(check, r)
+                        Msg::Admin(check, send_id, r)
                     });
                 }
                 Action::Heartbeat { checks } => {

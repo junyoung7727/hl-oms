@@ -169,6 +169,8 @@ pub struct Rig {
     /// Set: the OMS does not answer `/api/status` (U19a6).
     pub status_down: Option<String>,
     pub mismatches: Vec<(u64, Check, String)>,
+    /// The `send_id` of each entry of `mismatches`.
+    pub send_ids: Vec<u64>,
     pub heartbeats: Vec<Beat>,
     pub oms: Oms,
     /// Answers to `Mismatch` used before `oms`, in order.
@@ -212,6 +214,7 @@ impl Rig {
             instance: INSTANCE,
             status_down: None,
             mismatches: Vec::new(),
+            send_ids: Vec::new(),
             heartbeats: Vec::new(),
             oms: Oms::Holds,
             admin_script: VecDeque::new(),
@@ -293,15 +296,20 @@ impl Rig {
                     };
                     self.engine.on_status(now, req_id, s)
                 }
-                Action::Mismatch { check, detail } => {
+                Action::Mismatch {
+                    check,
+                    send_id,
+                    detail,
+                } => {
                     self.mismatches.push((now, check, detail.clone()));
+                    self.send_ids.push(send_id);
                     let answer = match (self.admin_script.pop_front(), self.oms) {
                         (Some(a), _) => Some(a),
                         (None, Oms::Holds) => Some(self.hold(check, &detail)),
                         (None, Oms::Silent) => None,
                     };
                     match answer {
-                        Some(a) => self.engine.on_admin(now, check, a),
+                        Some(a) => self.engine.on_admin(now, check, send_id, a),
                         None => vec![],
                     }
                 }
