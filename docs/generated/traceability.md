@@ -1,7 +1,7 @@
 # 계약 추적표
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `829b743834e05f84`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `5d1f9f7ce77e6569`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 | 계약 | 제목 | 상태 전이(이벤트) | 설계 결정 | 코드 | 주장 |
 |---|---|---|---|---|---|
@@ -29,6 +29,6 @@
 | [C-HOLD](../../docs/contracts/holds.md) | 운영자가 푸는 보류 | `hold_set` `hold_cleared` | ADR-030, ADR-008, ADR-004 | `crates/oms-core/src/model.rs`<br>`crates/oms-core/src/core.rs`<br>`crates/oms-core/src/decide.rs`<br>`crates/oms-core/src/input.rs`<br>`crates/oms-core/src/event.rs`<br>`crates/oms-node/src/node.rs`<br>`crates/oms-node/src/server.rs`<br>`crates/oms-node/src/config.rs`<br>`crates/oms-node/src/status.rs`<br>`crates/oms-node/src/alerts.rs`<br>`crates/oms-node/src/venue/mod.rs`<br>`crates/oms-api/src/lib.rs`<br>`crates/oms-api/src/ctl.rs` | V-HOLD-1(미실행), V-HOLD-2(미실행), V-HOLD-3(미실행), V-HOLD-4(미실행), V-HOLD-5(미실행), V-HOLD-6(미실행) |
 | [C-KILL](../../docs/contracts/kill.md) | Bybit 킬 스위치 | `kill_loop_ended` `kill_rearmed` | ADR-030, ADR-028, ADR-004 | `crates/oms-node/src/venue/bybit/kill.rs`<br>`crates/oms-node/src/venue/bybit/gateway.rs`<br>`crates/oms-node/src/venue/bybit/query.rs`<br>`crates/oms-node/src/config.rs`<br>`crates/oms-node/src/status.rs`<br>`crates/oms-node/src/node.rs`<br>`crates/oms-core/src/decide.rs`<br>`crates/oms-core/src/core.rs`<br>`crates/oms-core/src/input.rs`<br>`crates/oms-core/src/event.rs` | V-KILL-1(미실행), V-KILL-2(미실행), V-KILL-3(미실행), V-KILL-4(미실행), V-KILL-5(미실행) |
 | [C-LIVE](../../docs/contracts/liveness.md) | 전략 연결 감시와 모니터링 게이트 | `strategy_link_lost` `strategy_link_restored` `watcher_heartbeat` `monitor_changed` | ADR-030, ADR-008, ADR-015, ADR-004 | `crates/oms-node/src/liveness.rs`<br>`crates/oms-node/src/monitor.rs`<br>`crates/oms-api/src/lib.rs`<br>`crates/oms-core/src/config.rs`<br>`crates/oms-node/src/server.rs`<br>`crates/oms-node/src/node.rs`<br>`crates/oms-node/src/config.rs`<br>`crates/oms-node/src/status.rs`<br>`crates/oms-node/src/alerts.rs`<br>`crates/oms-core/src/decide.rs`<br>`crates/oms-core/src/core.rs`<br>`crates/oms-core/src/model.rs`<br>`crates/oms-core/src/input.rs`<br>`crates/oms-core/src/event.rs` | V-LIVE-1(미실행), V-LIVE-2(미실행), V-LIVE-3(미실행), V-LIVE-4(미실행), V-GATE-1(미실행), V-GATE-2(미실행), V-GATE-3(미실행), V-GATE-4(미실행) |
-| [C-WATCH](../../docs/contracts/watcher.md) | 독립 워처 |  | ADR-031, ADR-025, ADR-011 | `crates/watcher/src`<br>`tools/ci/watcher_independent.sh` | V-WATCH-1(미실행), V-WATCH-2(미실행), V-WATCH-3(미실행), V-WATCH-4(미실행), V-WATCH-5(미실행), V-WATCH-6(미실행) |
+| [C-WATCH](../../docs/contracts/watcher.md) | 독립 워처 |  | ADR-031, ADR-025, ADR-011 | `crates/watcher/src`<br>`tools/ci/watcher_independent.sh` | V-WATCH-1(미실행), V-WATCH-2(미실행), V-WATCH-3(미실행), V-WATCH-4(미실행), V-WATCH-5(미실행), V-WATCH-6(미실행), V-WATCH-7(미실행) |
 
 모든 저널 이벤트는 위 표의 어느 계약에 속한다(생성기가 확인한다).

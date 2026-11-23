@@ -18,7 +18,7 @@
 | testnet 실주문 | 실행하지 않았다(U-01). 증거금 규칙의 testnet 예행과 가정 T1~T11의 확인도 하지 않았다. mainnet 전에 필요하고 사용자의 승인이 필요하다(§10) |
 | 버전 올리기와 되돌리기 | 스키마 검사는 시험으로 확인. 절차 전체는 연습하지 않았다 |
 | 직접 알림(7.11: 토큰 파일, 시작·정지·치명 알림, 조건별 뜻) | 자동 시험으로 확인(loopback 가짜 텔레그램, 가상 거래소에 붙인 노드 프로세스). **실제 텔레그램에는 보낸 적이 없다** |
-| 모니터링 게이트(7.16) | 기록 시각을 넣은 코어 시험과 가상 거래소에 붙인 노드 프로세스(실제 시간)로 확인. 워처(U19a)는 아직 없어 하트비트는 시험의 클라이언트가 보냈다. **실제 거래소에서는 한 번도 해 보지 않았다** |
+| 모니터링 게이트(7.16) | 기록 시각을 넣은 코어 시험과 가상 거래소에 붙인 노드 프로세스(실제 시간)로 확인. 하트비트는 시험의 클라이언트가 보냈다. 워처(U19a7부터 하트비트와 불일치를 보낸다)는 loopback 가짜 소켓으로만 시험했다. **실제 거래소에서는 한 번도 해 보지 않았다** |
 | 전략 연결 감시(7.15) | 코어 시험, 시간을 입력으로 받는 노드 표 시험, 가상 거래소에 붙인 노드 프로세스(실제 시간)로 확인. **실제 거래소에서는 한 번도 해 보지 않았다** |
 | 보류(7.12 킬 래치와 킬 마커, 7.13 워처 불일치, 7.14 거래소 변경) | 코어 시험과 가상 거래소에 붙인 노드 프로세스로 확인(`clear-hold`는 `omsctl`의 본문 함수로). 가상 거래소와 Hyperliquid는 일괄 취소가 없어 킬 루프 대신 `unsupported`로 답한다. Bybit 킬 루프(U18b2, [C-KILL](../contracts/kill.md))는 loopback 가짜 Bybit와 수동 시계, 가짜 Bybit에 붙인 노드 프로세스로 확인. **실제 거래소에서는 한 번도 해 보지 않았다** |
 
@@ -392,11 +392,22 @@ telegram = "/etc/oms/telegram.json"   # 절대 경로
 
 ### 7.13 워처가 불일치를 확정했다 (`holds`에 `watcher_mismatch`)
 
-워처(U19a)의 검사 W1~W4 가운데 하나가 OMS와 거래소의 차이를 확정했다. `core.watcher_mismatch`가 검사 이름(`source`), 시각, 내용을 보여 준다. 일반 주문을 거절하고 감소 전용 주문은 받는다(증거금 정책이 있을 때). 저절로 풀리지 않는다.
+워처([C-WATCH](../contracts/watcher.md))의 검사 가운데 하나가 OMS와 거래소의 차이를 두 라운드 연속으로 보았고, 그 저널 항목이 `min_age_ms`(기본 2초)보다 오래됐다. `core.watcher_mismatch`가 검사 이름(`source`), 시각, 내용(`note` = 워처의 `detail`)을 보여 준다. 일반 주문을 거절하고 감소 전용 주문은 받는다(증거금 정책이 있을 때). 저절로 풀리지 않는다.
 
-1. 내용과 워처 로그를 보고 거래소 화면과 `status`(포지션, 열린 주문, 불일치)를 비교한다.
-2. 원인을 고친다(포지션 차이면 `adjust`, 주문이면 `resolve`·`cancel-all`).
-3. `omsctl … clear-hold --reason watcher_mismatch --note "원인과 조치"`. 차이가 남아 있으면 워처가 다시 보낸다.
+`detail`의 모양: `<검사> <종류> <대상>: venue <거래소 쪽>, journal <저널 쪽>; seen 2 rounds, <나이>`(여럿이면 끝에 `; and N more`). `<나이>`는 `journal entry <a> s old`(저널 항목, W2에서는 저널과 거래소의 변경 시각 중 새 것), `first seen <a> s ago`(저널이 모르는 주문), `change time unknown`(어느 시각도 모름).
+
+| 검사·종류 | 뜻 | 볼 것 |
+|---|---|---|
+| W1 `foreign` | 거래소에 열린 주문이 OMS의 것이 아니다(대상 = 거래소 `orderId`): 다른 형식이나 다른 인스턴스의 `orderLinkId`, 또는 저널이 모르는(지운) 주문 번호 | 거래소 화면에서 그 주문. 사람이 낸 주문이면 취소한다. OMS의 것으로 보이면 `status`의 열린 주문과 저널 |
+| W1 `closed_in_journal` | 저널에서 닫힌 주문이 거래소에 아직 열려 있다 | 거래소에서 그 주문을 취소한다(`omsctl cancel`은 닫힌 주문에 듣지 않는다). 체결이 오면 W2가 본다 |
+| W1 `open_after_terminal` | 저널은 거래소가 끝냈다고 적었는데(`venue_terminal`) 거래소가 아직 연다 | 거래소 화면, 게이트웨이 로그 |
+| W1 `details` | 둘 다 열렸지만 종목이나 방향이 다르다 | 거래소 화면과 `get_order` |
+| W1 `missing_at_venue` | 저널에 열려 있고 확인된 주문이 거래소에 없다 | 체결됐거나 거래소가 취소했는지 거래소 화면에서, 그다음 `resolve`(7.1, §6) |
+| W2 `position` | 기호의 거래소 포지션 ≠ 저널의 합(체결 + 거래소 변경 + 조정) | 거래소 포지션과 `status`의 장부. 수동 거래나 OMS가 못 본 체결이면 `adjust` |
+
+1. 워처 로그의 `error: confirmed difference: …` 줄을 **모두** 읽는다. OMS는 첫 메모만 남긴다(C-HOLD): 보류가 이미 걸린 동안 확정된 차이는 그 메모에 없다. 워처는 그것을 빚으로 들고 있다가 `clear-hold` 뒤 한 번 보내고, 그러면 보류가 그 메모와 함께 한 번 다시 걸린다. 로그를 미리 읽어 두면 돌아오는 보류가 예상된다.
+2. 위 표대로 거래소 화면과 `status`(포지션, 열린 주문, 불일치)를 비교하고 원인을 고친다(포지션이면 `adjust`, 주문이면 `resolve`·`cancel-all`).
+3. `omsctl … clear-hold --reason watcher_mismatch --note "원인과 조치"`. W1~W3의 차이가 남아 있으면 워처가 `mismatch_resend_ms`(기본 10초) 안에 다시 보내 보류가 돌아온다. 돌아오면 1로.
 
 ### 7.14 거래소가 포지션을 바꿨다 (`holds`에 `venue_change`)
 
@@ -443,6 +454,21 @@ unmonitored_cancel_us = 60000000
 ```
 
 mainnet은 이 표 없이 시작하지 않는다. testnet과 가상 거래소에서는 선택이고, 없으면 시작할 때 `warn` 한 줄이 남는다(그러면 워처가 없어도 아무것도 거래를 멈추지 않는다). 표가 있으면 `[runtime] tick_ms`는 1,000 이하여야 한다(게이트는 틱에서만 하트비트가 없다는 것을 본다). 재시작은 게이트를 열지 않는다(U-06): 다시 띄운 노드도 감시 안 됨으로 시작하고, 워처가 60초 안에 하트비트를 보내지 않으면 걸린 일반 주문이 취소된다.
+
+### 7.17 워처 자신의 상태
+
+워처는 지표와 로그로만 자기 상태를 알린다(알림 규칙은 U20b). 모두 `venue="bybit"`, `host`, `watcher` 이름표가 붙는다.
+
+| 보이는 것 | 뜻 | 할 일 |
+|---|---|---|
+| `watcher_auth_rejected = 1` | Bybit가 키를 거절했거나(401, 10003, 10004, 10005, 10007, 10010, 33004) 재확인에서 키가 시작 규칙에 더는 맞지 않는다. 재시작까지 Bybit에 아무것도 묻지 않는다. 검사가 성공하지 않으니 OMS의 게이트가 닫힌다(7.16) | 오류 줄로 원인을 본다. `watcher_public_ip_ok = 0`도 함께면 이 호스트의 공인 IP가 바뀐 것일 수 있다. 키나 IP 목록을 고친 뒤 워처를 다시 띄운다 |
+| `watcher_public_ip_ok = 0` | 반향이 본 공인 IP가 키의 IP 목록에 없거나 확인이 실패했다(`warn: public IP …`) | IP가 바뀌었으면 키의 IP 목록을 고친다. 반향 주소(`ip_echo_url`)가 죽었는지도 본다 |
+| `watcher_api_key_days_left` 있음 | 키에 만료가 있다(IP에 묶이지 않았거나 비밀번호가 바뀐 키, Bybit 문서). 없으면 해당 없음 | 0이 되기 전에 키를 바꾼다 |
+| `watcher_journal_error = 1` | 저널 읽기가 실패했다. `the journal is read again at the next round`면 다음 라운드가 다시 읽고, `the journal reader stops until the watcher restarts`면 재시작까지 멈춘다(모르는 이벤트, 다른 스키마나 인스턴스, 내려간 상한) | 다시 읽는 쪽이 계속되면 파일과 권한을 본다. 멈춘 쪽은 워처가 OMS보다 오래된 빌드인지(새 이벤트) 본 뒤 워처를 고쳐 다시 띄운다 |
+| `watcher_check_age_s{check}`가 계속 자람 | 그 검사가 성공하지 못한다: 거래소 오류, `/api/status` 무응답(`warn: … round failed: /api/status: …`), 저널 오류, 또는 W2의 미룸(체결이 이어지는 동안). 시작 중(시작 확인, OMS 기다림, 재생)이면 설정을 읽은 때부터 센다 | 워처 로그의 `round failed` 줄. W1·W2가 10초를 넘으면 OMS의 게이트가 닫힌다(7.16) |
+| `watcher_heartbeat_ok_ts`가 멈춤 | `monitor.sock`에 하트비트가 기록되지 않는다(`warn: monitor.sock … not connected`, `error: monitor.sock heartbeat refused …`) | 워처가 노드와 같은 uid인지, `[core.policy.monitor]`가 있는지(없으면 소켓이 없다), 두 호스트 시계 |
+| `watcher_up`이 없음 | 워처나 그 지표 밀어 넣기가 없다 | 프로세스와 `[telemetry] vm_url` |
+| `watcher_mismatch_active{check}` > 0 | 확정된 차이 가운데 라운드가 아직 보거나 OMS에 아직 빚진 것(보류 아래에서 확정돼 해제를 기다림) | 7.13 |
 
 ### 킬 마커 (`[kill] marker`)
 

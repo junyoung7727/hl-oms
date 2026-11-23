@@ -36,6 +36,8 @@
 
 ### 워처의 입력(운영 소켓, U19a/U19b가 보낸다)
 
+`watcher_mismatch`를 보내는 쪽은 U19a7부터 독립 워처다(`crates/watcher`, [C-WATCH](watcher.md) 7부): 확정된 차이를 `"held"` 답을 받을 때까지 빚으로 들고, 보류가 꺼진 것을 저널에서 본 뒤에만, 많아야 `mismatch_resend_ms`(기본 10초)마다 다시 보낸다. 첫 메모만 남으므로, 걸린 보류 아래에서 확정된 차이는 해제 뒤 한 번 보내져 보류가 그 메모와 함께 돌아온다. `watcher_kill`은 U19b다.
+
 새 입력 종류 `Input::Watcher`. 다른 입력처럼 기록된다.
 
 | op | 필드 | 효과 | 응답 |
