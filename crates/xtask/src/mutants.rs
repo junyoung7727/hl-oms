@@ -2408,6 +2408,42 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "alert", "an_auth_answer_sends_one_watch_p1_at_once"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M265-watcher-post-signed-over-another-body",
+        what: "the watcher's cancel-all is signed over a re-serialised body, not the bytes it sends (deliberate defect 11 of U19b2a)",
+        file: "crates/watcher/src/rest.rs",
+        find: "            self.recv_window_ms,\n            CANCEL_ALL_BODY,\n        );\n",
+        replace: "            self.recv_window_ms,\n            &serde_json::to_string_pretty(&serde_json::json!({\"category\": \"linear\", \"settleCoin\": \"USDT\"})).unwrap_or_default(),\n        );\n",
+        test: &["-p", "watcher", "--test", "client", "the_only_post_is_cancel_all_with_the_fixed_body"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M266-watcher-liquidation-distance-rounded-up",
+        what: "the kill notices' distance to the liquidation price is rounded up instead of down (deliberate defect 12 of U19b2a)",
+        file: "crates/watcher/src/decimal.rs",
+        find: "        let hundredths = num.0.checked_mul(10_000)? / den.0;\n",
+        replace: "        let hundredths = (num.0.checked_mul(10_000)? + den.0 - 1) / den.0;\n",
+        test: &["-p", "watcher", "--test", "kill", "the_position_block_lists_size_upnl_mark_and_liquidation_distance"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M267-watcher-empty-liq-price-gives-a-number",
+        what: "an empty liqPrice is read as 0 and gives a liquidation distance (deliberate defect 13 of U19b2a)",
+        file: "crates/watcher/src/kill.rs",
+        find: "        .filter(|s| !s.is_empty())\n        .and_then(|s| Dec::parse(s).ok())\n        .filter(|l| l.0 > 0);\n",
+        replace: "        .map(|s| Dec::parse(s).unwrap_or(Dec::ZERO));\n",
+        test: &["-p", "watcher", "--test", "kill", "the_position_block_lists_size_upnl_mark_and_liquidation_distance"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M268-watcher-read-only-key-passes-with-kill",
+        what: "a read-only key passes the start with [kill] (deliberate defect 14 of U19b2a)",
+        file: "crates/watcher/src/start.rs",
+        find: "    if read_only != 0 {\n",
+        replace: "    if read_only > 1 {\n",
+        test: &["-p", "watcher", "--test", "start", "a_key_that_must_cancel_needs_read_write_order_and_no_withdraw"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
