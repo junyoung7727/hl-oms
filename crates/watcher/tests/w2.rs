@@ -49,7 +49,10 @@ fn fills(r: &mut Rig, mut size: u64, (from, to): (u64, u64), start: u64, until: 
         }
         let made = t.wrapping_sub(300);
         if t >= from + 300 && made > from && made <= to && (made - from) % 200 == 0 {
-            r.write(t, &[ext(&format!("BTCUSDT:{made}"), "BTCUSDT", "1", made * 1000)]);
+            r.write(
+                t,
+                &[ext(&format!("BTCUSDT:{made}"), "BTCUSDT", "1", made * 1000)],
+            );
         }
         r.at(t);
     }
@@ -115,10 +118,7 @@ fn a_changing_difference_restarts_the_count() {
     assert_eq!(r.engine.success(Check::W2), Some(T0 + 1000));
     r.at(T0 + 2000);
     let btc = detail("BTCUSDT", "3", "1", "journal entry 12.0 s old");
-    assert_eq!(
-        w2_mismatches(&r),
-        vec![(T0 + 1000, eth), (T0 + 2000, btc)]
-    );
+    assert_eq!(w2_mismatches(&r), vec![(T0 + 1000, eth), (T0 + 2000, btc)]);
     // Agreement ends both.
     r.write(T0 + 2100, &[adj("BTCUSDT", "2"), adj("ETHUSDT", "-2")]);
     r.at(T0 + 3000);
@@ -387,7 +387,10 @@ fn a_difference_planted_after_the_fills_stop_is_confirmed_within_3_s() {
     let mut t = T0 + 12_000;
     // Plants at every phase of the 1 s round in steps of 100 ms, before
     // the round's read; then one 1 ms after a round's read.
-    let phases: Vec<(u64, bool)> = (0..10).map(|p| (p * 100, false)).chain([(0, true)]).collect();
+    let phases: Vec<(u64, bool)> = (0..10)
+        .map(|p| (p * 100, false))
+        .chain([(0, true)])
+        .collect();
     for (phase, after_read) in phases {
         let at = t + 1000 - t % 1000 + phase;
         for _ in 0..20 {
@@ -421,7 +424,14 @@ fn a_difference_planted_after_the_fills_stop_is_confirmed_within_3_s() {
         assert!((2000..=3000).contains(&late), "phase {phase}: {late} ms");
         // At a round start +2,000 ms; just after a round's read just
         // under +3,000 ms.
-        assert_eq!(late, if after_read { 2999 } else { 2000 + (1000 - phase) % 1000 });
+        assert_eq!(
+            late,
+            if after_read {
+                2999
+            } else {
+                2000 + (1000 - phase) % 1000
+            }
+        );
         // The journal follows; the difference ends.
         r.write(t, &[adj("BTCUSDT", "1")]);
         for _ in 0..30 {
