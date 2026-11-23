@@ -133,6 +133,13 @@ fn messages_split_at_3500_utf16_units_at_line_ends() {
     assert!(parts.iter().all(|p| units(p) <= 3500 && !p.is_empty()));
     let rejoined: String = parts.concat();
     assert_eq!(rejoined.replace('\n', ""), text.replace('\n', ""));
+    // A blank line at a cut or at the start makes no empty part and no part
+    // that starts with a line end: it is the one thing a split may drop
+    // (PR #3; review 1 S1).
+    let full = "x".repeat(3500);
+    assert_eq!(split(&format!("{full}\n\ny")), [full.as_str(), "y"]);
+    assert_eq!(split("\n\nabc"), ["abc"]);
+    assert_eq!(split("a\n\nb"), ["a\n\nb"]);
 }
 
 /// Sends the next part with `o` and applies the outcome; the part sent.
