@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `5f780db6a596d3a1`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `87ed24980e204068`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 주장 118건: 통과 0, 실패 0, 미실행 51, 이전 버전 결과 67.
 
@@ -2917,11 +2917,11 @@
 - 전제와 범위: 엔진 시험 도구(프로세스 안의 모델 거래소에 지갑 계좌 목록과 대본, 포지션과 체결; 시험 저널의 day_base_set·hold_cleared; 시험 도구의 OMS), 가짜 monitor.sock과 실제 oms::Monitor, runtime::checks, runtime::run과 http-fake의 wallet-balance 경로: 시험 9개
 - 실제 구성요소: 워처의 Engine, W3, W2, W4, runtime::checks, runtime::run, oms::Monitor, rest::Client(종단 시험), ADR-011 형식으로 쓴 저널 파일
 - 모의·시뮬레이션: Bybit wallet-balance·position/list·execution/list(모델 거래소와 http-fake), OMS(시험 도구), 시계(수동, 종단 시험만 실제)
-- 주입한 장애: 한도보다 10^-8 아래, 한도와 같음, 한 라운드만의 위반, 라운드마다 바뀌는 금액, 잔고 ≤ 0, 유지증거금 0, 기준 100에서 95.00과 94.99, 해제 뒤 이어지는 손실, 오늘의 새 기준, 기준 없음, 어제의 기준, 자정을 넘은 오늘의 기준, UNIFIED 없음·둘, 빈 소수, 음수 유지증거금, 지수, 목록이 아닌 list, 거래소 무응답, updatedTime 없는 기호와 늙은 updatedTime의 기호에 어린 W4 시각, 어느 시각도 없는 기호, 실패하는 W3 라운드, 엔진 전의 키 거절. 변이 M251~M254와 시험 밖 변이 14개(모두 잡힘, U19a9 보고)
-- 판정 기준과 근거: W3의 Mismatch와 확정 줄은 정한 라운드에만 정한 detail로 오고, watcher_differences{W3}·watcher_mismatches_total{W3}·watcher_mismatch_active{W3}와 W3의 성공 시각이 정한 값이며, 읽을 수 없는 답마다 watcher_request_errors_total{wallet-balance, unreadable}이 하나씩 오른다. W2의 확정은 W4의 시각이 2초 늙은 라운드에 정한 detail로 온다. 하트비트 줄의 W3·W4는 그 순간 엔진의 성공 시각과 같다. 종단 시험의 하트비트에 W1~W4 시각이 모두 있다
+- 주입한 장애: 한도보다 10^-8 아래, 한도와 같음, 한 라운드만의 위반, 라운드마다 바뀌는 금액, 잔고 ≤ 0, 유지증거금 0, 기준 100에서 95.00과 94.99, 해제 뒤 이어지는 손실, 오늘의 새 기준, 기준 없음, 어제의 기준, 자정을 넘은 오늘의 기준, UNIFIED 없음·둘, 빈 소수, 음수 유지증거금, 지수, 목록이 아닌 list, 거래소 무응답, updatedTime 없는 기호와 늙은 updatedTime의 기호에 어린 W4 시각, 어느 시각도 없는 기호, 실패하는 W3 라운드, 엔진 전의 키 거절, 다른 검사의 간격으로 도는 W3·W4. 변이 M251~M254와 시험 밖 변이 17개(모두 잡힘, U19a9 보고)
+- 판정 기준과 근거: W3의 Mismatch와 확정 줄은 정한 라운드에만 정한 detail로 오고, watcher_differences{W3}·watcher_mismatches_total{W3}·watcher_mismatch_active{W3}와 W3의 성공 시각이 정한 값이며, 읽을 수 없는 답마다 watcher_request_errors_total{wallet-balance, unreadable}이 하나씩 오른다. W2의 확정은 W4의 시각이 2초 늙은 라운드에 정한 detail로 온다. 하트비트 줄의 W3·W4는 그 순간 엔진의 성공 시각과 같다. 종단 시험의 하트비트에 W1~W4 시각이 모두 있다. runtime::checks로 돈 W3·W4의 성공 시각은 +1~+5초에 각자의 간격(W3 2초, W4 5초)으로만 움직인다(검토 1 S1)
 - 재현: `cargo test -p watcher --test w3 --test w2 --test heartbeat --test runtime`
 - 뒷받침하는 것: C-WATCH 9부, ADR-031, C-MARGIN
-- 확인하지 않은 범위: 실제 Bybit wallet-balance의 응답(8자리를 넘는 소수를 보내는지; 키가 없다, U-01). 자정부터 OMS의 새 day_base_set까지는 일 손실을 판단하지 않는다(소유자 질문 6). OMS의 유지증거금 여유(MmBuffer) 규칙은 W3에 없다. 워처의 [w3] 한도가 OMS 설정과 같은지는 운영자의 몫이다. 범위를 넘는 곱을 위반으로 보는 규칙은 시험하지 않았다(실제 금액에서는 생기지 않는다)
+- 확인하지 않은 범위: 실제 Bybit wallet-balance의 응답(8자리를 넘는 소수를 보내는지; 키가 없다, U-01). 자정부터 OMS의 새 day_base_set까지는 일 손실을 판단하지 않는다(소유자 질문 6). OMS의 유지증거금 여유(MmBuffer) 규칙은 W3에 없다. 워처의 [w3] 한도가 OMS 설정과 같은지는 운영자의 몫이다. 범위를 넘는 곱을 위반으로 보는 규칙은 시험하지 않았다(실제 금액에서는 생기지 않는다; 검토 1 N1). 미래 날의 기준은 판단에서 빼는지 시험하지 않았다(OMS가 쓰지 않는다)
 
 | 시험 | 결과 | 비고 |
 |---|---|---|

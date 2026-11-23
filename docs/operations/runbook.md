@@ -394,7 +394,7 @@ telegram = "/etc/oms/telegram.json"   # 절대 경로
 
 워처([C-WATCH](../contracts/watcher.md))의 검사 가운데 하나가 OMS와 거래소의 차이를 두 라운드 연속으로 보았고, 그 저널 항목이 `min_age_ms`(기본 2초)보다 오래됐다. `core.watcher_mismatch`가 검사 이름(`source`), 시각, 내용(`note` = 워처의 `detail`)을 보여 준다. 일반 주문을 거절하고 감소 전용 주문은 받는다(증거금 정책이 있을 때). 저절로 풀리지 않는다.
 
-`detail`의 모양: `<검사> <종류> <대상>: venue <거래소 쪽>, journal <저널 쪽>; seen 2 rounds, <나이>`(여럿이면 끝에 `; and N more`). `<나이>`는 `journal entry <a> s old`(저널 항목, W2에서는 저널과 거래소의 변경 시각 중 새 것), `first seen <a> s ago`(저널이 모르는 주문), `change time unknown`(어느 시각도 모름). W4(U19a8)는 `seen 2 sweeps, execTime <a> s old`(거래소 체결 시각; 없으면 `execTime unknown`)이고, `unknown_exec_type`은 `seen 1 sweep`이다(바로 확정). W4의 대상은 체결 키 `<symbol>:<execId>`다.
+`detail`의 모양: `<검사> <종류> <대상>: venue <거래소 쪽>, journal <저널 쪽>; seen 2 rounds, <나이>`(여럿이면 끝에 `; and N more`). `<나이>`는 `journal entry <a> s old`(저널 항목, W2에서는 저널과 거래소의 변경 시각 중 새 것; 거래소 쪽은 `updatedTime`, 처음 본 시각, U19a9부터 W4가 맞춘 `execTime`), `first seen <a> s ago`(저널이 모르는 주문), `change time unknown`(어느 시각도 모름). W4(U19a8)는 `seen 2 sweeps, execTime <a> s old`(거래소 체결 시각; 없으면 `execTime unknown`)이고, `unknown_exec_type`은 `seen 1 sweep`이다(바로 확정). W4의 대상은 체결 키 `<symbol>:<execId>`다.
 
 | 검사·종류 | 뜻 | 볼 것 |
 |---|---|---|
