@@ -189,7 +189,7 @@ The operator's `clear-hold` of one hold of C-HOLD (`kill`, `watcher_mismatch`, `
 _Avoid_: unhold, override
 
 **Watcher** (워처):
-The separate program (crate and binary `watcher`) that checks the OMS against the venue with code of its own: its own journal reader built from ADR-011 and C-TAIL only, its own sets, its own Bybit key and client. It depends on no `oms-*` or `md-*` crate and on no other workspace crate; only the test crate `watcher-conformance` links it with OMS code, and `tools/ci/watcher_independent.sh` checks this on every change (ADR-031, C-WATCH). It keeps no state and replays the journal from record 1 at every start. U19a1 built the reader, U19a2 the journal state, U19a3 its own Bybit signer and client and its metrics export, U19a4 its config and credentials files, U19a4b its start checks (query-api, the public IP, the settle coin of every symbol) and the IP recheck as sans-IO steps, U19a5 the sans-IO check engine and W1 (open orders), U19a6 W2 (positions), U19a7 the links to the OMS (`/api/status`, `watcher_mismatch` on `admin.sock` with the resend rule, the heartbeat on `monitor.sock`) and the runtime and binary `watcher --config`, U19a8 W4 (executions), U19a9 W3 (wallet and margin), W2's use of W4's execution times and the budget measurement.
+The separate program (crate and binary `watcher`) that checks the OMS against the venue with code of its own: its own journal reader built from ADR-011 and C-TAIL only, its own sets, its own Bybit key and client. It depends on no `oms-*` or `md-*` crate and on no other workspace crate; only the test crate `watcher-conformance` links it with OMS code, and `tools/ci/watcher_independent.sh` checks this on every change (ADR-031, C-WATCH). It keeps no state and replays the journal from record 1 at every start. U19a1 built the reader, U19a2 the journal state, U19a3 its own Bybit signer and client and its metrics export, U19a4 its config and credentials files, U19a4b its start checks (query-api, the public IP, the settle coin of every symbol) and the IP recheck as sans-IO steps, U19a5 the sans-IO check engine and W1 (open orders), U19a6 W2 (positions), U19a7 the links to the OMS (`/api/status`, `watcher_mismatch` on `admin.sock` with the resend rule, the heartbeat on `monitor.sock`) and the runtime and binary `watcher --config`, U19a8 W4 (executions), U19a9 W3 (wallet and margin), W2's use of W4's execution times and the budget measurement, U19b1a–c its own Telegram sender and the `[WATCH P1]` conditions.
 _Avoid_: monitor (the monitoring gate is the OMS's), checker, reconciler (that is the OMS's own)
 
 **Watcher journal state** (워처 저널 상태):
@@ -249,6 +249,10 @@ _Avoid_: watcher down, offline
 **Watcher heartbeat** (워처 하트비트):
 The watcher's line `heartbeat{watcher, checks}` on the monitor socket: per check `W1`..`W9` the time of its last success (ms on the wire, µs in the journal) or `null`. Answered `recorded` after it is durable.
 _Avoid_: ping (a `ping` is not a heartbeat)
+
+**`[WATCH P1]`** (워처 직접 알림):
+The watcher's own direct alerts (C-WATCH part 10), sent by its own Telegram sender (not by the OMS, not through the observability stack): one per confirmation of a difference (at once, then at most one per check per 60 s with the rest collected; a resend after an operator's clear sends none), the lasting conditions `auth` (the watcher's key stopped) and `public_ip` under the repeat rule, and one at a start refusal before exit 2. A testnet watcher without `[telegram]` writes each as one `warn` line.
+_Avoid_: watcher alert (the stack's alerts are `[MON P?]`), OMS alert (`[OMS P1]`)
 
 **Venue setting** (거래소 설정):
 The margin mode (isolated or cross) and venue leverage of one instrument, as the venue reports them.
@@ -313,7 +317,7 @@ The collector's writer loop marking itself alive once a second after a tick in w
 _Avoid_: heartbeat of the venue, keepalive (that is the WebSocket ping)
 
 **Direct alert** (직접 알림):
-A Telegram message sent by the process itself (alert-direct), not through the observability stack, with the repeat rule: once at start, every 5 min while the condition lasts, once at clear; prefixes `[MD P1]` (md-collector), `[OMS P1]` (oms-node, C-ALERT), later `[WATCH P1]`. With a second channel configured, every direct alert also goes there.
+A Telegram message sent by the process itself (alert-direct), not through the observability stack, with the repeat rule: once at start, every 5 min while the condition lasts, once at clear; prefixes `[MD P1]` (md-collector), `[OMS P1]` (oms-node, C-ALERT), `[WATCH P1]` (the watcher, whose own sender rewrites the same rules without linking alert-direct, C-WATCH part 10). With a second channel configured, every direct alert also goes there.
 _Avoid_: notification (the stack's alerts are `[MON P?]`)
 
 **Second channel** (둘째 채널):
