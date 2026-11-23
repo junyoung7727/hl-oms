@@ -16,8 +16,11 @@
 //! and, at this round, its time is at least `min_age_ms` old. A first
 //! sighting is pending (the round may still succeed); a second sighting
 //! that is still young is deferred (the round is not a success). What a
-//! check compares is its [`Logic`]: W1 in U19a5, W2 in U19a6, the others
-//! later.
+//! check compares is its [`Logic`]: W1 in U19a5, W2 in U19a6, W4 in U19a8,
+//! W3 later. W4 (U19a8) reads a sweep over one or more rounds (a round
+//! that reaches the page cap pauses, [`Page::Pause`]), compares only when
+//! the sweep completes, never defers and confirms `unknown_exec_type` at
+//! once.
 //!
 //! Sending (U19a7): a confirmed difference is **owed** until a send that
 //! carried it is answered `"held"` (`on_admin`); nothing else pays it. A
@@ -27,8 +30,14 @@
 //! check), the check owes a difference or (W1–W3) still sees a confirmed
 //! one, `mismatch_resend_ms` passed since the previous send started, and
 //! no send of the check is in flight. One send carries all of them.
+//!
+//! W4 (U19a8) does not resend a confirmed identity while sweeps still see
+//! it: once a `"held"` answer paid it and the state, read up to the cap of
+//! a status request emitted after that answer, shows the hold off, it is
+//! **dismissed**: never sent or counted again until a completed sweep no
+//! longer sees it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -74,7 +83,7 @@ impl Check {
 
     /// A confirmed difference that a round still sees is sent again after
     /// an operator's clear (W1–W3); W4's are dismissed instead (U19a8).
-    fn resends_while_seen(self) -> bool {
+    pub fn resends_while_seen(self) -> bool {
         self != Check::W4
     }
 }
@@ -112,6 +121,10 @@ pub enum Page {
     Next(VenueRequest),
     /// The venue read is complete.
     Done,
+    /// The round's page cap is reached: the round ends without a
+    /// comparison, a success or a failure, and the next round continues
+    /// the read (W4, U19a8).
+    Pause,
     /// retCode 0, but the page cannot be read: counted as `unreadable`.
     Unreadable(String),
     /// The round fails for another reason (too many pages).
@@ -145,8 +158,10 @@ pub struct Diff {
 /// What a check adds to the engine's rounds.
 pub trait Logic {
     fn check(&self) -> Check;
-    /// The first request of a round; the check forgets the last read.
-    fn first(&mut self) -> VenueRequest;
+    /// The first request of a round at `now_ms`, with the journal state as
+    /// the engine holds it then; the check forgets the last read (W4 may
+    /// continue it).
+    fn first(&mut self, now_ms: u64, state: &JournalState) -> VenueRequest;
     /// The `result` of a retCode 0 answer to the last request.
     fn page(&mut self, now_ms: u64, result: &Value) -> Page;
     /// The differences between the complete venue read and the journal.
@@ -157,10 +172,27 @@ pub trait Logic {
     fn young_defers_at_first_sighting(&self) -> bool {
         false
     }
+    /// A young difference seen twice defers the round (W1, W2). W4 is not
+    /// judged by the OMS gate: its young rows are read again by the next
+    /// sweep, and the sweep still succeeds (U19a8).
+    fn defers(&self) -> bool {
+        true
+    }
+    /// A difference of this kind is confirmed at its first sighting, with
+    /// no age rule (W4 `unknown_exec_type`).
+    fn at_once(&self, _kind: &str) -> bool {
+        false
+    }
+    /// The round failed: a venue answer, a page, the status, the journal
+    /// or a deadline.
+    fn failed(&mut self) {}
+    /// After the two-round rule of a comparison: the identities it saw
+    /// that are neither confirmed nor dismissed (pending or young).
+    fn judged(&mut self, _open: &BTreeSet<Ident>) {}
 }
 
 /// `(kind, subject, value)`; the check is the slot's.
-type Ident = (&'static str, String, String);
+pub type Ident = (&'static str, String, String);
 
 #[derive(Clone, Copy)]
 enum Wait {
@@ -199,6 +231,13 @@ struct Slot {
     /// confirmation, with the detail at the confirmation.
     owed: Vec<(Ident, String)>,
     sending: Option<Sending>,
+    /// W4: confirmed identities paid by a `"held"` answer, each with the
+    /// first request id after that answer; dismissed once a status request
+    /// from that id on shows the hold off.
+    paid: Vec<(Ident, u64)>,
+    /// W4: paid identities whose hold was seen cleared; not sent or counted
+    /// again until a completed sweep no longer sees them.
+    dismissed: BTreeSet<Ident>,
     /// When the previous send started.
     last_send_ms: Option<u64>,
     /// The first request id after the latest `"held"`/`"already held"`
@@ -281,6 +320,8 @@ impl Engine {
             confirmed: BTreeMap::new(),
             owed: Vec::new(),
             sending: None,
+            paid: Vec::new(),
+            dismissed: BTreeSet::new(),
             last_send_ms: None,
             hold_answer_req: None,
             failing: None,
@@ -326,7 +367,7 @@ impl Engine {
                 let why = format!("the journal reader stopped: {e}");
                 self.fail(i, why);
             } else {
-                let req = s.logic.first();
+                let req = s.logic.first(now, &self.state);
                 self.emit_venue(i, now, req, &mut out);
             }
         }
@@ -373,6 +414,7 @@ impl Engine {
         };
         match page {
             Page::Next(req) => self.emit_venue(i, now, req, &mut out),
+            Page::Pause => self.slots[i].round = None,
             Page::Done => {
                 let req_id = self.next_id();
                 self.slots[i].round = Some(Open {
@@ -426,6 +468,10 @@ impl Engine {
             Ok("held") => {
                 s.owed.retain(|(id, _)| !sent.carried.contains(id));
                 s.hold_answer_req = Some(after);
+                if !check.resends_while_seen() {
+                    s.paid
+                        .extend(sent.carried.into_iter().map(|id| (id, after)));
+                }
             }
             Ok("already held") => s.hold_answer_req = Some(after),
             Ok(other) => (self.log)(&format!(
@@ -497,6 +543,31 @@ impl Engine {
         });
     }
 
+    /// W4 (U19a8): a paid identity is dismissed once the journal state,
+    /// read up to the cap of a status request emitted after the `"held"`
+    /// answer that paid it, shows the hold off: an operator cleared the
+    /// hold that answer set. A cap sampled before the answer may predate
+    /// the `hold_set`, so it proves nothing.
+    fn dismiss(&mut self) {
+        if self.state.holds.watcher_mismatch {
+            return;
+        }
+        let caught = self.caught_up_req;
+        for i in 0..self.slots.len() {
+            let s = &mut self.slots[i];
+            let (due, keep): (Vec<_>, Vec<_>) = std::mem::take(&mut s.paid)
+                .into_iter()
+                .partition(|(_, after)| caught >= *after);
+            s.paid = keep;
+            for (id, _) in due {
+                if s.confirmed.remove(&id).is_some() {
+                    s.dismissed.insert(id);
+                }
+            }
+            self.set_active(i);
+        }
+    }
+
     /// `watcher_mismatch_active`: the confirmed differences a round still
     /// sees and the owed ones.
     fn set_active(&self, i: usize) {
@@ -527,6 +598,7 @@ impl Engine {
         match self.read_to(answer, seq_at_send) {
             Ok(()) => {
                 self.caught_up_req = self.caught_up_req.max(req_id);
+                self.dismiss();
                 self.judge(i, now);
                 for j in 0..self.slots.len() {
                     self.send(j, now, &mut out);
@@ -581,6 +653,7 @@ impl Engine {
     fn fail(&mut self, i: usize, why: String) {
         let s = &mut self.slots[i];
         s.round = None;
+        s.logic.failed();
         if s.failing.as_deref() != Some(why.as_str()) {
             (self.log)(&format!(
                 "warn: {} round failed: {why}",
@@ -681,6 +754,7 @@ impl Engine {
         s.round = None;
         let check = s.logic.check();
         let strict = s.logic.young_defers_at_first_sighting();
+        let defers = s.logic.defers();
         let mut seen = BTreeMap::new();
         let (mut open, mut deferred) = (0usize, false);
         let mut confirmed = Vec::new();
@@ -691,31 +765,44 @@ impl Engine {
             }
             let before = s.seen.get(&id).copied();
             seen.insert(id.clone(), before.unwrap_or(now));
-            if s.confirmed.contains_key(&id) {
+            // Confirmed, or (W4) dismissed: not counted again.
+            if s.confirmed.contains_key(&id) || s.dismissed.contains(&id) {
                 continue;
             }
             open += 1;
+            let since = match d.since {
+                Since::At(t) => Some(t),
+                Since::FirstSeen => Some(before.unwrap_or(now)),
+                Since::Unknown => None,
+            };
+            let age = since.map(|t| now - t.min(now));
+            // W4 `unknown_exec_type`: no second sighting, no age.
+            if s.logic.at_once(d.kind) {
+                open -= 1;
+                confirmed.push((id, detail(check, &d, age, 1)));
+                continue;
+            }
             // A strict check (W2) defers a young first sighting too.
             deferred |= before.is_none()
                 && strict
                 && matches!(d.since, Since::At(at) if now.saturating_sub(at) < min_age);
             // A first sighting is pending.
-            let Some(first) = before else { continue };
-            let since = match d.since {
-                Since::At(t) => Some(t),
-                Since::FirstSeen => Some(first),
-                Since::Unknown => None,
-            };
+            if before.is_none() {
+                continue;
+            }
             if since.is_some_and(|t| now.saturating_sub(t) < min_age) {
-                deferred = true;
+                deferred |= defers;
                 continue;
             }
             open -= 1;
-            confirmed.push((id, detail(check, &d, since.map(|t| now - t.min(now)))));
+            confirmed.push((id, detail(check, &d, age, 2)));
         }
         s.seen = seen;
         let still = &s.seen;
         s.confirmed.retain(|id, _| still.contains_key(id));
+        s.dismissed.retain(|id| still.contains_key(id));
+        let confirmed_now = &s.confirmed;
+        s.paid.retain(|(id, _)| confirmed_now.contains_key(id));
         let c = [("check", check.name())];
         for (id, line) in confirmed {
             s.confirmed.insert(id.clone(), line.clone());
@@ -728,6 +815,13 @@ impl Engine {
         self.metrics.set("watcher_differences", &c, open as f64);
         self.set_active(i);
         let s = &mut self.slots[i];
+        let pending: BTreeSet<Ident> = s
+            .seen
+            .keys()
+            .filter(|id| !s.confirmed.contains_key(*id) && !s.dismissed.contains(*id))
+            .cloned()
+            .collect();
+        s.logic.judged(&pending);
         if !deferred {
             s.success_ms = Some(now);
             if s.failing.take().is_some() {
@@ -737,16 +831,25 @@ impl Engine {
     }
 }
 
-/// `"<check> <kind> <subject>: <what>; seen 2 rounds, <age>"`.
-fn detail(check: Check, d: &Diff, age_ms: Option<u64>) -> String {
+/// `"<check> <kind> <subject>: <what>; seen 2 rounds, <age>"`; for W4
+/// `"seen <n> sweep(s), execTime <a> s old"` (U19a8).
+fn detail(check: Check, d: &Diff, age_ms: Option<u64>, seen: u32) -> String {
     let secs = |ms: u64| format!("{}.{} s", ms / 1000, ms % 1000 / 100);
+    let w4 = check == Check::W4;
     let age = match (d.since, age_ms) {
         (Since::FirstSeen, Some(a)) => format!("first seen {} ago", secs(a)),
+        (_, Some(a)) if w4 => format!("execTime {} old", secs(a)),
         (_, Some(a)) => format!("journal entry {} old", secs(a)),
+        (_, None) if w4 => "execTime unknown".to_string(),
         (_, None) => "change time unknown".to_string(),
     };
+    let rounds = match (w4, seen) {
+        (true, 1) => "1 sweep".to_string(),
+        (true, n) => format!("{n} sweeps"),
+        (false, n) => format!("{n} rounds"),
+    };
     format!(
-        "{} {} {}: {}; seen 2 rounds, {age}",
+        "{} {} {}: {}; seen {rounds}, {age}",
         check.name(),
         d.kind,
         d.subject,

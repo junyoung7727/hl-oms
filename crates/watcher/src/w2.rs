@@ -154,7 +154,7 @@ impl Logic for W2 {
         Check::W2
     }
 
-    fn first(&mut self) -> VenueRequest {
+    fn first(&mut self, _now_ms: u64, _state: &JournalState) -> VenueRequest {
         // The last round read every page and failed before its comparison
         // (status, journal): its sizes count, at its last venue answer.
         if let Some(t) = self.unseen {

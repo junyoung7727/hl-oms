@@ -2,7 +2,7 @@
 //! that carries out what the sans-IO parts ask. Boot: credentials → the
 //! metrics push timer (from here on) → the start checks ([`Start`]) → the
 //! wait for `/api/status` → the replay of the journal from record 1 to its
-//! cap → the engine (W1 and W2). The IP recheck ([`IpCheck`]) runs from
+//! cap → the engine (W1, W2 and W4). The IP recheck ([`IpCheck`]) runs from
 //! the end of the start on, also while the watcher waits for the OMS and
 //! replays. Every timer reads the injected clock; the loop wakes every
 //! [`TICK_MS`] of real time (and at every answer) and asks each part what
@@ -30,6 +30,7 @@ use crate::rest::{Client, ClientConfig, RestError};
 use crate::start::{self, IpCheck, Start, Step};
 use crate::state::JournalState;
 use crate::w2::W2;
+use crate::w4::W4;
 
 /// The loop asks every part what is due at least this often (real time,
 /// 판단(모델 아님)).
@@ -378,7 +379,7 @@ impl Runtime {
         }
         // Before the engine runs, the ages count from the config load.
         let age = now.saturating_sub(self.boot_ms) as f64 / 1000.0;
-        for c in [Check::W1, Check::W2] {
+        for c in [Check::W1, Check::W2, Check::W4] {
             self.metrics
                 .set("watcher_check_age_s", &[("check", c.name())], age);
         }
@@ -454,6 +455,8 @@ impl Runtime {
             now,
         );
         e.add_check(Box::new(W2::default()), self.cfg.intervals.w2_ms);
+        let w4 = W4::new(&self.cfg.rules, self.log.clone());
+        e.add_check(Box::new(w4), self.cfg.intervals.w4_ms);
         self.phase = Phase::Run(e);
     }
 

@@ -65,6 +65,7 @@ impl World {
         );
         bybit.route("/v5/order/realtime", [empty_page()]);
         bybit.route("/v5/position/list", [empty_page()]);
+        bybit.route("/v5/execution/list", [empty_page()]);
         let echo = FakeHttp::start(Answer::Reply(200, "127.0.0.1\n".into()));
         let status = FakeHttp::start(Answer::Reply(404, "{}".into()));
         let vm = FakeHttp::start(Answer::Reply(204, String::new()));
@@ -259,7 +260,7 @@ fn mismatch_lines(a: &FakeSock) -> Vec<Value> {
 fn the_watcher_runs_against_loopback_fakes_end_to_end() {
     let mut w = World::new(
         "rt-e2e",
-        "[intervals]\nw1_ms = 500\nw2_ms = 500\nheartbeat_ms = 1000\n\
+        "[intervals]\nw1_ms = 500\nw2_ms = 500\nw4_ms = 1000\nheartbeat_ms = 1000\n\
          [rules]\nmin_age_ms = 500\nmismatch_resend_ms = 1000\n\
          [http]\nrequest_timeout_ms = 1000\n",
     );
@@ -278,15 +279,18 @@ fn the_watcher_runs_against_loopback_fakes_end_to_end() {
             "list": [ours(1, "BTCUSDT", "Buy")]}))],
     );
     let mut run = w.start(Arc::new(SystemClock));
-    // The start checks, then rounds of W1 and W2, heartbeats with both
+    // The start checks, then rounds of W1, W2 and W4, heartbeats with the
     // success times, the mismatch at admin.sock and the metrics pushes.
     assert!(
         until(20, || {
             let hb = heartbeats(&w.monitor);
-            hb.iter()
-                .any(|h| h["checks"]["W1"].is_u64() && h["checks"]["W2"].is_u64())
+            hb.iter().any(|h| {
+                h["checks"]["W1"].is_u64()
+                    && h["checks"]["W2"].is_u64()
+                    && h["checks"]["W4"].is_u64()
+            })
         }),
-        "no heartbeat with W1 and W2: {:?}",
+        "no heartbeat with W1, W2 and W4: {:?}",
         heartbeats(&w.monitor)
     );
     assert!(until(10, || !mismatch_lines(&w.admin).is_empty()));
@@ -318,12 +322,13 @@ fn the_watcher_runs_against_loopback_fakes_end_to_end() {
     );
     assert!(hb.iter().all(|h| h["watcher"] == "w-rt"));
     // Every Bybit request is signed; the start asked query-api and the
-    // settle coin; the checks read open orders and positions.
+    // settle coin; the checks read open orders, positions and executions.
     for p in [
         "/v5/user/query-api",
         "/v5/market/instruments-info",
         "/v5/order/realtime",
         "/v5/position/list",
+        "/v5/execution/list",
     ] {
         let r = w.requests(p);
         assert!(!r.is_empty(), "{p}");
