@@ -16,9 +16,12 @@ crc32fast = "1.5.2"
 hex = "0.4.3"
 hmac = "0.13.0"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
+rustix = { version = "1.1.5", features = ["fs", "process"] }
+serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.11.0"
 tokio = { version = "1.53.1", features = ["rt", "time"] }
+toml = "1.1.6"
 
 [dev-dependencies]
 http-fake = { path = "../http-fake" }

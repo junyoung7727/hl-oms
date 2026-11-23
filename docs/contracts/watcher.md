@@ -1,15 +1,15 @@
 # C-WATCH 독립 워처
 
-상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
+상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23), 4부 중 설정과 자격 파일 구현됨(U19a4, 2026-11-23). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3, V-WATCH-4. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
 
-워처는 OMS와 코드를 나누지 않는 별도 프로그램이다. 저널을 자기 읽기로 읽고(이 문서와 [C-TAIL](tail.md), [ADR-011](../adr/ADR-011-file-format.md)만으로 썼다), 자기 키와 클라이언트로 Bybit를 조회해 OMS와 비교하고, 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고, `monitor.sock`에 하트비트를 보낸다. **U19a3까지는 저널 읽기, 저널 상태, 독립성 검사, Bybit 서명·클라이언트와 지표 내보내기만 있다. 시작 확인, 검사(W1~W4), 하트비트는 아직 없어 워처는 아직 아무것도 감시하지 않고, 클라이언트를 부르는 코드도 아직 없다.** 바이너리는 `watcher --version`에만 답하고, 그 밖의 호출은 "not built yet: the checks arrive in U19a5–U19a7"를 찍고 코드 2로 끝난다(네트워크도 파일도 건드리지 않는다).
+워처는 OMS와 코드를 나누지 않는 별도 프로그램이다. 저널을 자기 읽기로 읽고(이 문서와 [C-TAIL](tail.md), [ADR-011](../adr/ADR-011-file-format.md)만으로 썼다), 자기 키와 클라이언트로 Bybit를 조회해 OMS와 비교하고, 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고, `monitor.sock`에 하트비트를 보낸다. **U19a4까지는 저널 읽기, 저널 상태, 독립성 검사, Bybit 서명·클라이언트와 지표 내보내기, 설정 파일과 자격 파일 읽기만 있다. 시작 확인, 검사(W1~W4), 하트비트는 아직 없어 워처는 아직 아무것도 감시하지 않고, 클라이언트와 설정을 부르는 코드도 아직 없다.** 바이너리는 `watcher --version`에만 답하고, 그 밖의 호출은 "not built yet: the checks arrive in U19a5–U19a7"를 찍고 코드 2로 끝난다(네트워크도 파일도 건드리지 않는다).
 
 | 부 | 내용 | 단위 |
 |---|---|---|
 | 1 | 독립성과 그 검사, 저널 읽기, 아는 이벤트, 소수, `Base32Pair` | U19a1(이 문서) |
 | 2 | 저널 상태(주문, 열린 주문, 체결, 포지션, 보류, 기준일), 재생 속도 | U19a2(이 문서) |
 | 3 | Bybit 서명과 클라이언트, 응답 분류, 요청 제한, 지표 | U19a3(이 문서) |
-| 4 | 설정, 자격 파일, 시작 확인, IP 재확인 | U19a4, U19a4b(아직 없음) |
+| 4 | 설정과 자격 파일(이 문서), 시작 확인과 IP 재확인(아직 없음) | U19a4, U19a4b |
 | 5~9 | 검사 엔진과 W1, W2, OMS 연결과 실행, W4, W3과 예산 | U19a5~U19a9(아직 없음) |
 
 ## 1부. 독립성
@@ -162,7 +162,7 @@
 - 질의 문자열: `k=v`를 `&`로 잇고 키로 정렬한다. 값은 그대로 보낸다(거래소의 커서는 이미 퍼센트 인코딩되어 온다). 키나 값에 `[A-Za-z0-9-_.~%:,]` 밖의 글자가 있으면 **보내기 전에 거절**한다(`not_sent`). 인코딩해서 보내지 않는다. 이 거절은 요청이 아니므로 `watcher_requests_total`에 세지 않고 `watcher_request_errors_total{class="not_sent"}`에만 센다.
 - 머리글 다섯: `X-BAPI-API-KEY`, `X-BAPI-TIMESTAMP`(보내는 순간의 주입된 시계, 요청 제한에서 기다린 뒤에 읽는다), `X-BAPI-RECV-WINDOW`(`recv_window_ms`), `X-BAPI-SIGN`, `X-BAPI-SIGN-TYPE: 2`.
 - 연결: 지역 주소는 IPv4만(IP 반향이 보는 주소가 Bybit가 보는 주소가 되도록), 연결 제한 3초, 요청 제한 `request_timeout_ms`, 리다이렉트를 따르지 않고(서명된 요청을 다시 보내게 된다), 프록시를 쓰지 않는다.
-- 자격(`rest::Credentials`)의 `Debug`는 비밀을 찍지 않는다. 파일에서 읽는 것은 U19a4다.
+- 자격(`rest::Credentials`)의 `Debug`는 비밀을 찍지 않는다. 파일에서 읽는 것은 4부(`watcher::creds`)다.
 
 ### 응답 분류
 
@@ -231,3 +231,71 @@
 ### 검증(3부)
 
 `sign::the_strings_to_sign_and_signatures_match_independent_values`(거래소의 예시 문자열, RFC 4231 경우 2, 지어낸 비밀 `watcher-made-up-secret-42`로 Python `hmac`이 계산한 값; `tools/ci/secret_scan_allow.txt`에 이유와 함께), `sign::query_strings_are_sorted_and_unsafe_values_refused`, `client::every_request_carries_the_five_headers_and_the_signed_query`(Python 값과 같은 서명, 가짜가 요청을 받는 순간 카운터가 이미 올라가 있음, 보낼 수 없는 값은 아무것도 보내지 않음), `client::answers_are_classified`(부류마다 한 번, 다음 요청은 그대로 감; 줄바꿈이 든 긴 `retMsg`와 본문은 200자 한 줄), `client::auth_answers_are_never_retried`(10010, 10003, 33004, 10004, 10005, 10007, HTTP 401 각각: 응답 뒤 수동 시계를 10분 움직이며 매초 여섯 경로에 요청해도 가짜에 닿는 요청이 더 없고, 오류 줄은 하나), `client::http_403_pauses_every_request_for_600_s`(응답이 보낸 뒤 500 ms에 와도 멈춤은 응답부터 600초, 끝나기 1 ms 전까지 모든 경로와 반향이 보내지지 않음), `client::the_guard_holds_requests_beyond_60_in_10_s`(가드만, 수동 시계, 1분의 폭주 루프에서 어느 10초 창도 60 이하), `client::a_request_beyond_the_guard_waits_for_the_window`(클라이언트가 가득 찬 가드에서 기다리다 시계가 그 순간에 이르면 보내고, 그 요청은 기다린 뒤의 시계로 서명됨; 실제 시간), `client::a_request_waiting_at_the_guard_sees_a_later_rejection_or_pause`(가드의 마지막 자리를 받은 요청의 10010 또는 403 응답을 가짜가 다른 요청이 가드에서 기다릴 때까지 잡아 두고, 창이 끝나 깬 그 요청이 `auth`·`ip_banned`로 끝나며 가짜에 닿지 않음; 실제 시간; 검토 1 S2), `client::a_redirect_is_not_followed`(301, 302, 307, 308에 `get`과 반향 모두 `no_answer`, 리다이렉트 대상에 요청이 가지 않음; 검토 1 S1), `client::a_status_counts_when_its_body_is_cut`(`content-length: 100`에 5바이트를 보내고 닫는 loopback 서버: 401은 `auth`와 래치, 403은 `ip_banned`와 응답부터 600초 멈춤, 둘 다 다음 요청을 보내지 않음; 429는 `rate_limited`, 500과 200은 `no_answer`이고 다음 요청이 감; 검토 2 S1), `client::two_rejections_in_flight_write_one_error_line`(두 연결을 함께 잡았다가 둘 다 10010으로 답하는 loopback 서버: 둘 다 `auth`, 오류 줄 하나; 검토 2 N1), `metrics::the_import_lines_are_victoria_metrics_json`, `metrics::a_failed_push_is_dropped`. 변이: M188(10010을 다음 라운드에 다시 보냄), M191(질의 문자열을 정렬하지 않음), M192(403 멈춤 60초), M232(리다이렉트를 따름), M233(가드에서 기다린 요청이 깬 뒤 래치와 403 멈춤을 보지 않음; 둘 다 검토 1), M234(본문이 잘린 2xx 아닌 상태를 `no_answer`로 읽음; 검토 2 S1).
+
+## 4부. 설정과 자격 파일
+
+`watcher::config`, `watcher::creds`. `watcher --config <path>`가 읽을 TOML 파일 하나와 그 파일이 가리키는 자격 파일 하나다. **이 부분은 두 파일을 읽고 검사만 한다.** 바이너리는 아직 이것을 부르지 않는다(실행은 U19a7). 시작 확인(query-api, 공인 IP, 정산 코인)과 IP 재확인은 U19a4b다. 거부는 시작 거부가 된다: 종료 코드 2와 이유 한 줄이다(스펙 "Errors at start and in a round"). 읽기는 파일을 쓰지 않고 네트워크를 쓰지 않는다. 운영자가 보는 같은 표와 예는 [운영 문서](../operations/watcher.md)에 있다.
+
+### 설정 파일(`config::Config::load(path)`, `Config::from_toml(text)`)
+
+- TOML이다. **모르는 키는 거부한다**: 최상위, 모든 표(`[intervals]`, `[rules]`, `[w3]`, `[http]`, `[telemetry]`), 모르는 표(`[venue]` 등) 모두다. 틀린 키 이름이 기본값으로 조용히 바뀌지 않게 한다.
+- 거부는 모두 이유 한 줄이다. TOML 자신의 오류는 파일을 인용하며 여러 줄에 걸치므로, 메시지와 시작 줄 번호와 그 줄의 키만 남긴다(`invalid type: string "fast", expected u64 at line 11 (key w1_ms)`). 빠진 필수 필드는 메시지만 남긴다(``missing field `status_url` ``): 그 오류의 범위는 파일 전체여서 줄 번호와 키가 다른, 맞게 쓴 줄을 가리키게 된다(검토 1 S1). `Config::load`는 앞에 `config <path>:`를 붙인다.
+- 경로는 상대 경로를 설정 파일의 위치로 풀지 않는다. 경로마다 절대 경로여야 한다.
+- 두 경로를 비교할 때(자격 파일이 데이터 디렉터리 밖인지, 두 소켓이 다른지)는 "가리키는 곳"으로 비교한다. 존재하는 가장 긴 앞부분은 파일 시스템으로 풀고(심볼릭 링크를 따른다), 나머지는 글자로 `.`과 `..`을 접는다(`config::resolved`, OMS의 같은 이름 함수와 별도로 썼다).
+
+| 필드 | 기본 | 검사(범위는 판단(모델 아님)) |
+|---|---|---|
+| `name` | 필수 | 1~64자(바이트가 아니라 문자), 제어 문자 없음. 하트비트의 `watcher`(C-API `heartbeat`)와 지표의 `watcher` 이름표 |
+| `network` | 필수 | `testnet` 또는 `mainnet`. REST 주소 `https://api-testnet.bybit.com` / `https://api.bybit.com`(OMS와 같은 호스트) |
+| `mainnet_confirmed` | `false` | `mainnet`은 이것이 `true`일 때만 받는다(OMS와 같다). `testnet`에서는 아무것도 바꾸지 않는다 |
+| `credentials_file` | 필수 | 절대 경로, `..` 없음, 데이터 디렉터리 밖(디렉터리 자신도 안 됨, 심볼릭 링크로 가린 경우도). 파일의 규칙은 아래 "자격 파일" |
+| `sub_account_uid` | 필수 | 0보다 큰 정수. 키의 `userID`가 이것과 같아야 한다(시작 확인, U19a4b) |
+| `symbols` | 필수 | 이름 1~50개, 각각 `[A-Z0-9]` 1~32자, 같은 이름 두 번 없음 |
+| `ip_echo_url` | 필수 | `https`(위조된 답이 IP 확인을 통과할 수 있다, OMS와 같다; `https` URL은 호스트 없이 읽히지 않는다). 사용자·비밀번호 없음, 공백·제어 문자 없음(URL 읽기는 양 끝의 공백을 지우므로 적힌 글자와 쓰이는 URL이 달라진다; 검토 1 N3) |
+| `data_dir` | 필수 | 절대 경로. OMS의 데이터 디렉터리이고 워처는 읽기만 한다. 있는지는 보지 않는다 |
+| `status_url` | 필수 | 정확히 `http://127.0.0.1:<port>/api/status` 또는 `http://[::1]:<port>/api/status`. `<port>`는 0으로 시작하지 않는 십진수 1~65535, 80은 안 됨. `localhost`, 다른 주소, `https`, 사용자, 질의, 조각, 다른 경로는 거부(대시보드는 loopback만 듣는다) |
+| `admin_socket`, `monitor_socket` | `<data_dir>/admin.sock`, `<data_dir>/monitor.sock` | 절대 경로, 서로 다름(가리키는 곳으로) |
+| `host` | `/etc/hostname`(없거나 비면 `unknown`) | 지표의 `host` 이름표. 1~255자, 제어 문자 없음(판단(모델 아님)) |
+| `[intervals]` `w1_ms`, `w2_ms` | 1000(설계 §7.5) | 500~10,000 |
+| `w3_ms` | 2000(설계 §7.5) | 1000~30,000 |
+| `w4_ms` | 5000(설계 §7.5) | 1000~60,000 |
+| `heartbeat_ms` | 5000(설계 §7.5) | 1000~10,000(OMS의 30초 안) |
+| `ip_check_ms` | 60,000(스코프) | 10,000~3,600,000 |
+| `export_ms` | 1000(설계 §5.4.5의 1초 해상도) | 1000~60,000 |
+| `[rules]` `min_age_ms` | 2000(설계 §7.5, 스코프) | 500~10,000 |
+| `w4_overlap_ms` | 10,000(스코프) | 0~60,000 |
+| `w4_max_pages` | 10(스코프) | 1~50 |
+| `w4_initial_lookback_ms` | 600,000(판단(모델 아님)) | 0~86,400,000 |
+| `mismatch_resend_ms` | 10,000(판단(모델 아님)) | 1000~600,000 |
+| `[w3]` `account_mm_rate_max_bps` | 5000(OMS의 Bybit 값, C-MARGIN, 거기서도 판단) | 1~9999 |
+| `daily_loss_bps` | 500(OMS의 기본, C-MARGIN) | 1~10,000 |
+| `[http]` `recv_window_ms` | 5000(OMS의 기본) | 1000~20,000(OMS와 같은 범위) |
+| `request_timeout_ms` | 2000(판단(모델 아님)) | 200~10,000 |
+| `[telemetry]` `vm_url` | 없음(아무것도 내보내지 않음) | `http://`와 loopback 주소 숫자(`127.0.0.0/8`, `[::1]`)만. 사용자, 질의, 조각 없음. 공백·제어 문자 없음: 내보내기는 적힌 글자 뒤에 `/api/v1/import`를 붙이므로, 끝에 공백이 있으면 검사는 통과해도 모든 전송이 실패한다(검토 1 S3). 거부 줄은 URL을 인용하되 `@`가 있으면(비밀번호가 있을 수 있다) 인용하지 않는다(검토 1 N2) |
+
+- 범위는 양 끝을 포함한다. 음수는 TOML을 읽는 단계에서 거부된다.
+- 확인 횟수(2라운드)는 설정이 아니라 상수다(스코프가 정한다). "모든 주기는 설정에"(스코프)는 `[intervals]`와 `[rules]`가 맞춘다.
+- `Config::client_config()`가 3부의 클라이언트에 REST 주소, `recv_window_ms`, `request_timeout_ms`를 준다.
+
+### 자격 파일(`creds::load(path, data_dir)`)
+
+- TOML `api_key`, `api_secret` 두 개만. 둘 다 비어 있지 않아야 하고, 다른 키가 있으면 거부한다.
+- 읽는 순간에 설정의 경로 규칙(절대, `..` 없음, 데이터 디렉터리 밖)을 한 번 더 적용한다. 설정을 읽은 뒤 생긴 심볼릭 링크도 여기서 본다.
+- 여는 핸들 하나로 검사하고 읽는다(검사와 읽기 사이에 파일을 바꿔치기할 수 없다). 열 때 마지막 구성 요소의 심볼릭 링크를 따르지 않고(`O_NOFOLLOW`; 링크면 "is a symbolic link"), FIFO의 쓰는 쪽을 기다리지 않는다(`O_NONBLOCK`; 바로 "is not a regular file").
+- 그 핸들의 메타데이터: 일반 파일, 소유자 = 이 프로세스의 실효 uid(`geteuid`), 권한 정확히 `0600` 또는 `0400`(그룹·다른 사용자 비트, 소유자 실행 비트, set-id·sticky 비트가 있으면 거부; OMS의 `& 0o077` 규칙보다 좁다. 스펙의 표대로다).
+- **오류는 파일 내용을 인용하지 않는다**: TOML 오류(줄을 인용한다)를 버리고 "is not TOML with api_key and api_secret and nothing else"만 쓴다. 경로는 적는다. 비밀은 어디에도 찍히지 않는다(`Credentials`의 `Debug`는 `<hidden>`).
+
+### 알려진 한계(4부)
+
+- 다른 소유자의 실제 파일은 시험이 만들지 못한다(root만 만든다). 그래서 소유자 규칙은 규칙 함수(`creds::file_rules`)에 다른 uid를 주어 보고, `creds::load`로는 root가 소유한 `/etc/hostname`을 읽어 본다(검토 1 S4; 그 파일이 없거나 시험의 uid가 소유하면 이 경우만 건너뛴다). root로 돌리면 자격 시험은 바로 끝난다(OMS의 권한 시험과 같다).
+- 상위 디렉터리의 심볼릭 링크는 따른다(마지막 구성 요소만 거부한다). 데이터 디렉터리 밖인지는 링크를 따른 뒤의 위치로 본다. 자격 파일이 있는 디렉터리의 권한은 보지 않는다.
+- 경로 규칙은 읽는 순간까지 본다. 읽은 뒤에 경로가 바뀌는 것은 보지 않는다(워처는 자격 파일을 시작 때 한 번 읽는다).
+- 키와 비밀의 모양(HTTP 머리글에 넣을 수 있는 글자인지)은 보지 않는다. 그런 키는 첫 요청이 `not_sent`나 거래소의 키 거절로 끝난다.
+- `status_url`의 포트 80을 거부하는 것은 판단(모델 아님)이다: URL 형식이 `http`의 기본 포트 `:80`을 지우므로 클라이언트가 보내는 `Host`에 포트가 없고, 대시보드는 포트 없는 `Host`를 거부한다(`127.0.0.1:<port>`만 받는다). `vm_url`의 `localhost`를 거부하는 것도 판단(모델 아님)이다(이름은 다른 주소로 풀릴 수 있다).
+- 경로 비교는 존재하는 가장 긴 앞부분만 파일 시스템으로 푼다. 끊어진 심볼릭 링크(가리키는 곳이 아직 없는 링크)는 따르지 못하므로, `admin_socket`이 아직 없는 `monitor.sock`을 가리키는 링크면 두 소켓은 다르게 보인다(검토 1 N4). OMS가 엉뚱한 소켓으로 온 요청을 거부한다.
+- 데이터 디렉터리와 두 소켓이 있는지는 보지 않는다. OMS가 꺼져 있어도 워처는 시작해서 기다린다(U19a7).
+- 워처 키에 출금 권한이 없어야 한다(설계 §7.4). 시작 확인은 이것을 보지 않는다(OMS도 자기 키에 대해 보지 않는다). [운영 문서](../operations/watcher.md)에 적었다.
+
+### 검증(4부)
+
+`config::the_config_is_validated_and_mainnet_needs_confirmation`(필수 필드만의 기본값 전부, `mainnet`은 `mainnet_confirmed = true`일 때만, 최상위·표마다 모르는 키와 모르는 표, 필수 필드 여덟 각각 없음, 한 줄 오류와 줄 번호, 이름의 문자 수(`é` 64개는 받음), 기호의 모양·개수·중복, `https` 반향, 경로 규칙(상대, `..`, 데이터 디렉터리 안·자신·`.`·`..`로 쓴 데이터 디렉터리), `status_url` 15가지 거부와 세 가지 수용, `ip_echo_url`의 사용자·앞뒤 공백·줄바꿈·탭, 소켓의 기본·절대·같음(`.`, 링크로 가린 디렉터리, `..`; 검토 1 S2), 빠진 필드의 거부 줄에 줄 번호와 키가 없음(검토 1 S1), `host` 1~255자, 범위 16개의 양 끝과 그 밖 하나씩, 한 표의 두 필드, `vm_url` 세 가지 수용과 열두 가지 거부(조각, 앞뒤 공백, 탭, 줄바꿈 포함; 검토 1 S3), 비밀번호가 든 `vm_url`을 인용하지 않음), `config::the_config_file_is_read_and_its_refusals_name_the_file`, `creds::the_credentials_file_must_be_owner_only_and_outside_the_data_dir`(`0600`·`0400`은 받고 `0644`·`0640`·`0604`·`0660`·`0610`·`0700`·`0500`·`4600`·`2600`·`1600`은 거부, 다른 소유자(규칙 함수, 그리고 `creds::load`로 root의 `/etc/hostname`), 좋은 파일로 가는 심볼릭 링크, 디렉터리, FIFO(5초 안에 거부), 없는 파일, 내용 일곱 가지와 UTF-8 아닌 파일(어떤 오류에도 비밀이 없음), 데이터 디렉터리 안, `..`, 상대 경로, 데이터 디렉터리를 가리키는 링크(자격 쪽, 데이터 쪽), 다른 디렉터리를 가리키는 링크는 받음). 변이: M193(`mainnet_confirmed` 없이 `mainnet`을 받음; 스펙의 고의 결함 12), M235(두 소켓을 적힌 대로 비교), M236(자격 파일의 소유자를 자기 자신과 비교), M237(끝에 공백이 있는 `vm_url`을 받음; 검토 1).

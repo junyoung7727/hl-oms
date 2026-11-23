@@ -246,6 +246,9 @@ U19a3: signer and client, the in-process metrics registry and the VM import clie
 
 The confirmation count (2 rounds) is a constant, not config: the scope fixes it. "All intervals in config" (scope) is met by `[intervals]` and `[rules]`.
 
+Amendment (U19a4 review 1 S1, S3, N2, N3): a missing required field is refused with the TOML message alone (no line number or key, as its span is the whole file); `vm_url` and `ip_echo_url` hold no white space or control character (URL parsing trims the ends, and the exporter appends `/api/v1/import` to the text as written); `ip_echo_url` has no user or password; a refused `vm_url` holding `@` is not quoted. Tests in `config::the_config_is_validated_and_mainnet_needs_confirmation`; xtask mutant M237 (a `vm_url` with white space at its end accepted).
+Amendment (U19a4 review 1 S2, S4): V-WATCH-4 also covers the two sockets compared through a symlinked directory and through `..` (xtask mutant M235) and the owner rule through `creds::load` on a real root-owned file (`/etc/hostname`, skipped when missing or owned by the test's uid; xtask mutant M236).
+
 ### Signer and client (`watcher::sign`, `watcher::rest`)
 - Own HMAC-SHA256 and query string per `gateway.md:93` ("서명" row): GET only; POST signing for U19b's cancel-all is left to U19b (review 1 N3). Sorted keys; values sent as they are; a value with a character outside `[A-Za-z0-9-_.~%:,]` is refused before anything is sent.
 - `Client::get(path, params) -> Result<Value, RestError>`: IPv4 local address, connect timeout 3 s, `request_timeout_ms`, no redirects, no proxy, the five headers. `RestError` classes and their effect:
