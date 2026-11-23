@@ -70,14 +70,21 @@ fn text<'a>(row: &'a Value, field: &str) -> Result<&'a str, String> {
         .ok_or_else(|| format!("a row without {field}"))
 }
 
-/// The signed size of a row: `Buy` +, `Sell` −, `""` or no side 0.
+/// The signed size of a row: `Buy` +, `Sell` −, `""` or no side only with
+/// size 0. A size is never negative, `side` gives the sign (the OMS's
+/// own rule, `query.rs` `signed_size`): a size without a side is not read
+/// as no position.
 fn signed(row: &Value) -> Result<Dec, String> {
     let s = text(row, "size")?;
     let size = Dec::parse(s).map_err(|_| format!("size {s:?} is not a decimal"))?;
+    if s.starts_with('-') {
+        return Err(format!("size {s:?} is negative"));
+    }
     match row.get("side").and_then(Value::as_str) {
         Some("Buy") => Ok(size),
         Some("Sell") => size.checked_neg().map_err(|e| e.to_string()),
-        Some("") | None => Ok(Dec::ZERO),
+        Some("") | None if size.is_zero() => Ok(Dec::ZERO),
+        Some("") | None => Err(format!("size {s:?} without a side")),
         Some(other) => Err(format!("side {other:?} is not Buy, Sell or \"\"")),
     }
 }
@@ -182,12 +189,13 @@ impl Logic for W2 {
             let row = self.rows.get(symbol);
             let venue = row.map_or(Dec::ZERO, |r| r.size);
             let journal = state.position(symbol);
-            let Ok(d) = venue.checked_sub(journal) else {
-                continue;
+            // A difference out of the decimal's range is still one, with
+            // a fixed value (never read as agreement).
+            let d = match venue.checked_sub(journal) {
+                Ok(d) if d.is_zero() => continue,
+                Ok(d) => d.to_string(),
+                Err(_) => "overflow".to_string(),
             };
-            if d.is_zero() {
-                continue;
-            }
             // µs rounded up: an age is never taken as older than it is.
             let journal_at = state.last_change_at.get(symbol).map(|t| t.div_ceil(1000));
             let seen_at = self.seen.get(symbol).and_then(|s| s.1);
@@ -199,7 +207,7 @@ impl Logic for W2 {
             out.push(Diff {
                 kind: "position",
                 subject: symbol.clone(),
-                value: d.to_string(),
+                value: d,
                 what: format!("venue {venue}, journal {journal}"),
                 since,
             });

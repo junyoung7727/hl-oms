@@ -1800,7 +1800,7 @@ const MUTANTS: &[Mutant] = &[
         id: "M196-watcher-w2-confirms-two-values",
         what: "W2 leaves the difference value d out of a position difference's identity, so two rounds with two different values confirm, while the position still moves (deliberate defect 15 of U19a)",
         file: "crates/watcher/src/w2.rs",
-        find: "                value: d.to_string(),",
+        find: "                value: d,",
         replace: "                value: String::new(),",
         test: &["-p", "watcher", "--test", "w2", "a_changing_difference_restarts_the_count"],
         guards: "C-WATCH",

@@ -178,16 +178,30 @@ fn bad_pages_and_rows_fail_the_round() {
     r.venue
         .pos_script
         .push_back(page(vec![json!({"side": "Buy", "size": "1"})], ""));
-    for k in 0..5 {
+    // A size with an empty side or without a side, and a negative size,
+    // as the OMS refuses them (`query.rs` `signed_size`).
+    r.venue
+        .pos_script
+        .push_back(page(vec![pos("BTCUSDT", "", "1", None)], ""));
+    r.venue
+        .pos_script
+        .push_back(page(vec![json!({"symbol": "BTCUSDT", "size": "2"})], ""));
+    r.venue
+        .pos_script
+        .push_back(page(vec![pos("BTCUSDT", "Buy", "-1", None)], ""));
+    for k in 0..8 {
         r.at(T0 + k * 1000);
     }
-    assert_eq!(unreadable(&r), Some(5.0));
+    assert_eq!(unreadable(&r), Some(8.0));
     for why in [
         "a full page without nextPageCursor",
         "nextPageCursor is the cursor just sent",
         "side \"Long\"",
         "size \"1e3\"",
         "a row without symbol",
+        "size \"1\" without a side",
+        "size \"2\" without a side",
+        "size \"-1\" is negative",
     ] {
         assert_eq!(r.lines_with(why), 1, "{why}");
     }
@@ -196,7 +210,7 @@ fn bad_pages_and_rows_fail_the_round() {
     for i in 0..6 {
         r.venue.pos_script.push_back(page(vec![], &format!("k{i}")));
     }
-    r.at(T0 + 5000);
+    r.at(T0 + 8000);
     let after = r.venue.requests.iter().filter(|q| q.0 == PATH).count();
     assert_eq!(after - before, 5);
     assert_eq!(
@@ -209,18 +223,55 @@ fn bad_pages_and_rows_fail_the_round() {
     r.venue
         .pos_script
         .push_back(Err(RestError::NoAnswer("timeout".into())));
-    r.at(T0 + 6000);
+    r.at(T0 + 9000);
     assert_eq!(r.engine.success(Check::W2), None);
-    // An empty side is no position; an empty page with a cursor is
-    // followed; a short page without one ends the read.
+    // An empty side with size 0 is no position; an empty page with a
+    // cursor is followed; a short page without one ends the read.
     r.venue.pos_script.extend([
-        page(vec![pos("BTCUSDT", "", "1", None)], "c2"),
+        page(vec![pos("BTCUSDT", "", "0", None)], "c2"),
         page(vec![], "c3"),
         page(vec![], ""),
     ]);
-    r.at(T0 + 7000);
-    assert_eq!(r.engine.success(Check::W2), Some(T0 + 7000));
+    r.at(T0 + 10_000);
+    assert_eq!(r.engine.success(Check::W2), Some(T0 + 10_000));
     assert_eq!(r.gauge("watcher_differences", "W2"), Some(0.0));
+}
+
+#[test]
+fn a_round_that_failed_between_pages_leaves_no_observation() {
+    let mut r = rig("w2-failed-between-pages");
+    r.write(T0 - 60_000, &[adj("BTCUSDT", "1")]);
+    let btc = pos("BTCUSDT", "Buy", "1", Some(T0 - 60_000));
+    r.venue.positions = vec![btc.clone(), pos("ETHUSDT", "Buy", "1", None)];
+    // The first round reads page 1 (BTCUSDT, with a cursor) and loses
+    // page 2 (ETHUSDT): not a complete read, nothing is observed.
+    r.venue.pos_script.extend([
+        page(vec![btc], "c1"),
+        Err(RestError::NoAnswer("timeout".into())),
+    ]);
+    r.at(T0);
+    assert_eq!(r.engine.success(Check::W2), None);
+    // The second round is the first complete read: ETHUSDT is the state
+    // found at start (no seen time), pending, not deferred.
+    r.at(T0 + 1000);
+    assert_eq!(r.engine.success(Check::W2), Some(T0 + 1000));
+    r.at(T0 + 2000);
+    let want = detail("ETHUSDT", "1", "0", "change time unknown");
+    assert_eq!(w2_mismatches(&r), vec![(T0 + 2000, want)]);
+}
+
+#[test]
+fn a_difference_too_large_to_subtract_is_still_a_difference() {
+    let mut r = rig("w2-overflow");
+    // venue − journal leaves the decimal's range (i128 at 10^8).
+    let big = "1701411834604692317316873037158";
+    r.write(T0 - 60_000, &[adj("BTCUSDT", "-1")]);
+    r.venue.positions = vec![pos("BTCUSDT", "Buy", big, Some(T0 - 60_000))];
+    r.at(T0);
+    assert_eq!(r.gauge("watcher_differences", "W2"), Some(1.0));
+    r.at(T0 + 1000);
+    let want = detail("BTCUSDT", big, "-1", "journal entry 61.0 s old");
+    assert_eq!(w2_mismatches(&r), vec![(T0 + 1000, want)]);
 }
 
 #[test]
