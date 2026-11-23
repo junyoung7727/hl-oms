@@ -15,7 +15,9 @@ use std::time::{Duration, Instant};
 
 use http_fake::{Answer, FakeHttp, Request, dead_addr};
 use serde_json::Value;
-use watcher::alert::{self, Handle, MSG_LIMIT, OUTBOX_LIMIT, Outbox, Outcome, Part, Route, Token};
+use watcher::alert::{
+    self, Handle, MSG_LIMIT, MismatchNotices, OUTBOX_LIMIT, Outbox, Outcome, Part, Route, Token,
+};
 use watcher::clock::{Clock, ManualClock};
 use watcher::config::Config;
 use watcher::metrics::Metrics;
@@ -784,4 +786,81 @@ fn a_request_without_an_answer_fails_after_10_s() {
     assert!(!failed[0].contains(SECRET), "{}", failed[0]);
     // The last flush meets the same silence and is cut at its bound.
     assert_eq!(rig.finish(200), 1);
+}
+
+// ---------------------------------------------------------------- P1 conditions (U19b1c)
+
+const MISMATCH_HEAD: &str =
+    "불일치 확정 {k}건. OMS에 일반 주문 차단(watcher_mismatch)을 보내기 시작함(실패하면 다시 보냄; 결과는 OMS의 hold 알림). ";
+
+fn head(check: &str, k: u64) -> String {
+    format!("워처 {check} {}", MISMATCH_HEAD.replace("{k}", &k.to_string()))
+}
+
+fn strings(v: &[&str]) -> Vec<String> {
+    v.iter().map(|s| s.to_string()).collect()
+}
+
+#[test]
+fn mismatch_notices_are_at_most_one_per_check_per_60_s_and_collect_the_rest() {
+    use watcher::engine::Check::{W1, W2, W4};
+    let mut n = MismatchNotices::default();
+    assert!(n.poll(T0).is_empty());
+    // The first confirmation goes at once.
+    n.add(W1, &strings(&["W1 foreign a"]));
+    assert_eq!(n.poll(T0), vec![format!("{}W1 foreign a", head("W1", 1))]);
+    assert!(n.poll(T0).is_empty());
+    // Within 60 s the next ones of W1 are collected for the next message;
+    // another check has its own pace.
+    n.add(W1, &strings(&["W1 foreign b"]));
+    n.add(W1, &strings(&["W1 foreign c", "W1 foreign d"]));
+    assert!(n.poll(T0 + 1_000).is_empty());
+    assert!(n.poll(T0 + 59_999).is_empty());
+    n.add(W2, &strings(&["W2 position x"]));
+    assert_eq!(
+        n.poll(T0 + 59_999),
+        vec![format!("{}W2 position x", head("W2", 1))]
+    );
+    assert_eq!(
+        n.poll(T0 + 60_000),
+        vec![format!(
+            "{}W1 foreign b\n그 밖에: W1 foreign c; W1 foreign d",
+            head("W1", 3)
+        )]
+    );
+    // The pace counts from the last message.
+    n.add(W1, &strings(&["W1 foreign e"]));
+    assert!(n.poll(T0 + 60_001).is_empty());
+    assert!(n.poll(T0 + 119_999).is_empty());
+    assert_eq!(
+        n.poll(T0 + 120_000),
+        vec![format!("{}W1 foreign e", head("W1", 1))]
+    );
+    // A clock that steps back holds the pace.
+    n.add(W1, &strings(&["W1 foreign f"]));
+    assert!(n.poll(T0).is_empty());
+    assert_eq!(n.poll(T0 + 180_000).len(), 1);
+
+    // W4 confirms 300 in one round: five details, each cut to 600 UTF-16
+    // units, and the count of the rest; the message is one part.
+    let long = "가".repeat(700);
+    let many: Vec<String> = (0..300)
+        .map(|i| format!("W4 unknown_exec_type e{i}: {long}"))
+        .collect();
+    n.add(W4, &many);
+    let m = n.poll(T0 + 200_000);
+    assert_eq!(m.len(), 1);
+    let body = &m[0];
+    assert!(body.starts_with(&head("W4", 300)), "{body}");
+    assert!(body.ends_with("; 그리고 295건 더"), "{body}");
+    let (first, rest) = body[head("W4", 300).len()..].split_once("\n그 밖에: ").unwrap();
+    let rest = rest.strip_suffix("; 그리고 295건 더").unwrap();
+    let shown: Vec<&str> = std::iter::once(first).chain(rest.split("; ")).collect();
+    assert_eq!(shown.len(), 5);
+    for (i, d) in shown.iter().enumerate() {
+        assert!(d.starts_with(&format!("W4 unknown_exec_type e{i}: 가")), "{d}");
+        assert_eq!(units(d), 600, "{i}");
+    }
+    let name = "워".repeat(64);
+    assert_eq!(alert::split(&alert::message(&name, T0, body), MSG_LIMIT).len(), 1);
 }

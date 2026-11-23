@@ -22,6 +22,7 @@ use std::time::Duration;
 use tokio::sync::Notify;
 
 use crate::clock::Clock;
+use crate::engine::Check;
 use crate::log::Log;
 use crate::metrics::Metrics;
 
@@ -744,5 +745,98 @@ impl Sender {
         }
         let last = errors.last().cloned().unwrap_or_else(|| "no route".into());
         (Outcome::Retry(last), errors)
+    }
+}
+
+// ---------------------------------------------------------------- P1 conditions (U19b1c)
+
+/// At most one mismatch message per check this often, on the raw injected
+/// clock (판단(모델 아님)).
+pub const MISMATCH_PACE_MS: u64 = 60_000;
+/// A detail in a mismatch message is cut to this many UTF-16 units, so
+/// that five of them and the header fit one part (판단(모델 아님)).
+pub const DETAIL_UNITS: usize = 600;
+/// The details a mismatch message shows; the rest are counted.
+pub const DETAILS_SHOWN: usize = 5;
+
+/// `text` cut to at most `max` UTF-16 units at a character boundary.
+fn cut_units(text: &str, max: usize) -> String {
+    let mut used = 0;
+    text.chars()
+        .take_while(|c| {
+            used += c.len_utf16();
+            used <= max
+        })
+        .collect()
+}
+
+/// The body of a mismatch message: `k` identities of `check` confirmed,
+/// `details` the first ones (at most [`DETAILS_SHOWN`]).
+pub fn mismatch_text(check: Check, k: u64, details: &[String]) -> String {
+    let mut text = format!(
+        "워처 {} 불일치 확정 {k}건. OMS에 일반 주문 차단(watcher_mismatch)을 보내기 시작함(실패하면 다시 보냄; 결과는 OMS의 hold 알림). {}",
+        check.name(),
+        details.first().map(String::as_str).unwrap_or("")
+    );
+    if k > 1 {
+        let more: Vec<&str> = details.iter().skip(1).map(String::as_str).collect();
+        text.push_str("\n그 밖에: ");
+        text.push_str(&more.join("; "));
+        let rest = k.saturating_sub(details.len() as u64);
+        if rest > 0 {
+            text.push_str(&format!("; 그리고 {rest}건 더"));
+        }
+    }
+    text
+}
+
+#[derive(Debug, Default)]
+struct Collected {
+    last_sent_ms: Option<u64>,
+    /// The first [`DETAILS_SHOWN`] details since the last message.
+    details: Vec<String>,
+    /// Identities confirmed since the last message.
+    count: u64,
+}
+
+/// The mismatch P1 (C-WATCH part 10): one message per confirmation of an
+/// identity ([`crate::engine::Action::Confirmed`]), at once for the first,
+/// then at most one per check per [`MISMATCH_PACE_MS`]; what is confirmed
+/// meanwhile is collected into the next. Sans-IO; elapsed time is
+/// `saturating_sub`, so a clock that steps back holds the pace. Memory
+/// only.
+#[derive(Debug, Default)]
+pub struct MismatchNotices {
+    checks: BTreeMap<Check, Collected>,
+}
+
+impl MismatchNotices {
+    /// Identities of `check` confirmed, one detail each.
+    pub fn add(&mut self, check: Check, details: &[String]) {
+        let c = self.checks.entry(check).or_default();
+        for d in details {
+            c.count += 1;
+            if c.details.len() < DETAILS_SHOWN {
+                c.details.push(cut_units(d, DETAIL_UNITS));
+            }
+        }
+    }
+
+    /// The message bodies due at `now_ms`.
+    pub fn poll(&mut self, now_ms: u64) -> Vec<String> {
+        let mut out = Vec::new();
+        for (check, c) in &mut self.checks {
+            if c.count == 0
+                || c.last_sent_ms
+                    .is_some_and(|t| now_ms.saturating_sub(t) < MISMATCH_PACE_MS)
+            {
+                continue;
+            }
+            out.push(mismatch_text(*check, c.count, &c.details));
+            c.last_sent_ms = Some(now_ms);
+            c.count = 0;
+            c.details.clear();
+        }
+        out
     }
 }
