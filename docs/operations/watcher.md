@@ -1,6 +1,6 @@
 # 워처 운영
 
-설계: [ADR-031](../adr/ADR-031-watcher.md). 계약: [C-WATCH](../contracts/watcher.md). 이 문서는 워처의 설정과 자격 파일(U19a4), 시작 확인과 그 거부, 시작 확인이 내보내는 지표(U19a4b), 실행과 상황별 의미(U19a7)를 적는다. U19a7부터 `watcher --config`가 돈다: W1(열린 주문)과 W2(포지션), U19a8부터 W4(체결)를 검사하고, 확정된 차이를 `admin.sock`에 보내고, `monitor.sock`에 하트비트를 보낸다. W3은 아직 없다(U19a9). loopback 가짜로만 시험했고 실제 거래소에서 돌려 본 적이 없다. 서비스 설치와 알림 규칙은 U20b다.
+설계: [ADR-031](../adr/ADR-031-watcher.md). 계약: [C-WATCH](../contracts/watcher.md). 이 문서는 워처의 설정과 자격 파일(U19a4), 시작 확인과 그 거부, 시작 확인이 내보내는 지표(U19a4b), 실행과 상황별 의미(U19a7)를 적는다. U19a7부터 `watcher --config`가 돈다: W1(열린 주문)과 W2(포지션), U19a8부터 W4(체결), U19a9부터 W3(지갑과 증거금)을 검사하고, 확정된 차이를 `admin.sock`에 보내고, `monitor.sock`에 하트비트를 보낸다. loopback 가짜로만 시험했고 실제 거래소에서 돌려 본 적이 없다. 서비스 설치와 알림 규칙은 U20b다.
 
 ## 설정 파일
 
@@ -62,6 +62,8 @@ vm_url = "http://127.0.0.1:8428"                  # http, loopback 주소 숫자
 | `[telemetry] vm_url` | 없음 | `http://`, loopback 주소 숫자(`localhost`는 안 됨), 공백·제어 문자 없음(끝의 공백도) |
 
 기본값의 근거(설계 §7.5, 스코프, OMS의 값)와 거부의 이유는 [C-WATCH 4부](../contracts/watcher.md)에 있다.
+
+`[w3]`의 두 한도는 OMS 설정의 `account_mm_rate_max_bps`·`daily_loss_bps`(C-MARGIN)와 **같은 값으로 둔다**. 워처는 OMS 설정을 읽지 않는다(독립). 값이 다르면 W3과 OMS의 감소 전용 판단이 어긋난다(U19a9, C-WATCH 9부).
 
 ## 자격 파일
 
@@ -159,6 +161,8 @@ watcher --version
 |---|---|---|
 | `watcher_up` | 밀어 넣을 때마다 1 | 없으면 워처나 밀어 넣기가 없다 |
 | `watcher_heartbeat_ok_ts` | OMS가 마지막으로 하트비트를 기록한 하트비트 시각(epoch 초) | 멈추면 `monitor.sock` 줄 |
-| `watcher_check_age_s{check}` | 검사의 마지막 성공 뒤의 초. 시작 중에는 설정을 읽은 때부터. W4는 끝난 훑기에서만 성공하므로 여러 라운드에 걸친 훑기 동안 오른다 | W1·W2가 10초를 넘으면 OMS 게이트가 닫힌다. W4는 게이트가 판단하지 않는다 |
+| `watcher_check_age_s{check}` | 검사의 마지막 성공 뒤의 초. 시작 중에는 설정을 읽은 때부터(네 검사 모두). W4는 끝난 훑기에서만 성공하므로 여러 라운드에 걸친 훑기 동안 오른다. W3은 `wallet-balance`를 읽지 못하면 오른다 | W1·W2가 10초를 넘으면 OMS 게이트가 닫힌다. W3·W4는 게이트가 판단하지 않는다(기록만) |
 | `watcher_mismatch_active{check}` | 라운드가 아직 보는 확정된 차이와 아직 OMS에 빚진 것 | 런북 7.13 |
+| `watcher_mismatch_active{check="W3"}` | W3의 위반(`account_mm_rate`, `daily_loss`)이 확정되어 아직 보이거나 빚진 것. 많아야 2(정체는 종류뿐) | 런북 7.13의 W3 순서. OMS의 `core.margin`(감소 전용인지)과 함께 본다 |
+| `watcher_requests_total{endpoint}` | 경로마다 보낸 요청(쪽마다 하나) | 대조 예산은 초당 2.7(설계). 증가율이 그보다 크게 오래 높으면 W1의 쪽(열린 주문 수)이나 W4의 쪽(체결량)을 본다. 5초에 체결 100개면 약 3.2~3.3이 정상이다(C-WATCH 9부) |
 | `watcher_journal_seq`, `watcher_journal_error` | 마지막으로 읽은 기록, 읽기 실패 | 런북 7.17 |

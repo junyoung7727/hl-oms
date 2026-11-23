@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `5890157f33bc5964`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `0618cf7ac0958091`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
-주장 116건: 통과 0, 실패 0, 미실행 49, 이전 버전 결과 67.
+주장 118건: 통과 0, 실패 0, 미실행 51, 이전 버전 결과 67.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -123,6 +123,8 @@
 | V-WATCH-6 | 워처의 W2는 position/list(category=linear, settleCoin=USDT, 200개씩 5쪽까지)를 W1의 쪽 규칙으로 읽고(커서 없는 가득 찬 쪽, 같은 커서, 한 기호의 두 행(헤지 모드), 모르는 방향, 소수가 아닌 크기, 크기 있는 빈·없는 방향, 음수 크기, 기호 없는 행은 unreadable, 6쪽째는 실패), 기호마다 d = 거래소 − 저널(체결 + 외부 체결 + 거래소 변경 + 조정)을 차이 (W2, position, 기호, d)로 본다(범위를 넘은 d는 값 overflow인 차이). 다른 d는 처음부터 센다. 저널의 마지막 변경 시각과 거래소의 최근 변경 시각(updatedTime, 없으면 그 크기를 처음 본 라운드 seen_at) 중 알려진 것이 min_age_ms보다 어리면 첫 sighting이어도 미루고 라운드는 성공이 아니며, 모르는 시각은 늙음이라 저널이 바꾼 적 없는 기호의 거래소 포지션은 두 번째 라운드에 확정된다. 행이 없는 기호는 크기 0으로 보아 막 닫힌 포지션도 처음 0으로 본 라운드부터 2초 미루고, 첫 완전한 읽기의 크기에는 seen_at이 없으며, 모든 쪽을 읽은 뒤 실패한 라운드의 크기는 마지막 거래소 답의 시각으로 남고, 쪽 사이에서 실패한 라운드는 아무것도 남기지 않는다. 초당 5번의 체결이 60초 이어지는 동안 Mismatch가 없고, 체결이 멈춘 뒤 심은 차이는 라운드의 어느 위상에서도 3초 안에 확정된다 | 단위(sans-IO, 수동 시계) | 미실행 | `cargo test -p watcher --test w2` |
 | V-WATCH-7 | 워처의 엔진은 확정된 차이를 그것을 실은 보내기가 "held"로 답할 때까지 빚으로 두고("already held", 보류를 보이는 저널, 실패는 갚지 않고, 라운드가 더 보지 않아도 확정 때의 detail로 보낸다), 저널 상태가 그 검사의 최근 held/already held 답 뒤에 낸 상태 요청의 상한에서 보류 꺼짐을 보일 때, 지난 보내기 시작부터 mismatch_resend_ms가 지났을 때, 그 검사의 보내기가 진행 중이 아닐 때만 보낸다(보고가 없는 보내기는 낸 시각 + 2 × request_timeout_ms + 1초에 실패하고, 그 뒤에 온 늦은 보고는 번호가 달라 아무것도 갚지 않는다). W1·W2는 라운드가 아직 보는 확정된 차이를 해제 뒤 다시 보낸다. admin.sock 클라이언트는 hello 다음 watcher_mismatch를 보내고 두 답을 읽는다. monitor.sock 클라이언트는 연결 하나를 유지하고 hello를 먼저, 그다음 W1~W4의 성공 시각(없으면 null)을 보내며, 끊김·답 없음 뒤 다음 하트비트에 다시 연다. 실행은 설정을 읽은 때부터 지표를 밀어 넣고, 시작 확인, /api/status 기다림, 재생 동안에도 IP를 다시 확인하고, 재확인에서 시작 규칙에 맞지 않는 키는 모든 Bybit 요청을 멈추며, OMS가 답하지 않으면 아무것도 판단하지 않고, 시작 거부는 코드 2, shutdown 입력은 새 라운드 없이 마지막 밀어 넣기와 모니터 연결 닫음 뒤 0으로 끝난다 | 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나) | 미실행 | `cargo test -p watcher --test admin --test heartbeat --test runtime --test binary` |
 | V-WATCH-8 | 워처의 W4는 execution/list를 고정된 끝(첫 쪽의 시계)과 시작 max(워터마크 − w4_overlap_ms, ⌈체결 바닥/1000⌉)(7일로 자름)의 창으로 훑고, 라운드마다 w4_max_pages쪽까지 읽어 더 긴 훑기는 다음 라운드가 같은 창과 커서로 이으며(성공 시각은 끝난 훑기에서만), 빈 쪽이나 빈 커서에서 끝내고, 바뀌지 않은 커서와 읽을 수 없는 쪽은 라운드를 실패시켜 같은 커서로 다시 읽되 연달아 3번이나 50라운드면 같은 시작과 새 끝으로 다시 시작한다. 행은 execType으로 먼저 나눠 Trade는 저널 체결과, AdlTrade·BustTrade·Delivery·Settle은 저널 거래소 변경과 키 <symbol>:<execId>로 비교하고, Funding은 비교하지 않으며, 모르는 형은 끝난 훑기에서 바로 확정하고, 형이 필요로 하는 필드가 없는 행과 execTime이 훑기의 끝보다 뒤인 행은 unreadable_row, 바닥 아래 행과 수량 0인 Trade·거래소 변경 행은 무시한다. 차이는 두 훑기와 execTime 나이로 확정하고 어린 차이는 훑기를 실패시키지 않는다. 워터마크는 확정되지 않은 가장 오래된 행(execTime 없는 행은 모든 행보다 오래됨) 아래의 가장 새 행으로만, 뒤로 가지 않게 움직인다. held 답(already held는 갚지 않는다)으로 갚고 그 답 뒤에 낸 상한에서 보류 꺼짐을 본 W4 정체는 거두어 다시 보내지도 세지도 않는다 | 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나) | 미실행 | `cargo test -p watcher --test w4 --test runtime` |
+| V-WATCH-9 | 워처의 W3은 w3_ms마다 wallet-balance?accountType=UNIFIED의 UNIFIED 계좌 하나(정확히 하나, 세 필드가 저널 소수, 유지증거금이 음수가 아님; 아니면 unreadable로 라운드 실패)를 OMS의 공식으로 판단한다: account_mm_rate는 maintenance > 0이고 maintenance × 10 000 ≥ account_mm_rate_max_bps × margin_balance(같으면 건다), daily_loss는 저널의 일 기준값이 오늘의 UTC 날이고 (base − totalEquity) × 10 000 > daily_loss_bps × base(오늘의 기준이 없으면 판단하지 않는다). 정체는 종류뿐이고 두 라운드 연속에서 나이 없이 확정하며, 위반이 남아 있으면 해제 뒤 다시 보낸다. W2는 W4가 마지막으로 맞춘 그 기호의 execTime이 updatedTime이나 seen_at보다 새면 그것을 거래소의 변경 시각으로 쓴다. 하트비트의 W3·W4는 그 검사의 마지막 성공 시각이고, 실행은 W2(W4의 시각 지도와 함께), W3, W4를 돌리며 엔진 전에는 네 검사의 나이를 boot_ms부터 내보낸다 | 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나) | 미실행 | `cargo test -p watcher --test w3 --test w2 --test heartbeat --test runtime` |
+| V-WATCH-10 | W1·W2·W3·W4를 설계 간격(1초, 1초, 2초, 5초)으로 돌린 모의 1분(수동 시계, 실제 rest::Guard를 거친 모델 거래소, 요청 지연 0)에서 5초에 체결 30개를 고르게 주면 대조 요청은 W1 60 + W2 60 + W3 30 + W4 12 = 162개, 초당 2.7 이하이고 차이도 실패한 라운드도 없다. 5초에 100개면 192개(초당 3.2; 정상 상태는 훑기당 4쪽, 초당 3.3)로 설계 예산을 넘지만 W4는 12 훑기를 모두 자기 라운드에서 끝내고 정상 상태의 창은 15초다. 열린 주문 500개(W1 라운드 11쪽)에서는 가드가 10초에 60을 지키며 W1 라운드를 늘리지만 하트비트마다 W1·W2의 나이는 10초 아래다 | 단위(sans-IO 엔진과 sans-IO 가드, 수동 시계) | 미실행 | `cargo test -p watcher --test budget -- --nocapture` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다
 
@@ -2831,7 +2833,7 @@
 - 판정 기준과 근거: 보내기는 정한 시각(라운드)에만, 정한 detail로, 정한 수만큼 온다. 하트비트 줄의 W1·W2는 그 순간 엔진의 성공 시각과 같고 첫 것은 모두 null. 소켓 줄은 hello가 먼저이고 정확히 그 문자열이다. 종단 시험에서 W1·W2가 있는 하트비트, W1 불일치, 서명된 네 경로, watcher_up이 든 밀어 넣기, 코드 0
 - 재현: `cargo test -p watcher --test admin --test heartbeat --test runtime --test binary`
 - 뒷받침하는 것: C-WATCH 7부, ADR-031, C-LIVE 2부, C-HOLD
-- 확인하지 않은 범위: 실제 oms-node 프로세스와 실제 Bybit에 붙여 돈 적이 없다(키가 없다, U-01). SIGTERM·SIGINT에서 shutdown 입력으로의 연결(main.rs)은 시험하지 않았다. 빚은 메모리에만 있어 재시작하면 잃는다. W3·W4의 보내기와 하트비트 시각(U19a8·U19a9). 재생 중에는 하트비트가 없다(소유자 질문 9). 종단 시험만 실제 시간이고 짧은 간격(500ms)으로 돌았다
+- 확인하지 않은 범위: 실제 oms-node 프로세스와 실제 Bybit에 붙여 돈 적이 없다(키가 없다, U-01). SIGTERM·SIGINT에서 shutdown 입력으로의 연결(main.rs)은 시험하지 않았다. 빚은 메모리에만 있어 재시작하면 잃는다. W3·W4의 보내기와 하트비트 시각은 V-WATCH-8·V-WATCH-9가 본다. 재생 중에는 하트비트가 없다(소유자 질문 9). 종단 시험만 실제 시간이고 짧은 간격(500ms)으로 돌았다
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
@@ -2868,7 +2870,7 @@
 - 판정 기준과 근거: W4의 Mismatch는 정한 훑기(라운드)에만, 정한 detail로, 정한 수만큼 온다. 요청의 startTime·endTime·cursor가 규칙의 값과 같고, 쪽 수가 정한 수이며, W4의 성공 시각과 watcher_check_age_s{W4}·watcher_differences{W4}·watcher_mismatch_active{W4}가 정한 값이다
 - 재현: `cargo test -p watcher --test w4 --test runtime`
 - 뒷받침하는 것: C-WATCH 8부, ADR-031
-- 확인하지 않은 범위: W4의 가득 찬 마지막 쪽 한계: 거래소가 행이 더 있는데 가득 찬 쪽을 빈 커서로 끝내면 그 행은 비교하지 않는다(W2가 포지션으로 본다, 소유자 질문 11). 실제 Bybit execution/list의 응답, Funding·ADL 행의 모양, 빈 nextPageCursor의 뜻(facts Q9.9, 설계 R3 T15; 키가 없다, U-01). w4_initial_lookback_ms보다 오래 내려가 있던 뒤의 오래된 체결. 거둔 정체는 메모리에만 있어 재시작 뒤 다시 확정된다. 하트비트의 W4 시각은 종단 시험 하나로만 보았다(U19a9가 시험을 더한다). 예산(U19a9)
+- 확인하지 않은 범위: W4의 가득 찬 마지막 쪽 한계: 거래소가 행이 더 있는데 가득 찬 쪽을 빈 커서로 끝내면 그 행은 비교하지 않는다(W2가 포지션으로 본다, 소유자 질문 11). 실제 Bybit execution/list의 응답, Funding·ADL 행의 모양, 빈 nextPageCursor의 뜻(facts Q9.9, 설계 R3 T15; 키가 없다, U-01). w4_initial_lookback_ms보다 오래 내려가 있던 뒤의 오래된 체결. 거둔 정체는 메모리에만 있어 재시작 뒤 다시 확정된다. 하트비트의 W4 시각은 V-WATCH-9, 예산은 V-WATCH-10이 본다
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
@@ -2906,4 +2908,50 @@
 | `watcher/an_already_held_answer_to_a_w4_send_does_not_pay_it` | 미실행 |  |
 | `watcher/the_restart_warn_line_is_logged_once_per_run_of_failed_rounds` | 미실행 |  |
 | `watcher/the_watcher_runs_against_loopback_fakes_end_to_end` | 미실행 |  |
+
+## V-WATCH-9 — 워처의 W3은 w3_ms마다 wallet-balance?accountType=UNIFIED의 UNIFIED 계좌 하나(정확히 하나, 세 필드가 저널 소수, 유지증거금이 음수가 아님; 아니면 unreadable로 라운드 실패)를 OMS의 공식으로 판단한다: account_mm_rate는 maintenance > 0이고 maintenance × 10 000 ≥ account_mm_rate_max_bps × margin_balance(같으면 건다), daily_loss는 저널의 일 기준값이 오늘의 UTC 날이고 (base − totalEquity) × 10 000 > daily_loss_bps × base(오늘의 기준이 없으면 판단하지 않는다). 정체는 종류뿐이고 두 라운드 연속에서 나이 없이 확정하며, 위반이 남아 있으면 해제 뒤 다시 보낸다. W2는 W4가 마지막으로 맞춘 그 기호의 execTime이 updatedTime이나 seen_at보다 새면 그것을 거래소의 변경 시각으로 쓴다. 하트비트의 W3·W4는 그 검사의 마지막 성공 시각이고, 실행은 W2(W4의 시각 지도와 함께), W3, W4를 돌리며 엔진 전에는 네 검사의 나이를 boot_ms부터 내보낸다
+
+- 상태: **미실행**
+- 왜 중요한가: W3이 한 라운드로 확정하면 순간의 값 하나로 보류가 걸리고(설계 "한도 위반 2회 연속"), 한도와 같은 값을 통과시키면 OMS가 감소 전용으로 들어가는 계좌를 워처가 괜찮다고 본다. 어제의 기준으로 일 손실을 판단하면 새 날의 첫 시세 변동이 거짓 보류가 된다. 두 UNIFIED 계좌 중 하나를 고르거나 음수 유지증거금을 읽으면 OMS가 거부하는 보고로 판단한다. W2가 W4의 체결 시각을 쓰지 않으면 updatedTime이 없거나 움직이지 않는 거래소에서 체결이 막 맞은 기호의 차이를 어린 채로 확정한다. 하트비트가 W3·W4를 null로 보내면 OMS 기록에서 두 검사가 사라진다
+- 수준: 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나)
+- 전제와 범위: 엔진 시험 도구(프로세스 안의 모델 거래소에 지갑 계좌 목록과 대본, 포지션과 체결; 시험 저널의 day_base_set·hold_cleared; 시험 도구의 OMS), 가짜 monitor.sock과 실제 oms::Monitor, runtime::checks, runtime::run과 http-fake의 wallet-balance 경로: 시험 9개
+- 실제 구성요소: 워처의 Engine, W3, W2, W4, runtime::checks, runtime::run, oms::Monitor, rest::Client(종단 시험), ADR-011 형식으로 쓴 저널 파일
+- 모의·시뮬레이션: Bybit wallet-balance·position/list·execution/list(모델 거래소와 http-fake), OMS(시험 도구), 시계(수동, 종단 시험만 실제)
+- 주입한 장애: 한도보다 10^-8 아래, 한도와 같음, 한 라운드만의 위반, 라운드마다 바뀌는 금액, 잔고 ≤ 0, 유지증거금 0, 기준 100에서 95.00과 94.99, 해제 뒤 이어지는 손실, 오늘의 새 기준, 기준 없음, 어제의 기준, 자정을 넘은 오늘의 기준, UNIFIED 없음·둘, 빈 소수, 음수 유지증거금, 지수, 목록이 아닌 list, 거래소 무응답, updatedTime 없는 기호와 늙은 updatedTime의 기호에 어린 W4 시각, 어느 시각도 없는 기호, 실패하는 W3 라운드, 엔진 전의 키 거절. 변이 M251~M254와 시험 밖 변이 14개(모두 잡힘, U19a9 보고)
+- 판정 기준과 근거: W3의 Mismatch와 확정 줄은 정한 라운드에만 정한 detail로 오고, watcher_differences{W3}·watcher_mismatches_total{W3}·watcher_mismatch_active{W3}와 W3의 성공 시각이 정한 값이며, 읽을 수 없는 답마다 watcher_request_errors_total{wallet-balance, unreadable}이 하나씩 오른다. W2의 확정은 W4의 시각이 2초 늙은 라운드에 정한 detail로 온다. 하트비트 줄의 W3·W4는 그 순간 엔진의 성공 시각과 같다. 종단 시험의 하트비트에 W1~W4 시각이 모두 있다
+- 재현: `cargo test -p watcher --test w3 --test w2 --test heartbeat --test runtime`
+- 뒷받침하는 것: C-WATCH 9부, ADR-031, C-MARGIN
+- 확인하지 않은 범위: 실제 Bybit wallet-balance의 응답(8자리를 넘는 소수를 보내는지; 키가 없다, U-01). 자정부터 OMS의 새 day_base_set까지는 일 손실을 판단하지 않는다(소유자 질문 6). OMS의 유지증거금 여유(MmBuffer) 규칙은 W3에 없다. 워처의 [w3] 한도가 OMS 설정과 같은지는 운영자의 몫이다. 범위를 넘는 곱을 위반으로 보는 규칙은 시험하지 않았다(실제 금액에서는 생기지 않는다)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `watcher/a_margin_rate_at_the_limit_on_two_rounds_alarms` | 미실행 |  |
+| `watcher/a_daily_loss_beyond_todays_base_on_two_rounds_alarms` | 미실행 |  |
+| `watcher/without_todays_base_only_the_margin_rate_is_judged` | 미실행 |  |
+| `watcher/an_unreadable_wallet_fails_the_round` | 미실행 |  |
+| `watcher/a_missing_updated_time_falls_back_to_w4s_last_exec_time` | 미실행 |  |
+| `watcher/w3_and_w4_success_times_reach_the_heartbeat` | 미실행 |  |
+| `watcher/the_runtime_runs_w2_w3_and_w4_and_w2_reads_w4s_exec_times` | 미실행 |  |
+| `watcher/a_key_rejected_at_start_is_exported` | 미실행 |  |
+| `watcher/the_watcher_runs_against_loopback_fakes_end_to_end` | 미실행 |  |
+
+## V-WATCH-10 — W1·W2·W3·W4를 설계 간격(1초, 1초, 2초, 5초)으로 돌린 모의 1분(수동 시계, 실제 rest::Guard를 거친 모델 거래소, 요청 지연 0)에서 5초에 체결 30개를 고르게 주면 대조 요청은 W1 60 + W2 60 + W3 30 + W4 12 = 162개, 초당 2.7 이하이고 차이도 실패한 라운드도 없다. 5초에 100개면 192개(초당 3.2; 정상 상태는 훑기당 4쪽, 초당 3.3)로 설계 예산을 넘지만 W4는 12 훑기를 모두 자기 라운드에서 끝내고 정상 상태의 창은 15초다. 열린 주문 500개(W1 라운드 11쪽)에서는 가드가 10초에 60을 지키며 W1 라운드를 늘리지만 하트비트마다 W1·W2의 나이는 10초 아래다
+
+- 상태: **미실행**
+- 왜 중요한가: 완료 기준이 요구하는 대조 예산(2.7 req/s, 설계 §7.5)을 잰다. W4의 겹침과 모든 커서 규칙이 큰 부하에서 그것을 넘는다는 충돌(소유자 질문 1)을 숫자로 보인다. 많은 열린 주문에서 가드가 W1·W2를 게이트의 10초 너머로 늘리면 OMS가 감시 없음으로 거래를 멈춘다
+- 수준: 단위(sans-IO 엔진과 sans-IO 가드, 수동 시계)
+- 전제와 범위: 시험 쪽 스케줄러(10ms 단계, 가드 앞에서 기다리는 요청은 먼저 온 것부터), 엔진 시험 도구의 모델 거래소(열린 주문, 포지션, 체결, 지갑)와 시험 저널: 시험 3개
+- 실제 구성요소: 워처의 Engine, W1, W2, W3, W4, rest::Guard, ADR-011 형식으로 쓴 저널 파일
+- 모의·시뮬레이션: Bybit(모델 거래소, 지연 0), OMS(시험 도구), 요청을 내보내는 클라이언트(시험 쪽 스케줄러), 시계(수동)
+- 주입한 장애: 5초에 체결 30개와 100개(고르게, 저널이 같은 단계에 기록), 열린 주문 500개
+- 판정 기준과 근거: 30/5초: 경로별 60·60·30·12와 합 ≤ 162, 비율 ≤ 2.7, Mismatch·확정·실패한 라운드 0. 100/5초: 2.7 < 비율 ≤ 3.4, W4 훑기 12개가 각자의 라운드 시각에 끝나고 첫 훑기 뒤의 창이 16초 이하, Mismatch 0. 500개: 어느 10초에도 요청 ≤ 60, 첫 하트비트 뒤 모든 하트비트에서 W1·W2의 나이 < 10초, Mismatch 0, W1·W2의 실패한 라운드 0
+- 재현: `cargo test -p watcher --test budget -- --nocapture`
+- 뒷받침하는 것: C-WATCH 9부, ADR-031
+- 확인하지 않은 범위: 완료 기준 자신의 한도: 5초에 체결 100개에서 초당 2.7 이하는 그대로는 충족되지 않는다(범위의 W4 규칙을 따랐다, 소유자 질문 1). 그 부하의 비율(3.2, 정상 상태 3.3; 스펙의 어림 ≈ 3.1)은 budget::at_100_executions_per_5_s_the_rate_is_about_3_1_and_w4_keeps_up가 잰다. 실제 요청 지연과 실제 클라이언트의 가드 대기 순서(순서 없이 100ms마다 다시 묻는다), 고르지 않은 체결 몰림, IP 확인 요청은 모형에 없다. 실제 Bybit로 잰 적이 없다(키가 없다, U-01)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `watcher/at_30_executions_per_5_s_the_reconciliation_rate_in_a_simulated_minute_stays_at_or_below_2_7` | 미실행 |  |
+| `watcher/at_100_executions_per_5_s_the_rate_is_about_3_1_and_w4_keeps_up` | 미실행 |  |
+| `watcher/at_500_open_orders_the_guard_stretches_w1_rounds_below_10_s` | 미실행 |  |
 

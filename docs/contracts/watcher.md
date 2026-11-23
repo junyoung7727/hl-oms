@@ -1,8 +1,8 @@
 # C-WATCH 독립 워처
 
-상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23), 4부 구현됨(설정과 자격 파일 U19a4, 시작 확인과 IP 재확인 U19a4b, 2026-11-23), 5부 구현됨(검사 엔진과 W1, U19a5, 2026-11-23), 6부 구현됨(W2 포지션, U19a6, 2026-11-23), 7부 구현됨(OMS 연결과 실행, U19a7, 2026-11-23), 8부 구현됨(W4 체결, U19a8, 2026-11-23). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3, V-WATCH-4, V-WATCH-5, V-WATCH-6, V-WATCH-7, V-WATCH-8. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
+상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23), 4부 구현됨(설정과 자격 파일 U19a4, 시작 확인과 IP 재확인 U19a4b, 2026-11-23), 5부 구현됨(검사 엔진과 W1, U19a5, 2026-11-23), 6부 구현됨(W2 포지션, U19a6, 2026-11-23), 7부 구현됨(OMS 연결과 실행, U19a7, 2026-11-23), 8부 구현됨(W4 체결, U19a8, 2026-11-23), 9부 구현됨(W3 지갑과 증거금, W2의 대신 시각, 예산, U19a9, 2026-11-23). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3, V-WATCH-4, V-WATCH-5, V-WATCH-6, V-WATCH-7, V-WATCH-8, V-WATCH-9, V-WATCH-10. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
 
-워처는 OMS와 코드를 나누지 않는 별도 프로그램이다. 저널을 자기 읽기로 읽고(이 문서와 [C-TAIL](tail.md), [ADR-011](../adr/ADR-011-file-format.md)만으로 썼다), 자기 키와 클라이언트로 Bybit를 조회해 OMS와 비교하고, 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고, `monitor.sock`에 하트비트를 보낸다. **U19a7부터 워처는 돈다**: `watcher --config <path>`가 설정과 자격 파일을 읽고, 시작 확인을 거쳐 OMS의 `/api/status`를 기다린 뒤 저널을 처음부터 재생하고, W1(열린 주문), W2(포지션), U19a8부터 W4(체결)를 돌려 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고(다시 보내기 규칙, 7부), `heartbeat_ms`마다 `monitor.sock`에 하트비트를 보내고, 지표를 VictoriaMetrics로 밀어 넣는다. W3은 아직 없다(하트비트에서 `null`, U19a9). loopback 가짜와 시험 저널로만 시험했고 실제 OMS 프로세스나 실제 Bybit에 붙여 돌려 본 적이 없다(키가 없다, U-01). 서비스 설치는 U20b다.
+워처는 OMS와 코드를 나누지 않는 별도 프로그램이다. 저널을 자기 읽기로 읽고(이 문서와 [C-TAIL](tail.md), [ADR-011](../adr/ADR-011-file-format.md)만으로 썼다), 자기 키와 클라이언트로 Bybit를 조회해 OMS와 비교하고, 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고, `monitor.sock`에 하트비트를 보낸다. **U19a7부터 워처는 돈다**: `watcher --config <path>`가 설정과 자격 파일을 읽고, 시작 확인을 거쳐 OMS의 `/api/status`를 기다린 뒤 저널을 처음부터 재생하고, W1(열린 주문), W2(포지션), U19a8부터 W4(체결), U19a9부터 W3(지갑과 증거금)을 돌려 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고(다시 보내기 규칙, 7부), `heartbeat_ms`마다 `monitor.sock`에 하트비트를 보내고, 지표를 VictoriaMetrics로 밀어 넣는다. 네 검사가 모두 돈다(U19a9). loopback 가짜와 시험 저널로만 시험했고 실제 OMS 프로세스나 실제 Bybit에 붙여 돌려 본 적이 없다(키가 없다, U-01). 서비스 설치는 U20b다.
 
 | 부 | 내용 | 단위 |
 |---|---|---|
@@ -14,7 +14,7 @@
 | 6 | W2 포지션(거래소 쪽, 기호별 차이, 두 변경 시각과 미룸, 거래소 관찰 시각 `seen_at`)(이 문서) | U19a6 |
 | 7 | OMS 연결(`/api/status`, `admin.sock`의 다시 보내기 규칙, `monitor.sock` 하트비트)과 실행, 바이너리(이 문서) | U19a7 |
 | 8 | W4 체결(훑기, 쪽, 다시 시작, 워터마크, 형별 행 읽기, `execType` 표, 거둠)(이 문서) | U19a8 |
-| 9 | W3과 W2의 대신 시각, 예산 | U19a9(아직 없음) |
+| 9 | W3 지갑과 증거금, W2의 대신 시각(W4의 `execTime`), 하트비트의 W3·W4, 예산 측정(이 문서) | U19a9 |
 
 ## 1부. 독립성
 
@@ -201,7 +201,7 @@
 
 ### 요청 제한(가드)
 
-- 어느 10초 창에서든 요청은 60개까지다. 모든 Bybit 경로와 IP 반향을 합친다(판단(모델 아님); 최악의 경우는 "Budget", U19a9). OMS와 같이 쓰는 IP 한도(5초에 600, 설계 §7.3)를 워처의 폭주 루프에서 지킨다.
+- 어느 10초 창에서든 요청은 60개까지다. 모든 Bybit 경로와 IP 반향을 합친다(판단(모델 아님); 최악의 경우와 측정은 9부 "예산"). OMS와 같이 쓰는 IP 한도(5초에 600, 설계 §7.3)를 워처의 폭주 루프에서 지킨다.
 - `rest::Guard::admit(now) -> Result<(), u64>`는 주입된 시계 위의 sans-IO 부분이다. 요청을 기록하고 보내게 하거나, 보낼 수 있는 가장 이른 순간(창의 첫 요청 + 10,000 ms)을 돌려준다. 거절된 요청은 기록하지 않는다. 시계가 뒤로 가면 옛 기록이 창에 남아 시계가 그 값을 다시 지날 때까지 막는다.
 - 넘는 요청은 버리지 않고 기다린다. 클라이언트는 그 순간까지 자고 다시 묻는다. 한 번에 최대 100 ms만 자고 시계를 다시 읽는다(판단(모델 아님): 수동 시계나 한 걸음 움직인 시계를 놓치지 않도록. 실제 시계에서 10초를 기다리면 깨는 횟수가 100번이다). 깰 때마다 래치와 403 멈춤을 다시 본다.
 
@@ -226,7 +226,7 @@
 - 10004의 `retMsg`는 거래소가 서명한 문자열(`origin_string[<timestamp><api_key>…]`)을 담는다. 그래서 키 거절의 오류 줄에 API 키(비밀이 아니다. `Credentials`의 `Debug`도 찍는다)가 200자 안에서 나올 수 있다. 비밀은 어떤 오류나 로그에도 나오지 않는다.
 - 본문을 읽는 데 크기 상한이 없다. 상한은 `request_timeout_ms` × 대역폭뿐이다(OMS의 클라이언트와 같다. 반향 서비스는 소유자가 고른 https 주소다).
 - 연결 제한 3초는 `request_timeout_ms`가 3,000 이하이면(기본 2,000) 먼저 끝나는 전체 제한에 가려진다: 매달린 연결은 `not_sent`가 아니라 `no_answer`가 된다. 둘 다 그 라운드 실패라 효과는 같고 이름표만 다르다. 연결 제한의 부류는 시험하지 않았다.
-- 요청 제한에서 기다리는 요청들은 순서 없이 100 ms마다 다시 묻는다. W1의 페이지가 계속 가득 채우면 한 IP 확인이나 W3 요청이 여러 번 질 수 있다(U19a9의 예산 시험이 판단한다). 이미 보낸(가드를 지난) 요청은 그 사이 다른 응답이 키 거절이나 403 멈춤을 걸어도 나간다. 막을 수 없고, 시험은 그 응답 뒤에 묻는 요청과 그때 가드에서 기다리던 요청을 본다.
+- 요청 제한에서 기다리는 요청들은 순서 없이 100 ms마다 다시 묻는다. W1의 페이지가 계속 가득 채우면 한 IP 확인이나 W3 요청이 여러 번 질 수 있다. U19a9의 예산 시험(9부)은 기다리는 요청을 먼저 온 것부터 내보내는 모형으로 쟀다. 이미 보낸(가드를 지난) 요청은 그 사이 다른 응답이 키 거절이나 403 멈춤을 걸어도 나간다. 막을 수 없고, 시험은 그 응답 뒤에 묻는 요청과 그때 가드에서 기다리던 요청을 본다.
 - 재확인의 규칙(다른 `userID`, `isMaster`, 묶인 IP 없음 → `auth`처럼 재시작까지 멈춤, U19a4b)에는 클라이언트를 밖에서 래치하는 길이 필요하다. 이 부분에는 읽기(`auth_rejected()`)만 있고, 쓰기는 U19a4b가 더한다.
 - 값에 `%`를 허용하므로(거래소 커서), 깨진 퍼센트 열은 그대로 간다. 거래소가 10004로 답하면 클라이언트는 재시작까지 래치한다(멈추는 쪽이라 안전하다). 값은 코드의 상수, 검사된 설정, 거래소 커서에서만 온다.
 - IPv4 지역 주소와 프록시 없음은 loopback 가짜로 보일 수 없어 시험하지 않았다.
@@ -439,7 +439,7 @@
 - `settleCoin=USDT`이고 `symbol`이 없으면 `position/list`는 크기가 0보다 큰 행만 준다(gateway facts Q12.1). 그래서 막 0이 된 포지션에는 행도 `updatedTime`도 없다. 바로 닫힌 순간에 그렇다. W2는 기호마다 `{크기, seen_at}`를 둔다: 모든 쪽을 읽은 마지막 라운드의 부호 있는 크기(행이 없으면 0)와, 그 크기를 처음 본 라운드의 시각(그 라운드의 비교 시계, 5부 "성공").
 - 모든 쪽을 읽은 첫 라운드의 크기는 `seen_at`이 없다. 시작 때 찾은 상태이지 본 변경이 아니다. 그 뒤 다른 크기를 읽은 라운드가 `seen_at`을 자기 시각으로 한다.
 - 모든 쪽을 읽은 뒤 비교 전에 실패한 라운드(`/api/status` 무응답, 저널 오류, 상태 요청의 기한)도 크기를 남기고, 시각은 마지막 거래소 답의 시계다(검토 4 N2). OMS가 내려가 있는 동안 본 변경은 OMS가 다시 답할 때 이미 늙었고 다시 어려지지 않는다. 남기는 일은 다음 라운드의 첫 요청에서 한다(그 사이 아무도 이 목록을 읽지 않는다). 쪽 중간에 실패했거나 읽을 수 없는 쪽이 있던 라운드는 아무것도 남기지 않는다(시험 `w2::a_round_that_failed_between_pages_leaves_no_observation`, 검토 1 S2).
-- 거래소의 최근 변경 시각 = 행의 `updatedTime`(있고 읽히면), 아니면 `seen_at`. U19a9에서 W4가 마지막으로 맞춘 그 기호의 `execTime`이 더 새면 그것이 더해진다. 셋 다 없을 때만(첫 라운드부터 크기가 그대로이고 `updatedTime`이 없음) 모름, 곧 늙음이다.
+- 거래소의 최근 변경 시각 = 행의 `updatedTime`(있고 읽히면), 아니면 `seen_at`. U19a9부터 W4가 마지막으로 맞춘 그 기호의 `execTime`이 그보다 새면 그것을 쓴다(9부). 셋 다 없을 때만(첫 라운드부터 크기가 그대로이고 `updatedTime`도 W4의 시각도 없음) 모름, 곧 늙음이다.
 - 그래서 거래소에서 닫힌 포지션(t에 닫힘, 그것을 처음 0으로 본 라운드 r ≤ t + 1초)은 `now − r < 2초`인 동안 미룬다. `updatedTime` 있는 0 아닌 행과 같다. `updatedTime` 없이 라운드마다 크기가 바뀌면 라운드마다 어려 미루므로, 아무것도 확정하지 않는 동안 W2가 신선한 성공을 보고하지 않고 게이트가 10초에 닫힌다.
 - 목록에는 거래소가 완전한 읽기에서 보인 모든 기호가 하나씩 있고 거래소의 linear 기호 수로 묶인다(판단(모델 아님): 수백 개). 저널에만 있는 기호는 항목이 없고, 그것은 `{0, 없음}` 항목과 같다(검토 1 N2).
 
@@ -453,7 +453,7 @@
 
 ### 알려진 한계(6부)
 
-- `Engine::new`는 지금도 W1만 더하고(5부), U19a7의 실행 코드가 `Engine::add_check(Box::new(W2::default()), w2_ms)`로 W2를 더한다(7부; 종단 시험 `runtime::the_watcher_runs_against_loopback_fakes_end_to_end`가 W2 요청과 하트비트의 W2 시각을 본다).
+- `Engine::new`는 지금도 W1만 더하고(5부), 실행 코드가 `runtime::checks`로 W2(W4의 `execTime` 지도와 함께, U19a9), W3, W4를 더한다(7부, 9부; 종단 시험 `runtime::the_watcher_runs_against_loopback_fakes_end_to_end`가 W2 요청과 하트비트의 W2 시각을 본다).
 - 호스트 시계가 거래소보다 `min_age_ms`(2초) 이상 앞서면 모든 거래소 시각(`updatedTime`)이 늙어 보인다(`recv_window` 5초 안이면 그런 시계도 서명을 통과한다). 효과는 더 이른 확정이지 놓친 확정이 아니다(검토 3 N7). 시계가 뒤로 가는 한계(5부)와 함께 본다.
 - `updatedTime`의 뜻("Position updated timestamp (ms)", gateway facts Q12.7)은 문서에서만 왔다. 크기가 아닌 것(가격, 증거금, 펀딩)이 그것을 옮기는지는 모른다. 옮긴다면 미룸이 늘 뿐 확정을 놓치지는 않는다.
 - 라운드 도중 포지션이 바뀌어 한 기호가 두 쪽에 실리면 헤지 모드와 구별하지 못해 그 라운드는 `unreadable`이다(다음 라운드가 다시 읽는다; 판단(모델 아님): 쪽이 둘 이상인 계좌, 곧 200개 넘는 포지션에서만 생긴다).
@@ -491,7 +491,7 @@
 
 ### `monitor.sock` 하트비트(`oms::Monitor`)
 
-- 연결 하나를 유지한다. 없으면 하트비트 때 연결하고 `hello`(전략 없음, `client` `watcher/<name>`)의 답을 받은 뒤 `{"id":n,"op":"heartbeat","watcher":"<name>","checks":{"W1":<ms|null>,"W2":…,"W3":…,"W4":…}}`를 보낸다. 값은 엔진의 마지막 성공 시각(5부 "성공", ms)이고 성공이 없으면 `null`이다. W3은 U19a9까지 `null`이고, W4는 U19a8부터 W4의 성공 시각이다.
+- 연결 하나를 유지한다. 없으면 하트비트 때 연결하고 `hello`(전략 없음, `client` `watcher/<name>`)의 답을 받은 뒤 `{"id":n,"op":"heartbeat","watcher":"<name>","checks":{"W1":<ms|null>,"W2":…,"W3":…,"W4":…}}`를 보낸다. 값은 엔진의 마지막 성공 시각(5부 "성공", ms)이고 성공이 없으면 `null`이다. W4는 U19a8부터, W3은 U19a9부터 그 검사의 성공 시각이다(9부).
 - `"recorded"` → `watcher_heartbeat_ok_ts` = 그 하트비트의 시계(epoch 초).
 - 연결 실패(소켓 없음: `[core.policy.monitor]`가 없는 OMS, 거절), 끊김, `request_timeout_ms` 안에 답 없음 → 연결을 버리고 다음 하트비트에 다시 연다(검토 4 N4). 그래서 연결 시도는 하트비트마다 많아야 한 번이고, 속도는 `heartbeat_ms`마다 하나로 연결마다 초당 둘(`api.md`)보다 한참 낮다. 줄은 상태가 바뀔 때만 하나다(`monitor.sock <path> connected`, `warn: monitor.sock <path> not connected: <이유>; tried again at the next heartbeat`; 검토 3 N6).
 - 오류 답(`bad_request`: 예를 들어 OMS의 시계보다 앞선 검사 시각, `overloaded`, `unavailable`, `unauthorized`, `internal`) → 연결은 그대로, `error: monitor.sock heartbeat refused (…)` 줄은 1분에 하나까지.
@@ -569,7 +569,7 @@ U19a7은 U19a5·U19a6 시험 몇 개의 단언을 바꿨다(시험 도구의 OMS
 
 - "바로"는 끝난 훑기에서다: 행은 훑기가 끝날 때만 비교하므로 여러 라운드 훑기에서는 확정이 훑기 길이만큼 늦다(검토 2 N2). `detail`은 `seen 1 sweep`이다.
 - `missing_*`, `*_details`, `unreadable_row`는 훑기를 건너 두 라운드 규칙을 따르고 나이 조건은 "행의 `execTime`이 적어도 `min_age_ms` 지남"(`now − execTime ≥ min_age_ms`)이다. 한 훑기에서만 본 차이, 두 번 봤지만 어린 차이는 **훑기를 실패시키지 않는다**(W4는 OMS 게이트가 판단하지 않고, 어린 행은 워터마크가 그것을 지나지 않으므로 다음 훑기가 다시 읽는다). `detail`: `"W4 <kind> <key>: venue …, journal …; seen 2 sweeps, execTime <a> s old"`(`execTime`이 없으면 `execTime unknown`).
-- W4는 종목마다 일치한 `Trade`나 거래소 변경 행의 가장 새 `execTime`을 적는다(`W4::exec_times()`, 공유 지도). U19a9가 그것을 `updatedTime`이 없을 때 W2의 대신 시각으로 쓴다.
+- W4는 종목마다 일치한 `Trade`나 거래소 변경 행의 가장 새 `execTime`을 적는다(`W4::exec_times()`, 공유 지도). U19a9부터 W2가 그것이 `updatedTime`이나 `seen_at`보다 새면 거래소의 변경 시각으로 쓴다(9부).
 
 ### 워터마크
 
@@ -588,7 +588,7 @@ U19a7은 U19a5·U19a6 시험 몇 개의 단언을 바꿨다(시험 도구의 OMS
 
 ### 지표(8부)
 
-- W4는 5부의 `watcher_check_age_s{W4}`, `watcher_differences{W4}`, `watcher_mismatches_total{W4}`, `watcher_mismatch_active{W4}`(거둔 정체는 세지 않는다)와 3부의 `watcher_requests_total{endpoint="/v5/execution/list"}`(쪽마다), `watcher_request_errors_total`을 쓴다. 엔진이 돌기 전에는 실행이 `watcher_check_age_s{W4}`도 `boot_ms`부터 센다. 하트비트의 `W4`는 W4의 마지막 성공 시각이다(U19a8부터; U19a9가 시험 `heartbeat::w3_and_w4_success_times_reach_the_heartbeat`를 더한다).
+- W4는 5부의 `watcher_check_age_s{W4}`, `watcher_differences{W4}`, `watcher_mismatches_total{W4}`, `watcher_mismatch_active{W4}`(거둔 정체는 세지 않는다)와 3부의 `watcher_requests_total{endpoint="/v5/execution/list"}`(쪽마다), `watcher_request_errors_total`을 쓴다. 엔진이 돌기 전에는 실행이 `watcher_check_age_s{W4}`도 `boot_ms`부터 센다. 하트비트의 `W4`는 W4의 마지막 성공 시각이다(U19a8부터; 시험 `heartbeat::w3_and_w4_success_times_reach_the_heartbeat`, U19a9).
 
 ### 알려진 한계(8부)
 
@@ -605,3 +605,61 @@ U19a7은 U19a5·U19a6 시험 몇 개의 단언을 바꿨다(시험 도구의 OMS
 ### 검증(8부)
 
 `crates/watcher/tests/w4.rs` 33개(프로세스 안의 모델 거래소: 창 안의 체결을 새것부터 100개씩, 커서 `e<다음 번호>`; 시험 저널, 수동 시계). 완료 기준: `w4::funding_rows_beside_known_fills_are_no_mismatch_while_a_position_is_held`(W2와 W4가 함께 돌고, 포지션 ≠ 0, `execQty`와 `side`가 있는 펀딩 행), `w4::an_adl_trade_the_journal_lacks_is_a_mismatch`, `w4::a_round_of_250_executions_is_compared_in_full_over_3_pages`, `w4::executions_1200_are_compared_over_two_rounds_and_the_w4_age_rises_between`. 그 밖에 스펙의 U19a8 시험 18개(`w4::an_unknown_exec_type_is_a_mismatch_at_once`, `w4::the_sweep_starts_10_s_before_the_last_confirmed_exec_time`, `w4::a_row_loaded_late_inside_the_overlap_is_compared`, `w4::a_missing_trade_needs_two_sweeps`, `w4::a_failed_page_three_rounds_in_a_row_restarts_the_sweep_with_a_new_end`, `w4::an_unchanged_cursor_is_a_failed_page`, `w4::an_empty_page_ends_the_sweep`, `w4::a_funding_row_without_side_or_qty_is_ignored`, `w4::a_trade_row_without_qty_is_an_unreadable_row_and_needs_two_sweeps`, `w4::a_trade_at_the_fill_floor_millisecond_is_ignored`, `w4::an_empty_window_logs_once_per_state_change`, `w4::an_unknown_exec_type_in_a_multi_round_sweep_is_confirmed_when_the_sweep_completes`, `w4::a_confirmed_row_is_not_sent_again_after_clear_hold_in_a_quiet_account`, `w4::a_dismissed_row_that_leaves_the_window_and_a_changed_value_are_sent_anew`, `w4::a_hold_seen_at_a_cap_sampled_before_the_answer_does_not_dismiss`, `w4::the_watermark_never_moves_back`, `w4::a_row_confirmed_under_an_older_hold_is_sent_once_after_that_hold_is_cleared`, `w4::an_unconfirmed_row_without_a_readable_exec_time_holds_the_watermark`)와 더한 11개(`w4::a_sweep_not_complete_after_50_rounds_restarts`, `w4::a_trade_or_venue_change_with_other_details_is_a_difference`, `w4::a_row_without_a_key_is_named_by_its_text`, `w4::the_newest_agreeing_exec_time_is_kept_per_symbol`, `w4::a_young_difference_seen_twice_does_not_fail_the_sweep`, `w4::a_trade_at_the_floor_itself_is_compared`, `w4::a_round_that_reads_a_page_ends_the_run_of_failed_rounds`; U19a8 검토 1의 `w4::a_row_after_the_sweeps_end_is_an_unreadable_row_and_does_not_blind_w4`, `w4::a_trade_or_venue_change_of_quantity_0_is_ignored_as_the_oms_ignores_it`, `w4::an_already_held_answer_to_a_w4_send_does_not_pay_it`(W4 보내기가 진행 중일 때 W1 보내기가 `"held"`로 이기고 W4는 `"already held"`: W4 정체는 빚으로 남아 해제 뒤 한 번 보내진다), `w4::the_restart_warn_line_is_logged_once_per_run_of_failed_rounds`). `runtime::the_watcher_runs_against_loopback_fakes_end_to_end`는 서명된 `execution/list` 요청과 W4 성공 시각이 든 하트비트를 본다. 변이: M202(Funding을 Trade로; 고의 결함 21), M203(ADL을 체결과; 22), M204(모르는 형이 둘째 훑기를 기다림; 23), M205(쪽 상한 무시; 24), M206(겹침을 빼지 않음; 25), M207(이은 훑기가 1쪽부터; 26), M208(워터마크가 확정되지 않은 행을 지남; 27), M247(`execTime` 없는 행이 워터마크를 붙잡지 않음; 27의 둘째 형, 검토 4 S3), M215(실패한 쪽을 한없이 다시; 34), M216(`side` 없는 Funding이 읽을 수 없는 행; 35), M217(바닥을 내림; 36), M222(거둔 정체를 다시 확정하고 보냄; 41), M227(`"held"`로 답한 적 없는 정체를 해제 때 거둠; 46), M248(`end` 뒤의 `execTime`을 믿음; 검토 1 S1), M249(수량 0 행을 비교; 검토 1 S2), M250(`"already held"`가 W4 정체를 갚음; 검토 1 S3).
+
+## 9부. W3 지갑과 증거금, W2의 대신 시각, 예산(U19a9)
+
+### W3(`w3::W3`, `w3_ms`마다, 기본 2초)
+
+- 거래소: `GET /v5/account/wallet-balance?accountType=UNIFIED` 한 쪽. `result.list`에서 `accountType = "UNIFIED"`인 계좌가 정확히 하나여야 하고, 그 계좌의 `totalEquity`, `totalMaintenanceMargin`, `totalMarginBalance`가 저널 소수(1부: 지수, `+`, 9자리 이상의 소수는 거절)여야 한다. 아니면, 또는 유지증거금이 음수이면 `unreadable`이고 라운드는 실패한다. OMS의 증거금 보고도 같은 필드를 같은 규칙으로 읽고(`oms-node/src/venue/bybit/query.rs` `margin`: UNIFIED 계좌 하나, `Amount::parse`) 음수 유지증거금이면 보고 전체를 거부한다(C-MARGIN "입력, 상태, 이벤트").
+- 위반 둘. 공식은 OMS의 것(C-MARGIN), 한도는 워처 설정 `[w3]`(기본은 OMS의 Bybit 값: `account_mm_rate_max_bps` 5000, `daily_loss_bps` 500; 4부):
+  - `account_mm_rate`: `maintenance > 0`이고 `maintenance × 10 000 ≥ account_mm_rate_max_bps × margin_balance`(C-MARGIN "계좌 유지증거금률"). 정확히 한도와 같으면 건다. 한도 5000에서 잔고 1000: 유지증거금 499.99999999는 걸리지 않고 500은 건다. 잔고가 0 이하이고 유지증거금이 0보다 크면 언제나 걸고, 유지증거금이 0이면 잔고가 얼마든 걸지 않는다.
+  - `daily_loss`: 저널의 일 기준값(2부, `day_base_set`)의 `day`가 오늘의 UTC 날짜 번호(`now_ms / 86 400 000`, OMS의 `queried_at / DAY_US`와 같은 날)이고 `(base − totalEquity) × 10 000 > daily_loss_bps × base`(C-MARGIN "일 손실과 기준 금액"). 기준 100에서 95.00은 걸리지 않고 94.99는 건다. 오늘의 기준이 없으면 이 부분은 판단하지 않는다(소유자 질문 6). 계좌 유지증거금률은 그래도 판단한다.
+- 곱은 나누지 않는 정확한 정수(i128, 10^8 배)다. 곱이 범위를 넘으면 위반으로 본다(안전한 쪽, 판단(모델 아님); 실제 금액에서는 생기지 않는다).
+- 정체는 종류뿐이다: `(W3, <kind>, account, "")`(값은 정체에 들지 않는다, 스펙). 금액이 라운드마다 바뀌어도 같은 위반이다.
+- 확정: 같은 종류를 두 라운드 연속으로 보면(설계 §7.5 "한도 위반 2회 연속") 엔진의 두 라운드 규칙(5부)으로 확정한다. 나이 규칙은 없다(시각을 `Since::Unknown`으로 주어 늘 늙음). 첫 sighting은 보류 중이고 라운드는 성공한다. 실패한 라운드는 5부처럼 sighting을 지우지 않는다(본다, 실패, 본다 → 세 번째 라운드에서 확정).
+- `detail`(나이 없음): `W3 account_mm_rate account: venue totalMaintenanceMargin <m>, totalMarginBalance <b>, at or above <한도> bps; seen 2 rounds`, `W3 daily_loss account: venue totalEquity <e>, journal day base <v> of day <d>, more than <한도> bps below; seen 2 rounds`.
+- 다시 보내기(7부): W1·W2처럼 위반이 남아 있는 동안 운영자가 `clear-hold`로 풀면 `mismatch_resend_ms`(기본 10초)마다 다시 보내 보류가 돌아온다(소유자 질문 7). W3은 OMS의 한도와 같은 값을 쓰므로, OMS가 일 손실이나 계좌 유지증거금률 규칙으로 감소 전용 상태에 들어가면 W3도 보통 `watcher_mismatch` 보류를 건다. 일 손실의 위반은 저널에 오늘의 새 `day_base_set`(운영자의 `clear_reduce`, `rebase_day`)이 오거나 UTC 날짜가 바뀌면 끝난다. 운영자의 순서는 런북 7.13(먼저 OMS의 감소 상태, 그다음 워처 보류).
+
+### W2의 대신 시각(U19a9)
+
+- W2(6부)의 거래소 최근 변경 시각은 행의 `updatedTime`, 없으면 `seen_at`이다. U19a9부터 W4가 마지막으로 맞춘(일치한 `Trade`나 거래소 변경 행의) 그 기호의 가장 새 `execTime`이 그보다 새면 그것을 쓴다: `updatedTime.or(seen_at).max(W4 시각)`. 그래서 `updatedTime`이 있어도 W4의 시각이 더 새면 W4의 시각이다(스펙 "the time chosen so far"보다 새면). 셋 다 없을 때만 모름(늙음)이다.
+- 지도는 `W4::exec_times()`가 W4와 W2에 나눠 주는 공유 지도다(`W2::with_exec_times`). 실행 코드는 `runtime::checks`에서 둘을 잇는다(시험 `runtime::the_runtime_runs_w2_w3_and_w4_and_w2_reads_w4s_exec_times`). W4가 훑기를 비교할 때만 바뀌므로 W4 훑기 사이(기본 5초)에는 지난 훑기의 값이다.
+- 효과: 거래소가 `updatedTime`을 주지 않거나 늙은 `updatedTime`을 줄 때도, 체결이 막 맞은 기호의 차이는 `min_age_ms` 동안 미룬다. 미룸은 W2를 실패로 보이게 할 뿐 확정을 놓치지 않는다: W4의 시각은 그 체결 뒤 많아야 `min_age_ms`만 차이를 미룬다.
+- 저널의 기록 시각(`last_change_at`, OMS 시계)이 같은 체결의 `execTime`(거래소 시계)보다 늦는 보통의 경우 이 시각은 저널의 시각보다 새지 않아 아무것도 바꾸지 않는다. 바꾸는 것은 두 시계가 다를 때와 `updatedTime`이 크기 변경에 움직이지 않을 때다(6부 한계).
+
+### 하트비트의 W3·W4
+
+- 하트비트(7부)의 `W3`·`W4`는 그 검사의 마지막 성공 시각이다(성공 전에는 `null`, 실패한 라운드는 시각을 바꾸지 않는다). OMS는 W3..W9를 기록하지만 판단하지 않는다(U18b4; C-LIVE 2부). 시험 `heartbeat::w3_and_w4_success_times_reach_the_heartbeat`(실제 `oms::Monitor`가 가짜 `monitor.sock`에 보낸 줄).
+- 엔진이 돌기 전에는 실행 코드가 네 검사 모두의 `watcher_check_age_s`를 `boot_ms`부터 센다(시험 `runtime::a_key_rejected_at_start_is_exported`).
+
+### 예산(측정, 강제하지 않음)
+
+- 설계 예산: W1 1 + W2 1 + W3 0.5 + W4 0.2 = 2.7 req/s(설계 §7.5), W1·W2가 한 쪽, W4가 훑기당 한 쪽일 때. 강한 한도는 요청 제한(10초에 60, 3부)이다. 예산은 잴 뿐 막지 않는다.
+- 측정(`crates/watcher/tests/budget.rs`): 엔진에 W1~W4를 설계 간격(1초, 1초, 2초, 5초)으로, 수동 시계로 모의 1분([T0, T0 + 60초)), 10ms 단계(판단(모델 아님)). 거래소 요청은 모두 실제 `rest::Guard`를 거친 뒤 모델 거래소가 답한다. 체결은 5초에 n개를 고르게(체결 i는 `T0 + i × 5000 / n` ms), 저널은 그 단계에서 기록하고 거래소 포지션이 따라간다(차이 없음). 요청 지연은 0이다.
+
+| 부하 | W1 | W2 | W3 | W4 쪽 | 합 | req/s |
+|---|---|---|---|---|---|---|
+| 5초에 체결 30 | 60 | 60 | 30 | 12(훑기 12, 각 1쪽) | 162 | 2.700 |
+| 5초에 체결 100 | 60 | 60 | 30 | 42(훑기 12: 1, 2, 3, 그 뒤 4쪽씩) | 192 | 3.200 |
+
+- **범위와 완료 기준의 충돌**(소유자 질문 1, 기본값: 범위를 따름). 완료 기준 "5초에 체결 100 이하에서 2.7 req/s 이하"는 **그대로는 충족되지 않는다**. 범위의 W4 규칙(마지막으로 확정한 `execTime`의 10초 전부터, 모든 커서)이 매 훑기 15초 창을 다시 읽기 때문이다. 5초에 30(창에 약 90행, 1쪽)에서는 정확히 2.7이다(162 ≤ 162). 고른 100/5초에서는 창 `[w − 10초, end]`가 양 끝을 포함해 301행이라 정상 상태의 훑기는 4쪽이고, 정상 상태의 비율은 (60 + 60 + 30 + 48) / 60 = 3.3 req/s다. 첫 1분은 처음 훑기들이 작아(1, 2, 3쪽) 3.2 req/s로 쟀다. 스펙의 어림 ≈ 3.1(300행 = 3쪽)은 창 끝의 한 행을 세지 않았다. 3.3은 IP당 거래소 한도(5초에 600, 곧 초당 120, 설계 §7.3)의 약 2.75 %다. W4는 따라잡는다: 12 훑기가 모두 자기 라운드에서 끝나고 정상 상태의 창은 15초다. 대안(소유자가 고를 수 있다): 2.7에 묶고 W4가 뒤처지게 하거나, 겹침을 줄인다.
+- **많은 열린 주문**(검토 3 N4): 코어의 기본 `max_open_orders` 500이면 W1 라운드가 11쪽(가득 찬 10쪽과 빈 마지막 쪽)이라 1초 라운드에서 10초에 110요청이다. 시험 `budget::at_500_open_orders_the_guard_stretches_w1_rounds_below_10_s`(열린 주문 500개, 같은 1분)의 측정: 요청 W1 292, W2 35, W3 22, W4 11(가드가 10초에 60을 지켰다); W1 라운드 26개, 라운드 시간 평균 1,915 ms, 최대 6,990 ms; 하트비트마다 W1·W2의 나이는 최대 7,000 ms로 OMS 게이트의 10초 아래다. 가드는 미끄러지는 창이라 몇 초 만에 60을 다 쓰면 그 요청들이 창을 떠날 때(10초 뒤)까지 아무것도 나가지 않는다. 그래서 평균(약 2초, 스펙의 어림 2.5초)보다 최대가 훨씬 크고, W2·W3도 늘어난다(W2는 60 중 35 라운드). 시험에서 가드 앞에서 기다리는 요청은 먼저 온 것부터 나간다. 실제 클라이언트는 순서 없이 100ms마다 다시 묻는다(3부): 실제의 최대 나이는 다를 수 있다(판단(모델 아님)).
+- 가드의 최악 경우(판단(모델 아님)): 10초에 W1 10 + W2 10 + W3 5 + W4 2훑기 × 10쪽 + IP 확인 2 = 47 ≤ 60(W1·W2가 한 쪽, 곧 열린 주문 49개·포지션 199개 이하일 때).
+
+### 지표(9부)
+
+새 지표는 없다. W3은 5부의 `watcher_check_age_s{check="W3"}`, `watcher_differences{check="W3"}`, `watcher_mismatches_total{check="W3"}`, `watcher_mismatch_active{check="W3"}`와 3부의 `watcher_requests_total{endpoint="/v5/account/wallet-balance"}`, `watcher_request_errors_total{endpoint="/v5/account/wallet-balance",class}`를 쓴다. 예산은 `watcher_requests_total{endpoint}`의 증가율로 본다.
+
+### 알려진 한계(9부)
+
+- **자정 뒤**: OMS는 자정을 넘은 첫 보고를 옛 기준으로 먼저 판정하고 그 뒤 새 기준을 기록한다(C-MARGIN). 워처는 오늘의 기준만 쓰므로 자정부터 OMS의 새 `day_base_set`(다음 증거금 보고)까지 일 손실을 판단하지 않는다. OMS의 증거금 보고가 멈추면 그 날 내내 판단하지 않는다(소유자 질문 6의 기본값; OMS 자신의 `margin_stale` 규칙이 그 경우를 다룬다).
+- W3은 OMS의 유지증거금 여유 규칙(격리 포지션별 `MmBuffer`)을 보지 않는다(스펙의 W3은 두 규칙뿐; Bybit 설정은 격리를 받지 않는다, C-MARGIN).
+- 워처의 `[w3]` 한도는 OMS 설정과 따로 있다. 다르게 두면 두 판단이 다르다(운영 문서: 같은 값으로 둔다).
+- 8자리를 넘는 소수는 읽지 못한다(OMS와 같다). 실제 Bybit가 이 계좌에 더 긴 자리를 보내는지는 확인하지 않았다(키가 없다, U-01).
+- W2의 대신 시각은 W4가 맞춘 행에서만 온다. 저널에 없는 체결(바로 W2가 보는 차이)의 `execTime`은 쓰지 않는다(그 행은 W4의 차이다).
+- 예산은 측정일 뿐 강제하지 않는다. 시험의 요청 지연은 0이다. 실제 지연(판단(모델 아님): 요청당 수십~수백 ms)은 라운드를 늘려 비율을 낮춘다. 체결이 몰리면(고르지 않으면) 한 훑기의 쪽이 늘 수 있다(쪽 상한 `w4_max_pages`와 가드가 위 한도).
+- W3, W2의 대신 시각, 예산 모두 loopback 모델 거래소와 시험 저널로만 시험했다. 실제 `wallet-balance` 응답으로 돌려 본 적이 없다.
+
+### 검증(9부)
+
+`crates/watcher/tests/w3.rs` 4개: `w3::a_margin_rate_at_the_limit_on_two_rounds_alarms`(한도 바로 아래, 한 라운드만, 두 라운드 연속, 금액이 바뀌어도 같은 정체, 잔고 ≤ 0, 유지증거금 0, 요청 매개변수), `w3::a_daily_loss_beyond_todays_base_on_two_rounds_alarms`(95.00과 94.99, 해제 뒤 10초에 다시 보냄, 오늘의 새 기준 뒤 끝남), `w3::without_todays_base_only_the_margin_rate_is_judged`(기준 없음, 어제의 기준, 자정을 넘은 오늘의 기준), `w3::an_unreadable_wallet_fails_the_round`(UNIFIED 없음, 둘, 빈 소수, 음수 유지증거금, 지수, 목록 아님, 거래소 오류). `w2::a_missing_updated_time_falls_back_to_w4s_last_exec_time`(`updatedTime` 없는 기호, 늙은 `updatedTime`의 기호, 어느 시각도 없는 기호). `heartbeat::w3_and_w4_success_times_reach_the_heartbeat`. `runtime::the_runtime_runs_w2_w3_and_w4_and_w2_reads_w4s_exec_times`, 확장한 `runtime::the_watcher_runs_against_loopback_fakes_end_to_end`(지갑 경로, 서명된 요청, W3 시각이 든 하트비트)와 `runtime::a_key_rejected_at_start_is_exported`(엔진 전 네 검사의 나이). `crates/watcher/tests/budget.rs` 3개: `budget::at_30_executions_per_5_s_the_reconciliation_rate_in_a_simulated_minute_stays_at_or_below_2_7`, `budget::at_100_executions_per_5_s_the_rate_is_about_3_1_and_w4_keeps_up`, `budget::at_500_open_orders_the_guard_stretches_w1_rounds_below_10_s`. 변이: M251(W3이 한 라운드로 확정; 고의 결함 28), M252(한도와 같은 값이 통과), M253(다른 날의 기준으로 일 손실), M254(W2가 W4의 `execTime`을 쓰지 않음).
