@@ -2255,6 +2255,33 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "w4", "an_unconfirmed_row_without_a_readable_exec_time_holds_the_watermark"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M248-watcher-w4-exec-time-after-end-trusted",
+        what: "a W4 row whose execTime is after the sweep's end is trusted, so the watermark jumps past end and every later window is [end, end] (review 1 S1 of U19a8)",
+        file: "crates/watcher/src/w4.rs",
+        find: "let exec_time = read_time.filter(|&t| t <= end);",
+        replace: "let exec_time = read_time;",
+        test: &["-p", "watcher", "--test", "w4", "a_row_after_the_sweeps_end_is_an_unreadable_row_and_does_not_blind_w4"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M249-watcher-w4-zero-qty-compared",
+        what: "a W4 Trade or venue-change row of quantity 0, which the OMS never books, is compared and sets a false hold (review 1 S2 of U19a8)",
+        file: "crates/watcher/src/w4.rs",
+        find: "if qty.is_zero() {",
+        replace: "if qty.is_zero() && false {",
+        test: &["-p", "watcher", "--test", "w4", "a_trade_or_venue_change_of_quantity_0_is_ignored_as_the_oms_ignores_it"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M250-watcher-w4-already-held-pays",
+        what: "an \"already held\" answer pays what the W4 send carried, so a W4 difference in no hold note is dismissed at the clear (review 1 S3 of U19a8)",
+        file: "crates/watcher/src/engine.rs",
+        find: "            Ok(\"already held\") => s.hold_answer_req = Some(after),\n",
+        replace: "            Ok(\"already held\") => {\n                s.owed.retain(|(id, _)| !sent.carried.contains(id));\n                s.hold_answer_req = Some(after);\n                if !check.resends_while_seen() {\n                    s.paid.extend(sent.carried.into_iter().map(|id| (id, after)));\n                }\n            }\n",
+        test: &["-p", "watcher", "--test", "w4", "an_already_held_answer_to_a_w4_send_does_not_pay_it"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
