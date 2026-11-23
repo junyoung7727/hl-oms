@@ -70,12 +70,13 @@ impl World {
         let vm = FakeHttp::start(Answer::Reply(204, String::new()));
         let mut journal = TestJournal::new(name);
         journal.segment(2);
-        let creds_dir = common::test_dir(&format!("{name}-creds"));
+        // Short names: a socket path has at most 107 bytes (review 1 N2).
+        let creds_dir = common::test_dir(&format!("{name}-c"));
         let creds = creds_dir.join("creds.toml");
         std::fs::write(&creds, "api_key = \"k\"\napi_secret = \"s\"\n").unwrap();
         std::fs::set_permissions(&creds, std::fs::Permissions::from_mode(0o600)).unwrap();
-        let admin_path = creds_dir.join("admin.sock");
-        let monitor_path = creds_dir.join("monitor.sock");
+        let admin_path = creds_dir.join("a.sock");
+        let monitor_path = creds_dir.join("m.sock");
         let admin = FakeSock::serve(&admin_path, |_, _, v| oms(v, "held"));
         let monitor = FakeSock::serve(&monitor_path, |_, _, v| oms(v, "recorded"));
         let text = format!(
@@ -473,6 +474,94 @@ fn the_ip_recheck_runs_while_the_oms_is_down() {
     assert!(w.requests("/v5/position/list").is_empty());
     assert!(w.monitor.conns().is_empty());
     assert!(!w.status.requests().is_empty());
+    assert_eq!(run.shutdown(), 0);
+}
+
+#[test]
+fn the_ip_recheck_runs_during_the_boot_replay() {
+    let mut w = World::new(
+        "rt-recheck-replay",
+        "[intervals]\nip_check_ms = 10000\n[http]\nrequest_timeout_ms = 1000\n",
+    );
+    w.journal.append(T0 * 1000 - 60_000_000, &[ev_filler()]);
+    // The status cap is above the journal's last record: the boot replay
+    // reads again every second (the record after the last is missing, a
+    // retried journal error) and does not end.
+    let cap = w.journal.next_seq + 5;
+    w.status.route(
+        "/api/status",
+        [Answer::Reply(
+            200,
+            json!({"journal": {"durable_seq": cap},
+                "core": {"instance_id": "0000000000000007"}})
+            .to_string(),
+        )],
+    );
+    let clock = Arc::new(ManualClock::new(T0));
+    let mut run = w.start(clock.clone());
+    assert!(until(10, || w.lines_with("read again in 1 s") == 1));
+    assert_eq!(w.requests("/v5/user/query-api").len(), 1);
+    assert_eq!(w.echo.requests().len(), 1);
+    for k in 1..=3 {
+        walk(&clock, 10_000);
+        assert!(
+            until(10, || w.requests("/v5/user/query-api").len() == 1 + k
+                && w.echo.requests().len() == 1 + k),
+            "recheck {k}"
+        );
+    }
+    // Still in the replay: no engine round, no heartbeat.
+    assert_eq!(w.lines_with("read again in 1 s"), 1);
+    assert_eq!(w.lines_with("boot replay done"), 0);
+    assert!(w.requests("/v5/order/realtime").is_empty());
+    assert!(w.requests("/v5/position/list").is_empty());
+    assert!(w.monitor.conns().is_empty());
+    assert_eq!(run.shutdown(), 0);
+}
+
+#[test]
+fn a_recheck_that_fails_a_start_rule_stops_every_bybit_request() {
+    let w = World::new(
+        "rt-recheck-stop",
+        "[intervals]\nip_check_ms = 10000\n[http]\nrequest_timeout_ms = 1000\n",
+    );
+    w.status_ok();
+    let clock = Arc::new(ManualClock::new(T0));
+    let mut run = w.start(clock.clone());
+    // The checks run.
+    assert!(until(10, || {
+        walk(&clock, 1000);
+        !w.requests("/v5/order/realtime").is_empty() && !w.requests("/v5/position/list").is_empty()
+    }));
+    // The key becomes the master account's: the next recheck stops every
+    // Bybit request until restart.
+    w.bybit.route(
+        "/v5/user/query-api",
+        [ok(
+            json!({"isMaster": true, "userID": 1, "ips": ["127.0.0.1"]}),
+        )],
+    );
+    let rejected = r#"{"metric":{"__name__":"watcher_auth_rejected","host":"h","venue":"bybit","watcher":"w-rt"},"values":[1.0]"#;
+    assert!(
+        until(20, || {
+            walk(&clock, 1000);
+            w.pushes().iter().any(|b| b.contains(rejected))
+        }),
+        "{:?}",
+        w.lines.lock().unwrap()
+    );
+    assert_eq!(
+        w.lines_with("the key no longer passes the start check: query-api"),
+        1
+    );
+    // Requests already on the wire may end; after that nothing reaches
+    // Bybit, through rounds, rechecks and 30 s of the clock.
+    std::thread::sleep(Duration::from_millis(300));
+    let seen = w.bybit.requests().len();
+    walk(&clock, 30_000);
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(w.bybit.requests().len(), seen);
+    assert!(w.lines_with("round failed") >= 1);
     assert_eq!(run.shutdown(), 0);
 }
 
