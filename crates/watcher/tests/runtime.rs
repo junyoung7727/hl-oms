@@ -243,6 +243,31 @@ fn walk(clock: &ManualClock, ms: u64) {
     }
 }
 
+/// Walks the clock to the `k`-th IP recheck after the start (ip_check_ms =
+/// 10 s). The recheck is due 10 s after the loop read the last echo answer,
+/// and that answer can reach the loop after the fake saw the request and
+/// after the walk went on (a loaded machine): none is sent in the first
+/// 9.9 s, then the walk goes on in steps until query-api and the echo are
+/// both asked, at most 10 s more (판단(모델 아님)). The exact pace is
+/// start.rs's.
+fn walk_to_recheck(w: &World, clock: &ManualClock, k: usize) {
+    let asked = || {
+        (
+            w.requests("/v5/user/query-api").len(),
+            w.echo.requests().len(),
+        )
+    };
+    walk(clock, 9_900);
+    assert_eq!(asked(), (k, k), "recheck {k} before 10 s");
+    for _ in 0..100 {
+        walk(clock, 100);
+        if until(1, || asked() == (k + 1, k + 1)) {
+            return;
+        }
+    }
+    panic!("recheck {k}: {:?}", asked());
+}
+
 fn heartbeats(m: &FakeSock) -> Vec<Value> {
     m.conns()
         .iter()
@@ -475,12 +500,7 @@ fn the_ip_recheck_runs_while_the_oms_is_down() {
     assert_eq!(w.requests("/v5/user/query-api").len(), 1);
     assert_eq!(w.echo.requests().len(), 1);
     for k in 1..=3 {
-        walk(&clock, 10_000);
-        assert!(
-            until(10, || w.requests("/v5/user/query-api").len() == 1 + k
-                && w.echo.requests().len() == 1 + k),
-            "recheck {k}"
-        );
+        walk_to_recheck(&w, &clock, k);
     }
     // No engine round and no heartbeat while the OMS is down.
     assert!(w.requests("/v5/order/realtime").is_empty());
@@ -516,12 +536,7 @@ fn the_ip_recheck_runs_during_the_boot_replay() {
     assert_eq!(w.requests("/v5/user/query-api").len(), 1);
     assert_eq!(w.echo.requests().len(), 1);
     for k in 1..=3 {
-        walk(&clock, 10_000);
-        assert!(
-            until(10, || w.requests("/v5/user/query-api").len() == 1 + k
-                && w.echo.requests().len() == 1 + k),
-            "recheck {k}"
-        );
+        walk_to_recheck(&w, &clock, k);
     }
     // Still in the replay: no engine round, no heartbeat.
     assert_eq!(w.lines_with("read again in 1 s"), 1);
