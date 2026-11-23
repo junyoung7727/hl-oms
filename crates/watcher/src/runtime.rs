@@ -289,6 +289,8 @@ pub async fn run(
             return 2;
         }
     }
+    // What the 60 s mismatch pace still holds is queued before the flush.
+    rt.alerts.drain();
     let task = rt.alert_task.take();
     rt.stop(heartbeat).await;
     finish_alerts(task).await;

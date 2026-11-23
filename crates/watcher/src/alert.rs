@@ -848,6 +848,20 @@ impl MismatchNotices {
         }
         out
     }
+
+    /// At shutdown (review 1 S2): the bodies of everything still collected,
+    /// whatever the pace, so that no confirmation goes untold.
+    pub fn drain(&mut self) -> Vec<String> {
+        let mut out = Vec::new();
+        for (check, c) in &mut self.checks {
+            if c.count > 0 {
+                out.push(mismatch_text(*check, c.count, &c.details));
+            }
+            c.count = 0;
+            c.details.clear();
+        }
+        out
+    }
 }
 
 /// The repeat-rule key of the key stop.
@@ -975,6 +989,14 @@ impl Alerts {
         }
         if let Out::Telegram(h) = &self.out {
             h.tick(now_ms);
+        }
+    }
+
+    /// Shutdown, before the sender's last flush: the mismatch messages
+    /// still collected inside the pace are queued now.
+    pub fn drain(&mut self) {
+        for body in self.notices.drain() {
+            self.once(&body);
         }
     }
 }

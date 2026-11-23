@@ -867,6 +867,30 @@ fn mismatch_notices_are_at_most_one_per_check_per_60_s_and_collect_the_rest() {
     assert_eq!(alert::split(&alert::message(&name, T0, body), MSG_LIMIT).len(), 1);
 }
 
+#[test]
+fn mismatch_notices_drain_tells_what_the_pace_holds() {
+    // Review 1 S2: at shutdown what is collected inside the 60 s pace is
+    // given whatever the pace; then nothing is left.
+    use watcher::engine::Check::{W1, W2};
+    let mut n = MismatchNotices::default();
+    assert!(n.drain().is_empty());
+    n.add(W1, &strings(&["W1 foreign a"]));
+    assert_eq!(n.poll(T0).len(), 1);
+    n.add(W1, &strings(&["W1 foreign b", "W1 foreign c"]));
+    n.add(W2, &strings(&["W2 position x"]));
+    assert_eq!(n.poll(T0 + 1_000), vec![format!("{}W2 position x", head("W2", 1))]);
+    n.add(W2, &strings(&["W2 position y"]));
+    assert_eq!(
+        n.drain(),
+        vec![
+            format!("{}W1 foreign b\n그 밖에: W1 foreign c", head("W1", 2)),
+            format!("{}W2 position y", head("W2", 1)),
+        ]
+    );
+    assert!(n.drain().is_empty());
+    assert!(n.poll(T0 + 1_000_000).is_empty());
+}
+
 /// A client that never sends (its base is never asked), on `clock`.
 fn idle_client(clock: Arc<ManualClock>) -> watcher::rest::Client {
     bybit_client("http://127.0.0.1:9", clock)

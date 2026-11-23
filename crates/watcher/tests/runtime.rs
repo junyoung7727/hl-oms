@@ -1012,3 +1012,75 @@ fn a_confirmed_mismatch_is_told_on_telegram_once() {
     assert_eq!(run.shutdown(), 0);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_mismatch_collected_inside_the_pace_is_sent_at_shutdown() {
+    // U19b1c review 1 S2: W1 confirms v900 (told at once), then v901 inside
+    // the 60 s pace (collected); the shutdown queues what is collected
+    // before the sender's last flush. Review 1 S1: without [telegram] the
+    // same two P1s are one warn line each.
+    let (dir, tg) = telegram_section("rt-mm-drain-t");
+    let log_head = "warn: [WATCH P1] (no [telegram]: not sent) 워처 W1 불일치 확정 1건. OMS에 일반 주문 차단(watcher_mismatch)을 보내기 시작함(실패하면 다시 보냄; 결과는 OMS의 hold 알림).";
+    for with_tg in [true, false] {
+        let mut w = World::new(
+            if with_tg { "rt-mm-drain-tg" } else { "rt-mm-drain-log" },
+            &format!(
+                "[intervals]\nw1_ms = 500\nw2_ms = 500\nw3_ms = 1000\nw4_ms = 1000\nheartbeat_ms = 1000\n\
+                 [rules]\nmin_age_ms = 500\nmismatch_resend_ms = 1000\n\
+                 [http]\nrequest_timeout_ms = 1000\n{}",
+                if with_tg { tg.as_str() } else { "" }
+            ),
+        );
+        let now_us = SystemClock.now_ms() * 1000;
+        w.journal.append(now_us - 10_000_000, &[ev_filler()]);
+        w.status_ok();
+        let page = |rows: Vec<Value>| {
+            ok(json!({"category": "linear", "nextPageCursor": "", "list": rows}))
+        };
+        w.bybit.route(
+            "/v5/order/realtime",
+            [page(vec![row("x", "v900", "BTCUSDT", "Buy")])],
+        );
+        let mut run = w.start(Arc::new(SystemClock));
+        let told = |w: &World| {
+            if with_tg {
+                w.sent().len()
+            } else {
+                w.lines_with(log_head)
+            }
+        };
+        assert!(until(20, || told(&w) == 1), "{:?}", w.lines.lock().unwrap());
+        w.bybit.route(
+            "/v5/order/realtime",
+            [page(vec![
+                row("x", "v900", "BTCUSDT", "Buy"),
+                row("y", "v901", "BTCUSDT", "Buy"),
+            ])],
+        );
+        assert!(until(20, || w
+            .lines_with("error: confirmed difference: W1 foreign v901: ")
+            == 1));
+        // Inside the 60 s pace: collected, not told.
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(told(&w), 1);
+        assert_eq!(run.shutdown(), 0);
+        assert_eq!(told(&w), 2, "{:?}", w.lines.lock().unwrap());
+        if with_tg {
+            let sent = w.sent();
+            assert!(sent[0].contains("W1 foreign v900: "), "{}", sent[0]);
+            assert!(
+                sent[1].contains("\n워처 W1 불일치 확정 1건. OMS에 일반 주문 차단(watcher_mismatch)을 보내기 시작함"),
+                "{}",
+                sent[1]
+            );
+            assert!(sent[1].contains("W1 foreign v901: "), "{}", sent[1]);
+            assert_eq!(w.lines_with("alert sender stopped: nothing left to send"), 1);
+            assert_eq!(w.lines_with("no [telegram]"), 0);
+        } else {
+            assert_eq!(w.lines_with(&format!("{log_head} W1 foreign v900: ")), 1);
+            assert_eq!(w.lines_with(&format!("{log_head} W1 foreign v901: ")), 1);
+            assert!(w.telegram.requests().is_empty());
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
