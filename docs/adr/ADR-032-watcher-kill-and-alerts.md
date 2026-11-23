@@ -1,6 +1,6 @@
 # ADR-032 워처의 직접 알림과 자기 킬: OMS가 조용하면 마커를 쓰고 OMS를 멈춘 뒤 자기 키로 일괄 취소
 
-상태: 채택. U19b1a 구현(2026-11-24): `[telegram]` 설정과 mainnet 거부, 토큰 파일, `watcher::alert`의 순수 부분(메시지와 분할, 보관함, 응답의 결과, 반복 규칙). 아직 아무것도 보내지 않는다(송신 태스크는 U19b1b, 조건과 실행 연결은 U19b1c). 이 ADR의 나머지 결정(§7의 루프, W5, 킬 순서)은 여기서 정하고, 구현은 U19b2a~U19b3d가 맡아 각 §에 자기 결과를 더한다. 계약: [C-WATCH](../contracts/watcher.md) 10부(U19b1), 11부(U19b2), 12부(U19b3). [ADR-031](ADR-031-watcher.md)을 고친다(아래 "ADR-031과의 관계").
+상태: 채택. U19b1a 구현(2026-11-24): `[telegram]` 설정과 mainnet 거부, 토큰 파일, `watcher::alert`의 순수 부분(메시지와 분할, 보관함, 응답의 결과, 반복 규칙). U19b1b 구현(2026-11-24): 송신 태스크(`alert::spawn`: 두 경로, `Notify`로 깨우기, 주입된 시계의 흘려보내기 간격, 지표, 종료 때 흘려보내기), loopback 가짜로만 시험. 실행이 아직 띄우지 않아 아무것도 보내지 않는다(조건과 실행 연결은 U19b1c). 이 ADR의 나머지 결정(§7의 루프, W5, 킬 순서)은 여기서 정하고, 구현은 U19b2a~U19b3d가 맡아 각 §에 자기 결과를 더한다. 계약: [C-WATCH](../contracts/watcher.md) 10부(U19b1), 11부(U19b2), 12부(U19b3). [ADR-031](ADR-031-watcher.md)을 고친다(아래 "ADR-031과의 관계").
 
 ## 1. 문제와 발생 가능한 실패
 
@@ -84,7 +84,8 @@ ADR-031 §2의 "잠금을 잡지 않고, 파일을 쓰지 않는다(C-TAIL)"와 
 - 포기: 이미 시험된 `alert-direct`. 같은 전달 규칙을 두 번 구현하고 두 번 시험한다(U19b1a의 단위 시험, U19b1b의 송신 태스크 시험).
 - 포기: 지속 조건의 반복 상태를 재시작 너머로 들고 가는 것(재시작마다 시작 문구가 한 번 더 간다).
 - 위험(U19b1a): 토큰 파일의 git 저장소 규칙은 조상 디렉터리의 `.git`(디렉터리 또는 worktree의 파일)만 본다. `GIT_DIR`로 다른 곳을 가리키는 저장소, 또는 `.git`을 읽을 수 없는 디렉터리는 보지 못한다(`alert-direct`와 같다).
-- 위험: 실제 텔레그램에 보낸 적이 없다. 모든 시험은 loopback 가짜다(U19b1b부터).
+- 위험: 실제 텔레그램에 보낸 적이 없다. 모든 시험은 loopback 가짜다(U19b1b부터: 평문 `http`, 고정 경로는 `telegram.invalid`를 가짜 주소로). 고정 경로가 TLS에서 호스트 이름으로 SNI와 인증서를 확인하는 것은 `reqwest`의 `resolve`에 기대고 확인하지 않았다(U19b1b).
+- 가정(U19b1b): 송신 태스크는 자기 타이머 없이 `Notify`로만 깨고, 남은 부분의 다시 보내기는 실행의 틱이 주입된 시계로 깨운다(U19b1c가 실행에 연결한다). 틱이 멈추면 다시 보내기도 멈춘다(새 메시지는 바로 간다).
 - 위험(U19b1a): `chat_id`가 틀리면 텔레그램의 400(`chat not found`로 본다, 확인하지 않음)을 "이 메시지의 문제"로 읽어 모든 P1과 버림 알림이 버려지고 세어질 뿐 사람에게 닿지 않는다(PR #3과 같다). 드러나는 곳은 로그 줄과 `watcher_alerts_dropped_total`(U19b1b)뿐이다. 그 지표의 경보 규칙이나 시작 메시지의 거부를 `error`로 남기는 것은 U19b1c·U20b가 정한다(C-WATCH 10부 알려진 한계).
 - 가정: 400·413은 이 메시지의 문제이고 다시 보내도 낫지 않는다(PR #3). 429(`retry_after`)는 따로 읽지 않고 다시 보냄으로 다룬다(다음 흘려보내기, U19b1b).
 - 루프, W5, 킬 순서의 남은 위험과 가정은 U19b2a~U19b3d가 이 §에 더한다(설계 값: 1초 탐침, 10초 침묵, 1초 라운드, 30초 지켜봄, 60초 알림).
@@ -92,6 +93,7 @@ ADR-031 §2의 "잠금을 잡지 않고, 파일을 쓰지 않는다(C-TAIL)"와 
 ## 9. 근거
 
 - 시험(U19b1a): `crates/watcher/tests/alert.rs` 6개(`alert::messages_split_at_3500_utf16_units_at_line_ends`, `alert::the_outbox_keeps_50_parts_and_reports_the_drops_once`, `alert::answers_400_and_413_drop_the_part_and_other_answers_keep_it`, `alert::the_repeat_rule_sends_start_every_5_min_and_clear`, `alert::the_token_is_never_in_debug`, `alert::a_message_has_the_watch_p1_header_with_the_name_and_kst`), `config::telegram_is_validated_and_required_on_mainnet`, `creds::the_token_file_must_be_owner_only_outside_any_repository`, 확장한 `runtime::a_start_refusal_ends_the_run_with_exit_code_2`(주장 V-WATCH-11). 변이 M255~M260.
+- 시험(U19b1b): 같은 파일에 6개(`alert::a_network_error_moves_to_the_pinned_route`, `alert::the_token_is_never_in_a_log_line`, `alert::the_sender_task_flushes_on_the_manual_clock`, `alert::a_retry_keeps_the_part_for_the_next_flush`, `alert::shutdown_flushes_within_5_s_and_counts_the_rest`, `alert::set_queues_what_the_repeat_rule_gives`), 변이 M261. 주장 V-WATCH-11.
 - 설계: `10_DESIGN_DRAFT.md` §7.5(W5), §7.6(킬 스위치 표), §7.7(직접 알림), R1(C1~C5), R2 SHOULD 4~6, R3 SHOULD 6, R5 SHOULD 1·4(저장소 밖, 스펙 `.scratch/watcher-kill/spec.md`가 줄을 인용한다).
 
 ## 10. 재검토 조건
