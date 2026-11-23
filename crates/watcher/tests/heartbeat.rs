@@ -18,6 +18,8 @@ use watcher::metrics::Metrics;
 use watcher::oms::Monitor;
 use watcher::rest::RestError;
 use watcher::w2::W2;
+use watcher::w3::W3;
+use watcher::w4::W4;
 
 fn rt() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
@@ -227,4 +229,63 @@ fn heartbeats_carry_the_success_time_of_each_check() {
             w(at(14), at(4))
         ]
     );
+}
+
+#[test]
+fn w3_and_w4_success_times_reach_the_heartbeat() {
+    // W1 and W2 every 1 s, W3 every 2 s, W4 every 5 s; a heartbeat every
+    // 5 s, carried by the real client to a fake monitor.sock.
+    let mut r = Rig::new("hb-w3-w4");
+    let cfg = config();
+    let w4 = W4::new(&cfg.rules, r.log.clone());
+    r.engine
+        .add_check(Box::new(W2::with_exec_times(w4.exec_times())), 1000);
+    r.engine.add_check(Box::new(W3::new(&cfg.w3)), 2000);
+    r.engine.add_check(Box::new(w4), 5000);
+    r.venue.wallet = vec![account("1000", "0", "1000")];
+    let path = r.journal.dir.join("monitor.sock");
+    let fake = FakeSock::serve(&path, |_, _, v| oms(v, "recorded"));
+    let (mut m, _, _) = monitor(&path, 1000);
+    let rt = rt();
+    let mut want = Vec::new();
+    for k in 0..16 {
+        let t = T0 + k * 1000;
+        if k == 5 {
+            // W3 fails from here on; W4 keeps succeeding.
+            for _ in 0..20 {
+                r.venue
+                    .wallet_script
+                    .push_back(Err(RestError::NoAnswer("timeout".into())));
+            }
+        }
+        let a = r.engine.poll(t);
+        for x in &a {
+            if let Action::Heartbeat { checks } = x {
+                let s = |c| r.engine.success(c);
+                want.push(vec![
+                    ("W1".to_string(), s(Check::W1)),
+                    ("W2".to_string(), s(Check::W2)),
+                    ("W3".to_string(), s(Check::W3)),
+                    ("W4".to_string(), s(Check::W4)),
+                ]);
+                rt.block_on(m.beat(t, checks)).unwrap();
+            }
+        }
+        r.run(t, a);
+    }
+    let got: Vec<_> = fake.conns()[0]
+        .iter()
+        .filter(|v| v["op"] == "heartbeat")
+        .map(checks_of)
+        .collect();
+    assert_eq!(got, want);
+    // Null before the first success; W3 stays at its last success (T0 +
+    // 4 s) once its rounds fail; W4 moves with every sweep.
+    let at = |k: u64| Some(T0 + k * 1000);
+    let w34: Vec<_> = got.iter().map(|g| (g[2].1, g[3].1)).collect();
+    assert_eq!(
+        w34,
+        vec![(None, None), (at(4), at(0)), (at(4), at(5)), (at(4), at(10))]
+    );
+    assert!(got[1..].iter().all(|g| g[0].1.is_some() && g[1].1.is_some()));
 }
