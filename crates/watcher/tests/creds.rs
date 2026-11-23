@@ -256,6 +256,10 @@ fn the_token_file_must_be_owner_only_outside_any_repository() {
         assert_eq!(creds::load_token(&p, &data).unwrap(), want("-1001234"));
     }
     chmod(&p, 0o600);
+    // The loaded value's `Debug` shows the chat id, never the token.
+    let shown = format!("{:?}", creds::load_token(&p, &data).unwrap());
+    assert!(shown.contains("-1001234") && shown.contains("token: <hidden>"), "{shown}");
+    assert!(!shown.contains(BOT) && !shown.contains("made-up"), "{shown}");
     for (text, chat) in [
         (format!("{{\"token\": \"{BOT}\", \"chat_id\": \"@ops\"}}"), "@ops"),
         (format!("{{\"token\": \"{BOT}\", \"chat_id\": 42, \"note\": 1}}"), "42"),
