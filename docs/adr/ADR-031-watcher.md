@@ -84,7 +84,7 @@ B와 b. 커서 저장(C)은 하지 않는다.
 
 - Bybit 클라이언트(U19a3, C-WATCH 3부): 서명(`watcher::sign`)과 클라이언트(`watcher::rest`)를 거래소 문서(gateway facts, F18, F20)로 새로 쓴다. OMS의 `venue/bybit`는 API를 알려고 읽기만 한다. 분류는 OMS와 같은 표다. 둘 다 같은 문서에서 왔고, 이 ADR은 문서의 규칙을 OMS와 따로 한 번 더 구현하는 쪽을 택했다. 키 거절(HTTP 401, 10003, 10004, 10005, 10007, 10010, 33004)은 프로세스 안에서 래치해 그 뒤 Bybit 요청을 하나도 보내지 않는다. 재시작 루프로 다시 보내지 않도록, 시작 확인(U19a4b)도 이 경우 끝내지 않고 요청 없이 떠 있는다. HTTP 403은 응답 순간부터 600초 모든 요청과 IP 반향을 멈춘다. 요청 제한은 10초 창에 60개(판단(모델 아님)), 주입된 시계 위의 sans-IO `Guard`이고, 넘는 요청은 기다린다. 대안이었던 "OMS의 `Rest`를 가져다 쓴다"는 독립성 규칙 2가 막고, "토큰 버킷"은 같은 목적에 창보다 시험하기 어렵다(판단(모델 아님)).
 - 지표(U19a3): 워처 자신의 등록부와 VM 가져오기 클라이언트. 작업 공간의 `obs-push`는 OMS 코드를 담지 않지만 쓰지 않는다: 독립성 검사의 규칙이 "개발 의존성 `http-fake` 말고 작업 공간 crate 없음" 하나이기 때문이다. 큐가 없다(실패한 밀어 넣기는 버린다). 게이지는 다음 밀어 넣기가 새 값을 보내고 카운터는 누적이라, 큐가 지킬 것이 없다.
-- 시작 확인과 IP 재확인(U19a4b, C-WATCH 4부): OMS의 `venue/bybit/checks.rs`처럼 `async` 함수로 차례로 기다리는 대신, 시계를 읽지도 자지도 않는 단계 기계(`start::Start`, `start::IpCheck`: `poll(now)`이 다음 요청을, `on_answer(now, 답)`이 다음 시각을 준다)로 만들었다. 다시 묻기(5초, 403 뒤 600초)와 재확인 간격을 수동 시계로 실제 시간 없이 시험하고, U19a7의 실행 코드가 상태 대기와 재생 중에도 같은 루프에서 재확인을 돌리게 하기 위해서다(스펙 검토 3 S2). 키 거절이면 끝내지 않고 요청 없이 떠 있는다(재시작 루프가 거절된 키를 다시 보내지 않게). 재확인에서 키가 시작 규칙(하위 계정, `sub_account_uid`, IP에 묶임)에 더는 맞지 않으면 끝내지 않고 키 거절과 같은 클라이언트 래치(`Client::stop_key`, 코드 −1)로 모든 Bybit 요청을 멈춘다(소유자 질문 13의 기본값, 안전한 쪽). 대안 "재확인의 규칙 위반은 로그만 남기고 계속 검사한다"는 다른 계정이나 마스터 키로 대조를 이어 가게 한다.
+- 시작 확인과 IP 재확인(U19a4b, C-WATCH 4부): OMS의 `venue/bybit/checks.rs`처럼 `async` 함수로 차례로 기다리는 대신, 시계를 읽지도 자지도 않는 단계 기계(`start::Start`, `start::IpCheck`: `poll(now)`이 다음 요청을, `on_answer(now, 답)`이 다음 시각을 준다)로 만들었다. 다시 묻기(5초, 403 뒤 600초)와 재확인 간격을 수동 시계로 실제 시간 없이 시험하고, U19a7의 실행 코드가 상태 대기와 재생 중에도 같은 루프에서 재확인을 돌리게 하기 위해서다(스펙 검토 3 S2). 키 거절이면 끝내지 않고 요청 없이 떠 있는다(재시작 루프가 거절된 키를 다시 보내지 않게). 재확인에서 키가 시작 규칙(하위 계정, `sub_account_uid`, IP에 묶임)에 더는 맞지 않으면 끝내지 않고 키 거절과 같은 클라이언트 래치(`Client::stop_key`, 코드 −1)로 모든 Bybit 요청을 멈춘다(소유자 질문 13의 기본값, 안전한 쪽). 대안 "재확인의 규칙 위반은 로그만 남기고 계속 검사한다"는 다른 계정이나 마스터 키로 대조를 이어 가게 한다. 키 거절 뒤에도 재확인은 반향만으로 `watcher_public_ip_ok`를 계속 쓴다(검토 1 M1): 반향은 Bybit 요청이 아니고 10010의 흔한 원인이 바뀐 공인 IP라, 멈춘 게이지가 "IP는 맞다"고 계속 말하면 운영자를 잘못 이끈다.
 
 ## 8. 포기한 장점, 남은 위험, 가정
 
@@ -99,7 +99,7 @@ B와 b. 커서 저장(C)은 하지 않는다.
 
 ## 9. 근거
 
-- 시험(U19a4b): `crates/watcher/tests/start.rs` 12개(수동 시계의 sans-IO 단계, 요청 없음을 보일 곳은 loopback 가짜 Bybit·반향과 실제 클라이언트; 주장 V-WATCH-4). 변이 M189, M190, M225.
+- 시험(U19a4b): `crates/watcher/tests/start.rs` 13개(수동 시계의 sans-IO 단계, 요청 없음을 보일 곳은 loopback 가짜 Bybit·반향과 실제 클라이언트; 주장 V-WATCH-4). 변이 M189, M190, M225, M238(검토 1 M1).
 - 시험(U19a3): `crates/watcher/tests/sign.rs` 2개, `client.rs` 10개(검토 1에서 리다이렉트를 따르지 않음과 가드에서 기다린 요청이 그 사이의 키 거절·403을 봄을, 검토 2에서 본문이 잘린 상태와 동시에 온 두 거절을 더함), `metrics.rs` 2개(loopback 가짜와 수동 시계; 주장 V-WATCH-3). 변이 M188, M191, M192, M232, M233, M234.
 - 시험(U19a2): `crates/watcher/tests/state.rs` 10개, 적합성 `conformance::the_watcher_sets_equal_the_core_on_journals_with_every_event_kind`(이벤트 51개를 모두 쓰는 시나리오 열 개, 기록마다 코어와 비교; 주장 V-WATCH-2), 재생 측정 `replay::replay_speed_of_100000_records`. 변이 M185~M187, M210, M231(검토 1 S2).
 - 시험: `crates/watcher/tests/journal.rs` 9개, `crates/watcher/src` 단위 시험 3개(`events`, `decimal`, `wire_id`), `crates/watcher/tests/binary.rs` 1개, `crates/watcher-conformance/tests/conformance.rs` 2개, `tools/ci/selftest.sh`의 워처 22건(주장 V-WATCH-1). 변이 M182~M184, M221, M230(검토 1 S3).

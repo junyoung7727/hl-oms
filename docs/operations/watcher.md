@@ -109,7 +109,8 @@ api_secret = "..."
 시작 뒤 `ip_check_ms`(기본 60초)마다 키와 공인 IP를 다시 본다.
 
 - 실패하면(답 없음 등) `watcher_public_ip_ok = 0`과 경고 한 줄 `warn: IP recheck: query-api failed …`, 남은 날은 마지막 값 그대로.
-- 키가 **다른 계정의 것, 마스터 키, IP에 묶이지 않은 키**로 보이면 키 거절과 같이 재시작까지 모든 Bybit 요청을 멈춘다: `watcher_auth_rejected = 1`, 오류 한 줄 `error: the key no longer passes the start check: query-api: …; every Bybit request stops until the watcher restarts`. 키를 고친 뒤 다시 띄운다.
+- 재확인에서 **키가 거절되면**(10010 등) Bybit에는 더 묻지 않지만 공인 IP는 60초마다 계속 본다(반향은 Bybit 요청이 아니다). 비교하는 목록은 마지막으로 통과한 키의 IP 목록이다. 그래서 `watcher_auth_rejected = 1`과 `watcher_public_ip_ok = 0`이 함께 보이면 이 호스트의 공인 IP가 바뀐 것이 원인일 수 있다. 시작 5단계에서 키가 거절된 때도 같다. 시작 2단계에서 거절되면 IP 목록을 몰라 `watcher_public_ip_ok`가 없다.
+- 키가 **다른 계정의 것, 마스터 키, IP에 묶이지 않은 키**로 보이면 키 거절과 같이 재시작까지 모든 Bybit 요청을 멈추고 `watcher_public_ip_ok = 0`이 된다: `watcher_auth_rejected = 1`, 오류 한 줄 `error: the key no longer passes the start check: query-api: …; every Bybit request stops until the watcher restarts`. 키를 고친 뒤 다시 띄운다.
 
 ## 시작 확인의 지표(U19a4b)
 
@@ -118,5 +119,5 @@ api_secret = "..."
 | 이름 | 뜻 | 볼 것 |
 |---|---|---|
 | `watcher_api_key_days_left` | 키 만료까지 남은 날(내림, 만료 뒤 음수). IP에 묶인 키처럼 만료가 해당 없으면 없음 | 값이 있으면 키가 IP에 묶이지 않았거나 비밀번호가 바뀐 것이다(Bybit 문서). 만료 전에 키를 바꾼다 |
-| `watcher_public_ip_ok` | 1: 이 호스트의 공인 IP가 키의 IP 목록에 있음. 0: 없음, 또는 확인 실패 | 0이면 경고 줄로 원인을 본다. IP가 바뀌었으면 키의 IP 목록을 고친다 |
+| `watcher_public_ip_ok` | 1: 이 호스트의 공인 IP가 키의 IP 목록(마지막으로 통과한 것)에 있음. 0: 없음, 확인 실패, 또는 키가 시작 규칙에 더는 맞지 않음. 키 거절 뒤에도 반향으로 계속 쓴다. 시작 2단계에서 키가 거절되면 없음 | 0이면 경고 줄(또는 규칙 위반의 오류 줄)로 원인을 본다. IP가 바뀌었으면 키의 IP 목록을 고친다 |
 | `watcher_auth_rejected` | 1: 키 거절이나 시작 규칙 위반으로 모든 Bybit 요청이 멈췄음 | 오류 줄로 원인을 보고 키를 고친 뒤 재시작 |
