@@ -519,6 +519,8 @@ impl Runtime {
                         Msg::Admin(check, send_id, r)
                     });
                 }
+                // The mismatch P1 (U19b1c): wired with the sender.
+                Action::Confirmed { .. } => {}
                 Action::Heartbeat { checks } => {
                     if self.beats.try_send(checks).is_err() {
                         (self.log)(
