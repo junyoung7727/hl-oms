@@ -9,10 +9,13 @@
 //! client, the request guard, the clock and the metrics export; U19a4 the
 //! config; U19a4b the start checks; U19a5 the check engine and W1; U19a6
 //! W2; U19a7 the OMS links and the runtime; U19a8 W4; U19a9 W3 and W2's
-//! fallback to W4's execution times.
+//! fallback to W4's execution times. U19b1a (ADR-032) the `[telegram]`
+//! config, the token file and the pure parts of the watcher's own Telegram
+//! sender.
 //!
 //! [ADR-031]: ../../docs/adr/ADR-031-watcher.md
 
+pub mod alert;
 pub mod clock;
 pub mod config;
 pub mod creds;
