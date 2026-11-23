@@ -118,12 +118,16 @@ fn a_changing_difference_restarts_the_count() {
     assert_eq!(r.engine.success(Check::W2), Some(T0 + 1000));
     r.at(T0 + 2000);
     let btc = detail("BTCUSDT", "3", "1", "journal entry 12.0 s old");
-    assert_eq!(w2_mismatches(&r), vec![(T0 + 1000, eth), (T0 + 2000, btc)]);
+    // Confirmed at T0 + 2 s; its send waits for the hold the first send
+    // set (U19a7).
+    assert_eq!(r.confirmed, vec![(T0 + 1000, eth.clone()), (T0 + 2000, btc)]);
+    assert_eq!(w2_mismatches(&r), vec![(T0 + 1000, eth)]);
     // Agreement ends both.
     r.write(T0 + 2100, &[adj("BTCUSDT", "2"), adj("ETHUSDT", "-2")]);
     r.at(T0 + 3000);
     assert_eq!(r.gauge("watcher_differences", "W2"), Some(0.0));
-    assert_eq!(r.gauge("watcher_mismatch_active", "W2"), Some(0.0));
+    // BTCUSDT's is still owed: confirmed under the hold, not yet sent.
+    assert_eq!(r.gauge("watcher_mismatch_active", "W2"), Some(1.0));
     assert_eq!(r.gauge("watcher_mismatches_total", "W2"), Some(2.0));
     assert_eq!(r.engine.success(Check::W2), Some(T0 + 3000));
 }
@@ -352,7 +356,8 @@ fn sizes_found_at_the_first_round_have_no_seen_time() {
     assert_eq!(r.engine.success(Check::W2), Some(T0 + 3000));
     r.at(T0 + 6000);
     let want = detail("ETHUSDT", "1", "0", "journal entry 2.0 s old");
-    assert_eq!(w2_mismatches(&r)[1..], [(T0 + 6000, want)]);
+    // Confirmed at T0 + 6 s; its send waits for the hold (U19a7).
+    assert_eq!(r.confirmed[1..], [(T0 + 6000, want)]);
     assert_eq!(r.engine.success(Check::W2), Some(T0 + 6000));
 }
 
@@ -469,15 +474,17 @@ fn a_difference_planted_after_the_fills_stop_is_confirmed_within_3_s() {
         if !after_read {
             r.at(t);
         }
-        let before = w2_mismatches(&r).len();
+        // The confirmation, not the send: after the first, the sends wait
+        // for the hold it set (U19a7).
+        let before = r.confirmed.len();
         for _ in 0..40 {
-            if w2_mismatches(&r).len() > before {
+            if r.confirmed.len() > before {
                 break;
             }
             t += 100;
             r.at(t);
         }
-        let got = w2_mismatches(&r);
+        let got = &r.confirmed;
         assert_eq!(got.len(), before + 1, "phase {phase} {after_read}");
         let late = got[before].0 - plant;
         assert!((2000..=3000).contains(&late), "phase {phase}: {late} ms");
@@ -497,8 +504,12 @@ fn a_difference_planted_after_the_fills_stop_is_confirmed_within_3_s() {
             t += 100;
             r.at(t);
         }
-        assert_eq!(r.gauge("watcher_mismatch_active", "W2"), Some(0.0));
+        assert_eq!(r.gauge("watcher_differences", "W2"), Some(0.0));
     }
+    // The first was sent and paid; the 10 confirmed under its hold are one
+    // identity (d = 1 each time), owed until a clear (U19a7).
+    assert_eq!(r.gauge("watcher_mismatch_active", "W2"), Some(1.0));
+    assert_eq!(w2_mismatches(&r).len(), 1);
     assert_eq!(r.gauge("watcher_mismatches_total", "W2"), Some(11.0));
     assert!(r.mismatches.iter().all(|m| m.1 == Check::W2));
 }

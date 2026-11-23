@@ -21,6 +21,7 @@ pub mod events;
 pub mod journal;
 pub mod log;
 pub mod metrics;
+pub mod oms;
 pub mod rest;
 pub mod sign;
 pub mod start;

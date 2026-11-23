@@ -3,7 +3,10 @@
 //! answers every request at once (zero latency): venue requests from the
 //! model venue, status requests with the journal's last record as the
 //! durable cap. A test that needs to hold an answer calls the engine
-//! itself.
+//! itself. `Mismatch` is answered as the OMS answers `watcher_mismatch`
+//! (U19a7): the first one while no hold is set writes `hold_set` to the
+//! journal and is `"held"`, a later one `"already held"`; or from a script,
+//! or not at all ([`Oms::Silent`]).
 
 use super::{TestJournal, ev};
 use serde_json::{Value, json};
@@ -145,6 +148,15 @@ impl Venue {
     }
 }
 
+/// How the rig answers `Mismatch` (U19a7).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Oms {
+    /// As the OMS: `hold_set` and `"held"`, or `"already held"`.
+    Holds,
+    /// No answer: the test calls `engine.on_admin` itself.
+    Silent,
+}
+
 pub struct Rig {
     pub engine: Engine,
     pub venue: Venue,
@@ -158,17 +170,31 @@ pub struct Rig {
     pub status_down: Option<String>,
     pub mismatches: Vec<(u64, Check, String)>,
     pub heartbeats: Vec<Beat>,
+    pub oms: Oms,
+    /// Answers to `Mismatch` used before `oms`, in order.
+    pub admin_script: VecDeque<Result<String, String>>,
+    /// The OMS holds plain orders on a watcher's word.
+    pub held: bool,
+    /// Each confirmed difference (the engine's `error: confirmed
+    /// difference` line) with the clock it came at: the two-round rule's
+    /// result, whether or not a send carried it at once (U19a7).
+    pub confirmed: Vec<(u64, String)>,
 }
 
 impl Rig {
     /// An engine that starts at `T0` with W1 on an empty journal.
     pub fn new(name: &str) -> Rig {
+        Rig::with_config(name, &config())
+    }
+
+    /// As [`Rig::new`] with another config.
+    pub fn with_config(name: &str, cfg: &Config) -> Rig {
         let mut journal = TestJournal::new(name);
         journal.segment(2);
         let metrics = Arc::new(Metrics::new("h", "w"));
         let (log, lines) = watcher::log::collect();
         let engine = Engine::new(
-            &config(),
+            cfg,
             Tail::open(&journal.dir),
             JournalState::default(),
             metrics.clone(),
@@ -187,7 +213,43 @@ impl Rig {
             status_down: None,
             mismatches: Vec::new(),
             heartbeats: Vec::new(),
+            oms: Oms::Holds,
+            admin_script: VecDeque::new(),
+            held: false,
+            confirmed: Vec::new(),
         }
+    }
+
+    /// The OMS's answer to `watcher_mismatch`: the first while no hold is
+    /// set writes `hold_set` (its note is the detail) at the journal's
+    /// newest time, so that a test's later records keep their order.
+    pub fn hold(&mut self, check: Check, detail: &str) -> Result<String, String> {
+        if self.held {
+            return Ok("already held".into());
+        }
+        self.held = true;
+        let at = self.journal.last_at;
+        self.journal.append(
+            at,
+            &[ev(
+                "hold_set",
+                json!({"hold": "watcher_mismatch", "source": check.name(), "note": detail}),
+            )],
+        );
+        Ok("held".into())
+    }
+
+    /// An operator's `clear-hold --reason watcher_mismatch` at `now_ms`.
+    pub fn clear(&mut self, now_ms: u64) {
+        self.held = false;
+        let at = (now_ms * 1000).max(self.journal.last_at);
+        self.journal.append(
+            at,
+            &[ev(
+                "hold_cleared",
+                json!({"hold": "watcher_mismatch", "note": "checked"}),
+            )],
+        );
     }
 
     /// A record at `at_ms`.
@@ -209,6 +271,7 @@ impl Rig {
 
     /// Carries out `actions` and the actions their answers bring.
     pub fn run(&mut self, now: u64, actions: Vec<Action>) {
+        let lines_before = self.lines.lock().unwrap().len();
         let mut queue: VecDeque<Action> = actions.into();
         let mut steps = 0;
         while let Some(a) = queue.pop_front() {
@@ -231,8 +294,16 @@ impl Rig {
                     self.engine.on_status(now, req_id, s)
                 }
                 Action::Mismatch { check, detail } => {
-                    self.mismatches.push((now, check, detail));
-                    vec![]
+                    self.mismatches.push((now, check, detail.clone()));
+                    let answer = match (self.admin_script.pop_front(), self.oms) {
+                        (Some(a), _) => Some(a),
+                        (None, Oms::Holds) => Some(self.hold(check, &detail)),
+                        (None, Oms::Silent) => None,
+                    };
+                    match answer {
+                        Some(a) => self.engine.on_admin(now, check, a),
+                        None => vec![],
+                    }
                 }
                 Action::Heartbeat { checks } => {
                     self.heartbeats.push((now, checks));
@@ -240,6 +311,12 @@ impl Rig {
                 }
             };
             queue.extend(more);
+        }
+        let lines = self.lines.lock().unwrap();
+        for l in &lines[lines_before..] {
+            if let Some(d) = l.strip_prefix("error: confirmed difference: ") {
+                self.confirmed.push((now, d.to_string()));
+            }
         }
     }
 

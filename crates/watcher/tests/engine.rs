@@ -351,13 +351,16 @@ fn a_confirmed_identity_is_counted_once() {
     assert_eq!(r.gauge("watcher_mismatches_total", "W1"), Some(1.0));
     assert_eq!(r.lines_with("error: confirmed difference"), 1);
     // Gone for a round, then back: a new difference, two rounds again.
+    // (Its send waits for the hold the first one set, U19a7.)
     let listed = std::mem::take(&mut r.venue.orders);
     r.at(T0 + 6000);
     r.venue.orders = listed;
     r.at(T0 + 7000);
-    assert_eq!(r.mismatches.len(), 1);
+    assert_eq!(r.confirmed.len(), 1);
     r.at(T0 + 8000);
-    assert_eq!(r.mismatches.len(), 2);
+    assert_eq!(r.confirmed.len(), 2);
+    assert_eq!(r.confirmed[1].0, T0 + 8000);
+    assert_eq!(r.mismatches.len(), 1);
     assert_eq!(r.gauge("watcher_mismatches_total", "W1"), Some(2.0));
 }
 
