@@ -509,13 +509,12 @@ impl Engine {
                 continue;
             }
             open += 1;
-            // A first sighting is pending, or deferred by a strict check.
-            let Some(first) = before else {
-                if strict && matches!(d.since, Since::At(t) if now.saturating_sub(t) < min_age) {
-                    deferred = true;
-                }
-                continue;
-            };
+            // A strict check (W2) defers a young first sighting too.
+            deferred |= before.is_none()
+                && strict
+                && matches!(d.since, Since::At(at) if now.saturating_sub(at) < min_age);
+            // A first sighting is pending.
+            let Some(first) = before else { continue };
             let since = match d.since {
                 Since::At(t) => Some(t),
                 Since::FirstSeen => Some(first),
