@@ -37,6 +37,25 @@ fn ext(key: &str, instrument: &str, qty: &str, venue_ts_us: u64) -> Value {
     )
 }
 
+/// The model venue fills one buy every 200 ms in `(from, to]` (size and
+/// `updatedTime` move), and the test journal books each fill 300 ms later
+/// (판단(모델 아님)); the engine is polled every 100 ms from `start` to
+/// `until`. Returns the venue size at the end.
+fn fills(r: &mut Rig, mut size: u64, (from, to): (u64, u64), start: u64, until: u64) -> u64 {
+    for t in (start..=until).step_by(100) {
+        if t > from && t <= to && (t - from) % 200 == 0 {
+            size += 1;
+            r.venue.positions = vec![pos("BTCUSDT", "Buy", &size.to_string(), Some(t))];
+        }
+        let made = t.wrapping_sub(300);
+        if t >= from + 300 && made > from && made <= to && (made - from) % 200 == 0 {
+            r.write(t, &[ext(&format!("BTCUSDT:{made}"), "BTCUSDT", "1", made * 1000)]);
+        }
+        r.at(t);
+    }
+    size
+}
+
 fn detail(symbol: &str, venue: &str, journal: &str, age: &str) -> String {
     format!("W2 position {symbol}: venue {venue}, journal {journal}; seen 2 rounds, {age}")
 }
@@ -341,4 +360,76 @@ fn a_size_seen_by_a_round_that_then_fails_keeps_its_seen_time() {
     r.at(T0 + 5000);
     let want = detail("BTCUSDT", "1", "0", "journal entry 4.0 s old");
     assert_eq!(w2_mismatches(&r), vec![(T0 + 5000, want)]);
+}
+
+#[test]
+fn five_fills_per_second_for_60_s_give_no_mismatch() {
+    let mut r = rig("w2-fills");
+    let size = fills(&mut r, 0, (T0, T0 + 60_000), T0, T0 + 60_000);
+    assert_eq!(size, 300);
+    assert!(r.mismatches.is_empty(), "{:?}", r.mismatches);
+    // Every round in the fills was deferred: W2's age rose for 60 s.
+    assert_eq!(r.engine.success(Check::W2), Some(T0));
+    assert_eq!(r.gauge("watcher_check_age_s", "W2"), Some(60.0));
+    assert_eq!(r.gauge("watcher_mismatches_total", "W2"), None);
+    // The journal catches up 300 ms after the last fill: W2 agrees again.
+    fills(&mut r, size, (T0, T0 + 60_000), T0 + 60_100, T0 + 61_000);
+    assert_eq!(r.engine.success(Check::W2), Some(T0 + 61_000));
+    assert_eq!(r.engine.state().position("BTCUSDT").to_string(), "300");
+    assert!(r.mismatches.is_empty());
+}
+
+#[test]
+fn a_difference_planted_after_the_fills_stop_is_confirmed_within_3_s() {
+    let mut r = rig("w2-plant");
+    let mut size = fills(&mut r, 0, (T0, T0 + 10_000), T0, T0 + 12_000);
+    assert!(r.mismatches.is_empty());
+    let mut t = T0 + 12_000;
+    // Plants at every phase of the 1 s round in steps of 100 ms, before
+    // the round's read; then one 1 ms after a round's read.
+    let phases: Vec<(u64, bool)> = (0..10).map(|p| (p * 100, false)).chain([(0, true)]).collect();
+    for (phase, after_read) in phases {
+        let at = t + 1000 - t % 1000 + phase;
+        for _ in 0..20 {
+            t += 100;
+            if t == at {
+                break;
+            }
+            r.at(t);
+        }
+        assert_eq!(t, at);
+        if after_read {
+            r.at(t);
+        }
+        let plant = at + u64::from(after_read);
+        size += 1;
+        r.venue.positions = vec![pos("BTCUSDT", "Buy", &size.to_string(), Some(plant))];
+        if !after_read {
+            r.at(t);
+        }
+        let before = w2_mismatches(&r).len();
+        for _ in 0..40 {
+            if w2_mismatches(&r).len() > before {
+                break;
+            }
+            t += 100;
+            r.at(t);
+        }
+        let got = w2_mismatches(&r);
+        assert_eq!(got.len(), before + 1, "phase {phase} {after_read}");
+        let late = got[before].0 - plant;
+        assert!((2000..=3000).contains(&late), "phase {phase}: {late} ms");
+        // At a round start +2,000 ms; just after a round's read just
+        // under +3,000 ms.
+        assert_eq!(late, if after_read { 2999 } else { 2000 + (1000 - phase) % 1000 });
+        // The journal follows; the difference ends.
+        r.write(t, &[adj("BTCUSDT", "1")]);
+        for _ in 0..30 {
+            t += 100;
+            r.at(t);
+        }
+        assert_eq!(r.gauge("watcher_mismatch_active", "W2"), Some(0.0));
+    }
+    assert_eq!(r.gauge("watcher_mismatches_total", "W2"), Some(11.0));
+    assert!(r.mismatches.iter().all(|m| m.1 == Check::W2));
 }
