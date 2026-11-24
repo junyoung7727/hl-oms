@@ -5,6 +5,7 @@
 
 #![allow(dead_code, clippy::unwrap_used)]
 
+pub mod kill_rig;
 pub mod rig;
 pub mod sock;
 

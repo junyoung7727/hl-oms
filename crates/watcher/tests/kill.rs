@@ -8,8 +8,11 @@
 
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
 use std::sync::{Arc, Mutex};
 
+use common::kill_rig::{self as rig, KillRig, at_once, cancel_ok as ok_n, http, open_orders};
 use http_fake::{Answer, FakeHttp};
 use serde_json::{Value, json};
 use watcher::alert::{MSG_LIMIT, message, split};
@@ -17,11 +20,13 @@ use watcher::clock::{Clock, ManualClock};
 use watcher::config::Kill;
 use watcher::kill::{
     AbortWhy, Action, CancelAnswer, KillLoop, LATCHED_LINE, LastError, NOT_READ_ON_ABORT, NotSent,
-    Notice, PAUSED_LINE, POSITIONS, Phase, Positions, Report, StopOutcome, TIMED_OUT, notice_text,
-    position_block, read_positions,
+    Notice, PAST_DEADLINE, PAUSED_LINE, POSITIONS, Phase, Positions, Report, StopOutcome, TIMED_OUT, notice_text,
+    position_block, read_positions, Arrived, Inflight, ORDERS, cancel_answer, count_open,
 };
 use watcher::metrics::Metrics;
-use watcher::rest::{CancelAll, Client, ClientConfig, Credentials};
+use watcher::rest::{
+    CANCEL_ALL, CancelAll, Client, ClientConfig, Credentials, GUARD_MAX, GUARD_WINDOW_MS,
+};
 
 /// 2023-11-14T22:13:20Z.
 const T0: u64 = 1_700_000_000_000;
@@ -1563,4 +1568,658 @@ fn the_order_budget_holds_under_any_answer_sequence() {
         }
         assert!(ended > 0);
     }
+}
+
+// ---- The count reader, Inflight and the rig (U19b2c) ----
+
+/// An order row of `/v5/order/realtime`.
+fn order(link: &str, status: &str) -> Value {
+    json!({"orderLinkId": link, "orderId": format!("o-{link}-{status}"), "symbol": "BTCUSDT",
+        "side": "Buy", "qty": "1", "orderStatus": status})
+}
+
+/// One page of `/v5/order/realtime`.
+fn orders(rows: Vec<Value>, cursor: &str) -> Answer {
+    page(rows, cursor)
+}
+
+#[tokio::test]
+async fn foreign_orders_count() {
+    let ours = watcher::wire_id::encode(7, 1);
+    // Open = New, PartiallyFilled, Untriggered, whoever placed the order:
+    // ours, a foreign link, an empty link, a row without a link.
+    let first = vec![
+        order(&ours, "New"),
+        order("manual-1", "PartiallyFilled"),
+        order("", "Untriggered"),
+        json!({"orderId": "x", "orderStatus": "New"}),
+        order(&ours, "Filled"),
+    ];
+    let second = vec![order("web-2", "New"), order("web-3", "Cancelled")];
+    let fake = FakeHttp::start(Answer::Close);
+    fake.route(ORDERS, [orders(first, "c2"), orders(second, "")]);
+    let c = client(&fake);
+    let mut pages = 0;
+    let n = count_open(&c.client, &*c.clock, T0, RT, &mut || pages += 1).await;
+    assert_eq!(n, Ok(5));
+    assert_eq!(pages, 2);
+    assert_eq!(
+        targets(&fake),
+        [
+            "/v5/order/realtime?category=linear&limit=50&settleCoin=USDT",
+            "/v5/order/realtime?category=linear&cursor=c2&limit=50&settleCoin=USDT",
+        ]
+    );
+
+    // No open order at all: zero, the one answer that ends a watch.
+    let fake = FakeHttp::start(Answer::Close);
+    fake.route(ORDERS, [orders(vec![order(&ours, "Filled")], "")]);
+    let c = client(&fake);
+    assert_eq!(
+        count_open(&c.client, &*c.clock, T0, RT, &mut || {}).await,
+        Ok(0)
+    );
+
+    // What does not read is a count error, never a number.
+    let not_a_list = Answer::Reply(
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":{},"nextPageCursor":""}}"#.into(),
+    );
+    for (case, answers, sent) in [
+        ("list not a list", vec![not_a_list], 1),
+        (
+            "a row without orderStatus",
+            vec![orders(vec![json!({"orderLinkId": "a"})], "")],
+            1,
+        ),
+        (
+            "a full page without a cursor",
+            vec![orders(vec![order("a", "New"); 50], "")],
+            1,
+        ),
+        (
+            "the cursor just sent again",
+            vec![orders(vec![], "c2"), orders(vec![], "c2")],
+            2,
+        ),
+        ("HTTP 503", vec![Answer::Reply(503, "busy".into())], 1),
+    ] {
+        let fake = FakeHttp::start(Answer::Close);
+        fake.route(ORDERS, answers);
+        let c = client(&fake);
+        let n = count_open(&c.client, &*c.clock, T0, RT, &mut || {}).await;
+        assert!(n.is_err(), "{case}: {n:?}");
+        assert_eq!(fake.requests().len(), sent, "{case}");
+    }
+}
+
+/// A client shared with the tasks of `Inflight`.
+fn shared(fake: &FakeHttp) -> (Arc<Client>, Arc<ManualClock>) {
+    let c = client(fake);
+    (Arc::new(c.client), c.clock)
+}
+
+fn cancel_ok() -> Answer {
+    Answer::Reply(
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":[],"success":"1"},"time":1}"#.into(),
+    )
+}
+
+/// Waits in real time (at most 5 s) until `f` holds.
+async fn until(mut f: impl FnMut() -> bool, what: &str) {
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !f() {
+        assert!(std::time::Instant::now() < end, "waited 5 s for {what}");
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+    }
+}
+
+/// The request action of `acts`.
+fn request(acts: &[Action]) -> Action {
+    acts.iter()
+        .find(|a| matches!(a, Action::CancelAll { .. } | Action::Count { .. }))
+        .cloned()
+        .unwrap()
+}
+
+#[tokio::test]
+async fn an_aborted_task_sends_no_answer_to_the_loop() {
+    // A cancel-all answered in time, but its answer is still queued when
+    // its deadline passes: Inflight aborts the task at the deadline and
+    // drops what it sent. The loop gets nothing; poll fails the request.
+    let fake = FakeHttp::start(Answer::Close);
+    fake.route(CANCEL_ALL, [cancel_ok()]);
+    let (client, clock) = shared(&fake);
+    let mut inf = Inflight::new(client.clone(), clock.clone(), RT);
+    let mut l = kill_loop();
+    let acts = l.start(T0, "h", StopOutcome::Latched);
+    let cancel = cancel_id(&acts);
+    assert!(inf.start(&request(&acts), T0));
+    assert_eq!(inf.open(), 1);
+    until(|| inf.queued() == 1, "the cancel-all's answer").await;
+    // One ms before the deadline nothing is aborted.
+    assert_eq!(l.open_request(), Some((cancel, T0 + EXTRA)));
+    assert_eq!(inf.abort_due(T0 + EXTRA - 1, l.open_request()), 0);
+    clock.set(T0 + EXTRA);
+    assert_eq!(inf.abort_due(T0 + EXTRA, l.open_request()), 1);
+    assert_eq!(inf.take(), []);
+    assert_eq!((inf.open(), inf.aborted(), inf.stray()), (0, 1, 1));
+    let acts = l.poll(T0 + EXTRA);
+    assert_eq!(l.ignored(), 0);
+    assert_eq!(l.cancel_all_calls(), 1);
+    let count = count_id(&acts);
+
+    // A count whose first page answered and whose second hangs: aborted at
+    // its deadline (moved by the first page), its queued page is dropped
+    // and no further page goes.
+    fake.route(
+        ORDERS,
+        [orders(vec![order("a", "New")], "c2"), Answer::Hang],
+    );
+    assert!(inf.start(&request(&acts), T0 + EXTRA));
+    until(|| fake.requests().len() == 3, "the hanging second page").await;
+    until(|| inf.queued() == 1, "the first page").await;
+    assert_eq!(l.open_request(), Some((count, T0 + 2 * EXTRA)));
+    assert_eq!(inf.abort_due(T0 + 2 * EXTRA, l.open_request()), 1);
+    assert_eq!(inf.take(), []);
+    assert_eq!((inf.open(), inf.aborted(), inf.stray()), (0, 2, 2));
+
+    // A task the loop no longer has open is aborted at once, before its
+    // deadline: here the loop was aborted.
+    let fake = FakeHttp::start(Answer::Close);
+    fake.route(CANCEL_ALL, [Answer::Hang]);
+    let (client, clock) = shared(&fake);
+    let mut inf = Inflight::new(client, clock.clone(), RT);
+    let mut l = kill_loop();
+    let acts = l.start(T0, "h", StopOutcome::Latched);
+    assert!(inf.start(&request(&acts), T0));
+    until(|| fake.requests().len() == 1, "the hanging cancel-all").await;
+    assert_eq!(inf.abort_due(T0, l.open_request()), 0);
+    l.abort(T0, AbortWhy::Shutdown);
+    assert_eq!(l.open_request(), None);
+    assert_eq!(inf.abort_due(T0, l.open_request()), 1);
+    assert_eq!(inf.open(), 0);
+
+    // A new request of the loop aborts a task still live (the loop opens
+    // one only when it closed the last), so two never run at once.
+    let mut l = kill_loop();
+    let acts = l.start(T0, "h", StopOutcome::Latched);
+    assert!(inf.start(&request(&acts), T0));
+    assert!(inf.start(&Action::Count { req_id: 99 }, T0));
+    assert_eq!((inf.open(), inf.aborted()), (1, 2));
+    // Only requests start a task.
+    assert!(!inf.start(&Action::Notice(Notice::Start { round_ms: 1000 }), T0));
+    assert_eq!(inf.open(), 1);
+}
+
+#[tokio::test]
+async fn a_count_task_keeps_the_loops_deadline_from_its_emission() {
+    // The loop emits a count at T0 (its deadline T0 + 13,000) and the task
+    // first runs 5 ms later. Its first page's deadline is the emission's
+    // too (review 1 M1): a page at the loop's deadline exactly is past it
+    // for the task as for the loop, so no second page goes; 1 ms before it
+    // the count reads both pages.
+    for (answer_at, past) in [(T0 + EXTRA, true), (T0 + EXTRA - 1, false)] {
+        let fake = FakeHttp::start(Answer::Close);
+        fake.route(
+            ORDERS,
+            [orders(vec![order("a", "New")], "c2"), orders(vec![], "")],
+        );
+        let (client, clock) = shared(&fake);
+        let c = clock.clone();
+        fake.on_request(move |_| c.set(answer_at));
+        let mut inf = Inflight::new(client, clock.clone(), RT);
+        let mut l = kill_loop();
+        let acts = l.start(T0, "h", StopOutcome::Latched);
+        let cancel = Arrived::Cancel {
+            req_id: cancel_id(&acts),
+            answer: CancelAnswer::Failed("HTTP 503: busy".into()),
+        };
+        let acts = l.arrived(T0, cancel);
+        let count = count_id(&acts);
+        assert_eq!(l.open_request(), Some((count, T0 + EXTRA)));
+        clock.set(T0 + 5);
+        assert!(inf.start(&request(&acts), T0));
+        let mut told = Vec::new();
+        until(
+            || {
+                told.extend(inf.take());
+                told.iter().any(|a| matches!(a, Arrived::Counted { .. }))
+            },
+            "the count's result",
+        )
+        .await;
+        if past {
+            assert_eq!(
+                told,
+                [Arrived::Counted {
+                    req_id: count,
+                    result: Err(PAST_DEADLINE.to_string()),
+                }],
+                "{answer_at}"
+            );
+            assert_eq!(fake.requests().len(), 1, "{answer_at}");
+        } else {
+            assert_eq!(told.len(), 3, "{answer_at}: {told:?}");
+            assert_eq!(
+                told[2],
+                Arrived::Counted {
+                    req_id: count,
+                    result: Ok(1),
+                }
+            );
+            assert_eq!(fake.requests().len(), 2, "{answer_at}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_dropped_inflight_aborts_its_tasks() {
+    // A count waits at the request guard (60 requests in 10 s of the
+    // manual clock). While its Inflight lives, the count goes once the
+    // clock leaves the guard's window; after its Inflight is dropped it
+    // never goes (review 1 S2: no request of the loop outlives it).
+    let fake = FakeHttp::start(Answer::Close);
+    fake.route("/ip", [Answer::Reply(200, "192.0.2.1".into())]);
+    fake.route(ORDERS, [orders(vec![], "")]);
+    let (client, clock) = shared(&fake);
+    let echo = format!("{}/ip", fake.url());
+    let counts = |fake: &FakeHttp| {
+        fake.requests()
+            .iter()
+            .filter(|r| r.path() == ORDERS)
+            .count()
+    };
+    let wait = std::time::Duration::from_millis(50);
+    for at in [T0, T0 + 10 * GUARD_WINDOW_MS] {
+        clock.set(at);
+        let fill: Vec<_> = (0..GUARD_MAX)
+            .map(|_| {
+                let (client, echo) = (client.clone(), echo.clone());
+                tokio::spawn(async move { client.echo(&echo).await })
+            })
+            .collect();
+        for f in fill {
+            f.await.unwrap().unwrap();
+        }
+        let mut inf = Inflight::new(client.clone(), clock.clone(), RT);
+        assert!(inf.start(&Action::Count { req_id: 1 }, at));
+        tokio::time::sleep(wait).await;
+        let before = counts(&fake);
+        assert_eq!(before, usize::from(at != T0), "the guard holds the count");
+        if at == T0 {
+            clock.set(at + 2 * GUARD_WINDOW_MS);
+            until(|| counts(&fake) == 1, "the count after the guard's window").await;
+            assert_eq!(inf.open(), 1);
+        } else {
+            drop(inf);
+            clock.set(at + 2 * GUARD_WINDOW_MS);
+            // The guard looks again every 100 ms of real time.
+            tokio::time::sleep(10 * wait).await;
+            assert_eq!(counts(&fake), before, "a dropped Inflight's count went");
+        }
+    }
+}
+
+/// The notice kinds in order.
+fn kinds(rig: &KillRig) -> Vec<&'static str> {
+    rig.notices()
+        .iter()
+        .map(|(_, n)| match n {
+            Notice::Start { .. } => "start",
+            Notice::Progress { .. } => "progress",
+            Notice::Final { .. } => "final",
+            Notice::Abort { .. } => "abort",
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn one_order_left_after_the_first_cancel_all_repeats_until_zero_is_confirmed() {
+    // 2 cancel-alls and 8 counts in 31 s of the loop's clock: far under
+    // the guard's 60 per 10 s.
+    let mut rig = KillRig::new(vec![
+        (CANCEL_ALL, vec![at_once(ok_n(3))]),
+        (
+            ORDERS,
+            vec![at_once(open_orders(1, "")), at_once(open_orders(0, ""))],
+        ),
+    ]);
+    let report = rig.run().await;
+    assert_eq!(
+        report,
+        Report {
+            rounds: 2,
+            cancel_all_calls: 2,
+            zero_since: Some(rig::T0 + 1000),
+            aborted: false,
+        }
+    );
+    // Round 2 at t_1 + round_ms; the watch counts every 5 s for 30 s.
+    assert_eq!(rig.cancel_all_at(), [rig::T0, rig::T0 + 1000]);
+    let counts: Vec<u64> = rig
+        .requests()
+        .into_iter()
+        .filter(|(_, p)| p == ORDERS)
+        .map(|(t, _)| t - rig::T0)
+        .collect();
+    assert_eq!(
+        counts,
+        [0, 1000, 6000, 11_000, 16_000, 21_000, 26_000, 31_000]
+    );
+    assert_eq!(kinds(&rig), ["start", "final"]);
+    let (at, last) = rig.notices().pop().unwrap();
+    assert_eq!(at, rig::T0 + 31_000);
+    assert!(matches!(
+        last,
+        Notice::Final {
+            round: 2,
+            cancel_all_calls: 2,
+            ..
+        }
+    ));
+    rig.assert_at_most_2_cancel_alls_per_second();
+    assert_eq!((rig.inflight.open(), rig.inflight.aborted()), (0, 0));
+    assert_eq!(rig.lp.ignored(), 0);
+}
+
+#[tokio::test]
+async fn a_5xx_cancel_all_or_count_repeats_until_zero_is_confirmed() {
+    // A 503 cancel-all (sent, so a count follows), a 503 count (an error,
+    // never zero), two orders left, then zero: 3 cancel-alls and 9 counts.
+    let mut rig = KillRig::new(vec![
+        (
+            CANCEL_ALL,
+            vec![at_once(http(503)), at_once(ok_n(2)), at_once(ok_n(2))],
+        ),
+        (
+            ORDERS,
+            vec![
+                at_once(http(503)),
+                at_once(open_orders(2, "")),
+                at_once(open_orders(0, "")),
+            ],
+        ),
+    ]);
+    let report = rig.run().await;
+    assert_eq!(
+        report,
+        Report {
+            rounds: 3,
+            cancel_all_calls: 3,
+            zero_since: Some(rig::T0 + 2000),
+            aborted: false,
+        }
+    );
+    assert_eq!(
+        rig.cancel_all_at(),
+        [rig::T0, rig::T0 + 1000, rig::T0 + 2000]
+    );
+    assert_eq!(
+        rig.paths()[..6],
+        [CANCEL_ALL, ORDERS, CANCEL_ALL, ORDERS, CANCEL_ALL, ORDERS]
+    );
+    // The first cancel-all failed (counted as sent); its count's one page
+    // answered 503: a count error.
+    let first: Vec<&Arrived> = rig.arrived.iter().take(3).map(|(_, a)| a).collect();
+    assert!(
+        matches!(first[0], Arrived::Cancel { answer: CancelAnswer::Failed(why), .. } if why.contains("HTTP 503")),
+        "{first:?}"
+    );
+    assert!(
+        matches!(first[1..], [Arrived::Page { .. }, Arrived::Counted { result: Err(why), .. }] if why.contains("HTTP 503")),
+        "{first:?}"
+    );
+    assert_eq!(kinds(&rig), ["start", "final"]);
+    assert_eq!(rig.notices().last().unwrap().0, rig::T0 + 32_000);
+    rig.assert_at_most_2_cancel_alls_per_second();
+
+    // A venue that answers every request 900 ms late (the clock moves at
+    // each request): the rounds still keep at most 2 per second.
+    let late = |a| rig::slow(a, 900);
+    let mut rig = KillRig::new(vec![
+        (CANCEL_ALL, vec![late(http(503)), late(ok_n(1))]),
+        (
+            ORDERS,
+            vec![
+                late(open_orders(1, "")),
+                late(http(503)),
+                late(open_orders(0, "")),
+            ],
+        ),
+    ]);
+    let report = rig.run().await;
+    assert!(!report.aborted);
+    assert_eq!(report.rounds, 3);
+    assert_eq!(kinds(&rig), ["start", "final"]);
+    rig.assert_at_most_2_cancel_alls_per_second();
+    assert_eq!(rig.lp.ignored(), 0);
+}
+
+#[tokio::test]
+async fn a_late_count_page_ends_the_count_task() {
+    // The second page answers 14,000 ms after the first (the clock moves at
+    // its request), past the deadline the first page set (+13,000): the
+    // task itself sends no third page and the count is a count error. No
+    // abort is needed: the rig lets the task run to its end.
+    let mut rig = KillRig::new(vec![
+        (CANCEL_ALL, vec![at_once(ok_n(1))]),
+        (
+            ORDERS,
+            vec![
+                at_once(open_orders(1, "c2")),
+                rig::slow(open_orders(1, "c3"), 14_000),
+                at_once(open_orders(0, "")),
+            ],
+        ),
+    ]);
+    rig.start();
+    rig.run_until(|r| r.cancel_all_at().len() == 2).await;
+    assert_eq!(rig.paths(), [CANCEL_ALL, ORDERS, ORDERS, CANCEL_ALL]);
+    assert_eq!(rig.cancel_all_at(), [rig::T0, rig::T0 + 14_000]);
+    assert_eq!(rig.lp.remaining(), &Err(PAST_DEADLINE.to_string()));
+    assert_eq!(rig.inflight.aborted(), 0);
+    // One page told in time, then the result.
+    let told: Vec<&Arrived> = rig.arrived.iter().map(|(_, a)| a).collect();
+    assert!(
+        matches!(
+            told[1..],
+            [Arrived::Page { .. }, Arrived::Counted { result: Err(_), .. }, ..]
+        ),
+        "{told:?}"
+    );
+
+    // A page answered at the deadline exactly is past it too; one 1 ms
+    // before it is in time.
+    for (late, past) in [(13_000, true), (12_999, false)] {
+        let mut rig = KillRig::new(vec![
+            (CANCEL_ALL, vec![at_once(ok_n(1))]),
+            (
+                ORDERS,
+                vec![
+                    at_once(open_orders(1, "c2")),
+                    rig::slow(open_orders(1, "c3"), late),
+                    at_once(open_orders(0, "")),
+                ],
+            ),
+        ]);
+        rig.start();
+        rig.run_until(|r| r.cancel_all_at().len() == 2).await;
+        let pages = rig.paths().iter().filter(|p| *p == ORDERS).count();
+        if past {
+            assert_eq!(pages, 2, "{late}");
+            assert_eq!(rig.lp.remaining(), &Err(PAST_DEADLINE.to_string()));
+        } else {
+            assert_eq!(pages, 3, "{late}");
+            assert_eq!(rig.lp.remaining(), &Ok(2));
+        }
+    }
+
+    // Pages that answer 1,300 ms apart, 11 of them (+14,300 ms in all):
+    // each moves the deadline, so the count is not failed (review 2 S2).
+    let mut pages: Vec<rig::Reply> = (2..=11)
+        .map(|i| rig::slow(open_orders(1, &format!("c{i}")), 1300))
+        .collect();
+    pages.push(rig::slow(open_orders(0, ""), 1300));
+    let mut rig = KillRig::new(vec![(CANCEL_ALL, vec![at_once(ok_n(1))]), (ORDERS, pages)]);
+    rig.start();
+    rig.run_until(|r| r.cancel_all_at().len() == 2).await;
+    assert_eq!(rig.lp.remaining(), &Ok(10));
+    assert_eq!(rig.cancel_all_at(), [rig::T0, rig::T0 + 11 * 1300]);
+    assert_eq!(rig.paths().len(), 13);
+}
+
+#[tokio::test]
+async fn a_count_past_its_deadline_sends_no_further_page() {
+    // The second page hangs while the rig moves the clock: Inflight aborts
+    // the task at the deadline the first page set, the loop fails the
+    // count, and the next request is the next round's cancel-all.
+    let mut rig = KillRig::new(vec![
+        (CANCEL_ALL, vec![at_once(ok_n(1))]),
+        (
+            ORDERS,
+            vec![
+                at_once(open_orders(1, "c2")),
+                at_once(Answer::Hang),
+                at_once(open_orders(0, "")),
+            ],
+        ),
+    ]);
+    rig.start();
+    rig.run_until(|r| r.cancel_all_at().len() == 2).await;
+    assert_eq!(rig.paths(), [CANCEL_ALL, ORDERS, ORDERS, CANCEL_ALL]);
+    assert_eq!(rig.cancel_all_at(), [rig::T0, rig::T0 + rig::EXTRA]);
+    assert_eq!(rig.inflight.aborted(), 1);
+    assert_eq!(rig.lp.remaining(), &Err(PAST_DEADLINE.to_string()));
+    // The aborted task is gone: after the client's own timeout (2 s of
+    // real time) it sends nothing, so nothing stray comes.
+    tokio::time::sleep(std::time::Duration::from_millis(rig::RT + 500)).await;
+    assert_eq!(rig.inflight.take(), []);
+    assert_eq!(rig.inflight.stray(), 0);
+    assert_eq!(rig.paths().len(), 4);
+}
+
+#[tokio::test]
+async fn more_than_1000_open_orders_is_a_count_error() {
+    // 20 full pages, each with a next cursor: a 21st page would be needed.
+    // Two rounds of 1 cancel-all + 20 pages = 42 requests in about 1 s of
+    // the loop's clock (under the guard's 60 per 10 s), then the test
+    // stops before round 3.
+    // The fake repeats only its last answer, so both rounds are scripted.
+    let pages: Vec<rig::Reply> = (0..40)
+        .map(|i| at_once(open_orders(50, &format!("c{}", i % 20 + 2))))
+        .collect();
+    let mut rig = KillRig::new(vec![(CANCEL_ALL, vec![at_once(ok_n(500))]), (ORDERS, pages)]);
+    rig.start();
+    rig.run_until(|r| {
+        r.cancel_all_at().len() == 2 && r.lp.phase() == Phase::Repeat && r.inflight.open() == 0
+    })
+    .await;
+    let paths = rig.paths();
+    assert_eq!(paths.len(), 42);
+    for round in paths.chunks(21) {
+        assert_eq!(round[0], CANCEL_ALL);
+        assert!(round[1..].iter().all(|p| p == ORDERS));
+    }
+    assert_eq!(
+        rig.lp.remaining(),
+        &Err("more than 1000 open orders".to_string())
+    );
+    assert_eq!(rig.lp.round(), 2);
+    assert_eq!(rig.cancel_all_at(), [rig::T0, rig::T0 + 1000]);
+}
+
+#[tokio::test]
+async fn a_cancel_all_not_sent_is_told_from_the_state_before_the_call() {
+    // A latched key: nothing reaches the fake, no count follows, and the
+    // progress notice says the watcher must restart (C-WATCH part 11,
+    // U19b2a's known limit on the error of cancel_all).
+    let mut rig = KillRig::new(vec![(CANCEL_ALL, vec![at_once(ok_n(1))])]);
+    rig.client.stop_key("made-up rule");
+    rig.start();
+    rig.run_until(|r| r.lp.round() == 3).await;
+    assert!(rig.paths().is_empty());
+    let told: Vec<&Arrived> = rig.arrived.iter().map(|(_, a)| a).collect();
+    assert!(
+        told.iter().all(|a| matches!(
+            a,
+            Arrived::Cancel {
+                answer: CancelAnswer::NotSent(NotSent::Latched),
+                ..
+            }
+        )),
+        "{told:?}"
+    );
+    assert_eq!(rig.lp.cancel_all_calls(), 0);
+
+    // A cancel-all that never connected left nothing: NotSent(Local), and
+    // no count follows it.
+    let cfg = ClientConfig {
+        base: format!("http://{}", http_fake::dead_addr()),
+        recv_window_ms: 5000,
+        request_timeout_ms: RT,
+    };
+    let clock = Arc::new(ManualClock::new(T0));
+    let (log, _lines) = watcher::log::collect();
+    let dead = Client::new(
+        &cfg,
+        Credentials::new("WKEY", "watcher-made-up-secret-42"),
+        clock.clone(),
+        Arc::new(Metrics::new("h1", "w1")),
+        log,
+    )
+    .unwrap();
+    let a = cancel_answer(&dead, &*clock).await;
+    assert!(
+        matches!(a, CancelAnswer::NotSent(NotSent::Local(_))),
+        "{a:?}"
+    );
+
+    // A 403 the cancel-all itself got was sent (Failed, and a count
+    // follows); in the pause after it the next cancel-all is not sent.
+    let mut rig = KillRig::new(vec![
+        (CANCEL_ALL, vec![at_once(http(403))]),
+        (ORDERS, vec![at_once(open_orders(0, ""))]),
+    ]);
+    rig.start();
+    rig.run_until(|r| r.lp.round() == 2).await;
+    // The count after it is not sent either (the pause), so it fails.
+    assert_eq!(rig.paths(), [CANCEL_ALL]);
+    let told: Vec<&Arrived> = rig.arrived.iter().map(|(_, a)| a).collect();
+    assert!(
+        matches!(
+            told[..],
+            [
+                Arrived::Cancel {
+                    answer: CancelAnswer::Failed(_),
+                    ..
+                },
+                Arrived::Page { .. },
+                Arrived::Counted { result: Err(_), .. },
+                Arrived::Cancel {
+                    answer: CancelAnswer::NotSent(NotSent::Paused),
+                    ..
+                },
+            ]
+        ),
+        "{told:?}"
+    );
+
+    // When the pause ends the cancel-all is sent again (review 1 S1); the
+    // fake answers 403 again, so it is Failed (sent).
+    let until_ms = rig.client.paused_until().unwrap();
+    rig.clock.set(until_ms - 1);
+    assert_eq!(
+        cancel_answer(&rig.client, &*rig.clock).await,
+        CancelAnswer::NotSent(NotSent::Paused)
+    );
+    assert_eq!(rig.paths(), [CANCEL_ALL]);
+    rig.clock.set(until_ms);
+    let a = cancel_answer(&rig.client, &*rig.clock).await;
+    assert!(
+        matches!(&a, CancelAnswer::Failed(why) if why.contains("403")),
+        "{a:?}"
+    );
+    assert_eq!(rig.paths(), [CANCEL_ALL, CANCEL_ALL]);
 }

@@ -11,12 +11,16 @@
 //! Every text says `워처 킬`, the OMS's say `킬 루프`, so a person can tell
 //! the two loops apart in one chat.
 
+use std::sync::Arc;
+
 use serde_json::Value;
+use tokio::sync::mpsc;
 
 use crate::clock::Clock;
 use crate::config::Kill;
 use crate::decimal::Dec;
 use crate::rest::{CancelAll, Client, RestError};
+use crate::w1;
 
 /// The position list of the block (gateway facts Q12): with `settleCoin`
 /// and no `symbol` only rows of size > 0 come back (Q12.1).
@@ -439,6 +443,88 @@ fn class(e: &RestError) -> String {
     e.class().to_string()
 }
 
+// ---- The count reader (U19b2c) ----
+
+/// The open orders the loop counts (C3): W1's list, linear USDT.
+pub const ORDERS: &str = w1::PATH;
+
+/// Counts the open linear USDT orders for the loop (C3, C5): every page of
+/// [`ORDERS`] by W1's paging rule, at most [`w1::MAX_PAGES`] (more is the
+/// count error "more than 1000 open orders"); a row is open when its
+/// `orderStatus` is one of [`w1::OPEN`], whoever placed it (a foreign or
+/// empty `orderLinkId` counts: zero open orders is the goal). A row
+/// without `orderStatus`, or a page that does not read, is a count error,
+/// never a number.
+///
+/// The count keeps its own per-page deadline on `clock`, as the loop does:
+/// `start_ms` (the loop's emission, so the first page's deadline is the
+/// loop's and not the task's first run's; review 1 M1), then each page's
+/// answer, + `request_timeout_ms` + [`DEADLINE_EXTRA_MS`]. After a page that answered at or after it, the
+/// count sends no further page and ends with [`PAST_DEADLINE`]: the task
+/// asks for the next page at once, with no await the runtime could abort
+/// it at (review 3 S2). `on_page` is called for each page request that
+/// returned before its deadline (also one the client refused to send: the
+/// result that follows is then the error).
+pub async fn count_open(
+    client: &Client,
+    clock: &dyn Clock,
+    start_ms: u64,
+    request_timeout_ms: u64,
+    on_page: &mut (dyn FnMut() + Send),
+) -> Result<usize, String> {
+    let extra = request_timeout_ms.saturating_add(DEADLINE_EXTRA_MS);
+    let mut deadline = start_ms.saturating_add(extra);
+    let unreadable = |why: &str| client.unreadable(ORDERS, why).to_string();
+    let mut open = 0;
+    let mut cursor = String::new();
+    for _ in 0..w1::MAX_PAGES {
+        let mut params = vec![
+            ("category", "linear".to_string()),
+            ("settleCoin", "USDT".to_string()),
+            ("limit", w1::PAGE_LIMIT.to_string()),
+        ];
+        if !cursor.is_empty() {
+            params.push(("cursor", cursor.clone()));
+        }
+        let answer = client.get(ORDERS, &params).await;
+        let now = clock.now_ms();
+        if now >= deadline {
+            return Err(PAST_DEADLINE.to_string());
+        }
+        deadline = now.saturating_add(extra);
+        on_page();
+        let v = answer.map_err(|e| e.to_string())?;
+        let Some(list) = v.get("list").and_then(Value::as_array) else {
+            return Err(unreadable("result.list is not a list"));
+        };
+        let Some(next) = v.get("nextPageCursor").and_then(Value::as_str) else {
+            return Err(unreadable("nextPageCursor is not a string"));
+        };
+        for row in list {
+            let Some(status) = row.get("orderStatus").and_then(Value::as_str) else {
+                return Err(unreadable("a row without orderStatus"));
+            };
+            if w1::OPEN.contains(&status) {
+                open += 1;
+            }
+        }
+        if next.is_empty() {
+            if list.len() >= w1::PAGE_LIMIT {
+                return Err(unreadable("a full page without nextPageCursor"));
+            }
+            return Ok(open);
+        }
+        if next == cursor {
+            return Err(unreadable("nextPageCursor is the cursor just sent"));
+        }
+        cursor = next.to_string();
+    }
+    Err(format!(
+        "more than {} open orders",
+        w1::MAX_PAGES * w1::PAGE_LIMIT
+    ))
+}
+
 // ---- The loop (U19b2b) ----
 
 /// What one cancel-all of the loop came to.
@@ -632,6 +718,21 @@ impl KillLoop {
     /// The start notice's header (the kill sequence's, U19b3b).
     pub fn header(&self) -> &str {
         &self.header
+    }
+
+    /// The open request and its deadline in force, `(req_id, deadline)`:
+    /// what [`Inflight::abort_due`] aborts by (U19b2c).
+    pub fn open_request(&self) -> Option<(u64, u64)> {
+        self.open.map(|o| (o.id, o.deadline))
+    }
+
+    /// What a request task sent ([`Inflight::take`]), as the input it is.
+    pub fn arrived(&mut self, now: u64, a: Arrived) -> Vec<Action> {
+        match a {
+            Arrived::Cancel { req_id, answer } => self.cancel_done(now, req_id, answer),
+            Arrived::Page { req_id } => self.count_page(now, req_id),
+            Arrived::Counted { req_id, result } => self.count_done(now, req_id, result),
+        }
     }
 
     /// The instant the loop next wants a `poll`; `None` before the start
@@ -956,5 +1057,215 @@ impl KillLoop {
                 aborted: true,
             }),
         ]
+    }
+}
+
+// ---- Inflight (U19b2c) ----
+
+/// What a request task of the loop sent ([`Inflight::take`]); the loop
+/// takes it with [`KillLoop::arrived`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Arrived {
+    /// The answer of a cancel-all.
+    Cancel { req_id: u64, answer: CancelAnswer },
+    /// One page of a count answered before the count's own deadline.
+    Page { req_id: u64 },
+    /// The result of a count.
+    Counted {
+        req_id: u64,
+        result: Result<usize, String>,
+    },
+}
+
+impl Arrived {
+    fn req_id(&self) -> u64 {
+        match self {
+            Arrived::Cancel { req_id, .. }
+            | Arrived::Page { req_id }
+            | Arrived::Counted { req_id, .. } => *req_id,
+        }
+    }
+
+    /// The task's last message: it has ended.
+    fn last(&self) -> bool {
+        !matches!(self, Arrived::Page { .. })
+    }
+}
+
+/// What one cancel-all came to. Whether it left the host is told from the
+/// client's state before the call: `cancel_all` gives the same error for a
+/// request it did not send after a latch or in a 403 pause as for one that
+/// got 10010 or 403 (C-WATCH part 11, U19b2a). Latched and paused send
+/// nothing; a request that never connected is `Local`; every other error
+/// was sent and is `Failed` (the loop counts after it).
+pub async fn cancel_answer(client: &Client, clock: &dyn Clock) -> CancelAnswer {
+    if client.auth_stop().is_some() {
+        return CancelAnswer::NotSent(NotSent::Latched);
+    }
+    if client.paused_until().is_some_and(|u| clock.now_ms() < u) {
+        return CancelAnswer::NotSent(NotSent::Paused);
+    }
+    match client.cancel_all().await {
+        Ok(c) => CancelAnswer::Done(c),
+        Err(RestError::NotSent(why)) => CancelAnswer::NotSent(NotSent::Local(why)),
+        Err(e) => CancelAnswer::Failed(e.to_string()),
+    }
+}
+
+struct Task {
+    req_id: u64,
+    handle: tokio::task::AbortHandle,
+}
+
+/// The request tasks of the loop (C-WATCH part 11, review 2 S2): each
+/// `CancelAll` and `Count` the loop emits runs as one tokio task with the
+/// real client; what it sends comes back through [`Inflight::take`]. The
+/// deadline is the loop's ([`KillLoop::open_request`]): at every step,
+/// before the loop's next input, [`Inflight::abort_due`] aborts the task
+/// whose deadline passed and every task the loop no longer has open, and
+/// drops whatever they sent. So an abandoned request sends nothing more,
+/// never two requests of the loop run at once, and the request guard's 60
+/// per 10 s is taken only by live requests. Used by the kill rig of the
+/// tests and by the runtime (U19b3c).
+pub struct Inflight {
+    client: Arc<Client>,
+    clock: Arc<dyn Clock>,
+    request_timeout_ms: u64,
+    tx: mpsc::UnboundedSender<Arrived>,
+    rx: mpsc::UnboundedReceiver<Arrived>,
+    tasks: Vec<Task>,
+    aborted: u64,
+    stray: u64,
+}
+
+impl Inflight {
+    /// `clock` is the loop's; `request_timeout_ms` gives the count task
+    /// its own per-page deadline ([`count_open`]).
+    pub fn new(client: Arc<Client>, clock: Arc<dyn Clock>, request_timeout_ms: u64) -> Inflight {
+        let (tx, rx) = mpsc::unbounded_channel();
+        Inflight {
+            client,
+            clock,
+            request_timeout_ms,
+            tx,
+            rx,
+            tasks: Vec::new(),
+            aborted: 0,
+            stray: 0,
+        }
+    }
+
+    /// Starts the task of a `CancelAll` or `Count` (any other action is no
+    /// request: `false`); `emitted_at` is the clock the loop emitted it at
+    /// (the `now` of its `poll` or `arrived`), where a count's own deadline
+    /// starts. The loop opens a request only when it closed the last one,
+    /// so a task still live was given up: it is aborted first.
+    pub fn start(&mut self, a: &Action, emitted_at: u64) -> bool {
+        let (req_id, count) = match a {
+            Action::CancelAll { req_id } => (*req_id, false),
+            Action::Count { req_id } => (*req_id, true),
+            _ => return false,
+        };
+        self.abort_where(|_| true);
+        let (client, clock, tx) = (self.client.clone(), self.clock.clone(), self.tx.clone());
+        let rt = self.request_timeout_ms;
+        let handle = if count {
+            tokio::spawn(async move {
+                let pages = tx.clone();
+                let mut on_page = move || {
+                    let _ = pages.send(Arrived::Page { req_id });
+                };
+                let result = count_open(&client, &*clock, emitted_at, rt, &mut on_page).await;
+                let _ = tx.send(Arrived::Counted { req_id, result });
+            })
+        } else {
+            tokio::spawn(async move {
+                let answer = cancel_answer(&client, &*clock).await;
+                let _ = tx.send(Arrived::Cancel { req_id, answer });
+            })
+        };
+        self.tasks.push(Task {
+            req_id,
+            handle: handle.abort_handle(),
+        });
+        true
+    }
+
+    /// Aborts the open request's task at or after its deadline and every
+    /// task that is not the open request (`open`: the loop's
+    /// [`KillLoop::open_request`]); call it at every step before the loop's
+    /// next input. Returns how many it aborted.
+    pub fn abort_due(&mut self, now: u64, open: Option<(u64, u64)>) -> usize {
+        self.abort_where(|id| match open {
+            Some((open_id, deadline)) if open_id == id => now >= deadline,
+            _ => true,
+        })
+    }
+
+    /// Aborts every task (the loop ended or was aborted).
+    pub fn abort_all(&mut self) {
+        self.abort_where(|_| true);
+    }
+
+    fn abort_where(&mut self, abort: impl Fn(u64) -> bool) -> usize {
+        let before = self.tasks.len();
+        self.tasks.retain(|t| {
+            if abort(t.req_id) {
+                t.handle.abort();
+                false
+            } else {
+                true
+            }
+        });
+        let n = before - self.tasks.len();
+        self.aborted += n as u64;
+        n
+    }
+
+    /// What the live tasks sent since the last call, in order. A task's
+    /// answer or count result ends it. What an aborted task sent is dropped
+    /// ([`Inflight::stray`]).
+    pub fn take(&mut self) -> Vec<Arrived> {
+        let mut out = Vec::new();
+        while let Ok(a) = self.rx.try_recv() {
+            let id = a.req_id();
+            if !self.tasks.iter().any(|t| t.req_id == id) {
+                self.stray += 1;
+                continue;
+            }
+            if a.last() {
+                self.tasks.retain(|t| t.req_id != id);
+            }
+            out.push(a);
+        }
+        out
+    }
+
+    /// Tasks started and neither ended nor aborted.
+    pub fn open(&self) -> usize {
+        self.tasks.len()
+    }
+
+    /// Messages sent and not yet taken.
+    pub fn queued(&self) -> usize {
+        self.rx.len()
+    }
+
+    /// Tasks aborted.
+    pub fn aborted(&self) -> u64 {
+        self.aborted
+    }
+
+    /// Messages of aborted tasks, dropped (the runtime writes one debug line
+    /// each, U19b3c).
+    pub fn stray(&self) -> u64 {
+        self.stray
+    }
+}
+
+impl Drop for Inflight {
+    /// No request of the loop outlives it.
+    fn drop(&mut self) {
+        self.abort_all();
     }
 }

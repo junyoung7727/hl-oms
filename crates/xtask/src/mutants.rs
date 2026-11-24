@@ -2534,6 +2534,33 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "kill", "an_answer_handled_at_its_deadline_is_past_it"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M279-watcher-foreign-order-not-counted",
+        what: "the watcher's kill count leaves out an open order whose orderLinkId is not the OMS's (deliberate defect 25 of U19b2c)",
+        file: "crates/watcher/src/kill.rs",
+        find: "            if w1::OPEN.contains(&status) {\n",
+        replace: "            if w1::OPEN.contains(&status)\n                && row\n                    .get(\"orderLinkId\")\n                    .and_then(Value::as_str)\n                    .and_then(crate::wire_id::decode)\n                    .is_some()\n            {\n",
+        test: &["-p", "watcher", "--test", "kill", "foreign_orders_count"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M280-watcher-inflight-no-abort-at-deadline",
+        what: "kill::Inflight does not abort the open request's task past its deadline (deliberate defect 26 of U19b2c)",
+        file: "crates/watcher/src/kill.rs",
+        find: "            Some((open_id, deadline)) if open_id == id => now >= deadline,\n",
+        replace: "            Some((open_id, deadline)) if open_id == id => now >= deadline && false,\n",
+        test: &["-p", "watcher", "--test", "kill", "a_count_past_its_deadline_sends_no_further_page"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M281-watcher-count-page-after-a-late-page",
+        what: "the watcher's count task asks for the next page after a page that answered at or after its deadline (deliberate defect 27 of U19b2c)",
+        file: "crates/watcher/src/kill.rs",
+        find: "        if now >= deadline {\n            return Err(PAST_DEADLINE.to_string());\n        }\n",
+        replace: "        if now >= u64::MAX {\n            return Err(PAST_DEADLINE.to_string());\n        }\n",
+        test: &["-p", "watcher", "--test", "kill", "a_late_count_page_ends_the_count_task"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
