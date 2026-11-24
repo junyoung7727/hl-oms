@@ -17,11 +17,15 @@ use std::sync::Arc;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
+use crate::alert::kst;
 use crate::clock::Clock;
-use crate::config::Kill;
+use crate::config;
 use crate::decimal::Dec;
+use crate::oms;
 use crate::rest::{CancelAll, Client, RestError};
+use crate::stop;
 use crate::w1;
+use crate::w5::Fire;
 
 /// The position list of the block (gateway facts Q12): with `settleCoin`
 /// and no `symbol` only rows of size > 0 come back (Q12.1).
@@ -116,6 +120,11 @@ pub enum Notice {
         remaining: Option<usize>,
         cancel_all_calls: u64,
     },
+    /// A halt retried during the loop latched the OMS (U19b3b).
+    LateHalt { reply: String },
+    /// The kill was aborted before its loop (U19b3b): the header as far
+    /// as the steps went; the positions are not read.
+    AbortBefore { why: AbortWhy, header: String },
 }
 
 /// The fixed progress line of a cancel-all that the key latch held back.
@@ -181,8 +190,8 @@ fn last_error_text(e: &LastError) -> String {
 
 /// The body of a kill notice. `header` is the kill sequence's header
 /// (U19b3b) and goes into the start notice only. The runtime adds the
-/// position block ([`position_block`]) to every notice but the abort
-/// notice, whose text already ends with [`NOT_READ_ON_ABORT`].
+/// position block ([`position_block`]) to every notice but the two abort
+/// notices, whose texts already end with [`NOT_READ_ON_ABORT`].
 pub fn notice_text(n: &Notice, header: &str) -> String {
     match n {
         Notice::Start { round_ms } => format!(
@@ -223,10 +232,7 @@ pub fn notice_text(n: &Notice, header: &str) -> String {
             remaining,
             cancel_all_calls,
         } => {
-            let why = match why {
-                AbortWhy::Shutdown => "워처 종료".to_string(),
-                AbortWhy::StartRefused(r) => format!("워처 시작 거부: {}", cut(r, TEXT_MAX)),
-            };
+            let why = abort_why(why);
             let left = match remaining {
                 Some(n) => format!("{n}건"),
                 None => "모름".to_string(),
@@ -235,6 +241,23 @@ pub fn notice_text(n: &Notice, header: &str) -> String {
                 "{why}로 워처 킬 중단({round}회차, 남은 미체결 {left}, 일괄 취소 {cancel_all_calls}회). OMS의 래치·마커는 그대로.\n{NOT_READ_ON_ABORT}"
             )
         }
+        Notice::LateHalt { reply } => format!(
+            "늦은 정지: OMS가 다시 답해 watcher_kill로 래치함({})",
+            cut(reply, TEXT_MAX)
+        ),
+        // Before the loop no step halted or stopped the OMS: a halt that
+        // latched and a stop that ended start the loop at once.
+        Notice::AbortBefore { why, header } => format!(
+            "{header}.\n{}로 워처 킬 중단(일괄 취소 전). OMS가 아직 주문을 낼 수 있음\n{NOT_READ_ON_ABORT}",
+            abort_why(why)
+        ),
+    }
+}
+
+fn abort_why(why: &AbortWhy) -> String {
+    match why {
+        AbortWhy::Shutdown => "워처 종료".to_string(),
+        AbortWhy::StartRefused(r) => format!("워처 시작 거부: {}", cut(r, TEXT_MAX)),
     }
 }
 
@@ -608,7 +631,7 @@ struct Open {
 /// `next_wake` names the instant it next wants a `poll`.
 #[derive(Debug, Clone)]
 pub struct KillLoop {
-    t: Kill,
+    t: config::Kill,
     /// `request_timeout_ms` + [`DEADLINE_EXTRA_MS`].
     extra_ms: u64,
     phase: Phase,
@@ -640,7 +663,7 @@ pub struct KillLoop {
 impl KillLoop {
     /// The config ranges are checked at config load only; the loop takes
     /// the timings as they are.
-    pub fn new(timing: Kill, request_timeout_ms: u64) -> KillLoop {
+    pub fn new(timing: config::Kill, request_timeout_ms: u64) -> KillLoop {
         KillLoop {
             t: timing,
             extra_ms: request_timeout_ms.saturating_add(DEADLINE_EXTRA_MS),
@@ -1426,4 +1449,496 @@ pub fn write_marker(path: &Path, text: &str) -> MarkerOutcome {
 /// the kill sequence gives K1 a deadline and ignores a late outcome.
 pub fn spawn_marker(path: PathBuf, text: String) -> tokio::task::JoinHandle<MarkerOutcome> {
     tokio::task::spawn_blocking(move || write_marker(&path, &text))
+}
+
+// ---- The kill sequence (U19b3b): `Kill` ----
+
+/// K1's deadline from the write's emission (판단(모델 아님)).
+pub const MARKER_WAIT_MS: u64 = 2000;
+/// K2's deadline: emission + 2 × `request_timeout_ms` + this (판단(모델 아님)).
+pub const HALT_EXTRA_MS: u64 = 1000;
+/// While the halt is owed during the loop, `watcher_kill` is sent again
+/// this long after the end of the previous attempt (판단(모델 아님)).
+pub const HALT_RETRY_MS: u64 = 5000;
+/// K2's reason when its deadline passed.
+pub const HALT_TIMED_OUT: &str = "정지 응답 없음(시간 초과)";
+
+/// What a kill is given at the fire, besides W5's `Fire`.
+#[derive(Debug, Clone)]
+pub struct Setup {
+    /// The watcher's config name.
+    pub name: String,
+    /// `[kill]`: the loop timings, the marker path, the unit, the stop wait.
+    pub kill: config::Kill,
+    pub request_timeout_ms: u64,
+    /// The runtime saw a status answer in this process that passed the
+    /// marker-path rule. When false the marker is written all the same,
+    /// but it does not count as in place.
+    pub marker_checked: bool,
+    /// The OMS gave a good answer in this process (else the header says
+    /// `이 프로세스에서 없음`).
+    pub answered: bool,
+    /// The raw clock at the fire: every instant a text names is the wall
+    /// clock's, not `clock::Steady`'s.
+    pub raw_now_ms: u64,
+}
+
+/// What the runtime must do for the kill.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Step {
+    /// K1: write the marker at `[kill] marker` ([`spawn_marker`]); answer
+    /// with [`Kill::marker_done`].
+    WriteMarker { text: String },
+    /// K2, or a halt retried during the loop: `oms::admin_kill` with
+    /// `detail`, the task aborted at [`Kill::halt_open`]'s deadline;
+    /// answer with [`Kill::halt_done`].
+    Halt { id: u64, detail: String },
+    /// K3: start `stop::Stopper` with this deadline; answer with
+    /// [`Kill::stop_done`].
+    StopUnit { deadline: u64 },
+    /// The loop's request or notice (also the kill's own notices: the
+    /// late halt and the abort before the loop). Never `Action::Ended`.
+    Loop(Action),
+    /// The kill is over. `halt_owed`: neither a latch nor a stop with a
+    /// marker in place was confirmed; the runtime gives it to
+    /// `W5::kill_ended`.
+    Ended { report: Report, halt_owed: bool },
+}
+
+/// Where the kill is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stage {
+    /// K1: the marker write is out.
+    Marker,
+    /// K2: `watcher_kill` is out.
+    Halt,
+    /// K3: `systemctl stop` runs.
+    Stop,
+    /// The cancel-all loop runs.
+    Loop,
+    Ended,
+}
+
+/// The outcomes of the three steps, for `watcher_kill_step{step}`
+/// (`Some(true)` done, `Some(false)` failed, `None` not ended or not run).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Steps {
+    pub marker: Option<bool>,
+    pub halt: Option<bool>,
+    pub stop: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MarkerState {
+    Running,
+    Done(MarkerOutcome),
+    TimedOut,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum HaltState {
+    Running,
+    Latched(String),
+    Failed(String),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Attempt {
+    id: u64,
+    deadline: u64,
+}
+
+/// The watcher's kill sequence (C-WATCH part 12), sans-IO: K1 marker →
+/// K2 `watcher_kill` → K3 `systemctl stop` (only when K2 did not halt) →
+/// the cancel-all loop. Each step waits for the previous one's outcome or
+/// its deadline, so the first `CancelAll` comes only after K1 and K2 (and
+/// K3 when it runs) ended. Every input takes `now` on the kill's clock
+/// (`clock::Steady` in the runtime).
+pub struct Kill {
+    s: Setup,
+    silent_ms: u64,
+    stage: Stage,
+    /// K1's or K3's deadline.
+    deadline: u64,
+    marker: MarkerState,
+    halt: HaltState,
+    stop: Option<stop::Outcome>,
+    attempt: Option<Attempt>,
+    next_id: u64,
+    /// The instant the previous halt attempt ended.
+    halt_ended: u64,
+    halted: bool,
+    halt_owed: bool,
+    lp: KillLoop,
+    ignored: u64,
+}
+
+impl Kill {
+    /// The fire of W5: K1 starts at `now`.
+    pub fn new(fire: Fire, s: Setup, now: u64) -> (Kill, Vec<Step>) {
+        let text = marker_text(&s.name, s.raw_now_ms, fire.silent_ms, s.answered);
+        let lp = KillLoop::new(s.kill.clone(), s.request_timeout_ms);
+        let k = Kill {
+            silent_ms: fire.silent_ms,
+            stage: Stage::Marker,
+            deadline: now.saturating_add(MARKER_WAIT_MS),
+            marker: MarkerState::Running,
+            halt: HaltState::Running,
+            stop: None,
+            attempt: None,
+            next_id: 1,
+            halt_ended: now,
+            halted: false,
+            halt_owed: false,
+            lp,
+            ignored: 0,
+            s,
+        };
+        (k, vec![Step::WriteMarker { text }])
+    }
+
+    pub fn stage(&self) -> Stage {
+        self.stage
+    }
+
+    /// The loop inside (round, remaining, cancel-all calls, its header).
+    pub fn kill_loop(&self) -> &KillLoop {
+        &self.lp
+    }
+
+    /// The halt is owed (decided when the loop starts; false before):
+    /// neither a latch nor a stop with a marker in place was confirmed.
+    pub fn halt_owed(&self) -> bool {
+        self.halt_owed
+    }
+
+    /// Outcomes and late answers ignored (the runtime logs them).
+    pub fn ignored(&self) -> u64 {
+        self.ignored
+    }
+
+    /// The open halt attempt `(id, deadline)`: the runtime aborts its task
+    /// at the deadline, and every halt task that is not this one.
+    pub fn halt_open(&self) -> Option<(u64, u64)> {
+        self.attempt.map(|a| (a.id, a.deadline))
+    }
+
+    /// The loop's open request ([`Inflight::abort_due`]).
+    pub fn open_request(&self) -> Option<(u64, u64)> {
+        (self.stage == Stage::Loop)
+            .then(|| self.lp.open_request())
+            .flatten()
+    }
+
+    pub fn steps(&self) -> Steps {
+        Steps {
+            marker: match &self.marker {
+                MarkerState::Running => None,
+                MarkerState::Done(MarkerOutcome::Failed(_)) | MarkerState::TimedOut => Some(false),
+                MarkerState::Done(_) => Some(true),
+            },
+            halt: match &self.halt {
+                HaltState::Running => None,
+                HaltState::Latched(_) => Some(true),
+                HaltState::Failed(_) => Some(false),
+            },
+            stop: self
+                .stop
+                .as_ref()
+                .map(|o| matches!(o, stop::Outcome::Stopped)),
+        }
+    }
+
+    /// The marker is there (written or already present) and its path was
+    /// checked against the OMS's in this process.
+    fn marker_in_place(&self) -> bool {
+        matches!(
+            self.marker,
+            MarkerState::Done(MarkerOutcome::Written | MarkerOutcome::AlreadyPresent)
+        ) && self.s.marker_checked
+    }
+
+    fn stopped(&self) -> bool {
+        self.stop == Some(stop::Outcome::Stopped)
+    }
+
+    /// The stop outcome the final notice names, from what is known now.
+    pub fn outcome(&self) -> StopOutcome {
+        if self.halted {
+            StopOutcome::Latched
+        } else if self.stopped() {
+            if self.marker_in_place() {
+                StopOutcome::StoppedMarked
+            } else if matches!(self.marker, MarkerState::Done(MarkerOutcome::Written | MarkerOutcome::AlreadyPresent)) {
+                StopOutcome::StoppedUncheckedMarker
+            } else {
+                StopOutcome::StoppedUnmarked
+            }
+        } else {
+            StopOutcome::Unconfirmed
+        }
+    }
+
+    fn owes(&self) -> bool {
+        !self.halted && !(self.stopped() && self.marker_in_place())
+    }
+
+    /// The header of the start notice, as far as the steps went (`진행 중`
+    /// for a step not ended). Free texts are cut to [`TEXT_MAX`]
+    /// characters, control characters as spaces.
+    pub fn header(&self) -> String {
+        let last = if self.s.answered {
+            kst(self.s.raw_now_ms.saturating_sub(self.silent_ms))
+        } else {
+            "이 프로세스에서 없음".to_string()
+        };
+        let unchecked = if self.s.marker_checked {
+            ""
+        } else {
+            "(OMS가 읽는 경로인지 확인 못 함)"
+        };
+        let marker = match &self.marker {
+            MarkerState::Running => "진행 중".to_string(),
+            MarkerState::Done(MarkerOutcome::Written) => format!("씀{unchecked}"),
+            MarkerState::Done(MarkerOutcome::AlreadyPresent) => format!("이미 있음{unchecked}"),
+            MarkerState::Done(MarkerOutcome::Failed(kind)) => {
+                format!("쓰지 못함({})", cut(kind, TEXT_MAX))
+            }
+            MarkerState::TimedOut => "쓰지 못함(시간 초과; 뒤늦게 써질 수 있음)".to_string(),
+        };
+        let stop = match &self.halt {
+            HaltState::Running => "진행 중".to_string(),
+            HaltState::Latched(reply) => {
+                let reply = cut(reply, TEXT_MAX);
+                format!("admin.sock watcher_kill → {reply}")
+            }
+            HaltState::Failed(why) => {
+                let why = cut(why, TEXT_MAX);
+                let k3 = match &self.stop {
+                    None => "진행 중".to_string(),
+                    Some(stop::Outcome::Stopped) => "정지됨".to_string(),
+                    Some(stop::Outcome::Failed(w)) => format!("실패({})", cut(w, TEXT_MAX)),
+                    Some(stop::Outcome::Unconfirmed) => format!(
+                        "정지 확인 못 함({} ms 안에 systemctl이 끝나지 않음)",
+                        self.s.kill.stop_wait_ms
+                    ),
+                };
+                format!(
+                    "watcher_kill 실패({why}) → systemctl stop {}: {k3}",
+                    self.s.kill.oms_unit
+                )
+            }
+        };
+        let mut h = format!(
+            "W5: OMS /api/status 무응답 {}초, 마지막 정상 응답 {last}. 킬 마커: {marker}. OMS 정지: {stop}",
+            seconds(self.silent_ms)
+        );
+        if self.stop.is_some() && !self.stopped() {
+            h.push_str(". OMS 정지 실패: OMS가 새 주문을 낼 수 있음. OMS 키 폐기(X8 절차)를 검토");
+        }
+        h
+    }
+
+    /// The instant the kill next wants a `poll`; `None` after the end.
+    pub fn next_wake(&self) -> Option<u64> {
+        match self.stage {
+            Stage::Marker | Stage::Stop => Some(self.deadline),
+            Stage::Halt => self.attempt.map(|a| a.deadline),
+            Stage::Loop => {
+                let halt = match self.attempt {
+                    Some(a) => Some(a.deadline),
+                    None if self.halt_owed => {
+                        Some(self.halt_ended.saturating_add(HALT_RETRY_MS))
+                    }
+                    None => None,
+                };
+                match (self.lp.next_wake(), halt) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (a, b) => a.or(b),
+                }
+            }
+            Stage::Ended => None,
+        }
+    }
+
+    fn open_halt(&mut self, now: u64, detail: String) -> Step {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.attempt = Some(Attempt {
+            id,
+            deadline: now
+                .saturating_add(self.s.request_timeout_ms.saturating_mul(2))
+                .saturating_add(HALT_EXTRA_MS),
+        });
+        Step::Halt { id, detail }
+    }
+
+    /// K1 ended (or passed its deadline): K2.
+    fn to_halt(&mut self, now: u64, out: &mut Vec<Step>) {
+        self.stage = Stage::Halt;
+        let detail = halt_detail(&self.s.name, self.silent_ms);
+        out.push(self.open_halt(now, detail));
+    }
+
+    /// K2 did not halt: K3.
+    fn to_stop(&mut self, now: u64, out: &mut Vec<Step>) {
+        self.stage = Stage::Stop;
+        self.deadline = now.saturating_add(self.s.kill.stop_wait_ms);
+        out.push(Step::StopUnit {
+            deadline: self.deadline,
+        });
+    }
+
+    /// K2 halted, or K3 ended: the loop, with the header and the outcome.
+    fn to_loop(&mut self, now: u64, out: &mut Vec<Step>) {
+        self.stage = Stage::Loop;
+        self.halt_owed = self.owes();
+        let header = self.header();
+        let acts = self.lp.start(now, &header, self.outcome());
+        self.take(acts, out);
+        self.retry(now, out);
+    }
+
+    /// The loop's actions as steps; its end ends the kill.
+    fn take(&mut self, acts: Vec<Action>, out: &mut Vec<Step>) {
+        for a in acts {
+            match a {
+                Action::Ended(report) => {
+                    self.stage = Stage::Ended;
+                    // A retry still in flight is given up: the runtime
+                    // aborts its task; the halt stays owed for W5.
+                    self.attempt = None;
+                    out.push(Step::Ended {
+                        report,
+                        halt_owed: self.halt_owed,
+                    });
+                }
+                a => out.push(Step::Loop(a)),
+            }
+        }
+    }
+
+    /// While the loop runs and the halt is owed: `watcher_kill` again
+    /// [`HALT_RETRY_MS`] after the end of the previous attempt, never two
+    /// in flight.
+    fn retry(&mut self, now: u64, out: &mut Vec<Step>) {
+        if self.stage != Stage::Loop || !self.halt_owed || self.attempt.is_some() {
+            return;
+        }
+        if now >= self.halt_ended.saturating_add(HALT_RETRY_MS) {
+            let detail = late_halt_detail(&self.s.name);
+            out.push(self.open_halt(now, detail));
+        }
+    }
+
+    /// K1's outcome. A late one (after the deadline) is ignored.
+    pub fn marker_done(&mut self, now: u64, o: MarkerOutcome) -> Vec<Step> {
+        let mut out = Vec::new();
+        if self.stage != Stage::Marker {
+            self.ignored += 1;
+            return out;
+        }
+        self.marker = MarkerState::Done(o);
+        self.to_halt(now, &mut out);
+        out
+    }
+
+    /// The reply of halt attempt `id` (`oms::admin_kill`), taken when it
+    /// arrives while the attempt is open, also at its deadline before a
+    /// poll applied it (the truth about the OMS first).
+    pub fn halt_done(&mut self, now: u64, id: u64, r: Result<String, String>) -> Vec<Step> {
+        let mut out = Vec::new();
+        if !self.attempt.is_some_and(|a| a.id == id) {
+            self.ignored += 1;
+            return out;
+        }
+        self.attempt = None;
+        self.halt_ended = now;
+        let latched = match r {
+            Ok(reply) if oms::latched(&reply) => Ok(reply),
+            Ok(reply) => Err(reply),
+            Err(why) => Err(why),
+        };
+        match (self.stage, latched) {
+            (Stage::Halt, Ok(reply)) => {
+                self.halted = true;
+                self.halt = HaltState::Latched(reply);
+                self.to_loop(now, &mut out);
+            }
+            (Stage::Halt, Err(why)) => {
+                self.halt = HaltState::Failed(why);
+                self.to_stop(now, &mut out);
+            }
+            (Stage::Loop, Ok(reply)) => {
+                self.halted = true;
+                self.halt_owed = false;
+                self.lp.set_outcome(StopOutcome::Latched);
+                out.push(Step::Loop(Action::Notice(Notice::LateHalt { reply })));
+            }
+            // A failed retry tells nothing (the start notice already
+            // says the stop failed) and is tried again.
+            _ => {}
+        }
+        out
+    }
+
+    /// K3's outcome (`stop::Stopper::poll`, or a spawn error as
+    /// `Failed`). A late one is ignored.
+    pub fn stop_done(&mut self, now: u64, o: stop::Outcome) -> Vec<Step> {
+        let mut out = Vec::new();
+        if self.stage != Stage::Stop {
+            self.ignored += 1;
+            return out;
+        }
+        self.stop = Some(o);
+        self.to_loop(now, &mut out);
+        out
+    }
+
+    /// What a request task of the loop sent ([`Inflight::take`]).
+    pub fn arrived(&mut self, now: u64, a: Arrived) -> Vec<Step> {
+        let mut out = Vec::new();
+        if self.stage != Stage::Loop {
+            self.ignored += 1;
+            return out;
+        }
+        let acts = self.lp.arrived(now, a);
+        self.take(acts, &mut out);
+        out
+    }
+
+    /// The kill's clock moved to `now`: the step deadlines, the halt
+    /// retries, the loop.
+    pub fn poll(&mut self, now: u64) -> Vec<Step> {
+        let mut out = Vec::new();
+        match self.stage {
+            Stage::Marker if now >= self.deadline => {
+                self.marker = MarkerState::TimedOut;
+                self.to_halt(now, &mut out);
+            }
+            Stage::Halt => {
+                if self.attempt.is_some_and(|a| now >= a.deadline) {
+                    self.attempt = None;
+                    self.halt_ended = now;
+                    self.halt = HaltState::Failed(HALT_TIMED_OUT.to_string());
+                    self.to_stop(now, &mut out);
+                }
+            }
+            Stage::Stop if now >= self.deadline => {
+                self.stop = Some(stop::Outcome::Unconfirmed);
+                self.to_loop(now, &mut out);
+            }
+            Stage::Loop => {
+                if self.attempt.is_some_and(|a| now >= a.deadline) {
+                    self.attempt = None;
+                    self.halt_ended = now;
+                }
+                self.retry(now, &mut out);
+                let acts = self.lp.poll(now);
+                self.take(acts, &mut out);
+            }
+            _ => {}
+        }
+        out
+    }
 }
