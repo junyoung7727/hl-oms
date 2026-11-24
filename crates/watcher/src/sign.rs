@@ -114,7 +114,8 @@ pub fn prehash(timestamp_ms: u64, api_key: &str, recv_window_ms: u64, query: &st
     format!("{timestamp_ms}{api_key}{recv_window_ms}{query}")
 }
 
-/// `X-BAPI-SIGN` of a GET.
+/// `X-BAPI-SIGN` of a GET with an HMAC secret. The client signs through
+/// [`Signer::sign`]; this keeps the HMAC test vectors.
 pub fn signature(
     secret: &str,
     timestamp_ms: u64,
@@ -133,7 +134,8 @@ pub fn post_prehash(timestamp_ms: u64, api_key: &str, recv_window_ms: u64, body:
     format!("{timestamp_ms}{api_key}{recv_window_ms}{body}")
 }
 
-/// `X-BAPI-SIGN` of a POST of `body`.
+/// `X-BAPI-SIGN` of a POST of `body` with an HMAC secret (the test
+/// vectors; the client signs through [`Signer::sign`]).
 pub fn post_signature(
     secret: &str,
     timestamp_ms: u64,

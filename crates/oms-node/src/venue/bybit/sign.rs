@@ -119,7 +119,8 @@ pub fn rest_prehash(
     format!("{timestamp_ms}{api_key}{recv_window_ms}{payload}")
 }
 
-/// `X-BAPI-SIGN` of a REST request.
+/// `X-BAPI-SIGN` of a REST request with an HMAC secret. The client signs
+/// through [`Signer::sign`]; this keeps the HMAC test vectors.
 pub fn rest_signature(
     secret: &str,
     timestamp_ms: u64,
@@ -138,7 +139,8 @@ pub fn ws_prehash(expires_ms: u64) -> String {
     format!("GET/realtime{expires_ms}")
 }
 
-/// The HMAC signature of the private stream's `auth` message.
+/// The HMAC signature of the private stream's `auth` message (the
+/// test vectors; the streams sign through [`Signer::sign`]).
 pub fn ws_auth_signature(secret: &str, expires_ms: u64) -> String {
     hmac_hex(secret, &ws_prehash(expires_ms))
 }
