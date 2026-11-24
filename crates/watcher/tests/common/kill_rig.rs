@@ -113,7 +113,8 @@ pub struct KillRig {
     /// Everything `Inflight` gave the loop and the clock when it did.
     pub arrived: Vec<(u64, Arrived)>,
     seen: Arc<Mutex<Seen>>,
-    pending: Vec<Action>,
+    /// The requests to start, and the clock the loop emitted each at.
+    pending: Vec<(u64, Action)>,
     hangs_at_start: usize,
 }
 
@@ -219,21 +220,21 @@ impl KillRig {
     fn handle(&mut self, now: u64, acts: Vec<Action>) {
         for a in acts {
             if matches!(a, Action::CancelAll { .. } | Action::Count { .. }) {
-                self.pending.push(a.clone());
+                self.pending.push((now, a.clone()));
             }
             self.actions.push((now, a));
         }
     }
 
     fn start_pending(&mut self) {
-        for a in std::mem::take(&mut self.pending) {
+        for (at, a) in std::mem::take(&mut self.pending) {
             assert_eq!(
                 self.inflight.open(),
                 0,
                 "two requests of the loop at once: {a:?}"
             );
             self.hangs_at_start = self.seen.lock().unwrap().hangs;
-            assert!(self.inflight.start(&a));
+            assert!(self.inflight.start(&a, at));
         }
     }
 

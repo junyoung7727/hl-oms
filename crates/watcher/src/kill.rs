@@ -457,8 +457,9 @@ pub const ORDERS: &str = w1::PATH;
 /// never a number.
 ///
 /// The count keeps its own per-page deadline on `clock`, as the loop does:
-/// its start, then each page's answer, + `request_timeout_ms` +
-/// [`DEADLINE_EXTRA_MS`]. After a page that answered at or after it, the
+/// `start_ms` (the loop's emission, so the first page's deadline is the
+/// loop's and not the task's first run's; review 1 M1), then each page's
+/// answer, + `request_timeout_ms` + [`DEADLINE_EXTRA_MS`]. After a page that answered at or after it, the
 /// count sends no further page and ends with [`PAST_DEADLINE`]: the task
 /// asks for the next page at once, with no await the runtime could abort
 /// it at (review 3 S2). `on_page` is called for each page request that
@@ -467,11 +468,12 @@ pub const ORDERS: &str = w1::PATH;
 pub async fn count_open(
     client: &Client,
     clock: &dyn Clock,
+    start_ms: u64,
     request_timeout_ms: u64,
     on_page: &mut (dyn FnMut() + Send),
 ) -> Result<usize, String> {
     let extra = request_timeout_ms.saturating_add(DEADLINE_EXTRA_MS);
-    let mut deadline = clock.now_ms().saturating_add(extra);
+    let mut deadline = start_ms.saturating_add(extra);
     let unreadable = |why: &str| client.unreadable(ORDERS, why).to_string();
     let mut open = 0;
     let mut cursor = String::new();
@@ -1154,9 +1156,11 @@ impl Inflight {
     }
 
     /// Starts the task of a `CancelAll` or `Count` (any other action is no
-    /// request: `false`). The loop opens a request only when it closed the
-    /// last one, so a task still live was given up: it is aborted first.
-    pub fn start(&mut self, a: &Action) -> bool {
+    /// request: `false`); `emitted_at` is the clock the loop emitted it at
+    /// (the `now` of its `poll` or `arrived`), where a count's own deadline
+    /// starts. The loop opens a request only when it closed the last one,
+    /// so a task still live was given up: it is aborted first.
+    pub fn start(&mut self, a: &Action, emitted_at: u64) -> bool {
         let (req_id, count) = match a {
             Action::CancelAll { req_id } => (*req_id, false),
             Action::Count { req_id } => (*req_id, true),
@@ -1171,7 +1175,7 @@ impl Inflight {
                 let mut on_page = move || {
                     let _ = pages.send(Arrived::Page { req_id });
                 };
-                let result = count_open(&client, &*clock, rt, &mut on_page).await;
+                let result = count_open(&client, &*clock, emitted_at, rt, &mut on_page).await;
                 let _ = tx.send(Arrived::Counted { req_id, result });
             })
         } else {

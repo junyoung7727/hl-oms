@@ -24,7 +24,9 @@ use watcher::kill::{
     position_block, read_positions, Arrived, Inflight, ORDERS, cancel_answer, count_open,
 };
 use watcher::metrics::Metrics;
-use watcher::rest::{CANCEL_ALL, CancelAll, Client, ClientConfig, Credentials};
+use watcher::rest::{
+    CANCEL_ALL, CancelAll, Client, ClientConfig, Credentials, GUARD_MAX, GUARD_WINDOW_MS,
+};
 
 /// 2023-11-14T22:13:20Z.
 const T0: u64 = 1_700_000_000_000;
@@ -1598,7 +1600,7 @@ async fn foreign_orders_count() {
     fake.route(ORDERS, [orders(first, "c2"), orders(second, "")]);
     let c = client(&fake);
     let mut pages = 0;
-    let n = count_open(&c.client, &*c.clock, RT, &mut || pages += 1).await;
+    let n = count_open(&c.client, &*c.clock, T0, RT, &mut || pages += 1).await;
     assert_eq!(n, Ok(5));
     assert_eq!(pages, 2);
     assert_eq!(
@@ -1613,7 +1615,10 @@ async fn foreign_orders_count() {
     let fake = FakeHttp::start(Answer::Close);
     fake.route(ORDERS, [orders(vec![order(&ours, "Filled")], "")]);
     let c = client(&fake);
-    assert_eq!(count_open(&c.client, &*c.clock, RT, &mut || {}).await, Ok(0));
+    assert_eq!(
+        count_open(&c.client, &*c.clock, T0, RT, &mut || {}).await,
+        Ok(0)
+    );
 
     // What does not read is a count error, never a number.
     let not_a_list = Answer::Reply(
@@ -1642,7 +1647,7 @@ async fn foreign_orders_count() {
         let fake = FakeHttp::start(Answer::Close);
         fake.route(ORDERS, answers);
         let c = client(&fake);
-        let n = count_open(&c.client, &*c.clock, RT, &mut || {}).await;
+        let n = count_open(&c.client, &*c.clock, T0, RT, &mut || {}).await;
         assert!(n.is_err(), "{case}: {n:?}");
         assert_eq!(fake.requests().len(), sent, "{case}");
     }
@@ -1690,7 +1695,7 @@ async fn an_aborted_task_sends_no_answer_to_the_loop() {
     let mut l = kill_loop();
     let acts = l.start(T0, "h", StopOutcome::Latched);
     let cancel = cancel_id(&acts);
-    assert!(inf.start(&request(&acts)));
+    assert!(inf.start(&request(&acts), T0));
     assert_eq!(inf.open(), 1);
     until(|| inf.queued() == 1, "the cancel-all's answer").await;
     // One ms before the deadline nothing is aborted.
@@ -1712,7 +1717,7 @@ async fn an_aborted_task_sends_no_answer_to_the_loop() {
         ORDERS,
         [orders(vec![order("a", "New")], "c2"), Answer::Hang],
     );
-    assert!(inf.start(&request(&acts)));
+    assert!(inf.start(&request(&acts), T0 + EXTRA));
     until(|| fake.requests().len() == 3, "the hanging second page").await;
     until(|| inf.queued() == 1, "the first page").await;
     assert_eq!(l.open_request(), Some((count, T0 + 2 * EXTRA)));
@@ -1728,7 +1733,7 @@ async fn an_aborted_task_sends_no_answer_to_the_loop() {
     let mut inf = Inflight::new(client, clock.clone(), RT);
     let mut l = kill_loop();
     let acts = l.start(T0, "h", StopOutcome::Latched);
-    assert!(inf.start(&request(&acts)));
+    assert!(inf.start(&request(&acts), T0));
     until(|| fake.requests().len() == 1, "the hanging cancel-all").await;
     assert_eq!(inf.abort_due(T0, l.open_request()), 0);
     l.abort(T0, AbortWhy::Shutdown);
@@ -1740,12 +1745,121 @@ async fn an_aborted_task_sends_no_answer_to_the_loop() {
     // one only when it closed the last), so two never run at once.
     let mut l = kill_loop();
     let acts = l.start(T0, "h", StopOutcome::Latched);
-    assert!(inf.start(&request(&acts)));
-    assert!(inf.start(&Action::Count { req_id: 99 }));
+    assert!(inf.start(&request(&acts), T0));
+    assert!(inf.start(&Action::Count { req_id: 99 }, T0));
     assert_eq!((inf.open(), inf.aborted()), (1, 2));
     // Only requests start a task.
-    assert!(!inf.start(&Action::Notice(Notice::Start { round_ms: 1000 })));
+    assert!(!inf.start(&Action::Notice(Notice::Start { round_ms: 1000 }), T0));
     assert_eq!(inf.open(), 1);
+}
+
+#[tokio::test]
+async fn a_count_task_keeps_the_loops_deadline_from_its_emission() {
+    // The loop emits a count at T0 (its deadline T0 + 13,000) and the task
+    // first runs 5 ms later. Its first page's deadline is the emission's
+    // too (review 1 M1): a page at the loop's deadline exactly is past it
+    // for the task as for the loop, so no second page goes; 1 ms before it
+    // the count reads both pages.
+    for (answer_at, past) in [(T0 + EXTRA, true), (T0 + EXTRA - 1, false)] {
+        let fake = FakeHttp::start(Answer::Close);
+        fake.route(
+            ORDERS,
+            [orders(vec![order("a", "New")], "c2"), orders(vec![], "")],
+        );
+        let (client, clock) = shared(&fake);
+        let c = clock.clone();
+        fake.on_request(move |_| c.set(answer_at));
+        let mut inf = Inflight::new(client, clock.clone(), RT);
+        let mut l = kill_loop();
+        let acts = l.start(T0, "h", StopOutcome::Latched);
+        let cancel = Arrived::Cancel {
+            req_id: cancel_id(&acts),
+            answer: CancelAnswer::Failed("HTTP 503: busy".into()),
+        };
+        let acts = l.arrived(T0, cancel);
+        let count = count_id(&acts);
+        assert_eq!(l.open_request(), Some((count, T0 + EXTRA)));
+        clock.set(T0 + 5);
+        assert!(inf.start(&request(&acts), T0));
+        let mut told = Vec::new();
+        until(
+            || {
+                told.extend(inf.take());
+                told.iter().any(|a| matches!(a, Arrived::Counted { .. }))
+            },
+            "the count's result",
+        )
+        .await;
+        if past {
+            assert_eq!(
+                told,
+                [Arrived::Counted {
+                    req_id: count,
+                    result: Err(PAST_DEADLINE.to_string()),
+                }],
+                "{answer_at}"
+            );
+            assert_eq!(fake.requests().len(), 1, "{answer_at}");
+        } else {
+            assert_eq!(told.len(), 3, "{answer_at}: {told:?}");
+            assert_eq!(
+                told[2],
+                Arrived::Counted {
+                    req_id: count,
+                    result: Ok(1),
+                }
+            );
+            assert_eq!(fake.requests().len(), 2, "{answer_at}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_dropped_inflight_aborts_its_tasks() {
+    // A count waits at the request guard (60 requests in 10 s of the
+    // manual clock). While its Inflight lives, the count goes once the
+    // clock leaves the guard's window; after its Inflight is dropped it
+    // never goes (review 1 S2: no request of the loop outlives it).
+    let fake = FakeHttp::start(Answer::Close);
+    fake.route("/ip", [Answer::Reply(200, "192.0.2.1".into())]);
+    fake.route(ORDERS, [orders(vec![], "")]);
+    let (client, clock) = shared(&fake);
+    let echo = format!("{}/ip", fake.url());
+    let counts = |fake: &FakeHttp| {
+        fake.requests()
+            .iter()
+            .filter(|r| r.path() == ORDERS)
+            .count()
+    };
+    let wait = std::time::Duration::from_millis(50);
+    for at in [T0, T0 + 10 * GUARD_WINDOW_MS] {
+        clock.set(at);
+        let fill: Vec<_> = (0..GUARD_MAX)
+            .map(|_| {
+                let (client, echo) = (client.clone(), echo.clone());
+                tokio::spawn(async move { client.echo(&echo).await })
+            })
+            .collect();
+        for f in fill {
+            f.await.unwrap().unwrap();
+        }
+        let mut inf = Inflight::new(client.clone(), clock.clone(), RT);
+        assert!(inf.start(&Action::Count { req_id: 1 }, at));
+        tokio::time::sleep(wait).await;
+        let before = counts(&fake);
+        assert_eq!(before, usize::from(at != T0), "the guard holds the count");
+        if at == T0 {
+            clock.set(at + 2 * GUARD_WINDOW_MS);
+            until(|| counts(&fake) == 1, "the count after the guard's window").await;
+            assert_eq!(inf.open(), 1);
+        } else {
+            drop(inf);
+            clock.set(at + 2 * GUARD_WINDOW_MS);
+            // The guard looks again every 100 ms of real time.
+            tokio::time::sleep(10 * wait).await;
+            assert_eq!(counts(&fake), before, "a dropped Inflight's count went");
+        }
+    }
 }
 
 /// The notice kinds in order.
@@ -2091,4 +2205,21 @@ async fn a_cancel_all_not_sent_is_told_from_the_state_before_the_call() {
         ),
         "{told:?}"
     );
+
+    // When the pause ends the cancel-all is sent again (review 1 S1); the
+    // fake answers 403 again, so it is Failed (sent).
+    let until_ms = rig.client.paused_until().unwrap();
+    rig.clock.set(until_ms - 1);
+    assert_eq!(
+        cancel_answer(&rig.client, &*rig.clock).await,
+        CancelAnswer::NotSent(NotSent::Paused)
+    );
+    assert_eq!(rig.paths(), [CANCEL_ALL]);
+    rig.clock.set(until_ms);
+    let a = cancel_answer(&rig.client, &*rig.clock).await;
+    assert!(
+        matches!(&a, CancelAnswer::Failed(why) if why.contains("403")),
+        "{a:?}"
+    );
+    assert_eq!(rig.paths(), [CANCEL_ALL, CANCEL_ALL]);
 }
