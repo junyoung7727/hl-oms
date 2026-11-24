@@ -18,10 +18,10 @@ use watcher::config::Kill;
 use watcher::kill::{
     AbortWhy, Action, CancelAnswer, KillLoop, LATCHED_LINE, LastError, NOT_READ_ON_ABORT, NotSent,
     Notice, PAUSED_LINE, POSITIONS, Phase, Positions, Report, StopOutcome, TIMED_OUT, notice_text,
-    position_block, read_positions, ORDERS, count_open,
+    position_block, read_positions, Inflight, ORDERS, count_open,
 };
 use watcher::metrics::Metrics;
-use watcher::rest::{CancelAll, Client, ClientConfig, Credentials};
+use watcher::rest::{CANCEL_ALL, CancelAll, Client, ClientConfig, Credentials};
 
 /// 2023-11-14T22:13:20Z.
 const T0: u64 = 1_700_000_000_000;
@@ -1643,4 +1643,104 @@ async fn foreign_orders_count() {
         assert!(n.is_err(), "{case}: {n:?}");
         assert_eq!(fake.requests().len(), sent, "{case}");
     }
+}
+
+/// A client shared with the tasks of `Inflight`.
+fn shared(fake: &FakeHttp) -> (Arc<Client>, Arc<ManualClock>) {
+    let c = client(fake);
+    (Arc::new(c.client), c.clock)
+}
+
+fn cancel_ok() -> Answer {
+    Answer::Reply(
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":[],"success":"1"},"time":1}"#.into(),
+    )
+}
+
+/// Waits in real time (at most 5 s) until `f` holds.
+async fn until(mut f: impl FnMut() -> bool, what: &str) {
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !f() {
+        assert!(std::time::Instant::now() < end, "waited 5 s for {what}");
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+    }
+}
+
+/// The request action of `acts`.
+fn request(acts: &[Action]) -> Action {
+    acts.iter()
+        .find(|a| matches!(a, Action::CancelAll { .. } | Action::Count { .. }))
+        .cloned()
+        .unwrap()
+}
+
+#[tokio::test]
+async fn an_aborted_task_sends_no_answer_to_the_loop() {
+    // A cancel-all answered in time, but its answer is still queued when
+    // its deadline passes: Inflight aborts the task at the deadline and
+    // drops what it sent. The loop gets nothing; poll fails the request.
+    let fake = FakeHttp::start(Answer::Close);
+    fake.route(CANCEL_ALL, [cancel_ok()]);
+    let (client, clock) = shared(&fake);
+    let mut inf = Inflight::new(client.clone(), clock.clone(), RT);
+    let mut l = kill_loop();
+    let acts = l.start(T0, "h", StopOutcome::Latched);
+    let cancel = cancel_id(&acts);
+    assert!(inf.start(&request(&acts)));
+    assert_eq!(inf.open(), 1);
+    until(|| inf.queued() == 1, "the cancel-all's answer").await;
+    // One ms before the deadline nothing is aborted.
+    assert_eq!(l.open_request(), Some((cancel, T0 + EXTRA)));
+    assert_eq!(inf.abort_due(T0 + EXTRA - 1, l.open_request()), 0);
+    clock.set(T0 + EXTRA);
+    assert_eq!(inf.abort_due(T0 + EXTRA, l.open_request()), 1);
+    assert_eq!(inf.take(), []);
+    assert_eq!((inf.open(), inf.aborted(), inf.stray()), (0, 1, 1));
+    let acts = l.poll(T0 + EXTRA);
+    assert_eq!(l.ignored(), 0);
+    assert_eq!(l.cancel_all_calls(), 1);
+    let count = count_id(&acts);
+
+    // A count whose first page answered and whose second hangs: aborted at
+    // its deadline (moved by the first page), its queued page is dropped
+    // and no further page goes.
+    fake.route(
+        ORDERS,
+        [orders(vec![order("a", "New")], "c2"), Answer::Hang],
+    );
+    assert!(inf.start(&request(&acts)));
+    until(|| fake.requests().len() == 3, "the hanging second page").await;
+    until(|| inf.queued() == 1, "the first page").await;
+    assert_eq!(l.open_request(), Some((count, T0 + 2 * EXTRA)));
+    assert_eq!(inf.abort_due(T0 + 2 * EXTRA, l.open_request()), 1);
+    assert_eq!(inf.take(), []);
+    assert_eq!((inf.open(), inf.aborted(), inf.stray()), (0, 2, 2));
+
+    // A task the loop no longer has open is aborted at once, before its
+    // deadline: here the loop was aborted.
+    let fake = FakeHttp::start(Answer::Close);
+    fake.route(CANCEL_ALL, [Answer::Hang]);
+    let (client, clock) = shared(&fake);
+    let mut inf = Inflight::new(client, clock.clone(), RT);
+    let mut l = kill_loop();
+    let acts = l.start(T0, "h", StopOutcome::Latched);
+    assert!(inf.start(&request(&acts)));
+    until(|| fake.requests().len() == 1, "the hanging cancel-all").await;
+    assert_eq!(inf.abort_due(T0, l.open_request()), 0);
+    l.abort(T0, AbortWhy::Shutdown);
+    assert_eq!(l.open_request(), None);
+    assert_eq!(inf.abort_due(T0, l.open_request()), 1);
+    assert_eq!(inf.open(), 0);
+
+    // A new request of the loop aborts a task still live (the loop opens
+    // one only when it closed the last), so two never run at once.
+    let mut l = kill_loop();
+    let acts = l.start(T0, "h", StopOutcome::Latched);
+    assert!(inf.start(&request(&acts)));
+    assert!(inf.start(&Action::Count { req_id: 99 }));
+    assert_eq!((inf.open(), inf.aborted()), (1, 2));
+    // Only requests start a task.
+    assert!(!inf.start(&Action::Notice(Notice::Start { round_ms: 1000 })));
+    assert_eq!(inf.open(), 1);
 }
