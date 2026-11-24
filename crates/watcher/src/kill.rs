@@ -497,6 +497,10 @@ pub enum Action {
 
 /// The open-order count before the first count of the loop.
 pub const NOT_COUNTED: &str = "아직 세지 않음";
+/// The order budget: at most this many cancel-alls in any half-open
+/// window of [`ORDER_WINDOW_MS`], counted from emission (table 7-8 C4).
+pub const ORDER_BUDGET: usize = 2;
+pub const ORDER_WINDOW_MS: u64 = 1000;
 /// Why a request past its deadline failed (cancel-all `Failed`, count
 /// error).
 pub const PAST_DEADLINE: &str = "no answer before the deadline";
@@ -538,6 +542,12 @@ pub struct KillLoop {
     /// The next progress mark: `s + k × notice_ms`, `s` the start notice.
     next_mark: u64,
     ignored: u64,
+    /// The emission instants of the last [`ORDER_BUDGET`] cancel-alls,
+    /// oldest first.
+    sent_at: Vec<u64>,
+    /// The due cancel-all is held back by the budget.
+    holding: bool,
+    holds: u64,
 }
 
 impl KillLoop {
@@ -561,6 +571,9 @@ impl KillLoop {
             last_error: None,
             next_mark: 0,
             ignored: 0,
+            sent_at: Vec::with_capacity(ORDER_BUDGET),
+            holding: false,
+            holds: 0,
         }
     }
 
@@ -589,6 +602,22 @@ impl KillLoop {
         self.ignored
     }
 
+    /// Cancel-alls the order budget held back (each counted once).
+    pub fn budget_holds(&self) -> u64 {
+        self.holds
+    }
+
+    /// The first instant the budget admits one more cancel-all: the
+    /// oldest of the last [`ORDER_BUDGET`] emissions + [`ORDER_WINDOW_MS`].
+    fn budget_at(&self) -> Option<u64> {
+        if self.sent_at.len() < ORDER_BUDGET {
+            return None;
+        }
+        self.sent_at
+            .first()
+            .map(|t| t.saturating_add(ORDER_WINDOW_MS))
+    }
+
     /// The stop outcome the final notice will name.
     pub fn outcome(&self) -> StopOutcome {
         self.outcome
@@ -613,6 +642,7 @@ impl KillLoop {
         }
         let due = match (self.phase, self.open) {
             (_, Some(o)) => Some(o.deadline),
+            (Phase::Cancel, None) => self.budget_at(),
             (Phase::Repeat, None) => Some(self.round_start.saturating_add(self.t.round_ms)),
             (Phase::Watch, None) => Some(self.watch_due),
             _ => None,
@@ -807,6 +837,18 @@ impl KillLoop {
         }
         match self.phase {
             Phase::Cancel => {
+                if self.budget_at().is_some_and(|at| now < at) {
+                    if !self.holding {
+                        self.holding = true;
+                        self.holds += 1;
+                    }
+                    return;
+                }
+                self.holding = false;
+                if self.sent_at.len() == ORDER_BUDGET {
+                    self.sent_at.remove(0);
+                }
+                self.sent_at.push(now);
                 let id = self.id();
                 self.open = Some(Open {
                     id,

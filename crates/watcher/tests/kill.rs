@@ -944,8 +944,21 @@ fn drive(
     l: &mut KillLoop,
     poll_ms: u64,
     max_steps: usize,
-    mut reply: impl FnMut(u64, bool) -> Option<(u64, Ans)>,
+    reply: impl FnMut(u64, bool) -> Option<(u64, Ans)>,
 ) -> Vec<(u64, Action)> {
+    let (log, ended) = run(l, poll_ms, max_steps, reply);
+    assert!(ended, "the step bound of {max_steps} was reached");
+    log
+}
+
+/// [`drive`] without the end: returns the log and whether the loop ended
+/// within `max_steps`.
+fn run(
+    l: &mut KillLoop,
+    poll_ms: u64,
+    max_steps: usize,
+    mut reply: impl FnMut(u64, bool) -> Option<(u64, Ans)>,
+) -> (Vec<(u64, Action)>, bool) {
     let mut log = Vec::new();
     let mut pending: Vec<(u64, u64, Ans)> = Vec::new();
     let mut closes_at: Option<u64> = None;
@@ -978,7 +991,7 @@ fn drive(
             log.push((now, a));
         }
         if ended {
-            return log;
+            return (log, true);
         }
         let first = pending
             .iter()
@@ -1001,7 +1014,7 @@ fn drive(
             }
         }
     }
-    panic!("the step bound of {max_steps} was reached at {now}");
+    (log, false)
 }
 
 fn notices_at(log: &[(u64, Action)]) -> Vec<(u64, Notice)> {
@@ -1260,4 +1273,83 @@ fn the_outcome_set_during_the_loop_is_in_the_final_notice() {
     let _ = l.start(T0, "h", StopOutcome::Unconfirmed);
     l.set_outcome(StopOutcome::StoppedMarked);
     assert_eq!(l.outcome(), StopOutcome::StoppedMarked);
+}
+
+/// xorshift64: the test's own seeded generator.
+struct Rng(u64);
+
+impl Rng {
+    fn below(&mut self, n: u64) -> u64 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        x % n
+    }
+}
+
+#[test]
+fn the_order_budget_holds_under_any_answer_sequence() {
+    // Once with the default timings (the budget never binds there), once
+    // with round_ms and watch_every_ms 100, below the config ranges, where
+    // it must hold cancel-alls back.
+    let fast = Kill {
+        round_ms: 100,
+        watch_every_ms: 100,
+        ..Kill::default()
+    };
+    for (timing, binds) in [(Kill::default(), false), (fast, true)] {
+        let mut held = 0;
+        let mut ended = 0;
+        for seed in 1..=10_000u64 {
+            let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+            let mut l = KillLoop::new(timing.clone(), RT);
+            let poll_ms = [1, 10, 100, 1000, 7000][rng.below(5) as usize];
+            let (log, done_) = run(&mut l, poll_ms, 300, |_, count| {
+                let delay = match rng.below(4) {
+                    0 => 0,
+                    1 => rng.below(50),
+                    2 => rng.below(2000),
+                    _ => rng.below(20_000),
+                };
+                if rng.below(10) == 0 {
+                    return None;
+                }
+                let ans = if count {
+                    match rng.below(5) {
+                        0 | 1 => Ans::Count(Ok(0)),
+                        2 | 3 => Ans::Count(Ok(1 + rng.below(3) as usize)),
+                        _ => Ans::Count(Err("HTTP 503".into())),
+                    }
+                } else {
+                    match rng.below(8) {
+                        0..=3 => Ans::Cancel(done(rng.below(3) as usize)),
+                        4 | 5 => Ans::Cancel(CancelAnswer::Failed("HTTP 503".into())),
+                        6 => Ans::Cancel(CancelAnswer::NotSent(NotSent::Latched)),
+                        _ => Ans::Cancel(CancelAnswer::NotSent(NotSent::Paused)),
+                    }
+                };
+                Some((delay, ans))
+            });
+            let at: Vec<u64> = log
+                .iter()
+                .filter(|(_, a)| matches!(a, Action::CancelAll { .. }))
+                .map(|(t, _)| *t)
+                .collect();
+            // At most 2 in any half-open [t, t + 1,000): every third one
+            // is at least 1,000 ms after the first.
+            for w in at.windows(3) {
+                assert!(w[2] - w[0] >= 1000, "seed {seed}: {w:?}");
+            }
+            held += l.budget_holds();
+            ended += u64::from(done_);
+        }
+        if binds {
+            assert!(held > 0, "the budget held nothing back");
+        } else {
+            assert_eq!(held, 0, "valid timings never meet the budget");
+        }
+        assert!(ended > 0);
+    }
 }
