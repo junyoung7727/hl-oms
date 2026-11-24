@@ -299,10 +299,15 @@ fn liquidation_distance(row: &Value) -> String {
     }
 }
 
-/// One line of the block, or `None` for a row left out (`size` zero or
-/// not a decimal string).
+/// One line of the block, or `None` for a row left out (`size` zero). A
+/// size that does not read is a position of unknown size, `수량 모름`, never
+/// left out (review 1 S3).
 fn row_line(row: &Value) -> Option<String> {
-    let size = dec(row, "size").filter(|s| !s.is_zero())?;
+    let size = match dec(row, "size") {
+        Some(s) if s.is_zero() => return None,
+        Some(s) => s.to_string(),
+        None => "수량 모름".to_string(),
+    };
     let side = match row.get("side").and_then(Value::as_str) {
         Some("Buy") => "매수",
         Some("Sell") => "매도",
@@ -322,7 +327,7 @@ fn row_line(row: &Value) -> Option<String> {
 }
 
 /// The position block of a notice (`kst`: the time of the read). Rows of
-/// size 0 or an unreadable size are left out; at most [`ROWS_SHOWN`] rows,
+/// size 0 are left out, a row of unreadable size is shown as `수량 모름`; at most [`ROWS_SHOWN`] rows,
 /// then the count of the rest.
 pub fn position_block(p: &Positions, kst: &str) -> String {
     let rows = match p {

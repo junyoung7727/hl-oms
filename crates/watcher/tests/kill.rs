@@ -43,7 +43,8 @@ fn the_position_block_lists_size_upnl_mark_and_liquidation_distance() {
         row("ADAUSDT", "Buy", "1", "0.1", "0.5", "0"),
         // No mark price.
         row("XRPUSDT", "Sell", "100", "1.5", "0", "0.5"),
-        // Size 0 and an unreadable size are left out.
+        // Size 0 is left out; an unreadable size is shown as unknown, never
+        // dropped (review 1 S3: unknown is not flat).
         row("DOGEUSDT", "Buy", "0", "0", "0.1", "0.05"),
         row("LTCUSDT", "Buy", "", "0", "80", "70"),
         // 2/3 = 66.666… % → 66.66, never 66.67.
@@ -56,6 +57,7 @@ fn the_position_block_lists_size_upnl_mark_and_liquidation_distance() {
         "- SOLUSDT 매수 10, 미실현손익 0, 마크 150.5, 마크에서 강제청산가까지 모름(거래소가 청산가를 주지 않음)",
         "- ADAUSDT 매수 1, 미실현손익 0.1, 마크 0.5, 마크에서 강제청산가까지 모름(거래소가 청산가를 주지 않음)",
         "- XRPUSDT 매도 100, 미실현손익 1.5, 마크 0, 마크에서 강제청산가까지 모름(마크 가격 없음)",
+        "- LTCUSDT 매수 수량 모름, 미실현손익 0, 마크 80, 마크에서 강제청산가까지 12.5 %",
         "- BNBUSDT 매도 3, 미실현손익 모름, 마크 3, 마크에서 강제청산가까지 66.66 %",
     ]
     .join("\n");
@@ -70,6 +72,28 @@ fn the_position_block_lists_size_upnl_mark_and_liquidation_distance() {
     assert_eq!(
         position_block(&Positions::Rows(flat), KST),
         format!("{HEAD}\n포지션 없음")
+    );
+    // A row whose size does not read (a JSON number, more than 8 decimal
+    // places, no field) is a position of unknown size: the block never says
+    // `포지션 없음` for it (review 1 S3).
+    let mut number = row("ETHUSDT", "Sell", "0", "0", "3500", "3850");
+    number["size"] = json!(2);
+    let mut absent = row("SOLUSDT", "Buy", "0", "0", "150", "");
+    absent.as_object_mut().unwrap().remove("size");
+    let unknown = vec![
+        number,
+        row("BTCUSDT", "Buy", "0.123456789", "0", "70000", "63000"),
+        absent,
+    ];
+    assert_eq!(
+        position_block(&Positions::Rows(unknown), KST),
+        [
+            HEAD,
+            "- ETHUSDT 매도 수량 모름, 미실현손익 0, 마크 3500, 마크에서 강제청산가까지 10 %",
+            "- BTCUSDT 매수 수량 모름, 미실현손익 0, 마크 70000, 마크에서 강제청산가까지 10 %",
+            "- SOLUSDT 매수 수량 모름, 미실현손익 0, 마크 150, 마크에서 강제청산가까지 모름(거래소가 청산가를 주지 않음)",
+        ]
+        .join("\n")
     );
     // An unknown side or symbol still shows the position; a distance too
     // large to compute is unknown, not a wrong number.
@@ -387,22 +411,27 @@ async fn the_position_reader_pages_and_keeps_its_deadline() {
         200,
         r#"{"retCode":0,"retMsg":"OK","result":{"list":{}}}"#.into(),
     );
-    for (case, answers, class) in [
-        ("list not a list", vec![not_a_list], "unreadable"),
+    // The requests sent tell the rule that ended the read from the 5-page
+    // cap, which ends it with the same class (review 1 S1).
+    for (case, answers, class, sent) in [
+        ("list not a list", vec![not_a_list], "unreadable", 1),
         (
             "a full page without a cursor",
             vec![page(vec![a.clone(); 200], "")],
             "unreadable",
+            1,
         ),
         (
             "the cursor just sent again",
             vec![page(vec![], "p2"), page(vec![a.clone()], "p2")],
             "unreadable",
+            2,
         ),
         (
             "HTTP 503",
             vec![Answer::Reply(503, "busy".into())],
             "no_answer",
+            1,
         ),
     ] {
         let fake = FakeHttp::start(Answer::Close);
@@ -415,6 +444,7 @@ async fn the_position_reader_pages_and_keeps_its_deadline() {
             &[("endpoint", POSITIONS), ("class", class)],
         );
         assert_eq!(errors, Some(1.0), "{case}");
+        assert_eq!(fake.requests().len(), sent, "{case}");
     }
 
     // A latched or paused client is not asked: no request at all.
