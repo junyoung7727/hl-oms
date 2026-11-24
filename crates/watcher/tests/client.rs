@@ -231,6 +231,43 @@ async fn every_request_carries_the_five_headers_and_the_signed_query() {
     assert!(c.lines.lock().unwrap().is_empty());
 }
 
+/// A wall clock that steps back does not hold the client's guard for the
+/// step (U19b3c; review 4 S3): the guard reads its own `clock::Steady`, so
+/// the window ends `GUARD_WINDOW_MS` of further progress after the step,
+/// not when the clock passes the old values again. The kill loop's counts
+/// and cancel-alls wait at this guard. Real time: the client re-reads the
+/// clock while it waits.
+#[tokio::test]
+async fn a_clock_step_back_does_not_hold_the_guard() {
+    let fake = FakeHttp::start(ok("{}"));
+    let c = client(&fake);
+    for _ in 0..GUARD_MAX {
+        c.client
+            .get("/v5/account/wallet-balance", &[])
+            .await
+            .unwrap();
+    }
+    c.clock.set(T0 - 60_000);
+    let client = Arc::new(c.client);
+    let cl = client.clone();
+    let late = tokio::spawn(async move { cl.get("/v5/order/realtime", &[]).await });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert_eq!(fake.requests().len(), GUARD_MAX, "held at the guard");
+    c.clock.advance(GUARD_WINDOW_MS - 1);
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert_eq!(fake.requests().len(), GUARD_MAX, "held until the window ends");
+    c.clock.advance(1);
+    let r = tokio::time::timeout(Duration::from_secs(5), late).await;
+    assert!(matches!(r, Ok(Ok(Ok(_)))), "{r:?}");
+    let reqs = fake.requests();
+    assert_eq!(reqs.len(), GUARD_MAX + 1);
+    // Signed with the raw clock (the venue checks the real time).
+    assert_eq!(
+        reqs[GUARD_MAX].header("x-bapi-timestamp"),
+        Some((T0 - 60_000 + GUARD_WINDOW_MS).to_string().as_str())
+    );
+}
+
 /// The client waits at a full guard and sends when the clock reaches the
 /// instant the guard named: the request is held, not dropped. Real time:
 /// the client re-reads the clock while it waits.

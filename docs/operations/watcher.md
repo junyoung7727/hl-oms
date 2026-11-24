@@ -251,3 +251,19 @@ watcher --version
 | `watcher_mismatch_active{check="W3"}` | W3의 위반(`account_mm_rate`, `daily_loss`)이 확정되어 아직 보이거나 빚진 것. 많아야 2(정체는 종류뿐) | 런북 7.13의 W3 순서. OMS의 `core.margin`(감소 전용인지)과 함께 본다 |
 | `watcher_requests_total{endpoint}` | 경로마다 보낸 요청(쪽마다 하나) | 대조 예산은 초당 2.7(설계). 증가율이 그보다 크게 오래 높으면 W1의 쪽(열린 주문 수)이나 W4의 쪽(체결량)을 본다. 5초에 체결 100개면 약 3.2~3.3이 정상이다(C-WATCH 9부) |
 | `watcher_journal_seq`, `watcher_journal_error` | 마지막으로 읽은 기록, 읽기 실패 | 런북 7.17 |
+
+## W5와 킬의 지표(U19b3c)
+
+실행이 틱마다 W5와 킬의 접근자에서 적는다(C-WATCH 12부). 라벨은 다른 지표처럼 `venue="bybit"`, `host`, `watcher`.
+
+| 이름 | 뜻 | 볼 것 |
+|---|---|---|
+| `watcher_w5_armed` | 1이면 W5가 OMS를 지킨다. `[kill]`이 없거나, 시작 확인이 끝나기 전, 킬 동안, 킬 뒤 첫 정상 응답까지는 0 | 시작 뒤 0에 머물면 시작 확인이 다시 묻는 중이거나(C-WATCH 12부 알려진 한계) 킬 뒤 OMS가 아직 답하지 않는다 |
+| `watcher_oms_silence_s` | 지키는 동안 마지막 정상 `/api/status` 답 뒤의 초. 지키지 않으면 없다 | `silence_ms`(기본 10초)에 다가가면 킬이 가깝다 |
+| `watcher_kill_active` | 1이면 킬 순서나 그 루프가 돈다 | 1인 동안 `clear-hold --reason kill` 하지 않는다(런북 7.18, U19b3d) |
+| `watcher_kills_total` | 시작한 킬의 수 | 오르면 OMS가 10초 넘게 답하지 않았다 |
+| `watcher_kill_step{step}` | 마지막 킬의 `marker`, `halt`, `stop` 단계의 결과(1 됨, 0 실패). `halt`는 K2 자신의 결과라 루프 중 재시도가 래치해도 0으로 남는다. 정지가 래치했으면 `stop`은 없다. 첫 킬 전과 단계가 끝나기 전에는 없다 | `halt` 0이고 `stop` 0이면 OMS가 멈추지 않았을 수 있다(시작 알림의 `OMS 정지 실패`) |
+| `watcher_kill_round` | 지금이나 마지막 루프의 회차 | 오래 오르면 미체결이 0이 되지 않는다 |
+| `watcher_kill_remaining` | 지금 루프가 마지막으로 센 미체결 수. 세지 못한 동안은 없다 | 줄지 않으면 누군가 주문을 내고 있다 |
+| `watcher_kill_cancel_all_total` | 루프가 낸 일괄 취소 요청 수(보내지 못한 것도 셈, 알림의 `일괄 취소 {k}회`와 같음) | 1초에 1을 넘게 오르지 않는다 |
+| `watcher_kill_halt_owed` | 1이면 정지를 빚졌다: 도는 킬이 래치도 마커 있는 멈춤도 확인하지 못했거나(루프 중 5초마다 `watcher_kill`을 다시 보냄), 끝난 킬 뒤 W5가 `Rearming {halt_owed: true}`에 있다 | 1이고 OMS가 답하면 OMS가 래치 없이 거래할 수 있다: U19b3c는 루프 뒤의 빚을 아직 보내지 않으므로 손으로 래치한다(`omsctl`) |

@@ -16,28 +16,33 @@
 //! closes, the sender flushes for at most [`FINISH_MS`], exit 0. Nothing is
 //! persisted.
 
+use std::collections::VecDeque;
 use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::Value;
 use tokio::sync::mpsc;
-use tokio::task::JoinSet;
+use tokio::task::{AbortHandle, JoinSet};
 
-use crate::alert::{self, Alerts, FINISH_MS, Route, Task};
-use crate::clock::Clock;
-use crate::config::Config;
+use crate::alert::{self, Alerts, FINISH_MS, Route, Task, kst};
+use crate::clock::{Clock, Steady};
+use crate::config::{Config, resolved};
 use crate::engine::{Action, Check, Engine, Logic};
 use crate::journal::{MAX_RECORDS, Tail};
+use crate::kill::{self, Inflight, Kill, MarkerOutcome, Notice, Positions, Setup};
 use crate::log::Log;
 use crate::metrics::{Exporter, Metrics};
-use crate::oms::{Monitor, Status, admin_send};
+use crate::oms::{Monitor, Status, admin_kill, admin_send};
 use crate::rest::{Client, ClientConfig, RestError};
 use crate::start::{self, IpCheck, PublicIp, Start, Step};
 use crate::state::JournalState;
+use crate::stop::{self, Stopper};
 use crate::w2::W2;
 use crate::w3::W3;
 use crate::w4::W4;
+use crate::w5::{self, Fire, Timing, W5};
 
 /// The loop asks every part what is due at least this often (real time,
 /// 판단(모델 아님)).
@@ -47,16 +52,26 @@ pub const TICK_MS: u64 = 100;
 pub const STATUS_RETRY_MS: u64 = 1_000;
 /// ... and writes a line at most this often (판단(모델 아님)).
 pub const STATUS_LOG_MS: u64 = 10_000;
+/// After the message of a turn the loop takes at most this many more that
+/// already wait before it ticks (U19b3c, 판단(모델 아님)): a probe answer
+/// in the channel reaches W5 before `fire`.
+pub const QUEUED_MAX: usize = 1000;
+/// At most this many kill notices wait for their position read; beyond
+/// it the oldest waiting progress notice is dropped (판단(모델 아님)).
+pub const NOTICES_MAX: usize = 16;
 
 /// Where the watcher sends: the binary takes them from the config (the
-/// REST base from `network` only) and the two Telegram routes from
-/// [`Route::telegram`], with no override; tests give loopback fakes. The
-/// sender uses `telegram` when the config has `[telegram]` (U19b1c).
+/// REST base from `network` only), the two Telegram routes from
+/// [`Route::telegram`] and the stopper's program [`stop::SYSTEMCTL`], with
+/// no override; tests give loopback fakes and a script. The sender uses
+/// `telegram` when the config has `[telegram]` (U19b1c); a kill runs
+/// `systemctl` (U19b3c).
 #[derive(Debug, Clone)]
 pub struct Endpoints {
     pub rest_base: String,
     pub ip_echo_url: String,
     pub telegram: Vec<Route>,
+    pub systemctl: PathBuf,
 }
 
 impl Endpoints {
@@ -65,6 +80,7 @@ impl Endpoints {
             rest_base: cfg.network.rest_base().to_string(),
             ip_echo_url: cfg.ip_echo_url.clone(),
             telegram: Route::telegram(),
+            systemctl: PathBuf::from(stop::SYSTEMCTL),
         }
     }
 }
@@ -78,6 +94,14 @@ enum Msg {
     Status(u64, Result<Value, String>),
     Admin(Check, u64, Result<String, String>),
     Pushed,
+    /// W5's probe of `/api/status`.
+    Probe(u64, Result<Value, String>),
+    /// K1's outcome, of kill `kill_no`.
+    Marker(u64, MarkerOutcome),
+    /// The reply to halt attempt `id` of kill `kill_no`.
+    Halt(u64, u64, Result<String, String>),
+    /// The position read of notice `seq`.
+    Positions(u64, Positions),
 }
 
 enum Phase {
@@ -124,6 +148,110 @@ fn boot_cap(v: &Value) -> Result<u64, String> {
     Ok(cap)
 }
 
+/// What the engine emitted from an answer while a kill runs (U19b3c,
+/// review 1 S1): the mismatch P1 (`Confirmed`) is kept; every request
+/// (a page, a status request, a `watcher_mismatch` send) is dropped and
+/// named for the log.
+fn paused(actions: Vec<Action>) -> (Vec<Action>, Vec<&'static str>) {
+    let mut keep = Vec::new();
+    let mut dropped = Vec::new();
+    for a in actions {
+        match a {
+            Action::Confirmed { .. } => keep.push(a),
+            Action::Venue { path, .. } => dropped.push(path),
+            Action::Status { .. } => dropped.push("/api/status"),
+            Action::Mismatch { .. } => dropped.push("watcher_mismatch"),
+            Action::Heartbeat { .. } => dropped.push("heartbeat"),
+        }
+    }
+    (keep, dropped)
+}
+
+/// The marker-path boot rule (C-WATCH part 12, U19b3c): with `[kill]` a
+/// status answer is usable only if the OMS reads its kill marker at the
+/// watcher's path (`node.kill_marker`, compared where both point). A marker
+/// the OMS never reads would not keep a killed OMS halted at its next
+/// start. The OMS config is not read (independence).
+fn marker_rule(v: &Value, ours: &Path) -> Result<(), String> {
+    let m = v.pointer("/node/kill_marker");
+    let configured = m.and_then(|m| m.get("configured")).and_then(Value::as_bool) == Some(true);
+    let path = m
+        .and_then(|m| m.get("path"))
+        .and_then(Value::as_str)
+        .filter(|_| configured);
+    match path {
+        Some(p) if resolved(Path::new(p)) == resolved(ours) => Ok(()),
+        _ => Err(format!(
+            "the OMS reads its kill marker at {}; the watcher writes {}: they must be the same file",
+            path.map_or("none".to_string(), |p| kill::cut(p, kill::TEXT_MAX)),
+            ours.display()
+        )),
+    }
+}
+
+/// A running kill (C-WATCH part 12, U19b3c): the sans-IO sequence, the
+/// tasks of its loop's requests and of its open halt attempt. Everything
+/// of it reads `clock::Steady`.
+struct KillRun {
+    /// Tells this kill's outcomes from a former kill's late ones.
+    kill_no: u64,
+    kill: Kill,
+    inflight: Inflight,
+    /// The task of the open halt attempt (K2 or a retry): its id.
+    halt: Option<(u64, AbortHandle)>,
+    /// The loop's cancel-alls already counted in the metric.
+    cancel_alls: u64,
+    /// Late outcomes and stray answers already logged.
+    ignored: u64,
+    stray: u64,
+}
+
+/// A kill notice waiting for its position block, with the header of its
+/// kill (the start notice names it).
+struct Waiting {
+    notice: Notice,
+    header: String,
+}
+
+/// The position read of the notice being sent.
+struct Reading {
+    seq: u64,
+    w: Waiting,
+    deadline: u64,
+    task: AbortHandle,
+}
+
+/// The kill notices, sent beside the loop one at a time in their order,
+/// each with a position block read just before (C-WATCH part 12).
+#[derive(Default)]
+struct Notices {
+    waiting: VecDeque<Waiting>,
+    reading: Option<Reading>,
+    next_seq: u64,
+    dropped: u64,
+}
+
+impl Notices {
+    /// Queues `w`; beyond [`NOTICES_MAX`] waiting, the oldest waiting
+    /// progress notice is dropped (never a start, a final or a late halt).
+    /// Returns whether one was dropped.
+    fn push(&mut self, w: Waiting) -> bool {
+        let drop = if self.waiting.len() >= NOTICES_MAX {
+            self.waiting
+                .iter()
+                .position(|w| matches!(w.notice, Notice::Progress { .. }))
+        } else {
+            None
+        };
+        if let Some(i) = drop {
+            self.waiting.remove(i);
+            self.dropped += 1;
+        }
+        self.waiting.push_back(w);
+        drop.is_some()
+    }
+}
+
 struct Runtime {
     cfg: Config,
     echo_url: String,
@@ -150,6 +278,20 @@ struct Runtime {
     /// Set once the sender task ended before the shutdown.
     sender_ended: bool,
     public_ip: PublicIp,
+    /// A status answer in this process passed the marker-path rule.
+    marker_checked: bool,
+    /// The OMS gave a good status answer in this process.
+    answered: bool,
+    /// The clock of W5 and the kill path: it does not step back.
+    steady: Arc<dyn Clock>,
+    systemctl: PathBuf,
+    w5: W5,
+    kill: Option<KillRun>,
+    kills: u64,
+    /// The stoppers of K3, polled until their client is reaped (also
+    /// after their kill ended), each with its kill's `kill_no`.
+    stoppers: Vec<(u64, Stopper)>,
+    notices: Notices,
 }
 
 /// Runs the watcher until `shutdown` resolves; the exit code (0, or 2 for
@@ -252,6 +394,19 @@ pub async fn run(
     let heartbeat = tokio::spawn(heartbeats(monitor, beats_rx, clock.clone()));
     let start = Start::new(&cfg, metrics.clone(), log.clone(), boot_ms);
     let public_ip = start.public_ip();
+    let steady: Arc<dyn Clock> = Arc::new(Steady::new(clock.clone()));
+    let w5 = W5::new(Timing::of(&cfg), log.clone());
+    metrics.set("watcher_w5_armed", &[], 0.0);
+    if cfg.kill.is_some() {
+        for series in [
+            "watcher_kill_active",
+            "watcher_kills_total",
+            "watcher_kill_cancel_all_total",
+            "watcher_kill_halt_owed",
+        ] {
+            metrics.set(series, &[], 0.0);
+        }
+    }
     let mut rt = Runtime {
         echo_url: ep.ip_echo_url,
         clock,
@@ -273,6 +428,15 @@ pub async fn run(
         alert_task,
         sender_ended: false,
         public_ip,
+        marker_checked: false,
+        answered: false,
+        steady,
+        systemctl: ep.systemctl,
+        w5,
+        kill: None,
+        kills: 0,
+        stoppers: Vec::new(),
+        notices: Notices::default(),
         cfg,
     };
     let mut shutdown = std::pin::pin!(shutdown);
@@ -281,7 +445,16 @@ pub async fn run(
         tokio::select! {
             biased;
             _ = &mut shutdown => break,
-            Some(m) = rx.recv() => rt.on(m),
+            Some(m) = rx.recv() => {
+                rt.on(m);
+                // What already waits goes before the tick (review 2 S3).
+                for _ in 0..QUEUED_MAX {
+                    match rx.try_recv() {
+                        Ok(m) => rt.on(m),
+                        Err(_) => break,
+                    }
+                }
+            }
             _ = tokio::time::sleep(Duration::from_millis(wait)) => {}
         }
         rt.tick();
@@ -322,16 +495,18 @@ async fn heartbeats(
 }
 
 impl Runtime {
-    /// The boot replay reads on without waiting for a tick.
+    /// The boot replay reads on without waiting for a tick, and so does a
+    /// kill whose loop got an answer.
     fn busy(&self) -> bool {
         matches!(self.phase, Phase::Replay { not_before, .. } if self.clock.now_ms() >= not_before)
+            || self.kill.as_ref().is_some_and(|k| k.inflight.queued() > 0)
     }
 
-    fn spawn(&mut self, f: impl Future<Output = Msg> + Send + 'static) {
+    fn spawn(&mut self, f: impl Future<Output = Msg> + Send + 'static) -> AbortHandle {
         let tx = self.tx.clone();
         self.tasks.spawn(async move {
             let _ = tx.send(f.await);
-        });
+        })
     }
 
     /// An answer.
@@ -355,22 +530,64 @@ impl Runtime {
             Msg::Venue(id, a) => {
                 if let Phase::Run(e) = &mut self.phase {
                     let out = e.on_venue(now, id, a);
-                    self.exec(out);
+                    self.exec_answer(out);
                 }
             }
             Msg::Status(id, a) => {
                 if let Phase::Run(e) = &mut self.phase {
                     let out = e.on_status(now, id, a);
-                    self.exec(out);
+                    self.exec_answer(out);
                 }
             }
             Msg::Admin(check, send_id, a) => {
                 if let Phase::Run(e) = &mut self.phase {
                     let out = e.on_admin(now, check, send_id, a);
-                    self.exec(out);
+                    self.exec_answer(out);
                 }
             }
             Msg::Pushed => self.pushing = false,
+            Msg::Probe(id, a) => {
+                let good = w5::good_answer(&a);
+                self.answered |= good;
+                if self.w5.on_answer(self.steady.now_ms(), id, good).is_some() {
+                    // U19b3d acts on it; until then W5 stays in Rearming.
+                    (self.log)(
+                        "warn: W5: the OMS answers again and the last kill owes the halt; this watcher does not send the owed watcher_kill after a kill (U19b3d): the OMS may trade unlatched, latch it by hand; W5 starts no new kill",
+                    );
+                }
+            }
+            Msg::Marker(kill_no, o) => {
+                let now = self.steady.now_ms();
+                let steps = match self.kill.as_mut() {
+                    Some(k) if k.kill_no == kill_no => k.kill.marker_done(now, o),
+                    _ => {
+                        (self.log)(&format!(
+                            "debug: a late kill marker outcome is ignored: {o:?}"
+                        ));
+                        return;
+                    }
+                };
+                self.kill_steps(now, steps);
+            }
+            Msg::Halt(kill_no, id, r) => {
+                let now = self.steady.now_ms();
+                let steps = match self.kill.as_mut() {
+                    Some(k) if k.kill_no == kill_no => {
+                        if k.halt.as_ref().is_some_and(|(open, _)| *open == id) {
+                            k.halt = None;
+                        }
+                        k.kill.halt_done(now, id, r)
+                    }
+                    _ => {
+                        (self.log)(&format!(
+                            "debug: a late watcher_kill reply is ignored: {r:?}"
+                        ));
+                        return;
+                    }
+                };
+                self.kill_steps(now, steps);
+            }
+            Msg::Positions(seq, p) => self.positions_read(seq, p),
         }
     }
 
@@ -386,6 +603,9 @@ impl Runtime {
             }
             Step::Done | Step::StayUpNoRequests => {
                 self.ip = s.ip_check();
+                // The account is verified: W5 watches from here on, also
+                // while the watcher waits for the OMS and replays.
+                self.w5.arm(self.steady.now_ms());
                 self.phase = Phase::Wait {
                     next_try: now,
                     asking: false,
@@ -400,8 +620,18 @@ impl Runtime {
         let Phase::Wait { last_log, .. } = &self.phase else {
             return;
         };
-        match a.and_then(|v| boot_cap(&v)) {
-            Ok(cap) => {
+        match a.and_then(|v| Ok((boot_cap(&v)?, v))) {
+            Ok((cap, v)) => {
+                if let Some(k) = &self.cfg.kill {
+                    if let Err(reason) = marker_rule(&v, &k.marker) {
+                        (self.log)(&format!("error: start refused: {reason}"));
+                        self.alerts.once(&alert::refusal_text(&reason));
+                        self.refused = true;
+                        return;
+                    }
+                    self.marker_checked = true;
+                }
+                self.answered = true;
                 (self.log)(&format!(
                     "the OMS answers /api/status: replaying the journal up to record {cap}"
                 ));
@@ -438,6 +668,7 @@ impl Runtime {
         let now = self.clock.now_ms();
         self.alerts.poll(now, &self.client, &self.public_ip);
         self.watch_sender();
+        self.w5_tick();
         self.push_if_due(now);
         if let Some(req) = self.ip.as_mut().and_then(|ip| ip.poll(now)) {
             let (c, url) = (self.client.clone(), self.echo_url.clone());
@@ -460,6 +691,14 @@ impl Runtime {
                 }
             }
             Phase::Replay { .. } => self.replay(now),
+            // A kill pauses the engine (U19b3c): no round, no
+            // watcher_mismatch send, no heartbeat; answers in flight are
+            // still taken, what they ask for is not sent (`exec_answer`),
+            // their deadlines run at the polls after it.
+            Phase::Run(e) if self.kill.is_some() => {
+                e.export_ages(now);
+                return;
+            }
             Phase::Run(e) => {
                 let out = e.poll(now);
                 self.exec(out);
@@ -562,6 +801,25 @@ impl Runtime {
     }
 
     /// Carries out the engine's actions.
+    /// What the engine makes of an answer. While a kill runs (U19b3c,
+    /// review 1 S1) a round in flight at the fire goes no further: its next
+    /// page, its status request and any `watcher_mismatch` send are not
+    /// sent (one debug line each); the round closes at its deadline at a
+    /// poll after the kill, and an owed send goes again after its own
+    /// deadline. The mismatch P1 (`Confirmed`) still goes.
+    fn exec_answer(&mut self, actions: Vec<Action>) {
+        if self.kill.is_none() {
+            return self.exec(actions);
+        }
+        let (keep, dropped) = paused(actions);
+        for what in dropped {
+            (self.log)(&format!(
+                "debug: a kill runs: the engine's request is not sent ({what}); its round ends at its deadline after the kill"
+            ));
+        }
+        self.exec(keep);
+    }
+
     fn exec(&mut self, actions: Vec<Action>) {
         for a in actions {
             self.alerts.on_action(&a);
@@ -639,5 +897,449 @@ impl Runtime {
             (self.log)("warn: shutdown: the heartbeat in flight did not end in time");
         }
         (self.log)("shutdown: done");
+    }
+}
+
+/// W5 and the kill (C-WATCH part 12, U19b3c). W5, the kill sequence, its
+/// loop, the loop's request tasks, the position reads and the K-step
+/// deadlines read `clock::Steady`; the texts name instants of the raw clock.
+impl Runtime {
+    /// At every tick, in every phase: W5's probe and fire, the running
+    /// kill, the notices, the W5 and kill metrics.
+    fn w5_tick(&mut self) {
+        let now = self.steady.now_ms();
+        if let Some(p) = self.w5.poll(now) {
+            let s = self.status.clone();
+            self.spawn(async move { Msg::Probe(p.req_id, s.get().await) });
+        }
+        if let Some(f) = self.w5.fire(now) {
+            self.fire(now, f);
+        }
+        // K3's exit before the kill judges its deadline: a stop that ended
+        // between two ticks is reported as it ended (review 1 N1).
+        self.poll_stopper(now);
+        self.kill_tick(now);
+        self.notices_tick(now);
+        self.kill_metrics(now);
+    }
+
+    /// W5 fired: the kill starts with K1.
+    fn fire(&mut self, now: u64, f: Fire) {
+        let Some(k) = self.cfg.kill.clone() else {
+            return;
+        };
+        self.kills += 1;
+        self.metrics.add("watcher_kills_total", &[], 1.0);
+        self.metrics.set("watcher_kill_active", &[], 1.0);
+        for step in ["marker", "halt", "stop"] {
+            self.metrics.remove("watcher_kill_step", &[("step", step)]);
+        }
+        (self.log)(&format!(
+            "error: W5: /api/status gave no good answer for {} ms: the watcher kills (the marker {}, watcher_kill, systemctl stop {} if that fails) and cancels every order with its own key",
+            f.silent_ms,
+            k.marker.display(),
+            k.oms_unit
+        ));
+        let setup = Setup {
+            name: self.cfg.name.clone(),
+            kill: k,
+            request_timeout_ms: self.cfg.http.request_timeout_ms,
+            marker_checked: self.marker_checked,
+            answered: self.answered,
+            raw_now_ms: self.clock.now_ms(),
+        };
+        let (kill, steps) = Kill::new(f, setup, now);
+        let inflight = Inflight::new(
+            self.client.clone(),
+            self.steady.clone(),
+            self.cfg.http.request_timeout_ms,
+        );
+        self.kill = Some(KillRun {
+            kill_no: self.kills,
+            kill,
+            inflight,
+            halt: None,
+            cancel_alls: 0,
+            ignored: 0,
+            stray: 0,
+        });
+        self.kill_steps(now, steps);
+    }
+
+    /// The running kill at `now`: the halt task past its deadline and the
+    /// loop's request past its own are aborted before the next input, then
+    /// what the loop's tasks sent, then the deadlines and retries.
+    fn kill_tick(&mut self, now: u64) {
+        let Some(k) = self.kill.as_mut() else {
+            return;
+        };
+        if let Some((id, task)) = &k.halt
+            && k.kill
+                .halt_open()
+                .is_none_or(|(open, deadline)| open != *id || now >= deadline)
+        {
+            task.abort();
+            k.halt = None;
+        }
+        k.inflight.abort_due(now, k.kill.open_request());
+        for a in k.inflight.take() {
+            let Some(k) = self.kill.as_mut() else {
+                return;
+            };
+            let steps = k.kill.arrived(now, a);
+            self.kill_steps(now, steps);
+        }
+        let Some(k) = self.kill.as_mut() else {
+            return;
+        };
+        let steps = k.kill.poll(now);
+        self.kill_steps(now, steps);
+        if let Some(k) = self.kill.as_mut() {
+            let (ignored, stray) = (k.kill.ignored(), k.inflight.stray());
+            if (ignored, stray) != (k.ignored, k.stray) {
+                (k.ignored, k.stray) = (ignored, stray);
+                (self.log)(&format!(
+                    "debug: kill: {ignored} late outcomes and {stray} answers of aborted requests ignored so far"
+                ));
+            }
+        }
+    }
+
+    /// K3's clients: each outcome to the kill that started it; each is
+    /// polled until it is reaped (a dropped `Child` is never reaped).
+    fn poll_stopper(&mut self, now: u64) {
+        let mut outcomes = Vec::new();
+        self.stoppers.retain_mut(|(kill_no, s)| {
+            if let Some(o) = s.poll(now) {
+                outcomes.push((*kill_no, o));
+            }
+            !s.reaped()
+        });
+        for (kill_no, o) in outcomes {
+            match self.kill.as_mut() {
+                Some(k) if k.kill_no == kill_no => {
+                    let steps = k.kill.stop_done(now, o);
+                    self.kill_steps(now, steps);
+                }
+                _ => (self.log)(&format!(
+                    "debug: a late systemctl outcome is ignored: {o:?}"
+                )),
+            }
+        }
+    }
+
+    /// Carries out the kill's steps, in order.
+    fn kill_steps(&mut self, now: u64, steps: Vec<kill::Step>) {
+        let mut steps: VecDeque<kill::Step> = steps.into();
+        while let Some(step) = steps.pop_front() {
+            let Some(kill_no) = self.kill.as_ref().map(|k| k.kill_no) else {
+                return;
+            };
+            let Some(cfg) = self.cfg.kill.as_ref() else {
+                return;
+            };
+            match step {
+                kill::Step::WriteMarker { text } => {
+                    let path = cfg.marker.clone();
+                    self.spawn(async move {
+                        let o = kill::spawn_marker(path, text)
+                            .await
+                            .unwrap_or_else(|e| MarkerOutcome::Failed(e.to_string()));
+                        Msg::Marker(kill_no, o)
+                    });
+                }
+                kill::Step::Halt { id, detail } => {
+                    let (path, name) = (self.cfg.admin_socket.clone(), self.cfg.name.clone());
+                    let timeout = self.cfg.http.request_timeout_ms;
+                    let task = self.spawn(async move {
+                        Msg::Halt(
+                            kill_no,
+                            id,
+                            admin_kill(&path, &name, &detail, timeout).await,
+                        )
+                    });
+                    if let Some(k) = self.kill.as_mut()
+                        && let Some((_, old)) = k.halt.replace((id, task))
+                    {
+                        // Never two watcher_kill connections at once.
+                        old.abort();
+                    }
+                }
+                kill::Step::StopUnit { deadline } => {
+                    match Stopper::start(&self.systemctl, cfg, deadline) {
+                        Ok(s) => self.stoppers.push((kill_no, s)),
+                        Err(e) => {
+                            (self.log)(&format!("error: kill: systemctl stop did not start: {e}"));
+                            if let Some(k) = self.kill.as_mut() {
+                                steps.extend(k.kill.stop_done(now, stop::Outcome::Failed(e)));
+                            }
+                        }
+                    }
+                }
+                kill::Step::Loop(kill::Action::Notice(n)) => {
+                    let header = self
+                        .kill
+                        .as_ref()
+                        .map(|k| k.kill.kill_loop().header().to_string())
+                        .unwrap_or_default();
+                    self.queue_notice(n, header);
+                }
+                kill::Step::Loop(a) => {
+                    if let Some(k) = self.kill.as_mut() {
+                        k.inflight.start(&a, now);
+                    }
+                }
+                kill::Step::Ended { report, halt_owed } => self.kill_ended(now, &report, halt_owed),
+            }
+        }
+    }
+
+    /// The kill ended: its tasks are aborted (a halt retry in flight too:
+    /// the halt stays owed for W5), the engine runs again and W5 waits for
+    /// a good answer.
+    fn kill_ended(&mut self, now: u64, report: &kill::Report, halt_owed: bool) {
+        self.kill_metrics(now);
+        if let Some(mut k) = self.kill.take() {
+            if let Some((_, task)) = k.halt.take() {
+                task.abort();
+            }
+            k.inflight.abort_all();
+        }
+        self.w5.kill_ended(halt_owed);
+        self.metrics.set("watcher_kill_active", &[], 0.0);
+        let how = if report.aborted {
+            "aborted".to_string()
+        } else {
+            format!(
+                "zero open orders confirmed ({} rounds, {} cancel-alls)",
+                report.rounds, report.cancel_all_calls
+            )
+        };
+        (self.log)(&format!(
+            "the kill ended: {how}; the halt is {}",
+            if halt_owed { "owed" } else { "not owed" }
+        ));
+    }
+
+    /// Queues a notice (see [`Notices::push`]); a drop is logged.
+    fn queue_notice(&mut self, notice: Notice, header: String) {
+        if self.notices.push(Waiting { notice, header }) {
+            (self.log)(&format!(
+                "warn: kill: {NOTICES_MAX} notices wait for their position read: the oldest progress notice is dropped ({} so far)",
+                self.notices.dropped
+            ));
+        }
+    }
+
+    /// The position read past its deadline is aborted and its notice goes
+    /// with `시간 초과`; the next waiting notice starts its read.
+    fn notices_tick(&mut self, now: u64) {
+        if let Some(r) = &self.notices.reading
+            && now >= r.deadline
+        {
+            r.task.abort();
+            if let Some(r) = self.notices.reading.take() {
+                self.send_notice(&r.w, &Positions::Failed(kill::TIMED_OUT.to_string()));
+            }
+        }
+        while self.notices.reading.is_none() {
+            let Some(w) = self.notices.waiting.pop_front() else {
+                return;
+            };
+            // The abort notices already say that nothing was read.
+            if matches!(w.notice, Notice::Abort { .. } | Notice::AbortBefore { .. }) {
+                (self.alerts).once(&kill::notice_text(&w.notice, &w.header));
+                continue;
+            }
+            let seq = self.notices.next_seq;
+            self.notices.next_seq += 1;
+            let (c, clock) = (self.client.clone(), self.steady.clone());
+            let timeout = self.cfg.http.request_timeout_ms;
+            let task = self.spawn(async move {
+                Msg::Positions(seq, kill::read_positions(&c, &*clock, timeout).await)
+            });
+            let deadline = now
+                .saturating_add(timeout)
+                .saturating_add(kill::DEADLINE_EXTRA_MS);
+            self.notices.reading = Some(Reading {
+                seq,
+                w,
+                deadline,
+                task,
+            });
+        }
+    }
+
+    /// The positions of notice `seq`: an answer handled at or after the
+    /// read's deadline is past it.
+    fn positions_read(&mut self, seq: u64, p: Positions) {
+        let now = self.steady.now_ms();
+        if self.notices.reading.as_ref().is_none_or(|r| r.seq != seq) {
+            return;
+        }
+        let Some(r) = self.notices.reading.take() else {
+            return;
+        };
+        let p = if now >= r.deadline {
+            Positions::Failed(kill::TIMED_OUT.to_string())
+        } else {
+            p
+        };
+        self.send_notice(&r.w, &p);
+        self.notices_tick(now);
+    }
+
+    fn send_notice(&mut self, w: &Waiting, p: &Positions) {
+        let body = format!(
+            "{}\n{}",
+            kill::notice_text(&w.notice, &w.header),
+            kill::position_block(p, &kst(self.clock.now_ms()))
+        );
+        self.alerts.once(&body);
+    }
+
+    /// The W5 and kill series (C-WATCH part 12) from their accessors.
+    fn kill_metrics(&mut self, now: u64) {
+        let m = self.metrics.clone();
+        m.set(
+            "watcher_w5_armed",
+            &[],
+            f64::from(u8::from(self.w5.armed())),
+        );
+        match self.w5.silent_ms(now) {
+            Some(ms) => m.set("watcher_oms_silence_s", &[], ms as f64 / 1000.0),
+            None => m.remove("watcher_oms_silence_s", &[]),
+        }
+        if self.cfg.kill.is_none() {
+            return;
+        }
+        let owed = self.w5.halt_owed() || self.kill.as_ref().is_some_and(|k| k.kill.halt_owed());
+        m.set("watcher_kill_halt_owed", &[], f64::from(u8::from(owed)));
+        let Some(k) = self.kill.as_mut() else {
+            return;
+        };
+        let steps = k.kill.steps();
+        for (step, done) in [
+            ("marker", steps.marker),
+            ("halt", steps.halt),
+            ("stop", steps.stop),
+        ] {
+            if let Some(done) = done {
+                m.set(
+                    "watcher_kill_step",
+                    &[("step", step)],
+                    f64::from(u8::from(done)),
+                );
+            }
+        }
+        let lp = k.kill.kill_loop();
+        m.set("watcher_kill_round", &[], lp.round() as f64);
+        match lp.remaining() {
+            Ok(n) => m.set("watcher_kill_remaining", &[], *n as f64),
+            Err(_) => m.remove("watcher_kill_remaining", &[]),
+        }
+        let calls = lp.cancel_all_calls();
+        if calls > k.cancel_alls {
+            m.add(
+                "watcher_kill_cancel_all_total",
+                &[],
+                (calls - k.cancel_alls) as f64,
+            );
+            k.cancel_alls = calls;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kill::StopOutcome;
+
+    fn waiting(notice: Notice) -> Waiting {
+        Waiting {
+            notice,
+            header: String::new(),
+        }
+    }
+
+    fn progress(round: u64) -> Waiting {
+        waiting(Notice::Progress {
+            round,
+            remaining: Ok(1),
+            cancel_all_calls: round,
+            last_error: None,
+        })
+    }
+
+    fn last() -> Waiting {
+        waiting(Notice::Final {
+            watch_ms: 30_000,
+            round: 99,
+            cancel_all_calls: 99,
+            outcome: StopOutcome::Latched,
+        })
+    }
+
+    #[test]
+    fn during_a_kill_an_answer_keeps_the_mismatch_p1_and_drops_every_request() {
+        let p1 = Action::Confirmed {
+            check: Check::W1,
+            details: vec!["o1".into()],
+        };
+        let (keep, dropped) = paused(vec![
+            Action::Venue {
+                req_id: 1,
+                path: "/v5/execution/list",
+                params: Vec::new(),
+            },
+            p1.clone(),
+            Action::Status { req_id: 2 },
+            Action::Mismatch {
+                check: Check::W1,
+                send_id: 3,
+                detail: "o1".into(),
+            },
+        ]);
+        assert_eq!(keep, vec![p1]);
+        assert_eq!(
+            dropped,
+            vec!["/v5/execution/list", "/api/status", "watcher_mismatch"]
+        );
+    }
+
+    #[test]
+    fn a_full_notice_queue_drops_the_oldest_progress_notice_never_a_start_or_a_final() {
+        let mut q = Notices::default();
+        assert!(!q.push(waiting(Notice::Start { round_ms: 1_000 })));
+        for r in 1..NOTICES_MAX as u64 {
+            assert!(!q.push(progress(r)), "round {r}");
+        }
+        assert_eq!(q.waiting.len(), NOTICES_MAX);
+        assert!(q.push(last()), "the final makes room");
+        assert_eq!((q.waiting.len(), q.dropped), (NOTICES_MAX, 1));
+        let rounds: Vec<_> = q
+            .waiting
+            .iter()
+            .map(|w| match w.notice {
+                Notice::Start { .. } => "start".to_string(),
+                Notice::Progress { round, .. } => round.to_string(),
+                Notice::Final { .. } => "final".to_string(),
+                _ => "other".to_string(),
+            })
+            .collect();
+        assert_eq!(rounds.first().map(String::as_str), Some("start"));
+        assert_eq!(rounds[1], "2", "the oldest progress notice went");
+        assert_eq!(rounds.last().map(String::as_str), Some("final"));
+
+        // Without a progress notice waiting nothing is dropped: the queue
+        // grows past the bound rather than lose a late halt or the final.
+        let mut q = Notices::default();
+        for _ in 0..NOTICES_MAX {
+            q.push(waiting(Notice::LateHalt {
+                reply: "latched".into(),
+            }));
+        }
+        assert!(!q.push(last()));
+        assert_eq!((q.waiting.len(), q.dropped), (NOTICES_MAX + 1, 0));
     }
 }
