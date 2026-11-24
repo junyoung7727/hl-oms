@@ -647,6 +647,13 @@ impl Runtime {
                 }
             }
             Phase::Replay { .. } => self.replay(now),
+            // A kill pauses the engine (U19b3c): no round, no
+            // watcher_mismatch send, no heartbeat; answers in flight are
+            // still taken, their deadlines run at the first poll after it.
+            Phase::Run(e) if self.kill.is_some() => {
+                e.export_ages(now);
+                return;
+            }
             Phase::Run(e) => {
                 let out = e.poll(now);
                 self.exec(out);

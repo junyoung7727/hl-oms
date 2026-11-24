@@ -1504,3 +1504,109 @@ fn a_marker_written_by_the_watcher_is_read_by_a_marker_rule() {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&tg_dir);
 }
+
+/// One page of `/v5/order/realtime` with `n` open orders.
+fn orders(n: usize) -> Answer {
+    let list: Vec<Value> = (0..n)
+        .map(|i| json!({"orderStatus": "New", "orderLinkId": "", "orderId": format!("o{i}"),
+            "symbol": "BTCUSDT", "side": "Buy", "qty": "1"}))
+        .collect();
+    ok(json!({"category": "linear", "list": list, "nextPageCursor": ""}))
+}
+
+/// Records the manual clock and the path of every request at the fake
+/// Bybit.
+fn record_at(w: &World, clock: &Arc<ManualClock>) -> Arc<Mutex<Vec<(u64, String)>>> {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let (s, c) = (seen.clone(), clock.clone());
+    w.bybit.on_request(move |r| s.lock().unwrap().push((c.now_ms(), r.path().to_string())));
+    seen
+}
+
+fn at(seen: &Mutex<Vec<(u64, String)>>, path: &str, from: u64, to: u64) -> usize {
+    seen.lock()
+        .unwrap()
+        .iter()
+        .filter(|(t, p)| p == path && *t >= from && *t <= to)
+        .count()
+}
+
+/// A kill of an answering OMS that went silent: `admin.sock` latches. Walks
+/// until the start notice reached the fake Telegram. `kill` holds the
+/// further `[kill]` fields.
+fn kill_after_silence(
+    name: &str,
+    extra: &str,
+    kill: &str,
+    at_fire: impl Fn(&World),
+) -> (World, std::path::PathBuf, std::path::PathBuf, Arc<ManualClock>, Running, Arc<Mutex<Vec<(u64, String)>>>) {
+    let (tg_dir, tg) = telegram_section(&format!("{name}-t"));
+    let (mut w, dir) = kill_world(name, &format!("{extra}\n{tg}"), kill);
+    let marker = w.cfg.kill.as_ref().unwrap().marker.clone();
+    w.admin = admin_answering(&w.cfg.admin_socket, &marker, "latched").0;
+    w.systemctl = fake_systemctl(&dir, 0);
+    w.status_marked();
+    let clock = Arc::new(ManualClock::new(T0));
+    let seen = record_at(&w, &clock);
+    let run = w.start(clock.clone());
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    walk(&clock, 2000);
+    w.status_down();
+    walk_until(&clock, 20_000, "the fire", || w.lines_with(FIRED) == 1);
+    at_fire(&w);
+    walk_kill(&clock, "watcher_kill at admin.sock", || {
+        kill_lines(&w.admin).len() == 1
+    });
+    walk_kill(&clock, "the first cancel-all", || {
+        !w.requests(CANCEL_ALL).is_empty()
+    });
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    (w, dir, tg_dir, clock, run, seen)
+}
+
+const FINAL_NOTICE: &str = "워처 킬 정리 완료: 미체결 0건 확인 뒤 30초 동안 늦은 접수 없음(";
+
+#[test]
+fn the_engine_is_paused_during_a_kill_and_resumes_after() {
+    let (w, dir, tg_dir, clock, mut run, seen) = kill_after_silence(
+        "rt-k-pause",
+        "[intervals]\nw1_ms = 500\nw2_ms = 500\nw3_ms = 1000\nw4_ms = 1000\nheartbeat_ms = 1000\n\
+         [rules]\nmin_age_ms = 500\n",
+        "",
+        // One order stays open: the loop cannot end while the test looks.
+        |w| w.bybit.route("/v5/order/realtime", [orders(1)]),
+    );
+    let from = clock.now_ms();
+    let beats = heartbeats(&w.monitor).len();
+    let age = |w: &World| w.pushed(r#"watcher_check_age_s","check":"W1"#).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let (age0, t0) = (age(&w), clock.now_ms());
+    walk(&clock, 10_000);
+    std::thread::sleep(Duration::from_millis(300));
+    let to = clock.now_ms();
+    // The kill ran the whole window (an order was open): no check round
+    // (W3, W4; W1's list is the loop's count: no more of it than
+    // cancel-alls), no heartbeat; the check ages kept growing.
+    assert_eq!(at(&seen, "/v5/account/wallet-balance", from, to), 0);
+    assert_eq!(at(&seen, "/v5/execution/list", from, to), 0);
+    let cancels = at(&seen, CANCEL_ALL, from, to);
+    assert!(cancels >= 5, "{cancels}");
+    assert!(at(&seen, "/v5/order/realtime", from, to) <= cancels + 1);
+    assert_eq!(heartbeats(&w.monitor).len(), beats);
+    let grown = age(&w) - age0;
+    assert!(grown >= (clock.now_ms() - t0) as f64 / 1000.0 - 2.0, "{grown}");
+    assert_eq!(w.pushed("watcher_kill_active"), Some(1.0));
+    // Zero open orders: the loop ends, the checks and heartbeats resume.
+    w.bybit.route("/v5/order/realtime", [empty_page()]);
+    walk_until(&clock, 60_000, "the final notice", || !sent_with(&w, FINAL_NOTICE).is_empty());
+    let end = clock.now_ms();
+    walk(&clock, 3000);
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(until(10, || heartbeats(&w.monitor).len() > beats));
+    assert!(at(&seen, "/v5/account/wallet-balance", end, u64::MAX) >= 1);
+    assert!(at(&seen, "/v5/order/realtime", end, u64::MAX) >= 1);
+    assert_eq!(w.pushed("watcher_kill_active"), Some(0.0));
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
