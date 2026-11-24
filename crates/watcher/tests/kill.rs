@@ -627,8 +627,11 @@ fn a_failed_cancel_all_is_still_followed_by_a_count() {
     let mut acts = l.start(now, "h", StopOutcome::Latched);
     let mut ended = None;
     for _ in 0..100 {
-        // Every answer at once, in the instant of its request.
-        while let Some(a) = acts.pop() {
+        // Every answer at once, in the instant of its request (at most
+        // 100 actions per instant: a loop that asks again and again in one
+        // instant fails here instead of spinning).
+        for _ in 0..100 {
+            let Some(a) = acts.pop() else { break };
             match a {
                 Action::CancelAll { req_id } => acts.extend(l.cancel_done(
                     now,
@@ -640,6 +643,7 @@ fn a_failed_cancel_all_is_still_followed_by_a_count() {
                 Action::Notice(_) => {}
             }
         }
+        assert!(acts.is_empty(), "more than 100 actions at {now}");
         if ended.is_some() {
             break;
         }
@@ -652,6 +656,34 @@ fn a_failed_cancel_all_is_still_followed_by_a_count() {
         (1, 1, Some(T0))
     );
     assert_eq!(now, T0 + 30_000);
+}
+
+#[test]
+fn a_cancel_all_that_succeeds_clears_the_last_error() {
+    // Round 1's cancel-all fails, every later one is accepted: the
+    // progress notice shows no stale error.
+    let mut l = kill_loop();
+    let mut first = true;
+    let log = drive(&mut l, 100, 20_000, |now, count| {
+        if now >= T0 + 70_000 {
+            l_zero(count)
+        } else if count {
+            Some((10, Ans::Count(Ok(1))))
+        } else if std::mem::take(&mut first) {
+            Some((10, Ans::Cancel(CancelAnswer::Failed("HTTP 503".into()))))
+        } else {
+            Some((10, Ans::Cancel(done(1))))
+        }
+    });
+    assert!(notices_at(&log).iter().any(|(t, n)| *t == T0 + 60_000
+        && matches!(
+            n,
+            Notice::Progress {
+                last_error: None,
+                remaining: Ok(1),
+                ..
+            }
+        )));
 }
 
 #[test]
@@ -1273,6 +1305,23 @@ fn the_outcome_set_during_the_loop_is_in_the_final_notice() {
     let _ = l.start(T0, "h", StopOutcome::Unconfirmed);
     l.set_outcome(StopOutcome::StoppedMarked);
     assert_eq!(l.outcome(), StopOutcome::StoppedMarked);
+    // Without a change the final notice names the outcome of the start.
+    let mut l = KillLoop::new(Kill::default(), RT);
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::StoppedUncheckedMarker));
+    let k = count_id(&l.cancel_done(T0, c, done(0)));
+    assert_eq!(l.count_done(T0, k, Ok(0)), []);
+    let mut last = Vec::new();
+    for due in (1..=6).map(|i| T0 + i * 5000) {
+        let k = count_id(&l.poll(due));
+        last = l.count_done(due, k, Ok(0));
+    }
+    assert!(matches!(
+        notices(&last)[..],
+        [Notice::Final {
+            outcome: StopOutcome::StoppedUncheckedMarker,
+            ..
+        }]
+    ));
 }
 
 /// xorshift64: the test's own seeded generator.
