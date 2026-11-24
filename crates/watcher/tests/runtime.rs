@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 use watcher::alert::Route;
 use watcher::clock::{Clock, ManualClock, SystemClock};
 use watcher::config::Config;
+use watcher::rest::CANCEL_ALL;
 use watcher::runtime::{Endpoints, run};
 
 /// 2023-11-14T22:13:20Z.
@@ -1145,7 +1146,13 @@ fn kill_world(name: &str, extra: &str, kill: &str) -> (World, std::path::PathBuf
         ),
     );
     w.bybit.route("/v5/user/query-api", [cancel_key()]);
+    w.bybit.route(CANCEL_ALL, [cancel_ok()]);
     (w, dir)
+}
+
+/// A cancel-all Bybit accepted.
+fn cancel_ok() -> Answer {
+    ok(json!({"list": [], "success": "1"}))
 }
 
 /// `node.kill_marker` of an OMS that reads `path` (`None`: no `[kill]`).
@@ -1286,4 +1293,214 @@ fn a_status_with_another_marker_path_refuses_the_start() {
     assert_eq!(run.shutdown(), 0);
     let _ = std::fs::remove_file(&link);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The `watcher_kill` lines `admin.sock` got.
+fn kill_lines(a: &FakeSock) -> Vec<Value> {
+    a.conns()
+        .iter()
+        .flatten()
+        .filter(|v| v["op"] == "watcher_kill")
+        .cloned()
+        .collect()
+}
+
+/// An `admin.sock` at `path` that answers `watcher_kill` with `reply` (and
+/// every other op as the OMS); at each `watcher_kill` it notes whether the
+/// marker was there, before it answers.
+fn admin_answering(
+    path: &std::path::Path,
+    marker: &std::path::Path,
+    reply: &'static str,
+) -> (FakeSock, Arc<Mutex<Vec<bool>>>) {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let (s, m) = (seen.clone(), marker.to_path_buf());
+    let sock = FakeSock::serve(path, move |_, _, v| {
+        if v["op"] == "watcher_kill" {
+            s.lock().unwrap().push(m.exists());
+            oms(v, reply)
+        } else {
+            oms(v, "held")
+        }
+    });
+    (sock, seen)
+}
+
+/// The fake Telegram's texts that hold `pat`.
+fn sent_with(w: &World, pat: &str) -> Vec<String> {
+    w.sent().into_iter().filter(|t| t.contains(pat)).collect()
+}
+
+const START_NOTICE: &str = "워처 킬 시작(W5: OMS /api/status 무응답 ";
+
+#[test]
+fn oms_silence_writes_the_marker_and_halts_the_oms_before_the_first_cancel_all() {
+    let (tg_dir, tg) = telegram_section("rt-k-halt-t");
+    let (mut w, dir) = kill_world("rt-k-halt", &tg, "");
+    let marker = w.cfg.kill.as_ref().unwrap().marker.clone();
+    let (admin, at_kill) = admin_answering(&w.cfg.admin_socket, &marker, "latched");
+    w.admin = admin;
+    w.systemctl = fake_systemctl(&dir, 0);
+    // At the first cancel-all: had admin.sock answered watcher_kill?
+    let at_cancel = Arc::new(Mutex::new(Vec::new()));
+    let (a, replied) = (at_cancel.clone(), at_kill.clone());
+    w.bybit.on_request(move |r| {
+        if r.path() == CANCEL_ALL {
+            a.lock().unwrap().push(!replied.lock().unwrap().is_empty());
+        }
+    });
+    w.status_marked();
+    let clock = Arc::new(ManualClock::new(T0));
+    let mut run = w.start(clock.clone());
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    walk(&clock, 2000);
+    // The OMS stops answering: W5 fires after the silence, then K1, K2 and
+    // only then the loop.
+    w.status_down();
+    walk_until(&clock, 20_000, "the fire", || w.lines_with(FIRED) == 1);
+    walk_kill(&clock, "the marker", || marker.exists());
+    walk_kill(&clock, "watcher_kill at admin.sock", || {
+        kill_lines(&w.admin).len() == 1
+    });
+    walk_kill(&clock, "the first cancel-all", || {
+        !w.requests(CANCEL_ALL).is_empty()
+    });
+    assert_eq!(*at_kill.lock().unwrap(), vec![true], "the marker was there at watcher_kill");
+    assert_eq!(at_cancel.lock().unwrap()[0], true, "the halt was answered before the first cancel-all");
+    assert!(!dir.join("argv").exists(), "the halt latched: systemctl is not run");
+    let k = &kill_lines(&w.admin)[0];
+    let detail = k["detail"].as_str().unwrap();
+    assert!(detail.starts_with("W5: /api/status gave no good answer for "), "{detail}");
+    assert!(detail.ends_with(" s; watcher w-rt"), "{detail}");
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    let start = &sent_with(&w, START_NOTICE)[0];
+    assert!(start.starts_with("[WATCH P1] bybit w-rt "), "{start}");
+    assert!(
+        start.contains("킬 마커: 씀. OMS 정지: admin.sock watcher_kill → latched). 워처 키로 미체결 0건 확인까지 1초마다 일괄 취소"),
+        "{start}"
+    );
+    assert!(start.contains("\n포지션(거래소 /v5/position/list, "), "{start}");
+    assert!(start.ends_with("\n포지션 없음"), "{start}");
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+#[test]
+fn when_watcher_kill_fails_the_oms_unit_is_stopped_before_the_first_cancel_all() {
+    let (tg_dir, tg) = telegram_section("rt-k-stop-t");
+    let (mut w, dir) = kill_world("rt-k-stop", &tg, "");
+    // No admin.sock at the configured path.
+    w.cfg.admin_socket = w.cfg.admin_socket.with_file_name("none.sock");
+    w.systemctl = fake_systemctl(&dir, 0);
+    let argv = dir.join("argv");
+    let at_cancel = Arc::new(Mutex::new(Vec::new()));
+    let (a, file) = (at_cancel.clone(), argv.clone());
+    w.bybit.on_request(move |r| {
+        if r.path() == CANCEL_ALL {
+            a.lock().unwrap().push(file.exists());
+        }
+    });
+    w.status_marked();
+    let clock = Arc::new(ManualClock::new(T0));
+    let mut run = w.start(clock.clone());
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    walk(&clock, 2000);
+    w.status_down();
+    walk_until(&clock, 20_000, "the fire", || w.lines_with(FIRED) == 1);
+    walk_kill(&clock, "the fake systemctl", || argv.exists());
+    walk_kill(&clock, "the first cancel-all", || {
+        !w.requests(CANCEL_ALL).is_empty()
+    });
+    assert_eq!(at_cancel.lock().unwrap()[0], true, "systemctl ran before the first cancel-all");
+    assert_eq!(
+        std::fs::read_to_string(&argv).unwrap(),
+        format!("--no-ask-password\nstop\n--\n{UNIT}\n")
+    );
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    let start = &sent_with(&w, START_NOTICE)[0];
+    assert!(start.contains("킬 마커: 씀. OMS 정지: watcher_kill 실패(not sent: "), "{start}");
+    assert!(start.contains(&format!("→ systemctl stop {UNIT}: 정지됨). ")), "{start}");
+    assert!(!start.contains("X8"), "{start}");
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+/// A watcher started while the OMS does not answer `/api/status`: W5 is
+/// armed at the end of the start (owner question 1) and fires after the
+/// silence; `admin.sock` latches. Returns once `watcher_kill` arrived.
+fn kill_with_the_oms_down(name: &str) -> (World, std::path::PathBuf, std::path::PathBuf, Arc<ManualClock>, Running) {
+    let (tg_dir, tg) = telegram_section(&format!("{name}-t"));
+    let (mut w, dir) = kill_world(name, &tg, "");
+    let marker = w.cfg.kill.as_ref().unwrap().marker.clone();
+    w.admin = admin_answering(&w.cfg.admin_socket, &marker, "latched").0;
+    w.systemctl = fake_systemctl(&dir, 0);
+    let clock = Arc::new(ManualClock::new(T0));
+    let run = w.start(clock.clone());
+    // The start ends with the public IP echo.
+    assert!(until(10, || !w.echo.requests().is_empty()), "{:?}", w.log());
+    std::thread::sleep(Duration::from_millis(300));
+    // A gap only makes the fire later, never earlier.
+    walk(&clock, 9000);
+    assert_eq!(w.lines_with(FIRED), 0, "{:?}", w.log());
+    walk_until(&clock, 10_000, "the fire", || w.lines_with(FIRED) == 1);
+    walk_kill(&clock, "the marker", || marker.exists());
+    walk_kill(&clock, "watcher_kill at admin.sock", || {
+        kill_lines(&w.admin).len() == 1
+    });
+    (w, dir, tg_dir, clock, run)
+}
+
+#[test]
+fn a_watcher_started_with_the_oms_down_kills_after_the_silence() {
+    let (w, dir, tg_dir, clock, mut run) = kill_with_the_oms_down("rt-k-down");
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    let start = &sent_with(&w, START_NOTICE)[0];
+    assert!(
+        start.contains("초, 마지막 정상 응답 이 프로세스에서 없음. 킬 마커: 씀(OMS가 읽는 경로인지 확인 못 함). OMS 정지: admin.sock watcher_kill → latched)"),
+        "{start}"
+    );
+    // The OMS never answered: no replay, no check, no heartbeat.
+    assert!(w.monitor.conns().is_empty());
+    assert!(w.requests("/v5/account/wallet-balance").is_empty());
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+#[test]
+fn a_marker_written_by_the_watcher_is_read_by_a_marker_rule() {
+    use std::os::unix::fs::MetadataExt;
+    let (w, dir, tg_dir, _clock, mut run) = kill_with_the_oms_down("rt-k-file");
+    assert_eq!(run.shutdown(), 0);
+    // The file the runtime left, as the OMS's marker rule reads it
+    // (C-HOLD: anything at the path latches; the first 512 bytes, control
+    // characters as spaces, are the note).
+    let marker = &w.cfg.kill.as_ref().unwrap().marker;
+    let meta = std::fs::symlink_metadata(marker).unwrap();
+    assert!(meta.file_type().is_file());
+    assert_eq!(meta.mode() & 0o777, 0o600);
+    let bytes = std::fs::read(marker).unwrap();
+    assert!(bytes.len() <= 512, "{}", bytes.len());
+    let text: String = String::from_utf8(bytes)
+        .unwrap()
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    assert!(text.starts_with("watcher w-rt W5 2023-11-14T22:13:"), "{text}");
+    assert!(
+        text.contains(" s (last good answer none in this process); the watcher stops the OMS and cancels every order with its own key. Clear with omsctl clear-hold --reason kill."),
+        "{text}"
+    );
+    // Only the marker and the fake systemctl are in its directory: no
+    // temporary file is left.
+    let mut names: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names, vec!["kill.marker".to_string(), "systemctl".to_string()]);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
 }
