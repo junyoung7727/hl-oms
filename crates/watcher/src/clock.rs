@@ -3,9 +3,11 @@
 //! [`ManualClock`], which moves only when the test moves it. Nothing in the
 //! watcher sleeps on this clock: a wait is a step that returns the instant
 //! it next wants to run. Elapsed times are `saturating_sub`, so a clock
-//! that steps back holds the timers until it passes the old value again.
+//! that steps back holds the timers until it passes the old value again;
+//! the kill path reads [`Steady`] instead, which never steps back (U19b3a).
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 pub trait Clock: Send + Sync {
     fn now_ms(&self) -> u64;
@@ -43,5 +45,44 @@ impl ManualClock {
 impl Clock for ManualClock {
     fn now_ms(&self) -> u64 {
         self.0.load(Ordering::SeqCst)
+    }
+}
+
+/// A clock that does not step back (C-WATCH part 12, review 4 S3): the
+/// inner clock plus an offset; when the inner clock reads lower than the
+/// last value returned, the offset rises so the value stays at that last
+/// value. A step back becomes a pause of zero length, a step forward
+/// passes through (W5's gap rule handles it). The offset and the last
+/// value sit in one `Mutex`, so every task that reads one `Steady` sees
+/// one timeline. W5 and the kill path read it; signing, texts, the engine
+/// and the sender read the raw clock.
+pub struct Steady {
+    inner: Arc<dyn Clock>,
+    /// `(offset, last value returned)`.
+    state: Mutex<(u64, u64)>,
+}
+
+impl Steady {
+    pub fn new(inner: Arc<dyn Clock>) -> Steady {
+        Steady {
+            inner,
+            state: Mutex::new((0, 0)),
+        }
+    }
+}
+
+impl Clock for Steady {
+    fn now_ms(&self) -> u64 {
+        let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let (offset, last) = *s;
+        let raw = self.inner.now_ms().saturating_add(offset);
+        let now = if raw < last {
+            s.0 = offset + (last - raw);
+            last
+        } else {
+            raw
+        };
+        s.1 = now;
+        now
     }
 }
