@@ -10,15 +10,17 @@ mod common;
 
 use common::TestJournal;
 use common::rig::{accepted, acked, of, ours, row};
-use common::sock::{FakeSock, oms};
+use common::sock::{self, FakeSock, oms};
 use http_fake::{Answer, FakeHttp, Request};
 use serde_json::{Value, json};
 use std::os::unix::fs::PermissionsExt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use watcher::alert::Route;
 use watcher::clock::{Clock, ManualClock, SystemClock};
 use watcher::config::Config;
+use watcher::rest::CANCEL_ALL;
 use watcher::runtime::{Endpoints, run};
 
 /// 2023-11-14T22:13:20Z.
@@ -49,6 +51,9 @@ struct World {
     journal: TestJournal,
     cfg: Config,
     lines: Arc<Mutex<Vec<String>>>,
+    /// The `systemctl` the runtime may run (U19b3c): under the test base
+    /// directory only; a missing file unless a test writes a fake.
+    systemctl: std::path::PathBuf,
 }
 
 fn key() -> Answer {
@@ -56,10 +61,33 @@ fn key() -> Answer {
         "readOnly": 1, "expiredAt": "1970-01-01T00:00:00Z"}))
 }
 
+/// Sets this process's soft limit on open files to its hard limit, once.
+/// A `World` holds about 40 sockets (five http fakes, two socket fakes,
+/// the runtime's clients), a test may hold up to four, and libtest starts
+/// as many tests at once as the machine has cores: on 32 cores the peak was
+/// 1086 open files, over the soft limit 1024 a systemd service starts with
+/// ("Too many open files" in 9 tests, U19b3c gate impl_1). The hard limit
+/// stays as it is; if the call fails, the limit stays too.
+fn raise_open_files_limit() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        use rustix::process::{Resource, Rlimit, getrlimit, setrlimit};
+        let hard = getrlimit(Resource::Nofile).maximum;
+        let _ = setrlimit(
+            Resource::Nofile,
+            Rlimit {
+                current: hard,
+                maximum: hard,
+            },
+        );
+    });
+}
+
 impl World {
     /// The fakes answering as a healthy OMS and Bybit would; `extra` is
     /// appended to the config.
     fn new(name: &str, extra: &str) -> World {
+        raise_open_files_limit();
         let bybit = FakeHttp::start(Answer::Reply(404, "{}".into()));
         bybit.route("/v5/user/query-api", [key()]);
         bybit.route(
@@ -114,6 +142,7 @@ vm_url = "{}"
         );
         let cfg = Config::from_toml(&text).unwrap();
         let lines = Arc::new(Mutex::new(Vec::new()));
+        let systemctl = creds_dir.join("no-systemctl");
         World {
             bybit,
             echo,
@@ -125,6 +154,7 @@ vm_url = "{}"
             journal,
             cfg,
             lines,
+            systemctl,
         }
     }
 
@@ -142,11 +172,23 @@ vm_url = "{}"
         );
     }
 
+    /// The fakes' endpoints. A `systemctl` outside the test base directory
+    /// panics: no test may run the real one (review 3 N5).
     fn endpoints(&self) -> Endpoints {
+        let base = std::env::var("OMS_TEST_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::env::temp_dir());
+        assert!(
+            self.systemctl.starts_with(&base),
+            "systemctl {} is outside the test directory {}",
+            self.systemctl.display(),
+            base.display()
+        );
         Endpoints {
             rest_base: self.bybit.url(),
             ip_echo_url: format!("{}/", self.echo.url()),
             telegram: vec![Route::direct(&self.telegram.url())],
+            systemctl: self.systemctl.clone(),
         }
     }
 
@@ -1091,4 +1133,912 @@ fn a_mismatch_collected_inside_the_pace_is_sent_at_shutdown() {
         }
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---- U19b3c: W5 and the kill sequence in the runtime ----
+//
+// Every kill test keeps `2 × probe_ms + request_timeout_ms` = 4,000 ms (the
+// defaults), walks the clock with `walk` only until the kill fired (the
+// error line of the fire) and then waits for each kill effect in real time
+// (`walk_kill`), so no K step and no position read runs on a clock the test
+// moves faster than real time; after the start notice reached the fake
+// Telegram it walks again (the loop's waits are on the clock).
+
+/// The unit name of every runtime test (review 3 N5).
+const UNIT: &str = "watcher-test-no-such-unit.service";
+/// The error line of a fire, as far as a test reads it.
+const FIRED: &str = "error: W5: /api/status gave no good answer for";
+
+/// A key that may cancel (U19b2a): read-write with `ContractTrade: Order`.
+fn cancel_key() -> Answer {
+    ok(json!({"isMaster": false, "userID": 1, "ips": ["127.0.0.1"],
+        "readOnly": 0, "permissions": {"ContractTrade": ["Order", "Position"], "Wallet": []},
+        "expiredAt": "1970-01-01T00:00:00Z"}))
+}
+
+/// A world with `[kill]` (`kill` holds its further fields): the marker in
+/// its own test directory, the key one that may cancel. `extra` as for
+/// `World::new`. Also the marker's directory.
+fn kill_world(name: &str, extra: &str, kill: &str) -> (World, std::path::PathBuf) {
+    let dir = common::test_dir(&format!("{name}-k"));
+    let marker = dir.join("kill.marker");
+    let w = World::new(
+        name,
+        &format!(
+            "{extra}\n[kill]\nmarker = \"{}\"\noms_unit = \"{UNIT}\"\n{kill}",
+            marker.display()
+        ),
+    );
+    w.bybit.route("/v5/user/query-api", [cancel_key()]);
+    w.bybit.route(CANCEL_ALL, [cancel_ok()]);
+    (w, dir)
+}
+
+/// A cancel-all Bybit accepted.
+fn cancel_ok() -> Answer {
+    ok(json!({"list": [], "success": "1"}))
+}
+
+/// `node.kill_marker` of an OMS that reads `path` (`None`: no `[kill]`).
+fn marker_node(path: Option<&std::path::Path>) -> Value {
+    json!({"kill_marker": {"configured": path.is_some(),
+        "path": path.map(|p| p.display().to_string()), "present_at_boot": false}})
+}
+
+impl World {
+    /// `/api/status` with the journal's cap and `node`.
+    fn status_with(&self, node: Value) {
+        let cap = self.journal.next_seq - 1;
+        self.status.route(
+            "/api/status",
+            [Answer::Reply(
+                200,
+                json!({"journal": {"durable_seq": cap},
+                    "core": {"instance_id": "0000000000000007"}, "node": node})
+                .to_string(),
+            )],
+        );
+    }
+
+    /// The OMS answers and reads the watcher's marker.
+    fn status_marked(&self) {
+        self.status_with(marker_node(Some(&self.cfg.kill.as_ref().unwrap().marker)));
+    }
+
+    /// The OMS stops answering (`/api/status` 503).
+    fn status_down(&self) {
+        self.status
+            .route("/api/status", [Answer::Reply(503, "{}".into())]);
+    }
+
+    /// Every line of the log so far.
+    fn log(&self) -> Vec<String> {
+        self.lines.lock().unwrap().clone()
+    }
+
+    /// The last value of `series` in the VM pushes so far.
+    fn pushed(&self, series: &str) -> Option<f64> {
+        let head = format!(r#"{{"metric":{{"__name__":"{series}""#);
+        self.pushes().iter().rev().find_map(|b| {
+            b.lines().find(|l| l.starts_with(&head)).map(|l| {
+                let v: Value = serde_json::from_str(l).unwrap();
+                v["values"][0].as_f64().unwrap()
+            })
+        })
+    }
+}
+
+/// A fake `systemctl` in `dir`: writes its arguments, one per line, to
+/// `<dir>/argv` and exits `code`.
+fn fake_systemctl(dir: &std::path::Path, code: i32) -> std::path::PathBuf {
+    let p = dir.join("systemctl");
+    std::fs::write(
+        &p,
+        format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}/argv'\nexit {code}\n", dir.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o700)).unwrap();
+    p
+}
+
+/// `walk` until `cond` holds after a step (at most `max_ms`).
+fn walk_until(clock: &ManualClock, max_ms: u64, what: &str, cond: impl Fn() -> bool) {
+    for _ in 0..max_ms / 100 {
+        if cond() {
+            return;
+        }
+        walk(clock, 100);
+    }
+    assert!(cond(), "{what}: not within {max_ms} ms of walking");
+}
+
+/// Waits in real time (at most 2,000 ms per step) for a kill effect; when
+/// it does not come, moves the clock one 100 ms step and waits again, at
+/// most 300 steps (review 4 S2). A K step thus gets at most one 100 ms
+/// step of the manual clock while it runs.
+fn walk_kill(clock: &ManualClock, what: &str, effect: impl Fn() -> bool) {
+    for _ in 0..300 {
+        let end = Instant::now() + Duration::from_millis(2000);
+        while Instant::now() < end {
+            if effect() {
+                // One tick more, so the runtime acted on it.
+                std::thread::sleep(Duration::from_millis(150));
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        clock.advance(100);
+    }
+    panic!("walk_kill: {what} did not come within 300 steps");
+}
+
+#[test]
+fn a_status_with_another_marker_path_refuses_the_start() {
+    let why = |oms: &str, ours: &std::path::Path| {
+        format!(
+            "the OMS reads its kill marker at {oms}; the watcher writes {}: they must be the same file",
+            ours.display()
+        )
+    };
+    for (case, node) in [
+        ("other", marker_node(Some(std::path::Path::new("/elsewhere/kill.marker")))),
+        ("none", marker_node(None)),
+    ] {
+        let (w, dir) = kill_world(&format!("rt-mpath-{case}"), "", "");
+        let marker = w.cfg.kill.as_ref().unwrap().marker.clone();
+        w.status_with(node);
+        let mut run = w.start(Arc::new(ManualClock::new(T0)));
+        assert!(until(10, || !run.running()), "{case}: {:?}", w.log());
+        assert_eq!(run.shutdown(), 2, "{case}");
+        let oms = if case == "none" { "none" } else { "/elsewhere/kill.marker" };
+        let reason = why(oms, &marker);
+        assert_eq!(w.lines_with(&format!("error: start refused: {reason}")), 1, "{case}: {:?}", w.log());
+        // The start-refusal P1 (U19b1c), here as a log line; its reason is
+        // cut to 200 characters, and the marker path under OMS_TEST_DIR
+        // can make it longer (U19b3c review 1 S2).
+        let cut: String = reason.chars().take(200).collect();
+        assert_eq!(
+            w.lines_with(&format!(
+                "warn: [WATCH P1] (no [telegram]: not sent) 워처 시작 거부: {cut}. 워처가 꺼짐"
+            )),
+            1,
+            "{case}"
+        );
+        // Nothing was replayed: no check ran.
+        assert!(w.monitor.conns().is_empty(), "{case}");
+        assert!(!marker.exists(), "{case}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    // The same file through a symlinked directory is the same marker: the
+    // watcher goes on to the checks.
+    let (w, dir) = kill_world("rt-mpath-link", "", "");
+    let link = dir.with_extension("link");
+    let _ = std::fs::remove_file(&link);
+    std::os::unix::fs::symlink(&dir, &link).unwrap();
+    w.status_with(marker_node(Some(&link.join("kill.marker"))));
+    let mut run = w.start(Arc::new(ManualClock::new(T0)));
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    assert_eq!(w.lines_with("start refused"), 0);
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_file(&link);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The `watcher_kill` lines `admin.sock` got.
+fn kill_lines(a: &FakeSock) -> Vec<Value> {
+    a.conns()
+        .iter()
+        .flatten()
+        .filter(|v| v["op"] == "watcher_kill")
+        .cloned()
+        .collect()
+}
+
+/// An `admin.sock` at `path` that answers `watcher_kill` with `reply` (and
+/// every other op as the OMS); at each `watcher_kill` it notes whether the
+/// marker was there, before it answers.
+fn admin_answering(
+    path: &std::path::Path,
+    marker: &std::path::Path,
+    reply: &'static str,
+) -> (FakeSock, Arc<Mutex<Vec<bool>>>) {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let (s, m) = (seen.clone(), marker.to_path_buf());
+    let sock = FakeSock::serve(path, move |_, _, v| {
+        if v["op"] == "watcher_kill" {
+            s.lock().unwrap().push(m.exists());
+            oms(v, reply)
+        } else {
+            oms(v, "held")
+        }
+    });
+    (sock, seen)
+}
+
+/// The fake Telegram's texts that hold `pat`.
+fn sent_with(w: &World, pat: &str) -> Vec<String> {
+    w.sent().into_iter().filter(|t| t.contains(pat)).collect()
+}
+
+const START_NOTICE: &str = "워처 킬 시작(W5: OMS /api/status 무응답 ";
+
+#[test]
+fn oms_silence_writes_the_marker_and_halts_the_oms_before_the_first_cancel_all() {
+    let (tg_dir, tg) = telegram_section("rt-k-halt-t");
+    let (mut w, dir) = kill_world("rt-k-halt", &tg, "");
+    let marker = w.cfg.kill.as_ref().unwrap().marker.clone();
+    let (admin, at_kill) = admin_answering(&w.cfg.admin_socket, &marker, "latched");
+    w.admin = admin;
+    w.systemctl = fake_systemctl(&dir, 0);
+    // At the first cancel-all: had admin.sock answered watcher_kill?
+    let at_cancel = Arc::new(Mutex::new(Vec::new()));
+    let (a, replied) = (at_cancel.clone(), at_kill.clone());
+    w.bybit.on_request(move |r| {
+        if r.path() == CANCEL_ALL {
+            a.lock().unwrap().push(!replied.lock().unwrap().is_empty());
+        }
+    });
+    w.status_marked();
+    let clock = Arc::new(ManualClock::new(T0));
+    let mut run = w.start(clock.clone());
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    walk(&clock, 2000);
+    // The OMS stops answering: W5 fires after the silence, then K1, K2 and
+    // only then the loop.
+    w.status_down();
+    walk_until(&clock, 20_000, "the fire", || w.lines_with(FIRED) == 1);
+    walk_kill(&clock, "the marker", || marker.exists());
+    walk_kill(&clock, "watcher_kill at admin.sock", || {
+        kill_lines(&w.admin).len() == 1
+    });
+    walk_kill(&clock, "the first cancel-all", || {
+        !w.requests(CANCEL_ALL).is_empty()
+    });
+    assert_eq!(*at_kill.lock().unwrap(), vec![true], "the marker was there at watcher_kill");
+    assert!(at_cancel.lock().unwrap()[0], "the halt was answered before the first cancel-all");
+    assert!(!dir.join("argv").exists(), "the halt latched: systemctl is not run");
+    let k = &kill_lines(&w.admin)[0];
+    let detail = k["detail"].as_str().unwrap();
+    assert!(detail.starts_with("W5: /api/status gave no good answer for "), "{detail}");
+    assert!(detail.ends_with(" s; watcher w-rt"), "{detail}");
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    let start = &sent_with(&w, START_NOTICE)[0];
+    assert!(start.starts_with("[WATCH P1] bybit w-rt "), "{start}");
+    assert!(
+        start.contains("킬 마커: 씀. OMS 정지: admin.sock watcher_kill → latched). 워처 키로 미체결 0건 확인까지 1초마다 일괄 취소"),
+        "{start}"
+    );
+    assert!(start.contains("\n포지션(거래소 /v5/position/list, "), "{start}");
+    assert!(start.ends_with("\n포지션 없음"), "{start}");
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+#[test]
+fn when_watcher_kill_fails_the_oms_unit_is_stopped_before_the_first_cancel_all() {
+    let (tg_dir, tg) = telegram_section("rt-k-stop-t");
+    let (mut w, dir) = kill_world("rt-k-stop", &tg, "");
+    // No admin.sock at the configured path.
+    w.cfg.admin_socket = w.cfg.admin_socket.with_file_name("none.sock");
+    w.systemctl = fake_systemctl(&dir, 0);
+    let argv = dir.join("argv");
+    let at_cancel = Arc::new(Mutex::new(Vec::new()));
+    let (a, file) = (at_cancel.clone(), argv.clone());
+    w.bybit.on_request(move |r| {
+        if r.path() == CANCEL_ALL {
+            a.lock().unwrap().push(file.exists());
+        }
+    });
+    w.status_marked();
+    let clock = Arc::new(ManualClock::new(T0));
+    let mut run = w.start(clock.clone());
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    walk(&clock, 2000);
+    w.status_down();
+    walk_until(&clock, 20_000, "the fire", || w.lines_with(FIRED) == 1);
+    walk_kill(&clock, "the fake systemctl", || argv.exists());
+    walk_kill(&clock, "the first cancel-all", || {
+        !w.requests(CANCEL_ALL).is_empty()
+    });
+    assert!(at_cancel.lock().unwrap()[0], "systemctl ran before the first cancel-all");
+    assert_eq!(
+        std::fs::read_to_string(&argv).unwrap(),
+        format!("--no-ask-password\nstop\n--\n{UNIT}\n")
+    );
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    let start = &sent_with(&w, START_NOTICE)[0];
+    assert!(start.contains("킬 마커: 씀. OMS 정지: watcher_kill 실패(not sent: "), "{start}");
+    assert!(start.contains(&format!("→ systemctl stop {UNIT}: 정지됨). ")), "{start}");
+    assert!(!start.contains("X8"), "{start}");
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+/// A watcher started while the OMS does not answer `/api/status`: W5 is
+/// armed at the end of the start (owner question 1) and fires after the
+/// silence; `admin.sock` latches. Returns once `watcher_kill` arrived.
+fn kill_with_the_oms_down(name: &str) -> (World, std::path::PathBuf, std::path::PathBuf, Arc<ManualClock>, Running) {
+    let (tg_dir, tg) = telegram_section(&format!("{name}-t"));
+    let (mut w, dir) = kill_world(name, &tg, "");
+    let marker = w.cfg.kill.as_ref().unwrap().marker.clone();
+    w.admin = admin_answering(&w.cfg.admin_socket, &marker, "latched").0;
+    w.systemctl = fake_systemctl(&dir, 0);
+    let clock = Arc::new(ManualClock::new(T0));
+    let run = w.start(clock.clone());
+    // The start ends with the public IP echo.
+    assert!(until(10, || !w.echo.requests().is_empty()), "{:?}", w.log());
+    std::thread::sleep(Duration::from_millis(300));
+    // A gap only makes the fire later, never earlier.
+    walk(&clock, 9000);
+    assert_eq!(w.lines_with(FIRED), 0, "{:?}", w.log());
+    walk_until(&clock, 10_000, "the fire", || w.lines_with(FIRED) == 1);
+    walk_kill(&clock, "the marker", || marker.exists());
+    walk_kill(&clock, "watcher_kill at admin.sock", || {
+        kill_lines(&w.admin).len() == 1
+    });
+    (w, dir, tg_dir, clock, run)
+}
+
+#[test]
+fn a_watcher_started_with_the_oms_down_kills_after_the_silence() {
+    let (w, dir, tg_dir, clock, mut run) = kill_with_the_oms_down("rt-k-down");
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    let start = &sent_with(&w, START_NOTICE)[0];
+    assert!(
+        start.contains("초, 마지막 정상 응답 이 프로세스에서 없음. 킬 마커: 씀(OMS가 읽는 경로인지 확인 못 함). OMS 정지: admin.sock watcher_kill → latched)"),
+        "{start}"
+    );
+    // The OMS never answered: no replay, no check, no heartbeat.
+    assert!(w.monitor.conns().is_empty());
+    assert!(w.requests("/v5/account/wallet-balance").is_empty());
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+#[test]
+fn a_marker_written_by_the_watcher_is_read_by_a_marker_rule() {
+    use std::os::unix::fs::MetadataExt;
+    let (w, dir, tg_dir, _clock, mut run) = kill_with_the_oms_down("rt-k-file");
+    assert_eq!(run.shutdown(), 0);
+    // The file the runtime left, as the OMS's marker rule reads it
+    // (C-HOLD: anything at the path latches; the first 512 bytes, control
+    // characters as spaces, are the note).
+    let marker = &w.cfg.kill.as_ref().unwrap().marker;
+    let meta = std::fs::symlink_metadata(marker).unwrap();
+    assert!(meta.file_type().is_file());
+    assert_eq!(meta.mode() & 0o777, 0o600);
+    let bytes = std::fs::read(marker).unwrap();
+    assert!(bytes.len() <= 512, "{}", bytes.len());
+    let text: String = String::from_utf8(bytes)
+        .unwrap()
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    assert!(text.starts_with("watcher w-rt W5 2023-11-14T22:13:"), "{text}");
+    assert!(
+        text.contains(" s (last good answer none in this process); the watcher stops the OMS and cancels every order with its own key. Clear with omsctl clear-hold --reason kill."),
+        "{text}"
+    );
+    // Only the marker and the fake systemctl are in its directory: no
+    // temporary file is left.
+    let mut names: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names, vec!["kill.marker".to_string(), "systemctl".to_string()]);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+/// One page of `/v5/order/realtime` with `n` open orders.
+fn orders(n: usize) -> Answer {
+    let list: Vec<Value> = (0..n)
+        .map(|i| json!({"orderStatus": "New", "orderLinkId": "", "orderId": format!("o{i}"),
+            "symbol": "BTCUSDT", "side": "Buy", "qty": "1"}))
+        .collect();
+    ok(json!({"category": "linear", "list": list, "nextPageCursor": ""}))
+}
+
+/// The manual clock and the path of each request at the fake Bybit.
+type Seen = Arc<Mutex<Vec<(u64, String)>>>;
+
+/// Records the manual clock and the path of every request at the fake
+/// Bybit.
+fn record_at(w: &World, clock: &Arc<ManualClock>) -> Seen {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let (s, c) = (seen.clone(), clock.clone());
+    w.bybit.on_request(move |r| s.lock().unwrap().push((c.now_ms(), r.path().to_string())));
+    seen
+}
+
+/// Requests to `path` from the `from`-th request at the fake on (by order:
+/// the clock stands still while the K steps run, so instants can tie).
+fn since(seen: &Mutex<Vec<(u64, String)>>, path: &str, from: usize) -> Vec<(usize, u64)> {
+    seen.lock()
+        .unwrap()
+        .iter()
+        .enumerate()
+        .skip(from)
+        .filter(|(_, (_, p))| p == path)
+        .map(|(i, (t, _))| (i, *t))
+        .collect()
+}
+
+/// A kill of an answering OMS that went silent: `admin.sock` latches. Walks
+/// until the start notice reached the fake Telegram. `kill` holds the
+/// further `[kill]` fields. `at_fire` changes the fakes once the fire line
+/// is logged, before the loop's first request: the `watcher_kill` reply
+/// waits for it (at most 10 s of real time), and K1, K2 and the first
+/// cancel-all and count otherwise all fit in one 15 ms pause of the walk.
+fn kill_after_silence(
+    name: &str,
+    extra: &str,
+    kill: &str,
+    at_fire: impl Fn(&World),
+) -> (World, std::path::PathBuf, std::path::PathBuf, Arc<ManualClock>, Running, Seen) {
+    let (tg_dir, tg) = telegram_section(&format!("{name}-t"));
+    let (mut w, dir) = kill_world(name, &format!("{extra}\n{tg}"), kill);
+    // The manual clock stands still while the reply waits: K2's deadline
+    // does not pass.
+    let ready = Arc::new(AtomicBool::new(false));
+    let r = ready.clone();
+    w.admin = FakeSock::serve(&w.cfg.admin_socket, move |_, _, v| {
+        if v["op"] == "watcher_kill" {
+            let end = Instant::now() + Duration::from_secs(10);
+            while !r.load(Ordering::SeqCst) && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            oms(v, "latched")
+        } else {
+            oms(v, "held")
+        }
+    });
+    w.systemctl = fake_systemctl(&dir, 0);
+    w.status_marked();
+    let clock = Arc::new(ManualClock::new(T0));
+    let seen = record_at(&w, &clock);
+    let run = w.start(clock.clone());
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    walk(&clock, 2000);
+    w.status_down();
+    walk_until(&clock, 20_000, "the fire", || w.lines_with(FIRED) == 1);
+    at_fire(&w);
+    ready.store(true, Ordering::SeqCst);
+    walk_kill(&clock, "watcher_kill at admin.sock", || {
+        kill_lines(&w.admin).len() == 1
+    });
+    walk_kill(&clock, "the first cancel-all", || {
+        !w.requests(CANCEL_ALL).is_empty()
+    });
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    (w, dir, tg_dir, clock, run, seen)
+}
+
+const FINAL_NOTICE: &str = "워처 킬 정리 완료: 미체결 0건 확인 뒤 30초 동안 늦은 접수 없음(";
+
+#[test]
+fn the_engine_is_paused_during_a_kill_and_resumes_after() {
+    let (w, dir, tg_dir, clock, mut run, seen) = kill_after_silence(
+        "rt-k-pause",
+        "[intervals]\nw1_ms = 500\nw2_ms = 500\nw3_ms = 1000\nw4_ms = 1000\nheartbeat_ms = 1000\n\
+         [rules]\nmin_age_ms = 500\n",
+        "",
+        // One order stays open: the loop cannot end while the test looks.
+        |w| w.bybit.route("/v5/order/realtime", [orders(1)]),
+    );
+    // Every request from here on was sent after the fire (the start
+    // notice needs K1, K2 and a position read).
+    let from = seen.lock().unwrap().len();
+    let beats = heartbeats(&w.monitor).len();
+    let age = |w: &World| w.pushed(r#"watcher_check_age_s","check":"W1"#).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let (age0, t0) = (age(&w), clock.now_ms());
+    // Until 5 cancel-alls (one per round_ms of 1,000 if the machine keeps
+    // the pace; bounded).
+    walk_until(&clock, 60_000, "5 cancel-alls", || since(&seen, CANCEL_ALL, from).len() >= 5);
+    std::thread::sleep(Duration::from_millis(300));
+    // The kill ran the whole window (an order was open): no check round
+    // (W3, W4; W1's list is the loop's count: no more of it than
+    // cancel-alls), no heartbeat; the check ages kept growing.
+    assert!(since(&seen, "/v5/account/wallet-balance", from).is_empty());
+    assert!(since(&seen, "/v5/execution/list", from).is_empty());
+    let cancels = since(&seen, CANCEL_ALL, from).len();
+    assert!(cancels >= 5, "{cancels}");
+    assert!(since(&seen, "/v5/order/realtime", from).len() <= cancels + 1);
+    let to = seen.lock().unwrap().len();
+    assert_eq!(heartbeats(&w.monitor).len(), beats);
+    let grown = age(&w) - age0;
+    assert!(grown >= (clock.now_ms() - t0) as f64 / 1000.0 - 2.0, "{grown}");
+    assert_eq!(w.pushed("watcher_kill_active"), Some(1.0));
+    // Zero open orders: the loop ends, the checks and heartbeats resume.
+    w.bybit.route("/v5/order/realtime", [empty_page()]);
+    walk_until(&clock, 60_000, "the final notice", || !sent_with(&w, FINAL_NOTICE).is_empty());
+    walk(&clock, 3000);
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(until(10, || heartbeats(&w.monitor).len() > beats));
+    assert!(!since(&seen, "/v5/account/wallet-balance", to).is_empty());
+    assert!(!since(&seen, "/v5/order/realtime", to).is_empty());
+    assert_eq!(w.pushed("watcher_kill_active"), Some(0.0));
+    // W5 watches again after one good answer (the halt latched: not owed).
+    assert_eq!(w.pushed("watcher_w5_armed"), Some(0.0));
+    w.status_marked();
+    walk_until(&clock, 10_000, "W5 armed again", || w.pushed("watcher_w5_armed") == Some(1.0));
+    assert_eq!(w.pushed("watcher_kill_halt_owed"), Some(0.0));
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+#[test]
+fn the_watchers_loop_repeats_until_zero_at_no_more_than_2_cancel_alls_per_second() {
+    // From the fire on: the first count finds one order left, the second
+    // cancel-all and its count answer 503, the third round counts zero.
+    let (w, dir, tg_dir, clock, mut run, seen) = kill_after_silence("rt-k-rate", "", "", |w| {
+        w.bybit.route(
+            "/v5/order/realtime",
+            [orders(1), Answer::Reply(503, "{}".into()), empty_page()],
+        );
+        w.bybit.route(
+            CANCEL_ALL,
+            [cancel_ok(), Answer::Reply(503, "{}".into()), cancel_ok()],
+        );
+    });
+    walk_until(&clock, 120_000, "the final notice", || !sent_with(&w, FINAL_NOTICE).is_empty());
+    let all = since(&seen, CANCEL_ALL, 0);
+    let cancels: Vec<u64> = all.iter().map(|(_, t)| *t).collect();
+    assert_eq!(cancels.len(), 3, "{cancels:?}");
+    for &t in &cancels {
+        let n = cancels.iter().filter(|&&u| u >= t && u < t + 1000).count();
+        assert!(n <= 2, "{n} cancel-alls in [{t}, {t} + 1,000): {cancels:?}");
+    }
+    // The round wait (round_ms 1,000) holds between them.
+    assert!(cancels.windows(2).all(|p| p[1] - p[0] >= 1000), "{cancels:?}");
+    // A count after every cancel-all (the failed one too); after the third
+    // the watch counts every 5 s, the last at 30 s (z is the third count's
+    // answer, within a tick of the third cancel-all; the engine runs again
+    // only after the last).
+    let counts = |a: usize, b: usize| {
+        since(&seen, "/v5/order/realtime", a)
+            .into_iter()
+            .filter(|(i, _)| *i < b)
+            .count()
+    };
+    assert_eq!(counts(all[0].0, all[1].0), 1);
+    assert_eq!(counts(all[1].0, all[2].0), 1);
+    let watch = since(&seen, "/v5/order/realtime", all[2].0)
+        .into_iter()
+        .filter(|(_, t)| *t <= cancels[2] + 29_000)
+        .count();
+    assert_eq!(watch, 6);
+    let fin = &sent_with(&w, FINAL_NOTICE)[0];
+    assert!(
+        fin.contains("(3회차, 일괄 취소 3회). OMS는 래치됨(watcher_kill)."),
+        "{fin}"
+    );
+    assert!(fin.contains("\n포지션(거래소 /v5/position/list, "), "{fin}");
+    assert_eq!(w.lines_with("the kill ended: zero open orders confirmed (3 rounds, 3 cancel-alls); the halt is not owed"), 1);
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+const LATE_HALT: &str = "늦은 정지: OMS가 다시 답해 watcher_kill로 래치함(latched)";
+
+/// A kill whose halt and stop both fail: no `admin.sock` at the configured
+/// path and a `systemctl` that exits 1; one order stays open at the fake.
+/// `before` runs once the checks run, before the OMS goes silent. Returns
+/// once the start notice reached the fake Telegram, with the path where
+/// `admin.sock` may appear.
+fn kill_unhalted(
+    name: &str,
+    before: impl Fn(&World, &ManualClock),
+) -> (World, std::path::PathBuf, std::path::PathBuf, Arc<ManualClock>, Running, std::path::PathBuf) {
+    let (tg_dir, tg) = telegram_section(&format!("{name}-t"));
+    let (mut w, dir) = kill_world(name, &tg, "");
+    let sock = w.cfg.admin_socket.with_file_name("late.sock");
+    w.cfg.admin_socket = sock.clone();
+    w.systemctl = fake_systemctl(&dir, 1);
+    w.status_marked();
+    let clock = Arc::new(ManualClock::new(T0));
+    let run = w.start(clock.clone());
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    before(&w, &clock);
+    walk(&clock, 2000);
+    w.bybit.route("/v5/order/realtime", [orders(1)]);
+    w.status_down();
+    walk_until(&clock, 20_000, "the fire", || w.lines_with(FIRED) == 1);
+    walk_kill(&clock, "the fake systemctl", || dir.join("argv").exists());
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    let start = &sent_with(&w, START_NOTICE)[0];
+    assert!(
+        start.contains(&format!("→ systemctl stop {UNIT}: 실패(exit 1). OMS 정지 실패: OMS가 새 주문을 낼 수 있음. OMS 키 폐기(X8 절차)를 검토). 워처 키로")),
+        "{start}"
+    );
+    (w, dir, tg_dir, clock, run, sock)
+}
+
+#[test]
+fn an_oms_that_comes_back_during_the_loop_is_latched_before_the_loop_ends() {
+    // The OMS comes back unlatched 5 s into the loop (stalled, or restarted
+    // by systemd): the halt retried every 5 s reaches it while the kill
+    // runs (review 3 M1).
+    let (w, dir, tg_dir, clock, mut run, sock) = kill_unhalted("rt-k-late", |_, _| {});
+    walk(&clock, 5000);
+    let admin = admin_answering(&sock, &w.cfg.kill.as_ref().unwrap().marker, "latched").0;
+    walk_until(&clock, 20_000, "watcher_kill at the new admin.sock", || {
+        kill_lines(&admin).len() == 1
+    });
+    assert!(sent_with(&w, FINAL_NOTICE).is_empty());
+    assert_eq!(w.pushed("watcher_kill_active"), Some(1.0));
+    let detail = kill_lines(&admin)[0]["detail"].as_str().unwrap().to_string();
+    assert_eq!(detail, "W5: 늦은 정지: watcher w-rt의 킬이 OMS 래치나 정지를 확인하지 못함");
+    walk_until(&clock, 20_000, "the late halt notice", || {
+        !sent_with(&w, LATE_HALT).is_empty()
+    });
+    assert!(sent_with(&w, LATE_HALT)[0].contains("\n포지션(거래소 /v5/position/list, "));
+    assert!(sent_with(&w, FINAL_NOTICE).is_empty());
+    // The order goes: the final notice names the latch; no further halt.
+    w.bybit.route("/v5/order/realtime", [empty_page()]);
+    walk_until(&clock, 60_000, "the final notice", || !sent_with(&w, FINAL_NOTICE).is_empty());
+    let fin = &sent_with(&w, FINAL_NOTICE)[0];
+    assert!(fin.contains("OMS는 래치됨(watcher_kill)."), "{fin}");
+    walk(&clock, 10_000);
+    assert_eq!(kill_lines(&admin).len(), 1);
+    assert_eq!(sent_with(&w, LATE_HALT).len(), 1);
+    assert_eq!(w.lines_with("the halt is not owed"), 1);
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+
+    // The watcher's key was latched by a 10010 answer before the kill
+    // (scenario C of review 3 M1): no cancel-all can be sent, the loop
+    // cannot end, and the halt retries still reach the OMS.
+    let (w, dir, tg_dir, clock, mut run, sock) = kill_unhalted("rt-k-late-key", |w, clock| {
+        w.bybit.route(
+            "/v5/account/wallet-balance",
+            [Answer::Reply(200, r#"{"retCode":10010,"retMsg":"Unmatched IP"}"#.into())],
+        );
+        walk_until(clock, 10_000, "the key's latch", || {
+            !sent_with(w, "워처 키가 거부됨(retCode 10010").is_empty()
+        });
+    });
+    walk(&clock, 5000);
+    let admin = admin_answering(&sock, &w.cfg.kill.as_ref().unwrap().marker, "latched").0;
+    walk_until(&clock, 20_000, "watcher_kill at the new admin.sock", || {
+        kill_lines(&admin).len() == 1
+    });
+    walk_until(&clock, 20_000, "the late halt notice", || {
+        !sent_with(&w, LATE_HALT).is_empty()
+    });
+    walk(&clock, 10_000);
+    std::thread::sleep(Duration::from_millis(300));
+    // U19b3c's shutdown is U19a's path (U19b3d adds the abort notice).
+    assert_eq!(run.shutdown(), 0);
+    assert_eq!(kill_lines(&admin).len(), 1);
+    assert_eq!(sent_with(&w, LATE_HALT).len(), 1);
+    assert!(w.requests(CANCEL_ALL).is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+#[test]
+fn a_clock_step_back_during_a_kill_does_not_hold_the_loop() {
+    // One order stays open; the wall clock steps back 60 s during the loop
+    // (review 4 S3): the kill path reads clock::Steady, so the next
+    // cancel-all comes round_ms of further progress after the last one,
+    // not 60 s later.
+    let (w, dir, tg_dir, clock, mut run, seen) = kill_after_silence("rt-k-back", "", "", |w| {
+        w.bybit.route("/v5/order/realtime", [orders(1)])
+    });
+    walk(&clock, 3000);
+    let cancels = || w.requests(CANCEL_ALL).len();
+    // Settle: the last cancel-all was counted.
+    std::thread::sleep(Duration::from_millis(300));
+    let k = cancels();
+    let last = since(&seen, CANCEL_ALL, 0).last().unwrap().0;
+    assert!(until(5, || !since(&seen, "/v5/order/realtime", last).is_empty()));
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(cancels(), k);
+    clock.set(clock.now_ms() - 60_000);
+    // round_ms (1,000) plus one step: each step waits for the runtime's
+    // ticks before the next.
+    let mut steps = 0;
+    while cancels() == k {
+        steps += 1;
+        assert!(steps <= 11, "no cancel-all within round_ms + 100 ms after the step back");
+        clock.advance(100);
+        until(1, || cancels() > k);
+    }
+    assert_eq!(cancels(), k + 1);
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+#[test]
+fn a_halt_without_a_reply_is_aborted_at_its_deadline() {
+    // admin.sock takes watcher_kill and never answers. The K2 deadline (2 ×
+    // request_timeout_ms + 1,000 = 11,000 ms of the kill's clock) passes
+    // while the connection hangs, so walking the clock through it does not
+    // depend on the machine: the runtime aborts the task (the connection
+    // closes) long before admin_kill's own timeout of 5,000 ms of real time
+    // for the reply, and K3 runs (review 2 S1, S2).
+    let (tg_dir, tg) = telegram_section("rt-k-hang-t");
+    let (mut w, dir) = kill_world(
+        "rt-k-hang",
+        &format!("[http]\nrequest_timeout_ms = 5000\n[w5]\nsilence_ms = 19000\n{tg}"),
+        "",
+    );
+    w.admin = FakeSock::serve(&w.cfg.admin_socket, |_, _, v| {
+        if v["op"] == "watcher_kill" {
+            sock::Reply::Silent
+        } else {
+            oms(v, "held")
+        }
+    });
+    w.systemctl = fake_systemctl(&dir, 0);
+    w.status_marked();
+    let clock = Arc::new(ManualClock::new(T0));
+    let mut run = w.start(clock.clone());
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    walk(&clock, 2000);
+    w.status_down();
+    walk_until(&clock, 40_000, "the fire", || w.lines_with(FIRED) == 1);
+    walk_kill(&clock, "watcher_kill at admin.sock", || {
+        kill_lines(&w.admin).len() == 1
+    });
+    let asked = Instant::now();
+    let conn = w.admin.conns().len() - 1;
+    assert_eq!(w.admin.conns()[conn].last().unwrap()["op"], "watcher_kill");
+    walk(&clock, 11_100);
+    assert!(w.admin.wait(Duration::from_secs(10), |s| s.closed[conn]));
+    let took = asked.elapsed();
+    assert!(took < Duration::from_millis(4000), "the halt task was not aborted at its deadline: {took:?}");
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    let start = &sent_with(&w, START_NOTICE)[0];
+    assert!(
+        start.contains(&format!("OMS 정지: watcher_kill 실패(정지 응답 없음(시간 초과)) → systemctl stop {UNIT}: 정지됨). ")),
+        "{start}"
+    );
+    assert!(dir.join("argv").exists());
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+#[test]
+fn a_round_in_flight_at_the_fire_sends_nothing_more_during_the_kill() {
+    // A W4 page request is held at the fake across the fire; released, it
+    // answers with a next-page cursor. The engine asks for page 2 at once,
+    // but a kill runs: the runtime does not send it (no new request of a
+    // round, no watcher_mismatch send while a kill runs; review 1 S1).
+    let (tg_dir, tg) = telegram_section("rt-k-inflight-t");
+    let (mut w, dir) = kill_world(
+        "rt-k-inflight",
+        &format!(
+            "[http]\nrequest_timeout_ms = 5000\n[w5]\nsilence_ms = 19000\n\
+             [intervals]\nw1_ms = 500\nw2_ms = 500\nw3_ms = 1000\nw4_ms = 1000\nheartbeat_ms = 1000\n\
+             [rules]\nmin_age_ms = 500\n{tg}"
+        ),
+        "",
+    );
+    let ready = Arc::new(AtomicBool::new(false));
+    let r = ready.clone();
+    w.admin = FakeSock::serve(&w.cfg.admin_socket, move |_, _, v| {
+        if v["op"] == "watcher_kill" {
+            let end = Instant::now() + Duration::from_secs(10);
+            while !r.load(Ordering::SeqCst) && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            oms(v, "latched")
+        } else {
+            oms(v, "held")
+        }
+    });
+    w.systemctl = fake_systemctl(&dir, 0);
+    w.status_marked();
+    let clock = Arc::new(ManualClock::new(T0));
+    // Records every request; once `arm` is set, holds the next W4 page
+    // (it blocks the fake, bounded) until `release`.
+    let seen: Seen = Arc::new(Mutex::new(Vec::new()));
+    let targets = Arc::new(Mutex::new(Vec::<String>::new()));
+    let (arm, release, held) = (
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(AtomicBool::new(false)),
+    );
+    let (s, t, c) = (seen.clone(), targets.clone(), clock.clone());
+    let (a, rl, h) = (arm.clone(), release.clone(), held.clone());
+    w.bybit.on_request(move |q| {
+        s.lock().unwrap().push((c.now_ms(), q.path().to_string()));
+        t.lock().unwrap().push(q.target.clone());
+        if q.path() == "/v5/execution/list" && a.swap(false, Ordering::SeqCst) {
+            h.store(true, Ordering::SeqCst);
+            let end = Instant::now() + Duration::from_secs(10);
+            while !rl.load(Ordering::SeqCst) && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+    });
+    let mut run = w.start(clock.clone());
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    walk(&clock, 2000);
+    w.status_down();
+    // W4 asks every 1,000 ms: the page held is asked 2 to 3 s before the
+    // fire (19,000 ms of silence), inside its round's deadline of
+    // 16,000 ms; the client's timeout is 5,000 ms of real time.
+    walk(&clock, 16_000);
+    arm.store(true, Ordering::SeqCst);
+    walk_until(&clock, 10_000, "the fire", || w.lines_with(FIRED) == 1);
+    assert!(held.load(Ordering::SeqCst), "no W4 page was held at the fire");
+    // The page answers with a cursor; one order stays open, so the loop
+    // runs while the test looks.
+    let page = ok(json!({"category": "linear", "nextPageCursor": "p2",
+        "list": [{"execId": "e1", "execTime": "1", "symbol": "BTCUSDT"}]}));
+    w.bybit.route("/v5/execution/list", [page, empty_page()]);
+    w.bybit.route("/v5/order/realtime", [orders(1)]);
+    let from = seen.lock().unwrap().len();
+    release.store(true, Ordering::SeqCst);
+    ready.store(true, Ordering::SeqCst);
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    walk_until(&clock, 60_000, "3 cancel-alls", || {
+        since(&seen, CANCEL_ALL, from).len() >= 3
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let page2 = targets.lock().unwrap()[from..]
+        .iter()
+        .filter(|t| t.starts_with("/v5/execution/list?") && t.contains("cursor=p2"))
+        .count();
+    assert_eq!(page2, 0, "{:?}", &targets.lock().unwrap()[from..]);
+    assert_eq!(w.pushed("watcher_kill_active"), Some(1.0));
+    assert!(
+        w.lines_with("debug: a kill runs: the engine's request is not sent") >= 1,
+        "{:?}",
+        w.log()
+    );
+    assert!(mismatch_lines(&w.admin).is_empty());
+    // The loop ends; the round closes at its deadline and W4 reads again.
+    let to = seen.lock().unwrap().len();
+    w.bybit.route("/v5/order/realtime", [empty_page()]);
+    walk_until(&clock, 60_000, "the final notice", || !sent_with(&w, FINAL_NOTICE).is_empty());
+    walk_until(&clock, 30_000, "W4 again", || {
+        !since(&seen, "/v5/execution/list", to).is_empty()
+    });
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+#[test]
+fn a_stop_that_ended_before_the_k3_deadline_tick_is_reported_as_stopped() {
+    // The fake systemctl exits 0 at once; the clock then jumps past the K3
+    // deadline (stop_wait_ms = 10,000) before the next tick. That tick sees
+    // both: the stop's exit is read before the deadline is judged, so the
+    // start notice says 정지됨, not 정지 확인 못 함 (review 1 N1).
+    let (tg_dir, tg) = telegram_section("rt-k-stopdl-t");
+    let (mut w, dir) = kill_world("rt-k-stopdl", &tg, "");
+    w.cfg.admin_socket = w.cfg.admin_socket.with_file_name("none.sock");
+    w.systemctl = fake_systemctl(&dir, 0);
+    let argv = dir.join("argv");
+    w.status_marked();
+    let clock = Arc::new(ManualClock::new(T0));
+    let mut run = w.start(clock.clone());
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    walk(&clock, 2000);
+    w.status_down();
+    walk_until(&clock, 20_000, "the fire", || w.lines_with(FIRED) == 1);
+    // The clock stands still until the fake ran (the K3 deadline cannot
+    // pass), then jumps at once (the loop ticks every 100 ms).
+    assert!(until(10, || argv.exists()), "{:?}", w.log());
+    clock.advance(10_100);
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    let start = &sent_with(&w, START_NOTICE)[0];
+    assert!(start.contains(&format!("→ systemctl stop {UNIT}: 정지됨). ")), "{start}");
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
 }
