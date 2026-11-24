@@ -17,6 +17,7 @@ use crate::clock::Clock;
 use crate::config::Kill;
 use crate::decimal::Dec;
 use crate::rest::{CancelAll, Client, RestError};
+use crate::w1;
 
 /// The position list of the block (gateway facts Q12): with `settleCoin`
 /// and no `symbol` only rows of size > 0 come back (Q12.1).
@@ -437,6 +438,88 @@ pub async fn read_positions(
 
 fn class(e: &RestError) -> String {
     e.class().to_string()
+}
+
+// ---- The count reader (U19b2c) ----
+
+/// The open orders the loop counts (C3): W1's list, linear USDT.
+pub const ORDERS: &str = w1::PATH;
+
+/// Counts the open linear USDT orders for the loop (C3, C5): every page of
+/// [`ORDERS`] by W1's paging rule, at most [`w1::MAX_PAGES`] (more is the
+/// count error "more than 1000 open orders"); a row is open when its
+/// `orderStatus` is one of [`w1::OPEN`], whoever placed it (a foreign or
+/// empty `orderLinkId` counts: zero open orders is the goal). A row
+/// without `orderStatus`, or a page that does not read, is a count error,
+/// never a number.
+///
+/// The count keeps its own per-page deadline on `clock`, as the loop does:
+/// its start, then each page's answer, + `request_timeout_ms` +
+/// [`DEADLINE_EXTRA_MS`]. After a page that answered at or after it, the
+/// count sends no further page and ends with [`PAST_DEADLINE`]: the task
+/// asks for the next page at once, with no await the runtime could abort
+/// it at (review 3 S2). `on_page` is called for each page answered before
+/// its deadline.
+pub async fn count_open(
+    client: &Client,
+    clock: &dyn Clock,
+    request_timeout_ms: u64,
+    on_page: &mut (dyn FnMut() + Send),
+) -> Result<usize, String> {
+    let extra = request_timeout_ms.saturating_add(DEADLINE_EXTRA_MS);
+    let mut deadline = clock.now_ms().saturating_add(extra);
+    let unreadable = |why: &str| client.unreadable(ORDERS, why).to_string();
+    let mut open = 0;
+    let mut cursor = String::new();
+    for pages in 1..=w1::MAX_PAGES {
+        let mut params = vec![
+            ("category", "linear".to_string()),
+            ("settleCoin", "USDT".to_string()),
+            ("limit", w1::PAGE_LIMIT.to_string()),
+        ];
+        if !cursor.is_empty() {
+            params.push(("cursor", cursor.clone()));
+        }
+        let answer = client.get(ORDERS, &params).await;
+        let now = clock.now_ms();
+        if now >= deadline {
+            return Err(PAST_DEADLINE.to_string());
+        }
+        deadline = now.saturating_add(extra);
+        on_page();
+        let v = answer.map_err(|e| e.to_string())?;
+        let Some(list) = v.get("list").and_then(Value::as_array) else {
+            return Err(unreadable("result.list is not a list"));
+        };
+        let Some(next) = v.get("nextPageCursor").and_then(Value::as_str) else {
+            return Err(unreadable("nextPageCursor is not a string"));
+        };
+        for row in list {
+            let Some(status) = row.get("orderStatus").and_then(Value::as_str) else {
+                return Err(unreadable("a row without orderStatus"));
+            };
+            if w1::OPEN.contains(&status) {
+                open += 1;
+            }
+        }
+        if next.is_empty() {
+            if list.len() >= w1::PAGE_LIMIT {
+                return Err(unreadable("a full page without nextPageCursor"));
+            }
+            return Ok(open);
+        }
+        if next == cursor {
+            return Err(unreadable("nextPageCursor is the cursor just sent"));
+        }
+        if pages == w1::MAX_PAGES {
+            break;
+        }
+        cursor = next.to_string();
+    }
+    Err(format!(
+        "more than {} open orders",
+        w1::MAX_PAGES * w1::PAGE_LIMIT
+    ))
 }
 
 // ---- The loop (U19b2b) ----

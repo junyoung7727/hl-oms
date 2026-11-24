@@ -18,7 +18,7 @@ use watcher::config::Kill;
 use watcher::kill::{
     AbortWhy, Action, CancelAnswer, KillLoop, LATCHED_LINE, LastError, NOT_READ_ON_ABORT, NotSent,
     Notice, PAUSED_LINE, POSITIONS, Phase, Positions, Report, StopOutcome, TIMED_OUT, notice_text,
-    position_block, read_positions,
+    position_block, read_positions, ORDERS, count_open,
 };
 use watcher::metrics::Metrics;
 use watcher::rest::{CancelAll, Client, ClientConfig, Credentials};
@@ -1562,5 +1562,85 @@ fn the_order_budget_holds_under_any_answer_sequence() {
             assert_eq!(held, 0, "valid timings never meet the budget");
         }
         assert!(ended > 0);
+    }
+}
+
+// ---- The count reader, Inflight and the rig (U19b2c) ----
+
+/// An order row of `/v5/order/realtime`.
+fn order(link: &str, status: &str) -> Value {
+    json!({"orderLinkId": link, "orderId": format!("o-{link}-{status}"), "symbol": "BTCUSDT",
+        "side": "Buy", "qty": "1", "orderStatus": status})
+}
+
+/// One page of `/v5/order/realtime`.
+fn orders(rows: Vec<Value>, cursor: &str) -> Answer {
+    page(rows, cursor)
+}
+
+#[tokio::test]
+async fn foreign_orders_count() {
+    let ours = watcher::wire_id::encode(7, 1);
+    // Open = New, PartiallyFilled, Untriggered, whoever placed the order:
+    // ours, a foreign link, an empty link, a row without a link.
+    let first = vec![
+        order(&ours, "New"),
+        order("manual-1", "PartiallyFilled"),
+        order("", "Untriggered"),
+        json!({"orderId": "x", "orderStatus": "New"}),
+        order(&ours, "Filled"),
+    ];
+    let second = vec![order("web-2", "New"), order("web-3", "Cancelled")];
+    let fake = FakeHttp::start(Answer::Close);
+    fake.route(ORDERS, [orders(first, "c2"), orders(second, "")]);
+    let c = client(&fake);
+    let mut pages = 0;
+    let n = count_open(&c.client, &*c.clock, RT, &mut || pages += 1).await;
+    assert_eq!(n, Ok(5));
+    assert_eq!(pages, 2);
+    assert_eq!(
+        targets(&fake),
+        [
+            "/v5/order/realtime?category=linear&limit=50&settleCoin=USDT",
+            "/v5/order/realtime?category=linear&cursor=c2&limit=50&settleCoin=USDT",
+        ]
+    );
+
+    // No open order at all: zero, the one answer that ends a watch.
+    let fake = FakeHttp::start(Answer::Close);
+    fake.route(ORDERS, [orders(vec![order(&ours, "Filled")], "")]);
+    let c = client(&fake);
+    assert_eq!(count_open(&c.client, &*c.clock, RT, &mut || {}).await, Ok(0));
+
+    // What does not read is a count error, never a number.
+    let not_a_list = Answer::Reply(
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":{},"nextPageCursor":""}}"#.into(),
+    );
+    for (case, answers, sent) in [
+        ("list not a list", vec![not_a_list], 1),
+        (
+            "a row without orderStatus",
+            vec![orders(vec![json!({"orderLinkId": "a"})], "")],
+            1,
+        ),
+        (
+            "a full page without a cursor",
+            vec![orders(vec![order("a", "New"); 50], "")],
+            1,
+        ),
+        (
+            "the cursor just sent again",
+            vec![orders(vec![], "c2"), orders(vec![], "c2")],
+            2,
+        ),
+        ("HTTP 503", vec![Answer::Reply(503, "busy".into())], 1),
+    ] {
+        let fake = FakeHttp::start(Answer::Close);
+        fake.route(ORDERS, answers);
+        let c = client(&fake);
+        let n = count_open(&c.client, &*c.clock, RT, &mut || {}).await;
+        assert!(n.is_err(), "{case}: {n:?}");
+        assert_eq!(fake.requests().len(), sent, "{case}");
     }
 }
