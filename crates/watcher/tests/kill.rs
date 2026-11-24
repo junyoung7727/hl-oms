@@ -1871,6 +1871,8 @@ fn kinds(rig: &KillRig) -> Vec<&'static str> {
             Notice::Progress { .. } => "progress",
             Notice::Final { .. } => "final",
             Notice::Abort { .. } => "abort",
+            Notice::LateHalt { .. } => "late halt",
+            Notice::AbortBefore { .. } => "abort before the loop",
         })
         .collect()
 }

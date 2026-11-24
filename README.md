@@ -99,8 +99,8 @@ cargo run --release -p xtask -- docs        # 결과를 주장과 묶어 docs/ge
 | `crates/oms-sim` | 결정적 시뮬레이션과 가상 거래소 모델 | 1,700 |
 | `crates/oms-api` | 로컬 프로토콜 타입, 클라이언트, `omsctl` | 500 |
 | `crates/oms-node` | 실행 계층: 큐, 커밋 단계, 복구, 소켓 서버, HTTP, 게이트웨이(가상, Hyperliquid), `simvenue` | 7,300 |
-| `crates/watcher` | 독립 워처(U19a): OMS 코드 없이 문서로만 쓴 저널 읽기와 저널 상태, 자기 Bybit 서명·클라이언트와 지표 내보내기, 설정과 키 파일 읽기, 시작 확인과 IP 재확인, 검사 엔진과 W1(열린 주문), W2(포지션), W3(지갑과 증거금), W4(체결), OMS 연결(`/api/status`, `admin.sock` 다시 보내기, `monitor.sock` 하트비트)과 실행, 바이너리 `watcher --config`, 예산 측정, 직접 알림의 토큰 파일과 전달 규칙(U19b1a), 송신 태스크와 P1 조건(U19b1b·c), 서명된 일괄 취소와 킬 알림 문구(U19b2a, 아직 보내지 않음), sans-IO 킬 루프(U19b2b), 그 세기와 요청 태스크 `Inflight`(U19b2c, 시험 장치만 가짜 거래소에 대해 돌리고 실행은 아직 돌리지 않음), sans-IO W5와 뒤로 가지 않는 시계, `watcher_kill` 클라이언트, OMS 단위 하나의 멈춤(U19b3a, 아직 돌리지 않음; mainnet은 `[kill]` 필수). 의존성은 레지스트리 crate뿐 | 25,400 |
-| `crates/watcher-conformance` | 워처와 OMS 코드를 함께 링크하는 유일한 곳: 적합성 시험 | 900 |
+| `crates/watcher` | 독립 워처(U19a): OMS 코드 없이 문서로만 쓴 저널 읽기와 저널 상태, 자기 Bybit 서명·클라이언트와 지표 내보내기, 설정과 키 파일 읽기, 시작 확인과 IP 재확인, 검사 엔진과 W1(열린 주문), W2(포지션), W3(지갑과 증거금), W4(체결), OMS 연결(`/api/status`, `admin.sock` 다시 보내기, `monitor.sock` 하트비트)과 실행, 바이너리 `watcher --config`, 예산 측정, 직접 알림의 토큰 파일과 전달 규칙(U19b1a), 송신 태스크와 P1 조건(U19b1b·c), 서명된 일괄 취소와 킬 알림 문구(U19b2a, 아직 보내지 않음), sans-IO 킬 루프(U19b2b), 그 세기와 요청 태스크 `Inflight`(U19b2c, 시험 장치만 가짜 거래소에 대해 돌리고 실행은 아직 돌리지 않음), sans-IO W5와 뒤로 가지 않는 시계, `watcher_kill` 클라이언트, OMS 단위 하나의 멈춤(U19b3a, 아직 돌리지 않음; mainnet은 `[kill]` 필수), sans-IO 킬 순서(K1 마커 → K2 `watcher_kill` → K3 멈춤 → 루프)와 킬 마커 쓰기(U19b3b, 아직 돌리지 않음). 의존성은 레지스트리 crate뿐 | 27,450 |
+| `crates/watcher-conformance` | 워처와 OMS 코드를 함께 링크하는 유일한 곳: 적합성 시험(U19b3b부터 OMS의 킬 마커 독자도) | 900 |
 | `crates/xtask` | 수용 시험 실행기, 변이 점검, 부하 생성기, 문서 생성기 | 2,100 |
 | `registry/` | 검토 항목, 결정, 계약, 주장, 가정, 사용자 결정의 원본(TOML) | |
 | `docs/` | 문서. `docs/generated/`는 registry와 결과 파일에서 만든다 | |
