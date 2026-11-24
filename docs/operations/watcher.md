@@ -115,7 +115,7 @@ $EDITOR /etc/hl-oms/watcher-telegram.json
 - **OMS의 키와 다른 워처 전용 키**를 같은 하위 계정(`sub_account_uid`)에 만든다(설계 §7.4).
 - **읽기·쓰기 키**(`readOnly` 0)로 만들고 **`ContractTrade`의 `Order` 권한**을 준다: 워처는 자기 키로 일괄 취소(`POST /v5/order/cancel-all`)를 보낸다(C-WATCH 11부). 워처가 보내는 서명된 POST는 이것 하나이고 주문을 만들거나 고치는 길은 없다. `Order`가 일괄 취소를 허락한다는 것은 권한 이름에서 한 추론이다(testnet에서 확인할 것).
 - **출금 권한을 주지 않는다**(설계 §7.4). `Withdraw`는 마스터 전용이라 하위 계정 키에는 없어야 한다.
-- `[kill]`이 있으면 시작 2단계와 60초마다의 재확인이 세 가지를 본다(U19b2a): `readOnly`가 0이 아니면, `ContractTrade`에 `Order`가 없으면, 어느 권한 목록에든 `Withdraw`가 있으면 시작하지 않는다(종료 2, 줄은 `query-api: the API key is read-only …`, `… has no ContractTrade Order permission …`, `… has the Withdraw permission (<목록>) …`). 재확인에서 맞지 않으면 재시작까지 모든 Bybit 요청과 일괄 취소가 멈춘다(`watcher_auth_rejected` 1, `[WATCH P1] 워처 키가 시작 규칙을 더는 지키지 않음`). `[kill]`이 없으면(testnet) 이것을 보지 않는다: 그 워처는 조회만 하므로 읽기 전용 키도 되고, 출금 권한은 키를 만들 때 사람이 확인한다.
+- `[kill]`이 있으면 시작 2단계와 60초마다의 재확인이 세 가지를 본다(U19b2a): `readOnly`가 0이 아니면, `ContractTrade`에 `Order`가 없으면, 어느 권한 목록에든 `Withdraw`가 있으면 시작하지 않는다(답의 다른 목록을 읽을 수 없어도; 종료 2, 줄은 `query-api: the API key is read-only …`, `… has no ContractTrade Order permission …`, `… has the Withdraw permission (<목록>) …`). 재확인에서 맞지 않으면 재시작까지 모든 Bybit 요청과 일괄 취소가 멈춘다(`watcher_auth_rejected` 1, `[WATCH P1] 워처 키가 시작 규칙을 더는 지키지 않음`). `[kill]`이 없으면(testnet) 이것을 보지 않는다: 그 워처는 조회만 하므로 읽기 전용 키도 되고, 출금 권한은 키를 만들 때 사람이 확인한다.
 - 키를 IP에 묶는다(설계 §7.4). 묶지 않은 키는 시작 확인이 거부한다(U19a4b).
 
 ## 시작 확인과 거부(U19a4b)

@@ -1,6 +1,6 @@
 # C-WATCH 독립 워처
 
-상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23), 4부 구현됨(설정과 자격 파일 U19a4, 시작 확인과 IP 재확인 U19a4b, 2026-11-23), 5부 구현됨(검사 엔진과 W1, U19a5, 2026-11-23), 6부 구현됨(W2 포지션, U19a6, 2026-11-23), 7부 구현됨(OMS 연결과 실행, U19a7, 2026-11-23), 8부 구현됨(W4 체결, U19a8, 2026-11-23), 9부 구현됨(W3 지갑과 증거금, W2의 대신 시각, 예산, U19a9, 2026-11-23), 10부 구현됨(직접 알림의 설정, 토큰 파일과 전달 규칙 U19b1a, 2026-11-24; 송신 태스크 U19b1b, 2026-11-24; P1 조건과 실행 연결 U19b1c, 2026-11-24), 11부 앞부분 구현됨(서명된 일괄 취소 POST, `[kill]`의 키 규칙과 루프 필드, 킬 알림의 문구와 포지션 묶음 U19b2a, 2026-11-24; 아직 아무것도 일괄 취소를 보내지 않음). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md), 10~12부는 [ADR-032](../adr/ADR-032-watcher-kill-and-alerts.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3, V-WATCH-4, V-WATCH-5, V-WATCH-6, V-WATCH-7, V-WATCH-8, V-WATCH-9, V-WATCH-10, V-WATCH-11. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
+상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23), 4부 구현됨(설정과 자격 파일 U19a4, 시작 확인과 IP 재확인 U19a4b, 2026-11-23), 5부 구현됨(검사 엔진과 W1, U19a5, 2026-11-23), 6부 구현됨(W2 포지션, U19a6, 2026-11-23), 7부 구현됨(OMS 연결과 실행, U19a7, 2026-11-23), 8부 구현됨(W4 체결, U19a8, 2026-11-23), 9부 구현됨(W3 지갑과 증거금, W2의 대신 시각, 예산, U19a9, 2026-11-23), 10부 구현됨(직접 알림의 설정, 토큰 파일과 전달 규칙 U19b1a, 2026-11-24; 송신 태스크 U19b1b, 2026-11-24; P1 조건과 실행 연결 U19b1c, 2026-11-24), 11부 앞부분 구현됨(서명된 일괄 취소 POST, `[kill]`의 키 규칙과 루프 필드, 킬 알림의 문구와 포지션 묶음 U19b2a, 2026-11-24; 아직 아무것도 일괄 취소를 보내지 않음). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md), 10~12부는 [ADR-032](../adr/ADR-032-watcher-kill-and-alerts.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3, V-WATCH-4, V-WATCH-5, V-WATCH-6, V-WATCH-7, V-WATCH-8, V-WATCH-9, V-WATCH-10, V-WATCH-11, V-WATCH-12. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
 
 워처는 OMS와 코드를 나누지 않는 별도 프로그램이다. 저널을 자기 읽기로 읽고(이 문서와 [C-TAIL](tail.md), [ADR-011](../adr/ADR-011-file-format.md)만으로 썼다), 자기 키와 클라이언트로 Bybit를 조회해 OMS와 비교하고, 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고, `monitor.sock`에 하트비트를 보낸다. **U19a7부터 워처는 돈다**: `watcher --config <path>`가 설정과 자격 파일을 읽고, 시작 확인을 거쳐 OMS의 `/api/status`를 기다린 뒤 저널을 처음부터 재생하고, W1(열린 주문), W2(포지션), U19a8부터 W4(체결), U19a9부터 W3(지갑과 증거금)을 돌려 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고(다시 보내기 규칙, 7부), `heartbeat_ms`마다 `monitor.sock`에 하트비트를 보내고, 지표를 VictoriaMetrics로 밀어 넣는다. 네 검사가 모두 돈다(U19a9). loopback 가짜와 시험 저널로만 시험했고 실제 OMS 프로세스나 실제 Bybit에 붙여 돌려 본 적이 없다(키가 없다, U-01). 서비스 설치는 U20b다.
 
@@ -823,16 +823,18 @@ U19b2a가 이 부의 앞부분을 쓴다: 서명된 POST 하나(일괄 취소), 
 
 ### `[kill]`이 있을 때의 키 규칙(`start::Start` 2단계와 `IpCheck`)
 
-| 규칙 | 통과 | 거부(종료 2, `query-api: ` 다음 이유) | 읽을 수 없음(5초 뒤 다시) |
+| 규칙 | 통과 | 거부(종료 2, `query-api: ` 다음 이유) | 읽을 수 없음(시작은 5초 뒤, 재확인은 `ip_check_ms` 뒤 다시) |
 |---|---|---|---|
 | 읽기·쓰기 | `readOnly == 0`(정수) | `the API key is read-only (readOnly 1); with [kill] the watcher cancels orders and needs a read-write key` | `readOnly`가 없거나 정수가 아님(불리언 `false`, 문자열 `"0"` 포함) |
-| 주문 권한 | `permissions.ContractTrade`가 `"Order"`를 담음 | `the API key has no ContractTrade Order permission; with [kill] the watcher needs it to cancel orders`(`ContractTrade`가 없어도) | `permissions`가 객체가 아님, 그 값 하나가 문자열 목록이 아님 |
-| 출금 권한 없음 | `permissions`의 어느 목록에도 `"Withdraw"` 없음 | `the API key has the Withdraw permission (<목록 이름>); the watcher's key must not be able to withdraw` | 위와 같음 |
+| 주문 권한 | `permissions.ContractTrade`가 `"Order"`를 담음 | `the API key has no ContractTrade Order permission; with [kill] the watcher needs it to cancel orders`(`ContractTrade`가 없어도) | `permissions`가 객체가 아님, `ContractTrade`가 있지만 문자열 목록이 아님 |
+| 출금 권한 없음 | `permissions`의 어느 목록에도 `"Withdraw"` 없음 | `the API key has the Withdraw permission (<목록 이름>); the watcher's key must not be able to withdraw` | `permissions`가 객체가 아님, 그 값 하나가 문자열 목록이 아님 |
 
 - 이 규칙은 2단계의 기존 규칙(하위 계정, `sub_account_uid`, 묶인 IP) 뒤에 본다. `[kill]`이 없으면 읽지 않는다: 읽기 전용 키도 된다(U19a의 워처는 조회만 한다).
 - 재확인(`IpCheck`)도 같은 규칙을 본다. 거기서 맞지 않으면 4부의 규칙 멈춤이다(`Step::StopRequests`, `Client::stop_key`, 재시작까지 모든 Bybit 요청과 일괄 취소가 멈춤; 소유자 질문 5).
 - `Order`가 일괄 취소를 허락한다는 것은 권한 이름에서 한 추론이고 문서에 없다(Q4). `Withdraw`는 Q4에 마스터 전용이라 하위 계정 키에는 없어야 하고, 거부해도 잃는 것이 없다(설계 §7.4 "출금 권한 없음").
 - 읽을 수 없는 답을 "읽을 수 없음"(다시 묻기)으로 둔 것은 기존 2단계와 같은 판단이다. 거부가 아니라서 시작이 끝나지 않을 뿐 아무것도 허락하지 않는다.
+- 읽히는 규칙이 맞지 않으면 같은 답의 다른 필드나 목록을 읽을 수 없어도 거부다(검토 1 S4; 스펙 Amendment). 순서는 표의 위에서 아래(읽기·쓰기, 주문, 출금)이고, `Withdraw`는 읽히는 모든 목록에서 찾는다. "읽을 수 없음"은 읽히는 규칙이 모두 맞을 때만이다. 그래서 재확인에서 키가 읽기 전용이 되거나 `Withdraw`를 얻으면, 답의 다른 목록 하나가 `null`이어도 규칙 멈춤이다(IP 재확인 실패로 끝나지 않는다).
+- 재확인의 "읽을 수 없음"은 4부의 재확인 실패다: 경고 한 줄, `watcher_public_ip_ok` 0, `ip_check_ms` 뒤 다시(규칙 멈춤이 아니다; 검토 1 N4).
 
 ### `[kill]`의 루프 필드(`config::Kill`, U19b2a)
 
@@ -880,7 +882,7 @@ OMS의 `kill_*` 필드와 같은 기본값과 범위를 여기 다시 썼다. �
 - `Positions::Rows(행)`: 머리 줄 `포지션(거래소 /v5/position/list, {KST}, 강제청산가는 교차 증거금이면 거래소 추정):` 다음 행마다 `- {symbol} {매수|매도} {size}, 미실현손익 {unrealisedPnl}, 마크 {markPrice}, 마크에서 강제청산가까지 {d} %`.
   - `d = |mark − liq| / mark × 100`, 0.01 %로 **내림**: `Dec::percent_floor(num, den)`(`num ≥ 0`, `den > 0`; `num × 10^4 / den`을 검사된 `i128`로 0 쪽으로 나눈 몫이 백분의 일 퍼센트; 넘치면 `None`). 값은 워처의 `Dec`로 읽고 정규형으로 쓴다(`10`, `9.99`).
   - `liqPrice`가 비었거나 0이거나 읽을 수 없으면 `모름(거래소가 청산가를 주지 않음)`(교차 증거금이면 거래소가 주지 않을 수 있다), `markPrice`가 0 이하이거나 읽을 수 없으면 `모름(마크 가격 없음)`, 계산이 넘치면 `모름(계산 넘침)`. 손익이나 마크가 읽히지 않으면 그 자리가 `모름`.
-  - `size`가 0이거나 소수 문자열이 아닌 행은 뺀다(`settleCoin`만 주면 크기 > 0인 행만 온다, Q12.1). 방향이 `Buy`·`Sell`이 아니면 `방향 모름`, 기호는 `[A-Z0-9]` 32자까지(다른 글자는 `?`)로 쓴다: 행을 숨기지 않는다(스펙에 없는 판단). 음수 크기는 문서상 없지만(Q12.3) 읽히면 그대로 보인다.
+  - `size`가 0인 행은 뺀다(`settleCoin`만 주면 크기 > 0인 행만 온다, Q12.1). `size`가 읽히지 않는 행(필드 없음, JSON 수, 소수 9자리 이상, 빈 문자열)은 크기를 모르는 포지션이라 빼지 않고 `{size}` 자리에 `수량 모름`을 쓴다(검토 1 S3; 스펙 Amendment): 그런 행만 있어도 `포지션 없음`이라 하지 않는다. 방향이 `Buy`·`Sell`이 아니면 `방향 모름`, 기호는 `[A-Z0-9]` 32자까지(다른 글자는 `?`)로 쓴다: 행을 숨기지 않는다(스펙에 없는 판단). 음수 크기는 문서상 없지만(Q12.3) 읽히면 그대로 보인다.
   - 20행까지 쓰고 나머지는 `그 밖에 {m}종목`(판단(모델 아님): 알림 하나가 3,500 단위 한 부분에 들어가 "12개 P1"이 텔레그램 메시지 12개로 남게). 남는 행이 없으면 머리 줄 다음 `포지션 없음`.
 - `Positions::Failed(class)`: `포지션 조회 실패({class}). 수량·손익·마크·강제청산가 모름`(`class`는 3부의 부류, 기한을 넘기면 `시간 초과`).
 - `Positions::NotRead(why)`: `포지션 조회 안 함({why}). 수량·손익 모름`(래치나 멈춤이라 묻지 않았다).
@@ -908,7 +910,9 @@ OMS의 `kill_*` 필드와 같은 기본값과 범위를 여기 다시 썼다. �
 - 아직 아무것도 `cancel_all`, `read_positions`, `notice_text`, `position_block`을 부르지 않는다(U19b2b~U19b3c). 키 규칙만 시작에서 돈다.
 - 값이 터무니없이 긴 행(수십 자리 수)이 20개면 알림이 3,500 단위를 넘을 수 있다. 그때는 송신기가 메시지를 여러 부분으로 나눌 뿐 잃지 않는다(10부). 시험은 현실적인 긴 값(8자리 소수)으로 50행을 본다.
 - `cancelled`는 거래소가 받은 취소 목록의 길이다. 취소가 끝났다는 뜻이 아니다(Q11.5).
+- `cancel_all`은 보내지 않은 요청(키 래치, 403 멈춤)과 보내서 10010이나 403을 받은 요청에 같은 오류(`RestError::Auth`, `RestError::IpBanned`)를 돌려준다(검토 1 N2). U19b2c는 `CancelAnswer::NotSent(Latched|Paused)`와 `Failed`를 보낸 뒤의 `auth_stop()`·`paused_until()`이 아니라 보내기 전의 상태로 가려야 한다. 오늘은 아무것도 부르지 않아 결함이 아니다.
+- `Dec`는 소수 8자리까지만 읽는다(검토 1 N3). 9자리 이상의 `unrealisedPnl`·`markPrice`는 `모름`, `liqPrice`는 `모름(거래소가 청산가를 주지 않음)`(원인을 틀리게 말함, 수는 만들지 않음), `size`는 `수량 모름`이다. 사실 파일에는 그런 값이 없다: testnet 확인 몫.
 
 ### 검증(11부, U19b2a)
 
-주장 V-WATCH-12. `sign::the_post_string_to_sign_matches_the_published_example_and_independent_values`(Q1.10의 서명할 문자열 그대로, 만든 비밀의 Python `hmac` 값 둘, 공백이 다른 본문은 다른 값), `client::the_only_post_is_cancel_all_with_the_fixed_body`(방법, 경로, 바이트까지 같은 본문, `Content-Type`, 머리글 다섯, 독립 값의 서명, 도착한 바이트로 다시 계산한 서명, 보내기 전에 센 요청), `client::cancel_all_answers_are_classified`(`"1"`, 없음, 빈 목록, `"0"`, 목록 아님, `result` 없음, 숫자 1, `"2"`, 503, 10010 래치 뒤 아무 길로도 보내지 않음, 403 멈춤 600초), `client::no_other_post_exists`, `config::kill_loop_fields_are_validated`, `start::a_key_that_must_cancel_needs_read_write_order_and_no_withdraw`(시작의 거부 다섯, 읽을 수 없는 여섯, `[kill]` 없이 읽지 않음, 재확인의 규칙 멈춤 뒤 일괄 취소도 보내지 않음), `decimal::percent_floor_rounds_toward_zero_and_refuses_overflow`, `kill::the_position_block_lists_size_upnl_mark_and_liquidation_distance`, `kill::a_failed_position_read_says_unknown`, `kill::a_notice_fits_one_part_with_50_positions`, `kill::the_final_notice_names_the_stop_outcome`, `kill::a_latched_key_says_the_watcher_must_restart`, `kill::the_abort_notice_says_positions_were_not_read`, `kill::the_position_reader_pages_and_keeps_its_deadline`(두 쪽, 기한 뒤와 기한 정각의 쪽, 기한 1 ms 전, 5쪽 상한, 읽을 수 없는 쪽 셋과 503, 래치와 멈춤에서 요청 없음, 멈춤이 끝나면 다시 읽음). 변이 M265~M268과 시험 밖 변이 24개(U19b2a).
+주장 V-WATCH-12. `sign::the_post_string_to_sign_matches_the_published_example_and_independent_values`(Q1.10의 서명할 문자열 그대로, 만든 비밀의 Python `hmac` 값 둘, 공백이 다른 본문은 다른 값), `client::the_only_post_is_cancel_all_with_the_fixed_body`(방법, 경로, 바이트까지 같은 본문, `Content-Type`, 머리글 다섯, 독립 값의 서명, 도착한 바이트로 다시 계산한 서명, 보내기 전에 센 요청), `client::cancel_all_answers_are_classified`(`"1"`, 없음, 빈 목록, `"0"`, 목록 아님, `result` 없음, 숫자 1, `"2"`, 503, 10010 래치 뒤 아무 길로도 보내지 않음, 403 멈춤 600초), `client::no_other_post_exists`, `config::kill_loop_fields_are_validated`, `start::a_key_that_must_cancel_needs_read_write_order_and_no_withdraw`(시작의 거부 열하나: 다섯, `ContractTrade` 밖의 `Order`(검토 1 S2), 다른 필드·목록을 읽을 수 없어도 읽히는 규칙의 거부 다섯(검토 1 S4); 읽을 수 없는 여덟, `[kill]` 없이 읽지 않음, 재확인의 규칙 멈춤 뒤 일괄 취소도 보내지 않음, 재확인의 읽을 수 없는 답은 `ip_check_ms` 뒤 다시이고 멈춤이 아님(검토 1 N4)), `decimal::percent_floor_rounds_toward_zero_and_refuses_overflow`, `kill::the_position_block_lists_size_upnl_mark_and_liquidation_distance`(읽을 수 없는 크기는 `수량 모름`이고 `포지션 없음`이 아님, 검토 1 S3), `kill::a_failed_position_read_says_unknown`, `kill::a_notice_fits_one_part_with_50_positions`, `kill::the_final_notice_names_the_stop_outcome`, `kill::a_latched_key_says_the_watcher_must_restart`, `kill::the_abort_notice_says_positions_were_not_read`, `kill::the_position_reader_pages_and_keeps_its_deadline`(두 쪽, 기한 뒤와 기한 정각의 쪽, 기한 1 ms 전, 5쪽 상한, 읽을 수 없는 쪽 셋과 503과 그 요청 수(검토 1 S1), 래치와 멈춤에서 요청 없음, 멈춤이 끝나면 다시 읽음). 변이 M265~M268과 시험 밖 변이 24개(U19b2a).
