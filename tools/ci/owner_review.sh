@@ -37,8 +37,10 @@
 #             is in the diff for the reviewer.
 #   tests:    the change removes more `#[test]` / `#[tokio::test]`
 #             attributes than it adds (one commented out counts as
-#             removed), adds `#[ignore]` to an existing test, or adds a
-#             `cfg` that can switch tests off.
+#             removed), adds `#[ignore]` (also inside `cfg_attr`) to an
+#             existing test, adds a `cfg` that can switch tests off,
+#             removes a test target file, or removes the `mod` line of a
+#             file that still holds tests.
 #
 # exit 0: no finding, prints "owner_review: none"
 # exit 1: one line per finding ("owner_review: <rule>: ..."), never "none"
@@ -62,6 +64,7 @@ list="${2:-tools/ci/owner_review_paths.txt}"
 [[ -f "$list" ]] || cannot "no paths file $list"
 
 findings=0
+test_attr='^[[:space:]]*#[[:space:]]*\[[[:space:]]*(tokio::)?test[[:space:]]*[](]'
 finding() { echo "$prefix: $1"; findings=$((findings + 1)); }
 
 # -z: raw paths. --no-renames: a move is a deletion plus an addition, so
@@ -172,31 +175,69 @@ done
 # ---- tests -----------------------------------------------------------------
 # Counted over the whole change, so that a test moved to another file is
 # not a finding. Only an attribute at the start of a line counts, so that
-# `// #[test]` is a removal. An #[ignore] counts per file, beyond the test
-# attributes that the same file adds: a new test may be ignored from the
-# start (a measurement run by hand), an existing one may not. An added
-# `cfg` that holds `any()`, or names `test` inside `all(..)` or `not(..)`,
-# can switch tests off without removing one, and is a finding; one that
-# widens (`any(test, feature = "..")`) is not. A `cfg(feature = "..")`
-# put above an unchanged `mod tests` line is not seen (text check).
-while IFS=$'\t' read -r kind detail; do
-  finding "tests: $detail"
+# `// #[test]` is a removal. An #[ignore] (also inside `cfg_attr`) counts
+# per file, beyond the test attributes that the same file adds: a new test
+# may be ignored from the start (a measurement run by hand), an existing
+# one may not. The same holds for a `cfg` added in a file under a tests/
+# directory. Elsewhere an added `cfg` that holds `any()`, or names `test`
+# inside `all(..)` or `not(..)`, can switch tests off without removing
+# one, and is a finding; one that widens (`any(test, feature = "..")`) is
+# not. A removed test target (tests/<name>.rs or
+# tests/<dir>/main.rs that held a test), and a removed `mod <name>;` whose
+# file still holds a test, are findings: cargo no longer builds those
+# tests. A `cfg(feature = "..")` put above an unchanged `mod tests` line
+# under src/ is not seen (text check).
+while IFS=$'\t' read -r kind a b; do
+  case "$kind" in
+    tests) finding "tests: $a" ;;
+    mod)
+      # `mod b;` in file a: a/../b.rs or b/mod.rs, from the directory of a
+      # lib.rs, main.rs or mod.rs, else from a directory named after a.
+      case "${a##*/}" in
+        lib.rs | main.rs | mod.rs) d="${a%/*}" ;;
+        *) d="${a%.rs}" ;;
+      esac
+      for c in "$d/$b.rs" "$d/$b/mod.rs"; do
+        if git show "HEAD:$c" 2> /dev/null | grep -E "$test_attr" > /dev/null; then
+          finding "tests: $a: mod $b removed, $c still holds tests"
+          break
+        fi
+      done
+      ;;
+  esac
 done < <(git diff -U0 --no-renames --no-prefix "$mb" HEAD -- '*.rs' | awk '
   BEGIN { t = "^[-+][[:space:]]*#[[:space:]]*\\[[[:space:]]*(tokio::)?test[[:space:]]*[](]"
           ig = "^\\+[[:space:]]*#[[:space:]]*\\[[[:space:]]*ignore[[:space:]]*[]=(]"
-          cf = "^\\+[[:space:]]*#!?[[:space:]]*\\[[[:space:]]*cfg(_attr)?[[:space:]]*\\(" }
+          ca = "^\\+[[:space:]]*#[[:space:]]*\\[[[:space:]]*cfg_attr[[:space:]]*\\(.*[^[:alnum:]_]ignore([^[:alnum:]_]|$)"
+          cf = "^\\+[[:space:]]*#!?[[:space:]]*\\[[[:space:]]*cfg(_attr)?[[:space:]]*\\("
+          cp = "^\\+[[:space:]]*#!?[[:space:]]*\\[[[:space:]]*cfg[[:space:]]*\\("
+          md = "^[-+][[:space:]]*(pub(\\([^)]*\\))?[[:space:]]+)?mod[[:space:]]+[[:alnum:]_]+[[:space:]]*;" }
   /^\+\+\+ / { f = substr($0, 5); next }
   /^--- / { next }
   /^-/ && $0 ~ t { removed++ }
   /^\+/ && $0 ~ t { added++; fa[f]++ }
-  $0 ~ ig { fi[f]++ }
+  $0 ~ ig || $0 ~ ca { fi[f]++ }
   $0 ~ cf && ($0 ~ /any[[:space:]]*\([[:space:]]*\)/ \
-    || ($0 ~ /test/ && ($0 ~ /all[[:space:]]*\(/ || $0 ~ /not[[:space:]]*\(/))) { cfg[f]++ }
+    || ($0 ~ /test/ && ($0 ~ /all[[:space:]]*\(/ || $0 ~ /not[[:space:]]*\(/))) { cfg[f]++; next }
+  $0 ~ cp && f ~ /(^|\/)tests\// { tcfg[f]++ }
+  $0 ~ md && f != "/dev/null" {
+    m = $0; sub(/^[-+][[:space:]]*(pub(\([^)]*\))?[[:space:]]+)?mod[[:space:]]+/, "", m); sub(/[^[:alnum:]_].*/, "", m)
+    if ($0 ~ /^-/) mods[f "\t" m]--; else mods[f "\t" m]++
+  }
   END {
     if (removed > added) printf "tests\t%d test attribute(s) removed, %d added\n", removed, added
     for (f in fi) if (fi[f] > fa[f]) printf "tests\t%s: %d #[ignore] added, %d test attribute(s) added\n", f, fi[f], fa[f] + 0
     for (f in cfg) printf "tests\t%s: %d cfg on tests added\n", f, cfg[f]
+    for (f in tcfg) if (tcfg[f] > fa[f]) printf "tests\t%s: %d cfg added in a test file, %d test attribute(s) added\n", f, tcfg[f], fa[f] + 0
+    for (k in mods) if (mods[k] < 0) printf "mod\t%s\n", k
   }')
+# A test target that is gone. Moved below tests/<dir>/ (not main.rs), cargo
+# no longer builds it; the attributes removed and added cancel out.
+for f in "${changed[@]}"; do
+  [[ "$f" =~ ^(crates/[^/]+/)?tests/([^/]+\.rs|[^/]+/main\.rs)$ ]] || continue
+  git cat-file -e "HEAD:$f" 2> /dev/null && continue
+  git show "$mb:$f" 2> /dev/null | grep -E "$test_attr" > /dev/null && finding "tests: test target removed: $f"
+done
 
 if (( findings == 0 )); then
   echo "$prefix: none"

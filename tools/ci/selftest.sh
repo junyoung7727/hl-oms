@@ -414,6 +414,9 @@ printf '[workspace]\nmembers = ["crates/a"]\n\n[workspace.lints.clippy]\nunwrap_
 printf '[package]\nname = "a"\n\n[lints]\nworkspace = true\n' > crates/a/Cargo.toml
 printf '//! A.\n\n#![deny(\n    clippy::float_arithmetic,\n    clippy::expect_used\n)]\n\npub fn one() -> u8 {\n    1\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn one_is_one() {\n        assert_eq!(super::one(), 1);\n    }\n\n    #[tokio::test]\n    async fn later() {}\n}\n' > crates/a/src/lib.rs
 printf '#![allow(clippy::unwrap_used)]\n\n#[test]\nfn outside() {}\n' > crates/a/tests/t.rs
+# A module file with a test, declared from lib.rs.
+printf '\npub mod m;\n' >> crates/a/src/lib.rs
+printf 'pub fn m() {}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn m() {}\n}\n' > crates/a/src/m.rs
 # A crate with a stricter lint table of its own.
 mkdir -p crates/s/src; : > crates/s/src/lib.rs
 printf '[package]\nname = "s"\n\n[lints.clippy]\nfloat_arithmetic = "deny"\n' > crates/s/Cargo.toml
@@ -529,6 +532,23 @@ oreset; mkdir -p crates/n/src; : > crates/n/src/lib.rs; printf "[package]\nname 
 expect_owner 1 "owner: a new crate with a single-quoted lints table" "owner_review: manifest: crates/n/Cargo.toml"
 oreset; mkdir -p fixtures/w; printf '[workspace]\nmembers = []\n' > fixtures/w/Cargo.toml; plant
 expect_owner 0 "owner: a new manifest without [package]" "owner_review: none"
+# Tests switched off without removing an attribute (review 2, S1).
+oreset; sed -i 's/^    #\[test\]$/    #[test]\n    #[cfg_attr(unix, ignore)]/' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: an existing test ignored inside cfg_attr" "owner_review: tests: crates/a/src/lib.rs: 1 #[ignore] added, 0 test attribute(s) added"
+oreset; printf '\n#[test]\n#[cfg_attr(miri, ignore)]\nfn slow() {}\n' >> crates/a/tests/t.rs; plant
+expect_owner 0 "owner: a new test ignored inside cfg_attr from the start" "owner_review: none"
+oreset; sed -i 's/^#\[test\]$/#[cfg(feature = "never")]\n#[test]/' crates/a/tests/t.rs; plant
+expect_owner 1 "owner: cfg(feature) above an existing test in a test file" "owner_review: tests: crates/a/tests/t.rs: 1 cfg added in a test file, 0 test attribute(s) added"
+oreset; sed -i '1s/^/#![cfg(feature = "never")]\n/' crates/a/tests/t.rs; plant
+expect_owner 1 "owner: #![cfg(feature)] at the top of an existing test file" "owner_review: tests: crates/a/tests/t.rs: 1 cfg added in a test file, 0 test attribute(s) added"
+oreset; printf '#![cfg(unix)]\n#![allow(clippy::unwrap_used)]\n\n#[test]\nfn on_unix() {}\n' > crates/a/tests/t3.rs; plant
+expect_owner 0 "owner: a new test file under #![cfg(unix)]" "owner_review: none"
+oreset; mkdir -p crates/a/tests/old; git mv crates/a/tests/t.rs crates/a/tests/old/t.rs; plant
+expect_owner 1 "owner: a test file moved where cargo does not build it" "owner_review: tests: test target removed: crates/a/tests/t.rs"
+oreset; sed -i '/^pub mod m;$/d' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: a mod declaration removed, its file with tests kept" "owner_review: tests: crates/a/src/lib.rs: mod m removed, crates/a/src/m.rs still holds tests"
+oreset; sed -i 's/^pub mod m;$/mod m;/' crates/a/src/lib.rs; plant
+expect_owner 0 "owner: a mod declaration made private" "owner_review: none"
 oreset; cp tools/ci/owner_review_paths.txt "$tmp/base_paths.txt"; sed -i '/^\.github\/$/d' tools/ci/owner_review_paths.txt
 printf 'on: push\n' >> .github/workflows/ci.yml; plant
 expect_owner_with() { # the list from the base, as the runner passes it
