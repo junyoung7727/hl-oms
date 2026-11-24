@@ -1,0 +1,59 @@
+# Which crate may depend on which, and where the venue's order paths may be
+# written (ADR-033 part 2). Checked by `cargo run -p xtask -- layers` in CI.
+# The table locks the shape of 2026-11-24; this file is under tools/ci/, so
+# a change to it is an owner-review finding (tools/ci/owner_review.sh).
+#
+# A pattern is a crate name or a prefix ending in "*". Dependencies of
+# every kind count (normal, dev, build) unless a rule says otherwise. The
+# watcher's own rules stay in tools/ci/watcher_independent.sh (ADR-031).
+
+[[only]]
+why = "the pure crates link no workspace crate (ADR-002)"
+from = ["oms-core", "md-core"]
+to = []
+
+[[only]]
+why = "the journal, the simulated venue and the client API build on the core only"
+from = ["oms-journal", "oms-sim", "oms-api"]
+to = ["oms-core"]
+
+[[only]]
+why = "the execution shell links the core, the journal, the API, the simulated venue and the direct alerts; no reader and no market data"
+from = ["oms-node"]
+to = ["oms-core", "oms-journal", "oms-api", "oms-sim", "alert-direct", "http-fake"]
+
+[[deny]]
+why = "market data never reaches order code"
+from = ["md-*"]
+to = ["oms-*"]
+
+[[deny]]
+why = "nothing but the watcher's conformance tests links the execution shell"
+from = ["*"]
+except = ["watcher-conformance"]
+to = ["oms-node"]
+
+[[external]]
+why = "the core reaches no network, file, clock or random source (ADR-002)"
+crates = ["oms-core"]
+allow = ["serde", "serde_json"]
+
+[[external]]
+why = "market data's core reaches no network, file, clock or random source"
+crates = ["md-core"]
+allow = []
+
+[[text]]
+why = "only the Bybit gateway creates or amends orders (the watcher has no order path, ADR-032)"
+strings = ["/v5/order/create", "/v5/order/amend"]
+paths = ["crates/oms-node/src/venue/bybit/", "crates/oms-node/tests/"]
+
+[[text]]
+why = "Bybit order endpoints only in the gateway and the watcher"
+strings = ["/v5/order/"]
+paths = ["crates/oms-node/src/venue/bybit/", "crates/oms-node/tests/", "crates/watcher/", "crates/xtask/src/mutants.rs"]
+
+[[text]]
+why = "only the Hyperliquid gateway posts to /exchange"
+strings = ["\"/exchange\""]
+paths = ["crates/oms-node/src/venue/hyperliquid/"]
