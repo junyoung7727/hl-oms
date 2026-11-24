@@ -212,6 +212,27 @@ struct Notices {
     dropped: u64,
 }
 
+impl Notices {
+    /// Queues `w`; beyond [`NOTICES_MAX`] waiting, the oldest waiting
+    /// progress notice is dropped (never a start, a final or a late halt).
+    /// Returns whether one was dropped.
+    fn push(&mut self, w: Waiting) -> bool {
+        let drop = if self.waiting.len() >= NOTICES_MAX {
+            self.waiting
+                .iter()
+                .position(|w| matches!(w.notice, Notice::Progress { .. }))
+        } else {
+            None
+        };
+        if let Some(i) = drop {
+            self.waiting.remove(i);
+            self.dropped += 1;
+        }
+        self.waiting.push_back(w);
+        drop.is_some()
+    }
+}
+
 struct Runtime {
     cfg: Config,
     echo_url: String,
@@ -1047,24 +1068,14 @@ impl Runtime {
         ));
     }
 
-    /// Queues a notice; beyond [`NOTICES_MAX`] waiting, the oldest waiting
-    /// progress notice is dropped (never a start, a final or a late halt).
+    /// Queues a notice (see [`Notices::push`]); a drop is logged.
     fn queue_notice(&mut self, notice: Notice, header: String) {
-        let q = &mut self.notices;
-        if q.waiting.len() >= NOTICES_MAX
-            && let Some(i) = q
-                .waiting
-                .iter()
-                .position(|w| matches!(w.notice, Notice::Progress { .. }))
-        {
-            q.waiting.remove(i);
-            q.dropped += 1;
+        if self.notices.push(Waiting { notice, header }) {
             (self.log)(&format!(
                 "warn: kill: {NOTICES_MAX} notices wait for their position read: the oldest progress notice is dropped ({} so far)",
-                q.dropped
+                self.notices.dropped
             ));
         }
-        self.notices.waiting.push_back(Waiting { notice, header });
     }
 
     /// The position read past its deadline is aborted and its notice goes
@@ -1167,5 +1178,72 @@ impl Runtime {
             m.add("watcher_kill_cancel_all_total", &[], (calls - k.cancel_alls) as f64);
             k.cancel_alls = calls;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kill::StopOutcome;
+
+    fn waiting(notice: Notice) -> Waiting {
+        Waiting {
+            notice,
+            header: String::new(),
+        }
+    }
+
+    fn progress(round: u64) -> Waiting {
+        waiting(Notice::Progress {
+            round,
+            remaining: Ok(1),
+            cancel_all_calls: round,
+            last_error: None,
+        })
+    }
+
+    fn last() -> Waiting {
+        waiting(Notice::Final {
+            watch_ms: 30_000,
+            round: 99,
+            cancel_all_calls: 99,
+            outcome: StopOutcome::Latched,
+        })
+    }
+
+    #[test]
+    fn a_full_notice_queue_drops_the_oldest_progress_notice_never_a_start_or_a_final() {
+        let mut q = Notices::default();
+        assert!(!q.push(waiting(Notice::Start { round_ms: 1_000 })));
+        for r in 1..NOTICES_MAX as u64 {
+            assert!(!q.push(progress(r)), "round {r}");
+        }
+        assert_eq!(q.waiting.len(), NOTICES_MAX);
+        assert!(q.push(last()), "the final makes room");
+        assert_eq!((q.waiting.len(), q.dropped), (NOTICES_MAX, 1));
+        let rounds: Vec<_> = q
+            .waiting
+            .iter()
+            .map(|w| match w.notice {
+                Notice::Start { .. } => "start".to_string(),
+                Notice::Progress { round, .. } => round.to_string(),
+                Notice::Final { .. } => "final".to_string(),
+                _ => "other".to_string(),
+            })
+            .collect();
+        assert_eq!(rounds.first().map(String::as_str), Some("start"));
+        assert_eq!(rounds[1], "2", "the oldest progress notice went");
+        assert_eq!(rounds.last().map(String::as_str), Some("final"));
+
+        // Without a progress notice waiting nothing is dropped: the queue
+        // grows past the bound rather than lose a late halt or the final.
+        let mut q = Notices::default();
+        for _ in 0..NOTICES_MAX {
+            q.push(waiting(Notice::LateHalt {
+                reply: "latched".into(),
+            }));
+        }
+        assert!(!q.push(last()));
+        assert_eq!((q.waiting.len(), q.dropped), (NOTICES_MAX + 1, 0));
     }
 }
