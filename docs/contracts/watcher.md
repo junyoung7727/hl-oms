@@ -767,7 +767,7 @@ U19a7은 U19a5·U19a6 시험 몇 개의 단언을 바꿨다(시험 도구의 OMS
 - 불일치 메시지는 확정 때의 일이다. `watcher_mismatch` 보내기가 끝내 실패해도 워처는 P1을 더 보내지 않는다(7부의 다시 보내기와 `warn: … mismatch send failed` 줄은 이어진다). 보류가 걸렸는지는 OMS의 `hold:watcher_mismatch` 알림이 알린다.
 - 검사의 60초 안에 모인 확정은 다음 메시지가 다섯까지만 보이고 나머지는 수로만 센다. 모든 내용은 확정마다 `error: confirmed difference: …` 로그 줄에 있다.
 - `auth`의 HTTP 401 문구는 응답 본문을 담는다(스펙은 상태 줄이라 했다. 코드와 상태는 `HTTP 401`이 이미 말하고, 본문이 이유를 말한다; 스펙과 다른 판단). 본문이 비면 `HTTP 401: )`처럼 빈 채로 간다.
-- 시작 거부의 P1은 시작마다 하나다. 종료 코드 2에 다시 띄우는 단위는 재시작마다 하나를 보낸다(U20b의 단위는 2에서 다시 띄우지 않아야 한다, U19b3d가 운영 문서에 적는다).
+- 시작 거부의 P1은 시작마다 하나다. 종료 코드 2에 다시 띄우는 단위는 재시작마다 하나를 보낸다(U20b의 단위는 2에서 다시 띄우지 않아야 한다: `RestartPreventExitStatus=2`, 운영 문서).
 - 송신 태스크가 끝난 것을 알리는 줄에는 지표가 없다(스펙의 지표 표에 없다). 그 길(태스크 안의 패닉, 독이 든 잠금)을 만드는 시험 수단이 없어 그 줄은 시험하지 않았다.
 - 실행 시험은 실제 시간을 기다린다(약 3~6초, 텔레그램이 답하지 않는 시작 거부는 5초 한도).
 - retCode 10004의 `retMsg`는 서명한 문자열(`origin_string[<timestamp><api_key>…]`)을 담으므로(3부), U19b1c부터 `auth` P1이 그 200자 안의 API 키 아이디를 텔레그램에도 보낼 수 있다. 비밀은 어디에도 없다(리뷰 1 N1).
@@ -965,7 +965,7 @@ OMS의 `kill_*` 필드와 같은 기본값과 범위를 여기 다시 썼다. �
 
 - 실행은 아직 `KillLoop`를 돌리지 않는다(U19b3c). 이 부의 루프 시험은 루프를 손으로 몬다(클라이언트도 태스크도 없다). U19b2c의 시험 장치가 세기와 `Inflight`로 `http-fake`에 대해 돌린다(아래).
 - 앞의 세기가 열려 있으면 지켜봄의 세기가 늦어 `watch_every_ms`보다 드물 수 있다. 끝은 여전히 `z + watch_ms` 때나 뒤에 낸 세기의 0이다.
-- 라운드 수의 상한이 없다: 키가 래치되거나 403 멈춤이 길면 `NotSent` 라운드가 끝없이 돈다(요청은 나가지 않는다). 그런 루프는 워처를 다시 시작해야 끝난다(진행 알림의 고정 문구가 말한다; 런북 7.18은 U19b3d).
+- 라운드 수의 상한이 없다: 키가 래치되거나 403 멈춤이 길면 `NotSent` 라운드가 끝없이 돈다(요청은 나가지 않는다). 그런 루프는 워처를 다시 시작해야 끝난다(진행 알림의 고정 문구가 말한다; 런북 7.18).
 - 바뀐 건수는 최대 `notice_ms`(기본 60초) 늦게 알려진다(일부러 OMS와 다른 점 2).
 - `poll` 한 번은 열린 요청의 기한 하나만 처리한다: 오래 `poll`하지 않은 실행은 지난 기한 하나에 한 `poll`씩 따라잡는다(그 사이 요청은 하나뿐이라 늦어질 뿐 둘이 열리지 않는다).
 - `cancel_all_calls`(알림의 `일괄 취소 k회`)는 답(`Done`·`Failed`, 기한 뒤 포함)에서 센다: 일괄 취소가 열려 있는 동안의 진행·중단 알림은 이미 호스트를 떠났을 수 있는 그 하나를 빼고 센다(검토 1 N3). 낸 때 세면 `NotSent`를 다시 빼야 하므로 답에서 센다.
@@ -990,7 +990,7 @@ OMS의 `kill_*` 필드와 같은 기본값과 범위를 여기 다시 썼다. �
 
 ## 12부. W5와 OMS 멈추기(U19b3)
 
-U19b3a가 이 부의 앞부분을 쓴다: `[w5]`와 `[kill]`의 멈춤 필드, sans-IO W5(`watcher::w5::W5`), 킬 경로의 시계(`clock::Steady`), `watcher_kill` 클라이언트(`oms::admin_kill`), OMS 단위를 멈추는 프로그램(`stop::Stopper`). 킬 순서(K1 마커 → K2 `watcher_kill` → K3 멈춤 → 루프)와 마커 쓰기는 U19b3b, 실행 연결은 U19b3c·d다. **U19b3c부터 실행이 W5를 돌리고 킬을 끝까지 돌린다**(아래 "실행 연결(U19b3c)"); 루프 뒤의 빚진 정지와 킬 중의 종료·시작 거부는 U19b3d다. 시험은 손으로 준 시각, 시험이 가진 `UnixListener`, `OMS_TEST_DIR` 아래의 셸 스크립트로만 한다. 진짜 `systemctl`은 어느 시험도 돌리지 않는다.
+U19b3a가 이 부의 앞부분을 쓴다: `[w5]`와 `[kill]`의 멈춤 필드, sans-IO W5(`watcher::w5::W5`), 킬 경로의 시계(`clock::Steady`), `watcher_kill` 클라이언트(`oms::admin_kill`), OMS 단위를 멈추는 프로그램(`stop::Stopper`). 킬 순서(K1 마커 → K2 `watcher_kill` → K3 멈춤 → 루프)와 마커 쓰기는 U19b3b, 실행 연결은 U19b3c·d다. **U19b3c부터 실행이 W5를 돌리고 킬을 끝까지 돌린다**(아래 "실행 연결(U19b3c)"); 루프 뒤의 빚진 정지, 킬 중의 종료·시작 거부, 탐침 답의 마커 경로는 U19b3d다(이 부가 U19b3d로 완성됨). 시험은 손으로 준 시각, 시험이 가진 `UnixListener`, `OMS_TEST_DIR` 아래의 셸 스크립트로만 한다. 진짜 `systemctl`은 어느 시험도 돌리지 않는다.
 
 ### `[w5]`(`config::W5`, U19b3a)
 
@@ -1103,7 +1103,7 @@ W5는 시각, 탐침의 답, 킬의 끝을 받아 보낼 탐침, 킬을 시작�
 
 - 실행은 아직 W5를 무장하지 않고 `admin_kill`과 `Stopper`를 부르지 않는다(U19b3b·c). 이 부의 W5 시험은 W5를 손으로 몬다(시계 객체 없이 시각을 준다; 하나는 `Steady`로).
 - W5는 죽은 프로세스나 조용한 HTTP 태스크만 본다(위 "W5가 보지 못하는 것").
-- 시작 확인이 끝나기 전에 OMS를 기다리지 않는다: 워처가 OMS보다 먼저 시작하거나 `status_url`이 틀리면 `silence_ms` 뒤 OMS를 킬한다(소유자 질문 1; 런북의 시작 순서는 U19b3d).
+- 시작 확인이 끝나기 전에 OMS를 기다리지 않는다: 워처가 OMS보다 먼저 시작하거나 `status_url`이 틀리면 `silence_ms` 뒤 OMS를 킬한다(소유자 질문 1; 런북 7.18과 운영 문서의 시작 순서).
 - 틈 규칙: 워처가 보지 못한 시간은 침묵으로 세지 않는다. 그 틈과 겹친 진짜 침묵은 틈의 끝부터 세므로 W5는 최대 틈 하나만큼 늦게 쏜다. 틈(> `2 × probe_ms + request_timeout_ms`)이 거듭되는 워처는 W5를 쏘지 않는다: 그때 OMS 자신의 모니터링 게이트(30초 하트비트 없음 → `hold:unmonitored`)만이 지킨다.
 - 정지를 빚진 동안 W5는 침묵을 보지 않는다. 빚은 메모리에만 있다: 워처를 다시 시작하면 잊는다.
 - `silence_ms`의 한계는 결함 하나(잃은 탐침 하나, 또는 틈보다 짧은 멈춤 하나)만 막는다. 둘이 겹치거나 OMS의 답이 `request_timeout_ms`에 가까운 채 멈춤이 거듭되면 건강한 OMS를 킬할 수 있다(킬은 안전한 쪽이지만 `clear-hold`가 든다).
@@ -1119,7 +1119,7 @@ W5는 시각, 탐침의 답, 킬의 끝을 받아 보낼 탐침, 킬을 시작�
 ### 알려진 한계(12부, U19b3b)
 
 - 실행은 아직 `Kill`을 시작하지 않는다(U19b3c). K1~K3의 기한은 주입된 시계 위의 기한이라, 실행에서는 진짜 시간이고 시험에서는 손으로 준 시각이다.
-- 2,000 ms 안에 돌아오지 않는 마커 쓰기는 포기하지만 나중에 써질 수 있다(`쓰지 못함(시간 초과; 뒤늦게 써질 수 있음)`, 검토 2 S1). 걸린 쓰기는 `spawn_blocking`의 스레드 하나를 잡는다(끊을 수 없다; 종료는 U19b3d의 `shutdown_timeout`).
+- 2,000 ms 안에 돌아오지 않는 마커 쓰기는 포기하지만 나중에 써질 수 있다(`쓰지 못함(시간 초과; 뒤늦게 써질 수 있음)`, 검토 2 S1). 걸린 쓰기는 `spawn_blocking`의 스레드 하나를 잡는다(끊을 수 없다; 종료는 `main.rs`의 `shutdown_timeout(1,000 ms)`가 그것을 기다리지 않는다, U19b3d).
 - 마커 경합(U18b1 N4): 워처가 새 마커를 쓴 바로 뒤에 온 운영자의 `clear_hold kill`의 지우기는 그것을 지운다. 시작·마지막 알림은 워처가 볼 때 마커가 있었는지 말한다(`킬 마커: …`). OMS 쪽 고침(부트 때 본 inode만 지움)은 뒤의 OMS 단위다.
 - 머리가 가장 길고(64자 이름, 255자 단위, 잘린 문구 셋) 포지션 20행이 모두 가장 긴 모양(30자 기호, 소수 8자리 수)이면 시작 알림은 3,675 UTF-16 단위로 두 부분이 된다(시험에서 잼; BMP 밖 글자의 문구면 3,672 단위; 흔한 모양 20행이면 2,995 단위, 한 부분). 스펙의 "머리 + 본문 + 20행이 한 부분"은 흔한 모양에서만 참이다. 두 부분이어도 둘 다 순서대로 가고, 10분 12개 상한의 셈이 메시지 하나 늘 뿐이다.
 - 루프 동안의 정지 재시도는 5,000 ms마다다: 래치 없이 돌아온 OMS는 다음 시도가 닿을 때까지 최대 5초 + K2 기한 하나 동안 거래할 수 있다. 거부되는 `admin.sock`은 5초마다 실패한 `connect` 하나다.
@@ -1135,7 +1135,7 @@ W5는 시각, 탐침의 답, 킬의 끝을 받아 보낼 탐침, 킬을 시작�
 ### 실행 연결(U19b3c)
 
 - **W5의 무장**: 시작 기계가 `Done`이나 `StayUpNoRequests`를 낸 때 `W5::arm`. 그 뒤 모든 단계(OMS 기다림, 재생, 검사)에서 틱마다 `W5::poll`(탐침 `/api/status`, 엔진의 상태 요청과 따로)과 `W5::fire`. 탐침의 답은 `w5::good_answer`로 읽고, 정상이면 `answered`(이 프로세스에서 OMS가 정상으로 답한 적이 있음)를 참으로 한다. W5, `Kill`과 그 `KillLoop`, `Inflight`, 세기와 포지션 읽기, K 단계의 기한은 `clock::Steady` 하나를 읽는다. 마커 문구, 머리의 `마지막 정상 응답`, 알림의 KST는 원래 시계다.
-- **시작 때의 마커 경로 규칙**: `[kill]`이 있으면 `/api/status`를 기다리는 동안 답은 `node.kill_marker.configured == true`이고 `resolved(node.kill_marker.path) == resolved([kill] marker)`일 때만 쓸 수 있다(가리키는 곳으로 비교: 링크된 디렉터리를 거친 같은 파일은 같다). 아니면 `error: start refused: the OMS reads its kill marker at <path | none>; the watcher writes <path>: they must be the same file`, 시작 거부 P1(10부), 송신기 비우기(≤ 5,000 ms), 종료 코드 2. OMS가 읽지 않는 마커는 킬된 OMS를 다음 시작에 래치하지 못한다. 규칙을 지난 답은 `marker_checked`를 참으로 한다(이 프로세스 안; 탐침 답의 확인은 U19b3d). OMS의 설정은 읽지 않는다(독립성). 이것이 시작을 거부하는 유일한 상태 답 규칙이다: 답이 없거나 `journal.durable_seq`·`core.instance_id`가 맞지 않으면 전처럼 1초 뒤 다시 묻는다.
+- **시작 때의 마커 경로 규칙**: `[kill]`이 있으면 `/api/status`를 기다리는 동안 답은 `node.kill_marker.configured == true`이고 `resolved(node.kill_marker.path) == resolved([kill] marker)`일 때만 쓸 수 있다(가리키는 곳으로 비교: 링크된 디렉터리를 거친 같은 파일은 같다). 아니면 `error: start refused: the OMS reads its kill marker at <path | none>; the watcher writes <path>: they must be the same file`, 시작 거부 P1(10부), 송신기 비우기(≤ 5,000 ms), 종료 코드 2. OMS가 읽지 않는 마커는 킬된 OMS를 다음 시작에 래치하지 못한다. 규칙을 지난 답은 `marker_checked`를 참으로 한다(이 프로세스 안; 시작 뒤 탐침 답의 확인은 아래 "실행 연결(U19b3d)"). OMS의 설정은 읽지 않는다(독립성). 이것이 시작을 거부하는 유일한 상태 답 규칙이다: 답이 없거나 `journal.durable_seq`·`core.instance_id`가 맞지 않으면 전처럼 1초 뒤 다시 묻는다.
 - **기다리던 메시지 먼저(검토 2 S3)**: 한 차례의 메시지를 다룬 뒤 채널에 이미 있는 메시지를 최대 1,000개(판단(모델 아님)) 더 다루고 틱한다. 채널에서 기다리던 탐침의 답이 `fire`보다 먼저 W5에 닿는다.
 - **쏨**: `watcher_kills_total` + 1, `watcher_kill_active` = 1, `watcher_kill_step{step}` 셋을 지움, `error: W5: /api/status gave no good answer for <ms> ms: the watcher kills (the marker <path>, watcher_kill, systemctl stop <unit> if that fails) and cancels every order with its own key` 한 줄, `Kill::new(fire, Setup {marker_checked, answered, 원래 시계의 지금, …})`. 킬마다 번호가 있어 앞 킬의 늦은 결과(마커, `watcher_kill` 답, `systemctl`)는 새 킬에 닿지 않는다(debug 한 줄).
 - **요청 가드의 시계**: 루프의 세기와 일괄 취소, 포지션 읽기는 클라이언트의 요청 가드에서 기다린다. 가드가 원래 시계를 읽으면 Δ만큼 뒤로 간 걸음 뒤 지난 Δ + 10초의 요청이 모두 창에 남아(엔진이 멈춘 킬 동안에도 루프만으로 초당 둘), 60개를 넘으면 루프가 Δ까지 막힌다. 그래서 클라이언트는 가드에 자기 `Steady`를 준다(3부 "요청 제한"; 스펙의 `Steady` 목록에 없는 판단). 서명, 403 멈춤의 끝(원래 시계 + 600초)은 원래 시계다.
@@ -1147,19 +1147,58 @@ W5는 시각, 탐침의 답, 킬의 끝을 받아 보낼 탐침, 킬을 시작�
 - **킬 중의 엔진(소유자 질문 10)**: 킬이 도는 동안 엔진을 `poll`하지 않는다: 새 라운드, `watcher_mismatch` 보내기, 하트비트가 없다. 이미 나간 요청의 답은 엔진에 주지만, 그 답으로 엔진이 내는 것(다음 쪽, 상태 요청, `watcher_mismatch` 보내기)은 보내지 않는다(debug 한 줄씩; 불일치 P1은 간다; U19b3c 검토 1 S1). 기한은 `Engine::poll` 안에서만 돌아, 그런 라운드는 `Ended` 뒤의 `poll`에서 자기 기한(요청을 낸 때 + `request_timeout_ms` + 11,000 ms)에 닫히고(검토 2 N2), 보내지 못한 `watcher_mismatch`는 그 보내기의 기한(2 × `request_timeout_ms` + 1,000 ms)이 지난 뒤 다시 보내기 규칙대로 간다. 나이는 멈추지 않는다: `watcher_check_age_s`를 적는 일을 `poll`에서 `Engine::export_ages(now)`로 옮겼고, `poll`이 그것을 부르며 실행이 킬 동안 틱마다 부른다(검사가 돌지 않으니 오르는 것이 참이다). 시작 단계(OMS 기다림, 재생)와 IP 재확인은 그대로 돈다(OMS나 Bybit의 상태를 바꾸지 않음). 이유: OMS는 사라졌거나 래치되었고, 라운드는 상태 요청에서 어차피 실패하며, 그 Bybit 요청이 요청 가드에서 루프의 세기 자리를 잡는다(판단(모델 아님)).
 - **OMS의 모니터링 게이트(검토 1 S5)**: `watcher_kill`이 살아 있는 OMS를 래치했으면 루프 동안 하트비트가 없어 30초 뒤(`heartbeat_max_age_us`) OMS가 `hold:unmonitored`를 기록하고 그 알림이 따른다. 하트비트를 남겨도 그 W1·W2 시각이 10초를 넘어 게이트가 같이 닫힌다. 그 보류는 킬 래치가 이미 막는 일반 주문만 막는다: 모니터링 상실이 워처 킬 중에 따라오고, 루프가 끝나고 W1·W2가 다시 성공하면 스스로 풀린다(`Ended` 뒤 W1·W2 라운드 하나까지).
 - **끝(`Ended`)**: 지표를 마지막으로 적고, 루프의 태스크와 열린 정지 시도의 태스크를 끊고(늦은 답은 버림; 빚은 W5에), `W5::kill_ended(halt_owed)`, `watcher_kill_active` = 0, `the kill ended: zero open orders confirmed (<r> rounds, <k> cancel-alls) | aborted; the halt is owed | not owed` 한 줄. 엔진은 같은 틱부터 다시 돈다(늦은 라운드는 한 번, U19a). W5는 정상 응답 하나를 본 뒤 다시 지킨다(`Rearming`).
-- **U19b3c에서 아직 없는 것(U19b3d)**: 루프 뒤의 빚진 정지를 실행하지 않는다: W5는 `Rearming {halt_owed: true}`에 머물고(새 킬 없음, `watcher_kill_halt_owed` = 1), OMS가 다시 답하면 `warn: W5: the OMS answers again and the last kill owes the halt; …` 한 줄만 쓴다. 킬 중의 종료(SIGTERM·SIGINT)와 시작 거부는 U19a의 길이다: 중단 알림이 없고 기다리던 킬 알림은 보내지 않는다. 둘 다 U19b3d가 완성하고, 그 사이에는 아무것도 배치하지 않는다.
+- **U19b3c에서 없던 것**: 루프 뒤의 빚진 정지, 킬 중의 종료와 시작 거부의 중단 알림, 시작 뒤 탐침 답의 마커 경로는 U19b3d가 더했다(아래 "실행 연결(U19b3d)").
 
 ### 알려진 한계(12부, U19b3c)
 
-- 루프 뒤의 빚진 정지를 아직 보내지 않는다(위 "U19b3c에서 아직 없는 것"): 래치도 마커 있는 멈춤도 확인하지 못한 킬 뒤, 돌아온 OMS는 사람이 래치할 때까지 래치 없이 거래할 수 있고 그동안 W5는 지키지 않는다(`watcher_kill_halt_owed` = 1, warn 한 줄). U19b3c와 U19b3d 사이에는 아무것도 배치하지 않는다.
-- 킬 중의 종료와 시작 거부는 U19a의 길이다: 중단 알림이 없고, 포지션 읽기를 기다리던 킬 알림은 보내지 않는다(U19b3d).
+- 루프 뒤의 빚진 정지를 아직 보내지 않는다(위 "U19b3c에서 아직 없는 것"): 래치도 마커 있는 멈춤도 확인하지 못한 킬 뒤, 돌아온 OMS는 사람이 래치할 때까지 래치 없이 거래할 수 있고 그동안 W5는 지키지 않는다(`watcher_kill_halt_owed` = 1, warn 한 줄). U19b3c와 U19b3d 사이에는 아무것도 배치하지 않는다. U19b3d가 이 한계와 킬 중의 종료·시작 거부에 중단 알림이 없던 것을 닫았다(아래 "실행 연결(U19b3d)").
 - `Inflight`의 답은 자기 채널로 오므로 실행은 그것을 틱에서 본다: 답이 이미 와 있으면 기다리지 않고 돌지만, 틱을 기다리는 중에 온 답은 그 틱(최대 100 ms 진짜 시간)까지 기다린다. 라운드 사이가 그만큼 늘 수 있다. 예산(어느 1초에도 둘 이하)과 `round_ms`의 아래 한계는 그대로다.
 - 마지막 알림의 포지션 읽기는 `Ended` 뒤라 엔진의 라운드와 같은 요청 가드를 나눈다.
 - 403 멈춤의 끝은 원래 시계라, 그 멈춤 중에 시계가 Δ만큼 뒤로 가면 멈춤이 Δ만큼 길어진다(루프의 요청은 그동안 `NotSent(Paused)`; 거래소의 IP 금지 쪽에서는 안전한 쪽). 킬 경로는 그 끝(원래 시계)을 `Steady`와 견주므로(`kill::cancel_answer`, `kill::not_read`), 멈춤의 마지막 Δ 동안은 멈춤이 끝난 것으로 보고 클라이언트를 부른다. 클라이언트는 원래 시계로 거부해 보내는 것은 없고, 이유만 `Paused`·`NotRead` 대신 `Failed`·`Local`·조회 실패로 보인다(U19b3c 검토 1 N3).
-- `marker_checked`와 `answered`는 이 프로세스에서 본 것만이다: 워처를 다시 시작하면 처음부터다. 경로 확인은 시작 때의 상태 답에서만 한다(탐침 답은 U19b3d). 쏠 때 `Setup`에 옮겨 적으므로, 시작의 상태 답보다 먼저 쏜 킬은 그 킬 동안 시작의 답이 규칙을 지나도 끝까지 `확인 못 함`이고 정지는 빚으로 남는다(안전한 쪽; U19b3c 검토 1 N2).
+- `marker_checked`와 `answered`는 이 프로세스에서 본 것만이다: 워처를 다시 시작하면 처음부터다. 경로 확인은 시작 때의 상태 답과, U19b3d부터 시작 뒤 W5의 탐침 답에서 한다. 쏠 때 `Setup`에 옮겨 적으므로, 시작의 상태 답보다 먼저 쏜 킬은 그 킬 동안 시작의 답이 규칙을 지나도 끝까지 `확인 못 함`이고 정지는 빚으로 남는다(안전한 쪽; U19b3c 검토 1 N2).
 - 킬 동안의 엔진 멈춤 때문에 래치된 OMS는 약 30초 뒤 `hold:unmonitored`와 그 알림을 낸다(위 "OMS의 모니터링 게이트"). 그 보류는 루프 뒤 W1·W2가 다시 성공하면 풀린다.
 - 실행 시험의 K 단계는 수동 시계를 멈춘 채 진짜 시간으로 기다린다(`walk_kill`): 단계의 기한을 넘는 일은 답이 없는 경우(`a_halt_without_a_reply_is_aborted_at_its_deadline`)와 K3 기한 정각의 틱(`a_stop_that_ended_before_the_k3_deadline_tick_is_reported_as_stopped`)만 시험한다. 진짜 디스크의 느린 `fsync`, 진짜 OMS의 `admin.sock`, 진짜 `systemctl`은 시험하지 않았다(U20b와 testnet).
 
 ### 검증(12부, U19b3c)
 
 주장 V-WATCH-13(넓힘). `crates/watcher/tests/runtime.rs`의 실행 시험 12개(`runtime::run`, loopback 가짜와 시험의 `UnixListener`, `OMS_TEST_DIR` 아래의 가짜 `systemctl`, 수동 시계): `oms_silence_writes_the_marker_and_halts_the_oms_before_the_first_cancel_all`, `when_watcher_kill_fails_the_oms_unit_is_stopped_before_the_first_cancel_all`, `the_watchers_loop_repeats_until_zero_at_no_more_than_2_cancel_alls_per_second`(완료 기준의 실행 몫 셋), `a_status_with_another_marker_path_refuses_the_start`(다른 경로, `configured: false`, 링크를 거친 같은 파일은 됨), `the_engine_is_paused_during_a_kill_and_resumes_after`(킬 동안 W3·W4 요청과 하트비트 없음, W1 목록은 루프의 세기뿐, `watcher_check_age_s{W1}`이 오름, 끝난 뒤 다시 돌고 W5가 정상 응답 하나 뒤 다시 무장), `a_watcher_started_with_the_oms_down_kills_after_the_silence`, `a_marker_written_by_the_watcher_is_read_by_a_marker_rule`, `an_oms_that_comes_back_during_the_loop_is_latched_before_the_loop_ends`(두 꼴: 루프 5초 뒤 나타난 `admin.sock`, 그리고 10010으로 래치된 워처 키), `a_clock_step_back_during_a_kill_does_not_hold_the_loop`, `a_halt_without_a_reply_is_aborted_at_its_deadline`, `a_round_in_flight_at_the_fire_sends_nothing_more_during_the_kill`(쏨에 걸쳐 잡아 둔 W4 쪽이 다음 쪽 커서로 답함: 킬 동안 둘째 쪽 요청과 `watcher_mismatch` 없음, debug 줄, 끝난 뒤 W4가 다시 읽음; 검토 1 S1), `a_stop_that_ended_before_the_k3_deadline_tick_is_reported_as_stopped`(가짜 `systemctl`이 곧 0으로 끝난 뒤 시계가 K3 기한을 넘어 뜀: 시작 알림은 `정지됨`; 검토 1 N1). 그리고 `client::a_clock_step_back_does_not_hold_the_guard`(가득 찬 창 뒤 시계가 60초 뒤로 감: 요청은 진행 10,000 ms에 나가고 9,999 ms에는 기다림, 서명은 원래 시계), 단위 시험 `runtime::tests::a_full_notice_queue_drops_the_oldest_progress_notice_never_a_start_or_a_final`(16개가 기다릴 때 가장 오래된 진행 알림만 버리고 시작·늦은 정지·마지막 알림은 버리지 않음; 진행 알림이 없으면 큐가 16을 넘음), 단위 시험 `runtime::tests::during_a_kill_an_answer_keeps_the_mismatch_p1_and_drops_every_request`(킬 중 답에서 나온 쪽·상태 요청·`watcher_mismatch`는 버리고 불일치 P1은 남김; 검토 1 S1). 변이 M300(킬 중 엔진을 돌림), M301(마커 경로 규칙 건너뜀)과 U19b3c mut.py(보고서).
+
+### 실행 연결(U19b3d)
+
+U19b3c가 남긴 둘(루프 뒤의 빚진 정지, 킬 중의 종료·시작 거부)과 탐침 답의 마커 경로를 실행이 한다.
+
+- **루프 뒤의 빚진 정지(검토 2 M1)**: 래치도 경로를 확인한 마커 있는 멈춤도 없이 끝난(또는 중단된) 킬 뒤 W5는 `Rearming {halt_owed: true}`다. 그 상태의 첫 정상 탐침 답에 `W5::on_answer`가 `OwedHalt`를 내면 실행은 `warn: W5: the OMS answers again and the last kill owes the halt: watcher_kill` 한 줄을 쓰고 `oms::admin_kill`을 하나 보낸다(`detail` = `W5: 늦은 정지: watcher {name}의 킬이 OMS 래치나 정지를 확인하지 못함`, 기한은 K2와 같은 2 × `request_timeout_ms` + 1,000 ms, 기한에 태스크를 끊고 `정지 응답 없음(시간 초과)`). 답은 온 때 받는다. 결과를 `W5::owed_halt_done`에 주고 그것이 내는 P1(`늦은 정지: OMS가 다시 답해 watcher_kill로 래치함(<답>)`, 또는 첫 실패에만 `늦은 정지 실패: OMS가 답하지만 watcher_kill이 안 됨(<이유>). OMS가 래치 없이 주문을 낼 수 있음`)을 보낸다. 로그는 `W5: the owed watcher_kill latched the OMS: <답>` 또는 `error: W5: the owed watcher_kill did not latch the OMS: <이유>`. 래치하면 W5가 `Armed`로 돌아가 다시 지키고(`watcher_w5_armed` = 1, `watcher_kill_halt_owed` = 0), 실패하면 다음 정상 답에 다시 보낸다(둘이 함께 나가지 않음). 새 일괄 취소 루프는 시작하지 않는다(래치된 OMS가 자기 루프를 돌린다, C-KILL). 그동안 엔진은 돈다(킬이 없다).
+- **탐침 답의 마커 경로(검토 3 N6)**: 시작 뒤(재생과 검사 단계) W5의 정상 탐침 답마다 `node.kill_marker`를 시작 때의 규칙으로 본다. 맞지 않으면(`configured`가 아니거나 다른 경로) 지속 조건 `marker_path`의 P1(반복 규칙: 시작, 5분마다, 해소) `OMS가 읽는 킬 마커 경로가 워처의 경로와 다름(OMS: <경로 | 없음>, 워처: <경로>). 킬 마커가 OMS를 래치하지 못함: OMS 설정의 [kill] marker를 맞출 것`을 보내고, 그동안 `marker_checked`를 거짓으로 둔다: 그때 쏜 킬은 마커를 `씀(OMS가 읽는 경로인지 확인 못 함)`으로 적고 마커 있는 멈춤을 제자리로 세지 않아 정지를 빚는다(검토 3 S1). 규칙을 지난 답이 오면 해소하고 `marker_checked`가 참으로 돌아온다. 시작 거부도 킬도 아니다(워처는 시작을 지났다). OMS를 기다리는 동안(시작 단계)의 탐침 답은 보지 않는다: 그때는 시작의 상태 답이 판단한다(거부).
+- **킬 중의 종료(SIGTERM·SIGINT, 소유자 질문 8)**: 루프에서 빠지면 먼저 도는 킬을 끝낸다. K1(마커 쓰기) 중이면 그 결과를 K1의 기한까지(실제 시간으로 최대 `MARKER_WAIT_MS` = 2,000 ms) 기다린다(알림이 마커를 말하도록; K2는 시작하지 않는다). 그다음 어느 단계든 `Kill::abort(now, 워처 종료)`: 중단 알림 하나(루프 전이면 그때까지의 머리와 `워처 종료로 워처 킬 중단(일괄 취소 전). OMS가 아직 주문을 낼 수 있음`, 루프 중이면 `워처 종료로 워처 킬 중단(<r>회차, 남은 미체결 <n | 모름>, 일괄 취소 <k>회). OMS의 래치·마커는 그대로.`; 둘 다 포지션을 읽지 않고 `포지션 조회 안 함(워처 종료 중). 수량·손익·마크·강제청산가 모름`으로 끝남)와 `Ended`(`the kill ended: aborted; the halt is owed | not owed`). 열린 `watcher_kill` 태스크와 루프의 요청 태스크는 끊는다. K3의 `systemctl` 클라이언트는 죽이지 않고 systemd에 맡긴다(반쯤 멈춘 OMS가 멈춘 OMS보다 나쁘다). 마커는 남는다. 그 뒤 U19a의 종료 단계, 송신기 비우기(≤ 5,000 ms). `main.rs`는 tokio 실행기를 버리지 않고 `shutdown_timeout(1,000 ms)`(판단(모델 아님))로 끝낸다: 버린 실행기는 모든 `spawn_blocking` 태스크를 기다리므로, 디스크에 걸린 마커 쓰기가 종료를 잡는다.
+- **끝에서 기다리던 알림**: 종료나 시작 거부로 끝날 때, 포지션을 읽던 알림(그 읽기는 끊음)과 기다리던 알림은 모두 그 자리에서 `포지션 조회 안 함(워처 종료 중). 수량·손익 모름`과 함께 낸 순서대로 가고, 중단 알림이 그 뒤에 간다. 그래서 킬의 모든 메시지가 포지션 묶음이나 조회 실패나 조회 안 함 줄을 가진다.
+- **킬 중의 시작 거부(검토 1 S10)**: 시작을 거부하는 상태 답 규칙은 마커 경로 규칙 하나다(OMS를 기다리는 동안). 킬이 돌 때 거부하면 `Kill::abort(now, 워처 시작 거부: <이유>)`의 중단 알림이 먼저 큐에 들고, 그다음 시작 거부 P1, 송신기 비우기(≤ 5,000 ms), 종료 코드 2. 알림이 큐에 들기 전에 태스크를 끊지 않는다.
+- **마커 경로 거부 전의 빚진 정지(검토 3 S1)**: 거부할 때 정지를 빚졌으면(도는 킬이 빚을 졌거나 아직 루프 전이거나, W5가 `Rearming {halt_owed: true}`) 규칙에 맞지 않는 그 답이 OMS가 답한다는 것을 보이므로, 먼저 `watcher_kill` 하나를 보낸다(빚진 정지의 `detail`, K2의 기한). 이미 하나가 나가 있으면(킬의 K2나 재시도, W5의 빚진 정지) 새로 보내지 않고 그것을 기다린다. 기다리는 동안 킬은 멈춘다(그 단계가 내는 것을 하지 않음: `watcher_kill` 연결이 둘 열리지 않는다). `the start is refused while the halt is owed: watcher_kill first` 한 줄, 결과의 로그 한 줄, 그다음 위의 거부 길이고 시작 거부 P1 끝에 `. 늦은 정지: <답>` 또는 `. 늦은 정지: 실패(<이유>)`가 붙는다. 다른 마커 경로를 읽는 OMS가 워처가 꺼진 뒤 거래하지 못하게 하는 것은 래치뿐이다. 루프 전 단계(K1~K3 중)를 빚으로 보는 것은 스펙에 없는 판단이다(안전한 쪽: 아직 아무것도 래치를 확인하지 않았다). 거부를 기다리는 동안 SIGTERM이 오면 종료가 이긴다(코드 0, 그 태스크는 다른 것과 함께 끊김).
+- **재시작**: 아무것도 저장하지 않는다. 킬 중에 다시 시작한 워처는 킬을 이어 가지 않고 빚진 정지도 모른다. 시작 끝에 W5를 다시 무장하고, OMS가 그때도 답하지 않으면 다시 킬한다(새 마커를 쓰지 않음: 옛 것이 `이미 있음`), 새 루프가 0건을 확인한다.
+
+### 알려진 한계(12부, U19b3d로 완성)
+
+12부 전체의 한계다(앞 절들의 한계를 모아 둠; 숫자는 판단(모델 아님)이고 설계 값은 그렇게 적음).
+
+- W5는 죽은 프로세스나 답하지 않는 HTTP 태스크만 본다: 답하는 `/api/status` 뒤에서 코어나 파이프라인이 걸린 OMS는 W5의 킬이 아니다(검토 1 S1, 소유자 질문 11).
+- 살아 있는 OMS를 워처가 킬하는 동안 OMS의 `hold:unmonitored`와 그 알림이 30초 뒤 따르고, 루프 뒤 W1·W2가 다시 성공하면 풀린다(검토 1 S5).
+- OMS가 답하기 전에 시작한 워처, 또는 `status_url`이 틀린 워처는 `silence_ms` 뒤 OMS를 킬한다(소유자 질문 1; 런북 7.18과 운영 문서의 시작 순서).
+- 워처가 보지 못한 시간(자기 멈춤, 시계가 앞으로 뜀)은 침묵이 아니다(틈 규칙, 검토 2 S3). 그와 겹친 진짜 침묵은 틈의 끝부터 세어 W5가 최대 틈 하나만큼 늦게 쏘고, 틈(`2 × probe_ms + request_timeout_ms`)을 넘는 멈춤을 되풀이하는 워처는 W5를 쏘지 못한다: 그때는 OMS 자신의 모니터링 게이트(하트비트 30초 없음 → `hold:unmonitored`)만 지킨다.
+- 정지를 빚진 동안 `Kill`은 루프 동안 5,000 ms마다 `watcher_kill`을 다시 보내고, W5는 루프 뒤 OMS의 첫 정상 답에 보낸다(검토 2 M1, 검토 3 M1). 래치 없이 돌아온 OMS는 다음 시도가 닿을 때까지 거래한다: 루프 동안 최대 5초 + K2 기한 하나, 루프 뒤에는 최대 탐침 간격 하나(그 부팅 시간 빼고). 루프 뒤 빚진 동안 W5는 침묵을 지키지 않는다: 답하기 전에 다시 죽은 OMS는 런북에 맡긴다. 빚은 메모리에만 있다: 워처를 다시 시작하면 잊는다.
+- 워처의 루프는 0건 확인이나 워처의 멈춤으로만 끝난다: 루프가 도는 동안 운영자가 킬 보류를 풀면 루프가 거래하는 OMS의 주문을 취소한다(검토 2 S5; 런북 7.18).
+- 2,000 ms 안에 돌아오지 않은 마커 쓰기는 포기한다(`쓰지 못함(시간 초과; 뒤늦게 써질 수 있음)`): 나중에 써질 수 있다(검토 2 S1).
+- 킬의 첫 `[WATCH P1]`은 기본값에서 마지막 정상 답 뒤 약 40초까지 늦을 수 있다(판단(모델 아님); 검토 2 N7, 검토 4 N2: 포지션 읽기가 요청 가드에서 13초까지 기다릴 수 있다).
+- U18b1 N4의 마커 경쟁: 워처가 새 마커를 쓴 바로 뒤 운영자의 `clear_hold kill`이 지우면 마커가 사라진다. 워처의 시작·마지막 알림이 마커가 볼 때 있었는지(`킬 마커: …`)를 말하고, OMS 쪽 고침(시작 때 본 inode만 지움)은 뒤의 OMS 단위다.
+- 킬은 linear·USDT의 0건만 확인한다(U19b2a).
+- `stop`에는 U20b가 주는 systemd 권한이 있어야 한다: 그 전에는 K3가 실패하고 시작 알림은 `OMS 정지 실패`(루프는 돈다), 마지막 알림은 `OMS 정지 미확인`, 정지는 빚이다(검토 2 M1). `stop_wait_ms` 안에 끝나지 않은 `systemctl` 클라이언트는 죽이지만 systemd의 멈춤 작업은 나중에 OMS를 멈출 수 있다(`정지 확인 못 함`).
+- 저장하지 않음: 워처를 다시 시작하면 도는 킬을 잊는다. 시작 뒤 OMS가 그때도 내려가 있으면 W5가 다시 킬한다.
+- 12개 한계는 루프의 킬 알림을 센다. 지속 조건(`auth`, `public_ip`, `marker_path`)은 각각 ≤ 1 + ⌊T / 5분⌋을 더하고(U19b1c, U19b3d), 빚진 정지는 루프 동안 ≤ 1(`LateHalt`, 검토 3 M1)이나 루프 뒤 ≤ 2(`늦은 정지 실패` 한 번, 그다음 `늦은 정지`나 없음)를 더하며 둘이 함께는 없다(루프 중 래치가 빚을 끝낸다). 끝에서 기다리던 알림은 종료 때 한꺼번에 간다(16개 큐보다 많지 않음).
+- `[kill]`이 없으면(testnet만) W5가 꺼진다: 워처는 OMS를 멈추지도 그 침묵을 알리지도 않는다. OMS 자신의 모니터링 게이트와 관측 스택만 남는다(검토 3 N7).
+- 마커 경로는 시작 때(거부)와 시작 뒤 W5의 탐침 답(`marker_path` P1)에서 비교한다(검토 3 N6). 두 탐침 사이에 다른 경로로 다시 뜬 OMS는 다음 탐침에 보인다. OMS를 기다리는 동안의 탐침 답은 보지 않는다.
+- 벽시계가 Δ만큼 뒤로 가면(검토 4 S3) W5와 킬 경로는 `clock::Steady`를 읽어 그 걸음에 시간이 흐르지 않은 것처럼 간다. 송신기의 다시 보내기 간격(남은 부분이 있는 흘려보내기 뒤 5초), 반복 규칙, 불일치 알림 간격은 원래 시계를 읽어 Δ까지 기다린다(새 메시지는 바로 간다). 받아들인다: 가장 중요한 P1(킬의 시작 알림)은 새 메시지다.
+- 시작 확인이 다시 묻는 동안(쓸 수 있는 답 없는 시작 요청은 5,000 ms마다, HTTP 403 뒤에는 600초 뒤) W5는 무장되지 않고 워처가 시작에 걸렸다는 P1도 없다: 그때 죽은 OMS는 워처 쪽에서 아무도 알리지 않는다(`watcher_w5_armed = 0`이 U20b의 규칙이 볼 계열; 검토 4 N10).
+- 송신기가 뜬 뒤의 시작 거부는 시작마다 `[WATCH P1]` 하나를 보낸다: 종료 코드 2에 워처를 다시 띄우는 단위면 재시작마다 하나다. 운영 문서가 워처 단위는 2에서 다시 띄우지 않아야 한다고 적는다(`RestartPreventExitStatus=2`, OMS 단위의 3처럼; U20b가 단위를 쓴다; 검토 4 N9).
+- 종료 때 K1을 기다리는 것과 `shutdown_timeout`은 실행 시험이 보지 못한다(K1은 시험 디렉터리에서 곧 끝나고, 걸린 디스크를 흉내 내지 않는다). 거부를 기다리는 동안 킬을 멈추는 것도 실행 시험이 보지 못한다(재시도가 그 몇 초 안에 오는 경우를 만들지 않았다; `mut.py` 보고).
+
+### 검증(12부, U19b3d)
+
+주장 V-WATCH-13(넓힘). `crates/watcher/tests/runtime.rs`의 실행 시험 9개: `an_oms_that_comes_back_after_an_unconfirmed_stop_is_latched`(K2·K3 실패, 루프가 0건을 확인하고 마지막 알림은 `OMS 정지 미확인`이고 `clear-hold` 없음, `watcher_kill_halt_owed` = 1; 그 뒤 OMS가 답하고 시험의 `admin.sock`이 나타나 먼저 답하지 않으면 빚진 정지의 태스크가 K2 기한에 끊겨 `늦은 정지 실패(정지 응답 없음(시간 초과))` P1 하나, 정상 답마다 다시 보내되 P1은 더 없음; 래치하면 `늦은 정지` P1 하나와 `해소:` 줄, `watcher_w5_armed` 1, 10초 더 지나도 더 없음), `a_marker_path_change_after_the_boot_is_told`(시작 뒤 탐침 답의 경로가 바뀌면 `marker_path` P1 하나, 맞으면 `해소`, 다시 바뀌면 다시; 그때의 킬은 `씀(… 확인 못 함)`, K3가 멈춰도 마지막 줄은 `확인 못 함`이고 정지를 빚짐), `shutdown_during_a_kill_sends_one_abort_notice`(루프 중: 중단 알림 하나, 그 뒤 일괄 취소 없음; K3 중: 머리의 `진행 중`과 `일괄 취소 전`, 일괄 취소 없음, 1초 걸리는 가짜 `systemctl`이 워처가 끝난 뒤 제 일을 마침), `a_start_refusal_during_a_kill_sends_the_abort_notice_first`(OMS가 내려간 채 시작해 킬한 뒤 다른 마커 경로의 상태 답: 중단 알림, 그다음 거부 P1, 코드 2), `a_marker_path_refusal_sends_the_owed_halt_first`(K2가 거절되고 K3가 실패한 킬의 재시도 바로 뒤, 다른 경로의 상태 답: 거부 P1 전에 `watcher_kill` 하나가 시험의 `admin.sock`에 닿고 거부 P1이 `늦은 정지: latched`로 끝남, 코드 2), `a_marker_path_refusal_after_the_kill_waits_for_the_owed_halt_in_flight`(0건으로 끝난 킬 뒤 W5가 `Rearming {halt_owed: true}`일 때 다른 경로의 답과 답을 잡아 둔 `admin.sock`: W5의 빚진 정지와 거부가 `watcher_kill` 하나를 나누고(둘째 연결 없음), 거부 P1이 `늦은 정지: latched`로 끝나며 중단 알림은 없음), 완료 기준의 둘 `ten_minutes_of_failing_queries_send_at_most_12_p1_messages`(시작 알림부터 수동 시계 600초 동안 모든 킬 경로가 503, 1,000 ms 걸음: 창 `[s, s + 600 s]`에 12개 이하 10개 이상, 모두 `[WATCH P1]`, 마지막은 마지막 알림)와 `every_kill_notice_carries_the_position_block`(시작 알림에 두 포지션의 정확한 행, 다음 진행 알림은 `포지션 조회 실패(no_answer)`, 그다음은 읽는 중에 SIGTERM이 와 `포지션 조회 안 함(워처 종료 중)`, 중단 알림), `a_slow_position_read_sends_the_notice_with_unknown_positions`(포지션 경로가 답할 때 수동 시계를 14,000 ms 옮김: 시작 알림은 `포지션 조회 실패(시간 초과)`, 다음 쪽 요청 없음). 단위 시험 `runtime::tests::the_refusal_names_a_latch_only_for_a_reply_that_latched`(거부 P1의 `늦은 정지:` 뒤는 래치한 답만 그대로, 다른 답과 오류는 `실패(…)`, 200자). 변이 M302(킬 중 시작 거부가 중단 알림 전에 끝남), M303(`OwedHalt`를 하지 않음), M304(마커 경로가 다른 탐침 답이 `marker_checked`를 참으로 둠)와 U19b3d `mut.py`(보고서).

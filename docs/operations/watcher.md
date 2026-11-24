@@ -176,6 +176,9 @@ watcher --version
 - OMS에 `[core.policy.monitor]`가 없으면 `monitor.sock`이 없다. 워처는 하트비트마다 한 번 연결을 시도하고, 상태가 바뀔 때만 `warn: monitor.sock … not connected …` 한 줄을 쓴다.
 - 시작 순서: 설정과 키 파일 → 지표 밀어 넣기(여기서부터) → 시작 확인(위) → `/api/status` 기다림(1초마다 다시, `warn: waiting for /api/status: …`는 10초에 하나) → 저널을 기록 1부터 재생(`the OMS answers /api/status: replaying the journal up to record N`, `boot replay done at record N; the checks start`) → 검사와 하트비트. IP 재확인은 시작 확인 뒤 내내 돈다(OMS가 내려가 있어도).
 - 재생 중과 OMS를 기다리는 동안에는 하트비트가 없다. 그동안 OMS의 게이트는 감시 안 됨이다(런북 7.16). 재생은 기록 100만 건에 약 1.3초다(C-WATCH 2부).
+- **시작 순서**: OMS를 먼저 띄우고 `/api/status`가 답할 때까지 기다린 뒤 워처를 띄운다. 워처가 먼저 뜨거나, 사람이 띄운 OMS가 아직 부팅 중일 때 워처를 다시 띄우거나, `status_url`이 틀리면 워처는 `[kill]`이 있을 때 `silence_ms` 뒤 건강하거나 부팅 중인 OMS를 킬한다(런북 7.18). OMS를 일부러 멈출 때는 워처를 먼저 멈춘다.
+- **systemd(U20b)**: 워처가 할 수 있어야 하는 것은 `[kill] oms_unit` 하나의 `stop`뿐이다(polkit이나 사용자 단위로 U20b가 준다; 그 전에는 K3가 실패하고 알림이 `OMS 정지 실패`·`OMS 정지 미확인`이라고 말한다). 워처 단위는 종료 코드 2에 다시 띄우지 않는다(`RestartPreventExitStatus=2`): 시작 거부의 P1이 재시작마다 오지 않게.
+- 킬 중의 종료(U19b3d): 도는 킬을 먼저 중단 알림 하나로 끝낸다(K1 중이면 그 결과나 기한까지, 최대 2초). `systemctl` 클라이언트는 죽이지 않고 마커는 남긴다. 포지션을 읽던 알림과 기다리던 알림은 `포지션 조회 안 함(워처 종료 중)`과 함께 바로 간다. 그 뒤 아래와 같고, 송신기를 5초까지 비우고, 실행기를 `shutdown_timeout(1초)`로 끝낸다(디스크에 걸린 마커 쓰기가 종료를 잡지 않게).
 - 종료: SIGTERM이나 SIGINT. 새 라운드 없이 진행 중 요청을 `request_timeout_ms`까지 기다리고, 지표를 한 번 더 밀어 넣고, 모니터 연결을 닫고 코드 0으로 끝난다. 아무것도 저장하지 않는다(다음 시작이 처음부터 다시 읽는다).
 - 종료 코드 2: 사용법, 설정 파일, 키 파일, 시작 규칙(위의 표). 이유는 stderr 한 줄(`watcher: …` 또는 `watcher: error: …`).
 - 로그는 stderr의 한 줄씩이다(`watcher: ` 뒤). `error:`와 `warn:`으로 시작하는 줄이 운영자가 볼 것이다.
@@ -184,6 +187,9 @@ watcher --version
 
 | 로그 줄(앞부분) | 뜻 | 할 일 |
 |---|---|---|
+| `warn: W5: the OMS answers again and the last kill owes the halt: watcher_kill` | 래치도 확인된 멈춤도 없이 끝난 킬 뒤 OMS가 다시 답해 빚진 정지를 보낸다(U19b3d) | 다음 줄 |
+| `W5: the owed watcher_kill latched the OMS: …` / `error: W5: the owed watcher_kill did not latch the OMS: …` | 빚진 정지의 결과(`늦은 정지` / `늦은 정지 실패` P1이 함께) | 실패면 런북 7.18의 7번 |
+| `the start is refused while the halt is owed: watcher_kill first` | 다른 킬 마커 경로를 읽는 OMS로 시작을 거부하기 전에 정지를 보낸다(U19b3d) | 거부 P1의 `늦은 정지: …`, 런북 7.17 |
 | `error: confirmed difference: <detail>` | 검사가 차이를 확정했다. 보류가 꺼져 있으면 `admin.sock`에 보낸다 | 런북 7.13 |
 | `warn: W<n> mismatch send failed: …` | 보내기가 답을 받지 못했다(소켓 없음, 시간 초과, `overloaded` 등). 차이는 빚으로 남고 `mismatch_resend_ms` 뒤 다시 간다 | OMS가 떠 있는지, 같은 uid인지 |
 | `error: W<n> mismatch send refused (bad_request…` | OMS가 줄을 거절했다. 워처의 결함이다 | 줄과 함께 보고한다 |
@@ -216,10 +222,10 @@ watcher --version
 |---|---|---|
 | `watcher_w5_armed` | 1이면 W5가 OMS를 지킨다. `[kill]`이 없거나, 시작 확인이 끝나기 전, 킬 동안, 킬 뒤 첫 정상 응답까지는 0 | 시작 뒤 0에 머물면 시작 확인이 다시 묻는 중이거나(C-WATCH 12부 알려진 한계) 킬 뒤 OMS가 아직 답하지 않는다 |
 | `watcher_oms_silence_s` | 지키는 동안 마지막 정상 `/api/status` 답 뒤의 초. 지키지 않으면 없다 | `silence_ms`(기본 10초)에 다가가면 킬이 가깝다 |
-| `watcher_kill_active` | 1이면 킬 순서나 그 루프가 돈다 | 1인 동안 `clear-hold --reason kill` 하지 않는다(런북 7.18, U19b3d) |
+| `watcher_kill_active` | 1이면 킬 순서나 그 루프가 돈다 | 1인 동안 `clear-hold --reason kill` 하지 않는다(런북 7.18) |
 | `watcher_kills_total` | 시작한 킬의 수 | 오르면 OMS가 10초 넘게 답하지 않았다 |
 | `watcher_kill_step{step}` | 마지막 킬의 `marker`, `halt`, `stop` 단계의 결과(1 됨, 0 실패). `halt`는 K2 자신의 결과라 루프 중 재시도가 래치해도 0으로 남는다. 정지가 래치했으면 `stop`은 없다. 첫 킬 전과 단계가 끝나기 전에는 없다 | `halt` 0이고 `stop` 0이면 OMS가 멈추지 않았을 수 있다(시작 알림의 `OMS 정지 실패`) |
 | `watcher_kill_round` | 지금이나 마지막 루프의 회차 | 오래 오르면 미체결이 0이 되지 않는다 |
 | `watcher_kill_remaining` | 지금 루프가 마지막으로 센 미체결 수. 세지 못한 동안은 없다 | 줄지 않으면 누군가 주문을 내고 있다 |
 | `watcher_kill_cancel_all_total` | 루프가 낸 일괄 취소 요청 수(보내지 못한 것도 셈, 알림의 `일괄 취소 {k}회`와 같음) | 1초에 1을 넘게 오르지 않는다 |
-| `watcher_kill_halt_owed` | 1이면 정지를 빚졌다: 도는 킬이 래치도 마커 있는 멈춤도 확인하지 못했거나(루프 중 5초마다 `watcher_kill`을 다시 보냄), 끝난 킬 뒤 W5가 `Rearming {halt_owed: true}`에 있다 | 1이고 OMS가 답하면 OMS가 래치 없이 거래할 수 있다: U19b3c는 루프 뒤의 빚을 아직 보내지 않으므로 손으로 래치한다(`omsctl`) |
+| `watcher_kill_halt_owed` | 1이면 정지를 빚졌다: 도는 킬이 래치도 마커 있는 멈춤도 확인하지 못했거나(루프 중 5초마다 `watcher_kill`을 다시 보냄), 끝난 킬 뒤 W5가 `Rearming {halt_owed: true}`에 있다 | 1이고 OMS가 답하면 워처가 `watcher_kill`을 보낸다(루프 동안 5초마다, 루프 뒤 첫 정상 답에, U19b3d). `늦은 정지 실패` P1이 오면 OMS가 래치 없이 거래한다: 손으로 멈춘다(런북 7.18) |
