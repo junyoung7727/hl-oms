@@ -1293,9 +1293,14 @@ fn a_status_with_another_marker_path_refuses_the_start() {
         let oms = if case == "none" { "none" } else { "/elsewhere/kill.marker" };
         let reason = why(oms, &marker);
         assert_eq!(w.lines_with(&format!("error: start refused: {reason}")), 1, "{case}: {:?}", w.log());
-        // The start-refusal P1 (U19b1c), here as a log line.
+        // The start-refusal P1 (U19b1c), here as a log line; its reason is
+        // cut to 200 characters, and the marker path under OMS_TEST_DIR
+        // can make it longer (U19b3c review 1 S2).
+        let cut: String = reason.chars().take(200).collect();
         assert_eq!(
-            w.lines_with(&format!("warn: [WATCH P1] (no [telegram]: not sent) 워처 시작 거부: {reason}")),
+            w.lines_with(&format!(
+                "warn: [WATCH P1] (no [telegram]: not sent) 워처 시작 거부: {cut}. 워처가 꺼짐"
+            )),
             1,
             "{case}"
         );
