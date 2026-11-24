@@ -104,7 +104,7 @@ ADR-031 §2의 "잠금을 잡지 않고, 파일을 쓰지 않는다(C-TAIL)"와 
 - 위험(U19b2b): 루프에는 라운드 수의 상한이 없다. 키 래치나 긴 403 멈춤이면 보내지 않는 라운드가 끝없이 돌고 워처를 다시 시작해야 끝난다(진행 알림이 그렇게 말한다). 바뀐 건수는 최대 `notice_ms` 늦게 알려진다(OMS의 `킬 루프`가 먼저 보일 수 있다).
 - 위험(U19b3a): W5는 코어가 걸리고 HTTP 태스크가 답하는 OMS를 보지 못한다. 틈이 거듭되는 워처는 W5를 쏘지 않는다(OMS의 모니터링 게이트만 남는다). `stop` 권한은 U20b가 주기 전까지 없어 K3은 실패한다. `Steady`는 뒤로 간 걸음을 읽을 때만 보므로 걸음과 다음 읽기 사이의 진행(최대 한 틱)을 잃는다.
 - 가정(U19b3a): 이 PC의 `head`(uutils)는 읽히지 않는 파이프에서 막히지 않았다. 진짜 `systemctl`의 stderr가 파이프를 채우는지는 보지 않았다: 채우면 기한에서 `Unconfirmed`다(안전한 쪽).
-- 위험(U19b3b): 2,000 ms 안에 돌아오지 않은 마커 쓰기는 포기하지만 나중에 써질 수 있고, 걸린 쓰기는 `spawn_blocking` 스레드 하나를 잡는다. 머리가 가장 길고 포지션 20행이 모두 가장 긴 모양이면 시작 알림은 3,675 UTF-16 단위로 두 부분이다(스펙의 "한 부분"은 흔한 모양의 20행에서만 참: 2,995 단위). 래치 없이 돌아온 OMS는 루프 동안 다음 재시도까지 최대 5초 + K2 기한 하나 동안 거래할 수 있다. 마커 쓰기의 `sync_all`은 시험이 보지 못한다(정전을 흉내 내지 않는다; `mut.py`의 `marker-no-sync`가 살아남음).
+- 위험(U19b3b): 2,000 ms 안에 돌아오지 않은 마커 쓰기는 포기하지만 나중에 써질 수 있고, 걸린 쓰기는 `spawn_blocking` 스레드 하나를 잡는다. 머리의 자유 문구는 200 UTF-16 단위로 잘라(BMP 밖 글자는 2단위, U19b3b 검토 1 M1) 머리는 가장 길 때 1,029 단위다. 그 머리에 포지션 20행이 모두 가장 긴 모양이면 시작 알림은 3,675 UTF-16 단위로 두 부분이다(스펙의 "한 부분"은 흔한 모양의 20행에서만 참: 2,995 단위). 래치 없이 돌아온 OMS는 루프 동안 다음 재시도까지 최대 5초 + K2 기한 하나 동안 거래할 수 있다. 마커 쓰기의 `sync_all`은 시험이 보지 못한다(정전을 흉내 내지 않는다; `mut.py`의 `marker-no-sync`가 살아남음).
 - 가정(U19b3b): OMS의 `read_kill_marker`가 마커의 모양을 정한다(적합성 시험이 그 함수를 직접 부른다). 링크가 된 뒤 임시 이름 지우기나 디렉터리 `sync_all`이 실패하면 마커가 있어도 `Failed`로 적는다(안전한 쪽: 빚이 남는다).
 - 루프, W5, 킬 순서의 남은 위험과 가정은 U19b2a~U19b3d가 이 §에 더한다(설계 값: 1초 탐침, 10초 침묵, 1초 라운드, 30초 지켜봄, 60초 알림).
 
@@ -116,7 +116,7 @@ ADR-031 §2의 "잠금을 잡지 않고, 파일을 쓰지 않는다(C-TAIL)"와 
 - 시험(U19b2b): `crates/watcher/tests/kill.rs`의 루프 시험 18개(C-WATCH 11부 "검증(11부, U19b2b)", 주장 V-WATCH-12), 변이 M269~M278.
 - 시험(U19b2c): `crates/watcher/tests/kill.rs`의 세기·`Inflight`·시험 장치 시험 8개와 `crates/watcher/tests/common/kill_rig.rs`(C-WATCH 11부 "검증(11부, U19b2c)", 주장 V-WATCH-12), 변이 M279~M281.
 - 시험(U19b3a): `config::kill_and_w5_are_validated_and_kill_is_required_on_mainnet`, `clock::a_steady_clock_does_not_step_back`, `crates/watcher/tests/w5.rs` 12개, `oms::admin_kill_sends_hello_then_watcher_kill_and_reads_the_reply`, `crates/watcher/tests/stop.rs` 3개(C-WATCH 12부 "검증(12부, U19b3a)", 주장 V-WATCH-13), 변이 M282~M289와 M305(검토 1 S1의 한계).
-- 시험(U19b3b): `crates/watcher/tests/kill_sequence.rs` 18개와 `crates/watcher-conformance/tests/marker.rs`의 `marker::the_oms_reads_the_watchers_marker_file`(C-WATCH 12부 "검증(12부, U19b3b)", 주장 V-WATCH-13), 변이 M290~M299.
+- 시험(U19b3b): `crates/watcher/tests/kill_sequence.rs` 20개와 `crates/watcher-conformance/tests/marker.rs`의 `marker::the_oms_reads_the_watchers_marker_file`(C-WATCH 12부 "검증(12부, U19b3b)", 주장 V-WATCH-13), 변이 M290~M299와 M306~M309(검토 1).
 - 설계: `10_DESIGN_DRAFT.md` §7.5(W5), §7.6(킬 스위치 표), §7.7(직접 알림), R1(C1~C5), R2 SHOULD 4~6, R3 SHOULD 6, R5 SHOULD 1·4(저장소 밖, 스펙 `.scratch/watcher-kill/spec.md`가 줄을 인용한다).
 
 ## 10. 재검토 조건
