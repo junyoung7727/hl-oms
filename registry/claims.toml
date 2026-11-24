@@ -1821,3 +1821,33 @@ tests = ["watcher/kill_and_w5_are_validated_and_kill_is_required_on_mainnet", "w
 repro = "cargo test -p watcher --test config --test clock --test w5 --test admin --test stop --test runtime --test kill_sequence && cargo test -p watcher-conformance --test marker"
 supports = "C-WATCH 12부, ADR-032"
 not_covered = "실행은 아직 W5를 무장하지 않고 Kill·admin_kill·Stopper·spawn_marker를 부르지 않는다(U19b3c): W5와 킬 순서는 손으로 몬 시각으로만, 멈춤은 셸 스크립트로만, 마커 쓰기는 시험 디렉터리에서만 돌았다. 마커 쓰기를 거는 진짜 디스크와 정전 뒤 마커가 남는지(sync_all)는 시험하지 않았다(정전을 흉내 내지 않음). 코어가 걸리고 HTTP 태스크가 답하는 OMS는 W5가 보지 못한다(소유자 질문 11). 진짜 systemctl과 그 권한(U20b가 주는 그 단위 하나의 stop), systemd가 클라이언트를 죽인 뒤에도 멈춤 작업을 끝내는지, 워처가 진짜 OMS 프로세스를 멈춘 적은 없다(U20b와 testnet). 실제 OMS의 admin.sock에 watcher_kill을 보낸 적이 없다(시험의 UnixListener; OMS 쪽 규칙은 U18b1의 시험). 시계가 뒤로 간 걸음과 다음 읽기 사이의 진행은 Steady가 걸음에 묻는다(최대 한 틱). 틈 규칙의 한계 4,000 ms는 판단이고 실제 부하에서 재지 않았다"
+
+[[claim]]
+id = "V-WATCH-14"
+statement = "워처는 자격 파일의 RSA 키(rsa_private_key, PKCS#8 PEM 글)로도 서명한다: 같은 문자열(timestamp + api_key + recv_window + 질의 또는 본문)의 RSA-SHA256 PKCS#1 v1.5 서명을 표준 base64(패딩 있음)로 X-BAPI-SIGN에 싣고 X-BAPI-SIGN-TYPE은 보내지 않는다. GET과 일괄 취소 POST가 모두 Credentials::sign을 지난다. 자격 파일은 api_key와 api_secret 또는 rsa_private_key 중 정확히 하나만 받고, 둘 다·둘 다 없음·PKCS#1·암호화된 PEM·PEM이 아닌 글·키가 아닌 본문·잘린 본문·빈 키·1024비트 키는 키의 바이트를 담지 않는 한 줄로 시작을 거부하며(PKCS#1과 암호화된 PEM은 openssl 변환 명령을 적는다), Debug는 키를 찍지 않는다. HMAC 키의 서명은 전과 바이트까지 같다"
+why = "Bybit testnet의 AI 하위 계정은 RSA 키만 준다(소유자 결정 2026-11-25). 잘못된 모양(hex)의 RSA 서명은 키 거절로 재시작까지 래치되고, 오류 줄이나 Debug의 키 조각은 로그와 메시지로 샌다"
+level = "단위, 통합(loopback)"
+scope = "시험 전용 RSA 키(openssl 3.5.5로 만든 2048·1024비트, 소스에는 base64 본문만), 서명기, 자격 파일 읽기, loopback 가짜 Bybit에 붙인 클라이언트의 GET과 일괄 취소, 수동 시계"
+real = "ring 0.17(RSA PKCS#1 v1.5 SHA-256 서명과 공개 키 검증), base64 0.23, 워처의 Signer·Credentials·creds::load·Client, reqwest, loopback TCP"
+simulated = "Bybit(http-fake), 시계(수동)"
+faults = "둘 다 있는 비밀, 둘 다 없음, PKCS#1 PEM, 암호화된 PKCS#8 PEM, base64가 아닌 본문, 키가 아닌 DER, 잘린 본문, 머리·꼬리 줄 없는 본문, 빈 rsa_private_key, 1024비트 키, 권한 0644. 변이 M315, M316, M317과 저장소 밖 mut.py의 W1, W2, W4~W9"
+criterion = "서명이 openssl(printf '%s' prehash | openssl dgst -sha256 -sign key.pem | base64 -w0)의 값과 정확히 같고 ring의 공개 키로 검증되며 다른 문자열로는 검증되지 않는다. 가짜가 받은 GET과 일괄 취소의 X-BAPI-SIGN이 보낸 질의·본문에 대한 openssl 값이고 X-BAPI-SIGN-TYPE이 없다. 거부마다 기대한 문구가 있고 경로를 적은 한 줄이며 시험 키 네 개의 본문 어느 16자 조각도 담지 않는다. Debug는 정확히 'Credentials { api_key: \"WKEY\", rsa_private_key: <hidden> }'. HMAC 시험 벡터(tests/sign.rs, client.rs)는 바뀌지 않고 통과한다"
+tests = ["watcher/an_rsa_signature_is_openssls_base64_and_verifies_with_the_public_key", "watcher/an_rsa_credentials_file_is_read_and_its_refusals_quote_no_key", "watcher/an_rsa_key_signs_the_get_and_the_cancel_all_in_base64", "watcher/the_strings_to_sign_and_signatures_match_independent_values", "watcher/every_request_carries_the_five_headers_and_the_signed_query", "watcher/the_only_post_is_cancel_all_with_the_fixed_body"]
+repro = "cargo test -p watcher --test sign --test creds --test client"
+supports = "C-WATCH 3부·4부, ADR-034"
+not_covered = "실제 Bybit에 RSA 서명을 보낸 것은 이 저장소의 시험이 아니다(스펙 F1·F2의 2026-11-25 testnet 측정은 저장소 밖에서 openssl과 python으로 했다). ring이 파싱된 키로 서명에 실패하는 경로(D7: 보내지 않음)는 시험으로 일으키지 못했고 코드로만 본다. X-BAPI-SIGN-TYPE이 없는 RSA 요청을 Bybit가 계속 받는지는 F1 한 번의 측정뿐이다"
+
+[[claim]]
+id = "V-BYBIT-RSA-1"
+statement = "OMS의 Bybit 게이트웨이는 자격 파일의 RSA 키(rsa_private_key, PKCS#8 PEM 글)로도 서명한다: REST(GET의 질의, POST의 본문)는 같은 문자열의 RSA-SHA256 PKCS#1 v1.5 서명을 표준 base64로 X-BAPI-SIGN에 싣고 X-BAPI-SIGN-TYPE은 보내지 않으며, 비공개 스트림과 WS Trade의 auth는 GET/realtime + expires의 같은 서명을 base64로 싣는다. 모든 서명이 Credentials::sign을 지나고 서명을 만들지 못한 요청은 보내지 않는다(NotSent, auth not sent). 자격 파일은 api_key와 api_secret 또는 rsa_private_key 중 정확히 하나만 받고 워처와 같은 거부를 키의 바이트 없이 한 줄로 내며, Debug는 키를 찍지 않는다. HMAC 키의 서명은 전과 바이트까지 같다"
+why = "Bybit testnet의 AI 하위 계정은 RSA 키만 준다(소유자 결정 2026-11-25). hex로 보낸 RSA 서명은 'Invalid sign'으로 거절되고(F2) 키 거절은 재시작까지 게이트웨이를 막는다. 주문 POST의 서명이 보낸 본문과 다르면 주문이 나가지 않는다"
+level = "단위, 통합(loopback)"
+scope = "시험 전용 RSA 키(openssl 3.5.5로 만든 2048·1024비트, 소스에는 base64 본문만), Signer, Credentials::load, loopback 가짜 Bybit에 붙인 Rest의 GET과 주문 생성 POST(Orders::create), 두 스트림의 auth 메시지, 고정 시계"
+real = "ring 0.17, base64 0.23, oms-node의 Signer·Credentials·Rest·Orders·stream·trade의 auth_message, reqwest, loopback TCP"
+simulated = "Bybit(http-fake), 시계(고정)"
+faults = "둘 다 있는 비밀, 둘 다 없음, PKCS#1 PEM, 암호화된 PKCS#8 PEM, base64가 아닌 본문, 키가 아닌 DER, 잘린 본문, 머리·꼬리 줄 없는 본문, 빈 rsa_private_key, 1024비트 키, 권한 0644. 변이 M311~M314, M318과 저장소 밖 mut.py의 O1, O1b, O2~O6, O9, O10"
+criterion = "REST 예시 문자열과 GET/realtime1662350400000의 서명이 openssl 값과 정확히 같고 ring의 공개 키로 검증된다. 가짜가 받은 GET과 주문 생성 POST의 X-BAPI-SIGN이 보낸 질의·본문에 대한 openssl 값이고 X-BAPI-SIGN-TYPE이 없다. 두 auth 메시지의 셋째 인자가 openssl의 base64 값이다. 거부마다 기대한 문구가 있고 경로를 적은 한 줄이며 시험 키 네 개의 본문 어느 16자 조각도 담지 않는다. Debug는 정확히 'Credentials { api_key: \"K1\", rsa_private_key: <hidden> }'. HMAC 시험 벡터는 바뀌지 않고 통과한다"
+tests = ["node-unit/venue::bybit::sign::tests::rsa_signatures_are_openssls_base64_and_verify_with_the_public_key", "node-unit/venue::bybit::rest::tests::an_rsa_credentials_file_is_read_and_its_refusals_quote_no_key", "node-unit/venue::bybit::rest::tests::an_rsa_key_signs_a_get_in_base64_over_the_query_sent", "node-unit/venue::bybit::orders::tests::a_create_with_an_rsa_key_is_signed_in_base64_over_the_body_sent", "node-unit/venue::bybit::stream::tests::the_auth_message_with_an_rsa_key_carries_the_base64_signature", "node-unit/venue::bybit::trade::tests::the_auth_message_with_an_rsa_key_carries_the_base64_signature", "node-unit/venue::bybit::sign::tests::signatures_match_independent_hmac_values"]
+repro = "cargo test -p oms-node --lib venue::bybit"
+supports = "게이트웨이 계약 '서명'·G-12, ADR-034, ADR-028"
+not_covered = "실제 Bybit에 RSA 서명을 보낸 것은 이 저장소의 시험이 아니다(스펙 F1·F2의 testnet 측정은 저장소 밖). WS Trade(/v5/trade)의 RSA auth는 거래소에서 한 번도 해 보지 않았다(비공개 스트림과 같은 서명이라는 문서에 기댄다). ring의 서명 실패 경로(D7)는 시험으로 일으키지 못했다. 노드 프로세스 시험(bybit_node)은 HMAC 키로만 돈다"

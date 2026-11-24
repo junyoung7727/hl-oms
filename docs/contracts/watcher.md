@@ -1,6 +1,6 @@
 # C-WATCH 독립 워처
 
-상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23), 4부 구현됨(설정과 자격 파일 U19a4, 시작 확인과 IP 재확인 U19a4b, 2026-11-23), 5부 구현됨(검사 엔진과 W1, U19a5, 2026-11-23), 6부 구현됨(W2 포지션, U19a6, 2026-11-23), 7부 구현됨(OMS 연결과 실행, U19a7, 2026-11-23), 8부 구현됨(W4 체결, U19a8, 2026-11-23), 9부 구현됨(W3 지갑과 증거금, W2의 대신 시각, 예산, U19a9, 2026-11-23), 10부 구현됨(직접 알림의 설정, 토큰 파일과 전달 규칙 U19b1a, 2026-11-24; 송신 태스크 U19b1b, 2026-11-24; P1 조건과 실행 연결 U19b1c, 2026-11-24), 11부 앞부분 구현됨(서명된 일괄 취소 POST, `[kill]`의 키 규칙과 루프 필드, 킬 알림의 문구와 포지션 묶음 U19b2a, 2026-11-24; sans-IO 루프 `KillLoop` U19b2b, 2026-11-24; 아직 아무것도 일괄 취소를 보내거나 루프를 돌리지 않음). 12부 앞부분 구현됨(`[w5]`와 `[kill]`의 멈춤 필드, W5, `clock::Steady`, `watcher_kill` 클라이언트, 멈춤 U19b3a, 2026-11-24; 킬 순서 `Kill`과 마커 쓰기 U19b3b, 2026-11-24; 아직 아무것도 W5나 킬을 돌리지 않음). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md), 10~12부는 [ADR-032](../adr/ADR-032-watcher-kill-and-alerts.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3, V-WATCH-4, V-WATCH-5, V-WATCH-6, V-WATCH-7, V-WATCH-8, V-WATCH-9, V-WATCH-10, V-WATCH-11, V-WATCH-12, V-WATCH-13. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
+상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23), 4부 구현됨(설정과 자격 파일 U19a4, 시작 확인과 IP 재확인 U19a4b, 2026-11-23), 5부 구현됨(검사 엔진과 W1, U19a5, 2026-11-23), 6부 구현됨(W2 포지션, U19a6, 2026-11-23), 7부 구현됨(OMS 연결과 실행, U19a7, 2026-11-23), 8부 구현됨(W4 체결, U19a8, 2026-11-23), 9부 구현됨(W3 지갑과 증거금, W2의 대신 시각, 예산, U19a9, 2026-11-23), 10부 구현됨(직접 알림의 설정, 토큰 파일과 전달 규칙 U19b1a, 2026-11-24; 송신 태스크 U19b1b, 2026-11-24; P1 조건과 실행 연결 U19b1c, 2026-11-24), 11부 앞부분 구현됨(서명된 일괄 취소 POST, `[kill]`의 키 규칙과 루프 필드, 킬 알림의 문구와 포지션 묶음 U19b2a, 2026-11-24; sans-IO 루프 `KillLoop` U19b2b, 2026-11-24; 아직 아무것도 일괄 취소를 보내거나 루프를 돌리지 않음). 12부 앞부분 구현됨(`[w5]`와 `[kill]`의 멈춤 필드, W5, `clock::Steady`, `watcher_kill` 클라이언트, 멈춤 U19b3a, 2026-11-24; 킬 순서 `Kill`과 마커 쓰기 U19b3b, 2026-11-24; 아직 아무것도 W5나 킬을 돌리지 않음). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md), 10~12부는 [ADR-032](../adr/ADR-032-watcher-kill-and-alerts.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3, V-WATCH-4, V-WATCH-5, V-WATCH-6, V-WATCH-7, V-WATCH-8, V-WATCH-9, V-WATCH-10, V-WATCH-11, V-WATCH-12, V-WATCH-13, V-WATCH-14(RSA 키, [ADR-034](../adr/ADR-034-bybit-rsa-keys.md), 2026-11-25). 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
 
 워처는 OMS와 코드를 나누지 않는 별도 프로그램이다. 저널을 자기 읽기로 읽고(이 문서와 [C-TAIL](tail.md), [ADR-011](../adr/ADR-011-file-format.md)만으로 썼다), 자기 키와 클라이언트로 Bybit를 조회해 OMS와 비교하고, 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고, `monitor.sock`에 하트비트를 보낸다. **U19a7부터 워처는 돈다**: `watcher --config <path>`가 설정과 자격 파일을 읽고, 시작 확인을 거쳐 OMS의 `/api/status`를 기다린 뒤 저널을 처음부터 재생하고, W1(열린 주문), W2(포지션), U19a8부터 W4(체결), U19a9부터 W3(지갑과 증거금)을 돌려 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고(다시 보내기 규칙, 7부), `heartbeat_ms`마다 `monitor.sock`에 하트비트를 보내고, 지표를 VictoriaMetrics로 밀어 넣는다. 네 검사가 모두 돈다(U19a9). loopback 가짜와 시험 저널로만 시험했고 실제 OMS 프로세스나 실제 Bybit에 붙여 돌려 본 적이 없다(키가 없다, U-01). 서비스 설치는 U20b다.
 
@@ -165,8 +165,9 @@
 ### 서명
 
 - GET과 POST 하나를 서명한다. GET: `X-BAPI-SIGN = hex(HMAC_SHA256(secret, timestamp + api_key + recv_window + query))`. `query`는 URL에 보내는 문자열과 바이트까지 같다. POST(U19b2a): 질의 자리에 보내는 본문의 바이트가 온다(`sign::post_prehash`). 서명된 POST는 킬 루프의 일괄 취소 하나뿐이고 경로와 본문이 상수다(`Client::cancel_all`, 11부). 일반 POST는 없다.
+- RSA 키([ADR-034](../adr/ADR-034-bybit-rsa-keys.md), 2026-11-25): 같은 문자열의 RSA-SHA256 PKCS#1 v1.5 서명을 표준 base64(패딩 있음)로 싣는다(`X-BAPI-SIGN = base64(…)`, 스펙 F1의 testnet 측정과 Bybit v5 "Create A Request"). 서명은 GET과 일괄 취소 모두 `Credentials::sign` → `sign::Signer::sign` 한 곳을 지난다(HMAC은 소문자 hex). 서명을 만들지 못하면(파싱된 키에서는 기대하지 않는다) 그 요청은 보내지 않고 `not_sent`로 센다. 서명 없이나 다른 방식으로 보내지 않는다.
 - 질의 문자열: `k=v`를 `&`로 잇고 키로 정렬한다. 값은 그대로 보낸다(거래소의 커서는 이미 퍼센트 인코딩되어 온다). 키나 값에 `[A-Za-z0-9-_.~%:,]` 밖의 글자가 있으면 **보내기 전에 거절**한다(`not_sent`). 인코딩해서 보내지 않는다. 이 거절은 요청이 아니므로 `watcher_requests_total`에 세지 않고 `watcher_request_errors_total{class="not_sent"}`에만 센다.
-- 머리글 다섯: `X-BAPI-API-KEY`, `X-BAPI-TIMESTAMP`(보내는 순간의 주입된 시계, 요청 제한에서 기다린 뒤에 읽는다), `X-BAPI-RECV-WINDOW`(`recv_window_ms`), `X-BAPI-SIGN`, `X-BAPI-SIGN-TYPE: 2`.
+- 머리글 다섯: `X-BAPI-API-KEY`, `X-BAPI-TIMESTAMP`(보내는 순간의 주입된 시계, 요청 제한에서 기다린 뒤에 읽는다), `X-BAPI-RECV-WINDOW`(`recv_window_ms`), `X-BAPI-SIGN`, `X-BAPI-SIGN-TYPE: 2`(HMAC 키만. RSA 키의 요청은 이 머리글 없이 넷이다: 측정한 RSA 요청에 없었다, ADR-034).
 - 연결: 지역 주소는 IPv4만(IP 반향이 보는 주소가 Bybit가 보는 주소가 되도록), 연결 제한 3초, 요청 제한 `request_timeout_ms`, 리다이렉트를 따르지 않고(서명된 요청을 다시 보내게 된다), 프록시를 쓰지 않는다.
 - 자격(`rest::Credentials`)의 `Debug`는 비밀을 찍지 않는다. 파일에서 읽는 것은 4부(`watcher::creds`)다.
 
@@ -288,11 +289,14 @@
 
 ### 자격 파일(`creds::load(path, data_dir)`)
 
-- TOML `api_key`, `api_secret` 두 개만. 둘 다 비어 있지 않아야 하고, 다른 키가 있으면 거부한다.
+- TOML `api_key`와, `api_secret`(HMAC) 또는 `rsa_private_key`(RSA, PKCS#8 PEM 글을 TOML 여러 줄 문자열로; [ADR-034](../adr/ADR-034-bybit-rsa-keys.md)) 중 **정확히 하나**. 비어 있지 않아야 하고, 다른 키가 있으면 거부한다. 둘 다면 "has both api_secret and rsa_private_key; keep exactly one", 둘 다 없으면 "…: it has neither".
+- RSA 키는 읽을 때 한 번 파싱한다(`sign::Signer::rsa`, ring). `BEGIN PRIVATE KEY` 줄의 암호화되지 않은 PKCS#8만 받는다. PKCS#1(`BEGIN RSA PRIVATE KEY`)과 암호화된 PEM(`BEGIN ENCRYPTED PRIVATE KEY`)은 고치는 명령 `openssl pkcs8 -topk8 -nocrypt -in old.pem -out new.pem`을 적은 줄로, PEM이 아니거나 base64가 아닌 글은 "is not a PEM private key", 2048비트 미만이거나 RSA 키가 아닌 본문은 "is not an RSA key of 2048 bits or more that ring accepts (<ring의 이유>)"로 거부한다. 모두 종료 코드 2의 시작 거부다.
 - 읽는 순간에 설정의 경로 규칙(절대, `..` 없음, 데이터 디렉터리 밖)을 한 번 더 적용한다. 설정을 읽은 뒤 생긴 심볼릭 링크도 여기서 본다.
 - 여는 핸들 하나로 검사하고 읽는다(검사와 읽기 사이에 파일을 바꿔치기할 수 없다). 열 때 마지막 구성 요소의 심볼릭 링크를 따르지 않고(`O_NOFOLLOW`; 링크면 "is a symbolic link"), FIFO의 쓰는 쪽을 기다리지 않는다(`O_NONBLOCK`; 바로 "is not a regular file").
 - 그 핸들의 메타데이터: 일반 파일, 소유자 = 이 프로세스의 실효 uid(`geteuid`), 권한 정확히 `0600` 또는 `0400`(그룹·다른 사용자 비트, 소유자 실행 비트, set-id·sticky 비트가 있으면 거부; OMS의 `& 0o077` 규칙보다 좁다. 스펙의 표대로다).
-- **오류는 파일 내용을 인용하지 않는다**: TOML 오류(줄을 인용한다)를 버리고 "is not TOML with api_key and api_secret and nothing else"만 쓴다. 경로는 적는다. 비밀은 어디에도 찍히지 않는다(`Credentials`의 `Debug`는 `<hidden>`).
+- **오류는 파일 내용을 인용하지 않는다**: TOML 오류(줄을 인용한다)를 버리고 "is not TOML with api_key and api_secret or rsa_private_key, and nothing else"만 쓴다. RSA 키의 거부 줄도 키의 바이트를 담지 않는다(ring의 이유는 `TooSmall` 같은 고정된 이름). 경로는 적는다. 비밀과 키는 어디에도 찍히지 않는다(`Credentials`의 `Debug`는 `api_secret: <hidden>` 또는 `rsa_private_key: <hidden>`, `Signer`에는 `Debug`가 없다).
+
+RSA 키의 시험(V-WATCH-14): `sign::an_rsa_signature_is_openssls_base64_and_verifies_with_the_public_key`(openssl `dgst -sha256 -sign` 값과 같음, ring 공개 키로 검증, HMAC 서명기의 Python 값), `creds::an_rsa_credentials_file_is_read_and_its_refusals_quote_no_key`(읽힘과 `Debug`, 거부 열: 둘 다, 없음, PKCS#1, 암호화, base64 아님, 키 아닌 본문, 잘린 본문, 머리 줄 없음, 빈 키, 1024비트; 어느 줄에도 시험 키 본문의 16자 조각이 없음; 0644 거부), `client::an_rsa_key_signs_the_get_and_the_cancel_all_in_base64`(가짜가 받은 GET과 일괄 취소의 서명이 보낸 질의·본문의 openssl 값, `X-BAPI-SIGN-TYPE` 없음). 시험 키는 시험 전용으로 openssl로 만들었고 소스에는 base64 본문만 있다(`tests/common/rsa.rs`). 변이: M315(RSA 서명을 hex로), M316(RSA 파일이 HMAC으로 떨어짐), M317(둘 다 받음).
 
 ### 시작 확인(`start::Start`, U19a4b)
 
