@@ -2633,6 +2633,15 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "clock", "a_steady_clock_does_not_step_back"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M305-watcher-w5-bound-ignores-stall",
+        what: "the [w5] silence_ms bound holds one lost probe only, not a stall of the watcher shorter than a gap (U19b3a review 1 S1; M290-M304 are the spec's for U19b3b-d)",
+        file: "crates/watcher/src/config.rs",
+        find: "        let bound = 3 * w.probe_ms + 3 * self.http.request_timeout_ms + 1000;\n",
+        replace: "        let bound = w.probe_ms + 2 * self.http.request_timeout_ms + 1000;\n",
+        test: &["-p", "watcher", "--test", "config", "kill_and_w5_are_validated_and_kill_is_required_on_mainnet"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
