@@ -40,4 +40,5 @@
 | [ADR-030](ADR-030-kill-switch-holds.md) | 킬 스위치와 운영자가 푸는 보류: 저널에 남는 래치와 `clear_hold`, 내구화된 명령이 시작하는 확인 루프, 킬 마커, 전략 연결 감시, 모니터링 게이트(U18b1·U18b2 구현, U18b3~4 남음) | 리스크 |
 | [ADR-031](ADR-031-watcher.md) | 독립 워처: 문서(ADR-011, C-TAIL)만으로 쓴 저널 읽기, 의존성·소스를 보는 CI 스크립트로 OMS와 코드를 나누지 않음을 매번 확인, 커서 없이 시작마다 재생(U19a1 구현, 검사는 U19a2~9) | 운영 |
 | [ADR-032](ADR-032-watcher-kill-and-alerts.md) | 워처의 직접 알림 `[WATCH P1]`(자기 송신기, PR #3 규칙)과 자기 킬: OMS가 10초 조용하면 킬 마커, `watcher_kill`(안 되면 그 단위 하나만 `systemctl stop`), 그 뒤 자기 키로 일괄 취소 루프(ADR-031의 "파일을 쓰지 않는다"를 고침; U19b1a 구현, 나머지 U19b1b~U19b3d) | 운영 |
+| [ADR-033](ADR-033-repository-standards.md) | 저장소 표준: main 잠금(ruleset), 검사를 바꾸는 변경은 소유자 확인(`tools/ci/owner_review.sh`, 1부 구현), 구조 규칙·lint·리뷰 규칙 문서(2~4부) | 개발 과정 |
 | [ADR-034](ADR-034-bybit-rsa-keys.md) | Bybit RSA 서명 키: 자격 파일의 `rsa_private_key`(PKCS#8 PEM 글, `api_secret`과 정확히 하나), crate마다 서명기 하나(HMAC은 hex, RSA는 base64), PKCS#1·암호화된 PEM은 변환 명령을 적어 거부, 서명 실패는 보내지 않음(워처와 OMS, 2026-11-25 구현) | 거래소 |

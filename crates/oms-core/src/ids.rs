@@ -149,6 +149,7 @@ impl VenueClientId {
     pub fn from_u128(v: u128) -> VenueClientId {
         VenueClientId {
             instance_id: (v >> 64) as u64,
+            #[expect(clippy::cast_possible_truncation, reason = "the low 64 bits are the order id")]
             order_id: OrderId(v as u64),
         }
     }

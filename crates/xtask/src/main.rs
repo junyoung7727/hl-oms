@@ -14,6 +14,7 @@
 
 mod bench;
 mod digest;
+mod layers;
 mod loadgen;
 mod mutants;
 mod perf;
@@ -49,6 +50,7 @@ fn main() {
             0
         }
         Some("docs") => registry::run(&root()),
+        Some("layers") => layers::run(&root()),
         Some("mutants") => mutants::run(&root(), opt(&args, "--only").as_deref()),
         Some("recovery-time") => perf::recovery_time(
             opt(&args, "--dir").unwrap_or_else(|| "data/perf".into()).into(),
@@ -93,6 +95,7 @@ fn main() {
                  \x20 fsync-probe --dir D [--label L] [--count N] [--bytes N]\n\
                  \x20 core-bench [--orders N]\n\
                  \x20 docs                                  registry + evidence -> docs/generated/, dashboard/data/\n\
+                 \x20 layers                                crate layering table tools/ci/layers.toml (CI)\n\
                  \x20 digest                                source digest of this tree"
             );
             2
