@@ -263,7 +263,7 @@ The watcher's check that the OMS still answers (`watcher::w5::W5`, sans-IO, C-WA
 _Avoid_: heartbeat (the watcher's line to the OMS, the other direction), W1–W4 (the checks against the venue)
 
 **Watcher kill** (워처 킬):
-The whole sequence the watcher runs when W5 fires (`watcher::kill::Kill`, C-WATCH part 12): K1 write the kill marker (deadline 2 s), K2 `watcher_kill` on `admin.sock`, K3 `systemctl stop` of the one OMS unit only when K2 did not latch, then the watcher kill loop with the watcher's own key; the first cancel-all comes only after K1 and K2 (and K3) ended or passed their deadlines. While the halt is owed the loop sends `watcher_kill` again every 5 s. While it runs the watcher's check engine is paused (no round, no heartbeat). Its notices say `워처 킬`. Run by the runtime from U19b3c.
+The whole sequence the watcher runs when W5 fires (`watcher::kill::Kill`, C-WATCH part 12): K1 write the kill marker (deadline 2 s), K2 `watcher_kill` on `admin.sock`, K3 `systemctl stop` of the one OMS unit only when K2 did not latch, then the watcher kill loop with the watcher's own key; the first cancel-all comes only after K1 and K2 (and K3) ended or passed their deadlines. While the halt is owed the loop sends `watcher_kill` again every 5 s. While it runs the watcher's check engine is paused (no round, no heartbeat, no `watcher_mismatch` send; a round in flight at the fire sends nothing more). Its notices say `워처 킬`. Run by the runtime from U19b3c.
 _Avoid_: kill (the OMS's own latch, C-HOLD/C-KILL), watcher kill loop (only the cancel-all loop inside it)
 
 **Venue setting** (거래소 설정):
