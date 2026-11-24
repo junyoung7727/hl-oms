@@ -4,7 +4,7 @@ Status: ready-for-agent
 Owner decision: junyoung 2026-11-25 00:55 KST (DM): "rsa키로 해". Bybit testnet AI sub-accounts only issue self-generated (RSA) keys; the system-generated (HMAC) option is not offered there.
 
 ## Problem
-Both the watcher (crates/watcher) and the OMS Bybit venue (crates/oms-node/src/venue/bybit) sign every private request with HMAC-SHA256 only. The two testnet keys made for the owner's dogfood run (the owner's testnet sub-account, IP-bound) are RSA keys. Neither binary can use them.
+Both the watcher (crates/watcher) and the OMS Bybit venue (crates/oms-node/src/venue/bybit) sign every private request with HMAC-SHA256 only. The two testnet keys made for the owner's dogfood run (on the owner's testnet sub-account, IP-bound) are RSA keys. Neither binary can use them.
 
 ## Facts (measured on the Linux PC 2026-11-25 01:0x KST, Bybit testnet, with openssl + python, keys of the owner's testnet sub-account)
 - F1 REST: `X-BAPI-SIGN = base64(RSA-SHA256 PKCS#1 v1.5 signature over timestamp + api_key + recv_window + payload)`, standard base64 with padding. Same prehash as HMAC; only the transform differs (Bybit v5 guide "Create A Request": "lowercase HEX string for HMAC_SHA256, or base64 for RSA_SHA256"). GET /v5/user/query-api signed this way: retCode 0.
