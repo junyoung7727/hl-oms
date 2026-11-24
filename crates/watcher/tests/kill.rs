@@ -8,8 +8,11 @@
 
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
 use std::sync::{Arc, Mutex};
 
+use common::kill_rig::{self as rig, KillRig, at_once, cancel_ok as ok_n, http, open_orders};
 use http_fake::{Answer, FakeHttp};
 use serde_json::{Value, json};
 use watcher::alert::{MSG_LIMIT, message, split};
@@ -18,7 +21,7 @@ use watcher::config::Kill;
 use watcher::kill::{
     AbortWhy, Action, CancelAnswer, KillLoop, LATCHED_LINE, LastError, NOT_READ_ON_ABORT, NotSent,
     Notice, PAUSED_LINE, POSITIONS, Phase, Positions, Report, StopOutcome, TIMED_OUT, notice_text,
-    position_block, read_positions, Inflight, ORDERS, count_open,
+    position_block, read_positions, Arrived, Inflight, ORDERS, count_open,
 };
 use watcher::metrics::Metrics;
 use watcher::rest::{CANCEL_ALL, CancelAll, Client, ClientConfig, Credentials};
@@ -1743,4 +1746,139 @@ async fn an_aborted_task_sends_no_answer_to_the_loop() {
     // Only requests start a task.
     assert!(!inf.start(&Action::Notice(Notice::Start { round_ms: 1000 })));
     assert_eq!(inf.open(), 1);
+}
+
+/// The notice kinds in order.
+fn kinds(rig: &KillRig) -> Vec<&'static str> {
+    rig.notices()
+        .iter()
+        .map(|(_, n)| match n {
+            Notice::Start { .. } => "start",
+            Notice::Progress { .. } => "progress",
+            Notice::Final { .. } => "final",
+            Notice::Abort { .. } => "abort",
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn one_order_left_after_the_first_cancel_all_repeats_until_zero_is_confirmed() {
+    // 2 cancel-alls and 8 counts in 31 s of the loop's clock: far under
+    // the guard's 60 per 10 s.
+    let mut rig = KillRig::new(vec![
+        (CANCEL_ALL, vec![at_once(ok_n(3))]),
+        (
+            ORDERS,
+            vec![at_once(open_orders(1, "")), at_once(open_orders(0, ""))],
+        ),
+    ]);
+    let report = rig.run().await;
+    assert_eq!(
+        report,
+        Report {
+            rounds: 2,
+            cancel_all_calls: 2,
+            zero_since: Some(rig::T0 + 1000),
+            aborted: false,
+        }
+    );
+    // Round 2 at t_1 + round_ms; the watch counts every 5 s for 30 s.
+    assert_eq!(rig.cancel_all_at(), [rig::T0, rig::T0 + 1000]);
+    let counts: Vec<u64> = rig
+        .requests()
+        .into_iter()
+        .filter(|(_, p)| p == ORDERS)
+        .map(|(t, _)| t - rig::T0)
+        .collect();
+    assert_eq!(
+        counts,
+        [0, 1000, 6000, 11_000, 16_000, 21_000, 26_000, 31_000]
+    );
+    assert_eq!(kinds(&rig), ["start", "final"]);
+    let (at, last) = rig.notices().pop().unwrap();
+    assert_eq!(at, rig::T0 + 31_000);
+    assert!(matches!(
+        last,
+        Notice::Final {
+            round: 2,
+            cancel_all_calls: 2,
+            ..
+        }
+    ));
+    rig.assert_at_most_2_cancel_alls_per_second();
+    assert_eq!((rig.inflight.open(), rig.inflight.aborted()), (0, 0));
+    assert_eq!(rig.lp.ignored(), 0);
+}
+
+#[tokio::test]
+async fn a_5xx_cancel_all_or_count_repeats_until_zero_is_confirmed() {
+    // A 503 cancel-all (sent, so a count follows), a 503 count (an error,
+    // never zero), two orders left, then zero: 3 cancel-alls and 9 counts.
+    let mut rig = KillRig::new(vec![
+        (
+            CANCEL_ALL,
+            vec![at_once(http(503)), at_once(ok_n(2)), at_once(ok_n(2))],
+        ),
+        (
+            ORDERS,
+            vec![
+                at_once(http(503)),
+                at_once(open_orders(2, "")),
+                at_once(open_orders(0, "")),
+            ],
+        ),
+    ]);
+    let report = rig.run().await;
+    assert_eq!(
+        report,
+        Report {
+            rounds: 3,
+            cancel_all_calls: 3,
+            zero_since: Some(rig::T0 + 2000),
+            aborted: false,
+        }
+    );
+    assert_eq!(
+        rig.cancel_all_at(),
+        [rig::T0, rig::T0 + 1000, rig::T0 + 2000]
+    );
+    assert_eq!(
+        rig.paths()[..6],
+        [CANCEL_ALL, ORDERS, CANCEL_ALL, ORDERS, CANCEL_ALL, ORDERS]
+    );
+    // The first cancel-all failed (counted as sent); its count's one page
+    // answered 503: a count error.
+    let first: Vec<&Arrived> = rig.arrived.iter().take(3).map(|(_, a)| a).collect();
+    assert!(
+        matches!(first[0], Arrived::Cancel { answer: CancelAnswer::Failed(why), .. } if why.contains("HTTP 503")),
+        "{first:?}"
+    );
+    assert!(
+        matches!(first[1..], [Arrived::Page { .. }, Arrived::Counted { result: Err(why), .. }] if why.contains("HTTP 503")),
+        "{first:?}"
+    );
+    assert_eq!(kinds(&rig), ["start", "final"]);
+    assert_eq!(rig.notices().last().unwrap().0, rig::T0 + 32_000);
+    rig.assert_at_most_2_cancel_alls_per_second();
+
+    // A venue that answers every request 900 ms late (the clock moves at
+    // each request): the rounds still keep at most 2 per second.
+    let late = |a| rig::slow(a, 900);
+    let mut rig = KillRig::new(vec![
+        (CANCEL_ALL, vec![late(http(503)), late(ok_n(1))]),
+        (
+            ORDERS,
+            vec![
+                late(open_orders(1, "")),
+                late(http(503)),
+                late(open_orders(0, "")),
+            ],
+        ),
+    ]);
+    let report = rig.run().await;
+    assert!(!report.aborted);
+    assert_eq!(report.rounds, 3);
+    assert_eq!(kinds(&rig), ["start", "final"]);
+    rig.assert_at_most_2_cancel_alls_per_second();
+    assert_eq!(rig.lp.ignored(), 0);
 }
