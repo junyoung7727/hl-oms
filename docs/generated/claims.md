@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `e2b60458de1e7014`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `5bc9ff2fd8a485da`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 주장 121건: 통과 0, 실패 0, 미실행 54, 이전 버전 결과 67.
 
@@ -3078,7 +3078,7 @@
 - 판정 기준과 근거: 설정의 기본값과 거부 줄(한 줄, 정한 문구); W5가 낸 탐침의 시각, Fire의 시각과 값, State와 armed·silent_ms·halt_owed·probe_in_flight, OwedHalt의 시각과 수, owed_halt_done의 P1 문구, warn 줄; Steady가 준 값과 스레드마다의 순서; good_answer의 참거짓; admin_kill의 반환값과 가짜 소켓이 받은 두 줄과 걸린 시간; Stopper의 Outcome, 그것이 나온 틱, 스크립트가 적은 argv, poll 한 번의 시간(50 ms 아래), reaped; 소스의 Command::new 위치와 수; 실행의 warn 줄 수; Kill이 낸 Step의 순서와 시각, header()와 KillLoop의 머리 문구, outcome·halt_owed·halt_open·stage·next_wake, Ended의 report와 halt_owed, 알림의 종류와 문구, 메시지의 UTF-16 단위와 부분 수; 마커 파일의 종류·모드·내용, 디렉터리의 이름들, 문구의 바이트 수와 글자 경계, read_kill_marker의 결과; 실행: 종료 코드와 거부 줄, 가짜가 받은 요청의 순서(마커 파일 → watcher_kill 답 → systemctl argv → 첫 일괄 취소), 1,000 ms 창마다의 일괄 취소 수, 텔레그램 메시지의 문구, VM에 보낸 W5·킬·검사 나이 지표, 하트비트 수, 마커 파일의 모드·내용, 연결이 닫힌 실제 시간
 - 재현: `cargo test -p watcher --test config --test clock --test w5 --test admin --test stop --test runtime --test kill_sequence && cargo test -p watcher-conformance --test marker`
 - 뒷받침하는 것: C-WATCH 12부, ADR-032
-- 확인하지 않은 범위: 실행(U19b3c)은 W5와 킬을 돌리지만 루프 뒤의 빚진 정지, 킬 중의 종료·시작 거부의 중단 알림, 탐침 답의 마커 경로, 느린 포지션 읽기는 U19b3d다. 멈춤은 셸 스크립트로만, 마커 쓰기는 시험 디렉터리에서만 돌았다. 16개를 넘게 기다리는 알림의 버리기와 기다리던 메시지를 틱 전에 다루기는 실행 시험이 보지 못한다(설정 범위에서 큐가 16에 닿지 않음; 경쟁의 창을 좁힐 뿐). 킬 중 엔진 멈춤 때문에 래치된 OMS가 30초 뒤 hold:unmonitored를 내는 것은 진짜 OMS로 보지 않았다. 마커 쓰기를 거는 진짜 디스크와 정전 뒤 마커가 남는지(sync_all)는 시험하지 않았다(정전을 흉내 내지 않음). 코어가 걸리고 HTTP 태스크가 답하는 OMS는 W5가 보지 못한다(소유자 질문 11). 진짜 systemctl과 그 권한(U20b가 주는 그 단위 하나의 stop), systemd가 클라이언트를 죽인 뒤에도 멈춤 작업을 끝내는지, 워처가 진짜 OMS 프로세스를 멈춘 적은 없다(U20b와 testnet). 실제 OMS의 admin.sock에 watcher_kill을 보낸 적이 없다(시험의 UnixListener; OMS 쪽 규칙은 U18b1의 시험). 시계가 뒤로 간 걸음과 다음 읽기 사이의 진행은 Steady가 걸음에 묻는다(최대 한 틱). 틈 규칙의 한계 4,000 ms는 판단이고 실제 부하에서 재지 않았다
+- 확인하지 않은 범위: 실행(U19b3c)은 W5와 킬을 돌리지만 루프 뒤의 빚진 정지, 킬 중의 종료·시작 거부의 중단 알림, 탐침 답의 마커 경로, 느린 포지션 읽기는 U19b3d다. 멈춤은 셸 스크립트로만, 마커 쓰기는 시험 디렉터리에서만 돌았다. 16개를 넘게 기다리는 알림의 버리기는 단위 시험(runtime::tests)만 보고 실행 시험은 보지 못한다(설정 범위에서 큐가 16에 닿지 않음). 기다리던 메시지를 틱 전에 다루기는 실행 시험이 보지 못한다(경쟁의 창을 좁힐 뿐). 킬 중 엔진 멈춤 때문에 래치된 OMS가 30초 뒤 hold:unmonitored를 내는 것은 진짜 OMS로 보지 않았다. 마커 쓰기를 거는 진짜 디스크와 정전 뒤 마커가 남는지(sync_all)는 시험하지 않았다(정전을 흉내 내지 않음). 코어가 걸리고 HTTP 태스크가 답하는 OMS는 W5가 보지 못한다(소유자 질문 11). 진짜 systemctl과 그 권한(U20b가 주는 그 단위 하나의 stop), systemd가 클라이언트를 죽인 뒤에도 멈춤 작업을 끝내는지, 워처가 진짜 OMS 프로세스를 멈춘 적은 없다(U20b와 testnet). 실제 OMS의 admin.sock에 watcher_kill을 보낸 적이 없다(시험의 UnixListener; OMS 쪽 규칙은 U18b1의 시험). 시계가 뒤로 간 걸음과 다음 읽기 사이의 진행은 Steady가 걸음에 묻는다(최대 한 틱). 틈 규칙의 한계 4,000 ms는 판단이고 실제 부하에서 재지 않았다
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
@@ -3134,4 +3134,5 @@
 | `watcher/a_clock_step_back_during_a_kill_does_not_hold_the_loop` | 미실행 |  |
 | `watcher/a_halt_without_a_reply_is_aborted_at_its_deadline` | 미실행 |  |
 | `watcher/a_clock_step_back_does_not_hold_the_guard` | 미실행 |  |
+| `watcher/a_full_notice_queue_drops_the_oldest_progress_notice_never_a_start_or_a_final` | 미실행 |  |
 
