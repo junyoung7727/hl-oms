@@ -2768,6 +2768,15 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "kill_sequence", "the_first_retry_after_a_halt_timeout_counts_from_its_deadline"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M310-watcher-kill-header-latched-reply-not-cut",
+        what: "the header's latched K2 reply is not cut: the OMS's stored latch detail and its control characters go into the start notice (U19b3b review 2 S2)",
+        file: "crates/watcher/src/kill.rs",
+        find: "                let reply = cut_units(reply, TEXT_MAX);\n",
+        replace: "                let reply = reply.to_string();\n",
+        test: &["-p", "watcher", "--test", "kill_sequence", "already_latched_and_the_rearm_reply_count_as_halted"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
