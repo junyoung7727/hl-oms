@@ -2822,6 +2822,24 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "runtime", "a_marker_path_change_after_the_boot_is_told"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M319-watcher-shutdown-after-the-kill-drops-the-final-notice",
+        what: "a shutdown right after a kill ended does not send the kill notices still waiting for their position read: the final notice is lost (U19b3d review 1 M1)",
+        file: "crates/watcher/src/runtime.rs",
+        find: "        if let Some(k) = &self.kill\n            && k.kill.stage() == Stage::Marker\n        {\n",
+        replace: "        if self.kill.is_none() {\n            return;\n        }\n        if let Some(k) = &self.kill\n            && k.kill.stage() == Stage::Marker\n        {\n",
+        test: &["-p", "watcher", "--test", "runtime", "shutdown_right_after_the_kill_ended_sends_the_final_notice"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M320-watcher-refusal-before-the-loop-owes-no-halt",
+        what: "a marker-path refusal while K1, K2 or K3 runs does not count as owing the halt: the watcher exits 2 without a watcher_kill (U19b3d review 1 S1)",
+        file: "crates/watcher/src/runtime.rs",
+        find: ".is_some_and(|k| k.kill.halt_owed() || k.kill.stage() != Stage::Loop);",
+        replace: ".is_some_and(|k| k.kill.halt_owed());",
+        test: &["-p", "watcher", "--test", "runtime", "a_marker_path_refusal_before_the_kill_loop_sends_the_halt_first"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
