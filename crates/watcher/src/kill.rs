@@ -918,7 +918,7 @@ impl KillLoop {
     /// after a mark; the marks stay anchored to the start notice, and one
     /// notice covers every mark passed before it.
     fn progress(&mut self, now: u64, out: &mut Vec<Action>) {
-        if !self.running() || now < self.next_mark {
+        if now < self.next_mark {
             return;
         }
         let every = self.t.notice_ms.max(1);
