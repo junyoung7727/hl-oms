@@ -1816,10 +1816,11 @@ fn an_oms_that_comes_back_during_the_loop_is_latched_before_the_loop_ends() {
     });
     walk(&clock, 10_000);
     std::thread::sleep(Duration::from_millis(300));
-    // U19b3c's shutdown is U19a's path (U19b3d adds the abort notice).
+    // The shutdown aborts the loop with one notice (U19b3d).
     assert_eq!(run.shutdown(), 0);
     assert_eq!(kill_lines(&admin).len(), 1);
     assert_eq!(sent_with(&w, LATE_HALT).len(), 1);
+    assert_eq!(sent_with(&w, "워처 종료로 워처 킬 중단(").len(), 1);
     assert!(w.requests(CANCEL_ALL).is_empty());
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&tg_dir);
@@ -2150,6 +2151,86 @@ fn a_marker_path_change_after_the_boot_is_told() {
     assert!(fin.contains("OMS는 멈춤(systemctl stop). 킬 마커는 OMS가 읽는 경로인지 확인 못 함"), "{fin}");
     assert_eq!(w.lines_with("the halt is owed"), 1, "{:?}", w.log());
     assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+/// The fixed last line of both abort notices.
+const NOT_READ: &str = "포지션 조회 안 함(워처 종료 중). 수량·손익·마크·강제청산가 모름";
+
+/// Records each text the fake Telegram gets as `tg:<text>` in `seen`, with
+/// the manual clock, beside the fake Bybit's requests.
+fn record_telegram(w: &World, clock: &Arc<ManualClock>, seen: &Seen) {
+    let (s, c) = (seen.clone(), clock.clone());
+    w.telegram.on_request(move |r| {
+        let v: Value = serde_json::from_slice(&r.body).unwrap();
+        let text = v["text"].as_str().unwrap_or("").to_string();
+        s.lock().unwrap().push((c.now_ms(), format!("tg:{text}")));
+    });
+}
+
+#[test]
+fn shutdown_during_a_kill_sends_one_abort_notice() {
+    // In the loop (one order stays open): SIGTERM aborts it with one notice
+    // and no cancel-all follows it (owner question 8).
+    let (w, dir, tg_dir, clock, mut run, seen) = kill_after_silence("rt-k-term", "", "", |w| {
+        w.bybit.route("/v5/order/realtime", [orders(1)])
+    });
+    record_telegram(&w, &clock, &seen);
+    walk(&clock, 3000);
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!since(&seen, CANCEL_ALL, 0).is_empty());
+    assert_eq!(run.shutdown(), 0);
+    let aborts = sent_with(&w, "워처 종료로 워처 킬 중단(");
+    assert_eq!(aborts.len(), 1, "{:?}", w.sent());
+    assert!(aborts[0].contains("회차, 남은 미체결 1건, 일괄 취소 "), "{}", aborts[0]);
+    assert!(aborts[0].ends_with(&format!("OMS의 래치·마커는 그대로.\n{NOT_READ}")), "{}", aborts[0]);
+    let at = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .position(|(_, p)| p.starts_with("tg:") && p.contains("워처 종료로 워처 킬 중단("))
+        .unwrap();
+    assert!(since(&seen, CANCEL_ALL, at).is_empty(), "a cancel-all after the abort notice");
+    assert_eq!(w.lines_with("the kill ended: aborted"), 1, "{:?}", w.log());
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+
+    // During K3 (no admin.sock; systemctl takes 1 s of real time): the abort
+    // notice tells the steps so far, no cancel-all is sent, and the
+    // systemctl client is left to finish its job (not killed).
+    let (tg_dir, tg) = telegram_section("rt-k-term3-t");
+    let (mut w, dir) = kill_world("rt-k-term3", &tg, "");
+    w.cfg.admin_socket = w.cfg.admin_socket.with_file_name("none.sock");
+    let sc = dir.join("systemctl");
+    std::fs::write(
+        &sc,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{d}/argv'\nsleep 1\ntouch '{d}/done'\nexit 0\n",
+            d = dir.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&sc, std::fs::Permissions::from_mode(0o700)).unwrap();
+    w.systemctl = sc;
+    w.status_marked();
+    let clock = Arc::new(ManualClock::new(T0));
+    let mut run = w.start(clock.clone());
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    walk(&clock, 2000);
+    w.status_down();
+    walk_until(&clock, 20_000, "the fire", || w.lines_with(FIRED) == 1);
+    walk_kill(&clock, "the fake systemctl", || dir.join("argv").exists());
+    assert!(!dir.join("done").exists());
+    assert_eq!(run.shutdown(), 0);
+    let aborts = sent_with(&w, "워처 종료로 워처 킬 중단(일괄 취소 전). OMS가 아직 주문을 낼 수 있음");
+    assert_eq!(aborts.len(), 1, "{:?}", w.sent());
+    assert!(aborts[0].contains(&format!("킬 마커: 씀. OMS 정지: watcher_kill 실패(")), "{}", aborts[0]);
+    assert!(aborts[0].contains(&format!("→ systemctl stop {UNIT}: 진행 중.\n")), "{}", aborts[0]);
+    assert!(aborts[0].ends_with(NOT_READ), "{}", aborts[0]);
+    assert_eq!(w.sent().len(), 1, "{:?}", w.sent());
+    assert!(w.requests(CANCEL_ALL).is_empty());
+    assert!(until(5, || dir.join("done").exists()), "the systemctl client was killed");
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&tg_dir);
 }

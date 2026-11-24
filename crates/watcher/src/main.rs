@@ -58,5 +58,10 @@ fn main() -> ExitCode {
         let clock = Arc::new(watcher::clock::SystemClock);
         run(cfg, ep, clock, watcher::log::stderr(), shutdown).await
     });
+    // Not a drop: a dropped runtime waits for every `spawn_blocking` task,
+    // and a kill marker write hung on the disk must not hold the exit.
+    rt.shutdown_timeout(std::time::Duration::from_millis(
+        watcher::runtime::SHUTDOWN_MS,
+    ));
     ExitCode::from(code)
 }

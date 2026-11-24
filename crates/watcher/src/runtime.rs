@@ -31,7 +31,7 @@ use crate::clock::{Clock, Steady};
 use crate::config::{Config, resolved};
 use crate::engine::{Action, Check, Engine, Logic};
 use crate::journal::{MAX_RECORDS, Tail};
-use crate::kill::{self, Inflight, Kill, MarkerOutcome, Notice, Positions, Setup};
+use crate::kill::{self, AbortWhy, Inflight, Kill, MarkerOutcome, Notice, Positions, Setup, Stage};
 use crate::log::Log;
 use crate::metrics::{Exporter, Metrics};
 use crate::oms::{Monitor, Status, admin_kill, admin_send};
@@ -59,6 +59,14 @@ pub const QUEUED_MAX: usize = 1000;
 /// At most this many kill notices wait for their position read; beyond
 /// it the oldest waiting progress notice is dropped (판단(모델 아님)).
 pub const NOTICES_MAX: usize = 16;
+/// `main.rs` ends the tokio runtime with this `shutdown_timeout`
+/// (판단(모델 아님), U19b3d): a dropped runtime would wait for every
+/// `spawn_blocking` task, and a marker write hung on the disk must not hold
+/// the exit.
+pub const SHUTDOWN_MS: u64 = 1000;
+/// Why the kill notices still waiting at the end are sent without their
+/// position read (U19b3d).
+pub const ENDING: &str = "워처 종료 중";
 
 /// Where the watcher sends: the binary takes them from the config (the
 /// REST base from `network` only), the two Telegram routes from
@@ -488,6 +496,8 @@ pub async fn run(
             return 2;
         }
     }
+    // A running kill is aborted first, with one notice (U19b3d).
+    rt.shutdown_kill(&mut rx).await;
     // What the 60 s mismatch pace still holds is queued before the flush.
     rt.alerts.drain();
     let task = rt.alert_task.take();
@@ -1291,6 +1301,76 @@ impl Runtime {
             kill::position_block(p, &kst(self.clock.now_ms()))
         );
         self.alerts.once(&body);
+    }
+
+    /// Shutdown (SIGTERM, SIGINT) during a kill (U19b3d): during K1 the
+    /// marker's outcome is awaited up to K1's deadline (at most
+    /// [`kill::MARKER_WAIT_MS`] of real time) so the notice can tell it;
+    /// then `Kill::abort` in whatever step: the abort notice (no position
+    /// read) and `Ended`. A halt task is aborted; K3's client, if it runs,
+    /// is left to finish its job in systemd (a half-stopped OMS is worse
+    /// than a stopped one); the marker stays. Every notice still waiting
+    /// goes now.
+    async fn shutdown_kill(&mut self, rx: &mut mpsc::UnboundedReceiver<Msg>) {
+        let Some(k) = &self.kill else {
+            return;
+        };
+        if k.kill.stage() == Stage::Marker {
+            let kill_no = k.kill_no;
+            let left = k
+                .kill
+                .next_wake()
+                .unwrap_or(0)
+                .saturating_sub(self.steady.now_ms())
+                .min(kill::MARKER_WAIT_MS);
+            let end = tokio::time::Instant::now() + Duration::from_millis(left);
+            loop {
+                match tokio::time::timeout_at(end, rx.recv()).await {
+                    Ok(Some(Msg::Marker(no, o))) if no == kill_no => {
+                        let now = self.steady.now_ms();
+                        if let Some(k) = self.kill.as_mut() {
+                            // K2 is not started: the watcher ends.
+                            let _ = k.kill.marker_done(now, o);
+                        }
+                        break;
+                    }
+                    Ok(Some(_)) => {}
+                    _ => break,
+                }
+            }
+        }
+        self.abort_kill(AbortWhy::Shutdown);
+    }
+
+    /// Aborts a running kill (shutdown or a start refusal, U19b3d): the
+    /// abort notice and `Ended`; then every kill notice still waiting goes
+    /// at once, in its order, the abort notice last.
+    fn abort_kill(&mut self, why: AbortWhy) {
+        let now = self.steady.now_ms();
+        if let Some(k) = self.kill.as_mut() {
+            let steps = k.kill.abort(now, why);
+            self.kill_steps(now, steps);
+        }
+        self.flush_notices();
+    }
+
+    /// The kill notices still waiting, before the watcher ends (U19b3d): the
+    /// one whose positions are being read (its read is aborted) and every
+    /// waiting one go now with `포지션 조회 안 함(워처 종료 중)`; the abort
+    /// notices as they are.
+    fn flush_notices(&mut self) {
+        let not_read = Positions::NotRead(ENDING.to_string());
+        if let Some(r) = self.notices.reading.take() {
+            r.task.abort();
+            self.send_notice(&r.w, &not_read);
+        }
+        while let Some(w) = self.notices.waiting.pop_front() {
+            if matches!(w.notice, Notice::Abort { .. } | Notice::AbortBefore { .. }) {
+                self.alerts.once(&kill::notice_text(&w.notice, &w.header));
+            } else {
+                self.send_notice(&w, &not_read);
+            }
+        }
     }
 
     /// The W5 and kill series (C-WATCH part 12) from their accessors.
