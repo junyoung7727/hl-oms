@@ -948,7 +948,7 @@ fn a_retry_in_flight_at_the_loops_end_is_given_up() {
             Step::Halt { id, .. } => Some((*t, *id)),
             _ => None,
         })
-        .last()
+        .next_back()
         .unwrap();
     // The case's premise: the last attempt was still open at the end.
     assert_eq!((last, end), (T0 + 30_200, T0 + 30_300));
