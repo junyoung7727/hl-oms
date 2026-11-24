@@ -1610,3 +1610,51 @@ fn the_engine_is_paused_during_a_kill_and_resumes_after() {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&tg_dir);
 }
+
+#[test]
+fn the_watchers_loop_repeats_until_zero_at_no_more_than_2_cancel_alls_per_second() {
+    // From the fire on: the first count finds one order left, the second
+    // cancel-all and its count answer 503, the third round counts zero.
+    let (w, dir, tg_dir, clock, mut run, seen) = kill_after_silence("rt-k-rate", "", "", |w| {
+        w.bybit.route(
+            "/v5/order/realtime",
+            [orders(1), Answer::Reply(503, "{}".into()), empty_page()],
+        );
+        w.bybit.route(
+            CANCEL_ALL,
+            [cancel_ok(), Answer::Reply(503, "{}".into()), cancel_ok()],
+        );
+    });
+    walk_until(&clock, 120_000, "the final notice", || !sent_with(&w, FINAL_NOTICE).is_empty());
+    let cancels: Vec<u64> = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, p)| p == CANCEL_ALL)
+        .map(|(t, _)| *t)
+        .collect();
+    assert_eq!(cancels.len(), 3, "{cancels:?}");
+    for &t in &cancels {
+        let n = cancels.iter().filter(|&&u| u >= t && u < t + 1000).count();
+        assert!(n <= 2, "{n} cancel-alls in [{t}, {t} + 1,000): {cancels:?}");
+    }
+    // The round wait (round_ms 1,000) holds between them.
+    assert!(cancels.windows(2).all(|p| p[1] - p[0] >= 1000), "{cancels:?}");
+    // A count after every cancel-all (the failed one too); after the third
+    // the watch counts every 5 s, the last at 30 s (z is the third count's
+    // answer, within a tick of the third cancel-all; the engine runs again
+    // only after the last).
+    assert_eq!(at(&seen, "/v5/order/realtime", cancels[0], cancels[1] - 1), 1);
+    assert_eq!(at(&seen, "/v5/order/realtime", cancels[1], cancels[2] - 1), 1);
+    assert_eq!(at(&seen, "/v5/order/realtime", cancels[2], cancels[2] + 29_000), 6);
+    let fin = &sent_with(&w, FINAL_NOTICE)[0];
+    assert!(
+        fin.contains("(3회차, 일괄 취소 3회). OMS는 래치됨(watcher_kill)."),
+        "{fin}"
+    );
+    assert!(fin.contains("\n포지션(거래소 /v5/position/list, "), "{fin}");
+    assert_eq!(w.lines_with("the kill ended: zero open orders confirmed (3 rounds, 3 cancel-alls); the halt is not owed"), 1);
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
