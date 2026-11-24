@@ -268,7 +268,7 @@ impl W5 {
     /// In `Armed`: `silence_ms` without a good answer and a failed probe
     /// emitted at or after the last good answer → `Killing`, once. The
     /// second condition never delays a real kill under the config bound
-    /// `silence_ms ≥ probe_ms + 2 × request_timeout_ms + 1000`.
+    /// `silence_ms ≥ 3 × probe_ms + 3 × request_timeout_ms + 1000`.
     pub fn fire(&mut self, now: u64) -> Option<Fire> {
         let t = self.timing?;
         self.gap(now);

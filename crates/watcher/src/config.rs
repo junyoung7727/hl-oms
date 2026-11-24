@@ -506,10 +506,16 @@ impl Config {
     }
 
     /// `[w5]`: the ranges (판단(모델 아님)) and, with `[kill]`, the bound
-    /// that one lost probe and the next probe's slow answer stay below `silence_ms`
-    /// (review 1 S6): a probe lost after the last good answer `g` fails at
-    /// about `g + probe_ms + request_timeout_ms`, the next may take
-    /// `request_timeout_ms` to answer.
+    /// that keeps a healthy OMS below `silence_ms` (판단(모델 아님)). One
+    /// lost probe (review 1 S6): a probe lost after the last good answer
+    /// `g` fails at about `g + probe_ms + request_timeout_ms`, the next may
+    /// take `request_timeout_ms` to answer. A stall of the watcher no
+    /// longer than the gap threshold `2 × probe_ms + request_timeout_ms`
+    /// counts as silence (U19b3a review 1 S1): it may start just before
+    /// the answer to the probe of `g + probe_ms` and end after its
+    /// deadline, and the probe of the resume may take `request_timeout_ms`,
+    /// so up to `3 × probe_ms + 3 × request_timeout_ms`. The bound is the
+    /// larger, plus 1,000 ms.
     fn check_w5(&self) -> Result<(), String> {
         let w = &self.w5;
         for (field, v, lo, hi) in [
@@ -522,10 +528,10 @@ impl Config {
         }
         // The bound only where W5 runs: a config without `[kill]` keeps
         // any `request_timeout_ms` its range allows.
-        let bound = w.probe_ms + 2 * self.http.request_timeout_ms + 1000;
+        let bound = 3 * w.probe_ms + 3 * self.http.request_timeout_ms + 1000;
         if self.kill.is_some() && w.silence_ms < bound {
             return Err(format!(
-                "[w5] silence_ms must be at least probe_ms + 2 × request_timeout_ms + 1000 = {bound}: one lost probe must not fire W5"
+                "[w5] silence_ms must be at least 3 × probe_ms + 3 × request_timeout_ms + 1000 = {bound}: one lost probe or a stall of the watcher shorter than a gap must not fire W5"
             ));
         }
         Ok(())

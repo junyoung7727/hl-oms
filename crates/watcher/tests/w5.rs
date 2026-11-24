@@ -386,8 +386,9 @@ fn w5_fires_only_after_a_failed_probe() {
 
 #[test]
 fn one_lost_probe_and_a_slow_answer_at_the_silence_bound_do_not_fire() {
-    // probe_ms 500, request_timeout_ms 1,500, silence_ms at its lower
-    // bound 500 + 2 × 1,500 + 1,000 = 4,500 (review 1 S6). The last good
+    // probe_ms 500, request_timeout_ms 1,500, silence_ms at the lost-probe
+    // share of its lower bound, 500 + 2 × 1,500 + 1,000 = 4,500 (review 1
+    // S6; the config asks for 7,000, U19b3a review 1 S1). The last good
     // answer at T0; the next probe (+500 ms) is lost and fails at
     // +3,000 ms; the one after (+3,000 ms) answers after 1,499 ms.
     let t = Timing {
@@ -410,6 +411,50 @@ fn one_lost_probe_and_a_slow_answer_at_the_silence_bound_do_not_fire() {
     assert_eq!(&s.emitted()[..3], &[0, 500, 3000]);
     // The good answer at +4,499 ms came 1 ms before the bound.
     assert!(s.w.silent_ms(T0 + 20_000).unwrap() < 500);
+}
+
+/// The worst stall of the watcher that the gap rule does not see, against
+/// a healthy OMS whose every answer takes `request_timeout_ms − 1`: the
+/// good answer at T0, the next probe emitted at `T0 + probe_ms`, the
+/// watcher's last turn 1 ms before its answer would come, then no turn for
+/// exactly the gap threshold `2 × probe_ms + request_timeout_ms`; the
+/// probe's deadline passed meanwhile, the probe emitted at the resume
+/// answers `request_timeout_ms − 1` later. The instants W5 fired at.
+fn worst_stall(t: Timing) -> Vec<u64> {
+    let slow = t.request_timeout_ms - 1;
+    let oms = move |_: u64| Some((slow, true));
+    let mut s = Sim::armed_good_at_t0(t);
+    let last = T0 + t.probe_ms + slow - 1;
+    s.walk(T0 + 100, last - 1, 100, &oms);
+    s.at(last, &oms);
+    assert_eq!(s.emitted().last(), Some(&t.probe_ms));
+    assert_eq!(s.w.state(), State::Armed { last_good_ms: T0 });
+    // The client timed out while the process did not run: no answer.
+    s.pending.clear();
+    let resume = last + 2 * t.probe_ms + t.request_timeout_ms;
+    s.walk(resume, resume + 3 * t.silence_ms, 100, &oms);
+    assert!(s.lines.lock().unwrap().is_empty(), "not a gap");
+    s.fired_at()
+}
+
+#[test]
+fn a_stall_of_the_watcher_shorter_than_a_gap_does_not_fire_at_the_silence_bound() {
+    // U19b3a review 1 S1: a stall up to the gap threshold is counted as
+    // silence, so silence_ms must also hold it. At the bound 3 × probe_ms
+    // + 3 × request_timeout_ms + 1,000 the worst stall does not fire, with
+    // the defaults (10,000) and with probe_ms 5,000 (22,000).
+    assert_eq!(worst_stall(DEFAULT), Vec::<u64>::new());
+    let five = |silence_ms| Timing {
+        probe_ms: 5000,
+        silence_ms,
+        request_timeout_ms: 2000,
+    };
+    assert_eq!(worst_stall(five(22_000)), Vec::<u64>::new());
+    // Below it a healthy OMS is killed: the review's config (the old
+    // bound, 10,000) and silence_ms just above the gap threshold (12,001)
+    // both fire at the resume, 5,000 + 1,998 + 12,000 ms after T0.
+    assert_eq!(worst_stall(five(10_000)), vec![18_998]);
+    assert_eq!(worst_stall(five(12_001)), vec![18_998]);
 }
 
 #[test]

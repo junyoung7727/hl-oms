@@ -814,27 +814,32 @@ fn kill_and_w5_are_validated_and_kill_is_required_on_mainnet() {
         &w5("silence_ms = 60001"),
         "[w5] silence_ms must be between 3000 and 60000",
     );
-    // The bound: silence_ms ≥ probe_ms + 2 × request_timeout_ms + 1,000,
-    // so one lost probe and a slow answer cannot fire W5 (review 1 S6).
-    // It holds where W5 runs, with [kill].
+    // The bound: silence_ms ≥ 3 × probe_ms + 3 × request_timeout_ms +
+    // 1,000, so neither one lost probe and a slow answer (review 1 S6)
+    // nor a stall of the watcher shorter than a gap (U19b3a review 1 S1)
+    // can fire W5. It holds where W5 runs, with [kill].
     let http = |rt: u64, body: &str| {
         format!("{MIN}\n[http]\nrequest_timeout_ms = {rt}\n\n[w5]\n{body}\n\n[kill]\n{req}")
     };
-    let w = ok(&http(1500, "probe_ms = 500\nsilence_ms = 4500")).w5;
-    assert_eq!((w.probe_ms, w.silence_ms), (500, 4500));
-    refused(
-        &http(1500, "probe_ms = 500\nsilence_ms = 4499"),
-        "[w5] silence_ms must be at least probe_ms + 2 × request_timeout_ms + 1000 = 4500",
-    );
-    refused(
-        &http(2000, "silence_ms = 5999"),
-        "[w5] silence_ms must be at least probe_ms + 2 × request_timeout_ms + 1000 = 6000",
-    );
-    ok(&http(2000, "silence_ms = 6000"));
-    refused(
-        &http(10_000, ""),
-        "[w5] silence_ms must be at least probe_ms + 2 × request_timeout_ms + 1000 = 22000",
-    );
+    let bound = |n: u64| {
+        format!("[w5] silence_ms must be at least 3 × probe_ms + 3 × request_timeout_ms + 1000 = {n}: one lost probe or a stall of the watcher shorter than a gap must not fire W5")
+    };
+    let w = ok(&http(1500, "probe_ms = 500\nsilence_ms = 7000")).w5;
+    assert_eq!((w.probe_ms, w.silence_ms), (500, 7000));
+    refused(&http(1500, "probe_ms = 500\nsilence_ms = 6999"), &bound(7000));
+    // The lost-probe bound alone (probe_ms + 2 × request_timeout_ms +
+    // 1,000 = 4,500) is no longer enough.
+    refused(&http(1500, "probe_ms = 500\nsilence_ms = 4500"), &bound(7000));
+    // The defaults sit at the bound: 3 × 1,000 + 3 × 2,000 + 1,000.
+    ok(&http(2000, ""));
+    refused(&http(2000, "silence_ms = 9999"), &bound(10_000));
+    refused(&http(2000, "probe_ms = 1001"), &bound(10_003));
+    // The review's case: probe_ms 5,000 with the default silence_ms
+    // (gap threshold 12,000 ms > silence_ms) is refused.
+    refused(&http(2000, "probe_ms = 5000"), &bound(22_000));
+    refused(&http(2000, "probe_ms = 5000\nsilence_ms = 21999"), &bound(22_000));
+    ok(&http(2000, "probe_ms = 5000\nsilence_ms = 22000"));
+    refused(&http(10_000, ""), &bound(34_000));
     // Without [kill] W5 is off and the bound is not read: the longest
     // request_timeout_ms keeps the default [w5].
     let off = format!("{MIN}\n[http]\nrequest_timeout_ms = 10000\n");
