@@ -1,10 +1,14 @@
 # Paths that the owner reviews himself before a change is merged
-# (tools/ci/owner_review.sh, ADR-033). One entry per line: an entry that
-# ends with "/" is a directory prefix, any other entry is one exact path.
+# (tools/ci/owner_review.sh, ADR-033). One entry per line, read as in
+# .gitignore: an entry with a "/" before its end is a path from the top
+# (with a trailing "/" a directory prefix, else one exact path); an entry
+# without one is a name at any depth (with a trailing "/" a directory, else
+# a file), because clippy, rustfmt and cargo also read nested copies.
 # The checks themselves, their allow-lists and this list:
 .github/
 tools/ci/
 # What builds and lints the code:
+rust-toolchain
 rust-toolchain.toml
 clippy.toml
 .clippy.toml

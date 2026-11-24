@@ -15,7 +15,8 @@
 # The change is <base-commit>...HEAD (from the merge base, as in a pull
 # request). Four rules, one line per finding:
 #   path:     a changed path (added, changed, deleted, or either side of a
-#             move) is listed in tools/ci/owner_review_paths.txt. That
+#             move) is listed in tools/ci/owner_review_paths.txt (a name
+#             such as clippy.toml or .cargo/ at any depth). That
 #             file and this script are under tools/ci/, so changing the
 #             list is a finding too.
 #   manifest: a Cargo.toml changes what can turn a lint or a test off:
@@ -67,16 +68,25 @@ finding() { echo "$prefix: $1"; findings=$((findings + 1)); }
 mapfile -d '' -t changed < <(git diff -z --name-only --no-renames "$mb" HEAD)
 
 # ---- path ------------------------------------------------------------------
-# An entry that ends with "/" is a directory prefix, any other entry is one
-# exact path. The list is read at HEAD: a change that removes an entry
-# also changes the list, which is under tools/ci/.
+# As in .gitignore: an entry with a "/" before its end is a path from the
+# top (with a trailing "/" a directory prefix, else one exact path); an
+# entry without one is a name at any depth (with a trailing "/" a
+# directory name, else a file name). The list is read at HEAD: a change
+# that removes an entry also changes the list, which is under tools/ci/.
 mapfile -t entries < <(sed -e 's/#.*//' -e 's/[[:space:]]*$//' -e '/^$/d' "$list")
 for f in "${changed[@]}"; do
   for e in "${entries[@]}"; do
-    if [[ "$e" == */ ]]; then
-      [[ "$f" == "$e"* ]] && { finding "path: $f"; break; }
+    n="${e%/}"
+    if [[ "$n" == */* ]]; then
+      if [[ "$e" == */ ]]; then
+        [[ "$f" == "$e"* ]] && { finding "path: $f"; break; }
+      else
+        [[ "$f" == "$e" ]] && { finding "path: $f"; break; }
+      fi
+    elif [[ "$e" == */ ]]; then
+      [[ "$f" == "$e"* || "$f" == */"$e"* ]] && { finding "path: $f"; break; }
     else
-      [[ "$f" == "$e" ]] && { finding "path: $f"; break; }
+      [[ "$f" == "$e" || "$f" == */"$e" ]] && { finding "path: $f"; break; }
     fi
   done
 done

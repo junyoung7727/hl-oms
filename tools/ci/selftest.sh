@@ -507,6 +507,19 @@ oreset; printf '\n["lints".clippy]\nexpect_used = "allow"\n' >> crates/s/Cargo.t
 expect_owner 1 "owner: a quoted lints table" "owner_review: manifest: crates/s/Cargo.toml"
 oreset; sed -i 's|^pub fn one() -> u8 {$|#[expect(clippy::float_arithmetic, reason = "x")]\npub mod inner {}\n\npub fn one() -> u8 {|' crates/a/src/lib.rs; plant
 expect_owner 1 "owner: an item-level expect on a mod item" "owner_review: lint: crates/a/src/lib.rs"
+# Review 2 of ADR-033: a listed name without an inner "/" matches at any
+# depth (clippy and rustfmt read the file nearest the crate, cargo every
+# .cargo/ above the directory it runs in).
+oreset; printf 'disallowed-methods = []\n' > crates/a/clippy.toml; plant
+expect_owner 1 "owner: a nested clippy.toml" "owner_review: path: crates/a/clippy.toml"
+oreset; printf 'nightly\n' > rust-toolchain; plant
+expect_owner 1 "owner: a legacy rust-toolchain file" "owner_review: path: rust-toolchain"
+oreset; printf 'edition = "2015"\n' > crates/a/.rustfmt.toml; plant
+expect_owner 1 "owner: a nested .rustfmt.toml" "owner_review: path: crates/a/.rustfmt.toml"
+oreset; mkdir -p crates/a/.cargo; printf '[build]\nrustflags = ["-Aclippy::all"]\n' > crates/a/.cargo/config.toml; plant
+expect_owner 1 "owner: a nested .cargo/config.toml" "owner_review: path: crates/a/.cargo/config.toml"
+oreset; printf 'x\n' > crates/a/myclippy.toml; mkdir -p docs/tools/ci; printf 'x\n' > docs/tools/ci/note.md; plant
+expect_owner 0 "owner: a name that only ends in a listed name, a listed path below another directory" "owner_review: none"
 oreset; cp tools/ci/owner_review_paths.txt "$tmp/base_paths.txt"; sed -i '/^\.github\/$/d' tools/ci/owner_review_paths.txt
 printf 'on: push\n' >> .github/workflows/ci.yml; plant
 expect_owner_with() { # the list from the base, as the runner passes it
