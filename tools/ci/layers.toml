@@ -34,12 +34,12 @@ except = ["watcher-conformance"]
 to = ["oms-node"]
 
 [[external]]
-why = "the core reaches no network, file, clock or random source (ADR-002)"
+why = "the core links no outside crate but serde (ADR-002); its standard-library calls are limited by clippy.toml"
 crates = ["oms-core"]
 allow = ["serde", "serde_json"]
 
 [[external]]
-why = "market data's core reaches no network, file, clock or random source"
+why = "market data's core links no outside crate; its standard-library calls are limited by clippy.toml"
 crates = ["md-core"]
 allow = []
 

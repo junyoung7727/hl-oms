@@ -11,8 +11,8 @@
 //! - [`Core::needs`] lists the venue evidence the state is waiting for.
 
 // Money and decision code: no float arithmetic, no `expect`, no `as` that
-// can cut, wrap or lose a sign, no clock call (clippy.toml), and an
-// exception only as `#[expect(lint, reason = "..")]` (ADR-033 part 3).
+// can cut, wrap or lose a sign, no clock or I/O call listed in clippy.toml,
+// and an exception only as `#[expect(lint, reason = "..")]` (ADR-033 part 3).
 #![deny(
     clippy::float_arithmetic,
     clippy::expect_used,
