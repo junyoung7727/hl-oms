@@ -902,6 +902,68 @@ fn no_halt_is_retried_when_the_halt_is_not_owed() {
     assert_eq!(halts, vec![100, 5_200, 10_200, 15_200]);
 }
 
+#[test]
+fn the_first_retry_after_a_halt_timeout_counts_from_its_deadline() {
+    // K2 emitted at T0 + 100 is never answered: it ends at its deadline
+    // T0 + 5,100, K3 fails 1,000 ms later and the loop starts owing the
+    // halt; the first retry is 5,000 ms after K2's deadline (review 1 S2).
+    let one_open = || CancelAnswer::Done(CancelAll { cancelled: 1 });
+    let mut r = Run::new(true);
+    r.marker(T0 + 100, MarkerOutcome::Written);
+    assert!(r.poll(T0 + 100 + K2_MS - 1).is_empty());
+    let steps = r.poll(T0 + 100 + K2_MS);
+    assert!(
+        matches!(steps.as_slice(), [Step::StopUnit { .. }]),
+        "{steps:?}"
+    );
+    let steps = r.stop(T0 + 6_100, Outcome::Failed("exit 1".into()));
+    assert!(cancel_all(&steps) && halt_id(&steps).is_none(), "{steps:?}");
+    assert!(r.k.halt_owed());
+    r.drive(T0 + 6_100, T0 + 16_000, one_open, 1, Err("refused"));
+    let halts: Vec<u64> = r.halts().iter().map(|t| t - T0).collect();
+    assert_eq!(halts, vec![100, 10_100, 15_100]);
+}
+
+#[test]
+fn a_retry_in_flight_at_the_loops_end_is_given_up() {
+    // The venue is empty at once, so the loop ends 30 s after its start
+    // (T0 + 30,300); the retries are refused at once until the one of
+    // T0 + 30,200, which is not answered. The loop ends while it is open:
+    // it is given up (the runtime aborts its task by `halt_open`), the
+    // halt stays owed, a late reply to it is ignored (review 1 S2).
+    let mut r = unhalted();
+    r.drive_with(T0 + 300, T0 + 600_000, zero, 0, |_, emitted| {
+        (emitted < T0 + 30_000).then_some(Err("refused"))
+    });
+    assert_eq!(r.k.stage(), Stage::Ended);
+    let end = r
+        .log
+        .iter()
+        .find_map(|(t, s)| matches!(s, Step::Ended { .. }).then_some(*t))
+        .unwrap();
+    let (last, id) = r
+        .log
+        .iter()
+        .filter_map(|(t, s)| match s {
+            Step::Halt { id, .. } => Some((*t, *id)),
+            _ => None,
+        })
+        .last()
+        .unwrap();
+    // The case's premise: the last attempt was still open at the end.
+    assert_eq!((last, end), (T0 + 30_200, T0 + 30_300));
+    assert!(end < last + K2_MS);
+    assert_eq!(r.k.halt_open(), None);
+    assert_eq!(r.ended().map(|(_, owed)| owed), Some(true));
+    assert!(
+        r.k.halt_done(end + 100, id, Ok("latched".into()))
+            .is_empty()
+    );
+    assert!(r.k.halt_owed());
+    assert_eq!(r.k.outcome(), StopOutcome::Unconfirmed);
+    assert!(r.k.poll(end + 60_000).is_empty());
+}
+
 // ---- Abort in every step ----
 
 fn abort_text(steps: &[Step]) -> String {
@@ -1035,70 +1097,80 @@ fn longest_rows(n: usize) -> Vec<Value> {
 fn a_start_notice_with_the_longest_header_fits_one_part() {
     // The config's longest name (64 characters of 2 UTF-16 units) and
     // unit (255 characters); every free text far over its cut, with
-    // control characters in it.
+    // control characters in it, of 1-unit characters and of characters
+    // outside the BMP (2 units each; review 1 M1).
     let name = "𝕏".repeat(64);
     let unit = format!("{}.service", "u".repeat(247));
-    let mut s = setup(true);
-    s.name = name.clone();
-    s.kill.oms_unit = unit.clone();
-    let mut r = Run::with(s);
-    let noise = |n: usize| format!("a\n\u{7}b\r{}", "가".repeat(n));
-    r.marker(T0 + 100, MarkerOutcome::Failed(noise(1000)));
-    // A 64 KiB reply that is no latch, and 4 KiB of systemctl's stderr.
-    r.halt(T0 + 200, Ok(&*noise(64 * 1024).leak()));
-    r.stop(
-        T0 + 300,
-        Outcome::Failed(format!("exit 1: {}", noise(4096))),
-    );
-    let header = r.k.kill_loop().header().to_string();
-    assert!(!header.chars().any(char::is_control), "{header}");
-    assert!(header.contains(&format!("systemctl stop {unit}: 실패(")));
-    // Each free text is cut to 200 characters.
-    for cut in [
-        format!("쓰지 못함(a  b {}).", "가".repeat(195)),
-        format!("watcher_kill 실패(a  b {}) →", "가".repeat(195)),
-        format!("실패(exit 1: a  b {}).", "가".repeat(187)),
-    ] {
-        assert!(header.contains(&cut), "{cut}: {header}");
+    for c in ['가', '𝕏'] {
+        let mut s = setup(true);
+        s.name = name.clone();
+        s.kill.oms_unit = unit.clone();
+        let mut r = Run::with(s);
+        let noise = |n: usize| format!("a\n\u{7}b\r{}", c.to_string().repeat(n));
+        r.marker(T0 + 100, MarkerOutcome::Failed(noise(1000)));
+        // A 64 KiB reply that is no latch, and 4 KiB of systemctl's stderr.
+        r.halt(T0 + 200, Ok(&*noise(64 * 1024).leak()));
+        r.stop(
+            T0 + 300,
+            Outcome::Failed(format!("exit 1: {}", noise(4096))),
+        );
+        let header = r.k.kill_loop().header().to_string();
+        assert!(!header.chars().any(char::is_control), "{header}");
+        assert!(header.contains(&format!("systemctl stop {unit}: 실패(")));
+        // Each free text is cut to 200 UTF-16 units, at a whole character
+        // (the prefix `a  b ` is 5 units, `exit 1: a  b ` 13).
+        let fill = |prefix: usize| c.to_string().repeat((200 - prefix) / c.len_utf16());
+        for cut in [
+            format!("쓰지 못함(a  b {}).", fill(5)),
+            format!("watcher_kill 실패(a  b {}) →", fill(5)),
+            format!("실패(exit 1: a  b {}).", fill(13)),
+        ] {
+            assert!(header.contains(&cut), "{cut}: {header}");
+        }
+        let units = header.encode_utf16().count();
+        assert!(units <= 1029, "the header is {units} units");
+        eprintln!("header ({c}): {units} UTF-16 units");
+
+        let start = notice_text(&r.notices()[0], &header);
+        let body = format!(
+            "{start}\n{}",
+            position_block(&Positions::Rows(rows(20)), "11-15 07:13:20 KST")
+        );
+        let msg = message(&name, T0, &body);
+        let units = msg.encode_utf16().count();
+        eprintln!("start notice ({c}) with 20 plausible rows: {units} UTF-16 units");
+        assert!(units <= MSG_LIMIT, "{units} units");
+        assert_eq!(split(&msg, MSG_LIMIT).len(), 1);
+
+        // Known limit (C-WATCH part 12): with this header and 20 rows of
+        // the longest shape the block can show, the start notice is cut
+        // into two parts, never more.
+        let body = format!(
+            "{start}\n{}",
+            position_block(&Positions::Rows(longest_rows(20)), "11-15 07:13:20 KST")
+        );
+        let msg = message(&name, T0, &body);
+        eprintln!(
+            "start notice ({c}) with 20 longest rows: {} UTF-16 units",
+            msg.encode_utf16().count()
+        );
+        assert_eq!(split(&msg, MSG_LIMIT).len(), 2);
     }
-    let units = header.encode_utf16().count();
-    assert!(units <= 1300, "the header is {units} units");
-    eprintln!("header: {units} UTF-16 units");
-
-    let start = notice_text(&r.notices()[0], &header);
-    let body = format!(
-        "{start}\n{}",
-        position_block(&Positions::Rows(rows(20)), "11-15 07:13:20 KST")
-    );
-    let msg = message(&name, T0, &body);
-    let units = msg.encode_utf16().count();
-    eprintln!("start notice with 20 plausible rows: {units} UTF-16 units");
-    assert!(units <= MSG_LIMIT, "{units} units");
-    assert_eq!(split(&msg, MSG_LIMIT).len(), 1);
-
-    // Known limit (C-WATCH part 12): with this header and 20 rows of the
-    // longest shape the block can show, the start notice is cut into two
-    // parts, never more.
-    let body = format!(
-        "{start}\n{}",
-        position_block(&Positions::Rows(longest_rows(20)), "11-15 07:13:20 KST")
-    );
-    let msg = message(&name, T0, &body);
-    eprintln!(
-        "start notice with 20 longest rows: {} UTF-16 units",
-        msg.encode_utf16().count()
-    );
-    assert_eq!(split(&msg, MSG_LIMIT).len(), 2);
 }
 
 // ---- A clock that steps back ----
 
 #[test]
 fn a_clock_step_back_does_not_hold_the_loop() {
-    // The kill reads Steady over a wall clock that steps back 60 s during
-    // the loop with an order open; the texts read the raw clock.
-    let raw = std::sync::Arc::new(ManualClock::new(T0));
+    // The kill reads Steady over a wall clock that stepped back 60 s
+    // before the fire (so Steady is 60 s ahead of it) and steps back 60 s
+    // again during the loop with an order open; the texts read the raw
+    // clock (review 1 S1).
+    let raw = std::sync::Arc::new(ManualClock::new(T0 + 60_000));
     let steady = Steady::new(raw.clone());
+    assert_eq!(steady.now_ms(), T0 + 60_000);
+    raw.set(T0);
+    assert_eq!(steady.now_ms(), T0 + 60_000);
     let mut s = setup(true);
     s.raw_now_ms = raw.now_ms();
     let (k, steps) = Kill::new(FIRE, s, steady.now_ms());
@@ -1109,9 +1181,12 @@ fn a_clock_step_back_does_not_hold_the_loop() {
     };
     r.keep(T0, steps);
     match &r.log[0].1 {
-        Step::WriteMarker { text } => {
-            assert!(text.contains("W5 2023-11-14T22:13:20.000Z"), "{text}")
-        }
+        Step::WriteMarker { text } => assert!(
+            text.contains(
+                "W5 2023-11-14T22:13:20.000Z: /api/status gave no good answer for 10 s (last good answer 2023-11-14T22:13:10.000Z);"
+            ),
+            "{text}"
+        ),
         s => panic!("{s:?}"),
     }
     raw.advance(100);

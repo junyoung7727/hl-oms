@@ -151,6 +151,20 @@ pub(crate) fn cut(text: &str, max: usize) -> String {
         .collect()
 }
 
+/// As [`cut`], and at most `max` UTF-16 units, at a whole character:
+/// Telegram counts units, and a character outside the BMP is two
+/// (U19b3b review 1 M1).
+pub(crate) fn cut_units(text: &str, max: usize) -> String {
+    let mut units = 0;
+    cut(text, max)
+        .chars()
+        .take_while(|c| {
+            units += c.len_utf16();
+            units <= max
+        })
+        .collect()
+}
+
 /// Milliseconds as seconds, exactly (`1000` → `1`, `1500` → `1.5`).
 fn seconds(ms: u64) -> String {
     Dec(i128::from(ms) * 100_000).to_string()
@@ -1684,8 +1698,8 @@ impl Kill {
     }
 
     /// The header of the start notice, as far as the steps went (`진행 중`
-    /// for a step not ended). Free texts are cut to [`TEXT_MAX`]
-    /// characters, control characters as spaces.
+    /// for a step not ended). Free texts are cut to [`TEXT_MAX`] UTF-16
+    /// units at a whole character, control characters as spaces.
     pub fn header(&self) -> String {
         let last = if self.s.answered {
             kst(self.s.raw_now_ms.saturating_sub(self.silent_ms))
@@ -1702,22 +1716,22 @@ impl Kill {
             MarkerState::Done(MarkerOutcome::Written) => format!("씀{unchecked}"),
             MarkerState::Done(MarkerOutcome::AlreadyPresent) => format!("이미 있음{unchecked}"),
             MarkerState::Done(MarkerOutcome::Failed(kind)) => {
-                format!("쓰지 못함({})", cut(kind, TEXT_MAX))
+                format!("쓰지 못함({})", cut_units(kind, TEXT_MAX))
             }
             MarkerState::TimedOut => "쓰지 못함(시간 초과; 뒤늦게 써질 수 있음)".to_string(),
         };
         let stop = match &self.halt {
             HaltState::Running => "진행 중".to_string(),
             HaltState::Latched(reply) => {
-                let reply = cut(reply, TEXT_MAX);
+                let reply = cut_units(reply, TEXT_MAX);
                 format!("admin.sock watcher_kill → {reply}")
             }
             HaltState::Failed(why) => {
-                let why = cut(why, TEXT_MAX);
+                let why = cut_units(why, TEXT_MAX);
                 let k3 = match &self.stop {
                     None => "진행 중".to_string(),
                     Some(stop::Outcome::Stopped) => "정지됨".to_string(),
-                    Some(stop::Outcome::Failed(w)) => format!("실패({})", cut(w, TEXT_MAX)),
+                    Some(stop::Outcome::Failed(w)) => format!("실패({})", cut_units(w, TEXT_MAX)),
                     Some(stop::Outcome::Unconfirmed) => format!(
                         "정지 확인 못 함({} ms 안에 systemctl이 끝나지 않음)",
                         self.s.kill.stop_wait_ms
