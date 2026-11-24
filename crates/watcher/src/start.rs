@@ -177,37 +177,43 @@ fn read_key(v: &Value, uid: u64, must_cancel: bool) -> Key {
 /// Q4): `readOnly == 0` (an integer), `permissions.ContractTrade` a list
 /// with `"Order"` (that `Order` allows the cancel-all is inference from the
 /// permission names, not documented), and no `"Withdraw"` in any list of
-/// `permissions`. `None` when the key passes.
+/// `permissions`. `None` when the key passes. A rule that reads and fails
+/// refuses even when another field or list of the answer does not read
+/// (review 1 S4); the answer is unreadable only when no readable rule
+/// fails.
 fn read_cancel_rules(v: &Value) -> Option<Key> {
-    let Some(read_only) = v.get("readOnly").and_then(Value::as_i64) else {
-        return Some(Key::Unreadable("readOnly is not an integer".into()));
-    };
-    let Some(perms) = v.get("permissions").and_then(Value::as_object) else {
-        return Some(Key::Unreadable("permissions is not an object".into()));
-    };
+    let read_only = v.get("readOnly").and_then(Value::as_i64);
+    if let Some(r) = read_only.filter(|r| *r != 0) {
+        return Some(Key::Fails(format!(
+            "the API key is read-only (readOnly {r}); with [kill] the watcher cancels orders and needs a read-write key"
+        )));
+    }
+    let perms = v.get("permissions").and_then(Value::as_object);
     let mut lists = Vec::new();
-    for (name, list) in perms {
-        let Some(items) = list.as_array().and_then(|a| {
+    let mut unread = None;
+    for (name, list) in perms.into_iter().flatten() {
+        match list.as_array().and_then(|a| {
             a.iter()
                 .map(Value::as_str)
                 .collect::<Option<Vec<&str>>>()
-        }) else {
-            return Some(Key::Unreadable(format!(
-                "permissions.{} is not a list of strings",
-                one_word(name)
-            )));
-        };
-        lists.push((name.as_str(), items));
+        }) {
+            Some(items) => lists.push((name.as_str(), items)),
+            None => {
+                unread.get_or_insert(name.as_str());
+            }
+        }
     }
-    if read_only != 0 {
-        return Some(Key::Fails(format!(
-            "the API key is read-only (readOnly {read_only}); with [kill] the watcher cancels orders and needs a read-write key"
-        )));
-    }
-    let order = lists
-        .iter()
-        .any(|(name, items)| *name == "ContractTrade" && items.contains(&"Order"));
-    if !order {
+    // ContractTrade read without Order, or not there at all, fails; an
+    // unreadable ContractTrade leaves Order unknown.
+    let order = match perms.map(|p| p.get("ContractTrade")) {
+        Some(None) => Some(false),
+        Some(Some(_)) => lists
+            .iter()
+            .find(|(name, _)| *name == "ContractTrade")
+            .map(|(_, items)| items.contains(&"Order")),
+        None => None,
+    };
+    if order == Some(false) {
         return Some(Key::Fails(
             "the API key has no ContractTrade Order permission; with [kill] the watcher needs it to cancel orders"
                 .into(),
@@ -216,6 +222,18 @@ fn read_cancel_rules(v: &Value) -> Option<Key> {
     if let Some((name, _)) = lists.iter().find(|(_, items)| items.contains(&"Withdraw")) {
         return Some(Key::Fails(format!(
             "the API key has the Withdraw permission ({}); the watcher's key must not be able to withdraw",
+            one_word(name)
+        )));
+    }
+    if read_only.is_none() {
+        return Some(Key::Unreadable("readOnly is not an integer".into()));
+    }
+    if perms.is_none() {
+        return Some(Key::Unreadable("permissions is not an object".into()));
+    }
+    if let Some(name) = unread {
+        return Some(Key::Unreadable(format!(
+            "permissions.{} is not a list of strings",
             one_word(name)
         )));
     }

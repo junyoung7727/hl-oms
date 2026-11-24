@@ -1010,6 +1010,39 @@ async fn a_key_that_must_cancel_needs_read_write_order_and_no_withdraw() {
             cancel_key(json!(0), json!({"ContractTrade": ["Order", "Withdraw"]})),
             withdraw("ContractTrade"),
         ),
+        // `Order` counts only in ContractTrade (review 1 S2).
+        (
+            "Order only in another list",
+            cancel_key(json!(0), json!({"Spot": ["Order"], "ContractTrade": ["Position"]})),
+            NO_ORDER.to_string(),
+        ),
+        // A rule that reads and fails refuses, also when another field or
+        // list of the same answer does not read (review 1 S4).
+        (
+            "read only, a list unreadable",
+            cancel_key(json!(1), json!({"ContractTrade": ["Order"], "NFT": null})),
+            READ_ONLY.to_string(),
+        ),
+        (
+            "read only, permissions unreadable",
+            cancel_key(json!(1), json!(7)),
+            READ_ONLY.to_string(),
+        ),
+        (
+            "no Order, a list unreadable",
+            cancel_key(json!(0), json!({"ContractTrade": ["Position"], "NFT": null})),
+            NO_ORDER.to_string(),
+        ),
+        (
+            "Withdraw, a list unreadable",
+            cancel_key(json!(0), json!({"ContractTrade": ["Order"], "NFT": null, "Wallet": ["Withdraw"]})),
+            withdraw("Wallet"),
+        ),
+        (
+            "Withdraw, readOnly unreadable",
+            cancel_key(json!("0"), json!({"ContractTrade": ["Order"], "Wallet": ["Withdraw"]})),
+            withdraw("Wallet"),
+        ),
     ];
     // With [kill]: each rule refuses the start (exit 2) with the rule named.
     for (case, v, why) in &refusals {
@@ -1035,6 +1068,12 @@ async fn a_key_that_must_cancel_needs_read_write_order_and_no_withdraw() {
         ("permissions not an object", cancel_key(json!(0), json!(["Order"]))),
         ("ContractTrade not a list", cancel_key(json!(0), json!({"ContractTrade": "Order"}))),
         ("a list with a number", cancel_key(json!(0), json!({"ContractTrade": ["Order"], "Wallet": [1]}))),
+        // No readable rule fails, so the unread list keeps it unknown.
+        ("a null list", cancel_key(json!(0), json!({"ContractTrade": ["Order"], "NFT": null}))),
+        (
+            "ContractTrade and another list unreadable",
+            cancel_key(json!(0), json!({"Affiliate": null, "ContractTrade": [1]})),
+        ),
     ] {
         let metrics = Arc::new(Metrics::new("h1", "w1"));
         let mut s = start_kill(metrics.clone());
@@ -1080,4 +1119,23 @@ async fn a_key_that_must_cancel_needs_read_write_order_and_no_withdraw() {
         assert_eq!(c.client.cancel_all().await.unwrap_err().class(), "auth", "{case}");
         assert_eq!(fake.requests().len(), 3, "{case}");
     }
+    // At the recheck an answer whose [kill] fields do not read, and where no
+    // readable rule fails, is a failed recheck (asked again after
+    // ip_check_ms, watcher_public_ip_ok 0), not a rule stop (review 1 N4).
+    let fake = FakeHttp::start(ok(&json!({"list": []})));
+    let unread = cancel_key(json!(0), json!({"ContractTrade": ["Order"], "NFT": null}));
+    fake.route(QUERY_API, [ok(&can_cancel()), ok(&unread)]);
+    fake.route(INSTRUMENTS, [ok(&instrument("BTCUSDT", "USDT"))]);
+    let c = client(&fake);
+    let mut s = start_kill(c.metrics.clone());
+    assert_eq!(c.drive(&mut s.start).await, Step::Done);
+    let mut check = s.start.ip_check().unwrap();
+    c.clock.advance(60_000);
+    let now = c.clock.now_ms();
+    let req = check.poll(now).unwrap();
+    let step = check.on_answer(now, c.ask(&req).await);
+    assert_eq!(step, wait(now + 60_000));
+    assert_eq!(c.client.auth_rejected(), None);
+    assert_eq!(c.metrics.get(PUBLIC_IP_OK, &[]), Some(0.0));
+    assert_eq!(unreadable(&c.metrics, QUERY_API), Some(1.0));
 }
