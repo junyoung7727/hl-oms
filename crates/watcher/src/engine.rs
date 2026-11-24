@@ -394,13 +394,20 @@ impl Engine {
             let checks = Check::ALL.map(|c| (c, self.success(c))).to_vec();
             out.push(Action::Heartbeat { checks });
         }
+        self.export_ages(now);
+        out
+    }
+
+    /// `watcher_check_age_s` of every check at `now`. `poll` calls it, and
+    /// the runtime calls it at every tick while a kill pauses the engine
+    /// (U19b3c), so the ages keep growing while no check runs.
+    pub fn export_ages(&self, now: u64) {
         for s in &self.slots {
             let since = s.success_ms.unwrap_or(self.boot_ms);
             let age = now.saturating_sub(since) as f64 / 1000.0;
             let c = [("check", s.logic.check().name())];
             self.metrics.set("watcher_check_age_s", &c, age);
         }
-        out
     }
 
     /// The answer to a `Venue` request.

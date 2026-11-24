@@ -2777,6 +2777,24 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "kill_sequence", "already_latched_and_the_rearm_reply_count_as_halted"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M300-watcher-engine-polled-during-kill",
+        what: "the engine is polled during a kill: check rounds, watcher_mismatch sends and heartbeats go on (deliberate defect 46 of U19b3c)",
+        file: "crates/watcher/src/runtime.rs",
+        find: "            Phase::Run(e) if self.kill.is_some() => {\n",
+        replace: "            Phase::Run(e) if self.kill.is_some() && false => {\n",
+        test: &["-p", "watcher", "--test", "runtime", "the_engine_is_paused_during_a_kill_and_resumes_after"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M301-watcher-marker-path-rule-skipped",
+        what: "the marker-path boot rule is skipped: a status naming another marker path is usable (deliberate defect 47 of U19b3c)",
+        file: "crates/watcher/src/runtime.rs",
+        find: "                    if let Err(reason) = marker_rule(&v, &k.marker) {\n",
+        replace: "                    if let Err(reason) = Ok::<(), String>(()) {\n",
+        test: &["-p", "watcher", "--test", "runtime", "a_status_with_another_marker_path_refuses_the_start"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
