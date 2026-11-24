@@ -520,6 +520,15 @@ oreset; mkdir -p crates/a/.cargo; printf '[build]\nrustflags = ["-Aclippy::all"]
 expect_owner 1 "owner: a nested .cargo/config.toml" "owner_review: path: crates/a/.cargo/config.toml"
 oreset; printf 'x\n' > crates/a/myclippy.toml; mkdir -p docs/tools/ci; printf 'x\n' > docs/tools/ci/note.md; plant
 expect_owner 0 "owner: a name that only ends in a listed name, a listed path below another directory" "owner_review: none"
+# A new crate that leaves out the workspace lints builds outside all of them.
+oreset; mkdir -p crates/n/src; : > crates/n/src/lib.rs; printf '[package]\nname = "n"\n' > crates/n/Cargo.toml; plant
+expect_owner 1 "owner: a new crate without [lints] workspace = true" "owner_review: manifest: crates/n/Cargo.toml"
+oreset; mkdir -p crates/n/src; : > crates/n/src/lib.rs; printf '[package]\nname = "n"\n\n[lints]\nworkspace = false\n' > crates/n/Cargo.toml; plant
+expect_owner 1 "owner: a new crate with workspace = false" "owner_review: manifest: crates/n/Cargo.toml"
+oreset; mkdir -p crates/n/src; : > crates/n/src/lib.rs; printf "[package]\nname = \"n\"\n\n[lints]\nworkspace = true\n\n['lints'.clippy]\nunwrap_used = \"allow\"\n" > crates/n/Cargo.toml; plant
+expect_owner 1 "owner: a new crate with a single-quoted lints table" "owner_review: manifest: crates/n/Cargo.toml"
+oreset; mkdir -p fixtures/w; printf '[workspace]\nmembers = []\n' > fixtures/w/Cargo.toml; plant
+expect_owner 0 "owner: a new manifest without [package]" "owner_review: none"
 oreset; cp tools/ci/owner_review_paths.txt "$tmp/base_paths.txt"; sed -i '/^\.github\/$/d' tools/ci/owner_review_paths.txt
 printf 'on: push\n' >> .github/workflows/ci.yml; plant
 expect_owner_with() { # the list from the base, as the runner passes it

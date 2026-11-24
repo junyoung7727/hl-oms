@@ -23,8 +23,9 @@
 #             a [lints], [workspace.lints] or [profile] table (also as a
 #             dotted, quoted or inline key), a [[test]] or [[bench]]
 #             target, an `auto*` target key, a target's `test`, `harness`,
-#             `doctest` or `bench` key; or the root manifest drops a
-#             [workspace] member. A crate can turn a lint off, or a
+#             `doctest` or `bench` key; a new package manifest holds
+#             anything but exactly `[lints] workspace = true` of these; or
+#             the root manifest drops a [workspace] member. A crate can turn a lint off, or a
 #             profile can drop overflow-checks, without a listed path.
 #   lint:     a crate-level lint attribute (`#![allow|expect|warn|deny|
 #             forbid(..)]`, or one inside `#![cfg_attr(..)]`), or a lint
@@ -102,7 +103,7 @@ lint_tables() {
     { sub(/[[:space:]]*#.*/, ""); sub(/[[:space:]]+$/, "") }
     /^$/ { next }
     /^\[/ {
-      keep = ($0 ~ /^\[\[?[[:space:]]*"?(workspace"?\."?)?(lints|profile)"?([].[:space:]])/ \
+      keep = ($0 ~ /^\[\[?[[:space:]]*["\x27]?(workspace["\x27]?\.["\x27]?)?(lints|profile)["\x27]?([].[:space:]])/ \
               || $0 ~ /^\[\[[[:space:]]*(test|bench)[[:space:]]*\]\]/)
       target = ($0 ~ /^\[\[?[[:space:]]*(lib|bin|example|test|bench)[[:space:]]*\]\]?/)
     }
@@ -121,9 +122,14 @@ for f in "${changed[@]}"; do
   old="$(git show "$mb:$f" 2> /dev/null | lint_tables)"
   new="$( (git show "HEAD:$f" 2> /dev/null || true) | lint_tables)"
   std=$'[lints]\nworkspace = true'
-  # A new manifest that only takes the workspace lints, or a moved or
-  # removed one that only took them, is not a finding.
-  [[ -z "$old" && "$new" == "$std" ]] && continue
+  # A new package manifest takes exactly the workspace lints: one without
+  # them builds outside every workspace lint. A moved or removed one that
+  # only took them is not a finding.
+  if ! git cat-file -e "$mb:$f" 2> /dev/null \
+    && git show "HEAD:$f" 2> /dev/null | grep -E '^[[:space:]]*\[[[:space:]]*package[[:space:]]*\]' > /dev/null; then
+    [[ "$new" == "$std" ]] || finding "manifest: $f"
+    continue
+  fi
   [[ "$old" == "$std" && -z "$new" ]] && ! git cat-file -e "HEAD:$f" 2> /dev/null && continue
   [[ "$old" == "$new" ]] || finding "manifest: $f"
 done
