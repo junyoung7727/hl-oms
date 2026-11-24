@@ -14,6 +14,7 @@ use common::sock::{self, FakeSock, oms};
 use http_fake::{Answer, FakeHttp, Request};
 use serde_json::{Value, json};
 use std::os::unix::fs::PermissionsExt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use watcher::alert::Route;
@@ -1541,7 +1542,10 @@ fn since(seen: &Mutex<Vec<(u64, String)>>, path: &str, from: usize) -> Vec<(usiz
 
 /// A kill of an answering OMS that went silent: `admin.sock` latches. Walks
 /// until the start notice reached the fake Telegram. `kill` holds the
-/// further `[kill]` fields.
+/// further `[kill]` fields. `at_fire` changes the fakes once the fire line
+/// is logged, before the loop's first request: the `watcher_kill` reply
+/// waits for it (at most 10 s of real time), and K1, K2 and the first
+/// cancel-all and count otherwise all fit in one 15 ms pause of the walk.
 fn kill_after_silence(
     name: &str,
     extra: &str,
@@ -1550,8 +1554,21 @@ fn kill_after_silence(
 ) -> (World, std::path::PathBuf, std::path::PathBuf, Arc<ManualClock>, Running, Seen) {
     let (tg_dir, tg) = telegram_section(&format!("{name}-t"));
     let (mut w, dir) = kill_world(name, &format!("{extra}\n{tg}"), kill);
-    let marker = w.cfg.kill.as_ref().unwrap().marker.clone();
-    w.admin = admin_answering(&w.cfg.admin_socket, &marker, "latched").0;
+    // The manual clock stands still while the reply waits: K2's deadline
+    // does not pass.
+    let ready = Arc::new(AtomicBool::new(false));
+    let r = ready.clone();
+    w.admin = FakeSock::serve(&w.cfg.admin_socket, move |_, _, v| {
+        if v["op"] == "watcher_kill" {
+            let end = Instant::now() + Duration::from_secs(10);
+            while !r.load(Ordering::SeqCst) && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            oms(v, "latched")
+        } else {
+            oms(v, "held")
+        }
+    });
     w.systemctl = fake_systemctl(&dir, 0);
     w.status_marked();
     let clock = Arc::new(ManualClock::new(T0));
@@ -1562,6 +1579,7 @@ fn kill_after_silence(
     w.status_down();
     walk_until(&clock, 20_000, "the fire", || w.lines_with(FIRED) == 1);
     at_fire(&w);
+    ready.store(true, Ordering::SeqCst);
     walk_kill(&clock, "watcher_kill at admin.sock", || {
         kill_lines(&w.admin).len() == 1
     });
@@ -1591,7 +1609,9 @@ fn the_engine_is_paused_during_a_kill_and_resumes_after() {
     let age = |w: &World| w.pushed(r#"watcher_check_age_s","check":"W1"#).unwrap();
     std::thread::sleep(Duration::from_millis(300));
     let (age0, t0) = (age(&w), clock.now_ms());
-    walk(&clock, 10_000);
+    // Until 5 cancel-alls (one per round_ms of 1,000 if the machine keeps
+    // the pace; bounded).
+    walk_until(&clock, 60_000, "5 cancel-alls", || since(&seen, CANCEL_ALL, from).len() >= 5);
     std::thread::sleep(Duration::from_millis(300));
     // The kill ran the whole window (an order was open): no check round
     // (W3, W4; W1's list is the loop's count: no more of it than
