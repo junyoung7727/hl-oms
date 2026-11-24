@@ -49,6 +49,9 @@ struct World {
     journal: TestJournal,
     cfg: Config,
     lines: Arc<Mutex<Vec<String>>>,
+    /// The `systemctl` the runtime may run (U19b3c): under the test base
+    /// directory only; a missing file unless a test writes a fake.
+    systemctl: std::path::PathBuf,
 }
 
 fn key() -> Answer {
@@ -114,6 +117,7 @@ vm_url = "{}"
         );
         let cfg = Config::from_toml(&text).unwrap();
         let lines = Arc::new(Mutex::new(Vec::new()));
+        let systemctl = creds_dir.join("no-systemctl");
         World {
             bybit,
             echo,
@@ -125,6 +129,7 @@ vm_url = "{}"
             journal,
             cfg,
             lines,
+            systemctl,
         }
     }
 
@@ -142,11 +147,23 @@ vm_url = "{}"
         );
     }
 
+    /// The fakes' endpoints. A `systemctl` outside the test base directory
+    /// panics: no test may run the real one (review 3 N5).
     fn endpoints(&self) -> Endpoints {
+        let base = std::env::var("OMS_TEST_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::env::temp_dir());
+        assert!(
+            self.systemctl.starts_with(&base),
+            "systemctl {} is outside the test directory {}",
+            self.systemctl.display(),
+            base.display()
+        );
         Endpoints {
             rest_base: self.bybit.url(),
             ip_echo_url: format!("{}/", self.echo.url()),
             telegram: vec![Route::direct(&self.telegram.url())],
+            systemctl: self.systemctl.clone(),
         }
     }
 
@@ -1090,5 +1107,183 @@ fn a_mismatch_collected_inside_the_pace_is_sent_at_shutdown() {
             assert!(w.telegram.requests().is_empty());
         }
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---- U19b3c: W5 and the kill sequence in the runtime ----
+//
+// Every kill test keeps `2 × probe_ms + request_timeout_ms` = 4,000 ms (the
+// defaults), walks the clock with `walk` only until the kill fired (the
+// error line of the fire) and then waits for each kill effect in real time
+// (`walk_kill`), so no K step and no position read runs on a clock the test
+// moves faster than real time; after the start notice reached the fake
+// Telegram it walks again (the loop's waits are on the clock).
+
+/// The unit name of every runtime test (review 3 N5).
+const UNIT: &str = "watcher-test-no-such-unit.service";
+/// The error line of a fire, as far as a test reads it.
+const FIRED: &str = "error: W5: /api/status gave no good answer for";
+
+/// A key that may cancel (U19b2a): read-write with `ContractTrade: Order`.
+fn cancel_key() -> Answer {
+    ok(json!({"isMaster": false, "userID": 1, "ips": ["127.0.0.1"],
+        "readOnly": 0, "permissions": {"ContractTrade": ["Order", "Position"], "Wallet": []},
+        "expiredAt": "1970-01-01T00:00:00Z"}))
+}
+
+/// A world with `[kill]` (`kill` holds its further fields): the marker in
+/// its own test directory, the key one that may cancel. `extra` as for
+/// `World::new`. Also the marker's directory.
+fn kill_world(name: &str, extra: &str, kill: &str) -> (World, std::path::PathBuf) {
+    let dir = common::test_dir(&format!("{name}-k"));
+    let marker = dir.join("kill.marker");
+    let w = World::new(
+        name,
+        &format!(
+            "{extra}\n[kill]\nmarker = \"{}\"\noms_unit = \"{UNIT}\"\n{kill}",
+            marker.display()
+        ),
+    );
+    w.bybit.route("/v5/user/query-api", [cancel_key()]);
+    (w, dir)
+}
+
+/// `node.kill_marker` of an OMS that reads `path` (`None`: no `[kill]`).
+fn marker_node(path: Option<&std::path::Path>) -> Value {
+    json!({"kill_marker": {"configured": path.is_some(),
+        "path": path.map(|p| p.display().to_string()), "present_at_boot": false}})
+}
+
+impl World {
+    /// `/api/status` with the journal's cap and `node`.
+    fn status_with(&self, node: Value) {
+        let cap = self.journal.next_seq - 1;
+        self.status.route(
+            "/api/status",
+            [Answer::Reply(
+                200,
+                json!({"journal": {"durable_seq": cap},
+                    "core": {"instance_id": "0000000000000007"}, "node": node})
+                .to_string(),
+            )],
+        );
+    }
+
+    /// The OMS answers and reads the watcher's marker.
+    fn status_marked(&self) {
+        self.status_with(marker_node(Some(&self.cfg.kill.as_ref().unwrap().marker)));
+    }
+
+    /// The OMS stops answering (`/api/status` 503).
+    fn status_down(&self) {
+        self.status
+            .route("/api/status", [Answer::Reply(503, "{}".into())]);
+    }
+
+    /// Every line of the log so far.
+    fn log(&self) -> Vec<String> {
+        self.lines.lock().unwrap().clone()
+    }
+
+    /// The last value of `series` in the VM pushes so far.
+    fn pushed(&self, series: &str) -> Option<f64> {
+        let head = format!(r#"{{"metric":{{"__name__":"{series}""#);
+        self.pushes().iter().rev().find_map(|b| {
+            b.lines().find(|l| l.starts_with(&head)).map(|l| {
+                let v: Value = serde_json::from_str(l).unwrap();
+                v["values"][0].as_f64().unwrap()
+            })
+        })
+    }
+}
+
+/// A fake `systemctl` in `dir`: writes its arguments, one per line, to
+/// `<dir>/argv` and exits `code`.
+fn fake_systemctl(dir: &std::path::Path, code: i32) -> std::path::PathBuf {
+    let p = dir.join("systemctl");
+    std::fs::write(
+        &p,
+        format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}/argv'\nexit {code}\n", dir.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o700)).unwrap();
+    p
+}
+
+/// `walk` until `cond` holds after a step (at most `max_ms`).
+fn walk_until(clock: &ManualClock, max_ms: u64, what: &str, cond: impl Fn() -> bool) {
+    for _ in 0..max_ms / 100 {
+        if cond() {
+            return;
+        }
+        walk(clock, 100);
+    }
+    assert!(cond(), "{what}: not within {max_ms} ms of walking");
+}
+
+/// Waits in real time (at most 2,000 ms per step) for a kill effect; when
+/// it does not come, moves the clock one 100 ms step and waits again, at
+/// most 300 steps (review 4 S2). A K step thus gets at most one 100 ms
+/// step of the manual clock while it runs.
+fn walk_kill(clock: &ManualClock, what: &str, effect: impl Fn() -> bool) {
+    for _ in 0..300 {
+        let end = Instant::now() + Duration::from_millis(2000);
+        while Instant::now() < end {
+            if effect() {
+                // One tick more, so the runtime acted on it.
+                std::thread::sleep(Duration::from_millis(150));
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        clock.advance(100);
+    }
+    panic!("walk_kill: {what} did not come within 300 steps");
+}
+
+#[test]
+fn a_status_with_another_marker_path_refuses_the_start() {
+    let why = |oms: &str, ours: &std::path::Path| {
+        format!(
+            "the OMS reads its kill marker at {oms}; the watcher writes {}: they must be the same file",
+            ours.display()
+        )
+    };
+    for (case, node) in [
+        ("other", marker_node(Some(std::path::Path::new("/elsewhere/kill.marker")))),
+        ("none", marker_node(None)),
+    ] {
+        let (w, dir) = kill_world(&format!("rt-mpath-{case}"), "", "");
+        let marker = w.cfg.kill.as_ref().unwrap().marker.clone();
+        w.status_with(node);
+        let mut run = w.start(Arc::new(ManualClock::new(T0)));
+        assert!(until(10, || !run.running()), "{case}: {:?}", w.log());
+        assert_eq!(run.shutdown(), 2, "{case}");
+        let oms = if case == "none" { "none" } else { "/elsewhere/kill.marker" };
+        let reason = why(oms, &marker);
+        assert_eq!(w.lines_with(&format!("error: start refused: {reason}")), 1, "{case}: {:?}", w.log());
+        // The start-refusal P1 (U19b1c), here as a log line.
+        assert_eq!(
+            w.lines_with(&format!("warn: [WATCH P1] (no [telegram]: not sent) 워처 시작 거부: {reason}")),
+            1,
+            "{case}"
+        );
+        // Nothing was replayed: no check ran.
+        assert!(w.monitor.conns().is_empty(), "{case}");
+        assert!(!marker.exists(), "{case}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    // The same file through a symlinked directory is the same marker: the
+    // watcher goes on to the checks.
+    let (w, dir) = kill_world("rt-mpath-link", "", "");
+    let link = dir.with_extension("link");
+    let _ = std::fs::remove_file(&link);
+    std::os::unix::fs::symlink(&dir, &link).unwrap();
+    w.status_with(marker_node(Some(&link.join("kill.marker"))));
+    let mut run = w.start(Arc::new(ManualClock::new(T0)));
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    assert_eq!(w.lines_with("start refused"), 0);
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_file(&link);
     let _ = std::fs::remove_dir_all(&dir);
 }

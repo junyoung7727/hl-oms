@@ -17,6 +17,7 @@
 //! persisted.
 
 use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,15 +27,17 @@ use tokio::task::JoinSet;
 
 use crate::alert::{self, Alerts, FINISH_MS, Route, Task};
 use crate::clock::Clock;
-use crate::config::Config;
+use crate::config::{Config, resolved};
 use crate::engine::{Action, Check, Engine, Logic};
 use crate::journal::{MAX_RECORDS, Tail};
+use crate::kill;
 use crate::log::Log;
 use crate::metrics::{Exporter, Metrics};
 use crate::oms::{Monitor, Status, admin_send};
 use crate::rest::{Client, ClientConfig, RestError};
 use crate::start::{self, IpCheck, PublicIp, Start, Step};
 use crate::state::JournalState;
+use crate::stop;
 use crate::w2::W2;
 use crate::w3::W3;
 use crate::w4::W4;
@@ -49,14 +52,17 @@ pub const STATUS_RETRY_MS: u64 = 1_000;
 pub const STATUS_LOG_MS: u64 = 10_000;
 
 /// Where the watcher sends: the binary takes them from the config (the
-/// REST base from `network` only) and the two Telegram routes from
-/// [`Route::telegram`], with no override; tests give loopback fakes. The
-/// sender uses `telegram` when the config has `[telegram]` (U19b1c).
+/// REST base from `network` only), the two Telegram routes from
+/// [`Route::telegram`] and the stopper's program [`stop::SYSTEMCTL`], with
+/// no override; tests give loopback fakes and a script. The sender uses
+/// `telegram` when the config has `[telegram]` (U19b1c); a kill runs
+/// `systemctl` (U19b3c).
 #[derive(Debug, Clone)]
 pub struct Endpoints {
     pub rest_base: String,
     pub ip_echo_url: String,
     pub telegram: Vec<Route>,
+    pub systemctl: PathBuf,
 }
 
 impl Endpoints {
@@ -65,6 +71,7 @@ impl Endpoints {
             rest_base: cfg.network.rest_base().to_string(),
             ip_echo_url: cfg.ip_echo_url.clone(),
             telegram: Route::telegram(),
+            systemctl: PathBuf::from(stop::SYSTEMCTL),
         }
     }
 }
@@ -124,6 +131,28 @@ fn boot_cap(v: &Value) -> Result<u64, String> {
     Ok(cap)
 }
 
+/// The marker-path boot rule (C-WATCH part 12, U19b3c): with `[kill]` a
+/// status answer is usable only if the OMS reads its kill marker at the
+/// watcher's path (`node.kill_marker`, compared where both point). A marker
+/// the OMS never reads would not keep a killed OMS halted at its next
+/// start. The OMS config is not read (independence).
+fn marker_rule(v: &Value, ours: &Path) -> Result<(), String> {
+    let m = v.pointer("/node/kill_marker");
+    let configured = m.and_then(|m| m.get("configured")).and_then(Value::as_bool) == Some(true);
+    let path = m
+        .and_then(|m| m.get("path"))
+        .and_then(Value::as_str)
+        .filter(|_| configured);
+    match path {
+        Some(p) if resolved(Path::new(p)) == resolved(ours) => Ok(()),
+        _ => Err(format!(
+            "the OMS reads its kill marker at {}; the watcher writes {}: they must be the same file",
+            path.map_or("none".to_string(), |p| kill::cut(p, kill::TEXT_MAX)),
+            ours.display()
+        )),
+    }
+}
+
 struct Runtime {
     cfg: Config,
     echo_url: String,
@@ -150,6 +179,8 @@ struct Runtime {
     /// Set once the sender task ended before the shutdown.
     sender_ended: bool,
     public_ip: PublicIp,
+    /// A status answer in this process passed the marker-path rule.
+    marker_checked: bool,
 }
 
 /// Runs the watcher until `shutdown` resolves; the exit code (0, or 2 for
@@ -273,6 +304,7 @@ pub async fn run(
         alert_task,
         sender_ended: false,
         public_ip,
+        marker_checked: false,
         cfg,
     };
     let mut shutdown = std::pin::pin!(shutdown);
@@ -400,8 +432,17 @@ impl Runtime {
         let Phase::Wait { last_log, .. } = &self.phase else {
             return;
         };
-        match a.and_then(|v| boot_cap(&v)) {
-            Ok(cap) => {
+        match a.and_then(|v| Ok((boot_cap(&v)?, v))) {
+            Ok((cap, v)) => {
+                if let Some(k) = &self.cfg.kill {
+                    if let Err(reason) = marker_rule(&v, &k.marker) {
+                        (self.log)(&format!("error: start refused: {reason}"));
+                        self.alerts.once(&alert::refusal_text(&reason));
+                        self.refused = true;
+                        return;
+                    }
+                    self.marker_checked = true;
+                }
                 (self.log)(&format!(
                     "the OMS answers /api/status: replaying the journal up to record {cap}"
                 ));
