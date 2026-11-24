@@ -1,6 +1,6 @@
 # C-WATCH 독립 워처
 
-상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23), 4부 구현됨(설정과 자격 파일 U19a4, 시작 확인과 IP 재확인 U19a4b, 2026-11-23), 5부 구현됨(검사 엔진과 W1, U19a5, 2026-11-23), 6부 구현됨(W2 포지션, U19a6, 2026-11-23), 7부 구현됨(OMS 연결과 실행, U19a7, 2026-11-23), 8부 구현됨(W4 체결, U19a8, 2026-11-23), 9부 구현됨(W3 지갑과 증거금, W2의 대신 시각, 예산, U19a9, 2026-11-23), 10부 구현됨(직접 알림의 설정, 토큰 파일과 전달 규칙 U19b1a, 2026-11-24; 송신 태스크 U19b1b, 2026-11-24; P1 조건과 실행 연결 U19b1c, 2026-11-24), 11부 앞부분 구현됨(서명된 일괄 취소 POST, `[kill]`의 키 규칙과 루프 필드, 킬 알림의 문구와 포지션 묶음 U19b2a, 2026-11-24; 아직 아무것도 일괄 취소를 보내지 않음). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md), 10~12부는 [ADR-032](../adr/ADR-032-watcher-kill-and-alerts.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3, V-WATCH-4, V-WATCH-5, V-WATCH-6, V-WATCH-7, V-WATCH-8, V-WATCH-9, V-WATCH-10, V-WATCH-11, V-WATCH-12. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
+상태: 1~3부 구현됨(U19a1, U19a2, U19a3, 2026-11-23), 4부 구현됨(설정과 자격 파일 U19a4, 시작 확인과 IP 재확인 U19a4b, 2026-11-23), 5부 구현됨(검사 엔진과 W1, U19a5, 2026-11-23), 6부 구현됨(W2 포지션, U19a6, 2026-11-23), 7부 구현됨(OMS 연결과 실행, U19a7, 2026-11-23), 8부 구현됨(W4 체결, U19a8, 2026-11-23), 9부 구현됨(W3 지갑과 증거금, W2의 대신 시각, 예산, U19a9, 2026-11-23), 10부 구현됨(직접 알림의 설정, 토큰 파일과 전달 규칙 U19b1a, 2026-11-24; 송신 태스크 U19b1b, 2026-11-24; P1 조건과 실행 연결 U19b1c, 2026-11-24), 11부 앞부분 구현됨(서명된 일괄 취소 POST, `[kill]`의 키 규칙과 루프 필드, 킬 알림의 문구와 포지션 묶음 U19b2a, 2026-11-24; sans-IO 루프 `KillLoop` U19b2b, 2026-11-24; 아직 아무것도 일괄 취소를 보내거나 루프를 돌리지 않음). 설계 근거: [ADR-031](../adr/ADR-031-watcher.md), 10~12부는 [ADR-032](../adr/ADR-032-watcher-kill-and-alerts.md). 주장: V-WATCH-1, V-WATCH-2, V-WATCH-3, V-WATCH-4, V-WATCH-5, V-WATCH-6, V-WATCH-7, V-WATCH-8, V-WATCH-9, V-WATCH-10, V-WATCH-11, V-WATCH-12. 코드: `crates/watcher/src`, 시험 `crates/watcher/tests`, 적합성 시험 `crates/watcher-conformance/tests`, 검사 스크립트 `tools/ci/watcher_independent.sh`.
 
 워처는 OMS와 코드를 나누지 않는 별도 프로그램이다. 저널을 자기 읽기로 읽고(이 문서와 [C-TAIL](tail.md), [ADR-011](../adr/ADR-011-file-format.md)만으로 썼다), 자기 키와 클라이언트로 Bybit를 조회해 OMS와 비교하고, 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고, `monitor.sock`에 하트비트를 보낸다. **U19a7부터 워처는 돈다**: `watcher --config <path>`가 설정과 자격 파일을 읽고, 시작 확인을 거쳐 OMS의 `/api/status`를 기다린 뒤 저널을 처음부터 재생하고, W1(열린 주문), W2(포지션), U19a8부터 W4(체결), U19a9부터 W3(지갑과 증거금)을 돌려 확정된 차이를 `admin.sock`에 `watcher_mismatch`로 보내고(다시 보내기 규칙, 7부), `heartbeat_ms`마다 `monitor.sock`에 하트비트를 보내고, 지표를 VictoriaMetrics로 밀어 넣는다. 네 검사가 모두 돈다(U19a9). loopback 가짜와 시험 저널로만 시험했고 실제 OMS 프로세스나 실제 Bybit에 붙여 돌려 본 적이 없다(키가 없다, U-01). 서비스 설치는 U20b다.
 
@@ -16,7 +16,7 @@
 | 8 | W4 체결(훑기, 쪽, 다시 시작, 워터마크, 형별 행 읽기, `execType` 표, 거둠)(이 문서) | U19a8 |
 | 9 | W3 지갑과 증거금, W2의 대신 시각(W4의 `execTime`), 하트비트의 W3·W4, 예산 측정(이 문서) | U19a9 |
 | 10 | 직접 알림 `[WATCH P1]`: `[telegram]`, 토큰 파일, 전달 규칙(분할, 보관함, 응답의 결과, 반복 규칙), 송신 태스크(경로, 깨우기와 흘려보내기 간격, 지표, 종료 때 흘려보내기), P1 조건(불일치, 키 거부, 공인 IP, 시작 거부)과 실행 연결(이 문서) | U19b1a~c |
-| 11 | 워처의 일괄 취소 확인 루프: 서명된 POST 하나(일괄 취소), `[kill]`이 있을 때의 키 규칙, `[kill]`의 루프 필드, 킬 알림의 문구와 포지션 묶음, 포지션 읽기, 범위 linear/USDT(이 문서). 루프, 세기, `Inflight`는 U19b2b·c | U19b2a~c |
+| 11 | 워처의 일괄 취소 확인 루프: 서명된 POST 하나(일괄 취소), `[kill]`이 있을 때의 키 규칙, `[kill]`의 루프 필드, 킬 알림의 문구와 포지션 묶음, 포지션 읽기, 범위 linear/USDT, sans-IO 루프 `KillLoop`(C2~C5, 일괄 취소 예산, 기한, 알림 규칙, 중단)(이 문서). 세기와 `Inflight`는 U19b2c | U19b2a~c |
 
 ## 1부. 독립성
 
@@ -811,7 +811,7 @@ U19a7은 U19a5·U19a6 시험 몇 개의 단언을 바꿨다(시험 도구의 OMS
 
 ## 11부. 워처의 일괄 취소 확인 루프(U19b2)
 
-U19b2a가 이 부의 앞부분을 쓴다: 서명된 POST 하나(일괄 취소), `[kill]`이 있을 때의 키 규칙, `[kill]`의 루프 필드, 킬 알림의 문구와 포지션 묶음, 그 묶음의 포지션 읽기. 루프 자체(`KillLoop`, C2~C5, 일괄 취소 예산, 기한, 알림 규칙)는 U19b2b, 세기와 `Inflight`는 U19b2c다. **U19b2a 뒤 워처는 일괄 취소를 서명해 보낼 수 있고 `[kill]`이 있으면 취소할 수 없는 키를 거부하지만, 아직 아무것도 일괄 취소를 보내지 않는다**(부르는 코드가 없다). 시험은 loopback 가짜(`http-fake`)와 수동 시계로만 한다. Bybit 키가 아직 없어 실제 거래소에는 보낸 적이 없다.
+U19b2a가 이 부의 앞부분을 쓴다: 서명된 POST 하나(일괄 취소), `[kill]`이 있을 때의 키 규칙, `[kill]`의 루프 필드, 킬 알림의 문구와 포지션 묶음, 그 묶음의 포지션 읽기. 루프 자체(`KillLoop`, C2~C5, 일괄 취소 예산, 기한, 알림 규칙)는 U19b2b, 세기와 `Inflight`는 U19b2c다. **U19b2a 뒤 워처는 일괄 취소를 서명해 보낼 수 있고 `[kill]`이 있으면 취소할 수 없는 키를 거부하지만, 아직 아무것도 일괄 취소를 보내지 않는다**(부르는 코드가 없다). **U19b2b 뒤 sans-IO 루프가 있고 손으로 몬 시험을 지나지만, 아직 아무것도 그것을 돌리지 않는다**(세기와 `Inflight`는 U19b2c, 실행은 U19b3c). 시험은 loopback 가짜(`http-fake`)와 수동 시계로만 한다. Bybit 키가 아직 없어 실제 거래소에는 보낸 적이 없다.
 
 ### 서명된 POST 하나(`rest::Client::cancel_all`)
 
@@ -894,6 +894,33 @@ OMS의 `kill_*` 필드와 같은 기본값과 범위를 여기 다시 썼다. �
 - 기한: 읽기 시작의 주입된 시계 + `request_timeout_ms` + 11,000 ms(5부 엔진의 요청 기한과 같은 덧붙임: 가드의 10초 창 + 1초; 검토 4 N2). 쪽마다 답 뒤에 시계를 읽고, 기한 **때나 뒤에** 답한 쪽이면 `시간 초과`로 끝내고 다음 쪽을 보내지 않는다(검토 3 S2). 걸린 요청을 끊는 것(`AbortHandle`)은 실행(U19b3c)이 한다.
 - 키가 래치됐거나(`워처 키가 멈춤`) 403 멈춤 중이면(`HTTP 403 뒤 요청 일시 정지`) 묻지 않고 `NotRead`다.
 
+### 루프(`kill::KillLoop`, sans-IO, U19b2b)
+
+`KillLoop::new(timing: config::Kill, request_timeout_ms)`. 입력: `start(now, header, outcome)`, `cancel_done(now, req_id, CancelAnswer)`, `count_page(now, req_id)`(세기의 한 쪽이 답함; 검토 2 S2), `count_done(now, req_id, Result<usize, String>)`, `set_outcome(StopOutcome)`(루프 중 다시 보낸 정지가 래치함, U19b3b; 검토 3 M1), `poll(now)`, `abort(now, why)`. 출력 `Action`: `CancelAll {req_id}`, `Count {req_id}`, `Notice(Notice)`, `Ended(Report {rounds, cancel_all_calls, zero_since, aborted})`. 접근자: `phase()`, `round()`, `remaining()`, `cancel_all_calls()`, `next_wake()`, `header()`, `outcome()`, `ignored()`, `budget_holds()`. 모든 입력은 루프 시계의 `now`를 받아 그 자리에서 할 일을 돌려주고 아무것도 기다리지 않는다. `next_wake()`는 다음 `poll`을 원하는 시각이다: 열린 요청의 기한, 다음 라운드, 다음 지켜봄 세기, 예산의 시각, 다음 진행 알림 표시 중 가장 이른 것. `CancelAnswer` = `Done(CancelAll)` | `Failed(why)`(보냈고 쓸 답이 없거나 거부) | `NotSent(NotSent)`(아무것도 나가지 않음: `Latched`, `Paused`, `Local(why)`).
+
+| 상태(`Phase`) | 들어옴 | 함 | 다음 |
+|---|---|---|---|
+| `Cancel`(C2) | 라운드 r이 `t_r`에 시작 | 예산이 받으면 `CancelAll`, 아니면 예산의 시각까지 기다림 | `Done`·`Failed` → 곧바로 C3, `NotSent` → C4 |
+| `Count`(C3) | 보낸 일괄 취소 뒤(실패했어도) | `Count`(읽기는 U19b2c: `/v5/order/realtime` linear USDT의 모든 쪽, 열린 상태 셋, 남의 주문도 셈) | 0 → C5, n > 0 → C4, 오류 → C4(실패한 세기는 0이 아니다) |
+| `Repeat`(C4) | n > 0 또는 실패 | `t_r + round_ms`까지 기다림(이미 지났으면 곧바로) | C2, 라운드 r + 1(`t_{r+1}`은 그 시각) |
+| `Watch`(C5) | 이번 통과의 첫 0의 시각 `z`(C5에 들어올 때마다 새 `z`; 검토 4 N6) | `z + k × watch_every_ms`에 `Count`, 마지막은 `z + watch_ms` | n > 0 → 곧바로 C2(라운드 r + 1), 오류 → C4, `z + watch_ms` 때나 뒤에 낸 세기의 0 → 끝(얼마나 늦게 답했든) |
+| `Ended` | 위의 끝 | 마지막 알림(곧바로), `Ended(Report)` | 아무것도 안 함 |
+| `Aborted` | `abort`(U19b3d: 종료나 루프 중 시작 거부) | 중단 알림 하나, `Ended(aborted)` | 아무것도 안 함 |
+
+- **요청 둘이 함께 열리지 않는다**(검토 1 N7): 하나가 열려 있는 동안 기한이 된 세기나 일괄 취소는 그 답이나 기한을 기다렸다가 곧바로 간다. 그래서 지켜봄의 세기는 늦을 수 있고, 지켜봄을 끝내는 세기는 `z + watch_ms` 때나 뒤에 처음 낸 세기다. 그 전에 낸 세기가 늦게 답한 0은 끝이 아니다(OMS의 N4와 같다). 시작 전의 `abort`는 아무것도 하지 않는다(시작 전의 중단은 킬 순서가 알린다, U19b3b).
+- **일부러 OMS와 다른 점 1(C2 실패 뒤의 세기)**: OMS는 실패한 일괄 취소에서 세지 않고 C4로 간다(`crates/oms-node/src/venue/bybit/kill.rs:238-259`). 워처는 보낸 모든 일괄 취소 뒤에 센다. 세기가 진실이고(누가 취소했든 미체결 0이 목표), 미체결이 없을 때의 일괄 취소 답이 문서에 없다(Q11.7): Bybit가 취소할 것이 없는 일괄 취소를 거부하면, 거부 뒤에 세지 않는 루프는 끝나지 않는다(소유자 질문 3의 기본값). 보내지 않은 일괄 취소(래치, 멈춤, 로컬 오류) 뒤에는 세지 않는다(세기도 나가지 않는다).
+- **일괄 취소 예산**: 반열린 창 `[t, t + 1,000)` ms에 `CancelAll` 둘 이하, 낸 시각으로 센다(`ORDER_BUDGET` 2, `ORDER_WINDOW_MS` 1,000; 설계 표 7-8 C4의 비상 경로 초당 2). 예산이 잡은 일괄 취소는 예산의 시각(마지막 둘 중 이른 것 + 1,000 ms)에 `poll`에서 나간다. 설정에 맞는 타이밍(`round_ms ≥ 1,000`, `watch_every_ms ≥ 1,000`)에서는 두 일괄 취소가 1,000 ms보다 가깝지 않아(다음은 `t_r + round_ms`, 지켜봄 길에서는 `z ≥ t_r`에서 `watch_every_ms` 뒤) 예산이 묶이지 않는다: 나중에 타이밍이나 길이 바뀔 때의 방어다(검토 1 S2). `KillLoop::new`는 타이밍을 그대로 받으므로(범위는 설정을 읽을 때만 본다) 시험은 범위 밖의 100 ms로 예산이 묶이는 것을 본다.
+- **기한**(검토 2 S2, 검토 3 S2): `CancelAll`의 기한은 낸 시각 + `request_timeout_ms` + 11,000 ms(5부 엔진의 한 요청 덧붙임: 가드의 10초 창 + 1초). `Count`는 20 요청까지라 기한이 쪽마다다: 낸 시각 + 같은 덧붙임이고, 기한 전의 `count_page(now)`가 그것을 `now` + 덧붙임으로 옮긴다(1.3초짜리 11쪽 세기도 쪽이 답하는 동안은 실패하지 않는다). 쪽, `count_done`, `cancel_done`을 기한 **때나 뒤에** 받으면 기한 뒤다: 세기는 오류, 일괄 취소는 `Failed`(보낸 것으로 센다)이고 기한은 옮기지 않는다. `poll`이 기한을 먼저 보아도 같다(`no answer before the deadline`). 그 뒤에 온 같은 `req_id`의 답이나 쪽, 열린 요청이 아닌 `req_id`나 다른 종류의 답은 버리고 `ignored()`에 센다(디버그 줄은 실행 U19b3c가 쓴다). 기한이 지난 요청의 태스크를 끊는 것(`AbortHandle`)은 `kill::Inflight`(U19b2c)다.
+- **남은 건수와 마지막 오류**: `remaining()`은 마지막 세기의 결과다. 첫 세기 전에는 `모름: 아직 세지 않음`, 세기 오류는 그 이유의 모름이고 0이 되지 않는다. 보내지 않은 일괄 취소는 건수를 바꾸지 않는다(스펙에 없는 판단). 마지막 오류(`LastError`)는 마지막 일괄 취소의 것이고 `Done`이 지운다(스펙에 없는 판단: 진행 알림이 지난 오류를 지금 것처럼 보이지 않게). `NotSent`의 종류는 다음 진행 알림까지 남는다(검토 2 S5).
+- **라운드 수의 상한은 없다**: 0을 확인하거나 프로세스가 멈출 때까지 돈다(OMS의 루프와 표 7-8). 라운드마다 요청은 일괄 취소 하나와 세기의 쪽 20까지이고, 요청 제한(10초에 60)이 단단한 상한이다.
+
+### 알림 규칙(C4, U19b2b)
+
+- 종류: **시작**(`start` 때), **진행**(`poll`에서: 진행 알림 k는 `s + k × notice_ms`, `s`는 시작 알림의 시각; 루프가 끝나지 않은 동안 그 표시 때나 뒤의 첫 `poll`에서 나간다), **마지막**(끝나는 입력에서 곧바로, `notice_ms`로 잡지 않는다), **중단**(`abort` 때). 늦은 진행 알림은 다음 표시를 옮기지 않고, 한 `poll`에서 표시 둘 이상이 지났으면 알림 하나에 다음 표시는 `now` 뒤의 첫 표시다(검토 3 S3). 그래서 실행이 얼마나 늦게 `poll`해도(틱 100 ms; 빠른 수동 시계에서는 수 초) 아래 상한이 정확하다.
+- 진행 알림은 최신 라운드, 건수(알거나 `모름: <이유>`), 마지막 오류를 싣고, 건수가 바뀌지 않아도 `notice_ms`마다 나간다(표 7-8 "바뀌지 않아도 60초마다"; 소유자 질문 2의 기본값).
+- **일부러 OMS와 다른 점 2(바뀐 건수의 알림 없음; 검토 1 S4)**: OMS는 0보다 큰 알려진 건수가 마지막에 보인 것과 다르면 곧바로 바뀜 알림을 보내고(`kill.rs:192-235`, `Change`) 60초마다 반복한다. TN `05_trading.html:213`은 "60초마다, 그리고 남은 건수가 바뀔 때 보냄"이라 한다. 워처는 바뀜 알림을 보내지 않는다: 바뀐 건수는 다음 진행 알림을 기다린다. 이유는 범위의 "60초에 한 번까지"와 10분에 12개 상한(설계 R2 SHOULD 4)이고, OMS의 바뀜 알림은 이 상한을 지키지 않는다(바뀔 때마다 하나 더). 그래서 `watcher_kill` 뒤 두 루프가 함께 돌면 `[OMS P1] 킬 루프`가 건수 변화를 `[WATCH P1] 워처 킬`보다 최대 60초 먼저 보일 수 있다.
+- 상한: 길이 T의 어느 창에서도 시작·진행 알림은 1 + ⌈T / notice_ms⌉ 이하다(창 안의 첫 알림 뒤의 알림은 저마다 창 안에 자기 표시가 있다. 알림 하나가 그 전에 지난 모든 표시를 덮기 때문이다). 여기에 마지막 하나나 중단 하나가 더해진다. 10분 동안 조회가 실패해도 1 + 10 + 1 = 12다(`notice_ms` ≥ 60,000, 위 `[kill]`의 범위). 킬 순서는 킬마다 `LateHalt` 알림을 하나까지 더한다(U19b3b, 루프의 12 밖).
+
 ### 범위
 
 킬은 linear/USDT만 본다: 설정의 모든 기호가 USDT로 정산된다(4부 시작 5단계). 다른 정산 코인의 주문은 이 루프도 W1도 보지 않는다(표 7-8과 같다).
@@ -916,3 +943,15 @@ OMS의 `kill_*` 필드와 같은 기본값과 범위를 여기 다시 썼다. �
 ### 검증(11부, U19b2a)
 
 주장 V-WATCH-12. `sign::the_post_string_to_sign_matches_the_published_example_and_independent_values`(Q1.10의 서명할 문자열 그대로, 만든 비밀의 Python `hmac` 값 둘, 공백이 다른 본문은 다른 값), `client::the_only_post_is_cancel_all_with_the_fixed_body`(방법, 경로, 바이트까지 같은 본문, `Content-Type`, 머리글 다섯, 독립 값의 서명, 도착한 바이트로 다시 계산한 서명, 보내기 전에 센 요청), `client::cancel_all_answers_are_classified`(`"1"`, 없음, 빈 목록, `"0"`, 목록 아님, `result` 없음, 숫자 1, `"2"`, 503, 10010 래치 뒤 아무 길로도 보내지 않음, 403 멈춤 600초), `client::no_other_post_exists`, `config::kill_loop_fields_are_validated`, `start::a_key_that_must_cancel_needs_read_write_order_and_no_withdraw`(시작의 거부 열하나: 다섯, `ContractTrade` 밖의 `Order`(검토 1 S2), 다른 필드·목록을 읽을 수 없어도 읽히는 규칙의 거부 다섯(검토 1 S4); 읽을 수 없는 여덟, `[kill]` 없이 읽지 않음, 재확인의 규칙 멈춤 뒤 일괄 취소도 보내지 않음, 재확인의 읽을 수 없는 답은 `ip_check_ms` 뒤 다시이고 멈춤이 아님(검토 1 N4)), `decimal::percent_floor_rounds_toward_zero_and_refuses_overflow`, `kill::the_position_block_lists_size_upnl_mark_and_liquidation_distance`(읽을 수 없는 크기는 `수량 모름`이고 `포지션 없음`이 아님, 검토 1 S3), `kill::a_failed_position_read_says_unknown`, `kill::a_notice_fits_one_part_with_50_positions`, `kill::the_final_notice_names_the_stop_outcome`, `kill::a_latched_key_says_the_watcher_must_restart`, `kill::the_abort_notice_says_positions_were_not_read`, `kill::the_position_reader_pages_and_keeps_its_deadline`(두 쪽, 기한 뒤와 기한 정각의 쪽, 기한 1 ms 전, 5쪽 상한, 읽을 수 없는 쪽 셋과 503과 그 요청 수(검토 1 S1), 래치와 멈춤에서 요청 없음, 멈춤이 끝나면 다시 읽음). 변이 M265~M268과 시험 밖 변이 31개(U19b2a; 검토 1 수정의 7개 포함).
+
+### 알려진 한계(11부, U19b2b)
+
+- 아직 아무것도 `KillLoop`를 돌리지 않는다: 세기, `Inflight`, 시험 장치는 U19b2c, 실행은 U19b3c다. 이 부의 루프 시험은 루프를 손으로 몬다(클라이언트도 태스크도 없다).
+- 앞의 세기가 열려 있으면 지켜봄의 세기가 늦어 `watch_every_ms`보다 드물 수 있다. 끝은 여전히 `z + watch_ms` 때나 뒤에 낸 세기의 0이다.
+- 라운드 수의 상한이 없다: 키가 래치되거나 403 멈춤이 길면 `NotSent` 라운드가 끝없이 돈다(요청은 나가지 않는다). 그런 루프는 워처를 다시 시작해야 끝난다(진행 알림의 고정 문구가 말한다; 런북 7.18은 U19b3d).
+- 바뀐 건수는 최대 `notice_ms`(기본 60초) 늦게 알려진다(일부러 OMS와 다른 점 2).
+- `poll` 한 번은 열린 요청의 기한 하나만 처리한다: 오래 `poll`하지 않은 실행은 지난 기한 하나에 한 `poll`씩 따라잡는다(그 사이 요청은 하나뿐이라 늦어질 뿐 둘이 열리지 않는다).
+
+### 검증(11부, U19b2b)
+
+주장 V-WATCH-12(늘림). `kill::the_loop_cancels_counts_and_ends_after_the_watch`(C2→C3→C5, 5초마다 세기 여섯, `z + 30초`의 세기에서 끝, 마지막 알림과 `Report`, 끝 뒤에는 아무것도), `kill::a_count_above_zero_waits_for_the_round`(n > 0이면 `t_r + round_ms`, 늦은 `poll`은 그 라운드의 시작을 늦춤), `kill::a_failed_cancel_all_is_still_followed_by_a_count`(503 뒤 세기; 모든 일괄 취소가 거부되고 세기는 0인 거래소에서도 루프가 `T0 + 30초`에 끝남), `kill::a_cancel_all_that_succeeds_clears_the_last_error`, `kill::a_cancel_all_not_sent_waits_for_the_next_round`(`Latched`, `Paused`, `Local` 각각: 세기 없음, 보낸 수 0, 60초의 진행 알림이 그 종류를 실음), `kill::a_failed_count_is_never_zero`(C3와 C5의 세기 오류, 다음 0의 새 `z`), `kill::a_late_order_in_the_watch_goes_back_to_cancel_at_once`, `kill::the_watch_ends_only_on_the_count_due_at_its_end`(`z + 25초`에 낸 세기가 `z + 31초`에 0으로 답해도 끝이 아님, 그 뒤 곧바로 낸 세기가 10초 늦게 답해도 끝), `kill::two_requests_of_the_loop_are_never_in_flight`, `kill::a_request_past_its_deadline_fails_and_a_late_answer_is_ignored`, `kill::an_answer_handled_at_its_deadline_is_past_it`(쪽, `count_done`, `cancel_done`을 기한 정각과 1 ms 뒤, `poll` 전에), `kill::a_slow_paged_count_is_not_failed_while_pages_answer`(11쪽 × 1,300 ms, `request_timeout_ms` 2,000: `+14,300 ms`에 결과), `kill::a_progress_notice_comes_every_60_s_also_with_an_unchanged_count`(60·120·180초; `+65초`부터의 `poll`은 `+65초`와 `+120초`; 표시 둘을 한 번에 지나면 알림 하나), `kill::the_notice_rule_sends_no_change_notice`(5·4·3·2·1로 줄어도 시작·진행 하나·마지막뿐), `kill::ten_minutes_of_failing_queries_make_at_most_12_notices`(100 ms와 7,000 ms의 `poll`: 시작 1 + 진행 10 + 마지막 1, 600초 창마다 12 이하, 마지막은 끝나는 세기의 시각), `kill::abort_sends_one_notice_and_ends`(시작 전 아무것도; 라운드, 지켜봄, 모르는 건수; 그 뒤 아무것도), `kill::the_outcome_set_during_the_loop_is_in_the_final_notice`, `kill::the_order_budget_holds_under_any_answer_sequence`(시드 xorshift의 답 순서 10,000개 × 두 타이밍, 순서마다 300걸음까지; 기본 타이밍에서 일괄 취소 약 21만 개에 예산이 잡은 것 0, 100 ms 타이밍에서 약 24만 개에 잡은 것 2,162; 어느 셋도 1,000 ms 안에 없고 요청 둘이 함께 열리지 않음). 변이 M269~M278(스펙의 고의 결함 15~24)과 시험 밖 변이 32개(U19b2b의 `mut.py`; 31개 잡힘, 놓친 하나는 `poll`이 이미 막는 같은 검사라 코드에서 뺐다).
