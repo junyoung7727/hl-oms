@@ -184,6 +184,10 @@ pub async fn run(
             None
         }
     };
+    // Testnet only: the config refuses mainnet without it (U19b3a).
+    if cfg.kill.is_none() {
+        log("warn: no [kill]: W5 is off; when the OMS is silent the watcher neither stops it nor cancels its orders, and no [WATCH P1] tells it");
+    }
     let metrics = Arc::new(Metrics::new(&cfg.host, &cfg.name));
     let timeout = cfg.http.request_timeout_ms;
     let exporter = match &cfg.telemetry.vm_url {

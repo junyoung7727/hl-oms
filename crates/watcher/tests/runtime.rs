@@ -817,6 +817,14 @@ fn a_start_refusal_ends_the_run_with_exit_code_2() {
         ),
         1
     );
+    // ... and, from U19b3a, one warn line for no [kill] (testnet only:
+    // W5 is off).
+    assert_eq!(
+        w.lines_with(
+            "warn: no [kill]: W5 is off; when the OMS is silent the watcher neither stops it nor cancels its orders, and no [WATCH P1] tells it"
+        ),
+        1
+    );
     // ... and, from U19b1c, the refusal P1 as a log line.
     assert_eq!(w.lines_with("no [telegram]"), 2);
     assert_eq!(w.lines_with("warn: [WATCH P1] (no [telegram]: not sent) 워처 시작 거부"), 1);
