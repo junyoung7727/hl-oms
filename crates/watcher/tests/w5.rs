@@ -493,6 +493,53 @@ fn a_gap_in_the_watchers_own_ticks_is_not_oms_silence() {
     );
     assert_eq!(s.fires[0].1.silent_ms, 10_000);
 
+    // After a gap the first thing W5 sees may be an answer (it is handled
+    // before the poll of the turn): the gap is applied first, so the
+    // answer's instant is the last good one, not an instant one gap later.
+    let mut s = Sim::new(DEFAULT);
+    s.w.arm(T0);
+    let p = s.w.poll(T0).unwrap();
+    let after = T0 + 15_000;
+    assert_eq!(s.w.on_answer(after, p.req_id, true), None);
+    assert_eq!(
+        s.w.state(),
+        State::Armed {
+            last_good_ms: after
+        }
+    );
+    s.at(after, &silent);
+    assert_eq!(
+        s.w.state(),
+        State::Armed {
+            last_good_ms: after
+        }
+    );
+    assert_eq!(s.lines.lock().unwrap().len(), 1, "one gap, one line");
+    // A probe that failed before a gap still counts after it (every
+    // instant W5 holds moves by the gap). Timings outside the config
+    // bound (a 9,000 ms probe deadline against 3,000 ms of silence), so
+    // that no other probe fails in time: the good answer at T0, the probe
+    // of +1,000 ms answered bad at +1,100 ms, then 15 s unobserved. The
+    // observed silence reaches 3,000 ms at +18,000 ms; the next probe
+    // (+17,000 ms) would fail only at +26,000 ms.
+    let t = Timing {
+        probe_ms: 1000,
+        silence_ms: 3000,
+        request_timeout_ms: 8000,
+    };
+    let mut s = Sim::armed_good_at_t0(t);
+    s.walk(T0 + 100, T0 + 1100, 100, &|e| {
+        (e == T0 + 1000).then_some((100, false))
+    });
+    assert!(s.fires.is_empty() && s.w.probe_in_flight().is_none());
+    s.at(T0 + 16_100, &silent);
+    assert!(s.fires.is_empty());
+    s.walk(T0 + 16_200, T0 + 17_900, 100, &silent);
+    assert!(s.fires.is_empty());
+    s.at(T0 + 18_000, &silent);
+    assert_eq!(s.fired_at(), vec![18_000]);
+    assert_eq!(s.fires[0].1.silent_ms, 3000);
+
     // A gap exactly at the threshold is not a gap.
     let mut s = Sim::armed_good_at_t0(DEFAULT);
     s.at(T0 + 4000, &silent);
