@@ -57,6 +57,13 @@ pub fn load(path: &Path, data_dir: &Path) -> Result<Credentials, String> {
             if f.api_key.is_empty() || secret.is_empty() {
                 return Err(format!("credentials file {shown}: empty key or secret"));
             }
+            // A PEM key pasted here would be used as an HMAC secret: every
+            // request would be rejected by the venue (review S2).
+            if secret.contains("PRIVATE KEY-----") {
+                return Err(format!(
+                    "credentials file {shown}: api_secret holds a PEM private key; an RSA key goes in rsa_private_key"
+                ));
+            }
             Ok(Credentials::new(&f.api_key, &secret))
         }
         (None, Some(pem)) => {

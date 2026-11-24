@@ -289,7 +289,7 @@
 
 ### 자격 파일(`creds::load(path, data_dir)`)
 
-- TOML `api_key`와, `api_secret`(HMAC) 또는 `rsa_private_key`(RSA, PKCS#8 PEM 글을 TOML 여러 줄 문자열로; [ADR-034](../adr/ADR-034-bybit-rsa-keys.md)) 중 **정확히 하나**. 비어 있지 않아야 하고, 다른 키가 있으면 거부한다. 둘 다면 "has both api_secret and rsa_private_key; keep exactly one", 둘 다 없으면 "…: it has neither".
+- TOML `api_key`와, `api_secret`(HMAC) 또는 `rsa_private_key`(RSA, PKCS#8 PEM 글을 TOML 여러 줄 문자열로; [ADR-034](../adr/ADR-034-bybit-rsa-keys.md)) 중 **정확히 하나**. 비어 있지 않아야 하고, 다른 키가 있으면 거부한다. 둘 다면 "has both api_secret and rsa_private_key; keep exactly one", 둘 다 없으면 "…: it has neither". `api_secret`에 PEM 개인 키를 넣으면 "api_secret holds a PEM private key; an RSA key goes in rsa_private_key"(HMAC 비밀로 쓰지 않는다).
 - RSA 키는 읽을 때 한 번 파싱한다(`sign::Signer::rsa`, ring). `BEGIN PRIVATE KEY` 줄의 암호화되지 않은 PKCS#8만 받는다. PKCS#1(`BEGIN RSA PRIVATE KEY`)과 암호화된 PEM(`BEGIN ENCRYPTED PRIVATE KEY`)은 고치는 명령 `openssl pkcs8 -topk8 -nocrypt -in old.pem -out new.pem`을 적은 줄로, PEM이 아니거나 base64가 아닌 글은 "is not a PEM private key", 2048비트 미만이거나 RSA 키가 아닌 본문은 "is not an RSA key of 2048 bits or more that ring accepts (<ring의 이유>)"로 거부한다. 모두 종료 코드 2의 시작 거부다.
 - 읽는 순간에 설정의 경로 규칙(절대, `..` 없음, 데이터 디렉터리 밖)을 한 번 더 적용한다. 설정을 읽은 뒤 생긴 심볼릭 링크도 여기서 본다.
 - 여는 핸들 하나로 검사하고 읽는다(검사와 읽기 사이에 파일을 바꿔치기할 수 없다). 열 때 마지막 구성 요소의 심볼릭 링크를 따르지 않고(`O_NOFOLLOW`; 링크면 "is a symbolic link"), FIFO의 쓰는 쪽을 기다리지 않는다(`O_NONBLOCK`; 바로 "is not a regular file").

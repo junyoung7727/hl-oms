@@ -127,6 +127,7 @@ install -m 600 /dev/null /etc/hl-oms/watcher-bybit.toml
 |---|---|---|
 | `has both api_secret and rsa_private_key; keep exactly one` | 두 비밀이 다 있다 | 쓰지 않는 쪽을 지운다 |
 | `is not TOML with api_key and api_secret or rsa_private_key: it has neither` | 비밀이 없다 | 하나를 넣는다 |
+| `api_secret holds a PEM private key; an RSA key goes in rsa_private_key` | RSA 키를 `api_secret` 자리에 넣었다 | 키 이름을 `rsa_private_key`로 바꾼다 |
 | `rsa_private_key is a PKCS#1 key (BEGIN RSA PRIVATE KEY); convert it to PKCS#8 with: openssl pkcs8 -topk8 -nocrypt -in old.pem -out new.pem` | 옛 형(PKCS#1) | 적힌 명령으로 바꿔 다시 넣는다 |
 | `rsa_private_key is encrypted (BEGIN ENCRYPTED PRIVATE KEY); write it unencrypted with: openssl pkcs8 -topk8 -nocrypt -in old.pem -out new.pem` | 암호가 걸린 키(무인 실행은 암호를 물을 수 없다) | 적힌 명령(암호를 묻는다)으로 풀어 다시 넣는다 |
 | `rsa_private_key is not a PEM private key (BEGIN PRIVATE KEY, PKCS#8)` | 머리·꼬리 줄이 없거나 본문이 base64가 아니다 | 파일을 `genpkey`의 출력 그대로 다시 넣는다 |

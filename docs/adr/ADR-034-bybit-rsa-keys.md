@@ -56,7 +56,7 @@
 
 B, D, F. 결정 D1~D7(스펙):
 
-- D1 자격 파일(두 바이너리, 같은 모양): TOML `api_key`와 `api_secret`(HMAC, 그대로) 또는 `rsa_private_key`(PKCS#8 PEM 글, TOML 여러 줄 문자열) 중 **정확히 하나**. 둘 다 또는 둘 다 없으면 파일을 인용하지 않는 한 줄로 시작 거부. 모르는 키는 여전히 거부. 파일 규칙(일반 파일, 소유자, 0600/0400(OMS는 그룹·기타 비트 없음), 데이터 디렉터리 밖, 링크 아님)은 그대로이고 이제 RSA 키도 지킨다. 비밀 파일이 하나라서 검사도 한 벌이다.
+- D1 자격 파일(두 바이너리, 같은 모양): TOML `api_key`와 `api_secret`(HMAC, 그대로) 또는 `rsa_private_key`(PKCS#8 PEM 글, TOML 여러 줄 문자열) 중 **정확히 하나**. 둘 다 또는 둘 다 없으면 파일을 인용하지 않는 한 줄로 시작 거부. `api_secret` 값이 PEM 개인 키(`PRIVATE KEY-----`를 담음)면 HMAC 비밀로 쓰지 않고 "RSA 키는 `rsa_private_key`에" 한 줄로 시작 거부(검토 S2: 그대로 쓰면 모든 요청이 서명 거절 10004로 막힌다). 모르는 키는 여전히 거부. 파일 규칙(일반 파일, 소유자, 0600/0400(OMS는 그룹·기타 비트 없음), 데이터 디렉터리 밖, 링크 아님)은 그대로이고 이제 RSA 키도 지킨다. 비밀 파일이 하나라서 검사도 한 벌이다.
 - D2 PEM: `BEGIN PRIVATE KEY` 줄의 PKCS#8(암호화 안 됨)만. PKCS#1(`BEGIN RSA PRIVATE KEY`)과 `BEGIN ENCRYPTED PRIVATE KEY`는 고치는 명령(`openssl pkcs8 -topk8 -nocrypt -in old.pem -out new.pem`)을 적은 줄로 거부한다(두 형 모두 이 명령으로 고쳐짐을 openssl 3.5.5로 확인). 2048비트 미만은 거부(ring). 시작할 때 한 번 파싱하고, 파싱되지 않는 키는 시작 거부다: 워처는 다른 자격 오류처럼 종료 코드 2, OMS는 기존 자격 오류 길(게이트웨이를 띄우지 못함).
 - D3 crate마다 서명기 하나: 자격 정보가 `Signer`(HMAC 비밀 | 파싱된 RSA 키 쌍)를 들고, `sign(prehash) -> Result<String, String>`이 HMAC은 소문자 hex, RSA는 표준 base64를 돌려준다. 모든 호출 지점(워처의 GET과 일괄 취소 POST, OMS의 REST GET·POST와 비공개 스트림·WS Trade의 `auth`)이 그것을 지난다. 따로 HMAC을 부르는 호출 지점은 없다(HMAC 자유 함수는 기존 시험 벡터용으로만 남는다).
 - D4 워처는 F1~F3과 Bybit 문서로 자기 구현을 쓴다. OMS 코드를 쓰지 않는다(`watcher_independent.sh` 통과).

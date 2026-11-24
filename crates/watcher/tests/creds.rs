@@ -426,7 +426,8 @@ fn key_pieces() -> Vec<String> {
 /// The RSA form (ADR-034, spec D1, D2, T4, T6): `api_key` and
 /// `rsa_private_key`, the PKCS#8 PEM text inline. It is read, parsed once
 /// and signs to openssl's value; `Debug` hides it. Refused, each with one
-/// line that quotes no byte of the key: both secrets, neither, a PKCS#1
+/// line that quotes no byte of the key: both secrets, neither, a PEM key
+/// in `api_secret` (S2 of the review: it would be an HMAC secret), a PKCS#1
 /// key and an encrypted key (each naming the openssl fix), garbage PEM, a
 /// body that is not a key, a cut body, a body without the PEM lines, an
 /// empty key, a 1024-bit key. The file rules are the same as for the
@@ -476,6 +477,17 @@ fn an_rsa_credentials_file_is_read_and_its_refusals_quote_no_key() {
                 rsa::pem_2048()
             ),
             "has both api_secret and rsa_private_key; keep exactly one",
+        ),
+        (
+            format!("api_key = \"WKEY\"\napi_secret = \"\"\"\n{}\"\"\"\n", rsa::pem_2048()),
+            "api_secret holds a PEM private key; an RSA key goes in rsa_private_key",
+        ),
+        (
+            format!(
+                "api_key = \"WKEY\"\napi_secret = \"\"\"\n{}\"\"\"\n",
+                rsa::pem("RSA PRIVATE KEY", rsa::KEY_2048_PKCS1)
+            ),
+            "api_secret holds a PEM private key; an RSA key goes in rsa_private_key",
         ),
         ("api_key = \"WKEY\"\n".to_string(), "it has neither"),
         (

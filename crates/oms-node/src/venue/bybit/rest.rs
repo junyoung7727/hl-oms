@@ -105,6 +105,12 @@ impl Credentials {
         }
         match (f.api_secret, f.rsa_private_key) {
             (Some(secret), None) if secret.is_empty() => Err(empty()),
+            // A PEM key pasted here would be used as an HMAC secret: every
+            // request would be rejected by the venue (review S2).
+            (Some(secret), None) if secret.contains("PRIVATE KEY-----") => Err(format!(
+                "credentials file {}: api_secret holds a PEM private key; an RSA key goes in rsa_private_key",
+                path.display()
+            )),
             (Some(secret), None) => Ok(Credentials::new(&f.api_key, &secret)),
             (None, Some(pem)) => Credentials::rsa(&f.api_key, &pem)
                 .map_err(|e| format!("credentials file {}: {e}", path.display())),
@@ -577,7 +583,8 @@ mod tests {
     /// `rsa_private_key` (the PKCS#8 PEM text inline) is read and parsed
     /// once, signs to openssl's value, and `Debug` hides it. Refused, each
     /// with one line that names the file and quotes no byte of a key:
-    /// both secrets, neither, PKCS#1 and encrypted keys (each naming the
+    /// both secrets, neither, a PEM key in `api_secret` (S2 of the review:
+    /// it would be an HMAC secret), PKCS#1 and encrypted keys (each naming the
     /// openssl fix), garbage PEM, a body that is not a key, a cut body, the
     /// body without the PEM lines, an empty key, a 1024-bit key. The file
     /// rules still apply (0644 refused).
@@ -624,6 +631,17 @@ mod tests {
                     k::pem_2048()
                 ),
                 "has both api_secret and rsa_private_key; keep exactly one".into(),
+            ),
+            (
+                format!("api_key = \"K1\"\napi_secret = \"\"\"\n{}\"\"\"\n", k::pem_2048()),
+                "api_secret holds a PEM private key; an RSA key goes in rsa_private_key".into(),
+            ),
+            (
+                format!(
+                    "api_key = \"K1\"\napi_secret = \"\"\"\n{}\"\"\"\n",
+                    k::pem("RSA PRIVATE KEY", k::KEY_2048_PKCS1)
+                ),
+                "api_secret holds a PEM private key; an RSA key goes in rsa_private_key".into(),
             ),
             (
                 "api_key = \"K1\"\n".into(),
