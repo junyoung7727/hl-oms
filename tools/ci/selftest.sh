@@ -384,6 +384,107 @@ else
   echo "selftest: skip  watcher independence cases (no cargo on the path)"
 fi
 
+# ---- owner review ----------------------------------------------------------
+# A second throwaway repository, or/, with the script, its list, a root
+# manifest with lint and profile tables, and one crate whose lib.rs holds a
+# crate-level deny block and a test. Every case starts from the base
+# commit, plants one change, commits it and runs the script against the
+# base, so a finding is the script's.
+expect_owner() { # expect_owner <code> <label> <fixed text>
+  local want="$1" label="$2" text="$3" got=0
+  tools/ci/owner_review.sh "$obase" > "$tmp/out.txt" 2>&1 || got=$?
+  if [[ "$got" == "$want" ]] && grep -qF -- "$text" "$tmp/out.txt" \
+    && { [[ "$want" == 0 ]] || ! grep -qF "owner_review: none" "$tmp/out.txt"; }; then
+    echo "selftest: pass  (exit $want) $label"
+  else
+    echo "selftest: WRONG (wanted exit $want and \"$text\", got exit $got) $label"
+    sed 's/^/    /' "$tmp/out.txt"
+    failures=$((failures + 1))
+  fi
+}
+mkdir -p "$tmp/or"
+cd "$tmp/or"
+git init -q .
+mkdir -p tools/ci .github/workflows crates/a/src crates/a/tests
+cp "$src/owner_review.sh" "$src/owner_review_paths.txt" tools/ci/
+printf 'name: ci\n' > .github/workflows/ci.yml
+printf '# empty\n' > tools/ci/secret_scan_allow.txt
+printf 'echo gate\n' > tools/ci/gate.sh
+printf '[workspace]\nmembers = ["crates/a"]\n\n[workspace.lints.clippy]\nunwrap_used = "warn"\n\n[profile.release]\noverflow-checks = true\npanic = "abort"\n' > Cargo.toml
+printf '[package]\nname = "a"\n\n[lints]\nworkspace = true\n' > crates/a/Cargo.toml
+printf '//! A.\n\n#![deny(\n    clippy::float_arithmetic,\n    clippy::expect_used\n)]\n\npub fn one() -> u8 {\n    1\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn one_is_one() {\n        assert_eq!(super::one(), 1);\n    }\n\n    #[tokio::test]\n    async fn later() {}\n}\n' > crates/a/src/lib.rs
+printf '#![allow(clippy::unwrap_used)]\n\n#[test]\nfn outside() {}\n' > crates/a/tests/t.rs
+# A crate with a stricter lint table of its own.
+mkdir -p crates/s/src; : > crates/s/src/lib.rs
+printf '[package]\nname = "s"\n\n[lints.clippy]\nfloat_arithmetic = "deny"\n' > crates/s/Cargo.toml
+g add -A
+g commit -q -m base
+obase="$(git rev-parse HEAD)"
+oreset() { git reset -q --hard "$obase" && git clean -fdxq; }
+plant() { git add -A && g commit -q -m plant; }
+
+expect_owner 0 "owner: no change" "owner_review: none"
+printf 'pub fn two() -> u8 {\n    2\n}\n' >> crates/a/src/lib.rs; plant
+expect_owner 0 "owner: ordinary code change" "owner_review: none"
+oreset; printf 'on: push\n' >> .github/workflows/ci.yml; plant
+expect_owner 1 "owner: workflow change" "owner_review: path: .github/workflows/ci.yml"
+oreset; printf 'x.toml %s\n' "$(hex 1b 32)" >> tools/ci/secret_scan_allow.txt; plant
+expect_owner 1 "owner: allow-list entry added" "owner_review: path: tools/ci/secret_scan_allow.txt"
+oreset; sed -i '/^\.github\/$/d' tools/ci/owner_review_paths.txt; printf 'on: push\n' >> .github/workflows/ci.yml; plant
+expect_owner 1 "owner: an entry removed from the list (the list itself)" "owner_review: path: tools/ci/owner_review_paths.txt"
+oreset; mkdir -p scripts; git mv tools/ci/gate.sh scripts/gate.sh; plant
+expect_owner 1 "owner: a check moved out of tools/ci" "owner_review: path: tools/ci/gate.sh"
+oreset; rm tools/ci/gate.sh; plant
+expect_owner 1 "owner: a check deleted" "owner_review: path: tools/ci/gate.sh"
+oreset; printf 'disallowed-methods = []\n' > clippy.toml; plant
+expect_owner 1 "owner: clippy.toml added" "owner_review: path: clippy.toml"
+oreset; printf 'x\n' > "tools/ci/caf$(printf '\xc3\xa9').txt"; plant
+expect_owner 1 "owner: a file with a non-ASCII name under tools/ci" "owner_review: path: tools/ci/caf"
+oreset; sed -i '/^overflow-checks = true$/d' Cargo.toml; plant
+expect_owner 1 "owner: overflow-checks removed from the release profile" "owner_review: manifest: Cargo.toml"
+oreset; sed -i 's/^unwrap_used = "warn"$/unwrap_used = "allow"/' Cargo.toml; plant
+expect_owner 1 "owner: a workspace lint relaxed" "owner_review: manifest: Cargo.toml"
+oreset; printf '[package]\nname = "a"\n' > crates/a/Cargo.toml; plant
+expect_owner 1 "owner: a crate leaves the workspace lints" "owner_review: manifest: crates/a/Cargo.toml"
+oreset; printf '\n[lints.clippy]\nfloat_arithmetic = "allow"\n' >> crates/a/Cargo.toml; plant
+expect_owner 1 "owner: a crate lint table added" "owner_review: manifest: crates/a/Cargo.toml"
+oreset; printf '[profile.dev.package.zstd-sys]\nopt-level = 3\n' >> Cargo.toml; plant
+expect_owner 1 "owner: a profile table added" "owner_review: manifest: Cargo.toml"
+oreset; sed -i 's/^members = \["crates\/a"\]$/members = ["crates\/a", "crates\/b"]/' Cargo.toml
+mkdir -p crates/b/src; : > crates/b/src/lib.rs; printf '[package]\nname = "b"\n\n[lints]\nworkspace = true\n' > crates/b/Cargo.toml; plant
+expect_owner 0 "owner: a new crate that takes the workspace lints" "owner_review: none"
+oreset; mkdir -p crates/c/src; : > crates/c/src/lib.rs; printf '[package]\nname = "c"\n\n[lints.clippy]\nexpect_used = "allow"\n' > crates/c/Cargo.toml; plant
+expect_owner 1 "owner: a new crate with its own lint table" "owner_review: manifest: crates/c/Cargo.toml"
+oreset; printf '[package]\nname = "s"\n\n[lints]\nworkspace = true\n' > crates/s/Cargo.toml; plant
+expect_owner 1 "owner: a crate swaps its stricter table for the workspace lints" "owner_review: manifest: crates/s/Cargo.toml"
+oreset; sed -i '/^    clippy::expect_used$/d; s/^    clippy::float_arithmetic,$/    clippy::float_arithmetic/' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: a lint removed from a multi-line deny block" "owner_review: lint: crates/a/src/lib.rs"
+oreset; sed -i 's|^//! A\.$|//! A.\n#![allow(clippy::expect_used)]|' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: a crate-level allow added" "owner_review: lint: crates/a/src/lib.rs"
+oreset; sed -i 's|^//! A\.$|//! A.\n#![cfg_attr(test, allow(clippy::float_arithmetic))]|' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: a crate-level allow inside cfg_attr" "owner_review: lint: crates/a/src/lib.rs"
+oreset; mkdir -p crates/a/src/m; printf '#![allow(clippy::float_arithmetic)]\n' > crates/a/src/m/mod.rs; plant
+expect_owner 1 "owner: an inner allow at the top of a new module file" "owner_review: lint: crates/a/src/m/mod.rs"
+oreset; printf '#[expect(clippy::float_arithmetic, reason = "monitoring only")]\npub fn half(x: f64) -> f64 {\n    x / 2.0\n}\n' >> crates/a/src/lib.rs; plant
+expect_owner 0 "owner: an item-level expect with a reason" "owner_review: none"
+oreset; printf '#![allow(clippy::unwrap_used)]\n\n#[test]\nfn more() {}\n' > crates/a/tests/t2.rs; plant
+expect_owner 0 "owner: a new test file with the usual allow" "owner_review: none"
+oreset; perl -0pi -e 's/    #\[test\]\n    fn one_is_one\(\) \{\n        assert_eq!\(super::one\(\), 1\);\n    \}\n\n//' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: a test removed" "owner_review: tests: 1 test attribute(s) removed, 0 added"
+oreset; perl -0pi -e 's/    #\[tokio::test\]\n    async fn later\(\) \{\}\n//' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: a tokio test removed" "owner_review: tests: 1 test attribute(s) removed, 0 added"
+oreset; perl -0pi -e 's/    #\[test\]\n    fn one_is_one\(\) \{\n        assert_eq!\(super::one\(\), 1\);\n    \}\n\n//' crates/a/src/lib.rs
+printf '\n#[test]\nfn one_is_one() {\n    assert_eq!(a::one(), 1);\n}\n' >> crates/a/tests/t.rs; plant
+expect_owner 0 "owner: a test moved to another file" "owner_review: none"
+oreset; sed -i 's/^    #\[test\]$/    #[test]\n    #[ignore]/' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: an existing test ignored" "owner_review: tests: crates/a/src/lib.rs: 1 #[ignore] added, 0 test attribute(s) added"
+oreset; printf '\n#[test]\n#[ignore = "measurement, run by hand"]\nfn slow() {}\n' >> crates/a/tests/t.rs; plant
+expect_owner 0 "owner: a new test ignored from the start" "owner_review: none"
+oreset
+obase=not-a-commit
+expect_owner 2 "owner: a base that is no commit" "owner_review: cannot check:"
+cd "$repo"
+
 if [[ $failures -ne 0 ]]; then
   echo "selftest: FAILED ($failures case(s))"
   exit 1
