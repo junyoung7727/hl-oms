@@ -158,6 +158,13 @@ pub async fn admin_send(
     }
 }
 
+/// A `watcher_kill` reply that halted the OMS: `"latched"`, or one that
+/// starts with `"already latched"` (C-HOLD "워처의 입력"; this covers the
+/// re-arm reply after a confirmed loop).
+pub fn latched(reply: &str) -> bool {
+    reply == "latched" || reply.starts_with("already latched")
+}
+
 /// How often an error answer to a heartbeat is logged at most.
 pub const REFUSAL_LOG_MS: u64 = 60_000;
 

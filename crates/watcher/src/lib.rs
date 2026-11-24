@@ -13,7 +13,9 @@
 //! config, the token file and the pure parts of the watcher's own Telegram
 //! sender; U19b1b its sender task. U19b2a the one signed POST (the
 //! cancel-all), the key rules with `[kill]` and the kill notices' texts and
-//! position block (`kill`).
+//! position block (`kill`). U19b3a W5, the OMS silence check (`w5`),
+//! the clock of the kill path (`clock::Steady`), the `watcher_kill` client
+//! and the stopper of the OMS's unit (`stop`); nothing starts them yet.
 //!
 //! [ADR-031]: ../../docs/adr/ADR-031-watcher.md
 
@@ -38,6 +40,7 @@ pub mod w1;
 pub mod w2;
 pub mod w3;
 pub mod w4;
+pub mod w5;
 pub mod wire_id;
 
 /// The package version, printed by `watcher --version`.
