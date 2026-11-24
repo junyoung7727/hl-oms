@@ -142,12 +142,20 @@ async fn open_files_locked_while_running() {
     let h = Collector::start(s.config(&TWO_MARKETS, ""), s.deps())
         .await
         .expect("start");
-    eventually("frames written", || written(&h) >= 10).await;
-    let open = files_with(&s.dir, "/_open/");
-    let open: Vec<String> = open
-        .into_iter()
-        .filter(|p| p.ends_with(".partial"))
-        .collect();
+    // A connection opens its file at its first frame, so ten frames can all
+    // come from the instruments file and one connection: wait for the files
+    // too (seen once under the full gate's load, U19b2a).
+    let partials = || -> Vec<String> {
+        files_with(&s.dir, "/_open/")
+            .into_iter()
+            .filter(|p| p.ends_with(".partial"))
+            .collect()
+    };
+    eventually("frames written in three open files", || {
+        written(&h) >= 10 && partials().len() >= 3
+    })
+    .await;
+    let open = partials();
     assert!(open.len() >= 3, "{open:?}");
     let session = files_with(&s.dir, "/_session/");
     for p in open.iter().chain(session.iter()) {
