@@ -527,6 +527,8 @@ pub struct KillLoop {
     calls: u64,
     remaining: Result<usize, String>,
     last_error: Option<LastError>,
+    /// The next progress mark: `s + k × notice_ms`, `s` the start notice.
+    next_mark: u64,
 }
 
 impl KillLoop {
@@ -547,6 +549,7 @@ impl KillLoop {
             calls: 0,
             remaining: Err(NOT_COUNTED.to_string()),
             last_error: None,
+            next_mark: 0,
         }
     }
 
@@ -585,7 +588,7 @@ impl KillLoop {
             (Phase::Watch, None) => Some(self.watch_due),
             _ => None,
         };
-        due
+        Some(due.map_or(self.next_mark, |d| d.min(self.next_mark)))
     }
 
     fn running(&self) -> bool {
@@ -608,6 +611,7 @@ impl KillLoop {
         self.phase = Phase::Cancel;
         self.round = 1;
         self.round_start = now;
+        self.next_mark = now.saturating_add(self.t.notice_ms);
         let mut out = vec![Action::Notice(Notice::Start {
             round_ms: self.t.round_ms,
         })];
@@ -761,7 +765,26 @@ impl KillLoop {
             return out;
         }
         self.advance(now, &mut out);
+        self.progress(now, &mut out);
         out
+    }
+
+    /// The progress notice of the C4 rule: one at the first poll at or
+    /// after a mark; the marks stay anchored to the start notice, and one
+    /// notice covers every mark passed before it.
+    fn progress(&mut self, now: u64, out: &mut Vec<Action>) {
+        if now < self.next_mark {
+            return;
+        }
+        let every = self.t.notice_ms.max(1);
+        let passed = (now - self.next_mark) / every + 1;
+        self.next_mark = self.next_mark.saturating_add(passed.saturating_mul(every));
+        out.push(Action::Notice(Notice::Progress {
+            round: self.round,
+            remaining: self.remaining.clone(),
+            cancel_all_calls: self.calls,
+            last_error: self.last_error.clone(),
+        }));
     }
 
     /// Shutdown or a start refusal during the loop.

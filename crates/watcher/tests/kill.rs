@@ -606,3 +606,126 @@ fn a_count_above_zero_waits_for_the_round() {
     assert_eq!(l.poll(T0 + 3499), []);
     assert_eq!(l.cancel_all_calls(), 3);
 }
+
+#[test]
+fn a_failed_cancel_all_is_still_followed_by_a_count() {
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    // A sent cancel-all that failed is counted after (unlike the OMS): the
+    // count is the truth.
+    let k = count_id(&l.cancel_done(T0 + 10, c, CancelAnswer::Failed("HTTP 503".into())));
+    assert_eq!(l.phase(), Phase::Count);
+    assert_eq!(l.cancel_all_calls(), 1);
+    assert_eq!(l.count_done(T0 + 20, k, Ok(4)), []);
+    assert_eq!(l.remaining(), &Ok(4));
+
+    // Refused when nothing is open (the answer is not documented, Q11.7):
+    // every cancel-all is refused, every count says zero. The loop still
+    // ends on the count.
+    let mut l = kill_loop();
+    let mut now = T0;
+    let mut acts = l.start(now, "h", StopOutcome::Latched);
+    let mut ended = None;
+    for _ in 0..100 {
+        // Every answer at once, in the instant of its request.
+        while let Some(a) = acts.pop() {
+            match a {
+                Action::CancelAll { req_id } => acts.extend(l.cancel_done(
+                    now,
+                    req_id,
+                    CancelAnswer::Failed("retCode 170213: no order".into()),
+                )),
+                Action::Count { req_id } => acts.extend(l.count_done(now, req_id, Ok(0))),
+                Action::Ended(r) => ended = Some(r),
+                Action::Notice(_) => {}
+            }
+        }
+        if ended.is_some() {
+            break;
+        }
+        now = l.next_wake().unwrap();
+        acts = l.poll(now);
+    }
+    let r = ended.expect("the loop ends");
+    assert_eq!(
+        (r.rounds, r.cancel_all_calls, r.zero_since),
+        (1, 1, Some(T0))
+    );
+    assert_eq!(now, T0 + 30_000);
+}
+
+#[test]
+fn a_cancel_all_not_sent_waits_for_the_next_round() {
+    for kind in [
+        NotSent::Latched,
+        NotSent::Paused,
+        NotSent::Local("x".into()),
+    ] {
+        let mut l = kill_loop();
+        let mut c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+        let mut t = T0;
+        let mut progress = Vec::new();
+        // Nothing left the host: no count, the next cancel-all at the next
+        // round, none counted as sent.
+        while t < T0 + 60_000 {
+            assert_eq!(l.cancel_done(t, c, CancelAnswer::NotSent(kind.clone())), []);
+            assert_eq!(l.phase(), Phase::Repeat);
+            assert_eq!(l.next_wake(), Some(t + 1000));
+            assert_eq!(l.poll(t + 999), []);
+            t += 1000;
+            let acts = l.poll(t);
+            progress.extend(notices(&acts));
+            c = cancel_id(&acts);
+        }
+        assert_eq!(l.round(), 61);
+        assert_eq!(l.cancel_all_calls(), 0);
+        // The progress notice keeps the kind.
+        assert_eq!(
+            progress,
+            [Notice::Progress {
+                round: 61,
+                remaining: Err("아직 세지 않음".into()),
+                cancel_all_calls: 0,
+                last_error: Some(LastError::NotSent(kind.clone())),
+            }]
+        );
+    }
+}
+
+#[test]
+fn a_failed_count_is_never_zero() {
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let k = count_id(&l.cancel_done(T0 + 10, c, done(0)));
+    // A count error is no zero: no watch, the next round.
+    assert_eq!(l.count_done(T0 + 20, k, Err("HTTP 503".into())), []);
+    assert_eq!(l.remaining(), &Err("HTTP 503".into()));
+    assert_eq!(l.phase(), Phase::Repeat);
+    let c = cancel_id(&l.poll(T0 + 1000));
+    let k = count_id(&l.cancel_done(T0 + 1010, c, done(0)));
+    assert_eq!(l.count_done(T0 + 1020, k, Ok(0)), []);
+    assert_eq!(l.phase(), Phase::Watch);
+    // An error in the watch: back to C4, then C2; the next zero starts a
+    // new watch.
+    // (C4 waits until t_2 + round_ms, long past: C2 at once.)
+    let k = count_id(&l.poll(T0 + 6020));
+    let c = cancel_id(&l.count_done(T0 + 6030, k, Err("unreadable".into())));
+    assert_eq!(l.round(), 3);
+    let k = count_id(&l.cancel_done(T0 + 6040, c, done(0)));
+    let z = T0 + 6050;
+    assert_eq!(l.count_done(z, k, Ok(0)), []);
+    assert_eq!(l.next_wake(), Some(z + 5000));
+    let mut last = Vec::new();
+    for due in (1..=6).map(|i| z + i * 5000) {
+        let k = count_id(&l.poll(due));
+        last = l.count_done(due, k, Ok(0));
+    }
+    assert!(matches!(
+        last.last(),
+        Some(Action::Ended(Report {
+            rounds: 3,
+            zero_since: Some(at),
+            ..
+        })) if *at == z
+    ));
+}
