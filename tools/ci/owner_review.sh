@@ -33,7 +33,9 @@
 #             attribute on a `mod` item (it covers the whole module),
 #             changes in a file under crates/*/src/. Test files (tests/,
 #             benches/, examples/) are not read: they start with
-#             `#![allow(clippy::unwrap_used)]` by custom. Other item-level
+#             `#![allow(clippy::unwrap_used)]` by custom. Nor is the
+#             `#![cfg_attr(test, allow(clippy::unwrap_used))]` of a new
+#             crate's lib.rs. Other item-level
 #             `#[expect(.., reason = "..")]` is not a finding; the reason
 #             is in the diff for the reviewer.
 #   tests:    the change removes more `#[test]` / `#[tokio::test]`
@@ -191,6 +193,12 @@ for f in "${changed[@]}"; do
   [[ "$f" =~ ^crates/[^/]+/src/.*\.rs$ ]] || continue
   old="$(blob "$mb" "$f" | lint_attrs)" || cannot "cannot read $mb:$f"
   new="$(blob HEAD "$f" | lint_attrs)" || cannot "cannot read HEAD:$f"
+  # The lib.rs of a new crate may hold the usual test-only unwrap allow
+  # (oms-node, oms-journal and oms-api start with it).
+  if [[ "$f" =~ ^crates/([^/]+)/src/lib\.rs$ ]] && ! has "$mb" "$f" \
+    && ! has "$mb" "crates/${BASH_REMATCH[1]}/Cargo.toml"; then
+    new="$(grep -vxF 'cfg_attr(test,allow(clippy::unwrap_used))' <<< "$new")"
+  fi
   [[ "$old" == "$new" ]] || finding "lint: $f"
 done
 
@@ -201,14 +209,14 @@ done
 # per file, beyond the test attributes that the same file adds: a new test
 # may be ignored from the start (a measurement run by hand), an existing
 # one may not. The same holds for a `cfg` added in a file under a tests/
-# directory. Elsewhere an added `cfg` that holds `any()`, or names `test`
-# inside `all(..)` or `not(..)`, can switch tests off without removing
-# one, and is a finding; one that widens (`any(test, feature = "..")`) is
-# not. A removed test target (tests/<name>.rs or
-# tests/<dir>/main.rs that held a test), and a removed `mod <name>;` whose
-# file still holds a test, are findings: cargo no longer builds those
-# tests. A `cfg(feature = "..")` put above an unchanged `mod tests` line
-# under src/ is not seen (text check).
+# directory. Elsewhere an added `cfg` that holds `any()`, or names the
+# word `test` (not `testnet`) inside `all(..)` or `not(..)`, can switch
+# tests off without removing one, and is a finding; one that widens
+# (`any(test, feature = "..")`) is not. A removed test target
+# (tests/<name>.rs or tests/<dir>/main.rs that held a test), and a removed
+# `mod <name>;` whose file still holds a test, are findings: cargo no
+# longer builds those tests. A `cfg(feature = "..")` put above an
+# unchanged `mod tests` line under src/ is not seen (text check).
 while IFS=$'\t' read -r kind a b; do
   case "$kind" in
     tests) finding "tests: $a" ;;
@@ -241,7 +249,7 @@ done < <(git diff -U0 --no-renames --no-prefix "$mb" HEAD -- '*.rs' | awk '
   /^\+/ && $0 ~ t { added++; fa[f]++ }
   $0 ~ ig || $0 ~ ca { fi[f]++ }
   $0 ~ cf && ($0 ~ /any[[:space:]]*\([[:space:]]*\)/ \
-    || ($0 ~ /test/ && ($0 ~ /all[[:space:]]*\(/ || $0 ~ /not[[:space:]]*\(/))) { cfg[f]++; next }
+    || ($0 ~ /(^|[^[:alnum:]_])test([^[:alnum:]_]|$)/ && ($0 ~ /all[[:space:]]*\(/ || $0 ~ /not[[:space:]]*\(/))) { cfg[f]++; next }
   $0 ~ cp && f ~ /(^|\/)tests\// { tcfg[f]++ }
   $0 ~ md && f != "/dev/null" {
     m = $0; sub(/^[-+][[:space:]]*(pub(\([^)]*\))?[[:space:]]+)?mod[[:space:]]+/, "", m); sub(/[^[:alnum:]_].*/, "", m)

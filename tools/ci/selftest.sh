@@ -562,6 +562,19 @@ oreset; sed -i '/^pub mod m;$/d' crates/a/src/lib.rs; plant
 expect_owner 1 "owner: a mod declaration removed, its file with tests kept" "owner_review: tests: crates/a/src/lib.rs: mod m removed, crates/a/src/m.rs still holds tests"
 oreset; sed -i 's/^pub mod m;$/mod m;/' crates/a/src/lib.rs; plant
 expect_owner 0 "owner: a mod declaration made private" "owner_review: none"
+# Ordinary changes that must not call the owner (review 2, S7).
+oreset; printf '\n#[cfg(not(feature = "testnet"))]\npub fn mainnet_only() {}\n' >> crates/a/src/lib.rs; plant
+expect_owner 0 "owner: cfg(not(feature = \"testnet\")) (the word test only)" "owner_review: none"
+oreset; mkdir -p crates/n/src; printf '//! N.\n\n#![cfg_attr(test, allow(clippy::unwrap_used))]\n\npub fn n() {}\n' > crates/n/src/lib.rs
+printf '[package]\nname = "n"\n\n[lints]\nworkspace = true\n' > crates/n/Cargo.toml; plant
+expect_owner 0 "owner: a new crate whose lib.rs takes the usual test-only unwrap allow" "owner_review: none"
+oreset; mkdir -p crates/n/src; printf '#![cfg_attr(test, allow(clippy::unwrap_used))]\n#![allow(clippy::expect_used)]\n' > crates/n/src/lib.rs
+printf '[package]\nname = "n"\n\n[lints]\nworkspace = true\n' > crates/n/Cargo.toml; plant
+expect_owner 1 "owner: a new crate's lib.rs with another allow" "owner_review: lint: crates/n/src/lib.rs"
+oreset; sed -i 's|^//! A\.$|//! A.\n#![cfg_attr(test, allow(clippy::unwrap_used))]|' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: the usual test-only unwrap allow added to an existing crate" "owner_review: lint: crates/a/src/lib.rs"
+oreset; mkdir -p crates/a/src/q; printf '#![cfg_attr(test, allow(clippy::unwrap_used))]\n' > crates/a/src/q/mod.rs; plant
+expect_owner 1 "owner: the usual test-only unwrap allow in a new module of an existing crate" "owner_review: lint: crates/a/src/q/mod.rs"
 # The paths file as the header shows it, from a pipe, and a relative one
 # named from a subdirectory (review 2, S3).
 oreset; printf 'on: push\n' >> .github/workflows/ci.yml; plant
