@@ -148,6 +148,25 @@ fn boot_cap(v: &Value) -> Result<u64, String> {
     Ok(cap)
 }
 
+/// What the engine emitted from an answer while a kill runs (U19b3c,
+/// review 1 S1): the mismatch P1 (`Confirmed`) is kept; every request
+/// (a page, a status request, a `watcher_mismatch` send) is dropped and
+/// named for the log.
+fn paused(actions: Vec<Action>) -> (Vec<Action>, Vec<&'static str>) {
+    let mut keep = Vec::new();
+    let mut dropped = Vec::new();
+    for a in actions {
+        match a {
+            Action::Confirmed { .. } => keep.push(a),
+            Action::Venue { path, .. } => dropped.push(path),
+            Action::Status { .. } => dropped.push("/api/status"),
+            Action::Mismatch { .. } => dropped.push("watcher_mismatch"),
+            Action::Heartbeat { .. } => dropped.push("heartbeat"),
+        }
+    }
+    (keep, dropped)
+}
+
 /// The marker-path boot rule (C-WATCH part 12, U19b3c): with `[kill]` a
 /// status answer is usable only if the OMS reads its kill marker at the
 /// watcher's path (`node.kill_marker`, compared where both point). A marker
@@ -792,17 +811,8 @@ impl Runtime {
         if self.kill.is_none() {
             return self.exec(actions);
         }
-        let (keep, drop): (Vec<_>, Vec<_>) = actions
-            .into_iter()
-            .partition(|a| matches!(a, Action::Confirmed { .. }));
-        for a in &drop {
-            let what = match a {
-                Action::Venue { path, .. } => path,
-                Action::Status { .. } => "/api/status",
-                Action::Mismatch { .. } => "watcher_mismatch",
-                Action::Heartbeat { .. } => "heartbeat",
-                Action::Confirmed { .. } => "the mismatch P1",
-            };
+        let (keep, dropped) = paused(actions);
+        for what in dropped {
             (self.log)(&format!(
                 "debug: a kill runs: the engine's request is not sent ({what}); its round ends at its deadline after the kill"
             ));
@@ -1268,6 +1278,33 @@ mod tests {
             cancel_all_calls: 99,
             outcome: StopOutcome::Latched,
         })
+    }
+
+    #[test]
+    fn during_a_kill_an_answer_keeps_the_mismatch_p1_and_drops_every_request() {
+        let p1 = Action::Confirmed {
+            check: Check::W1,
+            details: vec!["o1".into()],
+        };
+        let (keep, dropped) = paused(vec![
+            Action::Venue {
+                req_id: 1,
+                path: "/v5/execution/list",
+                params: Vec::new(),
+            },
+            p1.clone(),
+            Action::Status { req_id: 2 },
+            Action::Mismatch {
+                check: Check::W1,
+                send_id: 3,
+                detail: "o1".into(),
+            },
+        ]);
+        assert_eq!(keep, vec![p1]);
+        assert_eq!(
+            dropped,
+            vec!["/v5/execution/list", "/api/status", "watcher_mismatch"]
+        );
     }
 
     #[test]
