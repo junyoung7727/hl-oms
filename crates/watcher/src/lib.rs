@@ -36,6 +36,7 @@ pub mod runtime;
 pub mod sign;
 pub mod start;
 pub mod state;
+pub mod stop;
 pub mod w1;
 pub mod w2;
 pub mod w3;
