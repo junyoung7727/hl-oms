@@ -102,6 +102,9 @@ enum Msg {
     Halt(u64, u64, Result<String, String>),
     /// The position read of notice `seq`.
     Positions(u64, Positions),
+    /// The reply to owed halt `id` (W5's after a kill, or the one before
+    /// a marker-path refusal; U19b3d).
+    Owed(u64, Result<String, String>),
 }
 
 enum Phase {
@@ -206,6 +209,15 @@ struct KillRun {
     stray: u64,
 }
 
+/// A `watcher_kill` sent outside a kill's own attempts (U19b3d): W5's
+/// owed halt at the OMS's first good answer after a kill, or the one before
+/// a marker-path refusal. Its task is aborted at the K2 deadline.
+struct Owed {
+    id: u64,
+    deadline: u64,
+    task: AbortHandle,
+}
+
 /// A kill notice waiting for its position block, with the header of its
 /// kill (the start notice names it).
 struct Waiting {
@@ -292,6 +304,9 @@ struct Runtime {
     /// after their kill ended), each with its kill's `kill_no`.
     stoppers: Vec<(u64, Stopper)>,
     notices: Notices,
+    /// The owed halt in flight, and the ids given so far.
+    owed: Option<Owed>,
+    owed_ids: u64,
 }
 
 /// Runs the watcher until `shutdown` resolves; the exit code (0, or 2 for
@@ -437,6 +452,8 @@ pub async fn run(
         kills: 0,
         stoppers: Vec::new(),
         notices: Notices::default(),
+        owed: None,
+        owed_ids: 0,
         cfg,
     };
     let mut shutdown = std::pin::pin!(shutdown);
@@ -549,11 +566,12 @@ impl Runtime {
             Msg::Probe(id, a) => {
                 let good = w5::good_answer(&a);
                 self.answered |= good;
-                if self.w5.on_answer(self.steady.now_ms(), id, good).is_some() {
-                    // U19b3d acts on it; until then W5 stays in Rearming.
+                let now = self.steady.now_ms();
+                if self.w5.on_answer(now, id, good).is_some() {
                     (self.log)(
-                        "warn: W5: the OMS answers again and the last kill owes the halt; this watcher does not send the owed watcher_kill after a kill (U19b3d): the OMS may trade unlatched, latch it by hand; W5 starts no new kill",
+                        "warn: W5: the OMS answers again and the last kill owes the halt: watcher_kill",
                     );
+                    self.start_owed(now);
                 }
             }
             Msg::Marker(kill_no, o) => {
@@ -588,6 +606,12 @@ impl Runtime {
                 self.kill_steps(now, steps);
             }
             Msg::Positions(seq, p) => self.positions_read(seq, p),
+            Msg::Owed(id, r) => {
+                if self.owed.as_ref().is_some_and(|o| o.id == id) {
+                    self.owed = None;
+                    self.owed_done(self.steady.now_ms(), r);
+                }
+            }
         }
     }
 
@@ -915,6 +939,10 @@ impl Runtime {
         if let Some(f) = self.w5.fire(now) {
             self.fire(now, f);
         }
+        if let Some(o) = self.owed.take_if(|o| now >= o.deadline) {
+            o.task.abort();
+            self.owed_done(now, Err(kill::HALT_TIMED_OUT.to_string()));
+        }
         // K3's exit before the kill judges its deadline: a stop that ended
         // between two ticks is reported as it ended (review 1 N1).
         self.poll_stopper(now);
@@ -1119,6 +1147,45 @@ impl Runtime {
             "the kill ended: {how}; the halt is {}",
             if halt_owed { "owed" } else { "not owed" }
         ));
+    }
+
+    /// Sends one owed `watcher_kill` (U19b3d), unless one is in flight:
+    /// W5's after a kill, or the one before a marker-path refusal. The K2
+    /// deadline; the engine runs meanwhile.
+    fn start_owed(&mut self, now: u64) {
+        if self.owed.is_some() {
+            return;
+        }
+        self.owed_ids += 1;
+        let id = self.owed_ids;
+        let (path, name) = (self.cfg.admin_socket.clone(), self.cfg.name.clone());
+        let timeout = self.cfg.http.request_timeout_ms;
+        let detail = kill::late_halt_detail(&name);
+        let task = self.spawn(async move {
+            Msg::Owed(id, admin_kill(&path, &name, &detail, timeout).await)
+        });
+        let deadline = now
+            .saturating_add(timeout.saturating_mul(2))
+            .saturating_add(kill::HALT_EXTRA_MS);
+        self.owed = Some(Owed { id, deadline, task });
+    }
+
+    /// The owed halt's outcome (its reply, or its deadline): one log line,
+    /// and W5's P1 (`늦은 정지` / `늦은 정지 실패` once).
+    fn owed_done(&mut self, now: u64, r: Result<String, String>) {
+        match &r {
+            Ok(reply) if crate::oms::latched(reply) => (self.log)(&format!(
+                "W5: the owed watcher_kill latched the OMS: {}",
+                kill::cut(reply, kill::TEXT_MAX)
+            )),
+            Ok(why) | Err(why) => (self.log)(&format!(
+                "error: W5: the owed watcher_kill did not latch the OMS: {}",
+                kill::cut(why, kill::TEXT_MAX)
+            )),
+        }
+        if let Some(text) = self.w5.owed_halt_done(now, r) {
+            self.alerts.once(&text);
+        }
     }
 
     /// Queues a notice (see [`Notices::push`]); a drop is logged.

@@ -2042,3 +2042,71 @@ fn a_stop_that_ended_before_the_k3_deadline_tick_is_reported_as_stopped() {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&tg_dir);
 }
+
+// U19b3d: what happens after, around and instead of the loop.
+
+/// The detail of a halt sent late (in the loop, after it, or before a
+/// marker-path refusal).
+const LATE_DETAIL: &str = "W5: 늦은 정지: watcher w-rt의 킬이 OMS 래치나 정지를 확인하지 못함";
+
+/// A kill of an answering OMS that went silent, whose halt and stop both
+/// fail: no `admin.sock` at the configured path and a `systemctl` that
+/// exits 1; the marker is checked. Returns once the start notice reached
+/// the fake Telegram, with the path where `admin.sock` may appear. The fake
+/// Bybit has no open order unless `at_fire` gives one.
+fn kill_unconfirmed(
+    name: &str,
+    extra: &str,
+    at_fire: impl Fn(&World),
+) -> (World, std::path::PathBuf, std::path::PathBuf, Arc<ManualClock>, Running, std::path::PathBuf) {
+    let (tg_dir, tg) = telegram_section(&format!("{name}-t"));
+    let (mut w, dir) = kill_world(name, &format!("{extra}\n{tg}"), "");
+    let sock = w.cfg.admin_socket.with_file_name("late.sock");
+    w.cfg.admin_socket = sock.clone();
+    w.systemctl = fake_systemctl(&dir, 1);
+    w.status_marked();
+    let clock = Arc::new(ManualClock::new(T0));
+    let run = w.start(clock.clone());
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    walk(&clock, 2000);
+    w.status_down();
+    walk_until(&clock, 20_000, "the fire", || w.lines_with(FIRED) == 1);
+    at_fire(&w);
+    walk_kill(&clock, "the fake systemctl", || dir.join("argv").exists());
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    (w, dir, tg_dir, clock, run, sock)
+}
+
+#[test]
+fn an_oms_that_comes_back_after_an_unconfirmed_stop_is_latched() {
+    // K2 and K3 fail; the loop confirms zero with the halt still owed (no
+    // admin.sock during the loop). Then the OMS answers again, unlatched
+    // (restarted by systemd, or it only stalled): W5's owed halt latches it
+    // at the first good answer (review 2 M1).
+    let (w, dir, tg_dir, clock, mut run, sock) = kill_unconfirmed("rt-k-owed", "", |_| {});
+    walk_until(&clock, 60_000, "the final notice", || !sent_with(&w, FINAL_NOTICE).is_empty());
+    let fin = &sent_with(&w, FINAL_NOTICE)[0];
+    assert!(fin.contains("OMS 정지 미확인: OMS가 살아 있으면 래치 없이 주문을 낼 수 있음"), "{fin}");
+    assert!(!fin.contains("clear-hold"), "{fin}");
+    assert_eq!(w.lines_with("the halt is owed"), 1, "{:?}", w.log());
+    walk(&clock, 2000);
+    assert_eq!(w.pushed("watcher_kill_halt_owed"), Some(1.0));
+    assert_eq!(w.pushed("watcher_w5_armed"), Some(0.0));
+    // The OMS comes back.
+    let admin = admin_answering(&sock, &w.cfg.kill.as_ref().unwrap().marker, "latched").0;
+    w.status_marked();
+    walk_until(&clock, 20_000, "the owed watcher_kill", || kill_lines(&admin).len() == 1);
+    assert_eq!(kill_lines(&admin)[0]["detail"], LATE_DETAIL);
+    walk_until(&clock, 20_000, "the late halt P1", || !sent_with(&w, LATE_HALT).is_empty());
+    walk_until(&clock, 10_000, "W5 armed", || w.pushed("watcher_w5_armed") == Some(1.0));
+    assert_eq!(w.pushed("watcher_kill_halt_owed"), Some(0.0));
+    // Once: no further watcher_kill, no second P1, no new kill.
+    walk(&clock, 10_000);
+    assert_eq!(kill_lines(&admin).len(), 1);
+    assert_eq!(sent_with(&w, LATE_HALT).len(), 1);
+    assert_eq!(sent_with(&w, "늦은 정지 실패").len(), 0);
+    assert_eq!(w.lines_with(FIRED), 1);
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
