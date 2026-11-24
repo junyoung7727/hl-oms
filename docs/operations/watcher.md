@@ -120,6 +120,12 @@ install -m 600 /dev/null /etc/hl-oms/watcher-bybit.toml
 { printf 'api_key = "%s"\nrsa_private_key = """\n' '<API 키>'; cat bybit-rsa.pem; printf '"""\n'; } > /etc/hl-oms/watcher-bybit.toml
 ```
 
+3. 워처가 이 파일로 시작하는 것을 본 뒤 개인 키의 원본을 지운다. 남기면 소유자·위치 검사를 받지 않는 두 번째 비밀 파일이 된다(검토 S3). 키를 잃으면 새로 만들어 등록하면 되므로 사본을 두지 않는다. 공개 키 `bybit-rsa.pub.pem`은 비밀이 아니라 남겨도 된다.
+
+```sh
+shred -u bybit-rsa.pem   # 또는 rm bybit-rsa.pem (SSD와 저널링 파일 시스템에서는 shred도 덮어쓰기를 보장하지 않는다)
+```
+
 - `api_key`와, `api_secret` 또는 `rsa_private_key` 중 하나만 둔다. 다른 키가 있거나, 둘 다 있거나, 둘 다 없거나, 값이 비면 시작하지 않는다.
 - RSA 키는 `BEGIN PRIVATE KEY` 줄의 PKCS#8이어야 한다(위 `genpkey`가 쓰는 형). 시작할 때 한 번 읽어 파싱하고, 거부는 종료 코드 2와 아래 한 줄이다.
 
