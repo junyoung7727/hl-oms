@@ -3,7 +3,11 @@
 # merged (ADR-033): changes to the checks themselves. A change that weakens
 # a check passes every check, so no check can catch it; only a person can.
 #
-# usage: owner_review.sh <base-commit>
+# usage: owner_review.sh <base-commit> [paths-file]
+#
+# paths-file defaults to tools/ci/owner_review_paths.txt of the working
+# tree. A merging runner passes the copy from the base branch, so that the
+# change under review cannot shorten the list it is checked against.
 #
 # The change is <base-commit>...HEAD (from the merge base, as in a pull
 # request). Four rules, one line per finding:
@@ -40,11 +44,11 @@ cannot() { echo "$prefix: cannot check: $1"; exit 2; }
 top="$(git rev-parse --show-toplevel 2> /dev/null)" || cannot "not in a git repository"
 cd "$top" || cannot "cannot enter $top"
 base="${1:-}"
-[[ -n "$base" ]] || cannot "usage: owner_review.sh <base-commit>"
+[[ -n "$base" ]] || cannot "usage: owner_review.sh <base-commit> [paths-file]"
 git rev-parse -q --verify "$base^{commit}" > /dev/null || cannot "no commit $base"
 mb="$(git merge-base "$base" HEAD 2> /dev/null)" || cannot "no merge base of $base and HEAD"
-list="tools/ci/owner_review_paths.txt"
-[[ -f "$list" ]] || cannot "no $list"
+list="${2:-tools/ci/owner_review_paths.txt}"
+[[ -f "$list" ]] || cannot "no paths file $list"
 
 findings=0
 finding() { echo "$prefix: $1"; findings=$((findings + 1)); }

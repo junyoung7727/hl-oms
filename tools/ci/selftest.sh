@@ -480,6 +480,22 @@ oreset; sed -i 's/^    #\[test\]$/    #[test]\n    #[ignore]/' crates/a/src/lib.
 expect_owner 1 "owner: an existing test ignored" "owner_review: tests: crates/a/src/lib.rs: 1 #[ignore] added, 0 test attribute(s) added"
 oreset; printf '\n#[test]\n#[ignore = "measurement, run by hand"]\nfn slow() {}\n' >> crates/a/tests/t.rs; plant
 expect_owner 0 "owner: a new test ignored from the start" "owner_review: none"
+oreset; cp tools/ci/owner_review_paths.txt "$tmp/base_paths.txt"; sed -i '/^\.github\/$/d' tools/ci/owner_review_paths.txt
+printf 'on: push\n' >> .github/workflows/ci.yml; plant
+expect_owner_with() { # the list from the base, as the runner passes it
+  local got=0
+  tools/ci/owner_review.sh "$obase" "$tmp/base_paths.txt" > "$tmp/out.txt" 2>&1 || got=$?
+  if [[ "$got" == 1 ]] && grep -qF "owner_review: path: .github/workflows/ci.yml" "$tmp/out.txt"; then
+    echo "selftest: pass  (exit 1) owner: the base list still sees what the change dropped from its own list"
+  else
+    echo "selftest: WRONG (wanted exit 1 and the workflow line, got exit $got) owner: base list"
+    sed 's/^/    /' "$tmp/out.txt"
+    failures=$((failures + 1))
+  fi
+}
+expect_owner_with
+rm tools/ci/owner_review_paths.txt
+expect_owner 2 "owner: a paths file that does not exist" "owner_review: cannot check: no paths file"
 oreset
 obase=not-a-commit
 expect_owner 2 "owner: a base that is no commit" "owner_review: cannot check:"
