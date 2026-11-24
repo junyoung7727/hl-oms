@@ -2255,7 +2255,7 @@ fn shutdown_during_a_kill_sends_one_abort_notice() {
     assert_eq!(run.shutdown(), 0);
     let aborts = sent_with(&w, "워처 종료로 워처 킬 중단(일괄 취소 전). OMS가 아직 주문을 낼 수 있음");
     assert_eq!(aborts.len(), 1, "{:?}", w.sent());
-    assert!(aborts[0].contains(&format!("킬 마커: 씀. OMS 정지: watcher_kill 실패(")), "{}", aborts[0]);
+    assert!(aborts[0].contains("킬 마커: 씀. OMS 정지: watcher_kill 실패("), "{}", aborts[0]);
     assert!(aborts[0].contains(&format!("→ systemctl stop {UNIT}: 진행 중.\n")), "{}", aborts[0]);
     assert!(aborts[0].ends_with(NOT_READ), "{}", aborts[0]);
     assert_eq!(w.sent().len(), 1, "{:?}", w.sent());
