@@ -729,3 +729,201 @@ fn a_failed_count_is_never_zero() {
         })) if *at == z
     ));
 }
+
+/// A loop in the watch: round 1's cancel-all and count answered at once,
+/// zero at `T0 + 20` (`z`).
+fn in_watch() -> (KillLoop, u64) {
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let k = count_id(&l.cancel_done(T0 + 10, c, done(1)));
+    assert_eq!(l.count_done(T0 + 20, k, Ok(0)), []);
+    assert_eq!(l.phase(), Phase::Watch);
+    (l, T0 + 20)
+}
+
+#[test]
+fn a_late_order_in_the_watch_goes_back_to_cancel_at_once() {
+    let (mut l, z) = in_watch();
+    let k = count_id(&l.poll(z + 5000));
+    // An order accepted late: C2 at once, round 2, the watch is over.
+    let c = cancel_id(&l.count_done(z + 5010, k, Ok(2)));
+    assert_eq!(
+        (l.phase(), l.round(), l.remaining()),
+        (Phase::Cancel, 2, &Ok(2))
+    );
+    let k = count_id(&l.cancel_done(z + 5020, c, done(2)));
+    // Zero again: a new watch from the new z.
+    let z2 = z + 5030;
+    assert_eq!(l.count_done(z2, k, Ok(0)), []);
+    assert_eq!(l.next_wake(), Some(z2 + 5000));
+    let mut last = Vec::new();
+    for due in (1..=6).map(|i| z2 + i * 5000) {
+        let k = count_id(&l.poll(due));
+        last = l.count_done(due + 1, k, Ok(0));
+    }
+    assert!(matches!(
+        last.last(),
+        Some(Action::Ended(Report { rounds: 2, zero_since: Some(at), .. })) if *at == z2
+    ));
+}
+
+#[test]
+fn the_watch_ends_only_on_the_count_due_at_its_end() {
+    let (mut l, z) = in_watch();
+    for due in (1..=4).map(|i| z + i * 5000) {
+        let k = count_id(&l.poll(due));
+        assert_eq!(l.count_done(due + 5, k, Ok(0)), [], "the zero at {due}");
+    }
+    // The count due at z + 25 s answers zero only at z + 31 s (inside its
+    // deadline): it is not the count due at the end, so it does not end
+    // the watch.
+    let k = count_id(&l.poll(z + 25_000));
+    assert_eq!(l.poll(z + 30_000), [], "never two requests");
+    let k_end = count_id(&l.count_done(z + 31_000, k, Ok(0)));
+    assert_eq!(l.phase(), Phase::Watch);
+    // The next count went at once, after z + 30 s: it ends the watch,
+    // however late it answers.
+    assert_eq!(l.poll(z + 40_000), []);
+    let acts = l.count_done(z + 41_000, k_end, Ok(0));
+    assert!(matches!(acts.last(), Some(Action::Ended(_))), "{acts:?}");
+    assert_eq!(l.phase(), Phase::Ended);
+}
+
+#[test]
+fn two_requests_of_the_loop_are_never_in_flight() {
+    let (mut l, z) = in_watch();
+    let k = count_id(&l.poll(z + 5000));
+    // The count due at z + 10 s waits while the one of z + 5 s is open...
+    assert_eq!(l.poll(z + 10_000), []);
+    assert_eq!(l.poll(z + 12_000), []);
+    // ...and goes at once at its answer.
+    let k2 = count_id(&l.count_done(z + 12_000, k, Ok(0)));
+    // Or at the deadline of the open one: that count failed, so C4, and
+    // the next request is one cancel-all.
+    assert_eq!(l.next_wake(), Some(z + 12_000 + EXTRA));
+    assert_eq!(l.poll(z + 15_000), []);
+    assert_eq!(l.poll(z + 12_000 + EXTRA - 1), []);
+    let acts = l.poll(z + 12_000 + EXTRA);
+    let c = cancel_id(&acts);
+    assert_eq!(l.round(), 2);
+    assert_eq!(l.count_done(z + 12_000 + EXTRA, k2, Ok(0)), [], "past");
+    // A cancel-all that hangs: no count, no next round beside it.
+    assert_eq!(l.poll(z + 12_000 + EXTRA + 5000), []);
+    let k3 = count_id(&l.poll(z + 12_000 + 2 * EXTRA));
+    assert_eq!(
+        l.cancel_done(z + 12_000 + 2 * EXTRA, c, done(0)),
+        [],
+        "past"
+    );
+    assert_eq!(l.phase(), Phase::Count);
+    let _ = k3;
+}
+
+#[test]
+fn a_request_past_its_deadline_fails_and_a_late_answer_is_ignored() {
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    // The cancel-all has its deadline at emission + request_timeout_ms +
+    // 11,000 ms.
+    assert_eq!(l.next_wake(), Some(T0 + EXTRA));
+    assert_eq!(l.poll(T0 + EXTRA - 1), []);
+    // Past it: Failed, so counted as sent and followed by a count.
+    let k = count_id(&l.poll(T0 + EXTRA));
+    assert_eq!(l.cancel_all_calls(), 1);
+    // A later answer with that req_id is ignored.
+    assert_eq!(l.cancel_done(T0 + EXTRA + 1, c, done(5)), []);
+    assert_eq!((l.cancel_all_calls(), l.ignored()), (1, 1));
+    assert_eq!(l.phase(), Phase::Count);
+    // The count past its deadline: a count error, never zero; t_1 +
+    // round_ms has long passed, so C2 at once.
+    assert_eq!(l.next_wake(), Some(T0 + 2 * EXTRA));
+    let c2 = cancel_id(&l.poll(T0 + 2 * EXTRA));
+    assert_eq!(l.remaining(), &Err("no answer before the deadline".into()));
+    assert_eq!(l.count_done(T0 + 2 * EXTRA + 1, k, Ok(0)), []);
+    assert_eq!((l.phase(), l.ignored()), (Phase::Cancel, 2));
+    // An answer to another req_id, or of the other kind, is ignored too.
+    assert_eq!(l.count_done(T0 + 2 * EXTRA + 2, c2, Ok(0)), []);
+    assert_eq!(l.count_page(T0 + 2 * EXTRA + 2, c2), []);
+    assert_eq!(l.cancel_done(T0 + 2 * EXTRA + 2, c2 + 7, done(0)), []);
+    assert_eq!(l.ignored(), 5);
+    // c2 passed its deadline too: the first poll after it (at the first
+    // progress mark) fails it and sends its count.
+    let acts = l.poll(T0 + 60_000);
+    count_id(&acts);
+    assert_eq!(
+        notices(&acts),
+        [Notice::Progress {
+            round: 2,
+            remaining: Err("no answer before the deadline".into()),
+            cancel_all_calls: 2,
+            last_error: Some(LastError::Failed("no answer before the deadline".into())),
+        }]
+    );
+}
+
+#[test]
+fn an_answer_handled_at_its_deadline_is_past_it() {
+    let past = || Err::<usize, String>("no answer before the deadline".into());
+    for late in [0, 1] {
+        // A cancel-all answered at its deadline (or after it, before the
+        // poll that would see the deadline): Failed.
+        let mut l = kill_loop();
+        let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+        let k = count_id(&l.cancel_done(T0 + EXTRA + late, c, done(0)));
+        assert_eq!(
+            l.poll(T0 + EXTRA + late),
+            [],
+            "the deadline is not seen twice"
+        );
+        let acts = l.poll(T0 + 60_000);
+        assert!(matches!(
+            notices(&acts)[..],
+            [Notice::Progress { last_error: Some(LastError::Failed(ref w)), .. }]
+                if w == "no answer before the deadline"
+        ));
+        assert_eq!(l.cancel_all_calls(), 1);
+
+        // A count answered at its deadline: a count error, not zero.
+        let mut l = kill_loop();
+        let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+        let k0 = count_id(&l.cancel_done(T0, c, done(0)));
+        let acts = l.count_done(T0 + EXTRA + late, k0, Ok(0));
+        assert_eq!(l.remaining(), &past());
+        cancel_id(&acts);
+        let _ = k;
+
+        // A page at its deadline: a count error, the deadline not moved,
+        // and the count's later result ignored.
+        let mut l = kill_loop();
+        let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+        let k0 = count_id(&l.cancel_done(T0, c, done(0)));
+        assert_eq!(l.count_page(T0 + EXTRA - 1, k0), []);
+        let deadline = T0 + EXTRA - 1 + EXTRA;
+        assert_eq!(l.next_wake(), Some(deadline));
+        let acts = l.count_page(deadline + late, k0);
+        assert_eq!(l.remaining(), &past());
+        cancel_id(&acts);
+        assert_eq!(l.count_done(deadline + late, k0, Ok(0)), []);
+        assert_eq!(l.phase(), Phase::Cancel);
+    }
+}
+
+#[test]
+fn a_slow_paged_count_is_not_failed_while_pages_answer() {
+    // 11 pages, 1,300 ms each, request_timeout_ms 2,000: the first
+    // deadline (13,000 ms) falls inside the count, every page moves it.
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let k = count_id(&l.cancel_done(T0, c, done(0)));
+    for page in 1..=10u64 {
+        let at = T0 + page * 1300;
+        assert_eq!(l.poll(at), [], "page {page}");
+        assert_eq!(l.count_page(at, k), [], "page {page}");
+        assert_eq!(l.next_wake(), Some(at + EXTRA));
+        assert_eq!(l.poll(at), []);
+    }
+    // The result, no count error; t_1 + round_ms has passed, so the next
+    // round at once.
+    cancel_id(&l.count_done(T0 + 14_300, k, Ok(3)));
+    assert_eq!((l.remaining(), l.round()), (&Ok(3), 2));
+}

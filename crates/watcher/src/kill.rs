@@ -497,6 +497,9 @@ pub enum Action {
 
 /// The open-order count before the first count of the loop.
 pub const NOT_COUNTED: &str = "아직 세지 않음";
+/// Why a request past its deadline failed (cancel-all `Failed`, count
+/// error).
+pub const PAST_DEADLINE: &str = "no answer before the deadline";
 
 /// The one request of the loop that is open.
 #[derive(Debug, Clone, Copy)]
@@ -504,6 +507,9 @@ struct Open {
     id: u64,
     /// A count, and whether it is the count that ends the watch.
     count: Option<bool>,
+    /// Emission (a count: its last page) + `request_timeout_ms` +
+    /// [`DEADLINE_EXTRA_MS`]; an answer handled at or after it is past it.
+    deadline: u64,
 }
 
 /// The watcher's cancel-all confirmation loop (C-WATCH part 11), sans-IO:
@@ -512,6 +518,8 @@ struct Open {
 #[derive(Debug, Clone)]
 pub struct KillLoop {
     t: Kill,
+    /// `request_timeout_ms` + [`DEADLINE_EXTRA_MS`].
+    extra_ms: u64,
     phase: Phase,
     header: String,
     outcome: StopOutcome,
@@ -529,14 +537,16 @@ pub struct KillLoop {
     last_error: Option<LastError>,
     /// The next progress mark: `s + k × notice_ms`, `s` the start notice.
     next_mark: u64,
+    ignored: u64,
 }
 
 impl KillLoop {
     /// The config ranges are checked at config load only; the loop takes
     /// the timings as they are.
-    pub fn new(timing: Kill, _request_timeout_ms: u64) -> KillLoop {
+    pub fn new(timing: Kill, request_timeout_ms: u64) -> KillLoop {
         KillLoop {
             t: timing,
+            extra_ms: request_timeout_ms.saturating_add(DEADLINE_EXTRA_MS),
             phase: Phase::Idle,
             header: String::new(),
             outcome: StopOutcome::Unconfirmed,
@@ -550,6 +560,7 @@ impl KillLoop {
             remaining: Err(NOT_COUNTED.to_string()),
             last_error: None,
             next_mark: 0,
+            ignored: 0,
         }
     }
 
@@ -572,6 +583,12 @@ impl KillLoop {
         self.calls
     }
 
+    /// Answers and pages ignored: past their deadline, or of no open
+    /// request (the runtime writes one debug line each, U19b3c).
+    pub fn ignored(&self) -> u64 {
+        self.ignored
+    }
+
     /// The start notice's header (the kill sequence's, U19b3b).
     pub fn header(&self) -> &str {
         &self.header
@@ -584,7 +601,8 @@ impl KillLoop {
             return None;
         }
         let due = match (self.phase, self.open) {
-            (Phase::Repeat, _) => Some(self.round_start.saturating_add(self.t.round_ms)),
+            (_, Some(o)) => Some(o.deadline),
+            (Phase::Repeat, None) => Some(self.round_start.saturating_add(self.t.round_ms)),
             (Phase::Watch, None) => Some(self.watch_due),
             _ => None,
         };
@@ -624,15 +642,32 @@ impl KillLoop {
     fn take(&mut self, req_id: u64, count: bool) -> Option<Open> {
         match self.open {
             Some(o) if o.id == req_id && o.count.is_some() == count => self.open.take(),
-            _ => None,
+            _ => {
+                self.ignored += 1;
+                None
+            }
         }
     }
 
     /// The answer of a cancel-all (C2).
     pub fn cancel_done(&mut self, now: u64, req_id: u64, a: CancelAnswer) -> Vec<Action> {
-        if !self.running() || self.take(req_id, false).is_none() {
+        if !self.running() {
             return Vec::new();
         }
+        let Some(o) = self.take(req_id, false) else {
+            return Vec::new();
+        };
+        let a = if now >= o.deadline {
+            CancelAnswer::Failed(PAST_DEADLINE.to_string())
+        } else {
+            a
+        };
+        let mut out = Vec::new();
+        self.cancelled(now, a, &mut out);
+        out
+    }
+
+    fn cancelled(&mut self, now: u64, a: CancelAnswer, out: &mut Vec<Action>) {
         match a {
             CancelAnswer::Done(_) => {
                 self.calls += 1;
@@ -649,8 +684,38 @@ impl KillLoop {
                 self.phase = Phase::Repeat;
             }
         }
+        self.advance(now, out);
+    }
+
+    /// One page of the open count answered: the count's deadline moves to
+    /// `now` + `request_timeout_ms` + [`DEADLINE_EXTRA_MS`]. A page at or
+    /// after the deadline in force fails the count.
+    pub fn count_page(&mut self, now: u64, req_id: u64) -> Vec<Action> {
         let mut out = Vec::new();
-        self.advance(now, &mut out);
+        if !self.running() {
+            return out;
+        }
+        match self.open.as_mut() {
+            Some(o) if o.id == req_id && o.count.is_some() => {
+                if now < o.deadline {
+                    o.deadline = now.saturating_add(self.extra_ms);
+                    return out;
+                }
+            }
+            _ => {
+                self.ignored += 1;
+                return out;
+            }
+        }
+        if let Some(o) = self.open.take() {
+            self.counted(
+                now,
+                o.count == Some(true),
+                Err(PAST_DEADLINE.into()),
+                &mut out,
+            );
+            self.advance(now, &mut out);
+        }
         out
     }
 
@@ -661,6 +726,11 @@ impl KillLoop {
         }
         let Some(o) = self.take(req_id, true) else {
             return Vec::new();
+        };
+        let r = if now >= o.deadline {
+            Err(PAST_DEADLINE.to_string())
+        } else {
+            r
         };
         let mut out = Vec::new();
         self.counted(now, o.count == Some(true), r, &mut out);
@@ -727,7 +797,11 @@ impl KillLoop {
         match self.phase {
             Phase::Cancel => {
                 let id = self.id();
-                self.open = Some(Open { id, count: None });
+                self.open = Some(Open {
+                    id,
+                    count: None,
+                    deadline: now.saturating_add(self.extra_ms),
+                });
                 out.push(Action::CancelAll { req_id: id });
             }
             Phase::Count => {
@@ -735,6 +809,7 @@ impl KillLoop {
                 self.open = Some(Open {
                     id,
                     count: Some(false),
+                    deadline: now.saturating_add(self.extra_ms),
                 });
                 out.push(Action::Count { req_id: id });
             }
@@ -751,6 +826,7 @@ impl KillLoop {
                 self.open = Some(Open {
                     id,
                     count: Some(ends),
+                    deadline: now.saturating_add(self.extra_ms),
                 });
                 out.push(Action::Count { req_id: id });
             }
@@ -763,6 +839,14 @@ impl KillLoop {
         let mut out = Vec::new();
         if !self.running() {
             return out;
+        }
+        // Past the deadline of the open request: it failed.
+        if let Some(o) = self.open.filter(|o| now >= o.deadline) {
+            self.open = None;
+            match o.count {
+                Some(ends) => self.counted(now, ends, Err(PAST_DEADLINE.into()), &mut out),
+                None => self.cancelled(now, CancelAnswer::Failed(PAST_DEADLINE.into()), &mut out),
+            }
         }
         self.advance(now, &mut out);
         self.progress(now, &mut out);
