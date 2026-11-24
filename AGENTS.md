@@ -9,6 +9,7 @@ Rules that the code does not show:
 - The tree is not rustfmt-clean. Do not run `cargo fmt` over existing files. Only files that a change adds must pass `rustfmt --check` (`tools/ci/rustfmt_added.sh`).
 - After any change under `crates/` or `registry/`, run `cargo run -p xtask -- docs` and commit `docs/generated/`. CI fails when they differ.
 - A claim (`registry/claims.toml`) may name only tests that exist. A journal event must be listed by a contract in `registry/contracts.toml`. Add the claim and the event in the same change that adds the test and the event.
+- Reviewers read `CODING_STANDARDS.md`. A change to a check (`tools/ci/`, lint settings, test removal) waits for the owner (`tools/ci/owner_review.sh`, ADR-033).
 
 ## Agent skills
 

@@ -1,6 +1,6 @@
 # ADR-033 저장소 표준: 검사를 바꾸는 변경은 소유자가 보고, 구조와 돈 코드의 문법은 기계가 막는다
 
-상태: 채택. 1부(소유자 확인 `tools/ci/owner_review.sh`) 구현(2026-11-24). 2부(구조 규칙 `xtask layers`)와 3부(순수 crate의 lint) 구현(2026-11-24). main 잠금은 GitHub 설정이라 이 저장소의 파일이 아니다(7절). 4부(리뷰 규칙 문서)는 뒤의 변경에서 구현하고 이 줄에 적는다.
+상태: 채택. 1부(소유자 확인 `tools/ci/owner_review.sh`) 구현(2026-11-24). 2부(구조 규칙 `xtask layers`), 3부(순수 crate의 lint), 4부(리뷰 규칙 `CODING_STANDARDS.md`와 주 1회 회고 `docs/agents/retro.md`) 구현(2026-11-24). main 잠금은 GitHub 설정이라 이 저장소의 파일이 아니다(7절).
 
 ## 1. 문제와 발생 가능한 실패
 
@@ -55,6 +55,8 @@
 - 검사 자체의 시험: `tools/ci/selftest.sh`의 "owner review" 절이 버려지는 저장소 `or/`에서 29가지를 심는다(결과 없음 7, 결과 21, 확인 불가 1).
 - 2부 구조 규칙: `tools/ci/layers.toml`의 규칙을 `cargo run -p xtask -- layers`가 CI 단계 "Crate layering table"(워처 독립 검사 바로 뒤)에서 확인한다. 규칙 넷: `only`(이 crate는 목록 밖의 작업 공간 crate에 의존하지 않는다), `deny`(이 crate들은 저 crate들에 의존하지 않는다, `except` 가능), `external`(작업 공간 밖의 normal·build 의존성은 목록만), `text`(이 문자열은 이 경로 밖의 `.rs`에 없다, 주석 포함). 의존성은 `cargo metadata --no-deps`의 선언된 것이고 종류(normal, dev, build)와 플랫폼을 가리지 않는다. 표의 이름이 어느 crate와도 맞지 않으면 결과다. 2026-11-24의 모양을 잠근다: 순수 crate(`oms-core`, `md-core`)는 작업 공간 crate에 의존하지 않고 `oms-core`의 외부 의존성은 `serde`, `serde_json`뿐; `oms-journal`·`oms-sim`·`oms-api`는 코어만; `oms-node`는 코어, 저널, API, 가상 거래소, 직접 알림만(읽기 쪽 `oms-projector`의 f64 손익이 판단에 닿지 않는다); 시세 crate는 `oms-*`에 의존하지 않고, `oms-node`에는 워처의 적합성 시험만 의존한다; `/v5/order/create`·`/v5/order/amend`는 Bybit 게이트웨이와 그 시험에만, `/v5/order/`는 거기와 워처와 `xtask/src/mutants.rs`에만, `"/exchange"`는 Hyperliquid 게이트웨이에만 있다. 워처 자신의 규칙은 `watcher_independent.sh`에 그대로 둔다. 시험은 `crates/xtask/src/layers.rs`의 단위 시험(심은 경우: 시세 crate가 코어에 의존(세 종류), 셸이 읽기 쪽에 의존, 코어가 `tokio`에 의존(normal·build는 결과, dev는 아님), 예외는 그 crate에만, 없는 이름, 모르는 필드, 게이트웨이 밖의 주문 경로)과 실제 트리를 실제 표로 돌리는 시험이다. 이전부터 있던 `xtask verify`의 `core_purity`(코어 소스의 `std::time`·`f64` 등 문자열과 의존성)는 CI에서 돌지 않았다. 2부와 3부가 그 내용을 CI에 옮긴다.
 - 3부 lint: `oms-core`의 `lib.rs`가 `#![deny(..)]`로 `float_arithmetic`, `expect_used`, `cast_possible_truncation`, `cast_sign_loss`, `cast_possible_wrap`, `disallowed_methods`, `allow_attributes`, `allow_attributes_without_reason`을 건다. 예외는 `#[expect(lint, reason = "..")]`로만 두고, 위반이 사라지면 `unfulfilled_lint_expectations`가 `-D warnings`로 실패한다. 처음 걸었을 때 실제 코드의 위반은 하나(`ids.rs`의 `v as u64`, cloid의 아래 64비트, 이유를 단 `expect`)였다. 시계 호출 목록(`SystemTime::now`, `Instant::now`, `tokio::time::Instant::now`)은 루트 `clippy.toml`에 있고, `clippy.toml`은 작업 공간 전체에 적용되므로 `[workspace.lints.clippy]`에서 `disallowed_methods = "allow"`로 두고 순수 crate(`oms-core`, `md-core`)의 `lib.rs`에서만 `deny`로 켠다(셸 crate의 시계 호출은 2026-11-24에 121곳). `md-core`는 시계 규칙만 건다: 감시용 `mid`·`spread_bp`의 실수 2곳과 `decimal.rs`의 변환 4곳은 따로 정한다. 넘침은 release의 `overflow-checks = true`와 `panic = "abort"`가 이미 멈춤으로 바꾸므로 `arithmetic_side_effects`(코어 67곳)는 걸지 않는다. 이 설정을 바꾸는 변경은 1부의 `path`·`manifest`·`lint` 결과다.
+
+- 4부 리뷰 규칙과 회고: 판단이 필요한 규칙만 루트의 `CODING_STANDARDS.md`에 근거(건수와 기간)와 함께 두고, 리뷰 에이전트가 읽는다(구현 에이전트는 읽지 않아도 된다). 첫 세 규칙은 실행기의 리뷰 29건(U18b~U19b, 2026-11-24까지)의 MUST·SHOULD 70건에서 왔다: 규칙에 시험이 없음 34건, 문서의 수와 주장이 코드와 다름 13건, 시계 7건. 기계적인 지적은 문장이 아니라 검사와 심은 경우로 바꾼다(`docs/agents/retro.md`, 주 1회).
 
 ## 8. 포기한 장점, 남은 위험, 가정
 
