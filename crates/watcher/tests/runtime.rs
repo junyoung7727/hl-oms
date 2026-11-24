@@ -2110,3 +2110,46 @@ fn an_oms_that_comes_back_after_an_unconfirmed_stop_is_latched() {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&tg_dir);
 }
+
+#[test]
+fn a_marker_path_change_after_the_boot_is_told() {
+    // The OMS passed the boot rule, then answers W5's probes with another
+    // marker path (restarted with another config): one lasting marker_path
+    // P1, and a kill then counts its marker as unchecked, so a stop with
+    // that marker still owes the halt (review 3 N6).
+    let (tg_dir, tg) = telegram_section("rt-k-mpchg-t");
+    let (mut w, dir) = kill_world("rt-k-mpchg", &tg, "");
+    w.cfg.admin_socket = w.cfg.admin_socket.with_file_name("none.sock");
+    w.systemctl = fake_systemctl(&dir, 0);
+    w.status_marked();
+    let marker = w.cfg.kill.as_ref().unwrap().marker.clone();
+    let clock = Arc::new(ManualClock::new(T0));
+    let mut run = w.start(clock.clone());
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    walk(&clock, 2000);
+    let p1 = format!(
+        "OMS가 읽는 킬 마커 경로가 워처의 경로와 다름(OMS: /elsewhere/kill.marker, 워처: {}). 킬 마커가 OMS를 래치하지 못함: OMS 설정의 [kill] marker를 맞출 것",
+        marker.display()
+    );
+    assert!(sent_with(&w, "킬 마커 경로").is_empty());
+    w.status_with(marker_node(Some(std::path::Path::new("/elsewhere/kill.marker"))));
+    walk_until(&clock, 10_000, "the marker_path P1", || !sent_with(&w, &p1).is_empty());
+    walk(&clock, 5000);
+    assert_eq!(sent_with(&w, "킬 마커 경로").len(), 1, "{:?}", w.sent());
+    assert_eq!(w.lines_with("start refused"), 0);
+    // The OMS goes silent: the kill writes the marker but cannot count it
+    // as in place; K3 stops the unit; the halt stays owed.
+    w.status_down();
+    walk_until(&clock, 20_000, "the fire", || w.lines_with(FIRED) == 1);
+    walk_kill(&clock, "the fake systemctl", || dir.join("argv").exists());
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    let start = &sent_with(&w, START_NOTICE)[0];
+    assert!(start.contains("킬 마커: 씀(OMS가 읽는 경로인지 확인 못 함). OMS 정지: watcher_kill 실패("), "{start}");
+    walk_until(&clock, 60_000, "the final notice", || !sent_with(&w, FINAL_NOTICE).is_empty());
+    let fin = &sent_with(&w, FINAL_NOTICE)[0];
+    assert!(fin.contains("OMS는 멈춤(systemctl stop). 킬 마커는 OMS가 읽는 경로인지 확인 못 함"), "{fin}");
+    assert_eq!(w.lines_with("the halt is owed"), 1, "{:?}", w.log());
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}

@@ -176,12 +176,7 @@ fn paused(actions: Vec<Action>) -> (Vec<Action>, Vec<&'static str>) {
 /// the OMS never reads would not keep a killed OMS halted at its next
 /// start. The OMS config is not read (independence).
 fn marker_rule(v: &Value, ours: &Path) -> Result<(), String> {
-    let m = v.pointer("/node/kill_marker");
-    let configured = m.and_then(|m| m.get("configured")).and_then(Value::as_bool) == Some(true);
-    let path = m
-        .and_then(|m| m.get("path"))
-        .and_then(Value::as_str)
-        .filter(|_| configured);
+    let path = oms_marker(v);
     match path {
         Some(p) if resolved(Path::new(p)) == resolved(ours) => Ok(()),
         _ => Err(format!(
@@ -190,6 +185,16 @@ fn marker_rule(v: &Value, ours: &Path) -> Result<(), String> {
             ours.display()
         )),
     }
+}
+
+/// The path where the OMS of a status answer reads its kill marker
+/// (`node.kill_marker`), `None` when it reads none.
+fn oms_marker(v: &Value) -> Option<&str> {
+    let m = v.pointer("/node/kill_marker");
+    let configured = m.and_then(|m| m.get("configured")).and_then(Value::as_bool) == Some(true);
+    m.and_then(|m| m.get("path"))
+        .and_then(Value::as_str)
+        .filter(|_| configured)
 }
 
 /// A running kill (C-WATCH part 12, U19b3c): the sans-IO sequence, the
@@ -566,6 +571,9 @@ impl Runtime {
             Msg::Probe(id, a) => {
                 let good = w5::good_answer(&a);
                 self.answered |= good;
+                if let (true, Ok(v)) = (good, &a) {
+                    self.probe_marker(v);
+                }
                 let now = self.steady.now_ms();
                 if self.w5.on_answer(now, id, good).is_some() {
                     (self.log)(
@@ -1147,6 +1155,26 @@ impl Runtime {
             "the kill ended: {how}; the halt is {}",
             if halt_owed { "owed" } else { "not owed" }
         ));
+    }
+
+    /// The marker-path rule on a good probe answer after the boot (U19b3d,
+    /// review 3 N6): a failure is the lasting P1 `marker_path` and makes
+    /// `marker_checked` false while it lasts (a kill then owes the halt);
+    /// an answer that passes clears both. Not a start refusal (the boot
+    /// status answer passed the rule) and not a kill. In the boot wait the
+    /// boot rule judges.
+    fn probe_marker(&mut self, v: &Value) {
+        let Some(k) = &self.cfg.kill else {
+            return;
+        };
+        if matches!(self.phase, Phase::Start(_) | Phase::Wait { .. }) {
+            return;
+        }
+        let text = marker_rule(v, &k.marker)
+            .err()
+            .map(|_| alert::marker_path_text(oms_marker(v), &k.marker));
+        self.marker_checked = text.is_none();
+        self.alerts.set(alert::MARKER_PATH, text.as_deref());
     }
 
     /// Sends one owed `watcher_kill` (U19b3d), unless one is in flight:
