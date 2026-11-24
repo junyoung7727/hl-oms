@@ -61,10 +61,33 @@ fn key() -> Answer {
         "readOnly": 1, "expiredAt": "1970-01-01T00:00:00Z"}))
 }
 
+/// Sets this process's soft limit on open files to its hard limit, once.
+/// A `World` holds about 40 sockets (five http fakes, two socket fakes,
+/// the runtime's clients), a test may hold up to four, and libtest starts
+/// as many tests at once as the machine has cores: on 32 cores the peak was
+/// 1086 open files, over the soft limit 1024 a systemd service starts with
+/// ("Too many open files" in 9 tests, U19b3c gate impl_1). The hard limit
+/// stays as it is; if the call fails, the limit stays too.
+fn raise_open_files_limit() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        use rustix::process::{Resource, Rlimit, getrlimit, setrlimit};
+        let hard = getrlimit(Resource::Nofile).maximum;
+        let _ = setrlimit(
+            Resource::Nofile,
+            Rlimit {
+                current: hard,
+                maximum: hard,
+            },
+        );
+    });
+}
+
 impl World {
     /// The fakes answering as a healthy OMS and Bybit would; `extra` is
     /// appended to the config.
     fn new(name: &str, extra: &str) -> World {
+        raise_open_files_limit();
         let bybit = FakeHttp::start(Answer::Reply(404, "{}".into()));
         bybit.route("/v5/user/query-api", [key()]);
         bybit.route(
