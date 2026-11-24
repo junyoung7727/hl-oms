@@ -542,7 +542,9 @@ impl Runtime {
                 let steps = match self.kill.as_mut() {
                     Some(k) if k.kill_no == kill_no => k.kill.marker_done(now, o),
                     _ => {
-                        (self.log)(&format!("debug: a late kill marker outcome is ignored: {o:?}"));
+                        (self.log)(&format!(
+                            "debug: a late kill marker outcome is ignored: {o:?}"
+                        ));
                         return;
                     }
                 };
@@ -558,7 +560,9 @@ impl Runtime {
                         k.kill.halt_done(now, id, r)
                     }
                     _ => {
-                        (self.log)(&format!("debug: a late watcher_kill reply is ignored: {r:?}"));
+                        (self.log)(&format!(
+                            "debug: a late watcher_kill reply is ignored: {r:?}"
+                        ));
                         return;
                     }
                 };
@@ -929,7 +933,9 @@ impl Runtime {
             return;
         };
         if let Some((id, task)) = &k.halt
-            && k.kill.halt_open().is_none_or(|(open, deadline)| open != *id || now >= deadline)
+            && k.kill
+                .halt_open()
+                .is_none_or(|(open, deadline)| open != *id || now >= deadline)
         {
             task.abort();
             k.halt = None;
@@ -974,7 +980,9 @@ impl Runtime {
                     let steps = k.kill.stop_done(now, o);
                     self.kill_steps(now, steps);
                 }
-                _ => (self.log)(&format!("debug: a late systemctl outcome is ignored: {o:?}")),
+                _ => (self.log)(&format!(
+                    "debug: a late systemctl outcome is ignored: {o:?}"
+                )),
             }
         }
     }
@@ -1003,7 +1011,11 @@ impl Runtime {
                     let (path, name) = (self.cfg.admin_socket.clone(), self.cfg.name.clone());
                     let timeout = self.cfg.http.request_timeout_ms;
                     let task = self.spawn(async move {
-                        Msg::Halt(kill_no, id, admin_kill(&path, &name, &detail, timeout).await)
+                        Msg::Halt(
+                            kill_no,
+                            id,
+                            admin_kill(&path, &name, &detail, timeout).await,
+                        )
                     });
                     if let Some(k) = self.kill.as_mut()
                         && let Some((_, old)) = k.halt.replace((id, task))
@@ -1148,7 +1160,11 @@ impl Runtime {
     /// The W5 and kill series (C-WATCH part 12) from their accessors.
     fn kill_metrics(&mut self, now: u64) {
         let m = self.metrics.clone();
-        m.set("watcher_w5_armed", &[], f64::from(u8::from(self.w5.armed())));
+        m.set(
+            "watcher_w5_armed",
+            &[],
+            f64::from(u8::from(self.w5.armed())),
+        );
         match self.w5.silent_ms(now) {
             Some(ms) => m.set("watcher_oms_silence_s", &[], ms as f64 / 1000.0),
             None => m.remove("watcher_oms_silence_s", &[]),
@@ -1162,9 +1178,17 @@ impl Runtime {
             return;
         };
         let steps = k.kill.steps();
-        for (step, done) in [("marker", steps.marker), ("halt", steps.halt), ("stop", steps.stop)] {
+        for (step, done) in [
+            ("marker", steps.marker),
+            ("halt", steps.halt),
+            ("stop", steps.stop),
+        ] {
             if let Some(done) = done {
-                m.set("watcher_kill_step", &[("step", step)], f64::from(u8::from(done)));
+                m.set(
+                    "watcher_kill_step",
+                    &[("step", step)],
+                    f64::from(u8::from(done)),
+                );
             }
         }
         let lp = k.kill.kill_loop();
@@ -1175,7 +1199,11 @@ impl Runtime {
         }
         let calls = lp.cancel_all_calls();
         if calls > k.cancel_alls {
-            m.add("watcher_kill_cancel_all_total", &[], (calls - k.cancel_alls) as f64);
+            m.add(
+                "watcher_kill_cancel_all_total",
+                &[],
+                (calls - k.cancel_alls) as f64,
+            );
             k.cancel_alls = calls;
         }
     }
