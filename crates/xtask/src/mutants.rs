@@ -2795,6 +2795,33 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "runtime", "a_status_with_another_marker_path_refuses_the_start"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M302-watcher-refusal-exits-before-the-abort-notice",
+        what: "a start refusal during a kill exits before the kill's abort notice is queued (deliberate defect 48 of U19b3d)",
+        file: "crates/watcher/src/runtime.rs",
+        find: "        self.abort_kill(AbortWhy::StartRefused(reason.to_string()));\n",
+        replace: "        self.flush_notices();\n",
+        test: &["-p", "watcher", "--test", "runtime", "a_start_refusal_during_a_kill_sends_the_abort_notice_first"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M303-watcher-owed-halt-not-acted-on",
+        what: "the runtime does not act on W5's OwedHalt: no watcher_kill at the OMS's next good answer after a kill that owes the halt (deliberate defect 49 of U19b3d)",
+        file: "crates/watcher/src/runtime.rs",
+        find: "                    self.start_owed(now);\n",
+        replace: "                    let _ = now;\n",
+        test: &["-p", "watcher", "--test", "runtime", "an_oms_that_comes_back_after_an_unconfirmed_stop_is_latched"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M304-watcher-probe-marker-path-keeps-checked",
+        what: "a probe answer that fails the marker-path rule leaves marker_checked true: a later kill counts its marker as in place and owes no halt (deliberate defect 50 of U19b3d)",
+        file: "crates/watcher/src/runtime.rs",
+        find: "        self.marker_checked = text.is_none();\n",
+        replace: "        self.marker_checked = true;\n",
+        test: &["-p", "watcher", "--test", "runtime", "a_marker_path_change_after_the_boot_is_told"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
