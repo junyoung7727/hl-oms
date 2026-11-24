@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::clock::Clock;
+use crate::clock::{Clock, Steady};
 use crate::log::Log;
 use crate::metrics::Metrics;
 use crate::sign;
@@ -287,6 +287,12 @@ pub struct Client {
     creds: Credentials,
     recv_window_ms: u64,
     clock: Arc<dyn Clock>,
+    /// The guard's clock: `clock` that never steps back (U19b3c; review 4
+    /// S3). The kill loop's requests wait at the guard: on the raw clock a
+    /// step back of Δ would keep every request of the last Δ + 10 s in the
+    /// window and hold the loop up to Δ. Signing and the 403 pause read
+    /// `clock`.
+    guard_clock: Steady,
     metrics: Arc<Metrics>,
     log: Log,
     stop: Mutex<Stop>,
@@ -349,6 +355,7 @@ impl Client {
             http,
             creds,
             recv_window_ms: cfg.recv_window_ms,
+            guard_clock: Steady::new(clock.clone()),
             clock,
             metrics,
             log,
@@ -478,6 +485,7 @@ impl Client {
     async fn turn(&self, bybit: bool) -> Result<(), RestError> {
         loop {
             let now = self.clock.now_ms();
+            let at_guard = self.guard_clock.now_ms();
             let at = {
                 let mut s = self
                     .stop
@@ -494,12 +502,12 @@ impl Client {
                         "not sent: paused after HTTP 403 until {until} ms"
                     )));
                 }
-                match s.guard.admit(now) {
+                match s.guard.admit(at_guard) {
                     Ok(()) => return Ok(()),
                     Err(at) => at,
                 }
             };
-            let wait = at.saturating_sub(now).clamp(1, GUARD_POLL_MS);
+            let wait = at.saturating_sub(at_guard).clamp(1, GUARD_POLL_MS);
             tokio::time::sleep(Duration::from_millis(wait)).await;
         }
     }

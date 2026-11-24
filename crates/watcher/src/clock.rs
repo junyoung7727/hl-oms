@@ -54,7 +54,8 @@ impl Clock for ManualClock {
 /// value. A step back becomes a pause of zero length, a step forward
 /// passes through (W5's gap rule handles it). The offset and the last
 /// value sit in one `Mutex`, so every task that reads one `Steady` sees
-/// one timeline. W5 and the kill path read it; signing, texts, the engine
+/// one timeline. W5 and the kill path read it, and so does the client's
+/// request guard (its own `Steady`, U19b3c); signing, texts, the engine
 /// and the sender read the raw clock.
 pub struct Steady {
     inner: Arc<dyn Clock>,
