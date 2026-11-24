@@ -10,7 +10,7 @@ mod common;
 
 use common::TestJournal;
 use common::rig::{accepted, acked, of, ours, row};
-use common::sock::{FakeSock, oms};
+use common::sock::{self, FakeSock, oms};
 use http_fake::{Answer, FakeHttp, Request};
 use serde_json::{Value, json};
 use std::os::unix::fs::PermissionsExt;
@@ -1609,6 +1609,11 @@ fn the_engine_is_paused_during_a_kill_and_resumes_after() {
     assert!(at(&seen, "/v5/account/wallet-balance", end, u64::MAX) >= 1);
     assert!(at(&seen, "/v5/order/realtime", end, u64::MAX) >= 1);
     assert_eq!(w.pushed("watcher_kill_active"), Some(0.0));
+    // W5 watches again after one good answer (the halt latched: not owed).
+    assert_eq!(w.pushed("watcher_w5_armed"), Some(0.0));
+    w.status_marked();
+    walk_until(&clock, 10_000, "W5 armed again", || w.pushed("watcher_w5_armed") == Some(1.0));
+    assert_eq!(w.pushed("watcher_kill_halt_owed"), Some(0.0));
     assert_eq!(run.shutdown(), 0);
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&tg_dir);
@@ -1797,6 +1802,57 @@ fn a_clock_step_back_during_a_kill_does_not_hold_the_loop() {
         until(1, || cancels() > k);
     }
     assert_eq!(cancels(), k + 1);
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+#[test]
+fn a_halt_without_a_reply_is_aborted_at_its_deadline() {
+    // admin.sock takes watcher_kill and never answers. The K2 deadline (2 ×
+    // request_timeout_ms + 1,000 = 7,000 ms of the kill's clock) passes
+    // while the connection hangs, so walking the clock through it does not
+    // depend on the machine: the runtime aborts the task (the connection
+    // closes) long before admin_kill's own 6,000 ms of real time, and K3
+    // runs (review 2 S1, S2).
+    let (tg_dir, tg) = telegram_section("rt-k-hang-t");
+    let (mut w, dir) = kill_world(
+        "rt-k-hang",
+        &format!("[http]\nrequest_timeout_ms = 3000\n[w5]\nsilence_ms = 13000\n{tg}"),
+        "",
+    );
+    w.admin = FakeSock::serve(&w.cfg.admin_socket, |_, _, v| {
+        if v["op"] == "watcher_kill" {
+            sock::Reply::Silent
+        } else {
+            oms(v, "held")
+        }
+    });
+    w.systemctl = fake_systemctl(&dir, 0);
+    w.status_marked();
+    let clock = Arc::new(ManualClock::new(T0));
+    let mut run = w.start(clock.clone());
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    walk(&clock, 2000);
+    w.status_down();
+    walk_until(&clock, 30_000, "the fire", || w.lines_with(FIRED) == 1);
+    walk_kill(&clock, "watcher_kill at admin.sock", || {
+        kill_lines(&w.admin).len() == 1
+    });
+    let asked = Instant::now();
+    let conn = w.admin.conns().len() - 1;
+    assert_eq!(w.admin.conns()[conn].last().unwrap()["op"], "watcher_kill");
+    walk(&clock, 7100);
+    assert!(w.admin.wait(Duration::from_secs(10), |s| s.closed[conn]));
+    let took = asked.elapsed();
+    assert!(took < Duration::from_millis(4000), "the halt task was not aborted at its deadline: {took:?}");
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    let start = &sent_with(&w, START_NOTICE)[0];
+    assert!(
+        start.contains(&format!("OMS 정지: watcher_kill 실패(정지 응답 없음(시간 초과)) → systemctl stop {UNIT}: 정지됨). ")),
+        "{start}"
+    );
+    assert!(dir.join("argv").exists());
     assert_eq!(run.shutdown(), 0);
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&tg_dir);
