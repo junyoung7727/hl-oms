@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `338f25b928e5ebd3`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `2ed88c0bdf647d81`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 주장 120건: 통과 0, 실패 0, 미실행 53, 이전 버전 결과 67.
 
@@ -3011,7 +3011,7 @@
 - 전제와 범위: watcher::sign의 POST 서명, rest::Client::cancel_all(http-fake), crates/watcher/src의 소스 글자, config::Kill, start::Start와 IpCheck의 [kill] 키 규칙(손으로와 http-fake), decimal::Dec::percent_floor, kill::notice_text·position_block(순수), kill::read_positions(http-fake, on_request로 수동 시계를 옮김): 시험 14개
 - 실제 구성요소: 워처의 sign(post_prehash, post_signature), rest(CANCEL_ALL, CANCEL_ALL_BODY, CancelAll, Client::cancel_all), config::Kill, start(read_key, read_cancel_rules), decimal::Dec::percent_floor, kill(NotSent, StopOutcome, AbortWhy, LastError, Notice, notice_text, Positions, position_block, read_positions)
 - 모의·시뮬레이션: Bybit(http-fake, 평문 http), 시계(수동 시계; 느린 쪽은 http-fake의 on_request가 시계를 옮김)
-- 주입한 장애: 거래소의 POST 예(공백 있는 본문), 공백이 다른 본문, 끝에 / 있는 기준 주소, 시계가 옮겨진 두 번째 일괄 취소; success "1"·없음·빈 목록·"0"·숫자 1·"2", list가 객체, result 없음·null, 503, 10010 래치 뒤 일괄 취소와 GET, 403과 599,999 ms·600,000 ms; 읽기 전용, Order 없음, ContractTrade 없음, Spot에만 있는 Order, Wallet과 ContractTrade의 Withdraw, null 목록이나 읽을 수 없는 readOnly·permissions와 함께 온 읽기 전용·Order 없음·Withdraw, null 목록, ContractTrade와 다른 목록 둘 다 읽을 수 없음, readOnly 없음·false·"0", permissions가 목록, ContractTrade가 문자열, 숫자가 든 목록, [kill] 없이 같은 키들, 재확인의 같은 키들, 재확인의 null 목록; 범위의 양끝과 한 걸음 밖, watch_every_ms > watch_ms, 모르는 키, 문자열 값; 1/3, 2/3, 0.99999999/100, 아주 작은 값, 음수, 0과 음수 분모, 두 곱셈의 넘침; 롱·숏·빈 청산가·청산가 0·마크 0·크기 0·빈 크기·JSON 수 크기·소수 9자리 크기·크기 없음·읽을 수 없는 손익·소문자 기호·빈 방향·넘치는 거리, 행 없음, 50행; 기한 뒤·정각·1 ms 전의 쪽, 6쪽, 목록 아닌 list, 커서 없는 가득 찬 쪽, 같은 커서(요청 둘에서 끝남), 503, 래치, 멈춤과 그 끝; 400자 이유와 오류, 64자 이름, 300자 시작 거부 이유. 변이 M265~M268과 시험 밖 변이 24개(U19b2a; 첫 실행의 놓친 하나는 같은 상한이 두 곳에 있어 생긴 동등 변이였고 코드를 한 곳으로 줄인 뒤 잡힘)
+- 주입한 장애: 거래소의 POST 예(공백 있는 본문), 공백이 다른 본문, 끝에 / 있는 기준 주소, 시계가 옮겨진 두 번째 일괄 취소; success "1"·없음·빈 목록·"0"·숫자 1·"2", list가 객체, result 없음·null, 503, 10010 래치 뒤 일괄 취소와 GET, 403과 599,999 ms·600,000 ms; 읽기 전용, Order 없음, ContractTrade 없음, Spot에만 있는 Order, Wallet과 ContractTrade의 Withdraw, null 목록이나 읽을 수 없는 readOnly·permissions와 함께 온 읽기 전용·Order 없음·Withdraw, null 목록, ContractTrade와 다른 목록 둘 다 읽을 수 없음, readOnly 없음·false·"0", permissions가 목록, ContractTrade가 문자열, 숫자가 든 목록, [kill] 없이 같은 키들, 재확인의 같은 키들, 재확인의 null 목록; 범위의 양끝과 한 걸음 밖, watch_every_ms > watch_ms, 모르는 키, 문자열 값; 1/3, 2/3, 0.99999999/100, 아주 작은 값, 음수, 0과 음수 분모, 두 곱셈의 넘침; 롱·숏·빈 청산가·청산가 0·마크 0·크기 0·빈 크기·JSON 수 크기·소수 9자리 크기·크기 없음·읽을 수 없는 손익·소문자 기호·빈 방향·넘치는 거리, 행 없음, 50행; 기한 뒤·정각·1 ms 전의 쪽, 6쪽, 목록 아닌 list, 커서 없는 가득 찬 쪽, 같은 커서(요청 둘에서 끝남), 503, 래치, 멈춤과 그 끝; 400자 이유와 오류, 64자 이름, 300자 시작 거부 이유. 변이 M265~M268과 시험 밖 변이 31개(U19b2a; 검토 1 수정의 7개 포함; 첫 실행의 놓친 하나는 같은 상한이 두 곳에 있어 생긴 동등 변이였고 코드를 한 곳으로 줄인 뒤 잡힘)
 - 판정 기준과 근거: 가짜가 받은 요청의 방법·경로·본문 바이트·머리글과 서명 값, 센 요청 수, cancel_all의 반환값과 부류, 오류 지표, 래치와 멈춤 뒤 가짜가 받은 요청 수; 소스의 .post( 수와 금지 문자열 0; 설정의 기본값과 거부 줄; 시작 Step(거부 줄, Wait, Next)과 재확인의 StopRequests 뒤 요청 수, 재확인 Wait와 watcher_public_ip_ok; percent_floor의 값과 None; 포지션 묶음과 알림 문구의 정확한 글자, clear-hold의 유무, 3,500 UTF-16 이하와 한 부분; read_positions의 반환값, 가짜가 받은 대상 목록, 끝난 시계
 - 재현: `cargo test -p watcher --lib --test sign --test client --test config --test start --test kill`
 - 뒷받침하는 것: C-WATCH 11부, ADR-032
