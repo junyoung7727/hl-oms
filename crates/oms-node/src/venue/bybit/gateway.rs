@@ -565,8 +565,10 @@ impl Gateway {
         // topic).
         let deadline = tokio::time::Instant::now() + self.timing.handshake;
         let expires = wall_ms() + self.recv_window_ms;
+        let auth = stream::auth_message(&self.creds, expires)
+            .map_err(|e| End::Retry(format!("auth not sent: {e}")))?;
         write
-            .send(send(stream::auth_message(&self.creds, expires)))
+            .send(send(auth))
             .await
             .map_err(|e| End::Retry(format!("auth not sent: {e}")))?;
         let mut authed = false;

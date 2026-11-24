@@ -19,14 +19,17 @@ use super::rest::Credentials;
 /// topic would also carry spot and options rows, F18 §1).
 pub const TOPICS: [&str; 2] = ["order.linear", "execution.linear"];
 
-/// The `auth` message (F20 Q2.1): `GET/realtime` + `expires`, signed.
-pub fn auth_message(creds: &Credentials, expires_ms: u64) -> String {
-    serde_json::json!({
+/// The `auth` message (F20 Q2.1): `GET/realtime` + `expires`, signed
+/// (HMAC hex or RSA base64, ADR-034). `Err` when the signature cannot be
+/// made: the message is not sent.
+pub fn auth_message(creds: &Credentials, expires_ms: u64) -> Result<String, String> {
+    let sig = creds.ws_auth_signature(expires_ms)?;
+    Ok(serde_json::json!({
         "req_id": "auth",
         "op": "auth",
-        "args": [creds.api_key, expires_ms, creds.ws_auth_signature(expires_ms)],
+        "args": [creds.api_key, expires_ms, sig],
     })
-    .to_string()
+    .to_string())
 }
 
 pub fn subscribe_message() -> String {
@@ -133,7 +136,8 @@ mod tests {
     #[test]
     fn the_sent_messages_have_the_documented_shapes() {
         let creds = Credentials::new("KEY", "SECRET");
-        let auth: Value = serde_json::from_str(&auth_message(&creds, 1_662_350_400_000)).unwrap();
+        let auth: Value =
+            serde_json::from_str(&auth_message(&creds, 1_662_350_400_000).unwrap()).unwrap();
         assert_eq!(auth["op"], "auth");
         assert_eq!(auth["args"][0], "KEY");
         assert_eq!(auth["args"][1], 1_662_350_400_000u64);
@@ -146,6 +150,23 @@ mod tests {
         assert_eq!(sub["args"], json!(["order.linear", "execution.linear"]));
         let ping: Value = serde_json::from_str(&ping_message(3)).unwrap();
         assert_eq!(ping["op"], "ping");
+    }
+
+    /// RSA (ADR-034, spec T3, F2): the `auth` message signed with an RSA
+    /// key carries the base64 signature of `GET/realtime{expires}`:
+    /// openssl's value (`printf '%s' GET/realtime1662350400000 | openssl dgst
+    /// -sha256 -sign key.pem | base64 -w0`, the test-only key), not hex.
+    #[test]
+    fn the_auth_message_with_an_rsa_key_carries_the_base64_signature() {
+        let pem = crate::venue::bybit::sign::test_keys::pem_2048();
+        let creds = super::super::rest::Credentials::rsa("KEY", &pem).unwrap();
+        let m: Value =
+            serde_json::from_str(&auth_message(&creds, 1_662_350_400_000).unwrap()).unwrap();
+        assert_eq!(
+            m,
+            json!({"req_id": "auth", "op": "auth", "args": ["KEY", 1_662_350_400_000u64,
+                "HZKuzRsZu3GyRpRRU9GK/xpL4DUyjo4bd+uRkRedWmZwUUr1ye+RvVNtV+LpPmx5X+1iKtlWIJGe1FNJ/jW/A0q4e2ND7FcQy9zEgbRZwVO+sbUqoN0m69zQ+mhqR5VBKXTFIcbEhzFiQKFHSC/hK5OmdSX2aCU0e0ROiA5o5p5Vcvs6jF4U1G2EF4bq5LX5BPufvpLsI4HoqBcX5Oq/gIjTxAORH2YNwzeuGh1migMEAxTpp2lRXc27qaBGhbPmYURG3QvCguBp5ctIiP2T6RTeiPgfBSYxSZZESMOs/oFVhjeRJ226Nrj7tUqcA9Gn1P4B4Y4SpIzAJ0tWLizZWg=="]})
+        );
     }
 
     #[test]

@@ -1,8 +1,10 @@
 //! The watcher's credentials file (C-WATCH part 4): TOML `api_key` and
-//! `api_secret`, both non-empty, nothing else. The file is a regular file
-//! (not a symlink), owned by the user the watcher runs as, mode 0600 or
-//! 0400, outside the OMS data directory. No error quotes the file, and
-//! the secret is printed nowhere ([`Credentials`]'s `Debug` hides it).
+//! exactly one of `api_secret` (HMAC) or `rsa_private_key` (the PKCS#8 PEM
+//! text inline, ADR-034), non-empty, nothing else. The file is a regular
+//! file (not a symlink), owned by the user the watcher runs as, mode 0600
+//! or 0400, outside the OMS data directory. No error quotes the file, and
+//! the secret or key is printed nowhere ([`Credentials`]'s `Debug` hides
+//! it).
 //!
 //! The token file of `[telegram]` (U19b1a, C-WATCH part 10) follows the
 //! same file rules, is not inside a git repository, and holds the JSON of
@@ -25,7 +27,8 @@ const TOKEN: &str = "token file";
 #[serde(deny_unknown_fields)]
 struct File {
     api_key: String,
-    api_secret: String,
+    api_secret: Option<String>,
+    rsa_private_key: Option<String>,
 }
 
 /// Reads the credentials file `path` of a watcher of `data_dir`. The path
@@ -40,13 +43,37 @@ pub fn load(path: &Path, data_dir: &Path) -> Result<Credentials, String> {
     file.read_to_string(&mut text)
         .map_err(|e| format!("credentials file {shown}: {e}"))?;
     // The TOML error would quote the line, which may hold the secret.
-    let f: File = toml::from_str(&text).map_err(|_| {
-        format!("credentials file {shown} is not TOML with api_key and api_secret and nothing else")
-    })?;
-    if f.api_key.is_empty() || f.api_secret.is_empty() {
-        return Err(format!("credentials file {shown}: empty key or secret"));
+    let shape = "is not TOML with api_key and api_secret or rsa_private_key";
+    let f: File = toml::from_str(&text)
+        .map_err(|_| format!("credentials file {shown} {shape}, and nothing else"))?;
+    match (f.api_secret, f.rsa_private_key) {
+        (Some(_), Some(_)) => Err(format!(
+            "credentials file {shown} has both api_secret and rsa_private_key; keep exactly one"
+        )),
+        (None, None) => Err(format!(
+            "credentials file {shown} {shape}: it has neither"
+        )),
+        (Some(secret), None) => {
+            if f.api_key.is_empty() || secret.is_empty() {
+                return Err(format!("credentials file {shown}: empty key or secret"));
+            }
+            // A PEM key pasted here would be used as an HMAC secret: every
+            // request would be rejected by the venue (review S2).
+            if secret.contains("PRIVATE KEY-----") {
+                return Err(format!(
+                    "credentials file {shown}: api_secret holds a PEM private key; an RSA key goes in rsa_private_key"
+                ));
+            }
+            Ok(Credentials::new(&f.api_key, &secret))
+        }
+        (None, Some(pem)) => {
+            if f.api_key.is_empty() {
+                return Err(format!("credentials file {shown}: empty key or secret"));
+            }
+            Credentials::rsa(&f.api_key, &pem)
+                .map_err(|e| format!("credentials file {shown}: {e}"))
+        }
     }
-    Ok(Credentials::new(&f.api_key, &f.api_secret))
 }
 
 /// Reads the token file `path` of `[telegram]` (U19b1a): the path rules

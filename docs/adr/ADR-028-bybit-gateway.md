@@ -81,7 +81,7 @@
 - `[core.policy]`는 `venue_enforces_expiry = true`, `absence_not_found_needed = 2`(ADR-024).
 - 증거금 정책이 있으면 `isolated = false`(교차 계좌)와 `account_mm_rate_max_bps`(1..=9999, 결정값 5000, U17d §7g). 다른 거래소는 그 값을 거부한다.
 - `credentials_file`은 `..`를 담지 않고, 심볼릭 링크와 상대 데이터 디렉터리를 풀어 비교해도 데이터 디렉터리 밖이어야 한다.
-- 자격 파일은 한 번 열어 그 핸들로 검사하고 읽는다: 일반 파일, 심볼릭 링크 아님(`O_NOFOLLOW`), OMS를 돌리는 사용자 소유, 그룹·기타 권한 없음.
+- 자격 파일은 한 번 열어 그 핸들로 검사하고 읽는다: 일반 파일, 심볼릭 링크 아님(`O_NOFOLLOW`), OMS를 돌리는 사용자 소유, 그룹·기타 권한 없음. 내용은 `api_key`와 `api_secret`(HMAC) 또는 `rsa_private_key`(RSA, PKCS#8 PEM 글; 2026-11-25 [ADR-034](ADR-034-bybit-rsa-keys.md)) 중 정확히 하나.
 
 ## 7b. 조회와 실행 분류표 (U16c)
 
