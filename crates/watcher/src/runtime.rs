@@ -511,19 +511,19 @@ impl Runtime {
             Msg::Venue(id, a) => {
                 if let Phase::Run(e) = &mut self.phase {
                     let out = e.on_venue(now, id, a);
-                    self.exec(out);
+                    self.exec_answer(out);
                 }
             }
             Msg::Status(id, a) => {
                 if let Phase::Run(e) = &mut self.phase {
                     let out = e.on_status(now, id, a);
-                    self.exec(out);
+                    self.exec_answer(out);
                 }
             }
             Msg::Admin(check, send_id, a) => {
                 if let Phase::Run(e) = &mut self.phase {
                     let out = e.on_admin(now, check, send_id, a);
-                    self.exec(out);
+                    self.exec_answer(out);
                 }
             }
             Msg::Pushed => self.pushing = false,
@@ -674,7 +674,8 @@ impl Runtime {
             Phase::Replay { .. } => self.replay(now),
             // A kill pauses the engine (U19b3c): no round, no
             // watcher_mismatch send, no heartbeat; answers in flight are
-            // still taken, their deadlines run at the first poll after it.
+            // still taken, what they ask for is not sent (`exec_answer`),
+            // their deadlines run at the polls after it.
             Phase::Run(e) if self.kill.is_some() => {
                 e.export_ages(now);
                 return;
@@ -781,6 +782,34 @@ impl Runtime {
     }
 
     /// Carries out the engine's actions.
+    /// What the engine makes of an answer. While a kill runs (U19b3c,
+    /// review 1 S1) a round in flight at the fire goes no further: its next
+    /// page, its status request and any `watcher_mismatch` send are not
+    /// sent (one debug line each); the round closes at its deadline at a
+    /// poll after the kill, and an owed send goes again after its own
+    /// deadline. The mismatch P1 (`Confirmed`) still goes.
+    fn exec_answer(&mut self, actions: Vec<Action>) {
+        if self.kill.is_none() {
+            return self.exec(actions);
+        }
+        let (keep, drop): (Vec<_>, Vec<_>) = actions
+            .into_iter()
+            .partition(|a| matches!(a, Action::Confirmed { .. }));
+        for a in &drop {
+            let what = match a {
+                Action::Venue { path, .. } => path,
+                Action::Status { .. } => "/api/status",
+                Action::Mismatch { .. } => "watcher_mismatch",
+                Action::Heartbeat { .. } => "heartbeat",
+                Action::Confirmed { .. } => "the mismatch P1",
+            };
+            (self.log)(&format!(
+                "debug: a kill runs: the engine's request is not sent ({what}); its round ends at its deadline after the kill"
+            ));
+        }
+        self.exec(keep);
+    }
+
     fn exec(&mut self, actions: Vec<Action>) {
         for a in actions {
             self.alerts.on_action(&a);

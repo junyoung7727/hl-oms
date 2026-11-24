@@ -1909,3 +1909,106 @@ fn a_halt_without_a_reply_is_aborted_at_its_deadline() {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&tg_dir);
 }
+
+#[test]
+fn a_round_in_flight_at_the_fire_sends_nothing_more_during_the_kill() {
+    // A W4 page request is held at the fake across the fire; released, it
+    // answers with a next-page cursor. The engine asks for page 2 at once,
+    // but a kill runs: the runtime does not send it (no new request of a
+    // round, no watcher_mismatch send while a kill runs; review 1 S1).
+    let (tg_dir, tg) = telegram_section("rt-k-inflight-t");
+    let (mut w, dir) = kill_world(
+        "rt-k-inflight",
+        &format!(
+            "[http]\nrequest_timeout_ms = 5000\n[w5]\nsilence_ms = 19000\n\
+             [intervals]\nw1_ms = 500\nw2_ms = 500\nw3_ms = 1000\nw4_ms = 1000\nheartbeat_ms = 1000\n\
+             [rules]\nmin_age_ms = 500\n{tg}"
+        ),
+        "",
+    );
+    let ready = Arc::new(AtomicBool::new(false));
+    let r = ready.clone();
+    w.admin = FakeSock::serve(&w.cfg.admin_socket, move |_, _, v| {
+        if v["op"] == "watcher_kill" {
+            let end = Instant::now() + Duration::from_secs(10);
+            while !r.load(Ordering::SeqCst) && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            oms(v, "latched")
+        } else {
+            oms(v, "held")
+        }
+    });
+    w.systemctl = fake_systemctl(&dir, 0);
+    w.status_marked();
+    let clock = Arc::new(ManualClock::new(T0));
+    // Records every request; once `arm` is set, holds the next W4 page
+    // (it blocks the fake, bounded) until `release`.
+    let seen: Seen = Arc::new(Mutex::new(Vec::new()));
+    let targets = Arc::new(Mutex::new(Vec::<String>::new()));
+    let (arm, release, held) = (
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(AtomicBool::new(false)),
+    );
+    let (s, t, c) = (seen.clone(), targets.clone(), clock.clone());
+    let (a, rl, h) = (arm.clone(), release.clone(), held.clone());
+    w.bybit.on_request(move |q| {
+        s.lock().unwrap().push((c.now_ms(), q.path().to_string()));
+        t.lock().unwrap().push(q.target.clone());
+        if q.path() == "/v5/execution/list" && a.swap(false, Ordering::SeqCst) {
+            h.store(true, Ordering::SeqCst);
+            let end = Instant::now() + Duration::from_secs(10);
+            while !rl.load(Ordering::SeqCst) && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+    });
+    let mut run = w.start(clock.clone());
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    walk(&clock, 2000);
+    w.status_down();
+    // W4 asks every 1,000 ms: the page held is asked 2 to 3 s before the
+    // fire (19,000 ms of silence), inside its round's deadline of
+    // 16,000 ms; the client's timeout is 5,000 ms of real time.
+    walk(&clock, 16_000);
+    arm.store(true, Ordering::SeqCst);
+    walk_until(&clock, 10_000, "the fire", || w.lines_with(FIRED) == 1);
+    assert!(held.load(Ordering::SeqCst), "no W4 page was held at the fire");
+    // The page answers with a cursor; one order stays open, so the loop
+    // runs while the test looks.
+    let page = ok(json!({"category": "linear", "nextPageCursor": "p2",
+        "list": [{"execId": "e1", "execTime": "1", "symbol": "BTCUSDT"}]}));
+    w.bybit.route("/v5/execution/list", [page, empty_page()]);
+    w.bybit.route("/v5/order/realtime", [orders(1)]);
+    let from = seen.lock().unwrap().len();
+    release.store(true, Ordering::SeqCst);
+    ready.store(true, Ordering::SeqCst);
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    walk_until(&clock, 60_000, "3 cancel-alls", || {
+        since(&seen, CANCEL_ALL, from).len() >= 3
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let page2 = targets.lock().unwrap()[from..]
+        .iter()
+        .filter(|t| t.starts_with("/v5/execution/list?") && t.contains("cursor=p2"))
+        .count();
+    assert_eq!(page2, 0, "{:?}", &targets.lock().unwrap()[from..]);
+    assert_eq!(w.pushed("watcher_kill_active"), Some(1.0));
+    assert!(
+        w.lines_with("debug: a kill runs: the engine's request is not sent") >= 1,
+        "{:?}",
+        w.log()
+    );
+    assert!(mismatch_lines(&w.admin).is_empty());
+    // The loop ends; the round closes at its deadline and W4 reads again.
+    let to = seen.lock().unwrap().len();
+    w.bybit.route("/v5/order/realtime", [empty_page()]);
+    walk_until(&clock, 60_000, "the final notice", || !sent_with(&w, FINAL_NOTICE).is_empty());
+    walk_until(&clock, 30_000, "W4 again", || {
+        !since(&seen, "/v5/execution/list", to).is_empty()
+    });
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
