@@ -589,6 +589,17 @@ impl KillLoop {
         self.ignored
     }
 
+    /// The stop outcome the final notice will name.
+    pub fn outcome(&self) -> StopOutcome {
+        self.outcome
+    }
+
+    /// A halt retried during the loop latched (U19b3b): the final notice
+    /// names the new outcome.
+    pub fn set_outcome(&mut self, outcome: StopOutcome) {
+        self.outcome = outcome;
+    }
+
     /// The start notice's header (the kill sequence's, U19b3b).
     pub fn header(&self) -> &str {
         &self.header
@@ -872,7 +883,28 @@ impl KillLoop {
     }
 
     /// Shutdown or a start refusal during the loop.
-    pub fn abort(&mut self, _now: u64, _why: AbortWhy) -> Vec<Action> {
-        Vec::new()
+    /// One abort notice and the end; nothing after it. Before the start
+    /// it does nothing (the kill sequence tells an abort before the loop,
+    /// U19b3b). The open request is dropped: its answer is never used.
+    pub fn abort(&mut self, _now: u64, why: AbortWhy) -> Vec<Action> {
+        if !self.running() {
+            return Vec::new();
+        }
+        self.phase = Phase::Aborted;
+        self.open = None;
+        vec![
+            Action::Notice(Notice::Abort {
+                why,
+                round: self.round,
+                remaining: self.remaining.clone().ok(),
+                cancel_all_calls: self.calls,
+            }),
+            Action::Ended(Report {
+                rounds: self.round,
+                cancel_all_calls: self.calls,
+                zero_since: self.zero_since,
+                aborted: true,
+            }),
+        ]
     }
 }

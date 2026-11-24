@@ -734,7 +734,7 @@ fn a_failed_count_is_never_zero() {
 /// zero at `T0 + 20` (`z`).
 fn in_watch() -> (KillLoop, u64) {
     let mut l = kill_loop();
-    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Unconfirmed));
     let k = count_id(&l.cancel_done(T0 + 10, c, done(1)));
     assert_eq!(l.count_done(T0 + 20, k, Ok(0)), []);
     assert_eq!(l.phase(), Phase::Watch);
@@ -926,4 +926,338 @@ fn a_slow_paged_count_is_not_failed_while_pages_answer() {
     // round at once.
     cancel_id(&l.count_done(T0 + 14_300, k, Ok(3)));
     assert_eq!((l.remaining(), l.round()), (&Ok(3), 2));
+}
+
+/// One answer of the scripted venue: a cancel-all's or a count's.
+#[derive(Clone)]
+enum Ans {
+    Cancel(CancelAnswer),
+    Count(Result<usize, String>),
+}
+
+/// Drives `l` from its start at `T0`: a poll every `poll_ms`, and each
+/// request answered as `reply(now, is_count)` says (`Some((delay, answer))`,
+/// or `None`: it hangs). Answers due at a poll's instant go first. Asserts
+/// that no request is emitted while another is open (answered, or before
+/// its deadline). Step-bounded. Returns every action with its instant.
+fn drive(
+    l: &mut KillLoop,
+    poll_ms: u64,
+    max_steps: usize,
+    mut reply: impl FnMut(u64, bool) -> Option<(u64, Ans)>,
+) -> Vec<(u64, Action)> {
+    let mut log = Vec::new();
+    let mut pending: Vec<(u64, u64, Ans)> = Vec::new();
+    let mut closes_at: Option<u64> = None;
+    let mut now = T0;
+    let mut next_poll = T0 + poll_ms;
+    let mut acts = l.start(now, "h", StopOutcome::Latched);
+    for _ in 0..max_steps {
+        let mut ended = false;
+        for a in acts.drain(..) {
+            let id = match a {
+                Action::CancelAll { req_id } => Some((req_id, false)),
+                Action::Count { req_id } => Some((req_id, true)),
+                Action::Ended(_) => {
+                    ended = true;
+                    None
+                }
+                Action::Notice(_) => None,
+            };
+            if let Some((id, count)) = id {
+                if let Some(c) = closes_at {
+                    assert!(c <= now, "two requests in flight at {now}");
+                }
+                let deadline = now + EXTRA;
+                closes_at = Some(deadline);
+                if let Some((delay, ans)) = reply(now, count) {
+                    pending.push((now + delay, id, ans));
+                    closes_at = Some((now + delay).min(deadline));
+                }
+            }
+            log.push((now, a));
+        }
+        if ended {
+            return log;
+        }
+        let first = pending
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, p)| p.0)
+            .map(|(i, p)| (i, p.0));
+        match first {
+            Some((i, at)) if at <= next_poll => {
+                let (_, id, ans) = pending.swap_remove(i);
+                now = at;
+                acts = match ans {
+                    Ans::Cancel(a) => l.cancel_done(now, id, a),
+                    Ans::Count(r) => l.count_done(now, id, r),
+                };
+            }
+            _ => {
+                now = next_poll;
+                next_poll += poll_ms;
+                acts = l.poll(now);
+            }
+        }
+    }
+    panic!("the step bound of {max_steps} was reached at {now}");
+}
+
+fn notices_at(log: &[(u64, Action)]) -> Vec<(u64, Notice)> {
+    log.iter()
+        .filter_map(|(t, a)| match a {
+            Action::Notice(n) => Some((*t, n.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_progress_notice_comes_every_60_s_also_with_an_unchanged_count() {
+    // One order that stays: every round counts 1.
+    let mut l = kill_loop();
+    let log = drive(&mut l, 100, 20_000, |now, count| {
+        if now >= T0 + 200_000 {
+            l_zero(count)
+        } else if count {
+            Some((10, Ans::Count(Ok(1))))
+        } else {
+            Some((10, Ans::Cancel(done(0))))
+        }
+    });
+    let got = notices_at(&log);
+    let progress: Vec<(u64, Notice)> = got
+        .iter()
+        .filter(|(_, n)| matches!(n, Notice::Progress { .. }))
+        .cloned()
+        .collect();
+    assert_eq!(
+        progress.iter().map(|(t, _)| t - T0).collect::<Vec<_>>(),
+        [60_000, 120_000, 180_000]
+    );
+    for (_, n) in &progress {
+        assert!(
+            matches!(
+                n,
+                Notice::Progress {
+                    remaining: Ok(1),
+                    last_error: None,
+                    ..
+                }
+            ),
+            "{n:?}"
+        );
+    }
+
+    // A late poll does not move the next mark: polls at +65 s and then
+    // every 100 ms give notices at +65 s and +120 s.
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let mut marks = Vec::new();
+    let _ = l.cancel_done(T0 + 1, c, CancelAnswer::NotSent(NotSent::Paused));
+    let mut t = T0 + 65_000;
+    while t <= T0 + 130_000 {
+        for a in l.poll(t) {
+            match a {
+                Action::Notice(_) => marks.push(t - T0),
+                Action::CancelAll { req_id } => {
+                    let _ = l.cancel_done(t, req_id, CancelAnswer::NotSent(NotSent::Paused));
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        t += 100;
+    }
+    assert_eq!(marks, [65_000, 120_000]);
+
+    // Two marks passed at one poll: one notice, the next at the first mark
+    // after it.
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let _ = l.cancel_done(T0 + 1, c, CancelAnswer::NotSent(NotSent::Paused));
+    let acts = l.poll(T0 + 130_000);
+    assert_eq!(notices(&acts).len(), 1);
+    let c = cancel_id(&acts);
+    let _ = l.cancel_done(T0 + 130_000, c, CancelAnswer::NotSent(NotSent::Paused));
+    assert_eq!(notices(&l.poll(T0 + 179_999)).len(), 0);
+    assert_eq!(notices(&l.poll(T0 + 180_000)).len(), 1);
+}
+
+/// The venue after a failure is over: cancel-all accepted, zero open.
+fn l_zero(count: bool) -> Option<(u64, Ans)> {
+    if count {
+        Some((10, Ans::Count(Ok(0))))
+    } else {
+        Some((10, Ans::Cancel(done(0))))
+    }
+}
+
+#[test]
+fn the_notice_rule_sends_no_change_notice() {
+    // The count goes down every round (5, 4, 3, 2, 1, then 1): no notice at
+    // a change; the progress notice at 60 s shows the latest count.
+    let mut l = kill_loop();
+    let mut counts = vec![5usize, 4, 3, 2].into_iter();
+    let log = drive(&mut l, 100, 20_000, |now, count| {
+        if now >= T0 + 70_000 {
+            l_zero(count)
+        } else if count {
+            Some((10, Ans::Count(Ok(counts.next().unwrap_or(1)))))
+        } else {
+            Some((10, Ans::Cancel(done(1))))
+        }
+    });
+    let got = notices_at(&log);
+    assert_eq!(got.len(), 3, "start, one progress, final: {got:?}");
+    assert_eq!(got[0], (T0, Notice::Start { round_ms: 1000 }));
+    assert_eq!(
+        got[1],
+        (
+            T0 + 60_000,
+            Notice::Progress {
+                round: 61,
+                remaining: Ok(1),
+                cancel_all_calls: 60,
+                last_error: None,
+            }
+        )
+    );
+    assert!(matches!(got[2].1, Notice::Final { .. }));
+}
+
+#[test]
+fn ten_minutes_of_failing_queries_make_at_most_12_notices() {
+    // Cancel-all and count fail (5xx, or no answer until the deadline) for
+    // 600 s from the start, then zero. The runtime polls every 100 ms, or
+    // late, every 7,000 ms.
+    for poll_ms in [100, 7000] {
+        let mut l = kill_loop();
+        let mut n = 0u64;
+        let log = drive(&mut l, poll_ms, 100_000, |now, count| {
+            n += 1;
+            if now >= T0 + 600_000 {
+                return l_zero(count);
+            }
+            match (n % 3, count) {
+                (0, _) => None,
+                (_, true) => Some((50, Ans::Count(Err("HTTP 503".into())))),
+                (_, false) => Some((50, Ans::Cancel(CancelAnswer::Failed("HTTP 503".into())))),
+            }
+        });
+        let got = notices_at(&log);
+        let kinds = |f: fn(&Notice) -> bool| got.iter().filter(|(_, n)| f(n)).count();
+        assert_eq!(kinds(|n| matches!(n, Notice::Start { .. })), 1, "{poll_ms}");
+        assert_eq!(
+            kinds(|n| matches!(n, Notice::Progress { .. })),
+            10,
+            "{poll_ms}"
+        );
+        assert_eq!(kinds(|n| matches!(n, Notice::Final { .. })), 1, "{poll_ms}");
+        assert!(matches!(got.last(), Some((_, Notice::Final { .. }))));
+        for (t, _) in &got {
+            let inside = got
+                .iter()
+                .filter(|(u, _)| *u >= *t && *u <= *t + 600_000)
+                .count();
+            assert!(inside <= 12, "{inside} notices from {t} ({poll_ms})");
+        }
+        // The final notice is not held back by notice_ms: it goes in the
+        // instant of the count that ends the watch.
+        let (end_at, _) = log.last().unwrap();
+        assert_eq!(got.last().unwrap().0, *end_at);
+    }
+}
+
+#[test]
+fn abort_sends_one_notice_and_ends() {
+    // Before the start: nothing (the kill sequence tells its own abort).
+    let mut l = kill_loop();
+    assert_eq!(l.abort(T0, AbortWhy::Shutdown), []);
+    assert_eq!(l.phase(), Phase::Idle);
+
+    // In the rounds, with a known count and a request open.
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let k = count_id(&l.cancel_done(T0 + 10, c, done(3)));
+    let c = cancel_id(&{
+        assert_eq!(l.count_done(T0 + 20, k, Ok(3)), []);
+        l.poll(T0 + 1000)
+    });
+    assert_eq!(
+        l.abort(T0 + 1500, AbortWhy::Shutdown),
+        [
+            Action::Notice(Notice::Abort {
+                why: AbortWhy::Shutdown,
+                round: 2,
+                remaining: Some(3),
+                cancel_all_calls: 1,
+            }),
+            Action::Ended(Report {
+                rounds: 2,
+                cancel_all_calls: 1,
+                zero_since: None,
+                aborted: true,
+            }),
+        ]
+    );
+    // Then nothing: no request, no notice, no second end.
+    assert_eq!((l.phase(), l.next_wake()), (Phase::Aborted, None));
+    assert_eq!(l.cancel_done(T0 + 1600, c, done(0)), []);
+    assert_eq!(l.poll(T0 + 120_000), []);
+    assert_eq!(l.abort(T0 + 120_000, AbortWhy::Shutdown), []);
+
+    // In the watch, and with an unknown count.
+    let (mut l, _) = in_watch();
+    let acts = l.abort(T0 + 100, AbortWhy::StartRefused("marker path".into()));
+    assert!(matches!(
+        acts[..],
+        [
+            Action::Notice(Notice::Abort {
+                remaining: Some(0),
+                ..
+            }),
+            Action::Ended(Report { aborted: true, .. })
+        ]
+    ));
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let _ = l.cancel_done(T0, c, CancelAnswer::NotSent(NotSent::Latched));
+    let acts = l.abort(T0 + 100, AbortWhy::Shutdown);
+    assert!(matches!(
+        acts[..],
+        [
+            Action::Notice(Notice::Abort {
+                remaining: None,
+                round: 1,
+                cancel_all_calls: 0,
+                ..
+            }),
+            _
+        ]
+    ));
+}
+
+#[test]
+fn the_outcome_set_during_the_loop_is_in_the_final_notice() {
+    // A halt retried during the loop latched (U19b3b): the final notice
+    // names the latch, not the outcome the loop started with.
+    let (mut l, z) = in_watch();
+    l.set_outcome(StopOutcome::Latched);
+    let mut last = Vec::new();
+    for due in (1..=6).map(|i| z + i * 5000) {
+        let k = count_id(&l.poll(due));
+        last = l.count_done(due, k, Ok(0));
+    }
+    assert!(matches!(
+        notices(&last)[..],
+        [Notice::Final {
+            outcome: StopOutcome::Latched,
+            ..
+        }]
+    ));
+    let mut l = kill_loop();
+    let _ = l.start(T0, "h", StopOutcome::Unconfirmed);
+    l.set_outcome(StopOutcome::StoppedMarked);
+    assert_eq!(l.outcome(), StopOutcome::StoppedMarked);
 }
