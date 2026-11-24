@@ -2840,6 +2840,33 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "runtime", "a_marker_path_refusal_before_the_kill_loop_sends_the_halt_first"],
         guards: "C-WATCH",
     },
+    Mutant {
+        id: "M321-watcher-refusal-opens-a-second-watcher-kill",
+        what: "a marker-path refusal while the kill's K2 is open does not wait for it and opens a second watcher_kill connection (U19b3d review 2 S1)",
+        file: "crates/watcher/src/runtime.rs",
+        find: "(open == *id).then_some((k.kill_no, *id, deadline))",
+        replace: "(open == *id && false).then_some((k.kill_no, *id, deadline))",
+        test: &["-p", "watcher", "--test", "runtime", "a_marker_path_refusal_during_k2_waits_for_the_kills_own_watcher_kill"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M322-watcher-refusal-hold-spins-the-runtime",
+        what: "a loop answer that waits while a refusal holds the kill makes the runtime turn its loop without a wait until the refusal ends (U19b3d review 2 N1)",
+        file: "crates/watcher/src/runtime.rs",
+        find: "            || (self.refusing.is_none()\n",
+        replace: "            || (true\n",
+        test: &["-p", "watcher", "--test", "runtime", "a_loop_answer_during_a_refusals_wait_does_not_spin_the_runtime"],
+        guards: "C-WATCH",
+    },
+    Mutant {
+        id: "M323-watcher-shutdown-during-a-refusal-drops-the-abort-notice",
+        what: "a shutdown while a refusal waits for its watcher_kill keeps the refusal: the kill's abort notice is not sent (U19b3d review 2 N4)",
+        file: "crates/watcher/src/runtime.rs",
+        find: "        self.refusing = None;\n        if let Some(k) = &self.kill\n",
+        replace: "        if let Some(k) = &self.kill\n",
+        test: &["-p", "watcher", "--test", "runtime", "a_shutdown_while_a_refusal_waits_sends_the_abort_notice"],
+        guards: "C-WATCH",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
