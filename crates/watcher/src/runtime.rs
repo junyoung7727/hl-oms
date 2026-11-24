@@ -205,6 +205,16 @@ fn oms_marker(v: &Value) -> Option<&str> {
         .filter(|_| configured)
 }
 
+/// How the refusal P1 names the outcome of the `watcher_kill` it sent
+/// first (U19b3d): the reply that latched, or `실패(<why>)` for any other
+/// reply or error.
+fn halt_outcome(r: &Result<String, String>) -> String {
+    match r {
+        Ok(reply) if crate::oms::latched(reply) => kill::cut(reply, kill::TEXT_MAX),
+        Ok(why) | Err(why) => format!("실패({})", kill::cut(why, kill::TEXT_MAX)),
+    }
+}
+
 /// A running kill (C-WATCH part 12, U19b3c): the sans-IO sequence, the
 /// tasks of its loop's requests and of its open halt attempt. Everything
 /// of it reads `clock::Steady`.
@@ -1346,12 +1356,9 @@ impl Runtime {
     fn finish_refusal(&mut self, reason: &str, halt: Option<Result<String, String>>) {
         self.abort_kill(AbortWhy::StartRefused(reason.to_string()));
         let mut text = alert::refusal_text(reason);
-        if let Some(r) = halt {
+        if let Some(r) = &halt {
             text.push_str(". 늦은 정지: ");
-            text.push_str(&match r {
-                Ok(reply) if crate::oms::latched(&reply) => kill::cut(&reply, kill::TEXT_MAX),
-                Ok(why) | Err(why) => format!("실패({})", kill::cut(&why, kill::TEXT_MAX)),
-            });
+            text.push_str(&halt_outcome(r));
         }
         self.alerts.once(&text);
         self.refused = true;
@@ -1614,6 +1621,17 @@ mod tests {
             dropped,
             vec!["/v5/execution/list", "/api/status", "watcher_mismatch"]
         );
+    }
+
+    #[test]
+    fn the_refusal_names_a_latch_only_for_a_reply_that_latched() {
+        assert_eq!(halt_outcome(&Ok("latched".into())), "latched");
+        let rearm = "already latched; the earlier confirmation is void and a new kill loop starts";
+        assert_eq!(halt_outcome(&Ok(rearm.into())), rearm);
+        assert_eq!(halt_outcome(&Ok("held".into())), "실패(held)");
+        assert_eq!(halt_outcome(&Err("not sent: no socket".into())), "실패(not sent: no socket)");
+        let long = "x".repeat(500);
+        assert_eq!(halt_outcome(&Err(long)), format!("실패({})", "x".repeat(200)));
     }
 
     #[test]
