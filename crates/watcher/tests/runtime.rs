@@ -2460,6 +2460,94 @@ fn a_marker_path_refusal_before_the_kill_loop_sends_the_halt_first() {
     let _ = std::fs::remove_dir_all(&tg_dir);
 }
 
+/// The watcher started with the OMS down; W5 killed; `admin.sock` holds
+/// K2's `watcher_kill` reply (10 s at most) until `release`, then latches.
+/// While K2 is open the OMS answers with another marker path: the refusal
+/// waits for the kill's own `watcher_kill` (review 2 S1). Returns when the
+/// refusal's wait is logged.
+#[allow(clippy::type_complexity)]
+fn a_refusal_waiting_for_k2(
+    name: &str,
+) -> (World, std::path::PathBuf, std::path::PathBuf, Arc<ManualClock>, Running, Seen, Arc<AtomicBool>) {
+    let (tg_dir, tg) = telegram_section(&format!("{name}-t"));
+    let (mut w, dir) = kill_world(name, &tg, "");
+    let seen: Seen = Arc::new(Mutex::new(Vec::new()));
+    let release = Arc::new(AtomicBool::new(false));
+    let (s, r) = (seen.clone(), release.clone());
+    w.admin = FakeSock::serve(&w.cfg.admin_socket, move |_, _, v| {
+        if v["op"] == "watcher_kill" {
+            s.lock().unwrap().push((0, "watcher_kill".to_string()));
+            let end = Instant::now() + Duration::from_secs(10);
+            while !r.load(Ordering::SeqCst) && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            oms(v, "latched")
+        } else {
+            oms(v, "held")
+        }
+    });
+    w.systemctl = fake_systemctl(&dir, 1);
+    let clock = Arc::new(ManualClock::new(T0));
+    record_telegram(&w, &clock, &seen);
+    let run = w.start(clock.clone());
+    assert!(until(10, || !w.echo.requests().is_empty()), "{:?}", w.log());
+    std::thread::sleep(Duration::from_millis(300));
+    walk_until(&clock, 20_000, "the fire", || w.lines_with(FIRED) == 1);
+    walk_kill(&clock, "K2 at the admin.sock", || kill_lines(&w.admin).len() == 1);
+    w.status_with(marker_node(Some(std::path::Path::new("/elsewhere/kill.marker"))));
+    // The boot status is asked every 1,000 ms, inside K2's 5,000 ms.
+    walk_until(&clock, 3000, "the refusal waits", || {
+        w.lines_with("the start is refused while the halt is owed: watcher_kill first") == 1
+    });
+    (w, dir, tg_dir, clock, run, seen, release)
+}
+
+#[test]
+fn a_marker_path_refusal_during_k2_waits_for_the_kills_own_watcher_kill() {
+    // No second watcher_kill while K2 is open: the refusal takes K2's
+    // reply, then the abort notice, the refusal P1 with the outcome, exit 2
+    // (review 2 S1; holds.md: never two watcher_kill connections at once).
+    let (w, dir, tg_dir, _clock, mut run, seen, release) = a_refusal_waiting_for_k2("rt-k-refk2");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(run.running());
+    assert_eq!(kill_lines(&w.admin).len(), 1, "a second watcher_kill while K2 is open");
+    release.store(true, Ordering::SeqCst);
+    assert!(until(3, || !run.running()), "the reply did not end the refusal: {:?}", w.log());
+    assert_eq!(run.shutdown(), 2);
+    assert_eq!(kill_lines(&w.admin).len(), 1);
+    let abort = first(&seen, "tg:", "로 워처 킬 중단(일괄 취소 전)").expect("no abort notice");
+    let refusal = first(&seen, "tg:", ". 워처가 꺼짐: W1~W4와 W5가 돌지 않음").expect("no refusal P1");
+    assert!(abort < refusal, "{:?}", seen.lock().unwrap());
+    let r = w.sent().into_iter().find(|t| t.contains("워처가 꺼짐")).unwrap();
+    assert!(r.contains(REFUSED_ELSEWHERE), "{r}");
+    assert!(r.ends_with(". 늦은 정지: latched"), "{r}");
+    assert_eq!(w.lines_with("the owed watcher_kill latched the OMS: latched"), 1, "{:?}", w.log());
+    assert!(w.requests(CANCEL_ALL).is_empty());
+    assert!(!dir.join("argv").exists(), "K3 ran");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+#[test]
+fn a_shutdown_while_a_refusal_waits_sends_the_abort_notice() {
+    // SIGTERM while the refusal waits for K2: the refusal gives way, the
+    // kill is aborted with its notice, no refusal P1, exit 0 (review 2 N4;
+    // the refusal's outcome is lost: a C-WATCH known limit).
+    let (w, dir, tg_dir, _clock, mut run, _seen, release) = a_refusal_waiting_for_k2("rt-k-refterm");
+    assert_eq!(run.shutdown(), 0);
+    release.store(true, Ordering::SeqCst);
+    let texts = w.sent();
+    let aborts: Vec<_> = texts.iter().filter(|t| t.contains("로 워처 킬 중단(")).collect();
+    assert_eq!(aborts.len(), 1, "{texts:?}");
+    assert!(aborts[0].contains("워처 종료로 워처 킬 중단(일괄 취소 전)"), "{}", aborts[0]);
+    assert!(aborts[0].ends_with(NOT_READ), "{}", aborts[0]);
+    assert!(sent_with(&w, "워처가 꺼짐").is_empty(), "{texts:?}");
+    assert_eq!(kill_lines(&w.admin).len(), 1);
+    assert_eq!(w.lines_with("the kill ended: aborted; the halt is owed"), 1, "{:?}", w.log());
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
 /// The client class of a 503 answer, as a failed position read shows it.
 const FAILED_503: &str = "no_answer";
 
