@@ -1907,6 +1907,43 @@ impl Kill {
         out
     }
 
+    /// Shutdown or a start refusal (U19b3d), in every step. Before the
+    /// loop: one abort notice with the header as far as the steps went
+    /// (`진행 중` for the step not ended), then the end; a step whose
+    /// action runs is not cancelled here (the runtime aborts a halt task;
+    /// a marker write cannot be; K3's client is left to systemd) and its
+    /// outcome is not reported. In the loop: the loop's own abort. The
+    /// halt debt is reported in both cases.
+    pub fn abort(&mut self, now: u64, why: AbortWhy) -> Vec<Step> {
+        let mut out = Vec::new();
+        match self.stage {
+            Stage::Ended => {}
+            Stage::Loop => {
+                let acts = self.lp.abort(now, why);
+                self.take(acts, &mut out);
+            }
+            _ => {
+                self.stage = Stage::Ended;
+                self.attempt = None;
+                self.halt_owed = self.owes();
+                out.push(Step::Loop(Action::Notice(Notice::AbortBefore {
+                    why,
+                    header: self.header(),
+                })));
+                out.push(Step::Ended {
+                    report: Report {
+                        rounds: 0,
+                        cancel_all_calls: 0,
+                        zero_since: None,
+                        aborted: true,
+                    },
+                    halt_owed: self.halt_owed,
+                });
+            }
+        }
+        out
+    }
+
     /// The kill's clock moved to `now`: the step deadlines, the halt
     /// retries, the loop.
     pub fn poll(&mut self, now: u64) -> Vec<Step> {

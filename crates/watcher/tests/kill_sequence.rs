@@ -14,9 +14,9 @@ use std::path::PathBuf;
 
 use watcher::config::Kill as KillCfg;
 use watcher::kill::{
-    Action, Arrived, CancelAnswer, DETAIL_MAX, Kill, MARKER_TEXT_MAX, MarkerOutcome, Notice,
-    Report, Setup, Stage, Step, StopOutcome, halt_detail, late_halt_detail, marker_text,
-    notice_text, spawn_marker, utc_ms, write_marker,
+    AbortWhy, Action, Arrived, CancelAnswer, DETAIL_MAX, Kill, MARKER_TEXT_MAX, MarkerOutcome,
+    NOT_READ_ON_ABORT, NotSent, Notice, Report, Setup, Stage, Step, StopOutcome, halt_detail,
+    late_halt_detail, marker_text, notice_text, spawn_marker, utc_ms, write_marker,
 };
 use watcher::rest::CancelAll;
 use watcher::stop::Outcome;
@@ -233,6 +233,8 @@ fn halt_id(steps: &[Step]) -> Option<u64> {
 struct Run {
     k: Kill,
     log: Vec<(u64, Step)>,
+    /// The loop's requests not yet answered by `drive`.
+    pending: Vec<Step>,
 }
 
 impl Run {
@@ -242,13 +244,23 @@ impl Run {
 
     fn with(s: Setup) -> Run {
         let (k, steps) = Kill::new(FIRE, s, T0);
-        let mut r = Run { k, log: Vec::new() };
+        let mut r = Run {
+            k,
+            log: Vec::new(),
+            pending: Vec::new(),
+        };
         r.keep(T0, steps);
         r
     }
 
     fn keep(&mut self, now: u64, steps: Vec<Step>) -> Vec<Step> {
         self.log.extend(steps.iter().cloned().map(|s| (now, s)));
+        self.pending.extend(steps.iter().cloned().filter(|s| {
+            matches!(
+                s,
+                Step::Loop(Action::CancelAll { .. } | Action::Count { .. })
+            )
+        }));
         steps
     }
 
@@ -303,22 +315,35 @@ impl Run {
 
     /// Answers every request of the loop at once (cancel-alls `cancel`,
     /// counts `open`) and every halt retry with `halt`, polling every
-    /// 100 ms from `now` until the kill ends; step-bounded.
+    /// 100 ms from `now` until the kill ends or `until`; step-bounded.
     fn drive(
+        &mut self,
+        now: u64,
+        until: u64,
+        cancel: impl Fn() -> CancelAnswer,
+        open: usize,
+        halt: Result<&'static str, &'static str>,
+    ) -> u64 {
+        self.drive_with(now, until, cancel, open, |_, _| Some(halt))
+    }
+
+    /// As `drive`, but the open halt attempt is answered with what
+    /// `halt(now, emitted)` gives at each step (`None`: not yet).
+    fn drive_with(
         &mut self,
         mut now: u64,
         until: u64,
         cancel: impl Fn() -> CancelAnswer,
         open: usize,
-        halt: Result<&str, &str>,
+        mut halt: impl FnMut(u64, u64) -> Option<Result<&'static str, &'static str>>,
     ) -> u64 {
         for _ in 0..20_000 {
             if self.k.stage() == Stage::Ended || now >= until {
                 return now;
             }
-            let mut work = self.poll(now);
-            while let Some(s) = work.pop() {
-                let more = match s {
+            self.poll(now);
+            while let Some(s) = self.pending.pop() {
+                match s {
                     Step::Loop(Action::CancelAll { req_id }) => self.arrived(
                         now,
                         Arrived::Cancel {
@@ -333,10 +358,18 @@ impl Run {
                             result: Ok(open),
                         },
                     ),
-                    Step::Halt { .. } => self.halt(now, halt),
                     _ => Vec::new(),
                 };
-                work.extend(more);
+            }
+            if self.k.halt_open().is_some() {
+                let emitted = *self.halts().last().unwrap();
+                if let Some(r) = halt(now, emitted) {
+                    let more = self.halt(now, r);
+                    assert!(
+                        !more.iter().any(|s| matches!(s, Step::Halt { .. })),
+                        "{more:?}"
+                    );
+                }
             }
             now += 100;
         }
@@ -735,5 +768,203 @@ fn a_kill_without_a_confirmed_stop_owes_the_halt() {
         assert!(!report.aborted);
         assert_eq!(halt_owed, owed, "{what}");
         assert_eq!(r.k.stage(), Stage::Ended);
+    }
+}
+
+// ---- The halt retried during the loop ----
+
+/// K2 refused and K3 failed: the loop starts at T0 + 300 with the halt
+/// owed; K2 ended at T0 + 200.
+fn unhalted() -> Run {
+    let mut r = Run::new(true);
+    r.marker(T0 + 100, MarkerOutcome::Written);
+    r.halt(T0 + 200, Err("no socket"));
+    let steps = r.stop(T0 + 300, Outcome::Failed("exit 1".into()));
+    assert!(cancel_all(&steps));
+    assert!(r.k.halt_owed());
+    r
+}
+
+#[test]
+fn an_oms_that_answers_during_the_loop_is_latched_at_once() {
+    // The watcher key is latched (scenario C): every cancel-all is not
+    // sent, so the loop cannot end; the retries need no Bybit request.
+    let latched = || CancelAnswer::NotSent(NotSent::Latched);
+    let mut r = unhalted();
+    // 5,000 ms after the failed K2, then 5,000 ms after each failure; an
+    // attempt without an answer is never joined by a second one and ends
+    // at its deadline (2 × 2,000 + 1,000), the next 5,000 ms after it.
+    let now = r.drive_with(T0 + 300, T0 + 25_000, latched, 1, |now, emitted| {
+        match emitted - T0 {
+            5_200 if now >= T0 + 6_000 => Some(Err("refused")),
+            5_200 => None,
+            // Never answered: its deadline is T0 + 16,000.
+            11_000 => None,
+            21_000 if now >= T0 + 21_500 => Some(Ok("latched")),
+            _ => None,
+        }
+    });
+    let halts: Vec<u64> = r.halts().iter().map(|t| t - T0).collect();
+    assert_eq!(halts, vec![100, 5_200, 11_000, 21_000]);
+    assert!(!r.k.halt_owed());
+    assert_eq!(r.k.outcome(), StopOutcome::Latched);
+    assert_eq!(r.k.kill_loop().outcome(), StopOutcome::Latched);
+    let late: Vec<Notice> = r
+        .notices()
+        .into_iter()
+        .filter(|n| matches!(n, Notice::LateHalt { .. }))
+        .collect();
+    assert_eq!(
+        late,
+        vec![Notice::LateHalt {
+            reply: "latched".into()
+        }]
+    );
+    assert_eq!(
+        notice_text(&late[0], ""),
+        "늦은 정지: OMS가 다시 답해 watcher_kill로 래치함(latched)"
+    );
+    // No further halt, however long the loop runs; no cancel-all left.
+    let now = r.drive(now, now + 60_000, latched, 1, Err("unexpected"));
+    assert_eq!(r.halts().len(), 4);
+    assert_eq!(r.k.kill_loop().cancel_all_calls(), 0);
+    // Then the key works again and the venue is empty: the final line
+    // names the latch, nothing is owed.
+    r.drive(now, now + 60_000, zero, 0, Err("unexpected"));
+    let finals: Vec<StopOutcome> = r
+        .notices()
+        .iter()
+        .filter_map(|n| match n {
+            Notice::Final { outcome, .. } => Some(*outcome),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(finals, vec![StopOutcome::Latched]);
+    assert_eq!(r.ended().map(|(_, owed)| owed), Some(false));
+}
+
+#[test]
+fn no_halt_is_retried_when_the_halt_is_not_owed() {
+    let one_open = || CancelAnswer::Done(CancelAll { cancelled: 1 });
+    // K2 latched.
+    let mut r = Run::new(true);
+    r.marker(T0 + 100, MarkerOutcome::Written);
+    r.halt(T0 + 200, Ok("latched"));
+    r.drive(T0 + 200, T0 + 120_000, one_open, 1, Err("unexpected"));
+    assert_eq!(r.halts(), vec![T0 + 100]);
+    // K3 stopped with a marker at a checked path.
+    let mut r = Run::new(true);
+    r.marker(T0 + 100, MarkerOutcome::AlreadyPresent);
+    r.halt(T0 + 200, Err("no socket"));
+    r.stop(T0 + 300, Outcome::Stopped);
+    assert!(!r.k.halt_owed());
+    r.drive(T0 + 300, T0 + 120_000, one_open, 1, Err("unexpected"));
+    assert_eq!(r.halts(), vec![T0 + 100]);
+    // The same stop with the path not checked owes it: retried.
+    let mut r = Run::new(false);
+    r.marker(T0 + 100, MarkerOutcome::AlreadyPresent);
+    r.halt(T0 + 200, Err("no socket"));
+    r.stop(T0 + 300, Outcome::Stopped);
+    r.drive(T0 + 300, T0 + 20_000, one_open, 1, Err("refused"));
+    let halts: Vec<u64> = r.halts().iter().map(|t| t - T0).collect();
+    assert_eq!(halts, vec![100, 5_200, 10_200, 15_200]);
+}
+
+// ---- Abort in every step ----
+
+fn abort_text(steps: &[Step]) -> String {
+    match steps {
+        [
+            Step::Loop(Action::Notice(n @ Notice::AbortBefore { .. })),
+            Step::Ended { report, .. },
+        ] => {
+            assert!(report.aborted && report.cancel_all_calls == 0, "{report:?}");
+            notice_text(n, "")
+        }
+        _ => panic!("{steps:?}"),
+    }
+}
+
+#[test]
+fn abort_before_the_loop_tells_the_steps_done() {
+    let silence = "W5: OMS /api/status 무응답 10초, 마지막 정상 응답 11-15 07:13:10 KST";
+    let tail = "로 워처 킬 중단(일괄 취소 전). OMS가 아직 주문을 낼 수 있음";
+    // During K1.
+    let mut r = Run::new(true);
+    let steps = r.k.abort(T0 + 100, AbortWhy::Shutdown);
+    let text = abort_text(&steps);
+    assert_eq!(
+        text,
+        format!(
+            "{silence}. 킬 마커: 진행 중. OMS 정지: 진행 중.\n워처 종료{tail}\n{NOT_READ_ON_ABORT}"
+        )
+    );
+    assert_eq!(r.k.stage(), Stage::Ended);
+    assert!(matches!(
+        steps[1],
+        Step::Ended {
+            halt_owed: true,
+            ..
+        }
+    ));
+    // Nothing after it: the late write, the deadlines, a second abort.
+    assert!(r.marker(T0 + 200, MarkerOutcome::Written).is_empty());
+    assert!(r.poll(T0 + 60_000).is_empty());
+    assert!(r.k.abort(T0 + 60_000, AbortWhy::Shutdown).is_empty());
+
+    // During K2, by a start refusal: the open attempt is given up.
+    let mut r = Run::new(true);
+    r.marker(T0 + 100, MarkerOutcome::Written);
+    let (id, _) = r.k.halt_open().unwrap();
+    let steps = r.k.abort(
+        T0 + 200,
+        AbortWhy::StartRefused("the OMS reads its kill marker at none".into()),
+    );
+    assert_eq!(
+        abort_text(&steps),
+        format!(
+            "{silence}. 킬 마커: 씀. OMS 정지: 진행 중.\n워처 시작 거부: the OMS reads its kill marker at none{tail}\n{NOT_READ_ON_ABORT}"
+        )
+    );
+    assert_eq!(r.k.halt_open(), None);
+    assert!(r.k.halt_done(T0 + 300, id, Ok("latched".into())).is_empty());
+
+    // During K3.
+    let mut r = Run::new(true);
+    r.marker(T0 + 100, MarkerOutcome::Failed("PermissionDenied".into()));
+    r.halt(T0 + 200, Err("no socket"));
+    let text = abort_text(&r.k.abort(T0 + 300, AbortWhy::Shutdown));
+    assert!(
+        text.starts_with(&format!(
+            "{silence}. 킬 마커: 쓰지 못함(PermissionDenied). OMS 정지: watcher_kill 실패(no socket) → systemctl stop {UNIT}: 진행 중.\n워처 종료{tail}"
+        )),
+        "{text}"
+    );
+    assert!(r.stop(T0 + 400, Outcome::Stopped).is_empty());
+    assert!(
+        r.index(|s| matches!(s, Step::Loop(Action::CancelAll { .. })))
+            .is_none()
+    );
+
+    // In the loop: the loop's own abort notice, and the debt reported.
+    for (reply, owed) in [(Ok("latched"), false), (Err("no socket"), true)] {
+        let mut r = Run::new(true);
+        r.marker(T0 + 100, MarkerOutcome::Written);
+        r.halt(T0 + 200, reply);
+        if owed {
+            r.stop(T0 + 300, Outcome::Failed("exit 1".into()));
+        }
+        let steps = r.k.abort(T0 + 400, AbortWhy::Shutdown);
+        assert!(
+            matches!(
+                steps.as_slice(),
+                [
+                    Step::Loop(Action::Notice(Notice::Abort { .. })),
+                    Step::Ended { report, halt_owed }
+                ] if report.aborted && *halt_owed == owed
+            ),
+            "{steps:?}"
+        );
+        assert!(r.poll(T0 + 2_000).is_empty());
     }
 }
