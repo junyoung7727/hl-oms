@@ -12,6 +12,9 @@
 # list (`bash <(git show main:tools/ci/owner_review.sh) main <(git show
 # main:tools/ci/owner_review_paths.txt)`), so that the change under review
 # can neither edit the script nor shorten the list it is checked against.
+# Exit 0 means no finding only together with the line `owner_review: none`:
+# if the base has no script (or the ref is mistyped), `bash <(git show ..)`
+# runs an empty script and exits 0 with no output.
 #
 # The change is <base-commit>...HEAD (from the merge base, as in a pull
 # request). Four rules, one line per finding:
@@ -217,6 +220,9 @@ done
 # `mod <name>;` whose file still holds a test, are findings: cargo no
 # longer builds those tests. A `cfg(feature = "..")` put above an
 # unchanged `mod tests` line under src/ is not seen (text check).
+# The patch is read as plain text whatever the caller's git config or the
+# change's .gitattributes say: an external diff program, colour or a
+# `-diff` attribute would hide every line and read as "none".
 while IFS=$'\t' read -r kind a b; do
   case "$kind" in
     tests) finding "tests: $a" ;;
@@ -236,7 +242,8 @@ while IFS=$'\t' read -r kind a b; do
       done
       ;;
   esac
-done < <(git diff -U0 --no-renames --no-prefix "$mb" HEAD -- '*.rs' | awk '
+done < <(git diff -U0 --no-renames --no-prefix --no-ext-diff --no-textconv --no-color --text \
+  "$mb" HEAD -- '*.rs' | awk '
   BEGIN { t = "^[-+][[:space:]]*#[[:space:]]*\\[[[:space:]]*(tokio::)?test[[:space:]]*[](]"
           ig = "^\\+[[:space:]]*#[[:space:]]*\\[[[:space:]]*ignore[[:space:]]*[]=(]"
           ca = "^\\+[[:space:]]*#[[:space:]]*\\[[[:space:]]*cfg_attr[[:space:]]*\\(.*[^[:alnum:]_]ignore([^[:alnum:]_]|$)"

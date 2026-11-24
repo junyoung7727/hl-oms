@@ -480,6 +480,15 @@ oreset; perl -0pi -e 's/    #\[test\]\n    fn one_is_one\(\) \{\n        assert_
 expect_owner 1 "owner: a test removed" "owner_review: tests: 1 test attribute(s) removed, 0 added"
 oreset; perl -0pi -e 's/    #\[tokio::test\]\n    async fn later\(\) \{\}\n//' crates/a/src/lib.rs; plant
 expect_owner 1 "owner: a tokio test removed" "owner_review: tests: 1 test attribute(s) removed, 0 added"
+rmtest() { perl -0pi -e 's/    #\[test\]\n    fn one_is_one\(\) \{\n        assert_eq!\(super::one\(\), 1\);\n    \}\n\n//' crates/a/src/lib.rs; }
+oreset; rmtest; plant
+expect_owner_run 1 "owner: a test removed, external diff program set" "owner_review: tests: 1 test attribute(s) removed, 0 added" \
+  env GIT_EXTERNAL_DIFF=true tools/ci/owner_review.sh "$obase"
+expect_owner_run 1 "owner: a test removed, colour always on" "owner_review: tests: 1 test attribute(s) removed, 0 added" \
+  env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=color.ui GIT_CONFIG_VALUE_0=always tools/ci/owner_review.sh "$obase"
+oreset; rmtest; printf '*.rs -diff\n' > .gitattributes; plant
+expect_owner 1 "owner: a test removed behind a -diff attribute" "owner_review: tests: 1 test attribute(s) removed, 0 added"
+expect_owner 1 "owner: .gitattributes added" "owner_review: path: .gitattributes"
 oreset; perl -0pi -e 's/    #\[test\]\n    fn one_is_one\(\) \{\n        assert_eq!\(super::one\(\), 1\);\n    \}\n\n//' crates/a/src/lib.rs
 printf '\n#[test]\nfn one_is_one() {\n    assert_eq!(a::one(), 1);\n}\n' >> crates/a/tests/t.rs; plant
 expect_owner 0 "owner: a test moved to another file" "owner_review: none"

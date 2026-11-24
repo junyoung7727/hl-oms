@@ -21,3 +21,6 @@ rustfmt.toml
 .rustfmt.toml
 .cargo/
 deny.toml
+# What makes git show a file's patch (a `-diff` line hides it from the
+# tests rule):
+.gitattributes
