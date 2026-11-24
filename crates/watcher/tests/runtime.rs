@@ -2234,3 +2234,104 @@ fn shutdown_during_a_kill_sends_one_abort_notice() {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&tg_dir);
 }
+
+/// The start-refusal P1's head for a status that names `/elsewhere`.
+const REFUSED_ELSEWHERE: &str = "워처 시작 거부: the OMS reads its kill marker at /elsewhere/kill.marker; the watcher writes ";
+
+/// The position in `seen` of the first entry that starts with `head` and
+/// holds `pat`.
+fn first(seen: &Seen, head: &str, pat: &str) -> Option<usize> {
+    seen.lock()
+        .unwrap()
+        .iter()
+        .position(|(_, p)| p.starts_with(head) && p.contains(pat))
+}
+
+#[test]
+fn a_start_refusal_during_a_kill_sends_the_abort_notice_first() {
+    // The watcher started with the OMS down; W5 killed (admin.sock latched:
+    // the halt is not owed). Then the OMS answers with another marker path:
+    // the boot rule refuses during the loop (review 1 S10).
+    let (w, dir, tg_dir, clock, mut run) = kill_with_the_oms_down("rt-k-refkill");
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    let seen: Seen = Arc::new(Mutex::new(Vec::new()));
+    record_telegram(&w, &clock, &seen);
+    w.status_with(marker_node(Some(std::path::Path::new("/elsewhere/kill.marker"))));
+    walk_until(&clock, 10_000, "the exit", || !run.running());
+    assert_eq!(run.shutdown(), 2);
+    let abort = first(&seen, "tg:", "로 워처 킬 중단(").expect("no abort notice");
+    let refusal = first(&seen, "tg:", ". 워처가 꺼짐: W1~W4와 W5가 돌지 않음").expect("no refusal P1");
+    assert!(abort < refusal, "{:?}", w.sent());
+    let texts = w.sent();
+    let a = texts.iter().find(|t| t.contains("로 워처 킬 중단(")).unwrap();
+    assert!(a.contains(REFUSED_ELSEWHERE), "{a}");
+    assert!(a.ends_with(&format!("OMS의 래치·마커는 그대로.\n{NOT_READ}")), "{a}");
+    let r = texts.iter().find(|t| t.contains("워처가 꺼짐")).unwrap();
+    assert!(r.contains(REFUSED_ELSEWHERE), "{r}");
+    assert!(!r.contains("늦은 정지"), "the halt latched: nothing owed: {r}");
+    assert_eq!(kill_lines(&w.admin).len(), 1);
+    assert_eq!(w.lines_with("the kill ended: aborted; the halt is not owed"), 1, "{:?}", w.log());
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+#[test]
+fn a_marker_path_refusal_sends_the_owed_halt_first() {
+    // The watcher started with the OMS down; W5 killed; admin.sock refused
+    // watcher_kill and systemctl failed: the loop runs (one order open) and
+    // owes the halt, retried every 5 s. Then the OMS answers with another
+    // marker path and latches: before the refusal the watcher sends one
+    // watcher_kill and names its outcome in the refusal P1 (review 3 S1).
+    let (tg_dir, tg) = telegram_section("rt-k-refowed-t");
+    let (mut w, dir) = kill_world("rt-k-refowed", &tg, "");
+    let seen: Seen = Arc::new(Mutex::new(Vec::new()));
+    let latch = Arc::new(AtomicBool::new(false));
+    let (s, l) = (seen.clone(), latch.clone());
+    w.admin = FakeSock::serve(&w.cfg.admin_socket, move |_, _, v| {
+        if v["op"] == "watcher_kill" {
+            s.lock().unwrap().push((0, "watcher_kill".to_string()));
+            if l.load(Ordering::SeqCst) {
+                oms(v, "latched")
+            } else {
+                sock::err(v, "bad_request", "not now")
+            }
+        } else {
+            oms(v, "held")
+        }
+    });
+    w.systemctl = fake_systemctl(&dir, 1);
+    w.bybit.route("/v5/order/realtime", [orders(1)]);
+    let clock = Arc::new(ManualClock::new(T0));
+    record_telegram(&w, &clock, &seen);
+    let mut run = w.start(clock.clone());
+    assert!(until(10, || !w.echo.requests().is_empty()), "{:?}", w.log());
+    std::thread::sleep(Duration::from_millis(300));
+    walk_until(&clock, 20_000, "the fire", || w.lines_with(FIRED) == 1);
+    walk_kill(&clock, "the fake systemctl", || dir.join("argv").exists());
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    // Right after a retry that failed, the OMS answers and would latch.
+    walk_until(&clock, 20_000, "a halt retry", || kill_lines(&w.admin).len() >= 2);
+    let before = kill_lines(&w.admin).len();
+    latch.store(true, Ordering::SeqCst);
+    w.status_with(marker_node(Some(std::path::Path::new("/elsewhere/kill.marker"))));
+    walk_until(&clock, 4000, "the exit", || !run.running());
+    assert_eq!(run.shutdown(), 2);
+    let kills = kill_lines(&w.admin);
+    assert_eq!(kills.len(), before + 1, "{kills:?}");
+    assert_eq!(kills[before]["detail"], LATE_DETAIL);
+    let last_kill = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .rposition(|(_, p)| p == "watcher_kill")
+        .unwrap();
+    let refusal = first(&seen, "tg:", ". 워처가 꺼짐: W1~W4와 W5가 돌지 않음").expect("no refusal P1");
+    let abort = first(&seen, "tg:", "로 워처 킬 중단(").expect("no abort notice");
+    assert!(last_kill < abort && abort < refusal, "{:?}", seen.lock().unwrap());
+    let r = w.sent().into_iter().find(|t| t.contains("워처가 꺼짐")).unwrap();
+    assert!(r.contains(REFUSED_ELSEWHERE), "{r}");
+    assert!(r.ends_with("워처가 꺼짐: W1~W4와 W5가 돌지 않음. 늦은 정지: latched"), "{r}");
+    assert_eq!(w.lines_with("the owed watcher_kill latched the OMS: latched"), 1, "{:?}", w.log());
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
