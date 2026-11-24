@@ -2265,6 +2265,33 @@ fn shutdown_during_a_kill_sends_one_abort_notice() {
     let _ = std::fs::remove_dir_all(&tg_dir);
 }
 
+#[test]
+fn shutdown_right_after_the_kill_ended_sends_the_final_notice() {
+    // The loop confirmed zero: the kill ended and its final notice waits
+    // for its position read, which hangs at the fake. SIGTERM in that
+    // window: the final notice goes at once with the not-read line, no
+    // abort notice (the kill had ended; review 1 M1, runbook 7.18 step 4).
+    let (w, dir, tg_dir, clock, mut run, _) = kill_after_silence("rt-k-termfin", "", "", |w| {
+        w.bybit.route("/v5/position/list", [empty_page(), Answer::Hang]);
+    });
+    let from = w.requests("/v5/position/list").len();
+    walk_until(&clock, 60_000, "the end of the kill", || {
+        w.lines_with("the kill ended: zero open orders confirmed") == 1
+    });
+    // The final notice's read (W2's rounds, running again, ask the same
+    // path).
+    assert!(until(5, || w.requests("/v5/position/list").len() > from), "{:?}", w.log());
+    assert!(sent_with(&w, FINAL_NOTICE).is_empty());
+    assert_eq!(run.shutdown(), 0);
+    let fin = sent_with(&w, FINAL_NOTICE);
+    assert_eq!(fin.len(), 1, "the final notice was lost at shutdown: {:?}", w.sent());
+    assert!(fin[0].ends_with("\n포지션 조회 안 함(워처 종료 중). 수량·손익 모름"), "{}", fin[0]);
+    assert!(sent_with(&w, "로 워처 킬 중단(").is_empty(), "{:?}", w.sent());
+    assert_eq!(w.sent().len(), 2, "start and final notice: {:?}", w.sent());
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
 /// The start-refusal P1's head for a status that names `/elsewhere`.
 const REFUSED_ELSEWHERE: &str = "워처 시작 거부: the OMS reads its kill marker at /elsewhere/kill.marker; the watcher writes ";
 

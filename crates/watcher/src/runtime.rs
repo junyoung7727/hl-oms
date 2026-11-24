@@ -1448,15 +1448,15 @@ impl Runtime {
     /// read) and `Ended`. A halt task is aborted; K3's client, if it runs,
     /// is left to finish its job in systemd (a half-stopped OMS is worse
     /// than a stopped one); the marker stays. Every notice still waiting
-    /// goes now.
+    /// goes now, also when the kill had already ended (its final notice
+    /// may still wait for its position read; review 1 M1).
     async fn shutdown_kill(&mut self, rx: &mut mpsc::UnboundedReceiver<Msg>) {
         // A refusal still waiting for its watcher_kill gives way: the
         // watcher ends (exit 0), its halt task is aborted with the rest.
         self.refusing = None;
-        let Some(k) = &self.kill else {
-            return;
-        };
-        if k.kill.stage() == Stage::Marker {
+        if let Some(k) = &self.kill
+            && k.kill.stage() == Stage::Marker
+        {
             let kill_no = k.kill_no;
             let left = k
                 .kill
@@ -1483,9 +1483,9 @@ impl Runtime {
         self.abort_kill(AbortWhy::Shutdown);
     }
 
-    /// Aborts a running kill (shutdown or a start refusal, U19b3d): the
-    /// abort notice and `Ended`; then every kill notice still waiting goes
-    /// at once, in its order, the abort notice last.
+    /// Aborts a running kill, if one runs (shutdown or a start refusal,
+    /// U19b3d): the abort notice and `Ended`; then every kill notice still
+    /// waiting goes at once, in its order, the abort notice last.
     fn abort_kill(&mut self, why: AbortWhy) {
         let now = self.steady.now_ms();
         if let Some(k) = self.kill.as_mut() {
