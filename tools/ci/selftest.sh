@@ -523,6 +523,15 @@ oreset; mkdir -p crates/a/.cargo; printf '[build]\nrustflags = ["-Aclippy::all"]
 expect_owner 1 "owner: a nested .cargo/config.toml" "owner_review: path: crates/a/.cargo/config.toml"
 oreset; printf 'x\n' > crates/a/myclippy.toml; mkdir -p docs/tools/ci; printf 'x\n' > docs/tools/ci/note.md; plant
 expect_owner 0 "owner: a name that only ends in a listed name, a listed path below another directory" "owner_review: none"
+# The layering and generated-docs checks are Rust code in xtask (review 2, S2).
+oreset; mkdir -p crates/xtask/src; printf 'pub fn run() -> i32 {\n    0\n}\n' > crates/xtask/src/layers.rs; plant
+expect_owner 1 "owner: the layering checker's code changed" "owner_review: path: crates/xtask/src/layers.rs"
+oreset; mkdir -p crates/xtask/src; printf 'pub fn check() {}\n' > crates/xtask/src/registry.rs; plant
+expect_owner 1 "owner: the generated-docs checker's code changed" "owner_review: path: crates/xtask/src/registry.rs"
+oreset; mkdir -p crates/xtask/src; printf 'fn main() {}\n' > crates/xtask/src/main.rs; plant
+expect_owner 1 "owner: the xtask command table changed" "owner_review: path: crates/xtask/src/main.rs"
+oreset; mkdir -p crates/xtask/src; printf 'pub fn m() {}\n' > crates/xtask/src/mutants.rs; plant
+expect_owner 0 "owner: another xtask file changed" "owner_review: none"
 # A new crate that leaves out the workspace lints builds outside all of them.
 oreset; mkdir -p crates/n/src; : > crates/n/src/lib.rs; printf '[package]\nname = "n"\n' > crates/n/Cargo.toml; plant
 expect_owner 1 "owner: a new crate without [lints] workspace = true" "owner_review: manifest: crates/n/Cargo.toml"

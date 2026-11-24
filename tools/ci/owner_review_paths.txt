@@ -7,6 +7,11 @@
 # The checks themselves, their allow-lists and this list:
 .github/
 tools/ci/
+# The checks written in Rust: the crate layering table (xtask layers), the
+# generated-docs check (xtask docs) and the command table that runs them.
+crates/xtask/src/layers.rs
+crates/xtask/src/registry.rs
+crates/xtask/src/main.rs
 # What builds and lints the code:
 rust-toolchain
 rust-toolchain.toml
