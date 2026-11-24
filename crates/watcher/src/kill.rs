@@ -1680,7 +1680,7 @@ impl Kill {
     }
 
     fn owes(&self) -> bool {
-        !self.halted && !(self.stopped() && self.marker_in_place())
+        !(self.halted || self.stopped() && self.marker_in_place())
     }
 
     /// The header of the start notice, as far as the steps went (`진행 중`
@@ -1774,14 +1774,14 @@ impl Kill {
     }
 
     /// K1 ended (or passed its deadline): K2.
-    fn to_halt(&mut self, now: u64, out: &mut Vec<Step>) {
+    fn start_halt(&mut self, now: u64, out: &mut Vec<Step>) {
         self.stage = Stage::Halt;
         let detail = halt_detail(&self.s.name, self.silent_ms);
         out.push(self.open_halt(now, detail));
     }
 
     /// K2 did not halt: K3.
-    fn to_stop(&mut self, now: u64, out: &mut Vec<Step>) {
+    fn start_stop(&mut self, now: u64, out: &mut Vec<Step>) {
         self.stage = Stage::Stop;
         self.deadline = now.saturating_add(self.s.kill.stop_wait_ms);
         out.push(Step::StopUnit {
@@ -1790,7 +1790,7 @@ impl Kill {
     }
 
     /// K2 halted, or K3 ended: the loop, with the header and the outcome.
-    fn to_loop(&mut self, now: u64, out: &mut Vec<Step>) {
+    fn start_loop(&mut self, now: u64, out: &mut Vec<Step>) {
         self.stage = Stage::Loop;
         self.halt_owed = self.owes();
         let header = self.header();
@@ -1839,7 +1839,7 @@ impl Kill {
             return out;
         }
         self.marker = MarkerState::Done(o);
-        self.to_halt(now, &mut out);
+        self.start_halt(now, &mut out);
         out
     }
 
@@ -1848,7 +1848,7 @@ impl Kill {
     /// poll applied it (the truth about the OMS first).
     pub fn halt_done(&mut self, now: u64, id: u64, r: Result<String, String>) -> Vec<Step> {
         let mut out = Vec::new();
-        if !self.attempt.is_some_and(|a| a.id == id) {
+        if self.attempt.is_none_or(|a| a.id != id) {
             self.ignored += 1;
             return out;
         }
@@ -1863,11 +1863,11 @@ impl Kill {
             (Stage::Halt, Ok(reply)) => {
                 self.halted = true;
                 self.halt = HaltState::Latched(reply);
-                self.to_loop(now, &mut out);
+                self.start_loop(now, &mut out);
             }
             (Stage::Halt, Err(why)) => {
                 self.halt = HaltState::Failed(why);
-                self.to_stop(now, &mut out);
+                self.start_stop(now, &mut out);
             }
             (Stage::Loop, Ok(reply)) => {
                 self.halted = true;
@@ -1891,7 +1891,7 @@ impl Kill {
             return out;
         }
         self.stop = Some(o);
-        self.to_loop(now, &mut out);
+        self.start_loop(now, &mut out);
         out
     }
 
@@ -1951,19 +1951,19 @@ impl Kill {
         match self.stage {
             Stage::Marker if now >= self.deadline => {
                 self.marker = MarkerState::TimedOut;
-                self.to_halt(now, &mut out);
+                self.start_halt(now, &mut out);
             }
             Stage::Halt => {
                 if self.attempt.is_some_and(|a| now >= a.deadline) {
                     self.attempt = None;
                     self.halt_ended = now;
                     self.halt = HaltState::Failed(HALT_TIMED_OUT.to_string());
-                    self.to_stop(now, &mut out);
+                    self.start_stop(now, &mut out);
                 }
             }
             Stage::Stop if now >= self.deadline => {
                 self.stop = Some(stop::Outcome::Unconfirmed);
-                self.to_loop(now, &mut out);
+                self.start_loop(now, &mut out);
             }
             Stage::Loop => {
                 if self.attempt.is_some_and(|a| now >= a.deadline) {

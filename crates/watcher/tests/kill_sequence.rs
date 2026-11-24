@@ -12,11 +12,15 @@ mod common;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
+use serde_json::{Value, json};
+use watcher::alert::{MSG_LIMIT, message, split};
+use watcher::clock::{Clock, ManualClock, Steady};
 use watcher::config::Kill as KillCfg;
 use watcher::kill::{
     AbortWhy, Action, Arrived, CancelAnswer, DETAIL_MAX, Kill, MARKER_TEXT_MAX, MarkerOutcome,
-    NOT_READ_ON_ABORT, NotSent, Notice, Report, Setup, Stage, Step, StopOutcome, halt_detail,
-    late_halt_detail, marker_text, notice_text, spawn_marker, utc_ms, write_marker,
+    NOT_READ_ON_ABORT, NotSent, Notice, Positions, Report, Setup, Stage, Step, StopOutcome,
+    halt_detail, late_halt_detail, marker_text, notice_text, position_block, spawn_marker, utc_ms,
+    write_marker,
 };
 use watcher::rest::CancelAll;
 use watcher::stop::Outcome;
@@ -255,12 +259,17 @@ impl Run {
 
     fn keep(&mut self, now: u64, steps: Vec<Step>) -> Vec<Step> {
         self.log.extend(steps.iter().cloned().map(|s| (now, s)));
-        self.pending.extend(steps.iter().cloned().filter(|s| {
-            matches!(
-                s,
-                Step::Loop(Action::CancelAll { .. } | Action::Count { .. })
-            )
-        }));
+        self.pending.extend(
+            steps
+                .iter()
+                .filter(|s| {
+                    matches!(
+                        s,
+                        Step::Loop(Action::CancelAll { .. } | Action::Count { .. })
+                    )
+                })
+                .cloned(),
+        );
         steps
     }
 
@@ -967,4 +976,194 @@ fn abort_before_the_loop_tells_the_steps_done() {
         );
         assert!(r.poll(T0 + 2_000).is_empty());
     }
+}
+
+// ---- The header's bound ----
+
+/// 20 positions of a plausible shape (a 12-character symbol, the
+/// venue's usual decimals).
+fn rows(n: usize) -> Vec<Value> {
+    (0..n)
+        .map(|i| {
+            json!({
+                "symbol": format!("{i:02}00PEPEUSDT"), "side": "Sell",
+                "size": "12345678.9", "unrealisedPnl": "-12345.6789",
+                "markPrice": "0.0123456", "liqPrice": "0.0150001",
+            })
+        })
+        .collect()
+}
+
+/// The longest rows the block can show: a 30-character symbol and eight
+/// decimals in every number.
+fn longest_rows(n: usize) -> Vec<Value> {
+    (0..n)
+        .map(|i| {
+            json!({
+                "symbol": format!("{i:02}{}USDT", "X".repeat(24)), "side": "Sell",
+                "size": "12345.12345678", "unrealisedPnl": "-123456.12345678",
+                "markPrice": "123456.12345678", "liqPrice": "100000.5",
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn a_start_notice_with_the_longest_header_fits_one_part() {
+    // The config's longest name (64 characters of 2 UTF-16 units) and
+    // unit (255 characters); every free text far over its cut, with
+    // control characters in it.
+    let name = "𝕏".repeat(64);
+    let unit = format!("{}.service", "u".repeat(247));
+    let mut s = setup(true);
+    s.name = name.clone();
+    s.kill.oms_unit = unit.clone();
+    let mut r = Run::with(s);
+    let noise = |n: usize| format!("a\n\u{7}b\r{}", "가".repeat(n));
+    r.marker(T0 + 100, MarkerOutcome::Failed(noise(1000)));
+    // A 64 KiB reply that is no latch, and 4 KiB of systemctl's stderr.
+    r.halt(T0 + 200, Ok(&*noise(64 * 1024).leak()));
+    r.stop(
+        T0 + 300,
+        Outcome::Failed(format!("exit 1: {}", noise(4096))),
+    );
+    let header = r.k.kill_loop().header().to_string();
+    assert!(!header.chars().any(char::is_control), "{header}");
+    assert!(header.contains(&format!("systemctl stop {unit}: 실패(")));
+    // Each free text is cut to 200 characters.
+    for cut in [
+        format!("쓰지 못함(a  b {}).", "가".repeat(195)),
+        format!("watcher_kill 실패(a  b {}) →", "가".repeat(195)),
+        format!("실패(exit 1: a  b {}).", "가".repeat(187)),
+    ] {
+        assert!(header.contains(&cut), "{cut}: {header}");
+    }
+    let units = header.encode_utf16().count();
+    assert!(units <= 1300, "the header is {units} units");
+    eprintln!("header: {units} UTF-16 units");
+
+    let start = notice_text(&r.notices()[0], &header);
+    let body = format!(
+        "{start}\n{}",
+        position_block(&Positions::Rows(rows(20)), "11-15 07:13:20 KST")
+    );
+    let msg = message(&name, T0, &body);
+    let units = msg.encode_utf16().count();
+    eprintln!("start notice with 20 plausible rows: {units} UTF-16 units");
+    assert!(units <= MSG_LIMIT, "{units} units");
+    assert_eq!(split(&msg, MSG_LIMIT).len(), 1);
+
+    // Known limit (C-WATCH part 12): with this header and 20 rows of the
+    // longest shape the block can show, the start notice is cut into two
+    // parts, never more.
+    let body = format!(
+        "{start}\n{}",
+        position_block(&Positions::Rows(longest_rows(20)), "11-15 07:13:20 KST")
+    );
+    let msg = message(&name, T0, &body);
+    eprintln!(
+        "start notice with 20 longest rows: {} UTF-16 units",
+        msg.encode_utf16().count()
+    );
+    assert_eq!(split(&msg, MSG_LIMIT).len(), 2);
+}
+
+// ---- A clock that steps back ----
+
+#[test]
+fn a_clock_step_back_does_not_hold_the_loop() {
+    // The kill reads Steady over a wall clock that steps back 60 s during
+    // the loop with an order open; the texts read the raw clock.
+    let raw = std::sync::Arc::new(ManualClock::new(T0));
+    let steady = Steady::new(raw.clone());
+    let mut s = setup(true);
+    s.raw_now_ms = raw.now_ms();
+    let (k, steps) = Kill::new(FIRE, s, steady.now_ms());
+    let mut r = Run {
+        k,
+        log: Vec::new(),
+        pending: Vec::new(),
+    };
+    r.keep(T0, steps);
+    match &r.log[0].1 {
+        Step::WriteMarker { text } => {
+            assert!(text.contains("W5 2023-11-14T22:13:20.000Z"), "{text}")
+        }
+        s => panic!("{s:?}"),
+    }
+    raw.advance(100);
+    r.marker(steady.now_ms(), MarkerOutcome::Written);
+    raw.advance(100);
+    r.halt(steady.now_ms(), Err("no socket"));
+    raw.advance(100);
+    r.stop(steady.now_ms(), Outcome::Failed("exit 1".into()));
+    assert!(
+        r.k.kill_loop()
+            .header()
+            .contains("마지막 정상 응답 11-15 07:13:10 KST"),
+        "{}",
+        r.k.kill_loop().header()
+    );
+
+    // The test's own count of real progress: 100 ms per step. The clock
+    // steps back 60 s at step 250 (25 s of progress).
+    let one_open = || CancelAnswer::Done(CancelAll { cancelled: 1 });
+    let mut progress = 300u64;
+    let mut cancels = Vec::new();
+    let mut halts = Vec::new();
+    let mut marks = Vec::new();
+    for step in 0..1000 {
+        if step == 250 {
+            raw.set(raw.now_ms() - 60_000);
+        } else {
+            raw.advance(100);
+            progress += 100;
+        }
+        let now = steady.now_ms();
+        let before = r.log.len();
+        r.poll(now);
+        while let Some(st) = r.pending.pop() {
+            match st {
+                Step::Loop(Action::CancelAll { req_id }) => r.arrived(
+                    now,
+                    Arrived::Cancel {
+                        req_id,
+                        answer: one_open(),
+                    },
+                ),
+                Step::Loop(Action::Count { req_id }) => r.arrived(
+                    now,
+                    Arrived::Counted {
+                        req_id,
+                        result: Ok(1),
+                    },
+                ),
+                _ => Vec::new(),
+            };
+        }
+        if r.k.halt_open().is_some() {
+            r.halt(now, Err("refused"));
+        }
+        for (_, st) in r.log[before..].iter() {
+            match st {
+                Step::Loop(Action::CancelAll { .. }) => cancels.push(progress),
+                Step::Halt { .. } => halts.push(progress),
+                Step::Loop(Action::Notice(Notice::Progress { .. })) => marks.push(progress),
+                _ => {}
+            }
+        }
+    }
+    // Every cancel-all round_ms of progress after the previous one, the
+    // halt retries every 5,000 ms, the progress marks every notice_ms,
+    // across the step back.
+    assert!(cancels.len() > 90, "{cancels:?}");
+    assert!(
+        cancels.windows(2).all(|w| w[1] - w[0] == 1000),
+        "{cancels:?}"
+    );
+    assert!(
+        halts.len() > 15 && halts.windows(2).all(|w| w[1] - w[0] == 5000),
+        "{halts:?}"
+    );
+    assert_eq!(marks, vec![60_300]);
 }
