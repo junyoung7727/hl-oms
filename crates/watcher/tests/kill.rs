@@ -869,6 +869,23 @@ fn a_watch_that_is_no_multiple_of_its_step_ends_at_watch_ms() {
     let k = count_id(&l.poll(z + 30_000));
     let acts = l.count_done(z + 30_001, k, Ok(0));
     assert!(matches!(acts.last(), Some(Action::Ended(_))), "{acts:?}");
+
+    // A step longer than the watch (below the config range; `new` takes
+    // the timings as they are): the first count is already the last, at
+    // z + watch_ms.
+    let timing = Kill {
+        watch_ms: 10_000,
+        watch_every_ms: 15_000,
+        ..Kill::default()
+    };
+    let mut l = KillLoop::new(timing, RT);
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let k = count_id(&l.cancel_done(T0 + 10, c, done(0)));
+    assert_eq!(l.count_done(z, k, Ok(0)), []);
+    assert_eq!(l.next_wake(), Some(z + 10_000));
+    let k = count_id(&l.poll(z + 10_000));
+    let acts = l.count_done(z + 10_001, k, Ok(0));
+    assert!(matches!(acts.last(), Some(Action::Ended(_))), "{acts:?}");
 }
 
 #[test]
