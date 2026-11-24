@@ -21,7 +21,7 @@ use watcher::config::Kill;
 use watcher::kill::{
     AbortWhy, Action, CancelAnswer, KillLoop, LATCHED_LINE, LastError, NOT_READ_ON_ABORT, NotSent,
     Notice, PAST_DEADLINE, PAUSED_LINE, POSITIONS, Phase, Positions, Report, StopOutcome, TIMED_OUT, notice_text,
-    position_block, read_positions, Arrived, Inflight, ORDERS, count_open,
+    position_block, read_positions, Arrived, Inflight, ORDERS, cancel_answer, count_open,
 };
 use watcher::metrics::Metrics;
 use watcher::rest::{CANCEL_ALL, CancelAll, Client, ClientConfig, Credentials};
@@ -1916,6 +1916,32 @@ async fn a_late_count_page_ends_the_count_task() {
         "{told:?}"
     );
 
+    // A page answered at the deadline exactly is past it too; one 1 ms
+    // before it is in time.
+    for (late, past) in [(13_000, true), (12_999, false)] {
+        let mut rig = KillRig::new(vec![
+            (CANCEL_ALL, vec![at_once(ok_n(1))]),
+            (
+                ORDERS,
+                vec![
+                    at_once(open_orders(1, "c2")),
+                    rig::slow(open_orders(1, "c3"), late),
+                    at_once(open_orders(0, "")),
+                ],
+            ),
+        ]);
+        rig.start();
+        rig.run_until(|r| r.cancel_all_at().len() == 2).await;
+        let pages = rig.paths().iter().filter(|p| *p == ORDERS).count();
+        if past {
+            assert_eq!(pages, 2, "{late}");
+            assert_eq!(rig.lp.remaining(), &Err(PAST_DEADLINE.to_string()));
+        } else {
+            assert_eq!(pages, 3, "{late}");
+            assert_eq!(rig.lp.remaining(), &Ok(2));
+        }
+    }
+
     // Pages that answer 1,300 ms apart, 11 of them (+14,300 ms in all):
     // each moves the deadline, so the count is not failed (review 2 S2).
     let mut pages: Vec<rig::Reply> = (2..=11)
@@ -2012,6 +2038,29 @@ async fn a_cancel_all_not_sent_is_told_from_the_state_before_the_call() {
         "{told:?}"
     );
     assert_eq!(rig.lp.cancel_all_calls(), 0);
+
+    // A cancel-all that never connected left nothing: NotSent(Local), and
+    // no count follows it.
+    let cfg = ClientConfig {
+        base: format!("http://{}", http_fake::dead_addr()),
+        recv_window_ms: 5000,
+        request_timeout_ms: RT,
+    };
+    let clock = Arc::new(ManualClock::new(T0));
+    let (log, _lines) = watcher::log::collect();
+    let dead = Client::new(
+        &cfg,
+        Credentials::new("WKEY", "watcher-made-up-secret-42"),
+        clock.clone(),
+        Arc::new(Metrics::new("h1", "w1")),
+        log,
+    )
+    .unwrap();
+    let a = cancel_answer(&dead, &*clock).await;
+    assert!(
+        matches!(a, CancelAnswer::NotSent(NotSent::Local(_))),
+        "{a:?}"
+    );
 
     // A 403 the cancel-all itself got was sent (Failed, and a count
     // follows); in the pause after it the next cancel-all is not sent.

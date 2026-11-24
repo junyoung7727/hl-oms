@@ -475,7 +475,7 @@ pub async fn count_open(
     let unreadable = |why: &str| client.unreadable(ORDERS, why).to_string();
     let mut open = 0;
     let mut cursor = String::new();
-    for pages in 1..=w1::MAX_PAGES {
+    for _ in 0..w1::MAX_PAGES {
         let mut params = vec![
             ("category", "linear".to_string()),
             ("settleCoin", "USDT".to_string()),
@@ -514,9 +514,6 @@ pub async fn count_open(
         }
         if next == cursor {
             return Err(unreadable("nextPageCursor is the cursor just sent"));
-        }
-        if pages == w1::MAX_PAGES {
-            break;
         }
         cursor = next.to_string();
     }
