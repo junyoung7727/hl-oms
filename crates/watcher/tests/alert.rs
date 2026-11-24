@@ -487,7 +487,9 @@ fn a_network_error_moves_to_the_pinned_route() {
     );
 
     // The binary takes them from `Endpoints::of`; there is no override.
-    let cfg = Config::from_toml(
+    // Mainnet needs `[kill]` (U19b3a), whose marker directory must exist.
+    let kill_dir = common::test_dir("alert-endpoints");
+    let cfg = Config::from_toml(&format!(
         r#"name = "w1"
 network = "mainnet"
 mainnet_confirmed = true
@@ -500,8 +502,13 @@ status_url = "http://127.0.0.1:8188/api/status"
 
 [telegram]
 token_file = "/etc/watcher/telegram.json"
+
+[kill]
+marker = "{}"
+oms_unit = "watcher-test-no-such-unit.service"
 "#,
-    )
+        kill_dir.join("kill.marker").display()
+    ))
     .unwrap();
     assert_eq!(Endpoints::of(&cfg).telegram, prod);
 

@@ -8,7 +8,7 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use watcher::config::{Config, Kill, Network};
+use watcher::config::{Config, Kill, Network, Systemd, W5};
 
 /// The required fields and nothing else.
 const MIN: &str = r#"name = "w1"
@@ -140,7 +140,7 @@ fn the_config_is_validated_and_mainnet_needs_confirmation() {
     refused(&unconfirmed, "mainnet requires mainnet_confirmed = true");
     let confirmed =
         set("network", Some("\"mainnet\"")).replace("name = ", "mainnet_confirmed = true\nname = ");
-    let m = ok(&format!("{confirmed}{TELEGRAM}"));
+    let m = ok(&format!("{confirmed}{TELEGRAM}{}", kill_section("config-mainnet")));
     assert_eq!((m.network, m.mainnet_confirmed), (Network::Mainnet, true));
     assert_eq!(m.client_config().base, "https://api.bybit.com");
     // The confirmation does not change a testnet config.
@@ -555,7 +555,10 @@ fn telegram_is_validated_and_required_on_mainnet() {
         &mainnet,
         "mainnet requires [telegram]: the watcher's P1 must reach a person",
     );
-    let m = ok(&format!("{mainnet}{TELEGRAM}"));
+    let m = ok(&format!(
+        "{mainnet}{TELEGRAM}{}",
+        kill_section("config-telegram-mainnet")
+    ));
     assert_eq!(m.network, Network::Mainnet);
     assert!(m.telegram.is_some());
     // An unconfirmed mainnet is still refused for the confirmation first.
@@ -609,12 +612,30 @@ fn telegram_is_validated_and_required_on_mainnet() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A whole `[kill]` section (mainnet needs one since U19b3a) whose marker
+/// directory is a fresh test directory named `name`.
+fn kill_section(name: &str) -> String {
+    format!("\n[kill]\n{}", kill_required(&common::test_dir(name)))
+}
+
+/// The two fields a `[kill]` section must name (U19b3a): a marker in an
+/// existing directory outside the data directory, and the OMS's unit.
+fn kill_required(dir: &Path) -> String {
+    format!(
+        "marker = \"{}\"\noms_unit = \"watcher-test-no-such-unit.service\"\n",
+        dir.join("kill.marker").display()
+    )
+}
+
 #[test]
 fn kill_loop_fields_are_validated() {
+    let dir = common::test_dir("config-kill-loop");
+    let req = kill_required(&dir);
     // Without the section: no kill (the key rules of step 2 are not read).
     assert_eq!(ok(MIN).kill, None);
-    // An empty section takes the defaults (table 7-8 C4, C5).
-    let k = ok(&format!("{MIN}\n[kill]\n")).kill.unwrap();
+    // A section with only the required fields takes the defaults (table
+    // 7-8 C4, C5).
+    let k = ok(&format!("{MIN}\n[kill]\n{req}")).kill.unwrap();
     assert_eq!(
         k,
         Kill {
@@ -622,9 +643,13 @@ fn kill_loop_fields_are_validated() {
             watch_ms: 30_000,
             watch_every_ms: 5000,
             notice_ms: 60_000,
+            marker: dir.join("kill.marker"),
+            oms_unit: "watcher-test-no-such-unit.service".into(),
+            systemd: Systemd::System,
+            stop_wait_ms: 10_000,
         }
     );
-    let kill = |body: &str| format!("{MIN}\n[kill]\n{body}\n");
+    let kill = |body: &str| format!("{MIN}\n[kill]\n{req}{body}\n");
     // Every bound itself is accepted, one step beyond it refused.
     for (field, lo, hi) in [
         ("round_ms", 1000, 10_000),
@@ -663,4 +688,177 @@ fn kill_loop_fields_are_validated() {
     refused(&kill("bogus = 1"), "bogus");
     refused(&kill("round_ms = \"1000\""), "round_ms");
     refused(&kill("round_ms = -1"), "round_ms");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn kill_and_w5_are_validated_and_kill_is_required_on_mainnet() {
+    let dir = common::test_dir("config-kill-w5");
+    let req = kill_required(&dir);
+    let kill = |body: &str| format!("{MIN}\n[kill]\n{body}\n");
+
+    // `marker` and `oms_unit` are required in the section (U19b3a).
+    refused(
+        &kill("oms_unit = \"hl-oms.service\""),
+        "missing field `marker`",
+    );
+    refused(
+        &kill(&format!("marker = \"{}\"", dir.join("m").display())),
+        "missing field `oms_unit`",
+    );
+
+    // The marker: the OMS's own rule (absolute, no `..`, outside the data
+    // directory by where it points, its directory exists at load).
+    let unit = "oms_unit = \"hl-oms.service\"";
+    let marker = |p: &str| kill(&format!("marker = \"{p}\"\n{unit}"));
+    refused(&marker("kill.marker"), "[kill] marker must be an absolute path");
+    refused(
+        &marker(&format!("{}/../x/kill.marker", dir.display())),
+        "[kill] marker must not hold `..`",
+    );
+    for inside in ["/srv/oms/data/kill.marker", "/srv/oms/./data/k"] {
+        refused(&marker(inside), "[kill] marker must be outside the data directory");
+    }
+    let missing = dir.join("no-such-dir").join("kill.marker");
+    refused(
+        &marker(&missing.display().to_string()),
+        &format!("[kill] marker: the directory of {} does not exist", missing.display()),
+    );
+    let data = dir.join("data");
+    std::fs::create_dir_all(&data).unwrap();
+    let alias = dir.join("alias");
+    std::os::unix::fs::symlink(&data, &alias).unwrap();
+    let with_data = |m: &Path| {
+        set("data_dir", Some(&format!("\"{}\"", data.display())))
+            + &format!("\n[kill]\nmarker = \"{}\"\n{unit}\n", m.display())
+    };
+    refused(
+        &with_data(&alias.join("kill.marker")),
+        "[kill] marker must be outside the data directory",
+    );
+    let k = ok(&with_data(&dir.join("kill.marker"))).kill.unwrap();
+    assert_eq!(k.marker, dir.join("kill.marker"));
+
+    // The unit: a systemd unit name, no glob, no space, no option.
+    let m = format!("marker = \"{}\"", dir.join("kill.marker").display());
+    let named = |u: &str| kill(&format!("{m}\noms_unit = {u:?}"));
+    const UNIT: &str = "[kill] oms_unit must be a systemd unit name: 1 to 255 of A-Z a-z 0-9 : _ . @ -, ending in .service, not starting with -";
+    for good in [
+        "hl-oms.service",
+        "hl-oms@bybit.service",
+        "a:b_c.d-e.service",
+        &format!("{}.service", "a".repeat(247)),
+    ] {
+        assert_eq!(ok(&named(good)).kill.unwrap().oms_unit, good);
+    }
+    for bad in [
+        "",
+        ".service",
+        "hl-oms",
+        "hl-oms.target",
+        "hl oms.service",
+        "hl-oms*.service",
+        "hl-oms?.service",
+        "hl-[o]ms.service",
+        "-hl-oms.service",
+        "--user.service",
+        "hl-oms.service ",
+        "hl/oms.service",
+        "hl-öms.service",
+        "hl-oms.service\n",
+        &format!("{}.service", "a".repeat(248)),
+    ] {
+        refused(&named(bad), UNIT);
+    }
+
+    // `systemd`: "system" (the default) or "user"; `stop_wait_ms` in range.
+    assert_eq!(ok(&kill(&req)).kill.unwrap().systemd, Systemd::System);
+    let user = ok(&kill(&format!("{req}systemd = \"user\""))).kill.unwrap();
+    assert_eq!(user.systemd, Systemd::User);
+    refused(&kill(&format!("{req}systemd = \"session\"")), "systemd");
+    for v in [1000, 120_000] {
+        let k = ok(&kill(&format!("{req}stop_wait_ms = {v}"))).kill.unwrap();
+        assert_eq!(k.stop_wait_ms, v);
+    }
+    for v in [999, 120_001] {
+        refused(
+            &kill(&format!("{req}stop_wait_ms = {v}")),
+            "[kill] stop_wait_ms must be between 1000 and 120000",
+        );
+    }
+    refused(&kill(&format!("{req}unit = \"x.service\"")), "unknown field `unit`");
+
+    // `[w5]`: absent = the design's 1 s probe and 10 s silence.
+    assert_eq!(
+        ok(MIN).w5,
+        W5 {
+            probe_ms: 1000,
+            silence_ms: 10_000,
+        }
+    );
+    let w5 = |body: &str| format!("{MIN}\n[w5]\n{body}\n");
+    assert_eq!(ok(&w5("")).w5, ok(MIN).w5);
+    for v in [500, 5000] {
+        assert_eq!(ok(&w5(&format!("probe_ms = {v}"))).w5.probe_ms, v);
+    }
+    for v in [499, 5001] {
+        refused(
+            &w5(&format!("probe_ms = {v}")),
+            "[w5] probe_ms must be between 500 and 5000",
+        );
+    }
+    for v in [10_000, 60_000] {
+        assert_eq!(ok(&w5(&format!("silence_ms = {v}"))).w5.silence_ms, v);
+    }
+    refused(
+        &w5("silence_ms = 60001"),
+        "[w5] silence_ms must be between 3000 and 60000",
+    );
+    // The bound: silence_ms ≥ probe_ms + 2 × request_timeout_ms + 1,000,
+    // so one lost probe and a slow answer cannot fire W5 (review 1 S6).
+    // It holds where W5 runs, with [kill].
+    let http = |rt: u64, body: &str| {
+        format!("{MIN}\n[http]\nrequest_timeout_ms = {rt}\n\n[w5]\n{body}\n\n[kill]\n{req}")
+    };
+    let w = ok(&http(1500, "probe_ms = 500\nsilence_ms = 4500")).w5;
+    assert_eq!((w.probe_ms, w.silence_ms), (500, 4500));
+    refused(
+        &http(1500, "probe_ms = 500\nsilence_ms = 4499"),
+        "[w5] silence_ms must be at least probe_ms + 2 × request_timeout_ms + 1000 = 4500",
+    );
+    refused(
+        &http(2000, "silence_ms = 5999"),
+        "[w5] silence_ms must be at least probe_ms + 2 × request_timeout_ms + 1000 = 6000",
+    );
+    ok(&http(2000, "silence_ms = 6000"));
+    refused(
+        &http(10_000, ""),
+        "[w5] silence_ms must be at least probe_ms + 2 × request_timeout_ms + 1000 = 22000",
+    );
+    // Without [kill] W5 is off and the bound is not read: the longest
+    // request_timeout_ms keeps the default [w5].
+    let off = format!("{MIN}\n[http]\nrequest_timeout_ms = 10000\n");
+    assert_eq!(ok(&off).w5.silence_ms, 10_000);
+    refused(
+        &http(200, "probe_ms = 500\nsilence_ms = 2999"),
+        "[w5] silence_ms must be between 3000 and 60000",
+    );
+    refused(&w5("bogus = 1"), "unknown field `bogus`");
+    refused(&w5("probe_ms = \"1000\""), "probe_ms");
+
+    // Mainnet refuses a config without [kill] (owner question 9), with
+    // the spec's line, and takes it with the section.
+    let mainnet = set("network", Some("\"mainnet\""))
+        .replace("name = ", "mainnet_confirmed = true\nname = ")
+        + TELEGRAM;
+    refused(
+        &mainnet,
+        "mainnet requires [kill]: without it the watcher cannot stop the OMS or cancel its orders",
+    );
+    let m = ok(&format!("{mainnet}\n[kill]\n{req}"));
+    assert_eq!(m.network, Network::Mainnet);
+    assert!(m.kill.is_some());
+    // Testnet takes a config without it (W5 is then off).
+    assert_eq!(ok(MIN).kill, None);
+    let _ = std::fs::remove_dir_all(&dir);
 }
