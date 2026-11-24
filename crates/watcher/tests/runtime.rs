@@ -2012,3 +2012,33 @@ fn a_round_in_flight_at_the_fire_sends_nothing_more_during_the_kill() {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&tg_dir);
 }
+
+#[test]
+fn a_stop_that_ended_before_the_k3_deadline_tick_is_reported_as_stopped() {
+    // The fake systemctl exits 0 at once; the clock then jumps past the K3
+    // deadline (stop_wait_ms = 10,000) before the next tick. That tick sees
+    // both: the stop's exit is read before the deadline is judged, so the
+    // start notice says 정지됨, not 정지 확인 못 함 (review 1 N1).
+    let (tg_dir, tg) = telegram_section("rt-k-stopdl-t");
+    let (mut w, dir) = kill_world("rt-k-stopdl", &tg, "");
+    w.cfg.admin_socket = w.cfg.admin_socket.with_file_name("none.sock");
+    w.systemctl = fake_systemctl(&dir, 0);
+    let argv = dir.join("argv");
+    w.status_marked();
+    let clock = Arc::new(ManualClock::new(T0));
+    let mut run = w.start(clock.clone());
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    walk(&clock, 2000);
+    w.status_down();
+    walk_until(&clock, 20_000, "the fire", || w.lines_with(FIRED) == 1);
+    // The clock stands still until the fake ran (the K3 deadline cannot
+    // pass), then jumps at once (the loop ticks every 100 ms).
+    assert!(until(10, || argv.exists()), "{:?}", w.log());
+    clock.advance(10_100);
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    let start = &sent_with(&w, START_NOTICE)[0];
+    assert!(start.contains(&format!("→ systemctl stop {UNIT}: 정지됨). ")), "{start}");
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}

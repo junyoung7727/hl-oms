@@ -905,8 +905,10 @@ impl Runtime {
         if let Some(f) = self.w5.fire(now) {
             self.fire(now, f);
         }
-        self.kill_tick(now);
+        // K3's exit before the kill judges its deadline: a stop that ended
+        // between two ticks is reported as it ended (review 1 N1).
         self.poll_stopper(now);
+        self.kill_tick(now);
         self.notices_tick(now);
         self.kill_metrics(now);
     }
