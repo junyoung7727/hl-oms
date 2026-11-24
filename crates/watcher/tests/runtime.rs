@@ -2138,6 +2138,14 @@ fn a_marker_path_change_after_the_boot_is_told() {
     walk(&clock, 5000);
     assert_eq!(sent_with(&w, "킬 마커 경로").len(), 1, "{:?}", w.sent());
     assert_eq!(w.lines_with("start refused"), 0);
+    // An answer that passes the rule clears it (repeat rule: once at the
+    // clear); another path later starts it again.
+    w.status_marked();
+    walk_until(&clock, 10_000, "the clear", || !sent_with(&w, &format!("해소: {p1}")).is_empty());
+    w.status_with(marker_node(Some(std::path::Path::new("/elsewhere/kill.marker"))));
+    walk_until(&clock, 10_000, "the P1 again", || sent_with(&w, &p1).len() == 3);
+    walk(&clock, 3000);
+    assert_eq!(sent_with(&w, "킬 마커 경로").len(), 3, "{:?}", w.sent());
     // The OMS goes silent: the kill writes the marker but cannot count it
     // as in place; K3 stops the unit; the halt stays owed.
     w.status_down();
@@ -2269,6 +2277,9 @@ fn a_start_refusal_during_a_kill_sends_the_abort_notice_first() {
     let r = texts.iter().find(|t| t.contains("워처가 꺼짐")).unwrap();
     assert!(r.contains(REFUSED_ELSEWHERE), "{r}");
     assert!(!r.contains("늦은 정지"), "the halt latched: nothing owed: {r}");
+    // In the boot wait the boot rule judges, not W5's probes: no
+    // marker_path P1 beside the refusal.
+    assert!(sent_with(&w, "킬 마커 경로").is_empty(), "{texts:?}");
     assert_eq!(kill_lines(&w.admin).len(), 1);
     assert_eq!(w.lines_with("the kill ended: aborted; the halt is not owed"), 1, "{:?}", w.log());
     let _ = std::fs::remove_dir_all(&dir);
@@ -2400,10 +2411,11 @@ fn ten_minutes_of_failing_queries_send_at_most_12_p1_messages() {
 #[test]
 fn every_kill_notice_carries_the_position_block() {
     // Two positions at the fake for the start notice's read; the read of
-    // the next notice (progress, 60 s later) fails; SIGTERM then aborts the
-    // loop (one order stays open). Every message of the kill shows the
-    // positions: the block, the failed read, or the abort's not-read line
-    // (design R3 SHOULD 6).
+    // the next notice (progress, 60 s later) fails; the read of the one
+    // after it hangs, and SIGTERM comes while it runs: that notice goes with
+    // the not-read line, then the abort notice (one order stays open).
+    // Every message of the kill shows the positions: the block, the failed
+    // read, or the not-read line (design R3 SHOULD 6).
     let rows = ok(json!({"category": "linear", "nextPageCursor": "", "list": [
         {"symbol": "BTCUSDT", "side": "Buy", "size": "0.5", "unrealisedPnl": "125.5",
          "markPrice": "70000", "liqPrice": "63000.12"},
@@ -2411,8 +2423,10 @@ fn every_kill_notice_carries_the_position_block() {
          "markPrice": "3500", "liqPrice": "3850"}]}));
     let (w, dir, tg_dir, clock, mut run, _) = kill_after_silence("rt-k-block", "", "", move |w| {
         w.bybit.route("/v5/order/realtime", [orders(1)]);
-        w.bybit.route("/v5/position/list", [rows.clone(), unavailable()]);
+        w.bybit.route("/v5/position/list", [rows.clone(), unavailable(), Answer::Hang]);
     });
+    let reads = || w.requests("/v5/position/list").len();
+    let from = reads();
     let start = &sent_with(&w, START_NOTICE)[0];
     assert!(
         start.contains(
@@ -2428,18 +2442,22 @@ fn every_kill_notice_carries_the_position_block() {
     walk_until(&clock, 70_000, "the progress notice", || {
         !sent_with(&w, "회차: 남은 미체결").is_empty()
     });
-    std::thread::sleep(Duration::from_millis(300));
+    // The next read hangs at the fake (the client's own timeout is 2,000 ms
+    // of real time): SIGTERM while it runs.
+    walk_until(&clock, 70_000, "the third read", || reads() == from + 2);
     assert_eq!(run.shutdown(), 0);
     let sent = w.sent();
-    assert_eq!(sent.len(), 3, "start, progress, abort: {sent:?}");
+    assert_eq!(sent.len(), 4, "start, progress, progress, abort: {sent:?}");
+    assert!(sent[2].contains("회차: 남은 미체결 1건"), "{}", sent[2]);
+    assert!(sent[2].ends_with("\n포지션 조회 안 함(워처 종료 중). 수량·손익 모름"), "{}", sent[2]);
     assert!(sent[1].contains("회차: 남은 미체결 1건"), "{}", sent[1]);
     assert!(
         sent[1].ends_with(&format!("\n포지션 조회 실패({FAILED_503}). 수량·손익·마크·강제청산가 모름")),
         "{}",
         sent[1]
     );
-    assert!(sent[2].contains("워처 종료로 워처 킬 중단("), "{}", sent[2]);
-    assert!(sent[2].ends_with(NOT_READ), "{}", sent[2]);
+    assert!(sent[3].contains("워처 종료로 워처 킬 중단("), "{}", sent[3]);
+    assert!(sent[3].ends_with(NOT_READ), "{}", sent[3]);
     for t in &sent {
         assert!(
             t.contains("\n포지션(거래소 /v5/position/list, ")
