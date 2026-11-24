@@ -20,7 +20,7 @@ use watcher::clock::{Clock, ManualClock};
 use watcher::config::Kill;
 use watcher::kill::{
     AbortWhy, Action, CancelAnswer, KillLoop, LATCHED_LINE, LastError, NOT_READ_ON_ABORT, NotSent,
-    Notice, PAUSED_LINE, POSITIONS, Phase, Positions, Report, StopOutcome, TIMED_OUT, notice_text,
+    Notice, PAST_DEADLINE, PAUSED_LINE, POSITIONS, Phase, Positions, Report, StopOutcome, TIMED_OUT, notice_text,
     position_block, read_positions, Arrived, Inflight, ORDERS, count_open,
 };
 use watcher::metrics::Metrics;
@@ -1881,4 +1881,81 @@ async fn a_5xx_cancel_all_or_count_repeats_until_zero_is_confirmed() {
     assert_eq!(kinds(&rig), ["start", "final"]);
     rig.assert_at_most_2_cancel_alls_per_second();
     assert_eq!(rig.lp.ignored(), 0);
+}
+
+#[tokio::test]
+async fn a_late_count_page_ends_the_count_task() {
+    // The second page answers 14,000 ms after the first (the clock moves at
+    // its request), past the deadline the first page set (+13,000): the
+    // task itself sends no third page and the count is a count error. No
+    // abort is needed: the rig lets the task run to its end.
+    let mut rig = KillRig::new(vec![
+        (CANCEL_ALL, vec![at_once(ok_n(1))]),
+        (
+            ORDERS,
+            vec![
+                at_once(open_orders(1, "c2")),
+                rig::slow(open_orders(1, "c3"), 14_000),
+                at_once(open_orders(0, "")),
+            ],
+        ),
+    ]);
+    rig.start();
+    rig.run_until(|r| r.cancel_all_at().len() == 2).await;
+    assert_eq!(rig.paths(), [CANCEL_ALL, ORDERS, ORDERS, CANCEL_ALL]);
+    assert_eq!(rig.cancel_all_at(), [rig::T0, rig::T0 + 14_000]);
+    assert_eq!(rig.lp.remaining(), &Err(PAST_DEADLINE.to_string()));
+    assert_eq!(rig.inflight.aborted(), 0);
+    // One page told in time, then the result.
+    let told: Vec<&Arrived> = rig.arrived.iter().map(|(_, a)| a).collect();
+    assert!(
+        matches!(
+            told[1..],
+            [Arrived::Page { .. }, Arrived::Counted { result: Err(_), .. }, ..]
+        ),
+        "{told:?}"
+    );
+
+    // Pages that answer 1,300 ms apart, 11 of them (+14,300 ms in all):
+    // each moves the deadline, so the count is not failed (review 2 S2).
+    let mut pages: Vec<rig::Reply> = (2..=11)
+        .map(|i| rig::slow(open_orders(1, &format!("c{i}")), 1300))
+        .collect();
+    pages.push(rig::slow(open_orders(0, ""), 1300));
+    let mut rig = KillRig::new(vec![(CANCEL_ALL, vec![at_once(ok_n(1))]), (ORDERS, pages)]);
+    rig.start();
+    rig.run_until(|r| r.cancel_all_at().len() == 2).await;
+    assert_eq!(rig.lp.remaining(), &Ok(10));
+    assert_eq!(rig.cancel_all_at(), [rig::T0, rig::T0 + 11 * 1300]);
+    assert_eq!(rig.paths().len(), 13);
+}
+
+#[tokio::test]
+async fn a_count_past_its_deadline_sends_no_further_page() {
+    // The second page hangs while the rig moves the clock: Inflight aborts
+    // the task at the deadline the first page set, the loop fails the
+    // count, and the next request is the next round's cancel-all.
+    let mut rig = KillRig::new(vec![
+        (CANCEL_ALL, vec![at_once(ok_n(1))]),
+        (
+            ORDERS,
+            vec![
+                at_once(open_orders(1, "c2")),
+                at_once(Answer::Hang),
+                at_once(open_orders(0, "")),
+            ],
+        ),
+    ]);
+    rig.start();
+    rig.run_until(|r| r.cancel_all_at().len() == 2).await;
+    assert_eq!(rig.paths(), [CANCEL_ALL, ORDERS, ORDERS, CANCEL_ALL]);
+    assert_eq!(rig.cancel_all_at(), [rig::T0, rig::T0 + rig::EXTRA]);
+    assert_eq!(rig.inflight.aborted(), 1);
+    assert_eq!(rig.lp.remaining(), &Err(PAST_DEADLINE.to_string()));
+    // The aborted task is gone: after the client's own timeout (2 s of
+    // real time) it sends nothing, so nothing stray comes.
+    tokio::time::sleep(std::time::Duration::from_millis(rig::RT + 500)).await;
+    assert_eq!(rig.inflight.take(), []);
+    assert_eq!(rig.inflight.stray(), 0);
+    assert_eq!(rig.paths().len(), 4);
 }
