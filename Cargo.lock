@@ -1222,6 +1222,7 @@ version = "0.1.0"
 dependencies = [
  "alert-direct",
  "axum",
+ "base64",
  "futures-util",
  "hex",
  "hmac",
@@ -1232,6 +1233,7 @@ dependencies = [
  "oms-journal",
  "oms-sim",
  "reqwest",
+ "ring",
  "rmp-serde",
  "rustix",
  "serde",

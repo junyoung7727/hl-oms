@@ -6,20 +6,26 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use super::sign;
+use super::sign::{self, Signer};
 
-/// The API key and secret, from a file outside the repository. `Debug`
-/// never prints the secret.
+/// The API key and its signing key, an HMAC secret or an RSA key
+/// (ADR-034), from a file outside the repository. `Debug` never prints the
+/// secret or the key.
 pub struct Credentials {
     pub api_key: String,
-    api_secret: String,
+    signer: Signer,
 }
 
 impl std::fmt::Debug for Credentials {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let hidden = if self.signer.is_rsa() {
+            "rsa_private_key"
+        } else {
+            "api_secret"
+        };
         write!(
             f,
-            "Credentials {{ api_key: {:?}, api_secret: <hidden> }}",
+            "Credentials {{ api_key: {:?}, {hidden}: <hidden> }}",
             self.api_key
         )
     }
@@ -29,21 +35,34 @@ impl std::fmt::Debug for Credentials {
 #[serde(deny_unknown_fields)]
 struct CredentialsFile {
     api_key: String,
-    api_secret: String,
+    api_secret: Option<String>,
+    rsa_private_key: Option<String>,
 }
 
 impl Credentials {
+    /// An HMAC key.
     pub fn new(api_key: &str, api_secret: &str) -> Credentials {
         Credentials {
             api_key: api_key.to_string(),
-            api_secret: api_secret.to_string(),
+            signer: Signer::hmac(api_secret),
         }
     }
 
-    /// Reads `api_key` and `api_secret` (TOML). The file must be a regular
-    /// file owned by this process's user and readable and writable by its
-    /// owner only (mode 0600 or 0400). The checks and the read use one
-    /// open handle, so the file cannot be swapped between them.
+    /// An RSA key: `pem` is the unencrypted PKCS#8 PEM text, parsed here
+    /// ([`Signer::rsa`]; its errors do not quote the text).
+    pub fn rsa(api_key: &str, pem: &str) -> Result<Credentials, String> {
+        Ok(Credentials {
+            api_key: api_key.to_string(),
+            signer: Signer::rsa(pem)?,
+        })
+    }
+
+    /// Reads `api_key` and exactly one of `api_secret` (HMAC) or
+    /// `rsa_private_key` (the PKCS#8 PEM text inline, ADR-034), TOML. The
+    /// file must be a regular file owned by this process's user and
+    /// readable and writable by its owner only (mode 0600 or 0400). The
+    /// checks and the read use one open handle, so the file cannot be
+    /// swapped between them. No error quotes the file.
     pub fn load(path: &Path) -> Result<Credentials, String> {
         use std::io::Read;
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
@@ -76,21 +95,44 @@ impl Credentials {
         file.read_to_string(&mut text).map_err(err)?;
         let f: CredentialsFile = toml::from_str(&text).map_err(|_| {
             format!(
-                "credentials file {} is not api_key and api_secret",
+                "credentials file {} is not api_key and api_secret or rsa_private_key",
                 path.display()
             )
         })?;
-        if f.api_key.is_empty() || f.api_secret.is_empty() {
-            return Err(format!(
-                "credentials file {}: empty key or secret",
-                path.display()
-            ));
+        let empty = || format!("credentials file {}: empty key or secret", path.display());
+        if f.api_key.is_empty() {
+            return Err(empty());
         }
-        Ok(Credentials::new(&f.api_key, &f.api_secret))
+        match (f.api_secret, f.rsa_private_key) {
+            (Some(secret), None) if secret.is_empty() => Err(empty()),
+            (Some(secret), None) => Ok(Credentials::new(&f.api_key, &secret)),
+            (None, Some(pem)) => Credentials::rsa(&f.api_key, &pem)
+                .map_err(|e| format!("credentials file {}: {e}", path.display())),
+            (Some(_), Some(_)) => Err(format!(
+                "credentials file {} has both api_secret and rsa_private_key; keep exactly one",
+                path.display()
+            )),
+            (None, None) => Err(format!(
+                "credentials file {} has neither api_secret nor rsa_private_key",
+                path.display()
+            )),
+        }
     }
 
-    pub fn ws_auth_signature(&self, expires_ms: u64) -> String {
-        sign::ws_auth_signature(&self.api_secret, expires_ms)
+    pub fn is_rsa(&self) -> bool {
+        self.signer.is_rsa()
+    }
+
+    /// The signature of `prehash` ([`Signer::sign`]): every REST request
+    /// and every stream's `auth` is signed here.
+    pub fn sign(&self, prehash: &str) -> Result<String, String> {
+        self.signer.sign(prehash)
+    }
+
+    /// The signature of the `auth` message of the private stream and of
+    /// WS Trade.
+    pub fn ws_auth_signature(&self, expires_ms: u64) -> Result<String, String> {
+        self.sign(&sign::ws_prehash(expires_ms))
     }
 }
 
@@ -245,23 +287,43 @@ impl Rest {
         self.recv_window_ms
     }
 
-    fn signed(&self, rb: reqwest::RequestBuilder, payload: &str) -> reqwest::RequestBuilder {
+    fn signed(
+        &self,
+        rb: reqwest::RequestBuilder,
+        payload: &str,
+    ) -> Result<reqwest::RequestBuilder, RestError> {
         self.signed_at(rb, payload, (self.now_ms)())
     }
 
-    fn signed_at(&self, rb: reqwest::RequestBuilder, payload: &str, ts: u64) -> reqwest::RequestBuilder {
-        let sig = sign::rest_signature(
-            &self.creds.api_secret,
-            ts,
-            &self.creds.api_key,
-            self.recv_window_ms,
-            payload,
-        );
-        rb.header("X-BAPI-API-KEY", &self.creds.api_key)
+    /// The signed headers. A signature that cannot be made is a request
+    /// that was not sent (`NotSent`): nothing goes out unsigned or signed
+    /// another way (ADR-034). With an RSA key there is no
+    /// `X-BAPI-SIGN-TYPE` (the measured RSA request had none).
+    fn signed_at(
+        &self,
+        rb: reqwest::RequestBuilder,
+        payload: &str,
+        ts: u64,
+    ) -> Result<reqwest::RequestBuilder, RestError> {
+        let sig = self
+            .creds
+            .sign(&sign::rest_prehash(
+                ts,
+                &self.creds.api_key,
+                self.recv_window_ms,
+                payload,
+            ))
+            .map_err(RestError::NotSent)?;
+        let rb = rb
+            .header("X-BAPI-API-KEY", &self.creds.api_key)
             .header("X-BAPI-TIMESTAMP", ts.to_string())
             .header("X-BAPI-RECV-WINDOW", self.recv_window_ms.to_string())
-            .header("X-BAPI-SIGN", sig)
-            .header("X-BAPI-SIGN-TYPE", "2")
+            .header("X-BAPI-SIGN", sig);
+        Ok(if self.creds.is_rsa() {
+            rb
+        } else {
+            rb.header("X-BAPI-SIGN-TYPE", "2")
+        })
     }
 
     async fn send(&self, rb: reqwest::RequestBuilder) -> Result<Value, RestError> {
@@ -296,7 +358,7 @@ impl Rest {
         } else {
             format!("{}{path}?{q}", self.base)
         };
-        self.send(self.signed(self.http.get(url), &q)).await
+        self.send(self.signed(self.http.get(url), &q)?).await
     }
 
     /// A signed POST of a JSON body; returns `result`. The signed string
@@ -308,7 +370,7 @@ impl Rest {
             .post(format!("{}{path}", self.base))
             .header("Content-Type", "application/json")
             .body(text.clone());
-        self.send(self.signed(rb, &text)).await
+        self.send(self.signed(rb, &text)?).await
     }
 
     /// A signed POST with request time `ts_ms`, answered raw: the order
@@ -325,7 +387,7 @@ impl Rest {
             .post(format!("{}{path}", self.base))
             .header("Content-Type", "application/json")
             .body(text.clone());
-        self.send_raw(self.signed_at(rb, &text, ts_ms)).await
+        self.send_raw(self.signed_at(rb, &text, ts_ms)?).await
     }
 }
 
@@ -497,5 +559,150 @@ mod tests {
                 .contains("regular file")
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Every 16-character piece of every test key's body: an error that
+    /// holds one quotes key material.
+    fn key_pieces() -> Vec<String> {
+        use crate::venue::bybit::sign::test_keys as k;
+        let mut out = Vec::new();
+        for body in [k::KEY_2048, k::KEY_2048_PKCS1, k::KEY_2048_ENCRYPTED, k::KEY_1024] {
+            let flat: Vec<char> = body.chars().filter(|c| *c != '\n').collect();
+            out.extend(flat.windows(16).map(|w| w.iter().collect::<String>()));
+        }
+        out
+    }
+
+    /// RSA (ADR-034, spec D1, D2, T4, T6): `api_key` and
+    /// `rsa_private_key` (the PKCS#8 PEM text inline) is read and parsed
+    /// once, signs to openssl's value, and `Debug` hides it. Refused, each
+    /// with one line that names the file and quotes no byte of a key:
+    /// both secrets, neither, PKCS#1 and encrypted keys (each naming the
+    /// openssl fix), garbage PEM, a body that is not a key, a cut body, the
+    /// body without the PEM lines, an empty key, a 1024-bit key. The file
+    /// rules still apply (0644 refused).
+    #[test]
+    fn an_rsa_credentials_file_is_read_and_its_refusals_quote_no_key() {
+        use crate::venue::bybit::sign::test_keys as k;
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("bybit-creds-rsa-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("creds.toml");
+        let write = |text: &str| {
+            std::fs::write(&p, text).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+        };
+        let with_key = |pem: &str| format!("api_key = \"K1\"\nrsa_private_key = \"\"\"\n{pem}\"\"\"\n");
+
+        write(&with_key(&k::pem_2048()));
+        let c = Credentials::load(&p).unwrap();
+        assert_eq!(c.api_key, "K1");
+        assert!(c.is_rsa());
+        assert_eq!(
+            format!("{c:?}"),
+            "Credentials { api_key: \"K1\", rsa_private_key: <hidden> }"
+        );
+        // The key read is the test key (openssl's value, sign.rs).
+        assert_eq!(
+            c.ws_auth_signature(1662350400000).unwrap(),
+            "HZKuzRsZu3GyRpRRU9GK/xpL4DUyjo4bd+uRkRedWmZwUUr1ye+RvVNtV+LpPmx5X+1iKtlWIJGe1FNJ/jW/A0q4e2ND7FcQy9zEgbRZwVO+sbUqoN0m69zQ+mhqR5VBKXTFIcbEhzFiQKFHSC/hK5OmdSX2aCU0e0ROiA5o5p5Vcvs6jF4U1G2EF4bq5LX5BPufvpLsI4HoqBcX5Oq/gIjTxAORH2YNwzeuGh1migMEAxTpp2lRXc27qaBGhbPmYURG3QvCguBp5ctIiP2T6RTeiPgfBSYxSZZESMOs/oFVhjeRJ226Nrj7tUqcA9Gn1P4B4Y4SpIzAJ0tWLizZWg=="
+        );
+        write("api_key = \"K1\"\napi_secret = \"S1\"\n");
+        let c = Credentials::load(&p).unwrap();
+        assert!(!c.is_rsa());
+        assert_eq!(
+            format!("{c:?}"),
+            "Credentials { api_key: \"K1\", api_secret: <hidden> }"
+        );
+
+        let fix = "openssl pkcs8 -topk8 -nocrypt -in old.pem -out new.pem";
+        let half = &k::KEY_2048[..k::KEY_2048.len() / 2];
+        let cases: Vec<(String, String)> = vec![
+            (
+                format!(
+                    "api_key = \"K1\"\napi_secret = \"S1\"\nrsa_private_key = \"\"\"\n{}\"\"\"\n",
+                    k::pem_2048()
+                ),
+                "has both api_secret and rsa_private_key; keep exactly one".into(),
+            ),
+            (
+                "api_key = \"K1\"\n".into(),
+                "has neither api_secret nor rsa_private_key".into(),
+            ),
+            (
+                with_key(&k::pem("RSA PRIVATE KEY", k::KEY_2048_PKCS1)),
+                format!("is a PKCS#1 key (BEGIN RSA PRIVATE KEY); convert it to PKCS#8 with: {fix}"),
+            ),
+            (
+                with_key(&k::pem("ENCRYPTED PRIVATE KEY", k::KEY_2048_ENCRYPTED)),
+                format!("is encrypted (BEGIN ENCRYPTED PRIVATE KEY); write it unencrypted with: {fix}"),
+            ),
+            (
+                with_key(&k::pem("PRIVATE KEY", "not base64 at all!\n")),
+                "is not a PEM private key".into(),
+            ),
+            (
+                with_key(&k::pem("PRIVATE KEY", "AAAA\n")),
+                "is not an RSA key of 2048 bits or more".into(),
+            ),
+            (with_key(&k::pem("PRIVATE KEY", half)), "rsa_private_key is not".into()),
+            (with_key(k::KEY_2048), "is not a PEM private key".into()),
+            (
+                "api_key = \"K1\"\nrsa_private_key = \"\"\n".into(),
+                "is not a PEM private key".into(),
+            ),
+            (
+                with_key(&k::pem("PRIVATE KEY", k::KEY_1024)),
+                "is not an RSA key of 2048 bits or more".into(),
+            ),
+        ];
+        let pieces = key_pieces();
+        for (text, needle) in &cases {
+            write(text);
+            let e = Credentials::load(&p).unwrap_err();
+            assert!(e.contains(needle.as_str()), "{e:?} lacks {needle:?}");
+            assert!(e.contains("creds.toml") && !e.contains('\n'), "{e:?}");
+            assert!(!e.contains("S1"), "the error quotes the secret: {e:?}");
+            if let Some(q) = pieces.iter().find(|q| e.contains(q.as_str())) {
+                panic!("the error quotes key material {q:?}: {e:?}");
+            }
+        }
+        write(&with_key(&k::pem_2048()));
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(Credentials::load(&p).unwrap_err().contains("chmod 600"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RSA (ADR-034, spec T5): a GET sent with an RSA key carries
+    /// `X-BAPI-SIGN` = openssl's base64 signature of the exact query sent
+    /// (`printf '%s' "1700000000000KEY5000category=linear&symbol=BTCUSDT" |
+    /// openssl dgst -sha256 -sign key.pem | base64 -w0`, the test-only key),
+    /// and no `X-BAPI-SIGN-TYPE` (spec F3: the measured request had none).
+    #[tokio::test]
+    async fn an_rsa_key_signs_a_get_in_base64_over_the_query_sent() {
+        let fake = FakeHttp::start(ok(r#"{"list":[]}"#));
+        let creds = Credentials::rsa("KEY", &crate::venue::bybit::sign::test_keys::pem_2048()).unwrap();
+        let r = Rest::new(&fake.url(), Arc::new(creds), 5000, Duration::from_millis(500))
+            .unwrap()
+            .with_clock(|| 1_700_000_000_000);
+        r.get(
+            "/v5/position/list",
+            &[("symbol", "BTCUSDT".into()), ("category", "linear".into())],
+        )
+        .await
+        .unwrap();
+        let req = &fake.requests()[0];
+        assert_eq!(
+            req.target,
+            "/v5/position/list?category=linear&symbol=BTCUSDT"
+        );
+        assert_eq!(req.header("x-bapi-api-key"), Some("KEY"));
+        assert_eq!(req.header("x-bapi-timestamp"), Some("1700000000000"));
+        assert_eq!(req.header("x-bapi-recv-window"), Some("5000"));
+        assert_eq!(req.header("x-bapi-sign-type"), None);
+        assert_eq!(
+            req.header("x-bapi-sign"),
+            Some("rOBcypNMg2nCT8ZjO16JGe1G7v5r6lc8HRM9zfrrI+LwZ9tfEi55ORgrdFZ8BuUNK16g1QruiAh4pzQq6jtosX9DV2oe8zFd4UfSgmM2U5pWOFrRDJfepasQzzUuDaO9FtZV7AcMI4ywjbEs9x7SJ0e6Q5K63FmDLbx+YxDR1VZde8A8SZdVrIZFJUtP6ojrRTr8fcmaqnkG64IBLieFs0++G0sTSVMyJllAOJ6Xz5PSr5vqWNjq5Y6zvBzHqgdOD2Bw3qCcDE3ZVB4T2nfglSvECBCKM2awcc0Kkgvmfna8CJ/AN5GkcvpAk0UTA5yfHD8MVwU4vmV6AqxDcJC2UQ==")
+        );
     }
 }
