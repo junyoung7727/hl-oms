@@ -2335,3 +2335,183 @@ fn a_marker_path_refusal_sends_the_owed_halt_first() {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&tg_dir);
 }
+
+/// The client class of a 503 answer, as a failed position read shows it.
+const FAILED_503: &str = "no_answer";
+
+/// A 503 answer.
+fn unavailable() -> Answer {
+    Answer::Reply(503, "{}".into())
+}
+
+#[test]
+fn ten_minutes_of_failing_queries_send_at_most_12_p1_messages() {
+    // From the fire on every kill path at the fake Bybit answers 503 for
+    // 600 s of the manual clock from the start notice `s`, then the venue
+    // answers and has no open order. Before the start notice the K steps
+    // run at walk_kill's pace (inside kill_after_silence); from it the
+    // clock moves 1,000 ms per 15 ms of real time (≤ round_ms; ≤ 20
+    // requests per 10 s of the clock), and only message counts are
+    // asserted (design R2 SHOULD 4; review 3 S3, review 4 S2).
+    let (w, dir, tg_dir, clock, mut run, seen) = kill_after_silence("rt-k-600", "", "", |w| {
+        for p in [CANCEL_ALL, "/v5/order/realtime", "/v5/position/list"] {
+            w.bybit.route(p, [unavailable()]);
+        }
+    });
+    // The start notice reached the fake at or before `s`, within the last
+    // step of walk_kill; the window counted is [s, s + 600 s].
+    let s = clock.now_ms();
+    record_telegram(&w, &clock, &seen);
+    for _ in 0..600 {
+        clock.advance(1000);
+        std::thread::sleep(Duration::from_millis(15));
+    }
+    w.bybit.route(CANCEL_ALL, [cancel_ok()]);
+    w.bybit.route("/v5/order/realtime", [empty_page()]);
+    w.bybit.route("/v5/position/list", [empty_page()]);
+    for _ in 0..200 {
+        if !sent_with(&w, FINAL_NOTICE).is_empty() {
+            break;
+        }
+        clock.advance(1000);
+        std::thread::sleep(Duration::from_millis(15));
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    let times: Vec<u64> = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, p)| p.starts_with("tg:"))
+        .map(|(t, _)| *t)
+        .collect();
+    // The start notice plus what came in the window after it.
+    let in_window = 1 + times.iter().filter(|&&t| t >= s && t <= s + 600_000).count();
+    assert!(in_window <= 12, "{in_window} messages in [s, s + 600 s]: {:?}", w.sent());
+    assert!(in_window >= 10, "{in_window} messages in [s, s + 600 s]: {:?}", w.sent());
+    let sent = w.sent();
+    assert!(sent.iter().all(|t| t.starts_with("[WATCH P1] bybit w-rt ")), "{sent:?}");
+    assert!(sent.last().unwrap().contains(FINAL_NOTICE), "{sent:?}");
+    assert_eq!(sent_with(&w, START_NOTICE).len(), 1);
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+#[test]
+fn every_kill_notice_carries_the_position_block() {
+    // Two positions at the fake for the start notice's read; the read of
+    // the next notice (progress, 60 s later) fails; SIGTERM then aborts the
+    // loop (one order stays open). Every message of the kill shows the
+    // positions: the block, the failed read, or the abort's not-read line
+    // (design R3 SHOULD 6).
+    let rows = ok(json!({"category": "linear", "nextPageCursor": "", "list": [
+        {"symbol": "BTCUSDT", "side": "Buy", "size": "0.5", "unrealisedPnl": "125.5",
+         "markPrice": "70000", "liqPrice": "63000.12"},
+        {"symbol": "ETHUSDT", "side": "Sell", "size": "2", "unrealisedPnl": "-10.25",
+         "markPrice": "3500", "liqPrice": "3850"}]}));
+    let (w, dir, tg_dir, clock, mut run, _) = kill_after_silence("rt-k-block", "", "", move |w| {
+        w.bybit.route("/v5/order/realtime", [orders(1)]);
+        w.bybit.route("/v5/position/list", [rows.clone(), unavailable()]);
+    });
+    let start = &sent_with(&w, START_NOTICE)[0];
+    assert!(
+        start.contains(
+            " KST, 강제청산가는 교차 증거금이면 거래소 추정):\n\
+             - BTCUSDT 매수 0.5, 미실현손익 125.5, 마크 70000, 마크에서 강제청산가까지 9.99 %\n\
+             - ETHUSDT 매도 2, 미실현손익 -10.25, 마크 3500, 마크에서 강제청산가까지 10 %"
+        ),
+        "{start}"
+    );
+    // The first progress mark is 60 s after the start notice. The read for
+    // it fails at once at the fake (503), far inside its deadline at walk's
+    // pace (13,000 ms of the clock ≈ 2 s of real time).
+    walk_until(&clock, 70_000, "the progress notice", || {
+        !sent_with(&w, "회차: 남은 미체결").is_empty()
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(run.shutdown(), 0);
+    let sent = w.sent();
+    assert_eq!(sent.len(), 3, "start, progress, abort: {sent:?}");
+    assert!(sent[1].contains("회차: 남은 미체결 1건"), "{}", sent[1]);
+    assert!(
+        sent[1].ends_with(&format!("\n포지션 조회 실패({FAILED_503}). 수량·손익·마크·강제청산가 모름")),
+        "{}",
+        sent[1]
+    );
+    assert!(sent[2].contains("워처 종료로 워처 킬 중단("), "{}", sent[2]);
+    assert!(sent[2].ends_with(NOT_READ), "{}", sent[2]);
+    for t in &sent {
+        assert!(
+            t.contains("\n포지션(거래소 /v5/position/list, ")
+                || t.contains("\n포지션 조회 실패(")
+                || t.contains("\n포지션 조회 안 함("),
+            "{t}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+#[test]
+fn a_slow_position_read_sends_the_notice_with_unknown_positions() {
+    // The start notice's position read: the route moves the manual clock by
+    // 14,000 ms at its answer, past the read's deadline of
+    // request_timeout_ms + 11,000 = 13,000 ms. The page is past the
+    // deadline when it is handled, so the notice goes with 시간 초과 and no
+    // further page is asked, though the page names one (review 2 N5,
+    // review 3 S2; review 4 N2).
+    let (tg_dir, tg) = telegram_section("rt-k-slowpos-t");
+    let (mut w, dir) = kill_world("rt-k-slowpos", &tg, "");
+    // The watcher_kill reply waits until the jump is armed: the K steps
+    // and the read otherwise fit in one pause of the walk.
+    let ready = Arc::new(AtomicBool::new(false));
+    let r = ready.clone();
+    w.admin = FakeSock::serve(&w.cfg.admin_socket, move |_, _, v| {
+        if v["op"] == "watcher_kill" {
+            let end = Instant::now() + Duration::from_secs(10);
+            while !r.load(Ordering::SeqCst) && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            oms(v, "latched")
+        } else {
+            oms(v, "held")
+        }
+    });
+    w.status_marked();
+    let clock = Arc::new(ManualClock::new(T0));
+    let mut run = w.start(clock.clone());
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    walk(&clock, 2000);
+    w.status_down();
+    walk_until(&clock, 20_000, "the fire", || w.lines_with(FIRED) == 1);
+    std::thread::sleep(Duration::from_millis(200));
+    let from = w.requests("/v5/position/list").len();
+    w.bybit.route(
+        "/v5/position/list",
+        [ok(json!({"category": "linear", "nextPageCursor": "p2", "list": [
+            {"symbol": "BTCUSDT", "side": "Buy", "size": "1", "unrealisedPnl": "0",
+             "markPrice": "70000", "liqPrice": "63000"}]}))],
+    );
+    let (jumped, c) = (Arc::new(AtomicBool::new(false)), clock.clone());
+    let j = jumped.clone();
+    w.bybit.on_request(move |q| {
+        if q.path() == "/v5/position/list" && !j.swap(true, Ordering::SeqCst) {
+            c.advance(14_000);
+        }
+    });
+    ready.store(true, Ordering::SeqCst);
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    let start = &sent_with(&w, START_NOTICE)[0];
+    assert!(jumped.load(Ordering::SeqCst));
+    assert!(
+        start.ends_with("\n포지션 조회 실패(시간 초과). 수량·손익·마크·강제청산가 모름"),
+        "{start}"
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    let reads: Vec<_> = w.requests("/v5/position/list")[from..].to_vec();
+    assert_eq!(reads.len(), 1, "no page after the one past the deadline");
+    assert!(!reads[0].target.contains("cursor=p2"));
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
