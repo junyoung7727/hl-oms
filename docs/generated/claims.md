@@ -1,7 +1,7 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `8f030551b07ac832`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `9b6f0898014b56d1`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
 
 주장 121건: 통과 0, 실패 0, 미실행 54, 이전 버전 결과 67.
 
@@ -3137,4 +3137,5 @@
 | `watcher/a_stop_that_ended_before_the_k3_deadline_tick_is_reported_as_stopped` | 미실행 |  |
 | `watcher/a_clock_step_back_does_not_hold_the_guard` | 미실행 |  |
 | `watcher/a_full_notice_queue_drops_the_oldest_progress_notice_never_a_start_or_a_final` | 미실행 |  |
+| `watcher/during_a_kill_an_answer_keeps_the_mismatch_p1_and_drops_every_request` | 미실행 |  |
 
