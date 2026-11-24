@@ -708,6 +708,9 @@ impl KillLoop {
         out
     }
 
+    /// C2 → C3 after every sent cancel-all, also a failed one (unlike
+    /// the OMS: the count is the truth, and a refusal when nothing is open
+    /// must not keep the loop from ending); C2 → C4 after one not sent.
     fn cancelled(&mut self, now: u64, a: CancelAnswer, out: &mut Vec<Action>) {
         match a {
             CancelAnswer::Done(_) => {
@@ -788,13 +791,9 @@ impl KillLoop {
     ) {
         self.remaining = r.clone();
         match (self.phase, r) {
-            (Phase::Count, Ok(0)) => {
-                self.phase = Phase::Watch;
-                self.zero_since = Some(now);
-                self.watch_due = now
-                    .saturating_add(self.t.watch_every_ms)
-                    .min(now.saturating_add(self.t.watch_ms));
-            }
+            // Only the count emitted at or after z + watch_ms ends the
+            // watch, however late it answers; a slow answer to an earlier
+            // count is not it.
             (Phase::Watch, Ok(0)) if ends_watch => {
                 self.phase = Phase::Ended;
                 out.push(Action::Notice(Notice::Final {
@@ -810,6 +809,13 @@ impl KillLoop {
                     aborted: false,
                 }));
             }
+            (Phase::Count, Ok(0)) => {
+                self.phase = Phase::Watch;
+                self.zero_since = Some(now);
+                self.watch_due = now
+                    .saturating_add(self.t.watch_every_ms)
+                    .min(now.saturating_add(self.t.watch_ms));
+            }
             (Phase::Watch, Ok(0)) => {}
             (Phase::Watch, Ok(_)) => {
                 // A late order: back to C2 at once.
@@ -818,6 +824,8 @@ impl KillLoop {
                 self.round_start = now;
                 self.phase = Phase::Cancel;
             }
+            // n > 0 after a cancel-all, or a count error (never zero):
+            // C4, the next round at t_r + round_ms.
             _ => {
                 self.zero_since = None;
                 self.phase = Phase::Repeat;
@@ -910,7 +918,7 @@ impl KillLoop {
     /// after a mark; the marks stay anchored to the start notice, and one
     /// notice covers every mark passed before it.
     fn progress(&mut self, now: u64, out: &mut Vec<Action>) {
-        if now < self.next_mark {
+        if !self.running() || now < self.next_mark {
             return;
         }
         let every = self.t.notice_ms.max(1);
@@ -924,8 +932,8 @@ impl KillLoop {
         }));
     }
 
-    /// Shutdown or a start refusal during the loop.
-    /// One abort notice and the end; nothing after it. Before the start
+    /// Shutdown or a start refusal during the loop (U19b3d): one abort
+    /// notice and the end; nothing after it. Before the start
     /// it does nothing (the kill sequence tells an abort before the loop,
     /// U19b3b). The open request is dropped: its answer is never used.
     pub fn abort(&mut self, _now: u64, why: AbortWhy) -> Vec<Action> {
