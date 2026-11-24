@@ -11,6 +11,8 @@ publish = false
 watcher = { path = "../watcher" }
 oms-core = { workspace = true }
 oms-journal = { workspace = true }
+# The OMS's own kill marker reader against the watcher's marker writer (U19b3b).
+oms-node = { path = "../oms-node" }
 serde_json = { workspace = true }
 
 [lints]

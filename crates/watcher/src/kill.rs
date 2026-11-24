@@ -11,6 +11,7 @@
 //! Every text says `워처 킬`, the OMS's say `킬 루프`, so a person can tell
 //! the two loops apart in one chat.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -1268,4 +1269,161 @@ impl Drop for Inflight {
     fn drop(&mut self) {
         self.abort_all();
     }
+}
+
+// ---- The kill sequence (U19b3b): texts and the marker writer ----
+
+/// The OMS reads this many bytes of the marker (`node.rs` `MARKER_TEXT_BYTES`).
+pub const MARKER_TEXT_MAX: usize = 512;
+/// The OMS refuses a longer `watcher_kill` detail (`input.rs`
+/// `WATCHER_DETAIL_MAX`).
+pub const DETAIL_MAX: usize = 1024;
+
+/// At most `max` bytes of `text`, cut at a whole character.
+fn cut_bytes(text: &str, max: usize) -> String {
+    let mut end = 0;
+    for (i, c) in text.char_indices() {
+        if i + c.len_utf8() > max {
+            break;
+        }
+        end = i + c.len_utf8();
+    }
+    text[..end].to_string()
+}
+
+/// `YYYY-MM-DDTHH:MM:SS.mmmZ` of a Unix time in ms.
+pub fn utc_ms(ms: u64) -> String {
+    let s = ms / 1000;
+    let days = (s / 86_400) as i64;
+    let sec = s % 86_400;
+    // Civil date from days since 1970-01-01 (H. Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{:03}Z",
+        sec / 3600,
+        sec / 60 % 60,
+        sec % 60,
+        ms % 1000
+    )
+}
+
+/// The marker's content (K1), at most [`MARKER_TEXT_MAX`] bytes cut at a
+/// whole character. `raw_now_ms` is the raw clock at the fire: the texts
+/// name instants of the wall clock, `silent_ms` is W5's. `answered`: the
+/// OMS gave a good answer in this process.
+pub fn marker_text(name: &str, raw_now_ms: u64, silent_ms: u64, answered: bool) -> String {
+    let last = if answered {
+        utc_ms(raw_now_ms.saturating_sub(silent_ms))
+    } else {
+        "none in this process".to_string()
+    };
+    cut_bytes(
+        &format!(
+            "watcher {name} W5 {}: /api/status gave no good answer for {} s (last good answer {last}); the watcher stops the OMS and cancels every order with its own key. Clear with omsctl clear-hold --reason kill.",
+            utc_ms(raw_now_ms),
+            seconds(silent_ms)
+        ),
+        MARKER_TEXT_MAX,
+    )
+}
+
+/// The `detail` of K2's `watcher_kill`, at most [`DETAIL_MAX`] bytes.
+pub fn halt_detail(name: &str, silent_ms: u64) -> String {
+    cut_bytes(
+        &format!(
+            "W5: /api/status gave no good answer for {} s; watcher {name}",
+            seconds(silent_ms)
+        ),
+        DETAIL_MAX,
+    )
+}
+
+/// The `detail` of a halt retried during the loop and of W5's owed halt,
+/// at most [`DETAIL_MAX`] bytes.
+pub fn late_halt_detail(name: &str) -> String {
+    cut_bytes(
+        &format!("W5: 늦은 정지: watcher {name}의 킬이 OMS 래치나 정지를 확인하지 못함"),
+        DETAIL_MAX,
+    )
+}
+
+/// What K1 came to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MarkerOutcome {
+    /// The watcher wrote the marker.
+    Written,
+    /// Something was at the marker path already; it was not touched.
+    AlreadyPresent,
+    /// The write failed: the io kind.
+    Failed(String),
+}
+
+/// Writes the kill marker (K1), blocking: the runtime runs it on
+/// `spawn_blocking` ([`spawn_marker`]), never inline in the tick.
+/// Anything at `path` (any file type, a dangling symlink too) is a marker
+/// already there and is not touched. Else the watcher's own temporary name
+/// `<dir>/.<file name>.watcher-<pid>.tmp` is removed if a killed watcher
+/// left it, the text is written to it (created new, mode 0600) and
+/// `sync_all`ed, hard-linked to `path` (something that appeared meanwhile
+/// wins: `AlreadyPresent`), the temporary name removed and the directory
+/// `sync_all`ed. Any error is `Failed(<io kind>)`.
+pub fn write_marker(path: &Path, text: &str) -> MarkerOutcome {
+    use std::io::{ErrorKind, Write};
+    use std::os::unix::fs::OpenOptionsExt;
+    let fail = |e: std::io::Error| MarkerOutcome::Failed(format!("{:?}", e.kind()));
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => return MarkerOutcome::AlreadyPresent,
+        Err(e) if e.kind() == ErrorKind::NotFound => {}
+        Err(e) => return fail(e),
+    }
+    let (Some(dir), Some(file)) = (path.parent(), path.file_name()) else {
+        return MarkerOutcome::Failed(format!("{:?}", ErrorKind::InvalidInput));
+    };
+    let tmp = dir.join(format!(
+        ".{}.watcher-{}.tmp",
+        file.to_string_lossy(),
+        std::process::id()
+    ));
+    match std::fs::remove_file(&tmp) {
+        Err(e) if e.kind() != ErrorKind::NotFound => return fail(e),
+        _ => {}
+    }
+    let written = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&tmp)
+        .and_then(|mut f| {
+            f.write_all(text.as_bytes())?;
+            f.sync_all()
+        });
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return fail(e);
+    }
+    let linked = std::fs::hard_link(&tmp, path);
+    let removed = std::fs::remove_file(&tmp);
+    match linked {
+        Err(e) if e.kind() == ErrorKind::AlreadyExists => return MarkerOutcome::AlreadyPresent,
+        Err(e) => return fail(e),
+        Ok(()) => {}
+    }
+    if let Err(e) = removed.and_then(|()| std::fs::File::open(dir)?.sync_all()) {
+        return fail(e);
+    }
+    MarkerOutcome::Written
+}
+
+/// Runs [`write_marker`] on `spawn_blocking`. The task cannot be aborted;
+/// the kill sequence gives K1 a deadline and ignores a late outcome.
+pub fn spawn_marker(path: PathBuf, text: String) -> tokio::task::JoinHandle<MarkerOutcome> {
+    tokio::task::spawn_blocking(move || write_marker(&path, &text))
 }
