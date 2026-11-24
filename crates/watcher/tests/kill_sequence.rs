@@ -247,7 +247,11 @@ impl Run {
     }
 
     fn with(s: Setup) -> Run {
-        let (k, steps) = Kill::new(FIRE, s, T0);
+        Run::fired(FIRE, s)
+    }
+
+    fn fired(fire: Fire, s: Setup) -> Run {
+        let (k, steps) = Kill::new(fire, s, T0);
         let mut r = Run {
             k,
             log: Vec::new(),
@@ -561,6 +565,25 @@ fn already_latched_and_the_rearm_reply_count_as_halted() {
             )
         );
     }
+
+    // A latch reply with the OMS's long stored detail after it: cut to
+    // 200 UTF-16 units at a whole character, control characters as
+    // spaces (`already latched \n\u{7}` is 18 units; review 2 S2).
+    let mut r = Run::new(true);
+    r.marker(T0 + 100, MarkerOutcome::Written);
+    let reply = format!("already latched \n\u{7}{}", "𝕏".repeat(300));
+    let steps = r.halt(T0 + 200, Ok(&reply));
+    assert!(cancel_all(&steps), "{steps:?}");
+    assert_eq!(r.k.outcome(), StopOutcome::Latched);
+    let header = r.k.kill_loop().header();
+    assert!(!header.chars().any(char::is_control), "{header}");
+    assert!(
+        header.ends_with(&format!(
+            "OMS 정지: admin.sock watcher_kill → already latched   {}",
+            "𝕏".repeat(91)
+        )),
+        "{header}"
+    );
 }
 
 #[test]
@@ -1099,13 +1122,29 @@ fn a_start_notice_with_the_longest_header_fits_one_part() {
     // unit (255 characters); every free text far over its cut, with
     // control characters in it, of 1-unit characters and of characters
     // outside the BMP (2 units each; review 1 M1).
+    // The silence's seconds text adds one unit per character: `10` at
+    // the tests' 10 s, milliseconds below 60 s and below 1,000 s, and the
+    // longest a `u64` gives (review 2 S1).
     let name = "𝕏".repeat(64);
     let unit = format!("{}.service", "u".repeat(247));
-    for c in ['가', '𝕏'] {
+    let silences = [
+        (10_000, "10"),
+        (59_999, "59.999"),
+        (999_999, "999.999"),
+        (u64::MAX, "18446744073709551.615"),
+    ];
+    for ((silent_ms, secs), c) in silences
+        .into_iter()
+        .flat_map(|s| ['가', '𝕏'].map(|c| (s, c)))
+    {
         let mut s = setup(true);
         s.name = name.clone();
         s.kill.oms_unit = unit.clone();
-        let mut r = Run::with(s);
+        let fire = Fire {
+            last_good_ms: T0.saturating_sub(silent_ms),
+            silent_ms,
+        };
+        let mut r = Run::fired(fire, s);
         let noise = |n: usize| format!("a\n\u{7}b\r{}", c.to_string().repeat(n));
         r.marker(T0 + 100, MarkerOutcome::Failed(noise(1000)));
         // A 64 KiB reply that is no latch, and 4 KiB of systemctl's stderr.
@@ -1127,9 +1166,19 @@ fn a_start_notice_with_the_longest_header_fits_one_part() {
         ] {
             assert!(header.contains(&cut), "{cut}: {header}");
         }
+        assert!(header.starts_with(&format!("W5: OMS /api/status 무응답 {secs}초, ")));
         let units = header.encode_utf16().count();
-        assert!(units <= 1029, "the header is {units} units");
-        eprintln!("header ({c}): {units} UTF-16 units");
+        // 1,029 units at `10`, one more per further character; 1,048 at
+        // the longest.
+        let most = 1027 + secs.len();
+        assert!(
+            units <= most && units <= 1048,
+            "the header is {units} units"
+        );
+        if c == '가' {
+            assert_eq!(units, most);
+        }
+        eprintln!("header ({c}, {secs} s): {units} UTF-16 units");
 
         let start = notice_text(&r.notices()[0], &header);
         let body = format!(
@@ -1138,7 +1187,7 @@ fn a_start_notice_with_the_longest_header_fits_one_part() {
         );
         let msg = message(&name, T0, &body);
         let units = msg.encode_utf16().count();
-        eprintln!("start notice ({c}) with 20 plausible rows: {units} UTF-16 units");
+        eprintln!("start notice ({c}, {secs} s) with 20 plausible rows: {units} UTF-16 units");
         assert!(units <= MSG_LIMIT, "{units} units");
         assert_eq!(split(&msg, MSG_LIMIT).len(), 1);
 
@@ -1151,7 +1200,7 @@ fn a_start_notice_with_the_longest_header_fits_one_part() {
         );
         let msg = message(&name, T0, &body);
         eprintln!(
-            "start notice ({c}) with 20 longest rows: {} UTF-16 units",
+            "start notice ({c}, {secs} s) with 20 longest rows: {} UTF-16 units",
             msg.encode_utf16().count()
         );
         assert_eq!(split(&msg, MSG_LIMIT).len(), 2);
