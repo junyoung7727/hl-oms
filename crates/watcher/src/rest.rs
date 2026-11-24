@@ -15,7 +15,7 @@ use serde_json::Value;
 use crate::clock::Clock;
 use crate::log::Log;
 use crate::metrics::Metrics;
-use crate::sign;
+use crate::sign::{self, Signer};
 
 /// At most this many requests in any [`GUARD_WINDOW_MS`], all Bybit paths
 /// and the IP echo together (판단(모델 아님)).
@@ -65,30 +65,55 @@ impl Guard {
     }
 }
 
-/// The API key and secret. `Debug` never prints the secret.
+/// The API key and its signing key: an HMAC secret or an RSA key
+/// (ADR-034). `Debug` never prints the secret or the key.
 pub struct Credentials {
     api_key: String,
-    api_secret: String,
+    signer: Signer,
 }
 
 impl Credentials {
+    /// An HMAC key (`api_secret`).
     pub fn new(api_key: &str, api_secret: &str) -> Credentials {
         Credentials {
             api_key: api_key.to_string(),
-            api_secret: api_secret.to_string(),
+            signer: Signer::hmac(api_secret),
         }
+    }
+
+    /// An RSA key (`rsa_private_key`, the PKCS#8 PEM text), parsed here;
+    /// the error does not quote the text ([`Signer::rsa`]).
+    pub fn rsa(api_key: &str, pem: &str) -> Result<Credentials, String> {
+        Ok(Credentials {
+            api_key: api_key.to_string(),
+            signer: Signer::rsa(pem)?,
+        })
     }
 
     pub fn api_key(&self) -> &str {
         &self.api_key
     }
+
+    pub fn is_rsa(&self) -> bool {
+        self.signer.is_rsa()
+    }
+
+    /// `X-BAPI-SIGN` of `prehash` ([`Signer::sign`]).
+    pub fn sign(&self, prehash: &str) -> Result<String, String> {
+        self.signer.sign(prehash)
+    }
 }
 
 impl std::fmt::Debug for Credentials {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let field = if self.signer.is_rsa() {
+            "rsa_private_key"
+        } else {
+            "api_secret"
+        };
         write!(
             f,
-            "Credentials {{ api_key: {:?}, api_secret: <hidden> }}",
+            "Credentials {{ api_key: {:?}, {field}: <hidden> }}",
             self.api_key
         )
     }
@@ -515,6 +540,11 @@ impl Client {
             }
         };
         self.turn(true).await?;
+        let ts = self.clock.now_ms();
+        let sig = self.sign(
+            path,
+            &sign::prehash(ts, &self.creds.api_key, self.recv_window_ms, &q),
+        )?;
         self.metrics
             .add("watcher_requests_total", &[("endpoint", path)], 1.0);
         let url = if q.is_empty() {
@@ -522,14 +552,6 @@ impl Client {
         } else {
             format!("{}{path}?{q}", self.base)
         };
-        let ts = self.clock.now_ms();
-        let sig = sign::signature(
-            &self.creds.api_secret,
-            ts,
-            &self.creds.api_key,
-            self.recv_window_ms,
-            &q,
-        );
         let rb = self.signed(self.http.get(url), ts, sig);
         let res = match self.send(rb).await {
             Ok((status, body)) => classify(status, &body),
@@ -550,16 +572,13 @@ impl Client {
     /// `watcher_requests_total{endpoint="/v5/order/cancel-all"}`.
     pub async fn cancel_all(&self) -> Result<CancelAll, RestError> {
         self.turn(true).await?;
+        let ts = self.clock.now_ms();
+        let sig = self.sign(
+            CANCEL_ALL,
+            &sign::post_prehash(ts, &self.creds.api_key, self.recv_window_ms, CANCEL_ALL_BODY),
+        )?;
         self.metrics
             .add("watcher_requests_total", &[("endpoint", CANCEL_ALL)], 1.0);
-        let ts = self.clock.now_ms();
-        let sig = sign::post_signature(
-            &self.creds.api_secret,
-            ts,
-            &self.creds.api_key,
-            self.recv_window_ms,
-            CANCEL_ALL_BODY,
-        );
         let rb = self
             .http
             .post(format!("{}{CANCEL_ALL}", self.base))
@@ -576,13 +595,31 @@ impl Client {
         res
     }
 
-    /// The five headers of a signed request.
+    /// The signature of `prehash` for a request to `endpoint`. A
+    /// signature that cannot be made (not expected for a parsed key) is a
+    /// request not sent, counted under `endpoint`: nothing goes out
+    /// unsigned or signed another way (ADR-034, spec D7).
+    fn sign(&self, endpoint: &str, prehash: &str) -> Result<String, RestError> {
+        self.creds.sign(prehash).map_err(|e| {
+            let e = RestError::NotSent(e);
+            self.count_error(endpoint, &e);
+            e
+        })
+    }
+
+    /// The five headers of a signed request (four with an RSA key: the
+    /// measured RSA request had no `X-BAPI-SIGN-TYPE`, ADR-034).
     fn signed(&self, rb: reqwest::RequestBuilder, ts: u64, sig: String) -> reqwest::RequestBuilder {
-        rb.header("X-BAPI-API-KEY", &self.creds.api_key)
+        let rb = rb
+            .header("X-BAPI-API-KEY", &self.creds.api_key)
             .header("X-BAPI-TIMESTAMP", ts.to_string())
             .header("X-BAPI-RECV-WINDOW", self.recv_window_ms.to_string())
-            .header("X-BAPI-SIGN", sig)
-            .header("X-BAPI-SIGN-TYPE", "2")
+            .header("X-BAPI-SIGN", sig);
+        if self.creds.is_rsa() {
+            rb
+        } else {
+            rb.header("X-BAPI-SIGN-TYPE", "2")
+        }
     }
 
     /// The HTTP status and body; `NotSent` when the connection failed,

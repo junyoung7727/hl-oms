@@ -28,7 +28,7 @@ pub struct Signer(Key);
 
 enum Key {
     Hmac(String),
-    Rsa(RsaKeyPair),
+    Rsa(Box<RsaKeyPair>),
 }
 
 impl Signer {
@@ -69,7 +69,7 @@ impl Signer {
         let pair = RsaKeyPair::from_pkcs8(&der).map_err(|e| {
             format!("rsa_private_key is not an RSA key of 2048 bits or more that ring accepts ({e})")
         })?;
-        Ok(Signer(Key::Rsa(pair)))
+        Ok(Signer(Key::Rsa(Box::new(pair))))
     }
 
     /// Whether this is an RSA key.

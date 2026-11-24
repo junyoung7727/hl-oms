@@ -5,6 +5,8 @@
 
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -32,6 +34,15 @@ struct C {
 }
 
 fn client_of(base: &str, timeout_ms: u64) -> C {
+    client_with(
+        base,
+        timeout_ms,
+        Credentials::new("WKEY", "watcher-made-up-secret-42"),
+    )
+}
+
+/// [`client_of`] with the given credentials.
+fn client_with(base: &str, timeout_ms: u64, creds: Credentials) -> C {
     let clock = Arc::new(ManualClock::new(T0));
     let metrics = Arc::new(Metrics::new("h1", "w1"));
     let (log, lines) = watcher::log::collect();
@@ -42,7 +53,7 @@ fn client_of(base: &str, timeout_ms: u64) -> C {
     };
     let client = Client::new(
         &cfg,
-        Credentials::new("WKEY", "watcher-made-up-secret-42"),
+        creds,
         clock.clone(),
         metrics.clone(),
         log,
@@ -871,6 +882,51 @@ async fn the_only_post_is_cancel_all_with_the_fixed_body() {
             .get("watcher_requests_total", &[("endpoint", CANCEL_ALL)]),
         Some(2.0)
     );
+    assert!(c.lines.lock().unwrap().is_empty());
+}
+
+/// RSA (ADR-034, spec T5): a GET and the cancel-all sent with an RSA key
+/// carry `X-BAPI-SIGN` = openssl's base64 signature of the exact string
+/// sent (`printf '%s' "1700000000000WKEY5000<query or body>" | openssl
+/// dgst -sha256 -sign key.pem | base64 -w0`, the test-only key of
+/// `common::rsa`), and no `X-BAPI-SIGN-TYPE` (the measured RSA request of
+/// spec F1 had none, F3).
+#[tokio::test]
+async fn an_rsa_key_signs_the_get_and_the_cancel_all_in_base64() {
+    let fake = FakeHttp::start(Answer::Close);
+    fake.route("/v5/position/list", [ok(r#"{"list":[]}"#)]);
+    fake.route(CANCEL_ALL, [ok(r#"{"list":[],"success":"1"}"#)]);
+    let creds = Credentials::rsa("WKEY", &common::rsa::pem_2048()).unwrap();
+    let c = client_with(&fake.url(), 300, creds);
+    c.client.get("/v5/position/list", &linear()).await.unwrap();
+    assert_eq!(c.client.cancel_all().await, Ok(CancelAll { cancelled: 0 }));
+    let reqs = fake.requests();
+    assert_eq!(reqs.len(), 2);
+    let (get, post) = (&reqs[0], &reqs[1]);
+    assert_eq!(
+        get.target,
+        "/v5/position/list?category=linear&settleCoin=USDT&symbol=BTCUSDT"
+    );
+    assert_eq!(
+        get.header("x-bapi-sign"),
+        Some(
+            "Z/OiGM92LUUgOR1CC1d+Uecq2WXR/JqP51inciW16WNfCYvWi9Zx4nDl+z+GugHAwhwL/fZ2vrjnJ1BEXfjQHzv4qu9y7jYj5eycDgiOK5wu0eI8f3Xsz2RKHjBrSBt9px93gldj6u1/U3rZiWTin4cuKjG/pwXmGowqjUJc01pTMcISoHXZmLzlrFiFhBdvFkFNDTsAVoYSnqosDgmu7CD513ne3vmPKyDG4EY3ZI4iHrODhy6CP2hpx7Hj/OSqG08uV05vz8qfrtEYx8VKWMq44l9KWsfZbH3SqrY691JFVc8yjnxRF7/BST/0dKgVAReq4mxvf5T7/T022P+sZw=="
+        )
+    );
+    assert_eq!(post.method, "POST");
+    assert_eq!(post.body, CANCEL_ALL_BODY.as_bytes());
+    assert_eq!(
+        post.header("x-bapi-sign"),
+        Some(
+            "FlGICQxf598l0zswWnCNcUBAimWI9f6g+YSTpQPkB8LZ5xav3CWFdH9wtAmTFA3RFwWNdXnKus5Fki5aPkBdChmzDxGpgs6Iq84vl+Uhy5qJHhWLbCX0YtueEfGhq2rrJSujOtUJXJggFNtfeMuLf1tgqgJGH+xeqVP9qJAlbpZmXB4Hsdg6G26RcszLL3MO9K8Q8Zo+6KEXWwZRQM0FKUK40/+C/n5OVgFbFlu5reodtTM6K4bHJgEdvKXrFKb37OmWwGbQ3DzqjwN7Yv0Nxs2NgnCrHuxALO62EPXtVuzCgFDfgsCGqPbp4CTHId9sAhSqBPjuZX/3ibwiPIpGTA=="
+        )
+    );
+    for r in [get, post] {
+        assert_eq!(r.header("x-bapi-api-key"), Some("WKEY"));
+        assert_eq!(r.header("x-bapi-timestamp"), Some("1700000000000"));
+        assert_eq!(r.header("x-bapi-recv-window"), Some("5000"));
+        assert_eq!(r.header("x-bapi-sign-type"), None);
+    }
     assert!(c.lines.lock().unwrap().is_empty());
 }
 
