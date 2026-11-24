@@ -850,6 +850,29 @@ fn an_oms_that_answers_during_the_loop_is_latched_at_once() {
         .collect();
     assert_eq!(finals, vec![StopOutcome::Latched]);
     assert_eq!(r.ended().map(|(_, owed)| owed), Some(false));
+
+    // A reply to a closed attempt is ignored while a newer one is open:
+    // it neither closes the new attempt nor latches.
+    let mut r = unhalted();
+    r.drive_with(T0 + 300, T0 + 15_300, latched, 1, |_, _| None);
+    let halts: Vec<u64> = r.halts().iter().map(|t| t - T0).collect();
+    assert_eq!(halts, vec![100, 5_200, 15_200]);
+    let ids: Vec<u64> = r
+        .log
+        .iter()
+        .filter_map(|(_, s)| match s {
+            Step::Halt { id, .. } => Some(*id),
+            _ => None,
+        })
+        .collect();
+    let open = r.k.halt_open().unwrap();
+    assert_eq!(open.0, ids[2]);
+    assert!(
+        r.k.halt_done(T0 + 15_300, ids[1], Ok("latched".into()))
+            .is_empty()
+    );
+    assert_eq!(r.k.halt_open(), Some(open));
+    assert!(r.k.halt_owed());
 }
 
 #[test]
