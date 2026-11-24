@@ -1757,3 +1757,44 @@ fn an_oms_that_comes_back_during_the_loop_is_latched_before_the_loop_ends() {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&tg_dir);
 }
+
+#[test]
+fn a_clock_step_back_during_a_kill_does_not_hold_the_loop() {
+    // One order stays open; the wall clock steps back 60 s during the loop
+    // (review 4 S3): the kill path reads clock::Steady, so the next
+    // cancel-all comes round_ms of further progress after the last one,
+    // not 60 s later.
+    let (w, dir, tg_dir, clock, mut run, seen) = kill_after_silence("rt-k-back", "", "", |w| {
+        w.bybit.route("/v5/order/realtime", [orders(1)])
+    });
+    walk(&clock, 3000);
+    let cancels = || w.requests(CANCEL_ALL).len();
+    // Settle: the last cancel-all was counted.
+    std::thread::sleep(Duration::from_millis(300));
+    let k = cancels();
+    let last = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|(_, p)| p == CANCEL_ALL)
+        .map(|(t, _)| *t)
+        .unwrap();
+    assert!(until(5, || at(&seen, "/v5/order/realtime", last, u64::MAX) >= 1));
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(cancels(), k);
+    clock.set(clock.now_ms() - 60_000);
+    // round_ms (1,000) plus one step: each step waits for the runtime's
+    // ticks before the next.
+    let mut steps = 0;
+    while cancels() == k {
+        steps += 1;
+        assert!(steps <= 11, "no cancel-all within round_ms + 100 ms after the step back");
+        clock.advance(100);
+        until(1, || cancels() > k);
+    }
+    assert_eq!(cancels(), k + 1);
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
