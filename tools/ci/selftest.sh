@@ -480,6 +480,33 @@ oreset; sed -i 's/^    #\[test\]$/    #[test]\n    #[ignore]/' crates/a/src/lib.
 expect_owner 1 "owner: an existing test ignored" "owner_review: tests: crates/a/src/lib.rs: 1 #[ignore] added, 0 test attribute(s) added"
 oreset; printf '\n#[test]\n#[ignore = "measurement, run by hand"]\nfn slow() {}\n' >> crates/a/tests/t.rs; plant
 expect_owner 0 "owner: a new test ignored from the start" "owner_review: none"
+# Review 1 of ADR-033: ways to switch tests off without removing an attribute.
+oreset; sed -i 's|^    #\[test\]$|    // #[test]|' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: a test attribute commented out" "owner_review: tests: 1 test attribute(s) removed, 0 added"
+oreset; sed -i 's|^#\[cfg(test)\]$|#[cfg(all(test, any()))]|' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: the test module switched off by cfg" "owner_review: tests: crates/a/src/lib.rs: 1 cfg on tests added"
+oreset; printf '\n#[cfg(any())]\n#[test]\nfn off() {}\n' >> crates/a/tests/t.rs; plant
+expect_owner 1 "owner: a test behind cfg(any())" "owner_review: tests: crates/a/tests/t.rs: 1 cfg on tests added"
+oreset; printf '\n#[cfg(test)]\nmod more {\n    #[test]\n    fn m() {}\n}\n' >> crates/a/src/lib.rs; plant
+expect_owner 0 "owner: a new plain cfg(test) module" "owner_review: none"
+oreset; printf '\n#[cfg(any(test, feature = "failpoints"))]\npub fn hook() {}\n' >> crates/a/src/lib.rs; plant
+expect_owner 0 "owner: a widening cfg(any(test, ..)) on a test hook" "owner_review: none"
+oreset; sed -i 's|^#\[cfg(test)\]$|#[cfg(not(test))]|' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: the test module put under cfg(not(test))" "owner_review: tests: crates/a/src/lib.rs: 1 cfg on tests added"
+oreset; sed -i 's|^name = "a"$|name = "a"\nautotests = false|' crates/a/Cargo.toml; plant
+expect_owner 1 "owner: autotests switched off" "owner_review: manifest: crates/a/Cargo.toml"
+oreset; printf '\n[lib]\ntest = false\n' >> crates/a/Cargo.toml; plant
+expect_owner 1 "owner: the lib target's tests switched off" "owner_review: manifest: crates/a/Cargo.toml"
+oreset; printf '\n[[test]]\nname = "t"\nharness = false\n' >> crates/a/Cargo.toml; plant
+expect_owner 1 "owner: a [[test]] target added" "owner_review: manifest: crates/a/Cargo.toml"
+oreset; sed -i 's|^members = \["crates/a"\]$|members = []|' Cargo.toml; plant
+expect_owner 1 "owner: a crate removed from the workspace" "owner_review: manifest: Cargo.toml: member removed: crates/a"
+oreset; mkdir -p crates/z/src; : > crates/z/src/lib.rs; printf '[package]\nname = "z"\nlints = { clippy = { expect_used = "allow" } }\n' > crates/z/Cargo.toml; plant
+expect_owner 1 "owner: a new crate with an inline lints key" "owner_review: manifest: crates/z/Cargo.toml"
+oreset; printf '\n["lints".clippy]\nexpect_used = "allow"\n' >> crates/s/Cargo.toml; plant
+expect_owner 1 "owner: a quoted lints table" "owner_review: manifest: crates/s/Cargo.toml"
+oreset; sed -i 's|^pub fn one() -> u8 {$|#[expect(clippy::float_arithmetic, reason = "x")]\npub mod inner {}\n\npub fn one() -> u8 {|' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: an item-level expect on a mod item" "owner_review: lint: crates/a/src/lib.rs"
 oreset; cp tools/ci/owner_review_paths.txt "$tmp/base_paths.txt"; sed -i '/^\.github\/$/d' tools/ci/owner_review_paths.txt
 printf 'on: push\n' >> .github/workflows/ci.yml; plant
 expect_owner_with() { # the list from the base, as the runner passes it
