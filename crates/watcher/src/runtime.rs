@@ -248,9 +248,9 @@ struct Runtime {
     w5: W5,
     kill: Option<KillRun>,
     kills: u64,
-    /// The stopper of the last K3, polled until its client is reaped
-    /// (also after its kill ended), with the kill's `kill_no`.
-    stopper: Option<(u64, Stopper)>,
+    /// The stoppers of K3, polled until their client is reaped (also
+    /// after their kill ended), each with its kill's `kill_no`.
+    stoppers: Vec<(u64, Stopper)>,
     notices: Notices,
 }
 
@@ -395,7 +395,7 @@ pub async fn run(
         w5,
         kill: None,
         kills: 0,
-        stopper: None,
+        stoppers: Vec::new(),
         notices: Notices::default(),
         cfg,
     };
@@ -937,26 +937,24 @@ impl Runtime {
         }
     }
 
-    /// K3's client: its outcome to the kill that started it; polled until
-    /// it is reaped.
+    /// K3's clients: each outcome to the kill that started it; each is
+    /// polled until it is reaped (a dropped `Child` is never reaped).
     fn poll_stopper(&mut self, now: u64) {
-        let Some((kill_no, s)) = self.stopper.as_mut() else {
-            return;
-        };
-        let kill_no = *kill_no;
-        let outcome = s.poll(now);
-        if s.reaped() {
-            self.stopper = None;
-        }
-        let Some(o) = outcome else {
-            return;
-        };
-        match self.kill.as_mut() {
-            Some(k) if k.kill_no == kill_no => {
-                let steps = k.kill.stop_done(now, o);
-                self.kill_steps(now, steps);
+        let mut outcomes = Vec::new();
+        self.stoppers.retain_mut(|(kill_no, s)| {
+            if let Some(o) = s.poll(now) {
+                outcomes.push((*kill_no, o));
             }
-            _ => (self.log)(&format!("debug: a late systemctl outcome is ignored: {o:?}")),
+            !s.reaped()
+        });
+        for (kill_no, o) in outcomes {
+            match self.kill.as_mut() {
+                Some(k) if k.kill_no == kill_no => {
+                    let steps = k.kill.stop_done(now, o);
+                    self.kill_steps(now, steps);
+                }
+                _ => (self.log)(&format!("debug: a late systemctl outcome is ignored: {o:?}")),
+            }
         }
     }
 
@@ -995,7 +993,7 @@ impl Runtime {
                 }
                 kill::Step::StopUnit { deadline } => {
                     match Stopper::start(&self.systemctl, cfg, deadline) {
-                        Ok(s) => self.stopper = Some((kill_no, s)),
+                        Ok(s) => self.stoppers.push((kill_no, s)),
                         Err(e) => {
                             (self.log)(&format!("error: kill: systemctl stop did not start: {e}"));
                             if let Some(k) = self.kill.as_mut() {
