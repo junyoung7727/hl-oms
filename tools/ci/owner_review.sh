@@ -5,12 +5,13 @@
 #
 # usage: owner_review.sh <base-commit> [paths-file]
 #
-# paths-file defaults to tools/ci/owner_review_paths.txt of the working
-# tree. A merging runner runs the base branch's copy of this script with
-# the base branch's list (`bash <(git show main:tools/ci/owner_review.sh)
-# main <(git show main:tools/ci/owner_review_paths.txt)`), so that the
-# change under review can neither edit the script nor shorten the list it
-# is checked against.
+# Run it inside the repository (any directory). paths-file defaults to
+# tools/ci/owner_review_paths.txt of the working tree; a relative one is
+# named from the caller's directory, and a pipe is accepted. A merging
+# runner runs the base branch's copy of this script with the base branch's
+# list (`bash <(git show main:tools/ci/owner_review.sh) main <(git show
+# main:tools/ci/owner_review_paths.txt)`), so that the change under review
+# can neither edit the script nor shorten the list it is checked against.
 #
 # The change is <base-commit>...HEAD (from the merge base, as in a pull
 # request). Four rules, one line per finding:
@@ -55,13 +56,17 @@ prefix="owner_review"
 cannot() { echo "$prefix: cannot check: $1"; exit 2; }
 
 top="$(git rev-parse --show-toplevel 2> /dev/null)" || cannot "not in a git repository"
+# A relative paths file is named from the caller's directory.
+list="${2:-}"
+[[ -z "$list" || "$list" == /* ]] || list="$PWD/$list"
 cd "$top" || cannot "cannot enter $top"
 base="${1:-}"
 [[ -n "$base" ]] || cannot "usage: owner_review.sh <base-commit> [paths-file]"
 git rev-parse -q --verify "$base^{commit}" > /dev/null || cannot "no commit $base"
 mb="$(git merge-base "$base" HEAD 2> /dev/null)" || cannot "no merge base of $base and HEAD"
-list="${2:-tools/ci/owner_review_paths.txt}"
-[[ -f "$list" ]] || cannot "no paths file $list"
+list="${list:-tools/ci/owner_review_paths.txt}"
+# -r, not -f: a list given as `<(git show ..)` is a pipe.
+[[ -r "$list" && ! -d "$list" ]] || cannot "no paths file $list"
 
 findings=0
 test_attr='^[[:space:]]*#[[:space:]]*\[[[:space:]]*(tokio::)?test[[:space:]]*[](]'
@@ -78,6 +83,9 @@ mapfile -d '' -t changed < <(git diff -z --name-only --no-renames "$mb" HEAD)
 # directory name, else a file name). The list is read at HEAD: a change
 # that removes an entry also changes the list, which is under tools/ci/.
 mapfile -t entries < <(sed -e 's/#.*//' -e 's/[[:space:]]*$//' -e '/^$/d' "$list")
+# An empty list is a failed read (a `git show` of a missing file), not a
+# list that asks for nothing.
+(( ${#entries[@]} > 0 )) || cannot "no entry in paths file $list"
 for f in "${changed[@]}"; do
   for e in "${entries[@]}"; do
     n="${e%/}"

@@ -391,8 +391,12 @@ fi
 # commit, plants one change, commits it and runs the script against the
 # base, so a finding is the script's.
 expect_owner() { # expect_owner <code> <label> <fixed text>
+  expect_owner_run "$1" "$2" "$3" tools/ci/owner_review.sh "$obase"
+}
+expect_owner_run() { # expect_owner_run <code> <label> <fixed text> <command...>
   local want="$1" label="$2" text="$3" got=0
-  tools/ci/owner_review.sh "$obase" > "$tmp/out.txt" 2>&1 || got=$?
+  shift 3
+  "$@" > "$tmp/out.txt" 2>&1 || got=$?
   if [[ "$got" == "$want" ]] && grep -qF -- "$text" "$tmp/out.txt" \
     && { [[ "$want" == 0 ]] || ! grep -qF "owner_review: none" "$tmp/out.txt"; }; then
     echo "selftest: pass  (exit $want) $label"
@@ -558,6 +562,16 @@ oreset; sed -i '/^pub mod m;$/d' crates/a/src/lib.rs; plant
 expect_owner 1 "owner: a mod declaration removed, its file with tests kept" "owner_review: tests: crates/a/src/lib.rs: mod m removed, crates/a/src/m.rs still holds tests"
 oreset; sed -i 's/^pub mod m;$/mod m;/' crates/a/src/lib.rs; plant
 expect_owner 0 "owner: a mod declaration made private" "owner_review: none"
+# The paths file as the header shows it, from a pipe, and a relative one
+# named from a subdirectory (review 2, S3).
+oreset; printf 'on: push\n' >> .github/workflows/ci.yml; plant
+expect_owner_run 1 "owner: script and list from git show, as the header shows" "owner_review: path: .github/workflows/ci.yml" \
+  bash -c 'bash <(git show HEAD:tools/ci/owner_review.sh) "$1" <(git show HEAD:tools/ci/owner_review_paths.txt)' _ "$obase"
+cp tools/ci/owner_review_paths.txt crates/a/list.txt
+expect_owner_run 1 "owner: a relative paths file named from a subdirectory" "owner_review: path: .github/workflows/ci.yml" \
+  bash -c 'cd crates/a && ../../tools/ci/owner_review.sh "$1" list.txt' _ "$obase"
+expect_owner_run 2 "owner: an empty paths file from a pipe (a failed git show)" "owner_review: cannot check: no entry in paths file" \
+  bash -c 'tools/ci/owner_review.sh "$1" <(git show HEAD:no/such/file 2> /dev/null)' _ "$obase"
 oreset; cp tools/ci/owner_review_paths.txt "$tmp/base_paths.txt"; sed -i '/^\.github\/$/d' tools/ci/owner_review_paths.txt
 printf 'on: push\n' >> .github/workflows/ci.yml; plant
 expect_owner_with() { # the list from the base, as the runner passes it
