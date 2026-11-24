@@ -27,6 +27,10 @@ todo = "deny"
 unwrap_used = "warn"
 # Nested `if let` + `if` reads more clearly than a let-chain in the decision code.
 collapsible_if = "allow"
+# The clock calls listed in clippy.toml. Shell crates read the clock; a
+# pure crate (oms-core, md-core: time arrives as an input, ADR-002) turns
+# this lint to deny in its lib.rs (ADR-033 part 3).
+disallowed_methods = "allow"
 
 # A panic anywhere ends the process. A thread that died while the others keep
 # accepting requests would be worse than a stop: the journal holds the last

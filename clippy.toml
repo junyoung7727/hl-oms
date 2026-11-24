@@ -1,0 +1,8 @@
+# Clock calls. The lint is allowed in the workspace (Cargo.toml) and denied
+# in the pure crates' lib.rs, where time arrives as an input (ADR-002,
+# ADR-033 part 3).
+disallowed-methods = [
+  { path = "std::time::SystemTime::now", reason = "time arrives as an input (ADR-002)" },
+  { path = "std::time::Instant::now", reason = "time arrives as an input (ADR-002)" },
+  { path = "tokio::time::Instant::now", reason = "time arrives as an input (ADR-002)" },
+]

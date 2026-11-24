@@ -4,6 +4,9 @@
 //! I/O out, as for `oms-core` (ADR-002). Prices and quantities are `i64` with a
 //! per-instrument exponent, as in the lake contract (`contracts/lake/`, 1.3).
 
+// No clock call (clippy.toml; ADR-033 part 3).
+#![deny(clippy::disallowed_methods)]
+
 pub mod adapter;
 pub mod book;
 pub mod conformance;
