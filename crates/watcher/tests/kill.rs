@@ -1959,3 +1959,87 @@ async fn a_count_past_its_deadline_sends_no_further_page() {
     assert_eq!(rig.inflight.stray(), 0);
     assert_eq!(rig.paths().len(), 4);
 }
+
+#[tokio::test]
+async fn more_than_1000_open_orders_is_a_count_error() {
+    // 20 full pages, each with a next cursor: a 21st page would be needed.
+    // Two rounds of 1 cancel-all + 20 pages = 42 requests in about 1 s of
+    // the loop's clock (under the guard's 60 per 10 s), then the test
+    // stops before round 3.
+    // The fake repeats only its last answer, so both rounds are scripted.
+    let pages: Vec<rig::Reply> = (0..40)
+        .map(|i| at_once(open_orders(50, &format!("c{}", i % 20 + 2))))
+        .collect();
+    let mut rig = KillRig::new(vec![(CANCEL_ALL, vec![at_once(ok_n(500))]), (ORDERS, pages)]);
+    rig.start();
+    rig.run_until(|r| {
+        r.cancel_all_at().len() == 2 && r.lp.phase() == Phase::Repeat && r.inflight.open() == 0
+    })
+    .await;
+    let paths = rig.paths();
+    assert_eq!(paths.len(), 42);
+    for round in paths.chunks(21) {
+        assert_eq!(round[0], CANCEL_ALL);
+        assert!(round[1..].iter().all(|p| p == ORDERS));
+    }
+    assert_eq!(
+        rig.lp.remaining(),
+        &Err("more than 1000 open orders".to_string())
+    );
+    assert_eq!(rig.lp.round(), 2);
+    assert_eq!(rig.cancel_all_at(), [rig::T0, rig::T0 + 1000]);
+}
+
+#[tokio::test]
+async fn a_cancel_all_not_sent_is_told_from_the_state_before_the_call() {
+    // A latched key: nothing reaches the fake, no count follows, and the
+    // progress notice says the watcher must restart (C-WATCH part 11,
+    // U19b2a's known limit on the error of cancel_all).
+    let mut rig = KillRig::new(vec![(CANCEL_ALL, vec![at_once(ok_n(1))])]);
+    rig.client.stop_key("made-up rule");
+    rig.start();
+    rig.run_until(|r| r.lp.round() == 3).await;
+    assert!(rig.paths().is_empty());
+    let told: Vec<&Arrived> = rig.arrived.iter().map(|(_, a)| a).collect();
+    assert!(
+        told.iter().all(|a| matches!(
+            a,
+            Arrived::Cancel {
+                answer: CancelAnswer::NotSent(NotSent::Latched),
+                ..
+            }
+        )),
+        "{told:?}"
+    );
+    assert_eq!(rig.lp.cancel_all_calls(), 0);
+
+    // A 403 the cancel-all itself got was sent (Failed, and a count
+    // follows); in the pause after it the next cancel-all is not sent.
+    let mut rig = KillRig::new(vec![
+        (CANCEL_ALL, vec![at_once(http(403))]),
+        (ORDERS, vec![at_once(open_orders(0, ""))]),
+    ]);
+    rig.start();
+    rig.run_until(|r| r.lp.round() == 2).await;
+    // The count after it is not sent either (the pause), so it fails.
+    assert_eq!(rig.paths(), [CANCEL_ALL]);
+    let told: Vec<&Arrived> = rig.arrived.iter().map(|(_, a)| a).collect();
+    assert!(
+        matches!(
+            told[..],
+            [
+                Arrived::Cancel {
+                    answer: CancelAnswer::Failed(_),
+                    ..
+                },
+                Arrived::Page { .. },
+                Arrived::Counted { result: Err(_), .. },
+                Arrived::Cancel {
+                    answer: CancelAnswer::NotSent(NotSent::Paused),
+                    ..
+                },
+            ]
+        ),
+        "{told:?}"
+    );
+}

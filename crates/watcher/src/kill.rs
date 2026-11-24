@@ -461,8 +461,9 @@ pub const ORDERS: &str = w1::PATH;
 /// [`DEADLINE_EXTRA_MS`]. After a page that answered at or after it, the
 /// count sends no further page and ends with [`PAST_DEADLINE`]: the task
 /// asks for the next page at once, with no await the runtime could abort
-/// it at (review 3 S2). `on_page` is called for each page answered before
-/// its deadline.
+/// it at (review 3 S2). `on_page` is called for each page request that
+/// returned before its deadline (also one the client refused to send: the
+/// result that follows is then the error).
 pub async fn count_open(
     client: &Client,
     clock: &dyn Clock,
