@@ -1,7 +1,8 @@
 //! Decimal strings of the journal (C-TAIL "기록 형식"): an optional `-`,
 //! digits, and an optional `.` with 1 to 8 digits. No exponent, no `+`, no
 //! more places. Read into an `i128` scaled by 10^8; arithmetic is exact and
-//! checked.
+//! checked. The venue's decimal strings of the kill notices' position block
+//! (U19b2a) are read the same way.
 
 use std::fmt;
 
@@ -79,6 +80,18 @@ impl Dec {
 
     pub fn is_zero(self) -> bool {
         self.0 == 0
+    }
+
+    /// `num / den × 100` in per cent, rounded toward zero to 0.01 % (the
+    /// kill notices' distance to the liquidation price, U19b2a): `num.0 ×
+    /// 10^4 / den.0` read as hundredths of a per cent, in checked `i128`.
+    /// `None` when `num < 0`, `den ≤ 0` or a step overflows.
+    pub fn percent_floor(num: Dec, den: Dec) -> Option<Dec> {
+        if num.0 < 0 || den.0 <= 0 {
+            return None;
+        }
+        let hundredths = num.0.checked_mul(10_000)? / den.0;
+        hundredths.checked_mul(SCALE / 100).map(Dec)
     }
 }
 
@@ -167,5 +180,30 @@ mod tests {
         ] {
             assert_eq!(Dec(scaled).to_string(), text);
         }
+    }
+    #[test]
+    fn percent_floor_rounds_toward_zero_and_refuses_overflow() {
+        let d = |t: &str| Dec::parse(t).unwrap_or_default();
+        let pct = |n: &str, m: &str| Dec::percent_floor(d(n), d(m)).map(|p| p.to_string());
+        // Rounded down to 0.01 %, never up.
+        assert_eq!(pct("1", "3").as_deref(), Some("33.33"));
+        assert_eq!(pct("2", "3").as_deref(), Some("66.66"));
+        assert_eq!(pct("7000", "70000").as_deref(), Some("10"));
+        assert_eq!(pct("0.99999999", "100").as_deref(), Some("0.99"));
+        assert_eq!(pct("0.00000001", "70000").as_deref(), Some("0"));
+        assert_eq!(pct("0", "1").as_deref(), Some("0"));
+        assert_eq!(pct("3", "1").as_deref(), Some("300"));
+        assert_eq!(pct("1234.5", "67890.12345678").as_deref(), Some("1.81"));
+        // num ≥ 0 and den > 0 only.
+        assert_eq!(pct("-1", "3"), None);
+        assert_eq!(pct("1", "0"), None);
+        assert_eq!(pct("1", "-3"), None);
+        // An overflow of either multiplication is None, not a wrong value.
+        assert_eq!(Dec::percent_floor(Dec(i128::MAX / 1000), Dec(1)), None);
+        assert_eq!(Dec::percent_floor(Dec(i128::MAX / 10_000), Dec(1)), None);
+        assert_eq!(
+            Dec::percent_floor(Dec(i128::MAX / 10_000), Dec(i128::MAX / 10_000)),
+            Some(Dec(100 * SCALE))
+        );
     }
 }

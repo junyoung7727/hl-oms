@@ -1,7 +1,7 @@
 //! The watcher's own Bybit client (C-WATCH part 3) against a loopback fake
 //! (`http-fake`), on a manual clock: the request guard, the headers and the
 //! signed query, the answer classes, the never-retried key rejection and
-//! the 403 pause.
+//! the 403 pause; the one signed POST, the cancel-all (U19b2a).
 
 #![allow(clippy::unwrap_used)]
 
@@ -15,8 +15,10 @@ use serde_json::json;
 use watcher::clock::ManualClock;
 use watcher::metrics::Metrics;
 use watcher::rest::{
-    Client, ClientConfig, Credentials, GUARD_MAX, GUARD_WINDOW_MS, Guard, RestError,
+    CANCEL_ALL, CANCEL_ALL_BODY, CancelAll, Client, ClientConfig, Credentials, GUARD_MAX,
+    GUARD_WINDOW_MS, Guard, RestError,
 };
+use watcher::sign::post_signature;
 
 const T0: u64 = 1_700_000_000_000;
 
@@ -793,4 +795,230 @@ async fn auth_stop_keeps_the_first_text() {
         (-1, false, "query-api: the API key is the master account's now")
     );
     assert!(fake.requests().is_empty());
+}
+
+#[tokio::test]
+async fn the_only_post_is_cancel_all_with_the_fixed_body() {
+    assert_eq!(CANCEL_ALL, "/v5/order/cancel-all");
+    assert_eq!(CANCEL_ALL_BODY, r#"{"category":"linear","settleCoin":"USDT"}"#);
+    let fake = FakeHttp::start(Answer::Close);
+    fake.route(
+        CANCEL_ALL,
+        [ok(
+            r#"{"list":[{"orderId":"1","orderLinkId":"a"},{"orderId":"2","orderLinkId":""}],"success":"1"}"#,
+        )],
+    );
+    // The REST base as configured, with a trailing slash: the URL is the
+    // base plus the path constant.
+    let c = client_of(&format!("{}/", fake.url()), 300);
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let (m, s) = (c.metrics.clone(), seen.clone());
+    fake.on_request(move |_| {
+        let v = m.get("watcher_requests_total", &[("endpoint", CANCEL_ALL)]);
+        s.lock().unwrap().push(v);
+    });
+    assert_eq!(c.client.cancel_all().await, Ok(CancelAll { cancelled: 2 }));
+    // Counted before it is sent.
+    assert_eq!(*seen.lock().unwrap(), [Some(1.0)]);
+
+    let reqs = fake.requests();
+    assert_eq!(reqs.len(), 1);
+    let r = &reqs[0];
+    assert_eq!(r.method, "POST");
+    assert_eq!(r.target, CANCEL_ALL);
+    // The bytes sent are the body constant, byte for byte.
+    assert_eq!(r.body, CANCEL_ALL_BODY.as_bytes());
+    assert_eq!(r.header("content-type"), Some("application/json"));
+    assert_eq!(r.header("x-bapi-api-key"), Some("WKEY"));
+    assert_eq!(r.header("x-bapi-timestamp"), Some("1700000000000"));
+    assert_eq!(r.header("x-bapi-recv-window"), Some("5000"));
+    assert_eq!(r.header("x-bapi-sign-type"), Some("2"));
+    // Python hmac over "1700000000000WKEY5000" + the body (tests/sign.rs).
+    assert_eq!(
+        r.header("x-bapi-sign"),
+        Some("df293dce1c898148cb8c548eaa8d9d5180068daaa25acc3b6b028df594ab0f96")
+    );
+    // And the signature is over the bytes that arrived: signed and sent
+    // are the same bytes.
+    let arrived = String::from_utf8(r.body.clone()).unwrap();
+    assert_eq!(
+        r.header("x-bapi-sign").map(str::to_string),
+        Some(post_signature(
+            "watcher-made-up-secret-42",
+            T0,
+            "WKEY",
+            5000,
+            &arrived
+        ))
+    );
+    // The timestamp is the injected clock at the send.
+    c.clock.advance(1_234);
+    c.client.cancel_all().await.unwrap();
+    let r = &fake.requests()[1];
+    assert_eq!(r.header("x-bapi-timestamp"), Some("1700000001234"));
+    assert_eq!(
+        r.header("x-bapi-sign").map(str::to_string),
+        Some(post_signature(
+            "watcher-made-up-secret-42",
+            T0 + 1_234,
+            "WKEY",
+            5000,
+            CANCEL_ALL_BODY
+        ))
+    );
+    assert_eq!(
+        c.metrics
+            .get("watcher_requests_total", &[("endpoint", CANCEL_ALL)]),
+        Some(2.0)
+    );
+    assert!(c.lines.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn cancel_all_answers_are_classified() {
+    let row = r#"{"orderId":"1","orderLinkId":"a"}"#;
+    // retCode 0: `success` "1" or absent is the count of the list.
+    for (result, n) in [
+        (format!(r#"{{"list":[{row},{row},{row}],"success":"1"}}"#), 3),
+        (format!(r#"{{"list":[{row}]}}"#), 1),
+        (r#"{"list":[],"success":"1"}"#.to_string(), 0),
+    ] {
+        let fake = FakeHttp::start(Answer::Close);
+        fake.route(CANCEL_ALL, [ok(&result)]);
+        let c = client(&fake);
+        assert_eq!(
+            c.client.cancel_all().await,
+            Ok(CancelAll { cancelled: n }),
+            "{result}"
+        );
+    }
+    // `success` "0" is refused; a list that is not an array, no result or
+    // another `success` value is unreadable. Each is counted under the
+    // path, and none stops or pauses the client.
+    for (result, class) in [
+        (format!(r#"{{"list":[{row}],"success":"0"}}"#), "refused"),
+        (r#"{"list":{},"success":"1"}"#.to_string(), "unreadable"),
+        (r#"{"success":"1"}"#.to_string(), "unreadable"),
+        ("null".to_string(), "unreadable"),
+        (format!(r#"{{"list":[{row}],"success":1}}"#), "unreadable"),
+        (format!(r#"{{"list":[{row}],"success":"2"}}"#), "unreadable"),
+    ] {
+        let fake = FakeHttp::start(Answer::Close);
+        fake.route(CANCEL_ALL, [ok(&result), ok(r#"{"list":[]}"#)]);
+        let c = client(&fake);
+        let e = c.client.cancel_all().await.unwrap_err();
+        assert_eq!(e.class(), class, "{result}: {e:?}");
+        if class == "refused" {
+            assert_eq!(
+                e,
+                RestError::Refused {
+                    code: 0,
+                    msg: "cancel-all answered success 0".into()
+                }
+            );
+        }
+        assert_eq!(
+            c.metrics.get(
+                "watcher_request_errors_total",
+                &[("endpoint", CANCEL_ALL), ("class", class)]
+            ),
+            Some(1.0),
+            "{result}"
+        );
+        assert_eq!(
+            c.client.cancel_all().await,
+            Ok(CancelAll { cancelled: 0 }),
+            "{result}"
+        );
+    }
+    // The client classes of every request: 5xx is no answer.
+    let fake = FakeHttp::start(Answer::Close);
+    fake.route(CANCEL_ALL, [Answer::Reply(503, "busy".into())]);
+    let c = client(&fake);
+    assert_eq!(c.client.cancel_all().await.unwrap_err().class(), "no_answer");
+
+    // 10010 latches the key: nothing more is sent, by any path.
+    let fake = FakeHttp::start(ok("{}"));
+    fake.route(CANCEL_ALL, [code(10010)]);
+    let c = client(&fake);
+    let e = c.client.cancel_all().await.unwrap_err();
+    assert!(matches!(e, RestError::Auth { code: 10010, .. }), "{e:?}");
+    assert_eq!(c.client.auth_rejected(), Some(10010));
+    assert_eq!(c.metrics.get("watcher_auth_rejected", &[]), Some(1.0));
+    c.clock.advance(60_000);
+    assert_eq!(c.client.cancel_all().await.unwrap_err().class(), "auth");
+    assert_eq!(
+        c.client
+            .get("/v5/order/realtime", &linear())
+            .await
+            .unwrap_err()
+            .class(),
+        "auth"
+    );
+    assert_eq!(fake.requests().len(), 1);
+
+    // 403 pauses every request for 600 s from the answer.
+    let fake = FakeHttp::start(ok(r#"{"list":[]}"#));
+    fake.route(CANCEL_ALL, [Answer::Reply(403, "banned".into()), ok(r#"{"list":[]}"#)]);
+    let c = client(&fake);
+    assert_eq!(c.client.cancel_all().await.unwrap_err().class(), "ip_banned");
+    assert_eq!(c.client.paused_until(), Some(T0 + 600_000));
+    c.clock.set(T0 + 599_999);
+    assert_eq!(c.client.cancel_all().await.unwrap_err().class(), "ip_banned");
+    assert_eq!(fake.requests().len(), 1);
+    c.clock.set(T0 + 600_000);
+    assert_eq!(c.client.cancel_all().await, Ok(CancelAll { cancelled: 0 }));
+    assert_eq!(fake.requests().len(), 2);
+}
+
+/// Plain-text count of `needle` in `text`.
+fn count(text: &str, needle: &str) -> usize {
+    text.matches(needle).count()
+}
+
+/// The source of the watcher, read at test time: one `.post(` in each of
+/// `rest.rs` (the cancel-all), `metrics.rs` (the VM import) and `alert.rs`
+/// (Telegram), none in any other file, and no generic way to send a
+/// request with another method. A comment counts too (plain text).
+#[test]
+fn no_other_post_exists() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    for e in std::fs::read_dir(&dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+            files.push(p);
+        }
+    }
+    files.sort();
+    assert!(files.len() >= 20, "{files:?}");
+    let mut posts = Vec::new();
+    for p in &files {
+        let text = std::fs::read_to_string(p).unwrap();
+        let name = p.file_name().unwrap().to_str().unwrap().to_string();
+        let n = count(&text, ".post(");
+        if n > 0 {
+            posts.push((name.clone(), n));
+        }
+        for banned in ["Method::", ".request(", ".put(", ".patch(", ".delete("] {
+            assert_eq!(count(&text, banned), 0, "{banned} in {name}");
+        }
+    }
+    assert_eq!(
+        posts,
+        [
+            ("alert.rs".to_string(), 1),
+            ("metrics.rs".to_string(), 1),
+            ("rest.rs".to_string(), 1)
+        ]
+    );
+    // The one in rest.rs is inside `cancel_all`.
+    let rest = std::fs::read_to_string(dir.join("rest.rs")).unwrap();
+    let at = rest.find(".post(").unwrap();
+    let f = rest[..at].rfind("pub async fn ").unwrap();
+    assert!(
+        rest[f..].starts_with("pub async fn cancel_all("),
+        "{}",
+        &rest[f..f + 40]
+    );
 }

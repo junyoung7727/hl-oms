@@ -1,10 +1,12 @@
 //! The watcher's own Bybit v5 request signing (C-WATCH part 3), written
 //! from the venue's documentation (`docs/contracts/gateway.md`, row "서명"),
-//! not from the OMS's code. GET only: the watcher sends no POST in U19a.
+//! not from the OMS's code. GETs, and from U19b2a the one signed POST,
+//! the cancel-all of the watcher's kill loop (`rest::Client::cancel_all`).
 //!
 //! `X-BAPI-SIGN = hex(HMAC_SHA256(secret, timestamp + api_key +
 //! recv_window + query))`, where the query is the string sent in the URL,
-//! byte for byte.
+//! byte for byte; for a POST the body sent takes the place of the query,
+//! byte for byte (gateway facts Q1.1, Q1.15).
 
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
@@ -36,6 +38,25 @@ pub fn signature(
     hmac_hex(
         secret,
         &prehash(timestamp_ms, api_key, recv_window_ms, query),
+    )
+}
+
+/// The string a POST signs: the body is the exact bytes sent.
+pub fn post_prehash(timestamp_ms: u64, api_key: &str, recv_window_ms: u64, body: &str) -> String {
+    format!("{timestamp_ms}{api_key}{recv_window_ms}{body}")
+}
+
+/// `X-BAPI-SIGN` of a POST of `body`.
+pub fn post_signature(
+    secret: &str,
+    timestamp_ms: u64,
+    api_key: &str,
+    recv_window_ms: u64,
+    body: &str,
+) -> String {
+    hmac_hex(
+        secret,
+        &post_prehash(timestamp_ms, api_key, recv_window_ms, body),
     )
 }
 

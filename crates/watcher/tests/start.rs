@@ -33,6 +33,11 @@ const UNBOUND: &str =
 type Lines = Arc<Mutex<Vec<String>>>;
 
 fn config(symbols: &[&str], ip_check_ms: u64) -> Config {
+    config_with(symbols, ip_check_ms, "")
+}
+
+/// The config of `config` with `extra` (whole sections) at its end.
+fn config_with(symbols: &[&str], ip_check_ms: u64, extra: &str) -> Config {
     let list: Vec<String> = symbols.iter().map(|s| format!("{s:?}")).collect();
     let text = format!(
         r#"name = "w1"
@@ -46,7 +51,7 @@ status_url = "http://127.0.0.1:8188/api/status"
 host = "h1"
 [intervals]
 ip_check_ms = {ip_check_ms}
-"#,
+{extra}"#,
         list.join(", ")
     );
     Config::from_toml(&text).unwrap()
@@ -946,4 +951,191 @@ fn an_answer_without_a_request_in_flight_changes_nothing() {
     for t in [due + 1, due + 60_000, due + 600_000] {
         assert_eq!(check.poll(t), None);
     }
+}
+
+/// A key that can cancel (U19b2a): read-write, `ContractTrade` with
+/// `Order`, no `Withdraw` anywhere.
+fn cancel_key(read_only: Value, permissions: Value) -> Value {
+    let mut v = good_key();
+    v["readOnly"] = read_only;
+    v["permissions"] = permissions;
+    v
+}
+
+fn can_cancel() -> Value {
+    cancel_key(
+        json!(0),
+        json!({"ContractTrade": ["Order", "Position"], "Wallet": ["AccountTransfer"], "NFT": []}),
+    )
+}
+
+/// A start with `[kill]` (the key must cancel) of BTCUSDT.
+fn start_kill(metrics: Arc<Metrics>) -> S {
+    let (log, lines) = watcher::log::collect();
+    let cfg = config_with(&["BTCUSDT"], 60_000, "[kill]\n");
+    let start = Start::new(&cfg, metrics.clone(), log, T0);
+    S {
+        start,
+        metrics,
+        lines,
+    }
+}
+
+#[tokio::test]
+async fn a_key_that_must_cancel_needs_read_write_order_and_no_withdraw() {
+    const READ_ONLY: &str = "the API key is read-only (readOnly 1); with [kill] the watcher cancels orders and needs a read-write key";
+    const NO_ORDER: &str = "the API key has no ContractTrade Order permission; with [kill] the watcher needs it to cancel orders";
+    let withdraw = |list: &str| {
+        format!("the API key has the Withdraw permission ({list}); the watcher's key must not be able to withdraw")
+    };
+    let refusals = [
+        ("read only", cancel_key(json!(1), can_cancel()["permissions"].clone()), READ_ONLY.to_string()),
+        (
+            "no Order",
+            cancel_key(json!(0), json!({"ContractTrade": ["Position"], "Wallet": []})),
+            NO_ORDER.to_string(),
+        ),
+        (
+            "no ContractTrade",
+            cancel_key(json!(0), json!({"Spot": ["SpotTrade"]})),
+            NO_ORDER.to_string(),
+        ),
+        (
+            "Withdraw in Wallet",
+            cancel_key(json!(0), json!({"ContractTrade": ["Order"], "Wallet": ["Withdraw"]})),
+            withdraw("Wallet"),
+        ),
+        (
+            "Withdraw in another list",
+            cancel_key(json!(0), json!({"ContractTrade": ["Order", "Withdraw"]})),
+            withdraw("ContractTrade"),
+        ),
+        // `Order` counts only in ContractTrade (review 1 S2).
+        (
+            "Order only in another list",
+            cancel_key(json!(0), json!({"Spot": ["Order"], "ContractTrade": ["Position"]})),
+            NO_ORDER.to_string(),
+        ),
+        // A rule that reads and fails refuses, also when another field or
+        // list of the same answer does not read (review 1 S4).
+        (
+            "read only, a list unreadable",
+            cancel_key(json!(1), json!({"ContractTrade": ["Order"], "NFT": null})),
+            READ_ONLY.to_string(),
+        ),
+        (
+            "read only, permissions unreadable",
+            cancel_key(json!(1), json!(7)),
+            READ_ONLY.to_string(),
+        ),
+        (
+            "no Order, a list unreadable",
+            cancel_key(json!(0), json!({"ContractTrade": ["Position"], "NFT": null})),
+            NO_ORDER.to_string(),
+        ),
+        (
+            "Withdraw, a list unreadable",
+            cancel_key(json!(0), json!({"ContractTrade": ["Order"], "NFT": null, "Wallet": ["Withdraw"]})),
+            withdraw("Wallet"),
+        ),
+        (
+            "Withdraw, readOnly unreadable",
+            cancel_key(json!("0"), json!({"ContractTrade": ["Order"], "Wallet": ["Withdraw"]})),
+            withdraw("Wallet"),
+        ),
+    ];
+    // With [kill]: each rule refuses the start (exit 2) with the rule named.
+    for (case, v, why) in &refusals {
+        let mut s = start_kill(Arc::new(Metrics::new("h1", "w1")));
+        take(&mut s.start, T0, &query_api());
+        let want = refuse(&format!("query-api: {why}"));
+        assert_eq!(s.start.on_answer(T0 + 5, Ok(v.clone())), want, "{case}");
+        asks_nothing(&mut s.start, &[T0 + 5, T0 + 5 + RETRY_MS], case);
+    }
+    // A key that can cancel goes on to the echo.
+    let mut s = start_kill(Arc::new(Metrics::new("h1", "w1")));
+    assert_eq!(answer(&mut s.start, T0, &query_api(), Ok(can_cancel())), Step::Next);
+    take(&mut s.start, T0, &Request::Echo);
+    // Fields that cannot be read: asked again after 5 s, never passed.
+    for (case, v) in [
+        ("no readOnly", {
+            let mut v = can_cancel();
+            v.as_object_mut().unwrap().remove("readOnly");
+            v
+        }),
+        ("readOnly a boolean", cancel_key(json!(false), can_cancel()["permissions"].clone())),
+        ("readOnly a string", cancel_key(json!("0"), can_cancel()["permissions"].clone())),
+        ("permissions not an object", cancel_key(json!(0), json!(["Order"]))),
+        ("ContractTrade not a list", cancel_key(json!(0), json!({"ContractTrade": "Order"}))),
+        ("a list with a number", cancel_key(json!(0), json!({"ContractTrade": ["Order"], "Wallet": [1]}))),
+        // No readable rule fails, so the unread list keeps it unknown.
+        ("a null list", cancel_key(json!(0), json!({"ContractTrade": ["Order"], "NFT": null}))),
+        (
+            "ContractTrade and another list unreadable",
+            cancel_key(json!(0), json!({"Affiliate": null, "ContractTrade": [1]})),
+        ),
+    ] {
+        let metrics = Arc::new(Metrics::new("h1", "w1"));
+        let mut s = start_kill(metrics.clone());
+        let step = answer(&mut s.start, T0, &query_api(), Ok(v));
+        assert_eq!(step, wait(T0 + RETRY_MS), "{case}");
+        assert_eq!(unreadable(&metrics, QUERY_API), Some(1.0), "{case}");
+        asks_nothing(&mut s.start, &[T0 + RETRY_MS - 1], case);
+        take(&mut s.start, T0 + RETRY_MS, &query_api());
+    }
+    // Without [kill] these fields are not read: a read-only key without
+    // Order passes (the watcher of U19a only reads).
+    for (case, v, _) in &refusals {
+        let mut s = start_of(&["BTCUSDT"]);
+        let step = answer(&mut s.start, T0, &query_api(), Ok(v.clone()));
+        assert_eq!(step, Step::Next, "{case}");
+    }
+    let mut s = start_of(&["BTCUSDT"]);
+    let step = answer(&mut s.start, T0, &query_api(), Ok(cancel_key(json!("x"), json!(7))));
+    assert_eq!(step, Step::Next, "unread fields");
+
+    // The recheck applies the same rules: a key that no longer can cancel
+    // stops every Bybit request until restart (a rule stop).
+    for (case, v, why) in &refusals {
+        let fake = FakeHttp::start(ok(&json!({"list": []})));
+        fake.route(QUERY_API, [ok(&can_cancel()), ok(v)]);
+        fake.route(INSTRUMENTS, [ok(&instrument("BTCUSDT", "USDT"))]);
+        let c = client(&fake);
+        let mut s = start_kill(c.metrics.clone());
+        assert_eq!(c.drive(&mut s.start).await, Step::Done, "{case}");
+        let mut check = s.start.ip_check().unwrap();
+        c.clock.advance(60_000);
+        let req = check.poll(c.clock.now_ms()).unwrap();
+        assert_eq!(req, query_api(), "{case}");
+        let step = check.on_answer(c.clock.now_ms(), c.ask(&req).await);
+        let reason = format!("the key no longer passes the start check: query-api: {why}");
+        assert_eq!(step, Step::StopRequests { reason }, "{case}");
+        apply(&c.client, &step);
+        assert_eq!(c.client.auth_rejected(), Some(OWN_RULE_CODE), "{case}");
+        assert_eq!(c.metrics.get(PUBLIC_IP_OK, &[]), Some(0.0), "{case}");
+        assert_eq!(fake.requests().len(), 3, "{case}");
+        nothing_sent(&c, &fake, |t| check.poll(t), case).await;
+        // The cancel-all is a Bybit request like the others: not sent.
+        assert_eq!(c.client.cancel_all().await.unwrap_err().class(), "auth", "{case}");
+        assert_eq!(fake.requests().len(), 3, "{case}");
+    }
+    // At the recheck an answer whose [kill] fields do not read, and where no
+    // readable rule fails, is a failed recheck (asked again after
+    // ip_check_ms, watcher_public_ip_ok 0), not a rule stop (review 1 N4).
+    let fake = FakeHttp::start(ok(&json!({"list": []})));
+    let unread = cancel_key(json!(0), json!({"ContractTrade": ["Order"], "NFT": null}));
+    fake.route(QUERY_API, [ok(&can_cancel()), ok(&unread)]);
+    fake.route(INSTRUMENTS, [ok(&instrument("BTCUSDT", "USDT"))]);
+    let c = client(&fake);
+    let mut s = start_kill(c.metrics.clone());
+    assert_eq!(c.drive(&mut s.start).await, Step::Done);
+    let mut check = s.start.ip_check().unwrap();
+    c.clock.advance(60_000);
+    let now = c.clock.now_ms();
+    let req = check.poll(now).unwrap();
+    let step = check.on_answer(now, c.ask(&req).await);
+    assert_eq!(step, wait(now + 60_000));
+    assert_eq!(c.client.auth_rejected(), None);
+    assert_eq!(c.metrics.get(PUBLIC_IP_OK, &[]), Some(0.0));
+    assert_eq!(unreadable(&c.metrics, QUERY_API), Some(1.0));
 }
