@@ -1526,12 +1526,17 @@ fn record_at(w: &World, clock: &Arc<ManualClock>) -> Seen {
     seen
 }
 
-fn at(seen: &Mutex<Vec<(u64, String)>>, path: &str, from: u64, to: u64) -> usize {
+/// Requests to `path` from the `from`-th request at the fake on (by order:
+/// the clock stands still while the K steps run, so instants can tie).
+fn since(seen: &Mutex<Vec<(u64, String)>>, path: &str, from: usize) -> Vec<(usize, u64)> {
     seen.lock()
         .unwrap()
         .iter()
-        .filter(|(t, p)| p == path && *t >= from && *t <= to)
-        .count()
+        .enumerate()
+        .skip(from)
+        .filter(|(_, (_, p))| p == path)
+        .map(|(i, (t, _))| (i, *t))
+        .collect()
 }
 
 /// A kill of an answering OMS that went silent: `admin.sock` latches. Walks
@@ -1579,22 +1584,24 @@ fn the_engine_is_paused_during_a_kill_and_resumes_after() {
         // One order stays open: the loop cannot end while the test looks.
         |w| w.bybit.route("/v5/order/realtime", [orders(1)]),
     );
-    let from = clock.now_ms();
+    // Every request from here on was sent after the fire (the start
+    // notice needs K1, K2 and a position read).
+    let from = seen.lock().unwrap().len();
     let beats = heartbeats(&w.monitor).len();
     let age = |w: &World| w.pushed(r#"watcher_check_age_s","check":"W1"#).unwrap();
     std::thread::sleep(Duration::from_millis(300));
     let (age0, t0) = (age(&w), clock.now_ms());
     walk(&clock, 10_000);
     std::thread::sleep(Duration::from_millis(300));
-    let to = clock.now_ms();
     // The kill ran the whole window (an order was open): no check round
     // (W3, W4; W1's list is the loop's count: no more of it than
     // cancel-alls), no heartbeat; the check ages kept growing.
-    assert_eq!(at(&seen, "/v5/account/wallet-balance", from, to), 0);
-    assert_eq!(at(&seen, "/v5/execution/list", from, to), 0);
-    let cancels = at(&seen, CANCEL_ALL, from, to);
+    assert!(since(&seen, "/v5/account/wallet-balance", from).is_empty());
+    assert!(since(&seen, "/v5/execution/list", from).is_empty());
+    let cancels = since(&seen, CANCEL_ALL, from).len();
     assert!(cancels >= 5, "{cancels}");
-    assert!(at(&seen, "/v5/order/realtime", from, to) <= cancels + 1);
+    assert!(since(&seen, "/v5/order/realtime", from).len() <= cancels + 1);
+    let to = seen.lock().unwrap().len();
     assert_eq!(heartbeats(&w.monitor).len(), beats);
     let grown = age(&w) - age0;
     assert!(grown >= (clock.now_ms() - t0) as f64 / 1000.0 - 2.0, "{grown}");
@@ -1602,12 +1609,11 @@ fn the_engine_is_paused_during_a_kill_and_resumes_after() {
     // Zero open orders: the loop ends, the checks and heartbeats resume.
     w.bybit.route("/v5/order/realtime", [empty_page()]);
     walk_until(&clock, 60_000, "the final notice", || !sent_with(&w, FINAL_NOTICE).is_empty());
-    let end = clock.now_ms();
     walk(&clock, 3000);
     std::thread::sleep(Duration::from_millis(300));
     assert!(until(10, || heartbeats(&w.monitor).len() > beats));
-    assert!(at(&seen, "/v5/account/wallet-balance", end, u64::MAX) >= 1);
-    assert!(at(&seen, "/v5/order/realtime", end, u64::MAX) >= 1);
+    assert!(!since(&seen, "/v5/account/wallet-balance", to).is_empty());
+    assert!(!since(&seen, "/v5/order/realtime", to).is_empty());
     assert_eq!(w.pushed("watcher_kill_active"), Some(0.0));
     // W5 watches again after one good answer (the halt latched: not owed).
     assert_eq!(w.pushed("watcher_w5_armed"), Some(0.0));
@@ -1634,13 +1640,8 @@ fn the_watchers_loop_repeats_until_zero_at_no_more_than_2_cancel_alls_per_second
         );
     });
     walk_until(&clock, 120_000, "the final notice", || !sent_with(&w, FINAL_NOTICE).is_empty());
-    let cancels: Vec<u64> = seen
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|(_, p)| p == CANCEL_ALL)
-        .map(|(t, _)| *t)
-        .collect();
+    let all = since(&seen, CANCEL_ALL, 0);
+    let cancels: Vec<u64> = all.iter().map(|(_, t)| *t).collect();
     assert_eq!(cancels.len(), 3, "{cancels:?}");
     for &t in &cancels {
         let n = cancels.iter().filter(|&&u| u >= t && u < t + 1000).count();
@@ -1652,9 +1653,19 @@ fn the_watchers_loop_repeats_until_zero_at_no_more_than_2_cancel_alls_per_second
     // the watch counts every 5 s, the last at 30 s (z is the third count's
     // answer, within a tick of the third cancel-all; the engine runs again
     // only after the last).
-    assert_eq!(at(&seen, "/v5/order/realtime", cancels[0], cancels[1] - 1), 1);
-    assert_eq!(at(&seen, "/v5/order/realtime", cancels[1], cancels[2] - 1), 1);
-    assert_eq!(at(&seen, "/v5/order/realtime", cancels[2], cancels[2] + 29_000), 6);
+    let counts = |a: usize, b: usize| {
+        since(&seen, "/v5/order/realtime", a)
+            .into_iter()
+            .filter(|(i, _)| *i < b)
+            .count()
+    };
+    assert_eq!(counts(all[0].0, all[1].0), 1);
+    assert_eq!(counts(all[1].0, all[2].0), 1);
+    let watch = since(&seen, "/v5/order/realtime", all[2].0)
+        .into_iter()
+        .filter(|(_, t)| *t <= cancels[2] + 29_000)
+        .count();
+    assert_eq!(watch, 6);
     let fin = &sent_with(&w, FINAL_NOTICE)[0];
     assert!(
         fin.contains("(3회차, 일괄 취소 3회). OMS는 래치됨(watcher_kill)."),
@@ -1780,15 +1791,8 @@ fn a_clock_step_back_during_a_kill_does_not_hold_the_loop() {
     // Settle: the last cancel-all was counted.
     std::thread::sleep(Duration::from_millis(300));
     let k = cancels();
-    let last = seen
-        .lock()
-        .unwrap()
-        .iter()
-        .rev()
-        .find(|(_, p)| p == CANCEL_ALL)
-        .map(|(t, _)| *t)
-        .unwrap();
-    assert!(until(5, || at(&seen, "/v5/order/realtime", last, u64::MAX) >= 1));
+    let last = since(&seen, CANCEL_ALL, 0).last().unwrap().0;
+    assert!(until(5, || !since(&seen, "/v5/order/realtime", last).is_empty()));
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(cancels(), k);
     clock.set(clock.now_ms() - 60_000);
@@ -1810,15 +1814,15 @@ fn a_clock_step_back_during_a_kill_does_not_hold_the_loop() {
 #[test]
 fn a_halt_without_a_reply_is_aborted_at_its_deadline() {
     // admin.sock takes watcher_kill and never answers. The K2 deadline (2 ×
-    // request_timeout_ms + 1,000 = 7,000 ms of the kill's clock) passes
+    // request_timeout_ms + 1,000 = 11,000 ms of the kill's clock) passes
     // while the connection hangs, so walking the clock through it does not
     // depend on the machine: the runtime aborts the task (the connection
-    // closes) long before admin_kill's own 6,000 ms of real time, and K3
-    // runs (review 2 S1, S2).
+    // closes) long before admin_kill's own timeout of 5,000 ms of real time
+    // for the reply, and K3 runs (review 2 S1, S2).
     let (tg_dir, tg) = telegram_section("rt-k-hang-t");
     let (mut w, dir) = kill_world(
         "rt-k-hang",
-        &format!("[http]\nrequest_timeout_ms = 3000\n[w5]\nsilence_ms = 13000\n{tg}"),
+        &format!("[http]\nrequest_timeout_ms = 5000\n[w5]\nsilence_ms = 19000\n{tg}"),
         "",
     );
     w.admin = FakeSock::serve(&w.cfg.admin_socket, |_, _, v| {
@@ -1835,14 +1839,14 @@ fn a_halt_without_a_reply_is_aborted_at_its_deadline() {
     assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
     walk(&clock, 2000);
     w.status_down();
-    walk_until(&clock, 30_000, "the fire", || w.lines_with(FIRED) == 1);
+    walk_until(&clock, 40_000, "the fire", || w.lines_with(FIRED) == 1);
     walk_kill(&clock, "watcher_kill at admin.sock", || {
         kill_lines(&w.admin).len() == 1
     });
     let asked = Instant::now();
     let conn = w.admin.conns().len() - 1;
     assert_eq!(w.admin.conns()[conn].last().unwrap()["op"], "watcher_kill");
-    walk(&clock, 7100);
+    walk(&clock, 11_100);
     assert!(w.admin.wait(Duration::from_secs(10), |s| s.closed[conn]));
     let took = asked.elapsed();
     assert!(took < Duration::from_millis(4000), "the halt task was not aborted at its deadline: {took:?}");
