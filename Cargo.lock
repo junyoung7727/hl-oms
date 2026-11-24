@@ -2481,11 +2481,13 @@ dependencies = [
 name = "watcher"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "crc32fast",
  "hex",
  "hmac",
  "http-fake",
  "reqwest",
+ "ring",
  "rustix",
  "serde",
  "serde_json",

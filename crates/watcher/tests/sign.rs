@@ -7,8 +7,13 @@
 
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
+use common::rsa;
 use watcher::sign::{
-    hmac_hex, post_prehash, post_signature, prehash, query_string, signature,
+    Signer, hmac_hex, post_prehash, post_signature, prehash, query_string, signature,
 };
 
 #[test]
@@ -127,5 +132,47 @@ fn the_post_string_to_sign_matches_the_published_example_and_independent_values(
             r#"{"category": "linear", "settleCoin": "USDT"}"#
         ),
         "df293dce1c898148cb8c548eaa8d9d5180068daaa25acc3b6b028df594ab0f96"
+    );
+}
+
+/// RSA (ADR-034, spec T2): RSA-SHA256 PKCS#1 v1.5 over the same string to
+/// sign, standard base64 with padding (F1). PKCS#1 v1.5 is deterministic,
+/// so openssl's value for the test-only key is the exact expected value:
+/// `printf '%s' "$prehash" | openssl dgst -sha256 -sign key.pem | base64 -w0`.
+/// The signature is also checked with ring's public key of the key, parsed
+/// here from the PEM body (not through the code under test). The HMAC
+/// signer gives the lower-case hex of `hmac_hex` (the Python value above).
+#[test]
+fn an_rsa_signature_is_openssls_base64_and_verifies_with_the_public_key() {
+    let pre = prehash(
+        1658384314791,
+        "XXXXXXXXXX",
+        5000,
+        "category=option&symbol=BTC-29JUL22-25000-C",
+    );
+    let signer = Signer::rsa(&rsa::pem_2048()).unwrap();
+    assert!(signer.is_rsa());
+    let got = signer.sign(&pre).unwrap();
+    assert_eq!(
+        got,
+        "kGwAVU7pufiKNgdwHDO+kJtPDvnBTOgIv4UsxfTpGa0f2PX8CWcUZSwp9+AVg5juKY+M7pZyRoSHx7Hoad0EJ2za2jyBZOvHw3OjB15AL3lDKsUVbFZX0Mv+7eox7X6rLRoy0TYLohV6Qg2NxaTGCYwWX+H25kZNjBTMUhV7tP07BXgeTR9ZJtiZ+rbOogQMC/UTXKmp7CaGlPIXvqpYqwViTPShBF1BTnZECBeFPFMV5iLXIRlYgzeCt5KtJlWjFeIwbxYI0wv7ntm+JpGpKmvTnXipBye5/S53ZzEjkFuYVHig7KKk6zWMzSUH1vV5oi4g18penJP66TzJuMSotQ=="
+    );
+    // Deterministic: the same string signs to the same value again.
+    assert_eq!(signer.sign(&pre).unwrap(), got);
+
+    use ring::signature::{KeyPair, RSA_PKCS1_2048_8192_SHA256, RsaKeyPair, UnparsedPublicKey};
+    let der = STANDARD.decode(rsa::KEY_2048.replace('\n', "")).unwrap();
+    let pair = RsaKeyPair::from_pkcs8(&der).unwrap();
+    let public = UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, pair.public_key().as_ref());
+    let sig = STANDARD.decode(&got).unwrap();
+    assert_eq!(sig.len(), 256);
+    assert!(public.verify(pre.as_bytes(), &sig).is_ok());
+    assert!(public.verify(format!("{pre}x").as_bytes(), &sig).is_err());
+
+    let hmac = Signer::hmac("watcher-made-up-secret-42");
+    assert!(!hmac.is_rsa());
+    assert_eq!(
+        hmac.sign(&pre).unwrap(),
+        "cf187522bbc9e07889883ae4fae5981af1e894c584aede1a967a72c23c5d5c40"
     );
 }
