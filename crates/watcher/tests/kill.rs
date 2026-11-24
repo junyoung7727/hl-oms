@@ -1,7 +1,10 @@
 //! The watcher's kill notices (C-WATCH part 11, U19b2a): the texts of the
 //! start, progress, final and abort notices, the position block every
 //! notice carries, and the position reader against a loopback fake
-//! (`http-fake`) on a manual clock.
+//! (`http-fake`) on a manual clock. And the sans-IO cancel-all
+//! confirmation loop `KillLoop` (U19b2b): C2–C5, the order budget, the
+//! request deadlines, the notice rule and abort, driven by hand on its own
+//! clock (no client, no task).
 
 #![allow(clippy::unwrap_used)]
 
@@ -11,12 +14,14 @@ use http_fake::{Answer, FakeHttp};
 use serde_json::{Value, json};
 use watcher::alert::{MSG_LIMIT, message, split};
 use watcher::clock::{Clock, ManualClock};
+use watcher::config::Kill;
 use watcher::kill::{
-    AbortWhy, LATCHED_LINE, LastError, NOT_READ_ON_ABORT, NotSent, Notice, PAUSED_LINE, POSITIONS,
-    Positions, StopOutcome, TIMED_OUT, notice_text, position_block, read_positions,
+    AbortWhy, Action, CancelAnswer, KillLoop, LATCHED_LINE, LastError, NOT_READ_ON_ABORT, NotSent,
+    Notice, PAUSED_LINE, POSITIONS, Phase, Positions, Report, StopOutcome, TIMED_OUT, notice_text,
+    position_block, read_positions,
 };
 use watcher::metrics::Metrics;
-use watcher::rest::{Client, ClientConfig, Credentials};
+use watcher::rest::{CancelAll, Client, ClientConfig, Credentials};
 
 /// 2023-11-14T22:13:20Z.
 const T0: u64 = 1_700_000_000_000;
@@ -474,4 +479,1088 @@ async fn the_position_reader_pages_and_keeps_its_deadline() {
     let p = read_positions(&c.client, &*c.clock, 2000).await;
     assert_eq!(p, Positions::Rows(vec![a]));
     assert_eq!(*seen.lock().unwrap(), [POSITIONS]);
+}
+
+// ---- The loop (U19b2b), sans-IO ----
+
+/// `request_timeout_ms` of the loop tests: a request's deadline is its
+/// emission (or its last page) + 13,000 ms.
+const RT: u64 = 2000;
+const EXTRA: u64 = RT + 11_000;
+
+fn kill_loop() -> KillLoop {
+    KillLoop::new(Kill::default(), RT)
+}
+
+fn done(n: usize) -> CancelAnswer {
+    CancelAnswer::Done(CancelAll { cancelled: n })
+}
+
+/// The `req_id` of the one request in `acts`, and whether it is a count.
+fn req(acts: &[Action]) -> (u64, bool) {
+    let reqs: Vec<(u64, bool)> = acts
+        .iter()
+        .filter_map(|a| match a {
+            Action::CancelAll { req_id } => Some((*req_id, false)),
+            Action::Count { req_id } => Some((*req_id, true)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(reqs.len(), 1, "one request in {acts:?}");
+    reqs[0]
+}
+
+fn cancel_id(acts: &[Action]) -> u64 {
+    let (id, count) = req(acts);
+    assert!(!count, "a cancel-all in {acts:?}");
+    id
+}
+
+fn count_id(acts: &[Action]) -> u64 {
+    let (id, count) = req(acts);
+    assert!(count, "a count in {acts:?}");
+    id
+}
+
+fn notices(acts: &[Action]) -> Vec<Notice> {
+    acts.iter()
+        .filter_map(|a| match a {
+            Action::Notice(n) => Some(n.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_loop_cancels_counts_and_ends_after_the_watch() {
+    let mut l = kill_loop();
+    assert_eq!(l.phase(), Phase::Idle);
+    assert_eq!(l.next_wake(), None);
+    let acts = l.start(T0, "h", StopOutcome::Latched);
+    assert_eq!(acts[0], Action::Notice(Notice::Start { round_ms: 1000 }));
+    assert_eq!(l.header(), "h");
+    let c = cancel_id(&acts);
+    assert_eq!((l.phase(), l.round()), (Phase::Cancel, 1));
+    // C2 answered → C3 at once.
+    let k = count_id(&l.cancel_done(T0 + 50, c, done(3)));
+    assert_eq!(l.cancel_all_calls(), 1);
+    // C3 zero → C5: a count every 5 s from z, the last at z + 30 s.
+    let z = T0 + 100;
+    assert_eq!(l.count_done(z, k, Ok(0)), []);
+    assert_eq!((l.phase(), l.remaining()), (Phase::Watch, &Ok(0)));
+    for step in 1..=6u64 {
+        let due = z + step * 5000;
+        assert_eq!(l.next_wake(), Some(due), "watch count {step}");
+        assert_eq!(l.poll(due - 1), []);
+        let k = count_id(&l.poll(due));
+        let acts = l.count_done(due + 40, k, Ok(0));
+        if step < 6 {
+            assert_eq!(acts, [], "watch count {step}");
+            continue;
+        }
+        assert_eq!(
+            acts,
+            [
+                Action::Notice(Notice::Final {
+                    watch_ms: 30_000,
+                    round: 1,
+                    cancel_all_calls: 1,
+                    outcome: StopOutcome::Latched,
+                }),
+                Action::Ended(Report {
+                    rounds: 1,
+                    cancel_all_calls: 1,
+                    zero_since: Some(z),
+                    aborted: false,
+                }),
+            ]
+        );
+    }
+    assert_eq!((l.phase(), l.next_wake()), (Phase::Ended, None));
+    assert_eq!(l.poll(z + 90_000), []);
+    assert_eq!(l.abort(z + 90_000, AbortWhy::Shutdown), []);
+}
+
+#[test]
+fn a_count_above_zero_waits_for_the_round() {
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let k = count_id(&l.cancel_done(T0 + 10, c, done(2)));
+    assert_eq!(l.count_done(T0 + 20, k, Ok(2)), []);
+    assert_eq!((l.phase(), l.remaining()), (Phase::Repeat, &Ok(2)));
+    // C4: the next round at t_1 + round_ms, not at once.
+    assert_eq!(l.next_wake(), Some(T0 + 1000));
+    assert_eq!(l.poll(T0 + 999), []);
+    let c = cancel_id(&l.poll(T0 + 1000));
+    assert_eq!((l.phase(), l.round()), (Phase::Cancel, 2));
+    // A late poll starts the round late; the next round waits round_ms
+    // from that start.
+    let k = count_id(&l.cancel_done(T0 + 1010, c, done(0)));
+    assert_eq!(l.count_done(T0 + 1020, k, Ok(1)), []);
+    assert_eq!(l.poll(T0 + 1999), []);
+    let c = cancel_id(&l.poll(T0 + 2500));
+    assert_eq!(l.round(), 3);
+    let k = count_id(&l.cancel_done(T0 + 2510, c, done(1)));
+    assert_eq!(l.count_done(T0 + 2520, k, Ok(1)), []);
+    assert_eq!(l.next_wake(), Some(T0 + 3500));
+    assert_eq!(l.poll(T0 + 3499), []);
+    assert_eq!(l.cancel_all_calls(), 3);
+}
+
+#[test]
+fn a_failed_cancel_all_is_still_followed_by_a_count() {
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    // A sent cancel-all that failed is counted after (unlike the OMS): the
+    // count is the truth.
+    let k = count_id(&l.cancel_done(T0 + 10, c, CancelAnswer::Failed("HTTP 503".into())));
+    assert_eq!(l.phase(), Phase::Count);
+    assert_eq!(l.cancel_all_calls(), 1);
+    assert_eq!(l.count_done(T0 + 20, k, Ok(4)), []);
+    assert_eq!(l.remaining(), &Ok(4));
+
+    // Refused when nothing is open (the answer is not documented, Q11.7):
+    // every cancel-all is refused, every count says zero. The loop still
+    // ends on the count.
+    let mut l = kill_loop();
+    let mut now = T0;
+    let mut acts = l.start(now, "h", StopOutcome::Latched);
+    let mut ended = None;
+    for _ in 0..100 {
+        // Every answer at once, in the instant of its request (at most
+        // 100 actions per instant: a loop that asks again and again in one
+        // instant fails here instead of spinning).
+        for _ in 0..100 {
+            let Some(a) = acts.pop() else { break };
+            match a {
+                Action::CancelAll { req_id } => acts.extend(l.cancel_done(
+                    now,
+                    req_id,
+                    CancelAnswer::Failed("retCode 170213: no order".into()),
+                )),
+                Action::Count { req_id } => acts.extend(l.count_done(now, req_id, Ok(0))),
+                Action::Ended(r) => ended = Some(r),
+                Action::Notice(_) => {}
+            }
+        }
+        assert!(acts.is_empty(), "more than 100 actions at {now}");
+        if ended.is_some() {
+            break;
+        }
+        now = l.next_wake().unwrap();
+        acts = l.poll(now);
+    }
+    let r = ended.expect("the loop ends");
+    assert_eq!(
+        (r.rounds, r.cancel_all_calls, r.zero_since),
+        (1, 1, Some(T0))
+    );
+    assert_eq!(now, T0 + 30_000);
+}
+
+#[test]
+fn a_cancel_all_that_succeeds_clears_the_last_error() {
+    // Round 1's cancel-all fails, every later one is accepted: the
+    // progress notice shows no stale error.
+    let mut l = kill_loop();
+    let mut first = true;
+    let log = drive(&mut l, 100, 20_000, |now, count| {
+        if now >= T0 + 70_000 {
+            l_zero(count)
+        } else if count {
+            Some((10, Ans::Count(Ok(1))))
+        } else if std::mem::take(&mut first) {
+            Some((10, Ans::Cancel(CancelAnswer::Failed("HTTP 503".into()))))
+        } else {
+            Some((10, Ans::Cancel(done(1))))
+        }
+    });
+    assert!(notices_at(&log).iter().any(|(t, n)| *t == T0 + 60_000
+        && matches!(
+            n,
+            Notice::Progress {
+                last_error: None,
+                remaining: Ok(1),
+                ..
+            }
+        )));
+}
+
+#[test]
+fn a_cancel_all_not_sent_waits_for_the_next_round() {
+    for kind in [
+        NotSent::Latched,
+        NotSent::Paused,
+        NotSent::Local("x".into()),
+    ] {
+        let mut l = kill_loop();
+        let mut c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+        let mut t = T0;
+        let mut progress = Vec::new();
+        // Nothing left the host: no count, the next cancel-all at the next
+        // round, none counted as sent.
+        while t < T0 + 60_000 {
+            assert_eq!(l.cancel_done(t, c, CancelAnswer::NotSent(kind.clone())), []);
+            assert_eq!(l.phase(), Phase::Repeat);
+            assert_eq!(l.next_wake(), Some(t + 1000));
+            assert_eq!(l.poll(t + 999), []);
+            t += 1000;
+            let acts = l.poll(t);
+            progress.extend(notices(&acts));
+            c = cancel_id(&acts);
+        }
+        assert_eq!(l.round(), 61);
+        assert_eq!(l.cancel_all_calls(), 0);
+        // The progress notice keeps the kind.
+        assert_eq!(
+            progress,
+            [Notice::Progress {
+                round: 61,
+                remaining: Err("아직 세지 않음".into()),
+                cancel_all_calls: 0,
+                last_error: Some(LastError::NotSent(kind.clone())),
+            }]
+        );
+    }
+    // A cancel-all not sent keeps the last known count (review 1 N2).
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let k = count_id(&l.cancel_done(T0 + 10, c, done(0)));
+    assert_eq!(l.count_done(T0 + 20, k, Ok(4)), []);
+    let c = cancel_id(&l.poll(T0 + 1000));
+    let not_sent = CancelAnswer::NotSent(NotSent::Paused);
+    assert_eq!(l.cancel_done(T0 + 1010, c, not_sent), []);
+    assert_eq!((l.remaining(), l.cancel_all_calls()), (&Ok(4), 1));
+}
+
+#[test]
+fn a_failed_count_is_never_zero() {
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let k = count_id(&l.cancel_done(T0 + 10, c, done(0)));
+    // A count error is no zero: no watch, the next round.
+    assert_eq!(l.count_done(T0 + 20, k, Err("HTTP 503".into())), []);
+    assert_eq!(l.remaining(), &Err("HTTP 503".into()));
+    assert_eq!(l.phase(), Phase::Repeat);
+    let c = cancel_id(&l.poll(T0 + 1000));
+    let k = count_id(&l.cancel_done(T0 + 1010, c, done(0)));
+    assert_eq!(l.count_done(T0 + 1020, k, Ok(0)), []);
+    assert_eq!(l.phase(), Phase::Watch);
+    // An error in the watch: back to C4, then C2; the next zero starts a
+    // new watch.
+    // (C4 waits until t_2 + round_ms, long past: C2 at once.)
+    let k = count_id(&l.poll(T0 + 6020));
+    let c = cancel_id(&l.count_done(T0 + 6030, k, Err("unreadable".into())));
+    assert_eq!(l.round(), 3);
+    let k = count_id(&l.cancel_done(T0 + 6040, c, done(0)));
+    let z = T0 + 6050;
+    assert_eq!(l.count_done(z, k, Ok(0)), []);
+    assert_eq!(l.next_wake(), Some(z + 5000));
+    let mut last = Vec::new();
+    for due in (1..=6).map(|i| z + i * 5000) {
+        let k = count_id(&l.poll(due));
+        last = l.count_done(due, k, Ok(0));
+    }
+    assert!(matches!(
+        last.last(),
+        Some(Action::Ended(Report {
+            rounds: 3,
+            zero_since: Some(at),
+            ..
+        })) if *at == z
+    ));
+}
+
+/// A loop in the watch: round 1's cancel-all and count answered at once,
+/// zero at `T0 + 20` (`z`).
+fn in_watch() -> (KillLoop, u64) {
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Unconfirmed));
+    let k = count_id(&l.cancel_done(T0 + 10, c, done(1)));
+    assert_eq!(l.count_done(T0 + 20, k, Ok(0)), []);
+    assert_eq!(l.phase(), Phase::Watch);
+    (l, T0 + 20)
+}
+
+#[test]
+fn a_late_order_in_the_watch_goes_back_to_cancel_at_once() {
+    let (mut l, z) = in_watch();
+    let k = count_id(&l.poll(z + 5000));
+    // An order accepted late: C2 at once, round 2, the watch is over.
+    let c = cancel_id(&l.count_done(z + 5010, k, Ok(2)));
+    assert_eq!(
+        (l.phase(), l.round(), l.remaining()),
+        (Phase::Cancel, 2, &Ok(2))
+    );
+    let k = count_id(&l.cancel_done(z + 5020, c, done(2)));
+    // Zero again: a new watch from the new z.
+    let z2 = z + 5030;
+    assert_eq!(l.count_done(z2, k, Ok(0)), []);
+    assert_eq!(l.next_wake(), Some(z2 + 5000));
+    let mut last = Vec::new();
+    for due in (1..=6).map(|i| z2 + i * 5000) {
+        let k = count_id(&l.poll(due));
+        last = l.count_done(due + 1, k, Ok(0));
+    }
+    assert!(matches!(
+        last.last(),
+        Some(Action::Ended(Report { rounds: 2, zero_since: Some(at), .. })) if *at == z2
+    ));
+
+    // The round the late order starts begins at its count: a count above
+    // zero after its cancel-all waits for that instant + round_ms, so the
+    // next cancel-all is not sent at once (review 1 S1).
+    let (mut l, z) = in_watch();
+    let k = count_id(&l.poll(z + 5000));
+    let c = cancel_id(&l.count_done(z + 5010, k, Ok(2)));
+    let k = count_id(&l.cancel_done(z + 5020, c, done(1)));
+    assert_eq!(l.count_done(z + 5030, k, Ok(1)), []);
+    assert_eq!(
+        (l.phase(), l.round(), l.next_wake()),
+        (Phase::Repeat, 2, Some(z + 5010 + 1000))
+    );
+    assert_eq!(l.poll(z + 5010 + 999), []);
+    cancel_id(&l.poll(z + 5010 + 1000));
+    assert_eq!(l.round(), 3);
+}
+
+#[test]
+fn the_watch_ends_only_on_the_count_due_at_its_end() {
+    let (mut l, z) = in_watch();
+    for due in (1..=4).map(|i| z + i * 5000) {
+        let k = count_id(&l.poll(due));
+        assert_eq!(l.count_done(due + 5, k, Ok(0)), [], "the zero at {due}");
+    }
+    // The count due at z + 25 s answers zero only at z + 31 s (inside its
+    // deadline): it is not the count due at the end, so it does not end
+    // the watch.
+    let k = count_id(&l.poll(z + 25_000));
+    assert_eq!(l.poll(z + 30_000), [], "never two requests");
+    let k_end = count_id(&l.count_done(z + 31_000, k, Ok(0)));
+    assert_eq!(l.phase(), Phase::Watch);
+    // The next count went at once, after z + 30 s: it ends the watch,
+    // however late it answers.
+    assert_eq!(l.poll(z + 40_000), []);
+    let acts = l.count_done(z + 41_000, k_end, Ok(0));
+    assert!(matches!(acts.last(), Some(Action::Ended(_))), "{acts:?}");
+    assert_eq!(l.phase(), Phase::Ended);
+}
+
+#[test]
+fn a_watch_that_is_no_multiple_of_its_step_ends_at_watch_ms() {
+    // watch_ms 30,000 with watch_every_ms 7,000 (config-valid): counts at
+    // z + 7, 14, 21, 28 s, and the last at z + 30 s, not z + 35 s (review
+    // 1 N1).
+    let timing = Kill {
+        watch_every_ms: 7000,
+        ..Kill::default()
+    };
+    let mut l = KillLoop::new(timing, RT);
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let k = count_id(&l.cancel_done(T0 + 10, c, done(0)));
+    let z = T0 + 20;
+    assert_eq!(l.count_done(z, k, Ok(0)), []);
+    for due in (1..=4).map(|i| z + i * 7000) {
+        assert_eq!(l.next_wake(), Some(due));
+        let k = count_id(&l.poll(due));
+        assert_eq!(l.count_done(due + 1, k, Ok(0)), []);
+    }
+    assert_eq!(l.next_wake(), Some(z + 30_000));
+    let k = count_id(&l.poll(z + 30_000));
+    let acts = l.count_done(z + 30_001, k, Ok(0));
+    assert!(matches!(acts.last(), Some(Action::Ended(_))), "{acts:?}");
+
+    // A step longer than the watch (below the config range; `new` takes
+    // the timings as they are): the first count is already the last, at
+    // z + watch_ms.
+    let timing = Kill {
+        watch_ms: 10_000,
+        watch_every_ms: 15_000,
+        ..Kill::default()
+    };
+    let mut l = KillLoop::new(timing, RT);
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let k = count_id(&l.cancel_done(T0 + 10, c, done(0)));
+    assert_eq!(l.count_done(z, k, Ok(0)), []);
+    assert_eq!(l.next_wake(), Some(z + 10_000));
+    let k = count_id(&l.poll(z + 10_000));
+    let acts = l.count_done(z + 10_001, k, Ok(0));
+    assert!(matches!(acts.last(), Some(Action::Ended(_))), "{acts:?}");
+}
+
+#[test]
+fn two_requests_of_the_loop_are_never_in_flight() {
+    let (mut l, z) = in_watch();
+    let k = count_id(&l.poll(z + 5000));
+    // The count due at z + 10 s waits while the one of z + 5 s is open...
+    assert_eq!(l.poll(z + 10_000), []);
+    assert_eq!(l.poll(z + 12_000), []);
+    // ...and goes at once at its answer.
+    let k2 = count_id(&l.count_done(z + 12_000, k, Ok(0)));
+    // Or at the deadline of the open one: that count failed, so C4, and
+    // the next request is one cancel-all.
+    assert_eq!(l.next_wake(), Some(z + 12_000 + EXTRA));
+    assert_eq!(l.poll(z + 15_000), []);
+    assert_eq!(l.poll(z + 12_000 + EXTRA - 1), []);
+    let acts = l.poll(z + 12_000 + EXTRA);
+    let c = cancel_id(&acts);
+    assert_eq!(l.round(), 2);
+    assert_eq!(l.count_done(z + 12_000 + EXTRA, k2, Ok(0)), [], "past");
+    // A cancel-all that hangs: no count, no next round beside it.
+    assert_eq!(l.poll(z + 12_000 + EXTRA + 5000), []);
+    let k3 = count_id(&l.poll(z + 12_000 + 2 * EXTRA));
+    assert_eq!(
+        l.cancel_done(z + 12_000 + 2 * EXTRA, c, done(0)),
+        [],
+        "past"
+    );
+    assert_eq!(l.phase(), Phase::Count);
+    let _ = k3;
+}
+
+#[test]
+fn a_request_past_its_deadline_fails_and_a_late_answer_is_ignored() {
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    // The cancel-all has its deadline at emission + request_timeout_ms +
+    // 11,000 ms.
+    assert_eq!(l.next_wake(), Some(T0 + EXTRA));
+    assert_eq!(l.poll(T0 + EXTRA - 1), []);
+    // Past it: Failed, so counted as sent and followed by a count.
+    let k = count_id(&l.poll(T0 + EXTRA));
+    assert_eq!(l.cancel_all_calls(), 1);
+    // A later answer with that req_id is ignored.
+    assert_eq!(l.cancel_done(T0 + EXTRA + 1, c, done(5)), []);
+    assert_eq!((l.cancel_all_calls(), l.ignored()), (1, 1));
+    assert_eq!(l.phase(), Phase::Count);
+    // The count past its deadline: a count error, never zero; t_1 +
+    // round_ms has long passed, so C2 at once.
+    assert_eq!(l.next_wake(), Some(T0 + 2 * EXTRA));
+    let c2 = cancel_id(&l.poll(T0 + 2 * EXTRA));
+    assert_eq!(l.remaining(), &Err("no answer before the deadline".into()));
+    assert_eq!(l.count_done(T0 + 2 * EXTRA + 1, k, Ok(0)), []);
+    assert_eq!((l.phase(), l.ignored()), (Phase::Cancel, 2));
+    // An answer to another req_id, or of the other kind, is ignored too.
+    assert_eq!(l.count_done(T0 + 2 * EXTRA + 2, c2, Ok(0)), []);
+    assert_eq!(l.count_page(T0 + 2 * EXTRA + 2, c2), []);
+    assert_eq!(l.cancel_done(T0 + 2 * EXTRA + 2, c2 + 7, done(0)), []);
+    assert_eq!(l.ignored(), 5);
+    // c2 passed its deadline too: the first poll after it (at the first
+    // progress mark) fails it and sends its count.
+    let acts = l.poll(T0 + 60_000);
+    let k3 = count_id(&acts);
+    assert_eq!(
+        notices(&acts),
+        [Notice::Progress {
+            round: 2,
+            remaining: Err("no answer before the deadline".into()),
+            cancel_all_calls: 2,
+            last_error: Some(LastError::Failed("no answer before the deadline".into())),
+        }]
+    );
+    // A page of the earlier, failed count does not move the deadline of
+    // the count open now (review 1 S2); a page of the open one does.
+    assert_eq!(l.next_wake(), Some(T0 + 60_000 + EXTRA));
+    assert_eq!(l.count_page(T0 + 70_000, k), []);
+    assert_eq!((l.next_wake(), l.ignored()), (Some(T0 + 60_000 + EXTRA), 6));
+    assert_eq!(l.count_page(T0 + 70_000, k3), []);
+    assert_eq!((l.next_wake(), l.ignored()), (Some(T0 + 70_000 + EXTRA), 6));
+}
+
+#[test]
+fn an_answer_handled_at_its_deadline_is_past_it() {
+    let past = || Err::<usize, String>("no answer before the deadline".into());
+    for late in [0, 1] {
+        // A cancel-all answered at its deadline (or after it, before the
+        // poll that would see the deadline): Failed.
+        let mut l = kill_loop();
+        let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+        let k = count_id(&l.cancel_done(T0 + EXTRA + late, c, done(0)));
+        assert_eq!(
+            l.poll(T0 + EXTRA + late),
+            [],
+            "the deadline is not seen twice"
+        );
+        let acts = l.poll(T0 + 60_000);
+        assert!(matches!(
+            notices(&acts)[..],
+            [Notice::Progress { last_error: Some(LastError::Failed(ref w)), .. }]
+                if w == "no answer before the deadline"
+        ));
+        assert_eq!(l.cancel_all_calls(), 1);
+
+        // A count answered at its deadline: a count error, not zero.
+        let mut l = kill_loop();
+        let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+        let k0 = count_id(&l.cancel_done(T0, c, done(0)));
+        let acts = l.count_done(T0 + EXTRA + late, k0, Ok(0));
+        assert_eq!(l.remaining(), &past());
+        cancel_id(&acts);
+        let _ = k;
+
+        // A page at its deadline: a count error, the deadline not moved,
+        // and the count's later result ignored.
+        let mut l = kill_loop();
+        let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+        let k0 = count_id(&l.cancel_done(T0, c, done(0)));
+        assert_eq!(l.count_page(T0 + EXTRA - 1, k0), []);
+        let deadline = T0 + EXTRA - 1 + EXTRA;
+        assert_eq!(l.next_wake(), Some(deadline));
+        let acts = l.count_page(deadline + late, k0);
+        assert_eq!(l.remaining(), &past());
+        cancel_id(&acts);
+        assert_eq!(l.count_done(deadline + late, k0, Ok(0)), []);
+        assert_eq!(l.phase(), Phase::Cancel);
+    }
+}
+
+#[test]
+fn a_slow_paged_count_is_not_failed_while_pages_answer() {
+    // 11 pages, 1,300 ms each, request_timeout_ms 2,000: the first
+    // deadline (13,000 ms) falls inside the count, every page moves it.
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let k = count_id(&l.cancel_done(T0, c, done(0)));
+    for page in 1..=10u64 {
+        let at = T0 + page * 1300;
+        assert_eq!(l.poll(at), [], "page {page}");
+        assert_eq!(l.count_page(at, k), [], "page {page}");
+        assert_eq!(l.next_wake(), Some(at + EXTRA));
+        assert_eq!(l.poll(at), []);
+    }
+    // The result, no count error; t_1 + round_ms has passed, so the next
+    // round at once.
+    cancel_id(&l.count_done(T0 + 14_300, k, Ok(3)));
+    assert_eq!((l.remaining(), l.round()), (&Ok(3), 2));
+}
+
+/// One answer of the scripted venue: a cancel-all's or a count's.
+#[derive(Clone)]
+enum Ans {
+    Cancel(CancelAnswer),
+    Count(Result<usize, String>),
+}
+
+/// Drives `l` from its start at `T0`: a poll every `poll_ms`, and each
+/// request answered as `reply(now, is_count)` says (`Some((delay, answer))`,
+/// or `None`: it hangs). Answers due at a poll's instant go first. Asserts
+/// that no request is emitted while another is open (answered, or before
+/// its deadline). Step-bounded. Returns every action with its instant.
+fn drive(
+    l: &mut KillLoop,
+    poll_ms: u64,
+    max_steps: usize,
+    reply: impl FnMut(u64, bool) -> Option<(u64, Ans)>,
+) -> Vec<(u64, Action)> {
+    let (log, ended) = run(l, poll_ms, max_steps, reply);
+    assert!(ended, "the step bound of {max_steps} was reached");
+    log
+}
+
+/// [`drive`] without the end: returns the log and whether the loop ended
+/// within `max_steps`.
+fn run(
+    l: &mut KillLoop,
+    poll_ms: u64,
+    max_steps: usize,
+    mut reply: impl FnMut(u64, bool) -> Option<(u64, Ans)>,
+) -> (Vec<(u64, Action)>, bool) {
+    let mut log = Vec::new();
+    let mut pending: Vec<(u64, u64, Ans)> = Vec::new();
+    let mut closes_at: Option<u64> = None;
+    let mut now = T0;
+    let mut next_poll = T0 + poll_ms;
+    let mut acts = l.start(now, "h", StopOutcome::Latched);
+    for _ in 0..max_steps {
+        let mut ended = false;
+        for a in acts.drain(..) {
+            let id = match a {
+                Action::CancelAll { req_id } => Some((req_id, false)),
+                Action::Count { req_id } => Some((req_id, true)),
+                Action::Ended(_) => {
+                    ended = true;
+                    None
+                }
+                Action::Notice(_) => None,
+            };
+            if let Some((id, count)) = id {
+                if let Some(c) = closes_at {
+                    assert!(c <= now, "two requests in flight at {now}");
+                }
+                let deadline = now + EXTRA;
+                closes_at = Some(deadline);
+                if let Some((delay, ans)) = reply(now, count) {
+                    pending.push((now + delay, id, ans));
+                    closes_at = Some((now + delay).min(deadline));
+                }
+            }
+            log.push((now, a));
+        }
+        if ended {
+            return (log, true);
+        }
+        let first = pending
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, p)| p.0)
+            .map(|(i, p)| (i, p.0));
+        match first {
+            Some((i, at)) if at <= next_poll => {
+                let (_, id, ans) = pending.swap_remove(i);
+                now = at;
+                acts = match ans {
+                    Ans::Cancel(a) => l.cancel_done(now, id, a),
+                    Ans::Count(r) => l.count_done(now, id, r),
+                };
+            }
+            _ => {
+                now = next_poll;
+                next_poll += poll_ms;
+                acts = l.poll(now);
+            }
+        }
+    }
+    (log, false)
+}
+
+fn notices_at(log: &[(u64, Action)]) -> Vec<(u64, Notice)> {
+    log.iter()
+        .filter_map(|(t, a)| match a {
+            Action::Notice(n) => Some((*t, n.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_progress_notice_comes_every_60_s_also_with_an_unchanged_count() {
+    // One order that stays: every round counts 1.
+    let mut l = kill_loop();
+    let log = drive(&mut l, 100, 20_000, |now, count| {
+        if now >= T0 + 200_000 {
+            l_zero(count)
+        } else if count {
+            Some((10, Ans::Count(Ok(1))))
+        } else {
+            Some((10, Ans::Cancel(done(0))))
+        }
+    });
+    let got = notices_at(&log);
+    let progress: Vec<(u64, Notice)> = got
+        .iter()
+        .filter(|(_, n)| matches!(n, Notice::Progress { .. }))
+        .cloned()
+        .collect();
+    assert_eq!(
+        progress.iter().map(|(t, _)| t - T0).collect::<Vec<_>>(),
+        [60_000, 120_000, 180_000]
+    );
+    for (_, n) in &progress {
+        assert!(
+            matches!(
+                n,
+                Notice::Progress {
+                    remaining: Ok(1),
+                    last_error: None,
+                    ..
+                }
+            ),
+            "{n:?}"
+        );
+    }
+
+    // A late poll does not move the next mark: polls at +65 s and then
+    // every 100 ms give notices at +65 s and +120 s.
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let mut marks = Vec::new();
+    let _ = l.cancel_done(T0 + 1, c, CancelAnswer::NotSent(NotSent::Paused));
+    let mut t = T0 + 65_000;
+    while t <= T0 + 130_000 {
+        for a in l.poll(t) {
+            match a {
+                Action::Notice(_) => marks.push(t - T0),
+                Action::CancelAll { req_id } => {
+                    let _ = l.cancel_done(t, req_id, CancelAnswer::NotSent(NotSent::Paused));
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        t += 100;
+    }
+    assert_eq!(marks, [65_000, 120_000]);
+
+    // Two marks passed at one poll: one notice, the next at the first mark
+    // after it.
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let _ = l.cancel_done(T0 + 1, c, CancelAnswer::NotSent(NotSent::Paused));
+    let acts = l.poll(T0 + 130_000);
+    assert_eq!(notices(&acts).len(), 1);
+    let c = cancel_id(&acts);
+    let _ = l.cancel_done(T0 + 130_000, c, CancelAnswer::NotSent(NotSent::Paused));
+    assert_eq!(notices(&l.poll(T0 + 179_999)).len(), 0);
+    assert_eq!(notices(&l.poll(T0 + 180_000)).len(), 1);
+}
+
+/// The venue after a failure is over: cancel-all accepted, zero open.
+fn l_zero(count: bool) -> Option<(u64, Ans)> {
+    if count {
+        Some((10, Ans::Count(Ok(0))))
+    } else {
+        Some((10, Ans::Cancel(done(0))))
+    }
+}
+
+#[test]
+fn the_notice_rule_sends_no_change_notice() {
+    // The count goes down every round (5, 4, 3, 2, 1, then 1): no notice at
+    // a change; the progress notice at 60 s shows the latest count.
+    let mut l = kill_loop();
+    let mut counts = vec![5usize, 4, 3, 2].into_iter();
+    let log = drive(&mut l, 100, 20_000, |now, count| {
+        if now >= T0 + 70_000 {
+            l_zero(count)
+        } else if count {
+            Some((10, Ans::Count(Ok(counts.next().unwrap_or(1)))))
+        } else {
+            Some((10, Ans::Cancel(done(1))))
+        }
+    });
+    let got = notices_at(&log);
+    assert_eq!(got.len(), 3, "start, one progress, final: {got:?}");
+    assert_eq!(got[0], (T0, Notice::Start { round_ms: 1000 }));
+    assert_eq!(
+        got[1],
+        (
+            T0 + 60_000,
+            Notice::Progress {
+                round: 61,
+                remaining: Ok(1),
+                cancel_all_calls: 60,
+                last_error: None,
+            }
+        )
+    );
+    assert!(matches!(got[2].1, Notice::Final { .. }));
+}
+
+#[test]
+fn ten_minutes_of_failing_queries_make_at_most_12_notices() {
+    // Cancel-all and count fail (5xx, or no answer until the deadline) for
+    // 600 s from the start, then zero. The runtime polls every 100 ms, or
+    // late, every 7,000 ms.
+    for poll_ms in [100, 7000] {
+        let mut l = kill_loop();
+        let mut n = 0u64;
+        let log = drive(&mut l, poll_ms, 100_000, |now, count| {
+            n += 1;
+            if now >= T0 + 600_000 {
+                return l_zero(count);
+            }
+            match (n % 3, count) {
+                (0, _) => None,
+                (_, true) => Some((50, Ans::Count(Err("HTTP 503".into())))),
+                (_, false) => Some((50, Ans::Cancel(CancelAnswer::Failed("HTTP 503".into())))),
+            }
+        });
+        let got = notices_at(&log);
+        let kinds = |f: fn(&Notice) -> bool| got.iter().filter(|(_, n)| f(n)).count();
+        assert_eq!(kinds(|n| matches!(n, Notice::Start { .. })), 1, "{poll_ms}");
+        assert_eq!(
+            kinds(|n| matches!(n, Notice::Progress { .. })),
+            10,
+            "{poll_ms}"
+        );
+        assert_eq!(kinds(|n| matches!(n, Notice::Final { .. })), 1, "{poll_ms}");
+        assert!(matches!(got.last(), Some((_, Notice::Final { .. }))));
+        for (t, _) in &got {
+            let inside = got
+                .iter()
+                .filter(|(u, _)| *u >= *t && *u <= *t + 600_000)
+                .count();
+            assert!(inside <= 12, "{inside} notices from {t} ({poll_ms})");
+        }
+        // The final notice is not held back by notice_ms: it goes in the
+        // instant of the count that ends the watch.
+        let (end_at, _) = log.last().unwrap();
+        assert_eq!(got.last().unwrap().0, *end_at);
+    }
+}
+
+#[test]
+fn abort_sends_one_notice_and_ends() {
+    // Before the start: nothing (the kill sequence tells its own abort).
+    let mut l = kill_loop();
+    assert_eq!(l.abort(T0, AbortWhy::Shutdown), []);
+    assert_eq!(l.phase(), Phase::Idle);
+
+    // In the rounds, with a known count and a request open.
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let k = count_id(&l.cancel_done(T0 + 10, c, done(3)));
+    let c = cancel_id(&{
+        assert_eq!(l.count_done(T0 + 20, k, Ok(3)), []);
+        l.poll(T0 + 1000)
+    });
+    assert_eq!(
+        l.abort(T0 + 1500, AbortWhy::Shutdown),
+        [
+            Action::Notice(Notice::Abort {
+                why: AbortWhy::Shutdown,
+                round: 2,
+                remaining: Some(3),
+                cancel_all_calls: 1,
+            }),
+            Action::Ended(Report {
+                rounds: 2,
+                cancel_all_calls: 1,
+                zero_since: None,
+                aborted: true,
+            }),
+        ]
+    );
+    // Then nothing: no request, no notice, no second end.
+    assert_eq!((l.phase(), l.next_wake()), (Phase::Aborted, None));
+    assert_eq!(l.cancel_done(T0 + 1600, c, done(0)), []);
+    assert_eq!(l.poll(T0 + 120_000), []);
+    assert_eq!(l.abort(T0 + 120_000, AbortWhy::Shutdown), []);
+
+    // In the watch, and with an unknown count.
+    let (mut l, _) = in_watch();
+    let acts = l.abort(T0 + 100, AbortWhy::StartRefused("marker path".into()));
+    assert!(matches!(
+        acts[..],
+        [
+            Action::Notice(Notice::Abort {
+                remaining: Some(0),
+                ..
+            }),
+            Action::Ended(Report { aborted: true, .. })
+        ]
+    ));
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let _ = l.cancel_done(T0, c, CancelAnswer::NotSent(NotSent::Latched));
+    let acts = l.abort(T0 + 100, AbortWhy::Shutdown);
+    assert!(matches!(
+        acts[..],
+        [
+            Action::Notice(Notice::Abort {
+                remaining: None,
+                round: 1,
+                cancel_all_calls: 0,
+                ..
+            }),
+            _
+        ]
+    ));
+}
+
+#[test]
+fn the_outcome_set_during_the_loop_is_in_the_final_notice() {
+    // A halt retried during the loop latched (U19b3b): the final notice
+    // names the latch, not the outcome the loop started with.
+    let (mut l, z) = in_watch();
+    l.set_outcome(StopOutcome::Latched);
+    let mut last = Vec::new();
+    for due in (1..=6).map(|i| z + i * 5000) {
+        let k = count_id(&l.poll(due));
+        last = l.count_done(due, k, Ok(0));
+    }
+    assert!(matches!(
+        notices(&last)[..],
+        [Notice::Final {
+            outcome: StopOutcome::Latched,
+            ..
+        }]
+    ));
+    let mut l = kill_loop();
+    let _ = l.start(T0, "h", StopOutcome::Unconfirmed);
+    l.set_outcome(StopOutcome::StoppedMarked);
+    assert_eq!(l.outcome(), StopOutcome::StoppedMarked);
+    // Without a change the final notice names the outcome of the start.
+    let mut l = KillLoop::new(Kill::default(), RT);
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::StoppedUncheckedMarker));
+    let k = count_id(&l.cancel_done(T0, c, done(0)));
+    assert_eq!(l.count_done(T0, k, Ok(0)), []);
+    let mut last = Vec::new();
+    for due in (1..=6).map(|i| T0 + i * 5000) {
+        let k = count_id(&l.poll(due));
+        last = l.count_done(due, k, Ok(0));
+    }
+    assert!(matches!(
+        notices(&last)[..],
+        [Notice::Final {
+            outcome: StopOutcome::StoppedUncheckedMarker,
+            ..
+        }]
+    ));
+}
+
+#[test]
+fn a_second_start_does_nothing() {
+    // One kill, one loop (review 1 S3): a start while a request is open, in
+    // the watch, after the end or after an abort returns nothing and
+    // changes nothing.
+    let state = |l: &KillLoop| {
+        (
+            l.phase(),
+            l.round(),
+            l.next_wake(),
+            l.cancel_all_calls(),
+            l.header().to_string(),
+            l.outcome(),
+        )
+    };
+    let again = |l: &mut KillLoop, now: u64| {
+        let before = state(l);
+        assert_eq!(l.start(now, "h2", StopOutcome::Unconfirmed), []);
+        assert_eq!(state(l), before);
+    };
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    again(&mut l, T0 + 1);
+    let k = count_id(&l.cancel_done(T0 + 10, c, done(0)));
+    again(&mut l, T0 + 11);
+    assert_eq!(l.count_done(T0 + 20, k, Ok(0)), []);
+    again(&mut l, T0 + 21);
+    assert_eq!(l.phase(), Phase::Watch);
+    let mut last = Vec::new();
+    for due in (1..=6).map(|i| T0 + 20 + i * 5000) {
+        let k = count_id(&l.poll(due));
+        last = l.count_done(due, k, Ok(0));
+    }
+    assert!(matches!(last.last(), Some(Action::Ended(_))));
+    again(&mut l, T0 + 40_000);
+    assert_eq!(l.phase(), Phase::Ended);
+    let (mut l, z) = in_watch();
+    assert_eq!(l.abort(z + 1, AbortWhy::Shutdown).len(), 2);
+    again(&mut l, z + 2);
+    assert_eq!(l.phase(), Phase::Aborted);
+}
+
+#[test]
+fn the_next_wake_is_the_earliest_due_instant_or_progress_mark() {
+    // A request open across the first progress mark: the wake is the mark
+    // (T0 + 60 s), not the deadline (T0 + 55 s + 13 s; review 1 S4).
+    let mut l = kill_loop();
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let k = count_id(&l.cancel_done(T0 + 10, c, done(3)));
+    assert_eq!(l.count_done(T0 + 20, k, Ok(3)), []);
+    assert_eq!(l.next_wake(), Some(T0 + 1000));
+    cancel_id(&l.poll(T0 + 55_000));
+    assert_eq!(l.next_wake(), Some(T0 + 60_000));
+    assert_eq!(notices(&l.poll(T0 + 60_000)).len(), 1);
+    assert_eq!(l.next_wake(), Some(T0 + 55_000 + EXTRA));
+
+    // A cancel-all the budget holds back: the wake is the budget's
+    // instant, the older of the last two emissions + 1,000 ms (round_ms
+    // 100, below the config range, so the budget binds).
+    let fast = Kill {
+        round_ms: 100,
+        ..Kill::default()
+    };
+    let mut l = KillLoop::new(fast, RT);
+    let c = cancel_id(&l.start(T0, "h", StopOutcome::Latched));
+    let k = count_id(&l.cancel_done(T0 + 1, c, done(1)));
+    assert_eq!(l.count_done(T0 + 2, k, Ok(1)), []);
+    assert_eq!(l.next_wake(), Some(T0 + 100));
+    let c = cancel_id(&l.poll(T0 + 100));
+    let k = count_id(&l.cancel_done(T0 + 101, c, done(1)));
+    assert_eq!(l.count_done(T0 + 102, k, Ok(1)), []);
+    assert_eq!(l.poll(T0 + 200), []);
+    assert_eq!(
+        (l.phase(), l.round(), l.budget_holds()),
+        (Phase::Cancel, 3, 1)
+    );
+    assert_eq!(l.next_wake(), Some(T0 + 1000));
+    assert_eq!(l.poll(T0 + 999), []);
+    cancel_id(&l.poll(T0 + 1000));
+}
+
+/// xorshift64: the test's own seeded generator.
+struct Rng(u64);
+
+impl Rng {
+    fn below(&mut self, n: u64) -> u64 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        x % n
+    }
+}
+
+#[test]
+fn the_order_budget_holds_under_any_answer_sequence() {
+    // Once with the default timings (the budget never binds there), once
+    // with round_ms and watch_every_ms 100, below the config ranges, where
+    // it must hold cancel-alls back.
+    let fast = Kill {
+        round_ms: 100,
+        watch_every_ms: 100,
+        ..Kill::default()
+    };
+    for (timing, binds) in [(Kill::default(), false), (fast, true)] {
+        let mut held = 0;
+        let mut ended = 0;
+        for seed in 1..=10_000u64 {
+            let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+            let mut l = KillLoop::new(timing.clone(), RT);
+            let poll_ms = [1, 10, 100, 1000, 7000][rng.below(5) as usize];
+            let (log, done_) = run(&mut l, poll_ms, 300, |_, count| {
+                let delay = match rng.below(4) {
+                    0 => 0,
+                    1 => rng.below(50),
+                    2 => rng.below(2000),
+                    _ => rng.below(20_000),
+                };
+                if rng.below(10) == 0 {
+                    return None;
+                }
+                let ans = if count {
+                    match rng.below(5) {
+                        0 | 1 => Ans::Count(Ok(0)),
+                        2 | 3 => Ans::Count(Ok(1 + rng.below(3) as usize)),
+                        _ => Ans::Count(Err("HTTP 503".into())),
+                    }
+                } else {
+                    match rng.below(8) {
+                        0..=3 => Ans::Cancel(done(rng.below(3) as usize)),
+                        4 | 5 => Ans::Cancel(CancelAnswer::Failed("HTTP 503".into())),
+                        6 => Ans::Cancel(CancelAnswer::NotSent(NotSent::Latched)),
+                        _ => Ans::Cancel(CancelAnswer::NotSent(NotSent::Paused)),
+                    }
+                };
+                Some((delay, ans))
+            });
+            let at: Vec<u64> = log
+                .iter()
+                .filter(|(_, a)| matches!(a, Action::CancelAll { .. }))
+                .map(|(t, _)| *t)
+                .collect();
+            // At most 2 in any half-open [t, t + 1,000): every third one
+            // is at least 1,000 ms after the first.
+            for w in at.windows(3) {
+                assert!(w[2] - w[0] >= 1000, "seed {seed}: {w:?}");
+            }
+            // With valid timings no two are closer than 1,000 ms (review 1
+            // S1).
+            if !binds {
+                for w in at.windows(2) {
+                    assert!(w[1] - w[0] >= 1000, "seed {seed}: {w:?}");
+                }
+            }
+            held += l.budget_holds();
+            ended += u64::from(done_);
+        }
+        if binds {
+            assert!(held > 0, "the budget held nothing back");
+        } else {
+            assert_eq!(held, 0, "valid timings never meet the budget");
+        }
+        assert!(ended > 0);
+    }
 }

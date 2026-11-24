@@ -5,7 +5,8 @@
 //! ([`position_block`]) and the reader of the positions behind it
 //! ([`read_positions`]). Written anew from the spec and the venue's
 //! documentation; the OMS's kill loop is a model only, nothing of it is
-//! used. The loop itself (`KillLoop`) is U19b2b.
+//! used. U19b2b adds the loop itself ([`KillLoop`], sans-IO: C2–C5 of
+//! table 7-8, the order budget, the request deadlines and the notice rule).
 //!
 //! Every text says `워처 킬`, the OMS's say `킬 루프`, so a person can tell
 //! the two loops apart in one chat.
@@ -13,8 +14,9 @@
 use serde_json::Value;
 
 use crate::clock::Clock;
+use crate::config::Kill;
 use crate::decimal::Dec;
-use crate::rest::{Client, RestError};
+use crate::rest::{CancelAll, Client, RestError};
 
 /// The position list of the block (gateway facts Q12): with `settleCoin`
 /// and no `symbol` only rows of size > 0 come back (Q12.1).
@@ -435,4 +437,524 @@ pub async fn read_positions(
 
 fn class(e: &RestError) -> String {
     e.class().to_string()
+}
+
+// ---- The loop (U19b2b) ----
+
+/// What one cancel-all of the loop came to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CancelAnswer {
+    /// Sent and accepted.
+    Done(CancelAll),
+    /// Sent, and no usable answer or refused.
+    Failed(String),
+    /// Nothing left the host.
+    NotSent(NotSent),
+}
+
+/// Where the loop is (table 7-8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    /// Not started.
+    Idle,
+    /// C2: the round's cancel-all is due or open.
+    Cancel,
+    /// C3: the count after a sent cancel-all is open.
+    Count,
+    /// C4: waits for the next round.
+    Repeat,
+    /// C5: zero was counted; the watch counts again until its end.
+    Watch,
+    /// Zero confirmed; the final notice went out.
+    Ended,
+    /// Aborted; the abort notice went out.
+    Aborted,
+}
+
+/// What the loop reports when it ends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Report {
+    pub rounds: u64,
+    pub cancel_all_calls: u64,
+    /// The start of the watch that ended the loop (`z`).
+    pub zero_since: Option<u64>,
+    pub aborted: bool,
+}
+
+/// What the runtime must do next.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Action {
+    /// Send one cancel-all; answer with `cancel_done(req_id)`.
+    CancelAll { req_id: u64 },
+    /// Count the open orders; tell each page with `count_page(req_id)`
+    /// and the result with `count_done(req_id)`.
+    Count { req_id: u64 },
+    /// Send a notice (with the position block, U19b3c).
+    Notice(Notice),
+    /// The loop is over.
+    Ended(Report),
+}
+
+/// The open-order count before the first count of the loop.
+pub const NOT_COUNTED: &str = "아직 세지 않음";
+/// The order budget: at most this many cancel-alls in any half-open
+/// window of [`ORDER_WINDOW_MS`], counted from emission (table 7-8 C4).
+pub const ORDER_BUDGET: usize = 2;
+pub const ORDER_WINDOW_MS: u64 = 1000;
+/// Why a request past its deadline failed (cancel-all `Failed`, count
+/// error).
+pub const PAST_DEADLINE: &str = "no answer before the deadline";
+
+/// The one request of the loop that is open.
+#[derive(Debug, Clone, Copy)]
+struct Open {
+    id: u64,
+    /// A count, and whether it is the count that ends the watch.
+    count: Option<bool>,
+    /// Emission (a count: its last page) + `request_timeout_ms` +
+    /// [`DEADLINE_EXTRA_MS`]; an answer handled at or after it is past it.
+    deadline: u64,
+}
+
+/// The watcher's cancel-all confirmation loop (C-WATCH part 11), sans-IO:
+/// every input takes `now` on the loop's clock and returns the actions due;
+/// `next_wake` names the instant it next wants a `poll`.
+#[derive(Debug, Clone)]
+pub struct KillLoop {
+    t: Kill,
+    /// `request_timeout_ms` + [`DEADLINE_EXTRA_MS`].
+    extra_ms: u64,
+    phase: Phase,
+    header: String,
+    outcome: StopOutcome,
+    round: u64,
+    /// `t_r`: when the current round started.
+    round_start: u64,
+    /// `z`: the start of the current watch.
+    zero_since: Option<u64>,
+    /// The instant the next watch count is due.
+    watch_due: u64,
+    open: Option<Open>,
+    next_id: u64,
+    calls: u64,
+    remaining: Result<usize, String>,
+    last_error: Option<LastError>,
+    /// The next progress mark: `s + k × notice_ms`, `s` the start notice.
+    next_mark: u64,
+    ignored: u64,
+    /// The emission instants of the last [`ORDER_BUDGET`] cancel-alls,
+    /// oldest first.
+    sent_at: Vec<u64>,
+    /// The due cancel-all is held back by the budget.
+    holding: bool,
+    holds: u64,
+}
+
+impl KillLoop {
+    /// The config ranges are checked at config load only; the loop takes
+    /// the timings as they are.
+    pub fn new(timing: Kill, request_timeout_ms: u64) -> KillLoop {
+        KillLoop {
+            t: timing,
+            extra_ms: request_timeout_ms.saturating_add(DEADLINE_EXTRA_MS),
+            phase: Phase::Idle,
+            header: String::new(),
+            outcome: StopOutcome::Unconfirmed,
+            round: 0,
+            round_start: 0,
+            zero_since: None,
+            watch_due: 0,
+            open: None,
+            next_id: 1,
+            calls: 0,
+            remaining: Err(NOT_COUNTED.to_string()),
+            last_error: None,
+            next_mark: 0,
+            ignored: 0,
+            sent_at: Vec::with_capacity(ORDER_BUDGET),
+            holding: false,
+            holds: 0,
+        }
+    }
+
+    pub fn phase(&self) -> Phase {
+        self.phase
+    }
+
+    /// The current or last round (0 before the start).
+    pub fn round(&self) -> u64 {
+        self.round
+    }
+
+    /// The last count: known, or why not.
+    pub fn remaining(&self) -> &Result<usize, String> {
+        &self.remaining
+    }
+
+    /// Cancel-alls sent (answered `Done` or `Failed`).
+    pub fn cancel_all_calls(&self) -> u64 {
+        self.calls
+    }
+
+    /// Answers and pages ignored: past their deadline, or of no open
+    /// request (the runtime writes one debug line each, U19b3c).
+    pub fn ignored(&self) -> u64 {
+        self.ignored
+    }
+
+    /// Cancel-alls the order budget held back (each counted once).
+    pub fn budget_holds(&self) -> u64 {
+        self.holds
+    }
+
+    /// The first instant the budget admits one more cancel-all: the
+    /// oldest of the last [`ORDER_BUDGET`] emissions + [`ORDER_WINDOW_MS`].
+    fn budget_at(&self) -> Option<u64> {
+        if self.sent_at.len() < ORDER_BUDGET {
+            return None;
+        }
+        self.sent_at
+            .first()
+            .map(|t| t.saturating_add(ORDER_WINDOW_MS))
+    }
+
+    /// The stop outcome the final notice will name.
+    pub fn outcome(&self) -> StopOutcome {
+        self.outcome
+    }
+
+    /// A halt retried during the loop latched (U19b3b): the final notice
+    /// names the new outcome.
+    pub fn set_outcome(&mut self, outcome: StopOutcome) {
+        self.outcome = outcome;
+    }
+
+    /// The start notice's header (the kill sequence's, U19b3b).
+    pub fn header(&self) -> &str {
+        &self.header
+    }
+
+    /// The instant the loop next wants a `poll`; `None` before the start
+    /// and after the end.
+    pub fn next_wake(&self) -> Option<u64> {
+        if !self.running() {
+            return None;
+        }
+        let due = match (self.phase, self.open) {
+            (_, Some(o)) => Some(o.deadline),
+            (Phase::Cancel, None) => self.budget_at(),
+            (Phase::Repeat, None) => Some(self.round_start.saturating_add(self.t.round_ms)),
+            (Phase::Watch, None) => Some(self.watch_due),
+            _ => None,
+        };
+        Some(due.map_or(self.next_mark, |d| d.min(self.next_mark)))
+    }
+
+    fn running(&self) -> bool {
+        !matches!(self.phase, Phase::Idle | Phase::Ended | Phase::Aborted)
+    }
+
+    fn id(&mut self) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
+    }
+
+    /// C1 → C2: the start notice and round 1.
+    pub fn start(&mut self, now: u64, header: &str, outcome: StopOutcome) -> Vec<Action> {
+        if self.phase != Phase::Idle {
+            return Vec::new();
+        }
+        self.header = header.to_string();
+        self.outcome = outcome;
+        self.phase = Phase::Cancel;
+        self.round = 1;
+        self.round_start = now;
+        self.next_mark = now.saturating_add(self.t.notice_ms);
+        let mut out = vec![Action::Notice(Notice::Start {
+            round_ms: self.t.round_ms,
+        })];
+        self.advance(now, &mut out);
+        out
+    }
+
+    /// The open request, if `req_id` is it and of that kind; else the
+    /// answer is ignored.
+    fn take(&mut self, req_id: u64, count: bool) -> Option<Open> {
+        match self.open {
+            Some(o) if o.id == req_id && o.count.is_some() == count => self.open.take(),
+            _ => {
+                self.ignored += 1;
+                None
+            }
+        }
+    }
+
+    /// The answer of a cancel-all (C2).
+    pub fn cancel_done(&mut self, now: u64, req_id: u64, a: CancelAnswer) -> Vec<Action> {
+        if !self.running() {
+            return Vec::new();
+        }
+        let Some(o) = self.take(req_id, false) else {
+            return Vec::new();
+        };
+        let a = if now >= o.deadline {
+            CancelAnswer::Failed(PAST_DEADLINE.to_string())
+        } else {
+            a
+        };
+        let mut out = Vec::new();
+        self.cancelled(now, a, &mut out);
+        out
+    }
+
+    /// C2 → C3 after every sent cancel-all, also a failed one (unlike
+    /// the OMS: the count is the truth, and a refusal when nothing is open
+    /// must not keep the loop from ending); C2 → C4 after one not sent.
+    fn cancelled(&mut self, now: u64, a: CancelAnswer, out: &mut Vec<Action>) {
+        match a {
+            CancelAnswer::Done(_) => {
+                self.calls += 1;
+                self.last_error = None;
+                self.phase = Phase::Count;
+            }
+            CancelAnswer::Failed(why) => {
+                self.calls += 1;
+                self.last_error = Some(LastError::Failed(why));
+                self.phase = Phase::Count;
+            }
+            CancelAnswer::NotSent(k) => {
+                self.last_error = Some(LastError::NotSent(k));
+                self.phase = Phase::Repeat;
+            }
+        }
+        self.advance(now, out);
+    }
+
+    /// One page of the open count answered: the count's deadline moves to
+    /// `now` + `request_timeout_ms` + [`DEADLINE_EXTRA_MS`]. A page at or
+    /// after the deadline in force fails the count.
+    pub fn count_page(&mut self, now: u64, req_id: u64) -> Vec<Action> {
+        let mut out = Vec::new();
+        if !self.running() {
+            return out;
+        }
+        match self.open.as_mut() {
+            Some(o) if o.id == req_id && o.count.is_some() => {
+                if now < o.deadline {
+                    o.deadline = now.saturating_add(self.extra_ms);
+                    return out;
+                }
+            }
+            _ => {
+                self.ignored += 1;
+                return out;
+            }
+        }
+        if let Some(o) = self.open.take() {
+            self.counted(
+                now,
+                o.count == Some(true),
+                Err(PAST_DEADLINE.into()),
+                &mut out,
+            );
+            self.advance(now, &mut out);
+        }
+        out
+    }
+
+    /// The result of a count (C3, or a count of the watch).
+    pub fn count_done(&mut self, now: u64, req_id: u64, r: Result<usize, String>) -> Vec<Action> {
+        if !self.running() {
+            return Vec::new();
+        }
+        let Some(o) = self.take(req_id, true) else {
+            return Vec::new();
+        };
+        let r = if now >= o.deadline {
+            Err(PAST_DEADLINE.to_string())
+        } else {
+            r
+        };
+        let mut out = Vec::new();
+        self.counted(now, o.count == Some(true), r, &mut out);
+        self.advance(now, &mut out);
+        out
+    }
+
+    fn counted(
+        &mut self,
+        now: u64,
+        ends_watch: bool,
+        r: Result<usize, String>,
+        out: &mut Vec<Action>,
+    ) {
+        self.remaining = r.clone();
+        match (self.phase, r) {
+            // Only the count emitted at or after z + watch_ms ends the
+            // watch, however late it answers; a slow answer to an earlier
+            // count is not it.
+            (Phase::Watch, Ok(0)) if ends_watch => {
+                self.phase = Phase::Ended;
+                out.push(Action::Notice(Notice::Final {
+                    watch_ms: self.t.watch_ms,
+                    round: self.round,
+                    cancel_all_calls: self.calls,
+                    outcome: self.outcome,
+                }));
+                out.push(Action::Ended(Report {
+                    rounds: self.round,
+                    cancel_all_calls: self.calls,
+                    zero_since: self.zero_since,
+                    aborted: false,
+                }));
+            }
+            (Phase::Count, Ok(0)) => {
+                self.phase = Phase::Watch;
+                self.zero_since = Some(now);
+                self.watch_due = now
+                    .saturating_add(self.t.watch_every_ms)
+                    .min(now.saturating_add(self.t.watch_ms));
+            }
+            (Phase::Watch, Ok(0)) => {}
+            (Phase::Watch, Ok(_)) => {
+                // A late order: back to C2 at once.
+                self.zero_since = None;
+                self.round += 1;
+                self.round_start = now;
+                self.phase = Phase::Cancel;
+            }
+            // n > 0 after a cancel-all, or a count error (never zero):
+            // C4, the next round at t_r + round_ms.
+            _ => {
+                self.zero_since = None;
+                self.phase = Phase::Repeat;
+            }
+        }
+    }
+
+    /// Emits the request that is due at `now`, if any.
+    fn advance(&mut self, now: u64, out: &mut Vec<Action>) {
+        if self.phase == Phase::Repeat && now >= self.round_start.saturating_add(self.t.round_ms) {
+            self.round += 1;
+            self.round_start = now;
+            self.phase = Phase::Cancel;
+        }
+        if self.open.is_some() {
+            return;
+        }
+        match self.phase {
+            Phase::Cancel => {
+                if self.budget_at().is_some_and(|at| now < at) {
+                    if !self.holding {
+                        self.holding = true;
+                        self.holds += 1;
+                    }
+                    return;
+                }
+                self.holding = false;
+                if self.sent_at.len() == ORDER_BUDGET {
+                    self.sent_at.remove(0);
+                }
+                self.sent_at.push(now);
+                let id = self.id();
+                self.open = Some(Open {
+                    id,
+                    count: None,
+                    deadline: now.saturating_add(self.extra_ms),
+                });
+                out.push(Action::CancelAll { req_id: id });
+            }
+            Phase::Count => {
+                let id = self.id();
+                self.open = Some(Open {
+                    id,
+                    count: Some(false),
+                    deadline: now.saturating_add(self.extra_ms),
+                });
+                out.push(Action::Count { req_id: id });
+            }
+            Phase::Watch if now >= self.watch_due => {
+                let z = self.zero_since.unwrap_or(now);
+                let end = z.saturating_add(self.t.watch_ms);
+                let ends = now >= end;
+                if !ends {
+                    let every = self.t.watch_every_ms.max(1);
+                    let k = (now - z) / every + 1;
+                    self.watch_due = z.saturating_add(k.saturating_mul(every)).min(end);
+                }
+                let id = self.id();
+                self.open = Some(Open {
+                    id,
+                    count: Some(ends),
+                    deadline: now.saturating_add(self.extra_ms),
+                });
+                out.push(Action::Count { req_id: id });
+            }
+            _ => {}
+        }
+    }
+
+    /// The loop's clock moved to `now`.
+    pub fn poll(&mut self, now: u64) -> Vec<Action> {
+        let mut out = Vec::new();
+        if !self.running() {
+            return out;
+        }
+        // Past the deadline of the open request: it failed.
+        if let Some(o) = self.open.filter(|o| now >= o.deadline) {
+            self.open = None;
+            match o.count {
+                Some(ends) => self.counted(now, ends, Err(PAST_DEADLINE.into()), &mut out),
+                None => self.cancelled(now, CancelAnswer::Failed(PAST_DEADLINE.into()), &mut out),
+            }
+        }
+        self.advance(now, &mut out);
+        self.progress(now, &mut out);
+        out
+    }
+
+    /// The progress notice of the C4 rule: one at the first poll at or
+    /// after a mark; the marks stay anchored to the start notice, and one
+    /// notice covers every mark passed before it.
+    fn progress(&mut self, now: u64, out: &mut Vec<Action>) {
+        if now < self.next_mark {
+            return;
+        }
+        let every = self.t.notice_ms.max(1);
+        let passed = (now - self.next_mark) / every + 1;
+        self.next_mark = self.next_mark.saturating_add(passed.saturating_mul(every));
+        out.push(Action::Notice(Notice::Progress {
+            round: self.round,
+            remaining: self.remaining.clone(),
+            cancel_all_calls: self.calls,
+            last_error: self.last_error.clone(),
+        }));
+    }
+
+    /// Shutdown or a start refusal during the loop (U19b3d): one abort
+    /// notice and the end; nothing after it. Before the start
+    /// it does nothing (the kill sequence tells an abort before the loop,
+    /// U19b3b). The open request is dropped: its answer is never used.
+    pub fn abort(&mut self, _now: u64, why: AbortWhy) -> Vec<Action> {
+        if !self.running() {
+            return Vec::new();
+        }
+        self.phase = Phase::Aborted;
+        self.open = None;
+        vec![
+            Action::Notice(Notice::Abort {
+                why,
+                round: self.round,
+                remaining: self.remaining.clone().ok(),
+                cancel_all_calls: self.calls,
+            }),
+            Action::Ended(Report {
+                rounds: self.round,
+                cancel_all_calls: self.calls,
+                zero_since: self.zero_since,
+                aborted: true,
+            }),
+        ]
+    }
 }
