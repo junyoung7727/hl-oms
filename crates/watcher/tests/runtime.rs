@@ -2548,6 +2548,25 @@ fn a_shutdown_while_a_refusal_waits_sends_the_abort_notice() {
     let _ = std::fs::remove_dir_all(&tg_dir);
 }
 
+#[test]
+fn a_refusal_waiting_for_k2_ends_at_k2s_deadline() {
+    // K2's reply never comes: the refusal ends at K2's deadline (5,000 ms
+    // from its send), its task aborted, and the refusal P1 names the
+    // failure; no second watcher_kill (review 1 mut.py miss
+    // refusal-kill-wait-deadline-never).
+    let (w, dir, tg_dir, clock, mut run, _seen, release) = a_refusal_waiting_for_k2("rt-k-refk2late");
+    walk_until(&clock, 8000, "the exit", || !run.running());
+    assert_eq!(run.shutdown(), 2);
+    release.store(true, Ordering::SeqCst);
+    assert_eq!(kill_lines(&w.admin).len(), 1);
+    let r = w.sent().into_iter().find(|t| t.contains("워처가 꺼짐")).unwrap();
+    assert!(r.ends_with(". 늦은 정지: 실패(정지 응답 없음(시간 초과))"), "{r}");
+    assert_eq!(sent_with(&w, "로 워처 킬 중단(일괄 취소 전)").len(), 1, "{:?}", w.sent());
+    assert!(w.requests(CANCEL_ALL).is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
 /// A clock that counts its reads: the runtime reads it at every turn of
 /// its loop, so the count shows whether the loop waits.
 struct Counting(Arc<ManualClock>, AtomicU64);
