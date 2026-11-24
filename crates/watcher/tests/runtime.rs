@@ -1658,3 +1658,102 @@ fn the_watchers_loop_repeats_until_zero_at_no_more_than_2_cancel_alls_per_second
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&tg_dir);
 }
+
+const LATE_HALT: &str = "늦은 정지: OMS가 다시 답해 watcher_kill로 래치함(latched)";
+
+/// A kill whose halt and stop both fail: no `admin.sock` at the configured
+/// path and a `systemctl` that exits 1; one order stays open at the fake.
+/// `before` runs once the checks run, before the OMS goes silent. Returns
+/// once the start notice reached the fake Telegram, with the path where
+/// `admin.sock` may appear.
+fn kill_unhalted(
+    name: &str,
+    before: impl Fn(&World, &ManualClock),
+) -> (World, std::path::PathBuf, std::path::PathBuf, Arc<ManualClock>, Running, std::path::PathBuf) {
+    let (tg_dir, tg) = telegram_section(&format!("{name}-t"));
+    let (mut w, dir) = kill_world(name, &tg, "");
+    let sock = w.cfg.admin_socket.with_file_name("late.sock");
+    w.cfg.admin_socket = sock.clone();
+    w.systemctl = fake_systemctl(&dir, 1);
+    w.status_marked();
+    let clock = Arc::new(ManualClock::new(T0));
+    let run = w.start(clock.clone());
+    assert!(until(10, || !heartbeats(&w.monitor).is_empty()), "{:?}", w.log());
+    before(&w, &clock);
+    walk(&clock, 2000);
+    w.bybit.route("/v5/order/realtime", [orders(1)]);
+    w.status_down();
+    walk_until(&clock, 20_000, "the fire", || w.lines_with(FIRED) == 1);
+    walk_kill(&clock, "the fake systemctl", || dir.join("argv").exists());
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    let start = &sent_with(&w, START_NOTICE)[0];
+    assert!(
+        start.contains(&format!("→ systemctl stop {UNIT}: 실패(exit 1). OMS 정지 실패: OMS가 새 주문을 낼 수 있음. OMS 키 폐기(X8 절차)를 검토). 워처 키로")),
+        "{start}"
+    );
+    (w, dir, tg_dir, clock, run, sock)
+}
+
+#[test]
+fn an_oms_that_comes_back_during_the_loop_is_latched_before_the_loop_ends() {
+    // The OMS comes back unlatched 5 s into the loop (stalled, or restarted
+    // by systemd): the halt retried every 5 s reaches it while the kill
+    // runs (review 3 M1).
+    let (w, dir, tg_dir, clock, mut run, sock) = kill_unhalted("rt-k-late", |_, _| {});
+    walk(&clock, 5000);
+    let admin = admin_answering(&sock, &w.cfg.kill.as_ref().unwrap().marker, "latched").0;
+    walk_until(&clock, 20_000, "watcher_kill at the new admin.sock", || {
+        kill_lines(&admin).len() == 1
+    });
+    assert!(sent_with(&w, FINAL_NOTICE).is_empty());
+    assert_eq!(w.pushed("watcher_kill_active"), Some(1.0));
+    let detail = kill_lines(&admin)[0]["detail"].as_str().unwrap().to_string();
+    assert_eq!(detail, "W5: 늦은 정지: watcher w-rt의 킬이 OMS 래치나 정지를 확인하지 못함");
+    walk_until(&clock, 20_000, "the late halt notice", || {
+        !sent_with(&w, LATE_HALT).is_empty()
+    });
+    assert!(sent_with(&w, LATE_HALT)[0].contains("\n포지션(거래소 /v5/position/list, "));
+    assert!(sent_with(&w, FINAL_NOTICE).is_empty());
+    // The order goes: the final notice names the latch; no further halt.
+    w.bybit.route("/v5/order/realtime", [empty_page()]);
+    walk_until(&clock, 60_000, "the final notice", || !sent_with(&w, FINAL_NOTICE).is_empty());
+    let fin = &sent_with(&w, FINAL_NOTICE)[0];
+    assert!(fin.contains("OMS는 래치됨(watcher_kill)."), "{fin}");
+    walk(&clock, 10_000);
+    assert_eq!(kill_lines(&admin).len(), 1);
+    assert_eq!(sent_with(&w, LATE_HALT).len(), 1);
+    assert_eq!(w.lines_with("the halt is not owed"), 1);
+    assert_eq!(run.shutdown(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+
+    // The watcher's key was latched by a 10010 answer before the kill
+    // (scenario C of review 3 M1): no cancel-all can be sent, the loop
+    // cannot end, and the halt retries still reach the OMS.
+    let (w, dir, tg_dir, clock, mut run, sock) = kill_unhalted("rt-k-late-key", |w, clock| {
+        w.bybit.route(
+            "/v5/account/wallet-balance",
+            [Answer::Reply(200, r#"{"retCode":10010,"retMsg":"Unmatched IP"}"#.into())],
+        );
+        walk_until(clock, 10_000, "the key's latch", || {
+            !sent_with(w, "워처 키가 거부됨(retCode 10010").is_empty()
+        });
+    });
+    walk(&clock, 5000);
+    let admin = admin_answering(&sock, &w.cfg.kill.as_ref().unwrap().marker, "latched").0;
+    walk_until(&clock, 20_000, "watcher_kill at the new admin.sock", || {
+        kill_lines(&admin).len() == 1
+    });
+    walk_until(&clock, 20_000, "the late halt notice", || {
+        !sent_with(&w, LATE_HALT).is_empty()
+    });
+    walk(&clock, 10_000);
+    std::thread::sleep(Duration::from_millis(300));
+    // U19b3c's shutdown is U19a's path (U19b3d adds the abort notice).
+    assert_eq!(run.shutdown(), 0);
+    assert_eq!(kill_lines(&admin).len(), 1);
+    assert_eq!(sent_with(&w, LATE_HALT).len(), 1);
+    assert!(w.requests(CANCEL_ALL).is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
