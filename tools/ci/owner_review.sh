@@ -55,6 +55,11 @@ set -uo pipefail
 prefix="owner_review"
 cannot() { echo "$prefix: cannot check: $1"; exit 2; }
 
+# A missing tool or a failed git command is "cannot check", never "none".
+for c in git sed awk perl comm sort grep; do
+  command -v "$c" > /dev/null || cannot "no $c on the path"
+done
+
 top="$(git rev-parse --show-toplevel 2> /dev/null)" || cannot "not in a git repository"
 # A relative paths file is named from the caller's directory.
 list="${2:-}"
@@ -68,6 +73,12 @@ list="${list:-tools/ci/owner_review_paths.txt}"
 # -r, not -f: a list given as `<(git show ..)` is a pipe.
 [[ -r "$list" && ! -d "$list" ]] || cannot "no paths file $list"
 
+# has <rev> <path>: the path is in the tree of rev (it reads trees only).
+has() { git rev-parse -q --verify "$1:$2" > /dev/null; }
+# blob <rev> <path>: the file at rev, nothing if the path is not there;
+# fails if the file is there but cannot be read.
+blob() { ! has "$1" "$2" || git cat-file blob "$1:$2"; }
+
 findings=0
 test_attr='^[[:space:]]*#[[:space:]]*\[[[:space:]]*(tokio::)?test[[:space:]]*[](]'
 finding() { echo "$prefix: $1"; findings=$((findings + 1)); }
@@ -75,6 +86,7 @@ finding() { echo "$prefix: $1"; findings=$((findings + 1)); }
 # -z: raw paths. --no-renames: a move is a deletion plus an addition, so
 # both names are seen.
 mapfile -d '' -t changed < <(git diff -z --name-only --no-renames "$mb" HEAD)
+wait $! || cannot "git diff $mb HEAD failed"
 
 # ---- path ------------------------------------------------------------------
 # As in .gitignore: an entry with a "/" before its end is a path from the
@@ -130,27 +142,29 @@ members() {
 }
 for f in "${changed[@]}"; do
   [[ "$f" == Cargo.toml || "$f" == */Cargo.toml ]] || continue
-  old="$(git show "$mb:$f" 2> /dev/null | lint_tables)"
-  new="$( (git show "HEAD:$f" 2> /dev/null || true) | lint_tables)"
+  old="$(blob "$mb" "$f" | lint_tables)" || cannot "cannot read $mb:$f"
+  new="$(blob HEAD "$f" | lint_tables)" || cannot "cannot read HEAD:$f"
   std=$'[lints]\nworkspace = true'
   # A new package manifest takes exactly the workspace lints: one without
   # them builds outside every workspace lint. A moved or removed one that
   # only took them is not a finding.
-  if ! git cat-file -e "$mb:$f" 2> /dev/null \
-    && git show "HEAD:$f" 2> /dev/null | grep -E '^[[:space:]]*\[[[:space:]]*package[[:space:]]*\]' > /dev/null; then
+  if ! has "$mb" "$f" \
+    && blob HEAD "$f" | grep -E '^[[:space:]]*\[[[:space:]]*package[[:space:]]*\]' > /dev/null; then
     [[ "$new" == "$std" ]] || finding "manifest: $f"
     continue
   fi
-  [[ "$old" == "$std" && -z "$new" ]] && ! git cat-file -e "HEAD:$f" 2> /dev/null && continue
+  [[ "$old" == "$std" && -z "$new" ]] && ! has HEAD "$f" && continue
   [[ "$old" == "$new" ]] || finding "manifest: $f"
 done
 # A crate that leaves the workspace leaves `cargo test --workspace` and the
 # lints. Adding a member is not a finding.
-if printf '%s\n' "${changed[@]}" | grep -qx 'Cargo.toml'; then
+if printf '%s\n' "${changed[@]}" | grep -x 'Cargo.toml' > /dev/null; then
+  old="$(blob "$mb" Cargo.toml | members | sort -u)" || cannot "cannot read $mb:Cargo.toml"
+  new="$(blob HEAD Cargo.toml | members | sort -u)" || cannot "cannot read HEAD:Cargo.toml"
+  nl=$'\n'
   while IFS= read -r m; do
     finding "manifest: Cargo.toml: member removed: $m"
-  done < <(comm -23 <(git show "$mb:Cargo.toml" 2> /dev/null | members | sort -u) \
-    <( (git show "HEAD:Cargo.toml" 2> /dev/null || true) | members | sort -u))
+  done < <(comm -23 <(printf '%s' "${old:+$old$nl}") <(printf '%s' "${new:+$new$nl}"))
 fi
 
 # ---- lint ------------------------------------------------------------------
@@ -175,8 +189,8 @@ lint_attrs() {
 }
 for f in "${changed[@]}"; do
   [[ "$f" =~ ^crates/[^/]+/src/.*\.rs$ ]] || continue
-  old="$(git show "$mb:$f" 2> /dev/null | lint_attrs)"
-  new="$( (git show "HEAD:$f" 2> /dev/null || true) | lint_attrs)"
+  old="$(blob "$mb" "$f" | lint_attrs)" || cannot "cannot read $mb:$f"
+  new="$(blob HEAD "$f" | lint_attrs)" || cannot "cannot read HEAD:$f"
   [[ "$old" == "$new" ]] || finding "lint: $f"
 done
 
@@ -206,7 +220,8 @@ while IFS=$'\t' read -r kind a b; do
         *) d="${a%.rs}" ;;
       esac
       for c in "$d/$b.rs" "$d/$b/mod.rs"; do
-        if git show "HEAD:$c" 2> /dev/null | grep -E "$test_attr" > /dev/null; then
+        text="$(blob HEAD "$c")" || cannot "cannot read HEAD:$c"
+        if grep -E "$test_attr" <<< "$text" > /dev/null; then
           finding "tests: $a: mod $b removed, $c still holds tests"
           break
         fi
@@ -239,12 +254,14 @@ done < <(git diff -U0 --no-renames --no-prefix "$mb" HEAD -- '*.rs' | awk '
     for (f in tcfg) if (tcfg[f] > fa[f]) printf "tests\t%s: %d cfg added in a test file, %d test attribute(s) added\n", f, tcfg[f], fa[f] + 0
     for (k in mods) if (mods[k] < 0) printf "mod\t%s\n", k
   }')
+wait $! || cannot "git diff -- '*.rs' $mb HEAD failed"
 # A test target that is gone. Moved below tests/<dir>/ (not main.rs), cargo
 # no longer builds it; the attributes removed and added cancel out.
 for f in "${changed[@]}"; do
   [[ "$f" =~ ^(crates/[^/]+/)?tests/([^/]+\.rs|[^/]+/main\.rs)$ ]] || continue
-  git cat-file -e "HEAD:$f" 2> /dev/null && continue
-  git show "$mb:$f" 2> /dev/null | grep -E "$test_attr" > /dev/null && finding "tests: test target removed: $f"
+  has HEAD "$f" && continue
+  text="$(blob "$mb" "$f")" || cannot "cannot read $mb:$f"
+  grep -E "$test_attr" <<< "$text" > /dev/null && finding "tests: test target removed: $f"
 done
 
 if (( findings == 0 )); then

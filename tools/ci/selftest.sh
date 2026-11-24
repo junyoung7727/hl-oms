@@ -588,6 +588,27 @@ expect_owner_with() { # the list from the base, as the runner passes it
 expect_owner_with
 rm tools/ci/owner_review_paths.txt
 expect_owner 2 "owner: a paths file that does not exist" "owner_review: cannot check: no paths file"
+# A failed read is "cannot check", never "none" (review 2, S4). An object
+# that the change needs is taken out of the repository for one run and
+# put back; a tool is left off the path.
+oreset; printf 'pub fn two() -> u8 {\n    2\n}\n' >> crates/a/src/lib.rs; plant
+without_object() { # without_object <rev:path> <code> <label> <text>: runs with that object gone
+  local oid obj
+  oid="$(git rev-parse "$1")"; obj=".git/objects/${oid:0:2}/${oid:2}"
+  mv "$obj" "$tmp/object"
+  expect_owner "$2" "$3" "$4"
+  mv "$tmp/object" "$obj"
+}
+without_object HEAD:crates/a/src/lib.rs 2 "owner: a changed file whose content is missing" "owner_review: cannot check:"
+without_object HEAD:crates/a/src 2 "owner: a changed directory whose tree is missing (git diff fails)" "owner_review: cannot check:"
+for t in perl awk; do
+  mkdir -p "$tmp/no-$t"
+  for c in git sed awk perl comm sort grep; do
+    [[ "$c" == "$t" ]] || ln -sf "$(command -v "$c")" "$tmp/no-$t/$c"
+  done
+  expect_owner_run 2 "owner: no $t on the path" "owner_review: cannot check: no $t" \
+    env PATH="$tmp/no-$t" "$BASH" tools/ci/owner_review.sh "$obase"
+done
 oreset
 obase=not-a-commit
 expect_owner 2 "owner: a base that is no commit" "owner_review: cannot check:"
