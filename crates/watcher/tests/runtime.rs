@@ -1366,7 +1366,7 @@ fn oms_silence_writes_the_marker_and_halts_the_oms_before_the_first_cancel_all()
         !w.requests(CANCEL_ALL).is_empty()
     });
     assert_eq!(*at_kill.lock().unwrap(), vec![true], "the marker was there at watcher_kill");
-    assert_eq!(at_cancel.lock().unwrap()[0], true, "the halt was answered before the first cancel-all");
+    assert!(at_cancel.lock().unwrap()[0], "the halt was answered before the first cancel-all");
     assert!(!dir.join("argv").exists(), "the halt latched: systemctl is not run");
     let k = &kill_lines(&w.admin)[0];
     let detail = k["detail"].as_str().unwrap();
@@ -1412,7 +1412,7 @@ fn when_watcher_kill_fails_the_oms_unit_is_stopped_before_the_first_cancel_all()
     walk_kill(&clock, "the first cancel-all", || {
         !w.requests(CANCEL_ALL).is_empty()
     });
-    assert_eq!(at_cancel.lock().unwrap()[0], true, "systemctl ran before the first cancel-all");
+    assert!(at_cancel.lock().unwrap()[0], "systemctl ran before the first cancel-all");
     assert_eq!(
         std::fs::read_to_string(&argv).unwrap(),
         format!("--no-ask-password\nstop\n--\n{UNIT}\n")
@@ -1514,9 +1514,12 @@ fn orders(n: usize) -> Answer {
     ok(json!({"category": "linear", "list": list, "nextPageCursor": ""}))
 }
 
+/// The manual clock and the path of each request at the fake Bybit.
+type Seen = Arc<Mutex<Vec<(u64, String)>>>;
+
 /// Records the manual clock and the path of every request at the fake
 /// Bybit.
-fn record_at(w: &World, clock: &Arc<ManualClock>) -> Arc<Mutex<Vec<(u64, String)>>> {
+fn record_at(w: &World, clock: &Arc<ManualClock>) -> Seen {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let (s, c) = (seen.clone(), clock.clone());
     w.bybit.on_request(move |r| s.lock().unwrap().push((c.now_ms(), r.path().to_string())));
@@ -1539,7 +1542,7 @@ fn kill_after_silence(
     extra: &str,
     kill: &str,
     at_fire: impl Fn(&World),
-) -> (World, std::path::PathBuf, std::path::PathBuf, Arc<ManualClock>, Running, Arc<Mutex<Vec<(u64, String)>>>) {
+) -> (World, std::path::PathBuf, std::path::PathBuf, Arc<ManualClock>, Running, Seen) {
     let (tg_dir, tg) = telegram_section(&format!("{name}-t"));
     let (mut w, dir) = kill_world(name, &format!("{extra}\n{tg}"), kill);
     let marker = w.cfg.kill.as_ref().unwrap().marker.clone();
