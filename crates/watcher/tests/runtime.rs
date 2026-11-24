@@ -14,7 +14,7 @@ use common::sock::{self, FakeSock, oms};
 use http_fake::{Answer, FakeHttp, Request};
 use serde_json::{Value, json};
 use std::os::unix::fs::PermissionsExt;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use watcher::alert::Route;
@@ -2544,6 +2544,87 @@ fn a_shutdown_while_a_refusal_waits_sends_the_abort_notice() {
     assert!(sent_with(&w, "워처가 꺼짐").is_empty(), "{texts:?}");
     assert_eq!(kill_lines(&w.admin).len(), 1);
     assert_eq!(w.lines_with("the kill ended: aborted; the halt is owed"), 1, "{:?}", w.log());
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&tg_dir);
+}
+
+/// A clock that counts its reads: the runtime reads it at every turn of
+/// its loop, so the count shows whether the loop waits.
+struct Counting(Arc<ManualClock>, AtomicU64);
+
+impl Clock for Counting {
+    fn now_ms(&self) -> u64 {
+        self.1.fetch_add(1, Ordering::SeqCst);
+        self.0.now_ms()
+    }
+}
+
+#[test]
+fn a_loop_answer_during_a_refusals_wait_does_not_spin_the_runtime() {
+    // The loop runs (one order open, the halt owed). A count or cancel-all
+    // is held at the fake Bybit; then the OMS answers with another marker
+    // path and holds the refusal's watcher_kill. The held Bybit answer then
+    // arrives while the kill is held: the runtime waits for its tick and
+    // does not turn its loop without a wait (review 2 N1).
+    let (tg_dir, tg) = telegram_section("rt-k-refspin-t");
+    let (mut w, dir) = kill_world("rt-k-refspin", &tg, "");
+    let (hold, release) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+    let (h, r) = (hold.clone(), release.clone());
+    w.admin = FakeSock::serve(&w.cfg.admin_socket, move |_, _, v| {
+        if v["op"] != "watcher_kill" {
+            oms(v, "held")
+        } else if h.load(Ordering::SeqCst) {
+            let end = Instant::now() + Duration::from_secs(10);
+            while !r.load(Ordering::SeqCst) && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            oms(v, "latched")
+        } else {
+            sock::err(v, "bad_request", "not now")
+        }
+    });
+    w.systemctl = fake_systemctl(&dir, 1);
+    w.bybit.route("/v5/order/realtime", [orders(1)]);
+    let clock = Arc::new(ManualClock::new(T0));
+    let counting = Arc::new(Counting(clock.clone(), AtomicU64::new(0)));
+    let mut run = w.start(counting.clone());
+    assert!(until(10, || !w.echo.requests().is_empty()), "{:?}", w.log());
+    std::thread::sleep(Duration::from_millis(300));
+    walk_until(&clock, 20_000, "the fire", || w.lines_with(FIRED) == 1);
+    walk_kill(&clock, "the fake systemctl", || dir.join("argv").exists());
+    walk_kill(&clock, "the start notice", || !sent_with(&w, START_NOTICE).is_empty());
+    let (bybit_hold, bybit_release, entered) =
+        (Arc::new(AtomicBool::new(true)), Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+    let (bh, br, en) = (bybit_hold.clone(), bybit_release.clone(), entered.clone());
+    w.bybit.on_request(move |q| {
+        if (q.path() == CANCEL_ALL || q.path() == "/v5/order/realtime") && bh.swap(false, Ordering::SeqCst) {
+            en.store(true, Ordering::SeqCst);
+            let end = Instant::now() + Duration::from_secs(10);
+            while !br.load(Ordering::SeqCst) && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+    });
+    walk_until(&clock, 20_000, "a loop request held", || entered.load(Ordering::SeqCst));
+    hold.store(true, Ordering::SeqCst);
+    w.status_with(marker_node(Some(std::path::Path::new("/elsewhere/kill.marker"))));
+    walk_until(&clock, 3000, "the refusal waits", || {
+        w.lines_with("the start is refused while the halt is owed: watcher_kill first") == 1
+    });
+    bybit_release.store(true, Ordering::SeqCst);
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(run.running(), "{:?}", w.log());
+    let from = counting.1.load(Ordering::SeqCst);
+    std::thread::sleep(Duration::from_millis(500));
+    let reads = counting.1.load(Ordering::SeqCst) - from;
+    // About 5 ticks in 500 ms; a loop without a wait reads it far more
+    // often. The bound is 판단(모델 아님).
+    assert!(reads < 300, "{reads} clock reads in 500 ms while the refusal waits");
+    release.store(true, Ordering::SeqCst);
+    assert!(until(3, || !run.running()), "{:?}", w.log());
+    assert_eq!(run.shutdown(), 2);
+    let r = w.sent().into_iter().find(|t| t.contains("워처가 꺼짐")).unwrap();
+    assert!(r.ends_with(". 늦은 정지: latched"), "{r}");
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&tg_dir);
 }

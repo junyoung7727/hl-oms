@@ -556,10 +556,12 @@ async fn heartbeats(
 
 impl Runtime {
     /// The boot replay reads on without waiting for a tick, and so does a
-    /// kill whose loop got an answer.
+    /// kill whose loop got an answer, unless a refusal holds the kill (its
+    /// answers wait until the refusal ends; review 2 N1).
     fn busy(&self) -> bool {
         matches!(self.phase, Phase::Replay { not_before, .. } if self.clock.now_ms() >= not_before)
-            || self.kill.as_ref().is_some_and(|k| k.inflight.queued() > 0)
+            || (self.refusing.is_none()
+                && self.kill.as_ref().is_some_and(|k| k.inflight.queued() > 0))
     }
 
     fn spawn(&mut self, f: impl Future<Output = Msg> + Send + 'static) -> AbortHandle {
