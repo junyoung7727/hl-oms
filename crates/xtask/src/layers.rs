@@ -11,6 +11,9 @@
 //! - `text`: a tracked `.rs` file outside `paths` may not contain any string
 //!   in `strings` (a match in a comment counts).
 //!
+//! The unit tests use a made-up path (`/x9/ord/...`), so that this file does
+//! not trip the real table's text rules.
+//!
 //! A pattern is a crate name or a prefix ending in `*`. A name in the table
 //! that matches no workspace crate is a finding, so a renamed crate cannot
 //! leave a rule behind that checks nothing.
@@ -307,7 +310,7 @@ mod tests {
 
         [[text]]
         why = "only the gateway creates orders"
-        strings = ["/v5/order/create"]
+        strings = ["/x9/ord/create"]
         paths = ["crates/oms-node/src/venue/", "crates/oms-node/tests/"]
     "#;
 
@@ -437,26 +440,26 @@ mod tests {
         let files = vec![
             (
                 "crates/oms-node/src/venue/bybit/orders.rs".to_string(),
-                "const P: &str = \"/v5/order/create\";".to_string(),
+                "const P: &str = \"/x9/ord/create\";".to_string(),
             ),
             (
                 "crates/oms-node/tests/bybit_node.rs".to_string(),
-                "\"/v5/order/create\"".to_string(),
+                "\"/x9/ord/create\"".to_string(),
             ),
             (
                 "crates/md-feed/src/lib.rs".to_string(),
-                "fn f() {}\n// \"/v5/order/create\"\n".to_string(),
+                "fn f() {}\n// \"/x9/ord/create\"\n".to_string(),
             ),
             (
                 "crates/oms-nodex/src/lib.rs".to_string(),
-                "\"/v5/order/create-batch\"".to_string(),
+                "\"/x9/ord/create-batch\"".to_string(),
             ),
         ];
         assert_eq!(
             check_text(&table(), &files),
             vec![
-                "text: crates/md-feed/src/lib.rs:2: /v5/order/create: only the gateway creates orders".to_string(),
-                "text: crates/oms-nodex/src/lib.rs:1: /v5/order/create: only the gateway creates orders".to_string(),
+                "text: crates/md-feed/src/lib.rs:2: /x9/ord/create: only the gateway creates orders".to_string(),
+                "text: crates/oms-nodex/src/lib.rs:1: /x9/ord/create: only the gateway creates orders".to_string(),
             ]
         );
     }
