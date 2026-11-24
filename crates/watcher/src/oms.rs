@@ -1,7 +1,7 @@
 //! The watcher's links to the OMS (C-WATCH part 7, U19a7), written from
 //! C-API and C-LIVE part 2, not from `oms-api`: `/api/status` on the
-//! loopback dashboard, `watcher_mismatch` on `admin.sock` (one connection
-//! per send) and the `heartbeat` on `monitor.sock` (one persistent
+//! loopback dashboard, `watcher_mismatch` and (U19b3a) `watcher_kill` on
+//! `admin.sock` (one connection per send) and the `heartbeat` on `monitor.sock` (one persistent
 //! connection). Each line is one JSON object; a reply is
 //! `{"id","ok","result"}` or `{"id","ok":false,"error":{"code","message"}}`.
 
@@ -137,17 +137,44 @@ pub async fn admin_send(
     detail: &str,
     timeout_ms: u64,
 ) -> Result<String, String> {
+    let line = format!(
+        r#"{{"id":2,"op":"watcher_mismatch","check":"{}","detail":{}}}"#,
+        check.name(),
+        quote(detail)
+    );
+    admin_request(path, name, &line, timeout_ms).await
+}
+
+/// One `watcher_kill {detail}` to `admin.sock` at `path` (U19b3a; K2 and
+/// the owed halt of U19b3b–d), with the connection and time rules of
+/// [`admin_send`]: `hello` (client `watcher/<name>`), then the request,
+/// each reply within `timeout_ms`, the whole within 2 × `timeout_ms`. The
+/// `result` (`"latched"`, `"already latched"`, the re-arm text; see
+/// [`latched`]), or why there is none. The OMS records `hold_set{kill,
+/// source: watcher}` and answers after it is durable (C-HOLD).
+pub async fn admin_kill(
+    path: &Path,
+    name: &str,
+    detail: &str,
+    timeout_ms: u64,
+) -> Result<String, String> {
+    let line = format!(r#"{{"id":2,"op":"watcher_kill","detail":{}}}"#, quote(detail));
+    admin_request(path, name, &line, timeout_ms).await
+}
+
+/// `hello` with id 1, then `line` (id 2) on one new connection.
+async fn admin_request(
+    path: &Path,
+    name: &str,
+    line: &str,
+    timeout_ms: u64,
+) -> Result<String, String> {
     let send = async {
         let (mut rd, mut wr) = connect(path).await?;
         ask(&mut rd, &mut wr, 1, &hello_line(1, name), timeout_ms)
             .await
             .map_err(|e| format!("hello: {e}"))?;
-        let line = format!(
-            r#"{{"id":2,"op":"watcher_mismatch","check":"{}","detail":{}}}"#,
-            check.name(),
-            quote(detail)
-        );
-        ask(&mut rd, &mut wr, 2, &line, timeout_ms)
+        ask(&mut rd, &mut wr, 2, line, timeout_ms)
             .await
             .map_err(|e| e.to_string())
     };
@@ -156,6 +183,13 @@ pub async fn admin_send(
         Ok(r) => r,
         Err(_) => Err(format!("no reply within {whole} ms")),
     }
+}
+
+/// A `watcher_kill` reply that halted the OMS: `"latched"`, or one that
+/// starts with `"already latched"` (C-HOLD "워처의 입력"; this covers the
+/// re-arm reply after a confirmed loop).
+pub fn latched(reply: &str) -> bool {
+    reply == "latched" || reply.starts_with("already latched")
 }
 
 /// How often an error answer to a heartbeat is logged at most.

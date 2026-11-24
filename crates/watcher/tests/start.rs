@@ -6,6 +6,8 @@
 
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
 use std::sync::{Arc, Mutex};
 
 use http_fake::{Answer, FakeHttp};
@@ -972,7 +974,13 @@ fn can_cancel() -> Value {
 /// A start with `[kill]` (the key must cancel) of BTCUSDT.
 fn start_kill(metrics: Arc<Metrics>) -> S {
     let (log, lines) = watcher::log::collect();
-    let cfg = config_with(&["BTCUSDT"], 60_000, "[kill]\n");
+    // `marker` and `oms_unit` are required in the section (U19b3a).
+    let dir = common::test_dir("start-kill");
+    let kill = format!(
+        "[kill]\nmarker = \"{}\"\noms_unit = \"watcher-test-no-such-unit.service\"\n",
+        dir.join("kill.marker").display()
+    );
+    let cfg = config_with(&["BTCUSDT"], 60_000, &kill);
     let start = Start::new(&cfg, metrics.clone(), log, T0);
     S {
         start,

@@ -128,7 +128,7 @@ pub const NOT_READ_ON_ABORT: &str =
 
 /// At most `max` characters, control characters and the Unicode line and
 /// paragraph separators as spaces: one text stays on its line.
-fn cut(text: &str, max: usize) -> String {
+pub(crate) fn cut(text: &str, max: usize) -> String {
     text.chars()
         .take(max)
         .map(|c| {

@@ -59,17 +59,22 @@ pub struct Config {
     /// `[telegram]` (U19b1a): the watcher's own sender of `[WATCH P1]`;
     /// required on mainnet, optional on testnet.
     pub telegram: Option<Telegram>,
-    /// `[kill]` (U19b2a: the loop timings): the watcher's own cancel-all
-    /// confirmation loop. With it the key must be able to cancel (start
-    /// step 2). U19b3a adds the marker, the unit and the stop fields.
+    /// `[kill]` (U19b2a: the loop timings; U19b3a: the marker, the unit
+    /// and the stop): the watcher's own kill. With it the key must be able
+    /// to cancel (start step 2) and W5 watches the OMS; required on
+    /// mainnet.
     pub kill: Option<Kill>,
+    /// `[w5]` (U19b3a): the OMS silence check; only active with `[kill]`.
+    pub w5: W5,
 }
 
-/// `[kill]`, the loop fields (C-WATCH part 11): the same defaults and
-/// ranges as the OMS's `kill_*` fields, written again here. The defaults
-/// are table 7-8's design values (C4, C5).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+/// `[kill]` (C-WATCH parts 11 and 12). The loop fields have the same
+/// defaults and ranges as the OMS's `kill_*` fields, written again here;
+/// their defaults are table 7-8's design values (C4, C5). `marker` and
+/// `oms_unit` have no default: [`Kill::default`] leaves them empty (the
+/// loop's timings for code that reads only them), and a config must name
+/// both.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Kill {
     /// A cancel-all every `round_ms` until zero open orders are confirmed.
     pub round_ms: u64,
@@ -79,6 +84,16 @@ pub struct Kill {
     pub watch_every_ms: u64,
     /// At most one progress notice per `notice_ms`.
     pub notice_ms: u64,
+    /// The kill marker the watcher writes (U19b3b) and the OMS reads once
+    /// at its boot: the OMS's own `[kill] marker` rule.
+    pub marker: PathBuf,
+    /// The one systemd unit the watcher may stop (`systemctl stop`).
+    pub oms_unit: String,
+    /// Which systemd manager runs `oms_unit`.
+    pub systemd: Systemd,
+    /// How long the `systemctl` client may run before the stop is
+    /// unconfirmed (판단(모델 아님)).
+    pub stop_wait_ms: u64,
 }
 
 impl Default for Kill {
@@ -88,6 +103,70 @@ impl Default for Kill {
             watch_ms: 30_000,
             watch_every_ms: 5000,
             notice_ms: 60_000,
+            marker: PathBuf::new(),
+            oms_unit: String::new(),
+            systemd: Systemd::System,
+            stop_wait_ms: 10_000,
+        }
+    }
+}
+
+/// The systemd manager of the OMS's unit: `systemctl` or
+/// `systemctl --user`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Systemd {
+    #[default]
+    System,
+    User,
+}
+
+/// `[kill]` as written: the loop and stop fields stay optional until the
+/// defaults are applied; `marker` and `oms_unit` are required.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct KillFile {
+    round_ms: Option<u64>,
+    watch_ms: Option<u64>,
+    watch_every_ms: Option<u64>,
+    notice_ms: Option<u64>,
+    marker: PathBuf,
+    oms_unit: String,
+    systemd: Option<Systemd>,
+    stop_wait_ms: Option<u64>,
+}
+
+impl KillFile {
+    fn into_kill(self) -> Kill {
+        let d = Kill::default();
+        Kill {
+            round_ms: self.round_ms.unwrap_or(d.round_ms),
+            watch_ms: self.watch_ms.unwrap_or(d.watch_ms),
+            watch_every_ms: self.watch_every_ms.unwrap_or(d.watch_every_ms),
+            notice_ms: self.notice_ms.unwrap_or(d.notice_ms),
+            marker: self.marker,
+            oms_unit: self.oms_unit,
+            systemd: self.systemd.unwrap_or(d.systemd),
+            stop_wait_ms: self.stop_wait_ms.unwrap_or(d.stop_wait_ms),
+        }
+    }
+}
+
+/// `[w5]` (C-WATCH part 12): a probe of `/api/status` every `probe_ms`;
+/// `silence_ms` without a good answer (and a failed probe) fires the kill.
+/// The defaults are the design's values (§7.5 W5 "1초", "10초 무응답").
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct W5 {
+    pub probe_ms: u64,
+    pub silence_ms: u64,
+}
+
+impl Default for W5 {
+    fn default() -> W5 {
+        W5 {
+            probe_ms: 1000,
+            silence_ms: 10_000,
         }
     }
 }
@@ -221,7 +300,9 @@ struct File {
     #[serde(default)]
     telemetry: Telemetry,
     telegram: Option<Telegram>,
-    kill: Option<Kill>,
+    kill: Option<KillFile>,
+    #[serde(default)]
+    w5: W5,
 }
 
 /// The default `host` label: `/etc/hostname`, else `"unknown"`.
@@ -268,7 +349,8 @@ impl Config {
             http: f.http,
             telemetry: f.telemetry,
             telegram: f.telegram,
-            kill: f.kill,
+            kill: f.kill.map(KillFile::into_kill),
+            w5: f.w5,
         };
         cfg.validate()?;
         Ok(cfg)
@@ -296,6 +378,9 @@ impl Config {
         }
         if self.network == Network::Mainnet && self.telegram.is_none() {
             return Err("mainnet requires [telegram]: the watcher's P1 must reach a person".into());
+        }
+        if self.network == Network::Mainnet && self.kill.is_none() {
+            return Err("mainnet requires [kill]: without it the watcher cannot stop the OMS or cancel its orders".into());
         }
         if !self.data_dir.is_absolute() {
             return Err("data_dir must be an absolute path".into());
@@ -406,11 +491,48 @@ impl Config {
                 ("watch_ms", k.watch_ms, 10_000, 300_000),
                 ("watch_every_ms", k.watch_every_ms, 1000, k.watch_ms),
                 ("notice_ms", k.notice_ms, 60_000, 600_000),
+                ("stop_wait_ms", k.stop_wait_ms, 1000, 120_000),
             ] {
                 if !(lo..=hi).contains(&v) {
                     return Err(format!("[kill] {field} must be between {lo} and {hi}"));
                 }
             }
+            check_marker_path(&k.marker, &self.data_dir)?;
+            if !unit_name(&k.oms_unit) {
+                return Err("[kill] oms_unit must be a systemd unit name: 1 to 255 of A-Z a-z 0-9 : _ . @ -, ending in .service, not starting with -".into());
+            }
+        }
+        self.check_w5()
+    }
+
+    /// `[w5]`: the ranges (판단(모델 아님)) and, with `[kill]`, the bound
+    /// that keeps a healthy OMS below `silence_ms` (판단(모델 아님)). One
+    /// lost probe (review 1 S6): a probe lost after the last good answer
+    /// `g` fails at about `g + probe_ms + request_timeout_ms`, the next may
+    /// take `request_timeout_ms` to answer. A stall of the watcher no
+    /// longer than the gap threshold `2 × probe_ms + request_timeout_ms`
+    /// counts as silence (U19b3a review 1 S1): it may start just before
+    /// the answer to the probe of `g + probe_ms` and end after its
+    /// deadline, and the probe of the resume may take `request_timeout_ms`,
+    /// so up to `3 × probe_ms + 3 × request_timeout_ms`. The bound is the
+    /// larger, plus 1,000 ms.
+    fn check_w5(&self) -> Result<(), String> {
+        let w = &self.w5;
+        for (field, v, lo, hi) in [
+            ("probe_ms", w.probe_ms, 500, 5000),
+            ("silence_ms", w.silence_ms, 3000, 60_000),
+        ] {
+            if !(lo..=hi).contains(&v) {
+                return Err(format!("[w5] {field} must be between {lo} and {hi}"));
+            }
+        }
+        // The bound only where W5 runs: a config without `[kill]` keeps
+        // any `request_timeout_ms` its range allows.
+        let bound = 3 * w.probe_ms + 3 * self.http.request_timeout_ms + 1000;
+        if self.kill.is_some() && w.silence_ms < bound {
+            return Err(format!(
+                "[w5] silence_ms must be at least 3 × probe_ms + 3 × request_timeout_ms + 1000 = {bound}: one lost probe or a stall of the watcher shorter than a gap must not fire W5"
+            ));
         }
         Ok(())
     }
@@ -446,6 +568,33 @@ pub fn check_credentials_path(file: &Path, data_dir: &Path) -> Result<(), String
 /// `credentials_file`. [`crate::creds::load_token`] applies them again.
 pub fn check_token_path(file: &Path, data_dir: &Path) -> Result<(), String> {
     check_path("[telegram] token_file", file, data_dir)
+}
+
+/// The OMS's own rule for `[kill] marker` (C-HOLD, C-WATCH part 12):
+/// the path rules of `credentials_file`, and the marker's directory exists
+/// at load (a marker that cannot be written there would never latch).
+pub fn check_marker_path(marker: &Path, data_dir: &Path) -> Result<(), String> {
+    check_path("[kill] marker", marker, data_dir)?;
+    match marker.parent() {
+        Some(dir) if dir.is_dir() => Ok(()),
+        _ => Err(format!(
+            "[kill] marker: the directory of {} does not exist",
+            marker.display()
+        )),
+    }
+}
+
+/// A systemd service name the stopper may pass: 1–255 of
+/// `[A-Za-z0-9:_.@-]`, ending in `.service` with a name before it, not
+/// starting with `-` (so it is never read as an option); no glob, no space.
+fn unit_name(u: &str) -> bool {
+    (1..=255).contains(&u.len())
+        && u.len() > ".service".len()
+        && u.ends_with(".service")
+        && !u.starts_with('-')
+        && u
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b":_.@-".contains(&b))
 }
 
 fn check_path(field: &str, file: &Path, data_dir: &Path) -> Result<(), String> {

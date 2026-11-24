@@ -414,3 +414,81 @@ fn the_admin_client_says_hello_and_reads_both_replies() {
         t.elapsed()
     );
 }
+
+/// The OMS's reply after a confirmed loop (`oms-core` `KILL_REARMED_REPLY`,
+/// C-HOLD "워처의 입력"), written again here.
+const REARMED: &str = "already latched; the earlier confirmation is void and a new kill loop starts";
+
+#[test]
+fn admin_kill_sends_hello_then_watcher_kill_and_reads_the_reply() {
+    let dir = common::test_dir("admin-kill");
+    let sock = dir.join("admin.sock");
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    // A missing socket fails at once, as "not sent".
+    let r = rt.block_on(watcher::oms::admin_kill(&sock, "w", "d", 1000));
+    assert!(r.unwrap_err().starts_with("not sent:"), "missing socket");
+    let detail = "W5: /api/status gave no good answer for 10 s; watcher \"w-1\" 감시";
+    let answers = [
+        (
+            r#"{"id":2,"ok":true,"result":"latched"}"#.to_string(),
+            Ok("latched".to_string()),
+        ),
+        (
+            r#"{"id":2,"ok":true,"result":"already latched"}"#.to_string(),
+            Ok("already latched".to_string()),
+        ),
+        (
+            format!(r#"{{"id":2,"ok":true,"result":"{REARMED}"}}"#),
+            Ok(REARMED.to_string()),
+        ),
+        (
+            r#"{"id":2,"ok":false,"error":{"code":"bad_request","message":"detail is empty"}}"#
+                .to_string(),
+            Err("bad_request: detail is empty".to_string()),
+        ),
+        (
+            r#"{"id":2,"ok":false,"error":{"code":"unauthorized","message":"uid"}}"#.to_string(),
+            Err("unauthorized: uid".to_string()),
+        ),
+    ];
+    for (reply, want) in answers {
+        let seen = fake_admin(&sock, move |_| Some(reply.clone()));
+        let got = rt.block_on(watcher::oms::admin_kill(&sock, "w-1", detail, 1000));
+        assert_eq!(got, want);
+        let end = Instant::now() + Duration::from_secs(5);
+        while seen.lock().unwrap().is_empty() && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let lines = seen.lock().unwrap().clone();
+        assert_eq!(lines.len(), 1, "one connection");
+        assert_eq!(
+            lines[0],
+            vec![
+                r#"{"id":1,"op":"hello","client":"watcher/w-1"}"#.to_string(),
+                r#"{"id":2,"op":"watcher_kill","detail":"W5: /api/status gave no good answer for 10 s; watcher \"w-1\" 감시"}"#
+                    .to_string(),
+            ]
+        );
+    }
+    // Which replies halted the OMS (K2 and the owed halt).
+    for r in ["latched", "already latched", REARMED] {
+        assert!(watcher::oms::latched(r), "{r}");
+    }
+    for r in ["held", "already held", "", "Latched", " latched", "latched."] {
+        assert!(!watcher::oms::latched(r), "{r}");
+    }
+    // No reply to watcher_kill: the whole call ends within 2 × the timeout.
+    let _seen = fake_admin(&sock, |_| None);
+    let t = Instant::now();
+    let got = rt.block_on(watcher::oms::admin_kill(&sock, "w", "d", 300));
+    assert!(got.unwrap_err().contains("no reply"), "timeout");
+    assert!(
+        t.elapsed() < Duration::from_millis(1500),
+        "{:?}",
+        t.elapsed()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

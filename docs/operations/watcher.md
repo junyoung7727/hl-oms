@@ -33,8 +33,14 @@ vm_url = "http://127.0.0.1:8428"                  # http, loopback 주소 숫자
 [telegram]                                        # mainnet은 필수(U19b1a), testnet은 없으면 warn 한 줄
 token_file = "/etc/hl-oms/watcher-telegram.json"  # 데이터 디렉터리 밖, git 저장소 밖, 0600 또는 0400
 
-# [kill]                                          # U19b2a: 루프 필드만. U19b3a가 marker, oms_unit을 더할 때까지 완성되지 않음
+[kill]                                            # mainnet은 필수(U19b3a), testnet은 없으면 warn 한 줄(W5 꺼짐)
+marker = "/var/lib/hl-oms/kill.marker"            # OMS 설정의 [kill] marker와 같은 파일(data_dir 밖, 디렉터리가 있어야 함)
+oms_unit = "hl-oms.service"                       # 워처가 멈출 수 있는 단위 하나
+# systemd = "system"                              # system | user(systemctl --user)
+# stop_wait_ms = 10000
 # round_ms = 1000  watch_ms = 30000  watch_every_ms = 5000  notice_ms = 60000
+
+# [w5]         probe_ms = 1000  silence_ms = 10000  # [kill]이 있을 때만 돈다
 ```
 
 | 필드 | 기본 | 받는 값(범위는 판단(모델 아님)) |
@@ -67,7 +73,9 @@ token_file = "/etc/hl-oms/watcher-telegram.json"  # 데이터 디렉터리 밖, 
 | `[http] request_timeout_ms` | 2000(판단(모델 아님)) | 200~10,000 |
 | `[telemetry] vm_url` | 없음 | `http://`, loopback 주소 숫자(`localhost`는 안 됨), 공백·제어 문자 없음(끝의 공백도) |
 | `[telegram] token_file` | 표 없음 | 표가 있으면 필수. 절대 경로, `..` 없음, `data_dir` 밖. **mainnet은 `[telegram]` 없이 시작하지 않는다**(`mainnet requires [telegram]: the watcher's P1 must reach a person`). 다른 키(`chat_id`, `token`)는 거부: 비밀은 토큰 파일에만 |
-| `[kill]` | 표 없음 | 워처 자신의 일괄 취소 확인 루프(C-WATCH 11부). 표가 있으면 키가 취소할 수 있어야 한다(아래 "워처 키"). U19b2a의 필드: `round_ms` 1,000(1,000~10,000), `watch_ms` 30,000(10,000~300,000), `watch_every_ms` 5,000(1,000~`watch_ms`), `notice_ms` 60,000(60,000~600,000); 기본값은 표 7-8의 설계 값, 범위는 판단(모델 아님). 모르는 키는 거부. **이 표는 U19b3a가 `marker`와 `oms_unit`을 더할 때까지 완성되지 않는다**: U19b2a에서 맞는 `[kill]`은 U19b3a 뒤에는 거부된다(그 사이에 배포하지 않는다). U19b2a의 워처는 아직 일괄 취소를 보내지 않는다 |
+| `[kill]` | 표 없음 | 워처 자신의 일괄 취소 확인 루프(C-WATCH 11부). 표가 있으면 키가 취소할 수 있어야 한다(아래 "워처 키"). U19b2a의 필드: `round_ms` 1,000(1,000~10,000), `watch_ms` 30,000(10,000~300,000), `watch_every_ms` 5,000(1,000~`watch_ms`), `notice_ms` 60,000(60,000~600,000); 기본값은 표 7-8의 설계 값, 범위는 판단(모델 아님). 모르는 키는 거부. U19b3a의 필드(C-WATCH 12부): `marker`(필수; OMS의 `[kill] marker` 규칙: 절대 경로, `..` 없음, `data_dir` 밖, 디렉터리가 있음), `oms_unit`(필수; `[A-Za-z0-9:_.@-]` 1~255자, `.service`로 끝남, `-`로 시작하지 않음), `systemd` `"system"`(`"system"`, `"user"`), `stop_wait_ms` 10,000(1,000~120,000, 판단(모델 아님)). **mainnet은 `[kill]` 없이 시작하지 않는다**(`mainnet requires [kill]: without it the watcher cannot stop the OMS or cancel its orders`). testnet은 없으면 `warn: no [kill]: W5 is off; …` 한 줄: 그 워처는 OMS가 조용해도 멈추지도 알리지도 않는다(OMS 자신의 모니터링 게이트와 관측 스택만이 신호). `marker`와 `oms_unit` 없는 U19b2a의 `[kill]`은 `missing field`로 거부된다. U19b3a의 워처는 아직 W5를 돌리지 않고 일괄 취소를 보내지 않는다 |
+| `[w5] probe_ms` | 1000(설계 §7.5) | 500~5000. `[kill]`이 있을 때만 쓴다 |
+| `[w5] silence_ms` | 10,000(설계 §7.5) | 3000~60,000, 그리고 `[kill]`이 있으면 `3 × probe_ms + 3 × request_timeout_ms + 1000` 이상(판단(모델 아님): 탐침 하나를 잃거나 워처가 틈 한계보다 짧게 멈춰도 쏘지 않게; 기본값이 한계에 맞으므로 `probe_ms`나 `request_timeout_ms`를 올리면 `silence_ms`도 올려야 한다; 거부 줄 `[w5] silence_ms must be at least …`) |
 
 기본값의 근거(설계 §7.5, 스코프, OMS의 값)와 거부의 이유는 [C-WATCH 4부](../contracts/watcher.md)에 있다.
 
