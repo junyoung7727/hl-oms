@@ -59,6 +59,11 @@ jobs:
       - name: Watcher depends on no OMS or market-data crate
         run: tools/ci/watcher_independent.sh
 
+      # Which crate may depend on which, and where the order paths may be
+      # written (tools/ci/layers.toml, ADR-033 part 2).
+      - name: Crate layering table
+        run: cargo run --locked -q -p xtask -- layers
+
       - name: Test
         run: cargo test --workspace --locked
 

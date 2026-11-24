@@ -384,6 +384,258 @@ else
   echo "selftest: skip  watcher independence cases (no cargo on the path)"
 fi
 
+# ---- owner review ----------------------------------------------------------
+# A second throwaway repository, or/, with the script, its list, a root
+# manifest with lint and profile tables, and one crate whose lib.rs holds a
+# crate-level deny block and a test. Every case starts from the base
+# commit, plants one change, commits it and runs the script against the
+# base, so a finding is the script's.
+expect_owner() { # expect_owner <code> <label> <fixed text>
+  expect_owner_run "$1" "$2" "$3" tools/ci/owner_review.sh "$obase"
+}
+expect_owner_run() { # expect_owner_run <code> <label> <fixed text> <command...>
+  local want="$1" label="$2" text="$3" got=0
+  shift 3
+  "$@" > "$tmp/out.txt" 2>&1 || got=$?
+  if [[ "$got" == "$want" ]] && grep -qF -- "$text" "$tmp/out.txt" \
+    && { [[ "$want" == 0 ]] || ! grep -qF "owner_review: none" "$tmp/out.txt"; }; then
+    echo "selftest: pass  (exit $want) $label"
+  else
+    echo "selftest: WRONG (wanted exit $want and \"$text\", got exit $got) $label"
+    sed 's/^/    /' "$tmp/out.txt"
+    failures=$((failures + 1))
+  fi
+}
+mkdir -p "$tmp/or"
+cd "$tmp/or"
+git init -q .
+mkdir -p tools/ci .github/workflows crates/a/src crates/a/tests
+cp "$src/owner_review.sh" "$src/owner_review_paths.txt" tools/ci/
+printf 'name: ci\n' > .github/workflows/ci.yml
+printf '# empty\n' > tools/ci/secret_scan_allow.txt
+printf 'echo gate\n' > tools/ci/gate.sh
+printf '[workspace]\nmembers = ["crates/a"]\n\n[workspace.lints.clippy]\nunwrap_used = "warn"\n\n[profile.release]\noverflow-checks = true\npanic = "abort"\n' > Cargo.toml
+printf '[package]\nname = "a"\n\n[lints]\nworkspace = true\n' > crates/a/Cargo.toml
+printf '//! A.\n\n#![deny(\n    clippy::float_arithmetic,\n    clippy::expect_used\n)]\n\npub fn one() -> u8 {\n    1\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn one_is_one() {\n        assert_eq!(super::one(), 1);\n    }\n\n    #[tokio::test]\n    async fn later() {}\n}\n' > crates/a/src/lib.rs
+printf '#![allow(clippy::unwrap_used)]\n\n#[test]\nfn outside() {}\n' > crates/a/tests/t.rs
+# A module file with a test, declared from lib.rs.
+printf '\npub mod m;\n' >> crates/a/src/lib.rs
+printf 'pub fn m() {}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn m() {}\n}\n' > crates/a/src/m.rs
+# A crate with a stricter lint table of its own.
+mkdir -p crates/s/src; : > crates/s/src/lib.rs
+printf '[package]\nname = "s"\n\n[lints.clippy]\nfloat_arithmetic = "deny"\n' > crates/s/Cargo.toml
+g add -A
+g commit -q -m base
+obase="$(git rev-parse HEAD)"
+oreset() { git reset -q --hard "$obase" && git clean -fdxq; }
+plant() { git add -A && g commit -q -m plant; }
+
+expect_owner 0 "owner: no change" "owner_review: none"
+printf 'pub fn two() -> u8 {\n    2\n}\n' >> crates/a/src/lib.rs; plant
+expect_owner 0 "owner: ordinary code change" "owner_review: none"
+oreset; printf 'on: push\n' >> .github/workflows/ci.yml; plant
+expect_owner 1 "owner: workflow change" "owner_review: path: .github/workflows/ci.yml"
+oreset; printf 'x.toml %s\n' "$(hex 1b 32)" >> tools/ci/secret_scan_allow.txt; plant
+expect_owner 1 "owner: allow-list entry added" "owner_review: path: tools/ci/secret_scan_allow.txt"
+oreset; sed -i '/^\.github\/$/d' tools/ci/owner_review_paths.txt; printf 'on: push\n' >> .github/workflows/ci.yml; plant
+expect_owner 1 "owner: an entry removed from the list (the list itself)" "owner_review: path: tools/ci/owner_review_paths.txt"
+oreset; mkdir -p scripts; git mv tools/ci/gate.sh scripts/gate.sh; plant
+expect_owner 1 "owner: a check moved out of tools/ci" "owner_review: path: tools/ci/gate.sh"
+oreset; rm tools/ci/gate.sh; plant
+expect_owner 1 "owner: a check deleted" "owner_review: path: tools/ci/gate.sh"
+oreset; printf 'disallowed-methods = []\n' > clippy.toml; plant
+expect_owner 1 "owner: clippy.toml added" "owner_review: path: clippy.toml"
+oreset; printf 'x\n' > "tools/ci/caf$(printf '\xc3\xa9').txt"; plant
+expect_owner 1 "owner: a file with a non-ASCII name under tools/ci" "owner_review: path: tools/ci/caf"
+oreset; sed -i '/^overflow-checks = true$/d' Cargo.toml; plant
+expect_owner 1 "owner: overflow-checks removed from the release profile" "owner_review: manifest: Cargo.toml"
+oreset; sed -i 's/^unwrap_used = "warn"$/unwrap_used = "allow"/' Cargo.toml; plant
+expect_owner 1 "owner: a workspace lint relaxed" "owner_review: manifest: Cargo.toml"
+oreset; printf '[package]\nname = "a"\n' > crates/a/Cargo.toml; plant
+expect_owner 1 "owner: a crate leaves the workspace lints" "owner_review: manifest: crates/a/Cargo.toml"
+oreset; printf '\n[lints.clippy]\nfloat_arithmetic = "allow"\n' >> crates/a/Cargo.toml; plant
+expect_owner 1 "owner: a crate lint table added" "owner_review: manifest: crates/a/Cargo.toml"
+oreset; printf '[profile.dev.package.zstd-sys]\nopt-level = 3\n' >> Cargo.toml; plant
+expect_owner 1 "owner: a profile table added" "owner_review: manifest: Cargo.toml"
+oreset; sed -i 's/^members = \["crates\/a"\]$/members = ["crates\/a", "crates\/b"]/' Cargo.toml
+mkdir -p crates/b/src; : > crates/b/src/lib.rs; printf '[package]\nname = "b"\n\n[lints]\nworkspace = true\n' > crates/b/Cargo.toml; plant
+expect_owner 0 "owner: a new crate that takes the workspace lints" "owner_review: none"
+oreset; mkdir -p crates/c/src; : > crates/c/src/lib.rs; printf '[package]\nname = "c"\n\n[lints.clippy]\nexpect_used = "allow"\n' > crates/c/Cargo.toml; plant
+expect_owner 1 "owner: a new crate with its own lint table" "owner_review: manifest: crates/c/Cargo.toml"
+oreset; printf '[package]\nname = "s"\n\n[lints]\nworkspace = true\n' > crates/s/Cargo.toml; plant
+expect_owner 1 "owner: a crate swaps its stricter table for the workspace lints" "owner_review: manifest: crates/s/Cargo.toml"
+oreset; sed -i '/^    clippy::expect_used$/d; s/^    clippy::float_arithmetic,$/    clippy::float_arithmetic/' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: a lint removed from a multi-line deny block" "owner_review: lint: crates/a/src/lib.rs"
+oreset; sed -i 's|^//! A\.$|//! A.\n#![allow(clippy::expect_used)]|' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: a crate-level allow added" "owner_review: lint: crates/a/src/lib.rs"
+oreset; sed -i 's|^//! A\.$|//! A.\n#![cfg_attr(test, allow(clippy::float_arithmetic))]|' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: a crate-level allow inside cfg_attr" "owner_review: lint: crates/a/src/lib.rs"
+oreset; mkdir -p crates/a/src/m; printf '#![allow(clippy::float_arithmetic)]\n' > crates/a/src/m/mod.rs; plant
+expect_owner 1 "owner: an inner allow at the top of a new module file" "owner_review: lint: crates/a/src/m/mod.rs"
+oreset; printf '#[expect(clippy::float_arithmetic, reason = "monitoring only")]\npub fn half(x: f64) -> f64 {\n    x / 2.0\n}\n' >> crates/a/src/lib.rs; plant
+expect_owner 0 "owner: an item-level expect with a reason" "owner_review: none"
+oreset; printf '#![allow(clippy::unwrap_used)]\n\n#[test]\nfn more() {}\n' > crates/a/tests/t2.rs; plant
+expect_owner 0 "owner: a new test file with the usual allow" "owner_review: none"
+oreset; perl -0pi -e 's/    #\[test\]\n    fn one_is_one\(\) \{\n        assert_eq!\(super::one\(\), 1\);\n    \}\n\n//' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: a test removed" "owner_review: tests: 1 test attribute(s) removed, 0 added"
+oreset; perl -0pi -e 's/    #\[tokio::test\]\n    async fn later\(\) \{\}\n//' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: a tokio test removed" "owner_review: tests: 1 test attribute(s) removed, 0 added"
+rmtest() { perl -0pi -e 's/    #\[test\]\n    fn one_is_one\(\) \{\n        assert_eq!\(super::one\(\), 1\);\n    \}\n\n//' crates/a/src/lib.rs; }
+oreset; rmtest; plant
+expect_owner_run 1 "owner: a test removed, external diff program set" "owner_review: tests: 1 test attribute(s) removed, 0 added" \
+  env GIT_EXTERNAL_DIFF=true tools/ci/owner_review.sh "$obase"
+expect_owner_run 1 "owner: a test removed, colour always on" "owner_review: tests: 1 test attribute(s) removed, 0 added" \
+  env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=color.ui GIT_CONFIG_VALUE_0=always tools/ci/owner_review.sh "$obase"
+oreset; rmtest; printf '*.rs -diff\n' > .gitattributes; plant
+expect_owner 1 "owner: a test removed behind a -diff attribute" "owner_review: tests: 1 test attribute(s) removed, 0 added"
+expect_owner 1 "owner: .gitattributes added" "owner_review: path: .gitattributes"
+oreset; perl -0pi -e 's/    #\[test\]\n    fn one_is_one\(\) \{\n        assert_eq!\(super::one\(\), 1\);\n    \}\n\n//' crates/a/src/lib.rs
+printf '\n#[test]\nfn one_is_one() {\n    assert_eq!(a::one(), 1);\n}\n' >> crates/a/tests/t.rs; plant
+expect_owner 0 "owner: a test moved to another file" "owner_review: none"
+oreset; sed -i 's/^    #\[test\]$/    #[test]\n    #[ignore]/' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: an existing test ignored" "owner_review: tests: crates/a/src/lib.rs: 1 #[ignore] added, 0 test attribute(s) added"
+oreset; printf '\n#[test]\n#[ignore = "measurement, run by hand"]\nfn slow() {}\n' >> crates/a/tests/t.rs; plant
+expect_owner 0 "owner: a new test ignored from the start" "owner_review: none"
+# Review 1 of ADR-033: ways to switch tests off without removing an attribute.
+oreset; sed -i 's|^    #\[test\]$|    // #[test]|' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: a test attribute commented out" "owner_review: tests: 1 test attribute(s) removed, 0 added"
+oreset; sed -i 's|^#\[cfg(test)\]$|#[cfg(all(test, any()))]|' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: the test module switched off by cfg" "owner_review: tests: crates/a/src/lib.rs: 1 cfg on tests added"
+oreset; printf '\n#[cfg(any())]\n#[test]\nfn off() {}\n' >> crates/a/tests/t.rs; plant
+expect_owner 1 "owner: a test behind cfg(any())" "owner_review: tests: crates/a/tests/t.rs: 1 cfg on tests added"
+oreset; printf '\n#[cfg(test)]\nmod more {\n    #[test]\n    fn m() {}\n}\n' >> crates/a/src/lib.rs; plant
+expect_owner 0 "owner: a new plain cfg(test) module" "owner_review: none"
+oreset; printf '\n#[cfg(any(test, feature = "failpoints"))]\npub fn hook() {}\n' >> crates/a/src/lib.rs; plant
+expect_owner 0 "owner: a widening cfg(any(test, ..)) on a test hook" "owner_review: none"
+oreset; sed -i 's|^#\[cfg(test)\]$|#[cfg(not(test))]|' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: the test module put under cfg(not(test))" "owner_review: tests: crates/a/src/lib.rs: 1 cfg on tests added"
+oreset; sed -i 's|^name = "a"$|name = "a"\nautotests = false|' crates/a/Cargo.toml; plant
+expect_owner 1 "owner: autotests switched off" "owner_review: manifest: crates/a/Cargo.toml"
+oreset; printf '\n[lib]\ntest = false\n' >> crates/a/Cargo.toml; plant
+expect_owner 1 "owner: the lib target's tests switched off" "owner_review: manifest: crates/a/Cargo.toml"
+oreset; printf '\n[[test]]\nname = "t"\nharness = false\n' >> crates/a/Cargo.toml; plant
+expect_owner 1 "owner: a [[test]] target added" "owner_review: manifest: crates/a/Cargo.toml"
+oreset; sed -i 's|^members = \["crates/a"\]$|members = []|' Cargo.toml; plant
+expect_owner 1 "owner: a crate removed from the workspace" "owner_review: manifest: Cargo.toml: member removed: crates/a"
+oreset; mkdir -p crates/z/src; : > crates/z/src/lib.rs; printf '[package]\nname = "z"\nlints = { clippy = { expect_used = "allow" } }\n' > crates/z/Cargo.toml; plant
+expect_owner 1 "owner: a new crate with an inline lints key" "owner_review: manifest: crates/z/Cargo.toml"
+oreset; printf '\n["lints".clippy]\nexpect_used = "allow"\n' >> crates/s/Cargo.toml; plant
+expect_owner 1 "owner: a quoted lints table" "owner_review: manifest: crates/s/Cargo.toml"
+oreset; sed -i 's|^pub fn one() -> u8 {$|#[expect(clippy::float_arithmetic, reason = "x")]\npub mod inner {}\n\npub fn one() -> u8 {|' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: an item-level expect on a mod item" "owner_review: lint: crates/a/src/lib.rs"
+# Review 2 of ADR-033: a listed name without an inner "/" matches at any
+# depth (clippy and rustfmt read the file nearest the crate, cargo every
+# .cargo/ above the directory it runs in).
+oreset; printf 'disallowed-methods = []\n' > crates/a/clippy.toml; plant
+expect_owner 1 "owner: a nested clippy.toml" "owner_review: path: crates/a/clippy.toml"
+oreset; printf 'nightly\n' > rust-toolchain; plant
+expect_owner 1 "owner: a legacy rust-toolchain file" "owner_review: path: rust-toolchain"
+oreset; printf 'edition = "2015"\n' > crates/a/.rustfmt.toml; plant
+expect_owner 1 "owner: a nested .rustfmt.toml" "owner_review: path: crates/a/.rustfmt.toml"
+oreset; mkdir -p crates/a/.cargo; printf '[build]\nrustflags = ["-Aclippy::all"]\n' > crates/a/.cargo/config.toml; plant
+expect_owner 1 "owner: a nested .cargo/config.toml" "owner_review: path: crates/a/.cargo/config.toml"
+oreset; printf 'x\n' > crates/a/myclippy.toml; mkdir -p docs/tools/ci; printf 'x\n' > docs/tools/ci/note.md; plant
+expect_owner 0 "owner: a name that only ends in a listed name, a listed path below another directory" "owner_review: none"
+# The layering and generated-docs checks are Rust code in xtask (review 2, S2).
+oreset; mkdir -p crates/xtask/src; printf 'pub fn run() -> i32 {\n    0\n}\n' > crates/xtask/src/layers.rs; plant
+expect_owner 1 "owner: the layering checker's code changed" "owner_review: path: crates/xtask/src/layers.rs"
+oreset; mkdir -p crates/xtask/src; printf 'pub fn check() {}\n' > crates/xtask/src/registry.rs; plant
+expect_owner 1 "owner: the generated-docs checker's code changed" "owner_review: path: crates/xtask/src/registry.rs"
+oreset; mkdir -p crates/xtask/src; printf 'fn main() {}\n' > crates/xtask/src/main.rs; plant
+expect_owner 1 "owner: the xtask command table changed" "owner_review: path: crates/xtask/src/main.rs"
+oreset; mkdir -p crates/xtask/src; printf 'pub fn m() {}\n' > crates/xtask/src/mutants.rs; plant
+expect_owner 0 "owner: another xtask file changed" "owner_review: none"
+# A new crate that leaves out the workspace lints builds outside all of them.
+oreset; mkdir -p crates/n/src; : > crates/n/src/lib.rs; printf '[package]\nname = "n"\n' > crates/n/Cargo.toml; plant
+expect_owner 1 "owner: a new crate without [lints] workspace = true" "owner_review: manifest: crates/n/Cargo.toml"
+oreset; mkdir -p crates/n/src; : > crates/n/src/lib.rs; printf '[package]\nname = "n"\n\n[lints]\nworkspace = false\n' > crates/n/Cargo.toml; plant
+expect_owner 1 "owner: a new crate with workspace = false" "owner_review: manifest: crates/n/Cargo.toml"
+oreset; mkdir -p crates/n/src; : > crates/n/src/lib.rs; printf "[package]\nname = \"n\"\n\n[lints]\nworkspace = true\n\n['lints'.clippy]\nunwrap_used = \"allow\"\n" > crates/n/Cargo.toml; plant
+expect_owner 1 "owner: a new crate with a single-quoted lints table" "owner_review: manifest: crates/n/Cargo.toml"
+oreset; mkdir -p fixtures/w; printf '[workspace]\nmembers = []\n' > fixtures/w/Cargo.toml; plant
+expect_owner 0 "owner: a new manifest without [package]" "owner_review: none"
+# Tests switched off without removing an attribute (review 2, S1).
+oreset; sed -i 's/^    #\[test\]$/    #[test]\n    #[cfg_attr(unix, ignore)]/' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: an existing test ignored inside cfg_attr" "owner_review: tests: crates/a/src/lib.rs: 1 #[ignore] added, 0 test attribute(s) added"
+oreset; printf '\n#[test]\n#[cfg_attr(miri, ignore)]\nfn slow() {}\n' >> crates/a/tests/t.rs; plant
+expect_owner 0 "owner: a new test ignored inside cfg_attr from the start" "owner_review: none"
+oreset; sed -i 's/^#\[test\]$/#[cfg(feature = "never")]\n#[test]/' crates/a/tests/t.rs; plant
+expect_owner 1 "owner: cfg(feature) above an existing test in a test file" "owner_review: tests: crates/a/tests/t.rs: 1 cfg added in a test file, 0 test attribute(s) added"
+oreset; sed -i '1s/^/#![cfg(feature = "never")]\n/' crates/a/tests/t.rs; plant
+expect_owner 1 "owner: #![cfg(feature)] at the top of an existing test file" "owner_review: tests: crates/a/tests/t.rs: 1 cfg added in a test file, 0 test attribute(s) added"
+oreset; printf '#![cfg(unix)]\n#![allow(clippy::unwrap_used)]\n\n#[test]\nfn on_unix() {}\n' > crates/a/tests/t3.rs; plant
+expect_owner 0 "owner: a new test file under #![cfg(unix)]" "owner_review: none"
+oreset; mkdir -p crates/a/tests/old; git mv crates/a/tests/t.rs crates/a/tests/old/t.rs; plant
+expect_owner 1 "owner: a test file moved where cargo does not build it" "owner_review: tests: test target removed: crates/a/tests/t.rs"
+oreset; sed -i '/^pub mod m;$/d' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: a mod declaration removed, its file with tests kept" "owner_review: tests: crates/a/src/lib.rs: mod m removed, crates/a/src/m.rs still holds tests"
+oreset; sed -i 's/^pub mod m;$/mod m;/' crates/a/src/lib.rs; plant
+expect_owner 0 "owner: a mod declaration made private" "owner_review: none"
+# Ordinary changes that must not call the owner (review 2, S7).
+oreset; printf '\n#[cfg(not(feature = "testnet"))]\npub fn mainnet_only() {}\n' >> crates/a/src/lib.rs; plant
+expect_owner 0 "owner: cfg(not(feature = \"testnet\")) (the word test only)" "owner_review: none"
+oreset; mkdir -p crates/n/src; printf '//! N.\n\n#![cfg_attr(test, allow(clippy::unwrap_used))]\n\npub fn n() {}\n' > crates/n/src/lib.rs
+printf '[package]\nname = "n"\n\n[lints]\nworkspace = true\n' > crates/n/Cargo.toml; plant
+expect_owner 0 "owner: a new crate whose lib.rs takes the usual test-only unwrap allow" "owner_review: none"
+oreset; mkdir -p crates/n/src; printf '#![cfg_attr(test, allow(clippy::unwrap_used))]\n#![allow(clippy::expect_used)]\n' > crates/n/src/lib.rs
+printf '[package]\nname = "n"\n\n[lints]\nworkspace = true\n' > crates/n/Cargo.toml; plant
+expect_owner 1 "owner: a new crate's lib.rs with another allow" "owner_review: lint: crates/n/src/lib.rs"
+oreset; sed -i 's|^//! A\.$|//! A.\n#![cfg_attr(test, allow(clippy::unwrap_used))]|' crates/a/src/lib.rs; plant
+expect_owner 1 "owner: the usual test-only unwrap allow added to an existing crate" "owner_review: lint: crates/a/src/lib.rs"
+oreset; mkdir -p crates/a/src/q; printf '#![cfg_attr(test, allow(clippy::unwrap_used))]\n' > crates/a/src/q/mod.rs; plant
+expect_owner 1 "owner: the usual test-only unwrap allow in a new module of an existing crate" "owner_review: lint: crates/a/src/q/mod.rs"
+# The paths file as the header shows it, from a pipe, and a relative one
+# named from a subdirectory (review 2, S3).
+oreset; printf 'on: push\n' >> .github/workflows/ci.yml; plant
+expect_owner_run 1 "owner: script and list from git show, as the header shows" "owner_review: path: .github/workflows/ci.yml" \
+  bash -c 'bash <(git show HEAD:tools/ci/owner_review.sh) "$1" <(git show HEAD:tools/ci/owner_review_paths.txt)' _ "$obase"
+cp tools/ci/owner_review_paths.txt crates/a/list.txt
+expect_owner_run 1 "owner: a relative paths file named from a subdirectory" "owner_review: path: .github/workflows/ci.yml" \
+  bash -c 'cd crates/a && ../../tools/ci/owner_review.sh "$1" list.txt' _ "$obase"
+expect_owner_run 2 "owner: an empty paths file from a pipe (a failed git show)" "owner_review: cannot check: no entry in paths file" \
+  bash -c 'tools/ci/owner_review.sh "$1" <(git show HEAD:no/such/file 2> /dev/null)' _ "$obase"
+oreset; cp tools/ci/owner_review_paths.txt "$tmp/base_paths.txt"; sed -i '/^\.github\/$/d' tools/ci/owner_review_paths.txt
+printf 'on: push\n' >> .github/workflows/ci.yml; plant
+expect_owner_with() { # the list from the base, as the runner passes it
+  local got=0
+  tools/ci/owner_review.sh "$obase" "$tmp/base_paths.txt" > "$tmp/out.txt" 2>&1 || got=$?
+  if [[ "$got" == 1 ]] && grep -qF "owner_review: path: .github/workflows/ci.yml" "$tmp/out.txt"; then
+    echo "selftest: pass  (exit 1) owner: the base list still sees what the change dropped from its own list"
+  else
+    echo "selftest: WRONG (wanted exit 1 and the workflow line, got exit $got) owner: base list"
+    sed 's/^/    /' "$tmp/out.txt"
+    failures=$((failures + 1))
+  fi
+}
+expect_owner_with
+rm tools/ci/owner_review_paths.txt
+expect_owner 2 "owner: a paths file that does not exist" "owner_review: cannot check: no paths file"
+# A failed read is "cannot check", never "none" (review 2, S4). An object
+# that the change needs is taken out of the repository for one run and
+# put back; a tool is left off the path.
+oreset; printf 'pub fn two() -> u8 {\n    2\n}\n' >> crates/a/src/lib.rs; plant
+without_object() { # without_object <rev:path> <code> <label> <text>: runs with that object gone
+  local oid obj
+  oid="$(git rev-parse "$1")"; obj=".git/objects/${oid:0:2}/${oid:2}"
+  mv "$obj" "$tmp/object"
+  expect_owner "$2" "$3" "$4"
+  mv "$tmp/object" "$obj"
+}
+without_object HEAD:crates/a/src/lib.rs 2 "owner: a changed file whose content is missing" "owner_review: cannot check:"
+without_object HEAD:crates/a/src 2 "owner: a changed directory whose tree is missing (git diff fails)" "owner_review: cannot check:"
+for t in perl awk; do
+  mkdir -p "$tmp/no-$t"
+  for c in git sed awk perl comm sort grep; do
+    [[ "$c" == "$t" ]] || ln -sf "$(command -v "$c")" "$tmp/no-$t/$c"
+  done
+  expect_owner_run 2 "owner: no $t on the path" "owner_review: cannot check: no $t" \
+    env PATH="$tmp/no-$t" "$BASH" tools/ci/owner_review.sh "$obase"
+done
+oreset
+obase=not-a-commit
+expect_owner 2 "owner: a base that is no commit" "owner_review: cannot check:"
+cd "$repo"
+
 if [[ $failures -ne 0 ]]; then
   echo "selftest: FAILED ($failures case(s))"
   exit 1

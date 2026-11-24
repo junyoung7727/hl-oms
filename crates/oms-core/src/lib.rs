@@ -10,7 +10,20 @@
 //! - [`Core::apply`] applies one already-decided event (recovery).
 //! - [`Core::needs`] lists the venue evidence the state is waiting for.
 
-#![cfg_attr(test, allow(clippy::unwrap_used))]
+// Money and decision code: no float arithmetic, no `expect`, no `as` that
+// can cut, wrap or lose a sign, no clock or I/O call listed in clippy.toml,
+// and an exception only as `#[expect(lint, reason = "..")]` (ADR-033 part 3).
+#![deny(
+    clippy::float_arithmetic,
+    clippy::expect_used,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_wrap,
+    clippy::disallowed_methods,
+    clippy::allow_attributes,
+    clippy::allow_attributes_without_reason
+)]
+#![cfg_attr(test, expect(clippy::unwrap_used, reason = "a failed unwrap is a failed test"))]
 
 pub mod config;
 pub mod core;
