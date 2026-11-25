@@ -1231,6 +1231,21 @@ fn a_dashboard_with_an_unknown_metric_fails() {
     for f in cases {
         plant_json(D2, f, &["G7"]);
     }
+    // vmalert's ALERTS left out of the catalogue: the open-alert panels
+    // read a name nobody writes (and a label no entry has).
+    let mut t = Tree::real();
+    t.replace(
+        "deploy/observability/metrics.toml",
+        "[[stack]]\nname = \"ALERTS\"\nlabels = [\"alertname\", \"alertstate\", \"severity\", \"venue\", \"alertgroup\"]\ncomponent = \"vmalert\"\nversion = \"v1.157.0\"\n",
+        "",
+    );
+    let f = crate::check(&t);
+    assert_rules(&f, &["G7"]);
+    assert!(
+        f.iter()
+            .any(|x| x.text.contains("ALERTS is in no part of the metric catalogue")),
+        "{f:?}"
+    );
     // A VictoriaLogs panel's LogsQL is not read as MetricsQL.
     let mut t = Tree::real();
     edit(&mut t, D2, |v| {

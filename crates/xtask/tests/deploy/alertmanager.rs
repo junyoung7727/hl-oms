@@ -1059,8 +1059,7 @@ fn the_oms_inhibit_rules_hold_back_only_derived_alerts() {
         &["R10"],
     );
     // An Md* alert that reads an OMS, projector, journal or watcher series
-    // (each prefix of the list), or every service's drops. The watcher's
-    // series join the catalogue in a later part: one row is planted here.
+    // (each prefix of the list), or every service's drops.
     let md = "deploy/observability/vmalert/metrics/market-data.rules.json";
     for e in [
         "max by (venue) (oms_holds) > 0",
@@ -1071,12 +1070,6 @@ fn the_oms_inhibit_rules_hold_back_only_derived_alerts() {
         "sum by (venue, endpoint) (increase(obs_push_dropped_total{service=\"oms-projector\"}[10m])) > 0",
     ] {
         let mut t = Tree::real();
-        let catalogue = "deploy/observability/metrics.toml";
-        let mut rows = t.files[catalogue].clone();
-        rows.push_str(
-            "\n[[metric]]\nname = \"watcher_up\"\nlabels = [\"venue\"]\nsource = \"crates/watcher/src/metrics.rs\"\n",
-        );
-        t.set(catalogue, &rows);
         edit_rules(&mut t, md, |v| {
             let r = v["groups"][0]["rules"]
                 .as_array_mut()

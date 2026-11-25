@@ -26,6 +26,12 @@ pub const ANCHORS: &[&str] = &[
     "crates/oms-projector/src/projector.rs",
     "crates/oms-core/src/model.rs",
     "crates/watcher/src/metrics.rs",
+    "crates/watcher/src/engine.rs",
+    "crates/watcher/src/rest.rs",
+    "crates/watcher/src/oms.rs",
+    "crates/watcher/src/alert.rs",
+    "crates/watcher/src/start.rs",
+    "crates/watcher/src/runtime.rs",
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
