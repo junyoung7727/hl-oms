@@ -108,11 +108,13 @@
    - verify 결과 `crypto/l0/_verify/venue=<v>/date=<d>.json`이 없다.
    - 확인 도장 `/var/lib/qdp-crypto-audit/verify-<v>-<d>.stamp`가 없다.
    - 그 날짜의 봉인 파일 중 도장 뒤에 상태가 바뀐(ctime) 것이 있다(`find -cnewer`).
+   - 도장의 시각이 지금(스크립트 시작 시각)보다 뒤다. 도장을 찍은 뒤 시계가 뒤로 갔다는 뜻이고, 그런 도장은 그 사이 봉인된 파일을 가리므로 없는 것으로 본다.
 
    봉인 파일이 없는 날짜(PC가 꺼진 날, 설치 전)는 건너뛴다. 빈 결과를 쓰지 않기 위해서다.
 3. verify는 이렇게 한다: 도장 `….stamp.new`를 찍고 1초 쉰 뒤 verify를 돌린다. 성공하면 `….stamp.new`를 `….stamp`로 옮긴다(`mv`는 찍은 시각을 지킨다). 실패하면 stderr에 쓰고 옛 도장을 두고 다음 날짜로 간다.
    - 도장을 verify **전에** 찍는 이유: 일별 봉인은 일일 작업 잠금 밖에서 돈다. verify는 날짜의 파일을 한 번 나열하고 끝에 결과를 쓴다. 나열 뒤에 `.partial`에서 이름이 바뀐 파일은 결과에 없고, 그 ctime은 결과 파일보다 오래다. 결과 파일과 비교하면 그 날짜를 다시 고르지 않는다. 도장과 비교하면 그 파일이 더 새로우므로 다음 실행이 다시 verify한다.
    - ctime인 이유: 이름 바꾸기는 파일의 ctime을 바꾸고 mtime은 그대로 둔다. `-newer`(mtime)는 그런 파일을 놓친다. 1초 쉬는 이유: 커널 시각은 거칠어서 찍기와 같은 틱의 이름 바꾸기는 같은 시각이 되고, `-cnewer`는 "더 새로움"만 센다.
+   - 도장과 파일의 ctime은 둘 다 벽시계 시각이다. 한 verify 실행 **도중** 시계가 뒤로 가면(운영자, 또는 재시작 뒤 chrony의 `makestep 1 3`) 그 실행 중 봉인된 파일의 ctime이 도장보다 앞설 수 있고, 그 날짜를 다시 고르지 않는다. 위의 "지금보다 뒤인 도장" 검사는 이 경우를 잡지 못한다. 02:30 UTC 무렵에 `clock_step`이 보이면 9개 날짜를 손으로 verify한다(아래 명령).
    - 도장은 거래소·날짜마다 빈 파일 하나이고 지우지 않는다(거래소마다 1년 약 365개, 판단(모델 아님)).
 4. `cd /opt/qdp-crypto`(실패하면 종료 코드 2, 감사기를 돌리지 않음) 뒤 `uv run --no-sync python -m quant_data.crypto audit --lake /mnt/nvme/lake --venue <v> --state /var/lib/qdp-crypto-audit/audit-<v>.json --vm-url http://127.0.0.1:8428`. 상태 파일은 레이크 밖이다(감사기의 조건). 감사기는 근거가 있는 모든 날짜를 감사하고 날짜마다 verify 결과를 읽는다. verify 결과가 없는 날짜의 봉인 파일은 `lake_audit_not_audited_files`에 센다.
 
@@ -124,9 +126,9 @@
 md-lake verify --venue <v> --lake /mnt/nvme/lake --date <YYYY-MM-DD> --json
 ```
 
-다음 감사가 그 결과를 읽는다.
+다음 감사가 그 결과를 읽는다. verify가 계속 실패하는 날짜(예: 읽을 수 없는 봉인 파일)도 같다: 스크립트는 그 날짜가 창 안에 있는 9일 동안만 매일 다시 verify하고 종료 코드 5를 낸다. 9일이 지나면 어떤 실행도 다시 시도하지 않고 단위는 다시 초록이 된다. 그 전에 원인을 고치고 손으로 verify한다.
 
-**종료 코드와 어디서 보이나**
+**종료 코드와 어디서 보이나** (아래의 `Lake*` 알림 규칙 파일은 아직 없다, §1)
 
 | 코드 | 뜻 | 어디서 보이나 |
 |---|---|---|
@@ -137,7 +139,7 @@ md-lake verify --venue <v> --lake /mnt/nvme/lake --date <YYYY-MM-DD> --json
 | 3 | 쓰기 오류나 버그. 지표를 보내기 전이면 | 36시간 뒤 `LakeAuditStale` |
 | 3 | 날짜 하나의 쓰기 오류. 감사기는 `lake_audit_last_run_ts`를 보내고 그 날짜를 상태에서 지운다 | `systemctl --failed`만 |
 | 4 | 지표 보내기 실패 | 36시간 뒤 `LakeAuditStale` |
-| 5 | 감사기는 성공, verify 하나 이상 실패(감사기는 5를 쓰지 않음) | `systemctl --failed`만. 다음 실행이 그 날짜를 다시 verify한다 |
+| 5 | 감사기는 성공, verify 하나 이상이 돌지 못함(`md-lake verify`의 오류 종료, 나열·도장 쓰기 실패; 감사기는 5를 쓰지 않음). verify가 손상(예: `framing_errors`)을 찾으면 verify는 0으로 끝나고 손상은 감사기의 `fail`(코드 1)로 보인다 | `systemctl --failed`만. 다음 실행이 그 날짜를 다시 verify한다. 단 그 날짜가 9일 창 안에 있는 동안만이다(위의 "창보다 오래된 날짜") |
 | 그 밖 | `uv` 자신의 오류 코드를 그대로 넘김 | 36시간 뒤 `LakeAuditStale` |
 
 0이 아닌 코드는 모두 단위를 실패로 남긴다. 모두 실제로 볼 일이다.
@@ -183,7 +185,7 @@ chrony가 시작한 뒤 첫 세 번의 갱신에서만 1초가 넘는 차이를 
 
 ## 7. 설치 전 확인
 
-1. `cargo test --locked -p xtask --test deploy`. 실패하면 줄마다 `deploy: <파일>: <규칙>: <내용>`이 나온다. 규칙: P1(파일이 종류대로 읽힘), U1(서비스마다 `MemoryMax` 하나, 크기, `infinity` 아님), U2(oneshot 서비스 ↔ 같은 이름의 타이머, 타이머에 `Unit=` 없음), U3(수집기의 재시작·감시 설정과 보호 설정, 시작 제한의 옛 이름과 `[Service]` 쪽 키, `MemoryHigh` 없음), U4(슬라이스의 가중치와 예약), U5(세 타이머의 시각과 `Persistent`), U6(설계 상한), U7(아카이버와 감사의 일일 작업 잠금), U8(`127.0.0.1`에서만 듣고 Alertmanager 클러스터 포트 없음. 리스너 플래그는 어떤 철자로 써도 모두 셈), U9(저장소가 `/mnt/nvme/` 아래, 저장소마다 경로 플래그 한 번), U10(보관 1년, VM 메모리 한도), U11(vmalert 둘의 원본·알림·간격), U12(어느 배치 파일도 KR qdp 체크아웃을 이름하지 않음, 감사 스크립트의 `venue=$1`과 `--state "$STATE_DIRECTORY/audit-$venue.json"`, 감사 단위의 `StateDirectory=qdp-crypto-audit`), U13(`venues.toml`의 거래소가 수집기와 아카이버 모두에 등록됨), U14(설치 지도), U15(스택은 `hlobs`, 어느 단위에도 `User=root`를 쓰지 않음), U16(`md-lake verify`나 감사 스크립트를 돌리는 단위가 읽기 전용 `l0` 아래의 `_verify`에, 감사는 `crypto/audit`에도 쓸 수 있음. 감사 단위의 두 경로 줄은 정확히 §4.1의 값), U17(`Exec*` 줄에 `$(`, 백틱, `%i`·`%I`·`%n`·`%%`가 아닌 `%` 없음: systemd는 셸을 돌리지 않음), U18(스택 단위의 재시작·격리 설정, 쓰는 디렉터리, 다른 단위에 묶이지 않음), U19(봉인·아카이버·감사 실행의 시간 제한, 아카이버의 스레드 1개와 L1 삭제 꺼짐, `EnvironmentFile=` 없음).
+1. `cargo test --locked -p xtask --test deploy`. 실패하면 줄마다 `deploy: <파일>: <규칙>: <내용>`이 나온다. 규칙: P1(파일이 종류대로 읽힘), U1(서비스마다 `MemoryMax` 하나, 크기, `infinity` 아님), U2(oneshot 서비스 ↔ 같은 이름의 타이머, 타이머에 `Unit=` 없음), U3(수집기의 재시작·감시 설정과 보호 설정, 시작 제한의 옛 이름과 `[Service]` 쪽 키, `MemoryHigh` 없음), U4(슬라이스의 가중치와 예약), U5(세 타이머의 시각과 `Persistent`), U6(설계 상한), U7(아카이버와 감사의 일일 작업 잠금), U8(`127.0.0.1`에서만 듣고 Alertmanager 클러스터 포트 없음. 리스너 플래그는 어떤 철자로 써도 모두 셈), U9(저장소가 `/mnt/nvme/` 아래, 저장소마다 경로 플래그 한 번), U10(보관 1년, VM 메모리 한도), U11(vmalert 둘의 원본·알림·간격), U12(어느 배치 파일도 KR qdp 체크아웃을 이름하지 않음, 감사 스크립트의 `venue=$1`과 `--state "$STATE_DIRECTORY/audit-$venue.json"`, 감사 단위의 `StateDirectory=qdp-crypto-audit`. 스크립트는 CI에서 돌지 않으므로 다시 verify할 날짜와 종료 코드를 정하는 줄도 글자 그대로 고정: 9일 창, `-cnewer "$stamp"`, 지금보다 뒤인 도장 검사, 도장 → `sleep 1` → verify → `mv` 순서, 실패 시 옛 도장 유지, `exit 5`, `--vm-url http://127.0.0.1:8428`), U13(`venues.toml`의 거래소가 수집기와 아카이버 모두에 등록됨), U14(설치 지도), U15(스택은 `hlobs`, 어느 단위에도 `User=root`를 쓰지 않음), U16(`md-lake verify`나 감사 스크립트를 돌리는 단위가 읽기 전용 `l0` 아래의 `_verify`에, 감사는 `crypto/audit`에도 쓸 수 있음. 감사 스크립트를 돌리는 다른 단위도 `crypto/audit`에 쓸 수 있어야 함. 감사 단위의 두 경로 줄은 정확히 §4.1의 값이고 `LAKE=/mnt/nvme/lake` 한 번), U17(`Exec*` 줄에 `$(`, 백틱, `%i`·`%I`·`%n`·`%%`가 아닌 `%` 없음: systemd는 셸을 돌리지 않음), U18(스택 단위의 재시작·격리 설정, 쓰는 디렉터리, 다른 단위에 묶이지 않음), U19(봉인·아카이버·감사 실행의 시간 제한, 아카이버의 스레드 1개와 L1 삭제 꺼짐, `EnvironmentFile=` 없음).
 2. `systemd-analyze verify`: 단위 사본의 실행 파일 경로(`/usr/local/bin/`, `/usr/local/lib/hl-oms-obs/`, `/opt/grafana/bin/`)를 내려받은 공식 바이너리와 `/bin/true` 링크가 있는 임시 디렉터리로 바꾸고, 템플릿은 인스턴스 링크(`md-collector@bybit.service` 등)로 검사한다. 모르는 키는 `Unknown key`로 나온다. 감사 스크립트는 `sh -n bin/crypto-lake-audit.sh`로 문법만 본다.
 
 ## 8. 설치 순서 (소유자, 운영 항목 X1)

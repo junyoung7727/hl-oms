@@ -4,8 +4,8 @@
 # (docs/operations/observability.md §4).
 #
 # 1. md-lake verify for each of the 9 UTC dates from yesterday back that has
-#    a sealed L0 file and no verify result, no verify stamp, or a sealed file
-#    whose status changed after the stamp.
+#    a sealed L0 file and no verify result, no verify stamp, a stamp later
+#    than now, or a sealed file whose status changed after the stamp.
 # 2. The qdp auditor, which reads those results.
 #
 # Exit: 2 = usage refused (an empty setting, or no qdp checkout); else the

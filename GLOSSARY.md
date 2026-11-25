@@ -400,5 +400,5 @@ _Avoid_: seal lock (that is `md-lake seal`'s own lock, exit 3)
 _Avoid_: manifest (that is the lake's), package
 
 **Verify stamp** (확인 도장):
-An empty file `/var/lib/qdp-crypto-audit/verify-<venue>-<date>.stamp` that the audit script touches (as `….stamp.new`) before it runs `md-lake verify` on a date, and moves over the old stamp only when verify succeeds. A sealed file of the date whose status changed (ctime) after the stamp makes the next run verify the date again, also a file sealed while verify ran (ADR-035).
+An empty file `/var/lib/qdp-crypto-audit/verify-<venue>-<date>.stamp` that the audit script touches (as `….stamp.new`) before it runs `md-lake verify` on a date, and moves over the old stamp only when verify succeeds. A sealed file of the date whose status changed (ctime) after the stamp makes the next run verify the date again, also a file sealed while verify ran (ADR-035). A stamp later than the run's start (the clock was set back) counts as missing.
 _Avoid_: verify result (that is `crypto/l0/_verify/venue=<v>/date=<d>.json`, written by verify), seal log
