@@ -2,7 +2,7 @@
 //! R1 every metric name is in the catalogue, R3 every label is known, R4
 //! every function is allowed, R5 every alert has a severity and a summary
 //! and one Watchdog exists, R6 the liveness, lake-gauge and audit-age rules
-//! of every configured venue, R7 the design's lake and disk rules and the
+//! of every configured venue, R7 the design's lake, disk and journal rules and the
 //! intervals of the groups that hold the pinned rules, R8 log groups are
 //! `vlogs` and metric groups are not, R9 the scrape jobs, the job names the
 //! rules use and the memory alert's caps; U8 also covers scrape targets.
@@ -112,6 +112,31 @@ const DESIGN: &[DesignRule] = &[
         None,
         Some("P2"),
     ),
+    // The journal file system (design R4 SHOULD 2): the lake rules' shape.
+    (
+        "oms.rules.json",
+        "journal-recording",
+        "journal_disk_days_left",
+        "journal_disk_free_bytes / clamp_min(-deriv(journal_disk_free_bytes[24h]) * 86400, 1)",
+        None,
+        None,
+    ),
+    (
+        "oms.rules.json",
+        "oms",
+        "JournalDiskDaysLeftLow",
+        "journal_disk_days_left < 7 and on(venue) (time() - tfirst_over_time(journal_disk_free_bytes[24h])) > 43200",
+        Some("10m"),
+        Some("P2"),
+    ),
+    (
+        "oms.rules.json",
+        "oms",
+        "JournalDiskDaysLeftCritical",
+        "journal_disk_days_left < 2 and on(venue) (time() - tfirst_over_time(journal_disk_free_bytes[24h])) > 43200",
+        Some("10m"),
+        Some("P1"),
+    ),
 ];
 /// R7: the groups that hold an R6, R7 or Watchdog rule, and their
 /// interval. `None`: no interval, or the default it stands for.
@@ -121,6 +146,9 @@ const GROUP_INTERVALS: &[(&str, &str, Option<&str>)] = &[
     ("lake.rules.json", "lake", None),
     ("lake.rules.json", "lake-audit", Some("1m")),
     ("system.rules.json", "watchdog", None),
+    ("oms.rules.json", "journal-recording", Some("1m")),
+    ("oms.rules.json", "oms", None),
+    ("oms.rules.json", "projector", None),
 ];
 /// vmalert-metrics' `-evaluationInterval` (U11 pins it): what a group
 /// without an interval is evaluated at.
@@ -730,6 +758,27 @@ fn a_rule_with_an_unknown_metric_fails() {
     assert_rules(&crate::check(&t), &[]);
 }
 
+const OMS: &str = "deploy/observability/vmalert/metrics/oms.rules.json";
+
+#[test]
+fn a_rule_with_an_unknown_oms_metric_fails() {
+    // A name the projector does not push (it pushes oms_position_qty).
+    let f = set_expr(
+        OMS,
+        "OmsParkedFills",
+        "max by (venue) (oms_position_value) > 0",
+        &["R1"],
+    );
+    assert!(f[0].text.contains("oms_position_value"), "{f:?}");
+    // In a pinned rule it is R1 and the pin's rule.
+    set_expr(
+        OMS,
+        "JournalDiskDaysLeftLow",
+        "journal_disk_days_lft < 7 and on(venue) (time() - tfirst_over_time(journal_disk_free_bytes[24h])) > 43200",
+        &["R1", "R7"],
+    );
+}
+
 #[test]
 fn an_unknown_label_or_function_fails() {
     for (e, rule) in [
@@ -1117,6 +1166,60 @@ fn the_design_lake_and_disk_rules_are_present() {
         v["groups"][2]["interval"] = Value::String("10s".into());
     });
     assert_rules(&crate::check(&t), &["R7"]);
+}
+
+#[test]
+fn the_design_journal_and_key_rules_are_present() {
+    set_expr(
+        OMS,
+        "JournalDiskDaysLeftLow",
+        "journal_disk_days_left < 8 and on(venue) (time() - tfirst_over_time(journal_disk_free_bytes[24h])) > 43200",
+        &["R7"],
+    );
+    // Without the warm-up: the first day of a new journal pages.
+    set_expr(
+        OMS,
+        "JournalDiskDaysLeftCritical",
+        "journal_disk_days_left < 2",
+        &["R7"],
+    );
+    set_expr(
+        OMS,
+        "journal_disk_days_left",
+        "journal_disk_free_bytes / clamp_min(-deriv(journal_disk_free_bytes[1h]) * 86400, 1)",
+        &["R7"],
+    );
+    for (name, f) in [
+        ("JournalDiskDaysLeftLow", "for"),
+        ("JournalDiskDaysLeftCritical", "severity"),
+    ] {
+        plant_rule(
+            OMS,
+            name,
+            |r| {
+                if f == "for" {
+                    r.as_object_mut().unwrap().remove("for");
+                } else {
+                    r["labels"]["severity"] = Value::String("P2".into());
+                }
+            },
+            &["R7"],
+        );
+    }
+    // The recording group evaluated every hour; the OMS group every minute.
+    for (group, interval) in [("journal-recording", "1h"), ("oms", "1m"), ("projector", "5m")] {
+        let mut t = Tree::real();
+        edit(&mut t, OMS, |v| {
+            let g = v["groups"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|g| g["name"] == group)
+                .unwrap();
+            g["interval"] = Value::String(interval.into());
+        });
+        assert_rules(&crate::check(&t), &["R7"]);
+    }
 }
 
 #[test]

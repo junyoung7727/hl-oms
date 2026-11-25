@@ -108,6 +108,124 @@ name = "obs_push_queue_lines"
 labels = ["service", "venue", "endpoint"]
 source = "crates/obs-push/src/lib.rs"
 
+# The projector's series (pushed with venue; the oms_* state series only
+# after its first catch-up).
+
+[[metric]]
+name = "oms_up"
+labels = ["venue"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "oms_heartbeat_ts"
+labels = ["venue"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "oms_journal_durable_seq"
+labels = ["venue"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "projector_lag_records"
+labels = ["venue"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "projector_cursor_seq"
+labels = ["venue"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "projector_pending_lines"
+labels = ["venue"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "projector_unconfirmed_records"
+labels = ["venue"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "projector_tail_error"
+labels = ["venue"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "projector_caught_up"
+labels = ["venue"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "projector_rejected_lines"
+labels = ["venue"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "oms_halt"
+labels = ["venue"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "oms_holds"
+labels = ["venue", "reason"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "oms_open_orders"
+labels = ["venue"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "oms_in_doubt_orders"
+labels = ["venue"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "oms_parked_fills"
+labels = ["venue"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "oms_position_qty"
+labels = ["venue", "symbol"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "oms_realized_pnl"
+labels = ["venue", "symbol"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "oms_upnl"
+labels = ["venue", "symbol"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "oms_account_value"
+labels = ["venue"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "oms_margin_ratio"
+labels = ["venue", "symbol"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "oms_limit"
+labels = ["venue", "kind", "symbol"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "oms_limit_distance"
+labels = ["venue", "kind", "symbol"]
+source = "crates/oms-projector/src/metrics.rs"
+
+[[metric]]
+name = "journal_disk_free_bytes"
+labels = ["venue"]
+source = "crates/oms-projector/src/projector.rs"
+
 [[stack]]
 name = "up"
 labels = ["job", "instance"]
