@@ -441,8 +441,18 @@ fn every_projector_and_watcher_series_is_catalogued() {
         "",
     );
     let f = check(&t);
-    assert_rules(&f, &["R1"]);
+    assert_rules(&f, &["R1", "G7"]);
     assert!(f[0].text.starts_with("OmsParkedFills: oms_parked_fills"), "{f:?}");
+    // A watcher row removed: the rule that reads it names an unknown metric.
+    let mut t = Tree::real();
+    t.replace(
+        CATALOGUE,
+        "[[metric]]\nname = \"watcher_kill_halt_owed\"\nlabels = [\"venue\", \"host\", \"watcher\"]\nsource = \"crates/watcher/src/runtime.rs\"\n",
+        "",
+    );
+    let f = check(&t);
+    assert_rules(&f, &["R1"]);
+    assert!(f[0].text.starts_with("WatcherKillHaltOwed: watcher_kill_halt_owed"), "{f:?}");
     // The projector's file no longer has the name.
     let mut t = Tree::real();
     t.replace(

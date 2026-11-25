@@ -2,8 +2,9 @@
 //! access off, G3 the admin password from a file, G4 the two datasources,
 //! G5 the dashboard provider and the provisioning path, G6 the panels'
 //! datasources and targets, G7 the dashboards' expressions against the
-//! metric catalogue, G8 the two dashboards, G9 Grafana's data on the lake
-//! disk.
+//! metric catalogue, G8 the four dashboards and the panels pinned to an
+//! alert or a design question, G9 Grafana's data on the lake disk, G10 the
+//! event timeline's kinds against the journal's event names.
 
 use std::collections::BTreeSet;
 
@@ -124,12 +125,50 @@ const FAILED_JOBS_COMMAND: &str = "systemctl --failed 'md-*' 'crypto-lake-audit*
 /// G8: the dashboards of design §8.4 (uid, title: the one question each
 /// answers).
 const BOARDS: &[(&str, &str)] = &[
+    (TRADING_UID, "D1 거래: 지금 한도까지 얼마나 남았나"),
     (
         "d2-market-data",
         "D2 시세 수집: 어느 거래소·종목이 비거나 늦나",
     ),
     ("d3-system", "D3 시스템: 서비스가 살아 있고 자원이 남았나"),
+    (EVENTS_UID, "D4 사건 타임라인: 무슨 일이 어떤 순서로 있었나"),
 ];
+/// G8: D1's answer to its question (design §8.4 "각 값 옆에 한도와 거리"):
+/// one table with exactly these targets, every limit beside its distance by
+/// `kind` and `symbol`.
+const TRADING_UID: &str = "d1-trading";
+const LIMITS_TITLE: &str = "한도와 거리";
+const LIMIT_TARGETS: &[&str] = &[
+    "oms_limit{venue=~\"$venue\"}",
+    "oms_limit_distance{venue=~\"$venue\"}",
+];
+/// G8, G10: D4's two event panels (orders and fills; holds, kills and
+/// mismatches) on VictoriaLogs, each one query of this frame around its
+/// list of event kinds: the projector's line per journal event, every
+/// field a person needs to tell one event from its repeat after a
+/// projector restart (`seq`, `event_index`).
+const EVENTS_UID: &str = "d4-events";
+const EVENT_PANELS: &[&str] = &["주문·체결", "정지·킬·불일치"];
+const EVENT_QUERY: (&str, &str) = (
+    "_stream:{service=\"oms\"} venue:=\"$venue\" kind:in(",
+    ") | fields _time, seq, event_index, kind, order_id, wire_id, symbol, side, qty, px, phase, reason, unconfirmed | sort by (_time desc) | limit 1000",
+);
+const LOGS_UID: &str = "vl";
+/// G10: the journal event kinds D4 leaves out, each frequent or periodic,
+/// or bookkeeping without a state a person acts on (판단(모델 아님)).
+/// With D4's two lists they hold every name of `Event::name` once.
+const LEFT_OUT: &[&str] = &[
+    "watcher_heartbeat",
+    "ref_price_updated",
+    "margin_reported",
+    "open_orders_swept",
+    "positions_verified",
+    "status_noted",
+    "venue_oid_learned",
+    "purged",
+    "day_base_set",
+];
+const EVENT_RS: &str = "crates/oms-core/src/event.rs";
 /// G8: panels that show the value an alert compares with its threshold,
 /// so the panel and the alert cannot drift apart: (dashboard uid, alert,
 /// threshold, the dashboard's variable filter put first in each selector).
@@ -170,7 +209,7 @@ fn on_data_disk(path: &str) -> bool {
     })
 }
 
-pub fn check(_t: &Tree, p: &Parsed, cat: &Catalogue, out: &mut Vec<Finding>) {
+pub fn check(t: &Tree, p: &Parsed, cat: &Catalogue, out: &mut Vec<Finding>) {
     let boards: Vec<(&str, &Value)> = p
         .json
         .iter()
@@ -179,7 +218,9 @@ pub fn check(_t: &Tree, p: &Parsed, cat: &Catalogue, out: &mut Vec<Finding>) {
         .collect();
     g6_panels(&boards, out);
     g7_expressions(&boards, cat, out);
-    g8_boards(p, &boards, out);
+    if let Some(lists) = g8_boards(p, &boards, out) {
+        g10_event_kinds(t, &lists, out);
+    }
     let Some(ini) = p.ini.get(INI) else {
         finding(out, INI, "G1", "missing");
         return;
@@ -648,7 +689,12 @@ fn g7_expressions(boards: &[(&str, &Value)], cat: &Catalogue, out: &mut Vec<Find
     }
 }
 
-fn g8_boards(p: &Parsed, boards: &[(&str, &Value)], out: &mut Vec<Finding>) {
+/// G8, and the kind lists of D4's event panels when their frame is right.
+fn g8_boards(
+    p: &Parsed,
+    boards: &[(&str, &Value)],
+    out: &mut Vec<Finding>,
+) -> Option<Vec<Vec<String>>> {
     let uid = |d: &Value| d.get("uid").and_then(Value::as_str).map(str::to_string);
     for &(want_uid, want_title) in BOARDS {
         let found: Vec<&&Value> = boards
@@ -707,8 +753,65 @@ fn g8_boards(p: &Parsed, boards: &[(&str, &Value)], out: &mut Vec<Finding>) {
             }
         }
     }
+    let board = |want_uid: &str| -> Option<(&str, &Value)> {
+        boards
+            .iter()
+            .find(|(_, d)| uid(d).as_deref() == Some(want_uid))
+            .copied()
+    };
+    if let Some((path, d)) = board(TRADING_UID) {
+        let found: Vec<&Value> = panels(d)
+            .into_iter()
+            .filter(|x| x.get("title").and_then(Value::as_str) == Some(LIMITS_TITLE))
+            .collect();
+        let ok = matches!(found[..], [x] if panel_type(x) == "table"
+            && targets(x)
+                .iter()
+                .map(|t| crate::rules::norm(t.get("expr").and_then(Value::as_str).unwrap_or("")))
+                .eq(LIMIT_TARGETS.iter().map(|e| e.to_string())));
+        if !ok {
+            finding(
+                out,
+                path,
+                "G8",
+                format!("one table panel {LIMITS_TITLE:?} with exactly the targets {LIMIT_TARGETS:?}"),
+            );
+        }
+    }
+    let mut lists = None;
+    if let Some((path, d)) = board(EVENTS_UID) {
+        let mut got = Vec::new();
+        for title in EVENT_PANELS {
+            let found: Vec<&Value> = panels(d)
+                .into_iter()
+                .filter(|x| x.get("title").and_then(Value::as_str) == Some(*title))
+                .collect();
+            let list = match found[..] {
+                [x] if ds_uid(x) == Some(LOGS_UID) => match &targets(x)[..] {
+                    [t] => kind_list(t.get("expr").and_then(Value::as_str).unwrap_or("")),
+                    _ => None,
+                },
+                _ => None,
+            };
+            match list {
+                Some(l) => got.push(l),
+                None => finding(
+                    out,
+                    path,
+                    "G8",
+                    format!(
+                        "one {LOGS_UID} panel {title:?} with one query {}<kinds>{}",
+                        EVENT_QUERY.0, EVENT_QUERY.1
+                    ),
+                ),
+            }
+        }
+        if got.len() == EVENT_PANELS.len() {
+            lists = Some(got);
+        }
+    }
     let Some((path, exprs)) = board_exprs(SYSTEM_UID) else {
-        return;
+        return lists;
     };
     let want: BTreeSet<String> = crate::rules::SCRAPE_JOBS
         .iter()
@@ -732,6 +835,70 @@ fn g8_boards(p: &Parsed, boards: &[(&str, &Value)], out: &mut Vec<Finding>) {
                 "one panel target must be exactly the terms {want:?} (each scraped component's memory over its unit's MemoryMax)"
             ),
         );
+    }
+    lists
+}
+
+/// The event kinds of a D4 query in `EVENT_QUERY`'s frame; `None` when the
+/// frame differs.
+fn kind_list(e: &str) -> Option<Vec<String>> {
+    let rest = crate::rules::norm(e);
+    let rest = rest.strip_prefix(EVENT_QUERY.0)?;
+    let (list, tail) = rest.split_once(')')?;
+    let tail = format!("){tail}");
+    (tail == EVENT_QUERY.1).then(|| list.split(',').map(|k| k.trim().to_string()).collect())
+}
+
+/// The names of `Event::name`: the `"<name>"` after `=>` in each arm of
+/// `pub fn name(&self)` of `impl Event` (not `impl Input`, whose names
+/// are inputs).
+fn event_names(text: &str) -> Option<Vec<String>> {
+    let body = &text[text.find("\nimpl Event {")?..];
+    let body = &body[body.find("pub fn name(&self)")?..];
+    let body = &body[..body.find("\n    }\n")?];
+    let names = body
+        .lines()
+        .filter_map(|l| l.split_once("=> \"")?.1.split_once('"'))
+        .map(|(name, _)| name.to_string())
+        .collect();
+    Some(names)
+}
+
+/// The G10 partition: every event kind is in exactly one of `lists` (D4's
+/// two panels and `LEFT_OUT`), and every listed name is an event kind.
+fn kind_partition(events: &[String], lists: &[Vec<String>]) -> Vec<String> {
+    let listed: Vec<&String> = lists.iter().flatten().collect();
+    let mut out = Vec::new();
+    for e in events {
+        let n = listed.iter().filter(|k| **k == e).count();
+        if n != 1 {
+            out.push(format!(
+                "{e} is in {n} of D4's two event lists and the left-out list (exactly one)"
+            ));
+        }
+    }
+    for k in listed {
+        if !events.contains(k) {
+            out.push(format!("{k} is no event kind of Event::name"));
+        }
+    }
+    out
+}
+
+fn g10_event_kinds(t: &Tree, panel_lists: &[Vec<String>], out: &mut Vec<Finding>) {
+    let Some(events) = t.files.get(EVENT_RS).and_then(|s| event_names(s)) else {
+        finding(
+            out,
+            EVENT_RS,
+            "G10",
+            "no `pub fn name(&self)` in `impl Event` to read the event kinds from",
+        );
+        return;
+    };
+    let mut lists = panel_lists.to_vec();
+    lists.push(LEFT_OUT.iter().map(|s| s.to_string()).collect());
+    for text in kind_partition(&events, &lists) {
+        finding(out, &format!("{DASHBOARDS}d4-events.json"), "G10", text);
     }
 }
 
@@ -1356,4 +1523,143 @@ fn the_market_data_and_system_dashboards_exist() {
     ] {
         plant_json(D3, f, &["G8"]);
     }
+}
+
+const D1: &str = "deploy/observability/grafana/dashboards/d1-trading.json";
+const D4: &str = "deploy/observability/grafana/dashboards/d4-events.json";
+
+#[test]
+fn the_trading_and_event_dashboards_exist() {
+    for (path, rules) in [(D1, &["U14", "G8"][..]), (D4, &["U14", "G8"][..])] {
+        let mut t = Tree::real();
+        t.remove(path);
+        assert_rules(&crate::check(&t), rules);
+    }
+    plant_json(D1, |v| v["uid"] = json!("d1"), &["G8"]);
+    plant_json(D4, |v| v["title"] = json!("D4 사건"), &["G8"]);
+    // The open alerts are vmalert's ALERTS (G4 allows vm and vl only).
+    let t = Tree::real();
+    let d1: Value = serde_json::from_str(&t.files[D1]).unwrap();
+    let alerts = d1["panels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["title"] == "열린 알림")
+        .unwrap();
+    assert_eq!(alerts["targets"][0]["expr"], "ALERTS{alertstate=\"firing\"}");
+    assert_eq!(alerts["datasource"]["uid"], "vm");
+}
+
+#[test]
+fn the_trading_dashboard_shows_limits_and_distances() {
+    let limits = |f: fn(&mut Value)| -> Edit {
+        Box::new(move |v| f(panel_mut(v, LIMITS_TITLE)))
+    };
+    let cases: Vec<Edit> = vec![
+        // A target dropped: the limits without the distance, or the reverse.
+        limits(|p| {
+            p["targets"].as_array_mut().unwrap().pop();
+        }),
+        limits(|p| {
+            p["targets"].as_array_mut().unwrap().remove(0);
+        }),
+        // Another series, a filter that hides a kind, a third target.
+        limits(|p| p["targets"][1]["expr"] = json!("oms_limit_distance{venue=~\"$venue\", kind=\"daily_loss\"}")),
+        limits(|p| p["targets"][0]["expr"] = json!("oms_position_qty{venue=~\"$venue\"}")),
+        limits(|p| {
+            let t = p["targets"][0].clone();
+            p["targets"].as_array_mut().unwrap().push(t);
+        }),
+        // Not a table, or the panel gone.
+        limits(|p| p["type"] = json!("timeseries")),
+        limits(|p| p["title"] = json!("한도")),
+    ];
+    for f in cases {
+        plant_json(D1, f, &["G8"]);
+    }
+    // A name the projector does not push is G7 as anywhere else.
+    plant_json(
+        D1,
+        |v| panel_mut(v, "포지션")["targets"][0]["expr"] = json!("oms_position_value{venue=~\"$venue\"}"),
+        &["G7"],
+    );
+}
+
+#[test]
+fn the_event_dashboard_names_only_journal_event_kinds() {
+    let order = |f: fn(&mut Value)| -> Edit { Box::new(move |v| f(panel_mut(v, EVENT_PANELS[0]))) };
+    let expr = |p: &mut Value, from: &str, to: &str| {
+        let e = p["targets"][0]["expr"].as_str().unwrap().to_string();
+        assert_eq!(e.matches(from).count(), 1, "{from}");
+        p["targets"][0]["expr"] = json!(e.replacen(from, to, 1));
+    };
+    // A misspelt kind: order_accepted is in no list, order_acepted is no
+    // event kind.
+    let mut t = Tree::real();
+    edit(&mut t, D4, |v| {
+        expr(panel_mut(v, EVENT_PANELS[0]), "kind:in(order_accepted,", "kind:in(order_acepted,")
+    });
+    let f = crate::check(&t);
+    assert_rules(&f, &["G10"]);
+    assert_eq!(f.len(), 2, "{f:?}");
+    // A kind in both panels.
+    let mut t = Tree::real();
+    edit(&mut t, D4, |v| {
+        expr(panel_mut(v, EVENT_PANELS[1]), "kind:in(config_activated,", "kind:in(fill_parked, config_activated,")
+    });
+    let f = crate::check(&t);
+    assert_rules(&f, &["G10"]);
+    assert!(f.len() == 1 && f[0].text.contains("fill_parked is in 2"), "{f:?}");
+    // A new event kind with no place.
+    let mut t = Tree::real();
+    t.replace(
+        EVENT_RS,
+        "            Event::MonitorChanged { .. } => \"monitor_changed\",\n",
+        "            Event::MonitorChanged { .. } => \"monitor_changed\",\n            Event::MarginCalled { .. } => \"margin_called\",\n",
+    );
+    let f = crate::check(&t);
+    assert_rules(&f, &["G10"]);
+    assert!(f.len() == 1 && f[0].text.contains("margin_called is in 0"), "{f:?}");
+    // The names of `impl Input` are not event kinds; nor is Event::name
+    // found under another name.
+    let mut t = Tree::real();
+    t.replace(EVENT_RS, "impl Event {", "impl Evnt {");
+    assert_rules(&crate::check(&t), &["G10"]);
+    let events = event_names(&Tree::real().files[EVENT_RS]).unwrap();
+    assert_eq!(events.len(), 51);
+    assert!(!events.iter().any(|e| e == "boot"));
+    let mut d4: Value = serde_json::from_str(&Tree::real().files[D4]).unwrap();
+    let panel_lists: Vec<Vec<String>> = EVENT_PANELS
+        .iter()
+        .map(|title| {
+            let e = panel_mut(&mut d4, title)["targets"][0]["expr"].as_str().unwrap().to_string();
+            kind_list(&e).unwrap()
+        })
+        .collect();
+    assert_eq!(panel_lists.iter().map(Vec::len).collect::<Vec<_>>(), [19, 23]);
+    let lists = |left: &[&str]| -> Vec<Vec<String>> {
+        let mut l = panel_lists.clone();
+        l.push(left.iter().map(|s| s.to_string()).collect());
+        l
+    };
+    assert!(kind_partition(&events, &lists(LEFT_OUT)).is_empty());
+    let mut boot = LEFT_OUT.to_vec();
+    boot.push("boot");
+    let f = kind_partition(&events, &lists(&boot));
+    assert!(f.len() == 1 && f[0].starts_with("boot is no event kind"), "{f:?}");
+    let f = kind_partition(&events, &lists(&LEFT_OUT[1..]));
+    assert!(f.len() == 1 && f[0].starts_with("watcher_heartbeat is in 0"), "{f:?}");
+    // The frame of a query: another stream, no venue filter, fewer fields,
+    // a smaller limit, the panel on VictoriaMetrics.
+    for (from, to) in [
+        ("_stream:{service=\"oms\"}", "_stream:{service=\"oms-projector\"}"),
+        (" venue:=\"$venue\"", ""),
+        (" order_id, wire_id,", " order_id,"),
+        ("limit 1000", "limit 10"),
+    ] {
+        let mut t = Tree::real();
+        edit(&mut t, D4, |v| expr(panel_mut(v, EVENT_PANELS[1]), from, to));
+        assert_rules(&crate::check(&t), &["G8"]);
+    }
+    plant_json(D4, order(|p| p["title"] = json!("주문")), &["G8"]);
 }

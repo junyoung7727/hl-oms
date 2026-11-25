@@ -14,7 +14,8 @@ use crate::ini::{self, Dialect, Ini};
 /// Files read besides `deploy/`: the registries that name the collector's
 /// and the archiver's venues (rule U13), the pinned qdp metric list, the
 /// files that push the metrics of the catalogue (rule R2), the hold reasons
-/// (rule R12) and the watcher's venue label (rule R13).
+/// (rule R12), the watcher's venue label (rule R13) and the journal's event
+/// names (rule G10).
 pub const ANCHORS: &[&str] = &[
     "contracts/lake/xrepo/metrics.json",
     "crates/md-collector/src/registry.rs",
@@ -32,6 +33,7 @@ pub const ANCHORS: &[&str] = &[
     "crates/watcher/src/alert.rs",
     "crates/watcher/src/start.rs",
     "crates/watcher/src/runtime.rs",
+    "crates/oms-core/src/event.rs",
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
