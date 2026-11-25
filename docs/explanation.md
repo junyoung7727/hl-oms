@@ -1,5 +1,15 @@
 > 이 설명은 커밋 `0806fcc` 기준이다.
 
+# 구성 (arc42 §5 구성 요소 뷰)
+
+![hl-oms 구성: 주문 경로와 안전 장치](architecture/architecture.svg)
+
+- 초록 굵은 선이 주문이 가는 길이다: 전략 → 로컬 소켓 → ① 코어 → ② 저널 → ③ 게이트웨이 → Bybit. 저널의 fdatasync가 성공하기 전에는 응답도 전송도 나가지 않는다(2절).
+- 빨간 점선이 워처다. OMS와 코드를 나누지 않고 거래소와 저널을 따로 읽는다. 차이를 확정하면 보류를 걸고, OMS가 10초 답하지 않으면 킬한다(6절 12, 9절).
+- 보라 점선은 읽기만 하는 옆길이다. 관측(프로젝터, VictoriaMetrics, Grafana), 거래 표(`oms-export`, 그림에 없음), 시세 수집은 멈춰도 주문과 킬에 영향이 없다.
+- 전략도 공개 시세를 `md-feed`로 Bybit에서 직접 받는다(그림에 없음). 수집기도 텔레그램으로 직접 알린다.
+- 그림 원본은 [architecture.archify.json](architecture/architecture.archify.json)이다. 상자마다 근거 코드 위치가 있다. Archify로 다시 그려 SVG로 내보낸다.
+
 # 상황별 동작 (arc42 §6 런타임 뷰)
 
 대상: Bybit USDT 무기한 선물(linear). 숫자는 기본값이고, 바꿀 수 있는 값은 그렇다고 적었다.
