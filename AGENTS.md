@@ -5,7 +5,7 @@ Read `README.md` first. It is the map of the documents (`docs/`), the registry (
 Rules that the code does not show:
 
 - This repository is public. Never commit keys, wallet addresses, journals, snapshots or logs. `tools/ci/secret_scan.sh` must pass.
-- Never run a node against Hyperliquid testnet or mainnet, and never send an order, without the owner's written approval (user decisions U-01, U-09).
+- Never run a node against Hyperliquid testnet or mainnet, and never send an order, without the owner's written approval (user decisions U-01, U-09). Approved: minimum-size orders on the Bybit testnet sub-account through the `bybit-testnet` suite. Take the account lock first (`flock /mnt/nvme/gitproject/.gh-runner/locks/bybit-testnet.lock`, shared with the CI job); the suite cancels every order of the account. The key file stays outside the repository.
 - The tree is not rustfmt-clean. Do not run `cargo fmt` over existing files. Only files that a change adds must pass `rustfmt --check` (`tools/ci/rustfmt_added.sh`).
 - After any change under `crates/` or `registry/`, run `cargo run -p xtask -- docs` and commit `docs/generated/`. CI fails when they differ.
 - A claim (`registry/claims.toml`) may name only tests that exist. A journal event must be listed by a contract in `registry/contracts.toml`. Add the claim and the event in the same change that adds the test and the event.

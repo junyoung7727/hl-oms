@@ -1,27 +1,31 @@
 {
   "core_purity": "ok",
   "environment": {
-    "busiest_processes": "58.6 python;22.4 chrome;18.3 WebKitWebProces;",
+    "busiest_processes": "109 python;17.4 chrome;14.5 WebKitWebProces;",
     "cpu": "Intel(R) Core(TM) i9-14900K",
     "cpus_online": "32",
     "device_model": "Samsung SSD 980 500GB",
-    "df": "/dev/nvme0n1p2  457G  363G   71G  84% /",
+    "df": "/dev/nvme1n1p2  457G  390G   44G  91% /",
     "energy_pref": "balance_performance",
     "governor": "powersave",
-    "kernel": "7.0.0-42-generic",
-    "loadavg": "2.52 2.92 3.24",
+    "kernel": "7.0.0-43-generic",
+    "loadavg": "5.48 6.24 5.77",
     "memory": "30Gi",
-    "mount": "/dev/nvme0n1p2 ext4 rw,relatime,stripe=32",
+    "mount": "/dev/nvme1n1p2 ext4 rw,relatime,stripe=32",
     "os": "Ubuntu 26.04 LTS",
     "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)",
     "write_cache": "write back"
   },
-  "extended": "/mnt/nvme/gitproject/.cargo-target/hl-oms-integ-extended",
-  "finished_at_us": 1794840040372885,
+  "extended": null,
+  "finished_at_us": 1795579045637739,
   "live_testnet": false,
   "mode": "full",
-  "source_digest": "762a4acf55af90fb",
-  "started_at_us": 1794839298380834,
+  "source_digest": "25182f3862f64a45",
+  "source_scripts": {
+    "selftest": "ok",
+    "watcher_independent": "ok"
+  },
+  "started_at_us": 1795578688435607,
   "suites": [
     {
       "command": "cargo test --release -p oms-core",
@@ -30,10 +34,18 @@
       "name": "core",
       "notes": [],
       "ok": true,
-      "seconds": 12.2,
+      "seconds": 22.7,
       "tests": [
         {
-          "name": "num::tests::formats_canonically",
+          "name": "ids::tests::base32_pair_decoding_is_strict",
+          "result": "passed"
+        },
+        {
+          "name": "ids::tests::base32_pair_roundtrips_and_fits_an_order_link_id",
+          "result": "passed"
+        },
+        {
+          "name": "ids::tests::hex128_is_the_hex_form_of_today",
           "result": "passed"
         },
         {
@@ -45,6 +57,10 @@
           "result": "passed"
         },
         {
+          "name": "num::tests::formats_canonically",
+          "result": "passed"
+        },
+        {
           "name": "num::tests::notional_overflow_is_reported",
           "result": "passed"
         },
@@ -53,11 +69,11 @@
           "result": "passed"
         },
         {
-          "name": "num::tests::rejects_instead_of_rounding",
+          "name": "num::tests::parses_business_examples",
           "result": "passed"
         },
         {
-          "name": "num::tests::parses_business_examples",
+          "name": "num::tests::rejects_instead_of_rounding",
           "result": "passed"
         },
         {
@@ -65,7 +81,15 @@
           "result": "passed"
         },
         {
+          "name": "rate::tests::a_clock_that_goes_back_does_not_free_a_slot",
+          "result": "passed"
+        },
+        {
           "name": "num::tests::notional_ceil_is_the_least_upper_bound",
+          "result": "passed"
+        },
+        {
+          "name": "rate::tests::a_request_counts_until_one_window_after_it_finished",
           "result": "passed"
         },
         {
@@ -73,7 +97,139 @@
           "result": "passed"
         },
         {
+          "name": "rate::tests::cancels_may_take_the_reserve_and_then_block_orders_too",
+          "result": "passed"
+        },
+        {
+          "name": "rate::tests::the_ninth_order_in_a_second_waits_while_two_cancels_still_go_out",
+          "result": "passed"
+        },
+        {
+          "name": "rate::tests::the_window_slides_with_each_request",
+          "result": "passed"
+        },
+        {
           "name": "num::tests::serde_roundtrip_is_exact",
+          "result": "passed"
+        },
+        {
+          "name": "rate::tests::no_rolling_second_of_arrivals_holds_more_than_the_limits",
+          "result": "passed"
+        },
+        {
+          "name": "ids::tests::base32_pair_gives_a_million_distinct_ids",
+          "result": "passed"
+        },
+        {
+          "name": "a_policy_at_its_default_writes_no_new_key",
+          "result": "passed"
+        },
+        {
+          "name": "a_request_without_market_ref_keeps_its_bytes",
+          "result": "passed"
+        },
+        {
+          "name": "a_repeated_request_with_another_market_ref_is_a_duplicate",
+          "result": "passed"
+        },
+        {
+          "name": "one_answer_is_enough_by_default_and_writes_no_new_event",
+          "result": "passed"
+        },
+        {
+          "name": "the_policy_refuses_zero_answers",
+          "result": "passed"
+        },
+        {
+          "name": "market_ref_round_trips_through_the_journal",
+          "result": "passed"
+        },
+        {
+          "name": "market_ref_names_are_validated",
+          "result": "passed"
+        },
+        {
+          "name": "two_answers_after_expiry_plus_margin_are_needed_when_the_policy_asks_for_two",
+          "result": "passed"
+        },
+        {
+          "name": "a_report_without_account_mm_is_rejected_under_the_limit_and_recorded_without_it",
+          "result": "passed"
+        },
+        {
+          "name": "no_maintenance_margin_latches_nothing_whatever_the_balance",
+          "result": "passed"
+        },
+        {
+          "name": "a_margin_balance_of_zero_or_below_with_maintenance_latches",
+          "result": "passed"
+        },
+        {
+          "name": "clear_reduce_is_refused_while_the_account_rate_is_at_or_above_the_limit",
+          "result": "passed"
+        },
+        {
+          "name": "the_limit_is_one_to_9999_bps",
+          "result": "passed"
+        },
+        {
+          "name": "the_limit_is_judged_exactly_at_one_basis_point",
+          "result": "passed"
+        },
+        {
+          "name": "the_comparison_is_exact_at_the_largest_amounts",
+          "result": "passed"
+        },
+        {
+          "name": "status_shows_the_account_numbers_and_the_rule",
+          "result": "passed"
+        },
+        {
+          "name": "rate_just_below_the_limit_does_not_latch_and_at_the_limit_latches_with_the_cancels",
+          "result": "passed"
+        },
+        {
+          "name": "journals_with_and_without_account_mm_replay_to_the_live_state",
+          "result": "passed"
+        },
+        {
+          "name": "the_latch_is_not_replaced_by_a_later_rule",
+          "result": "passed"
+        },
+        {
+          "name": "only_the_configuration_and_enums_are_read_as_a_whole",
+          "result": "passed"
+        },
+        {
+          "name": "the_field_table_lists_every_field_the_encoder_writes",
+          "result": "passed"
+        },
+        {
+          "name": "every_row_of_the_table_is_a_field_the_encoder_writes",
+          "result": "passed"
+        },
+        {
+          "name": "the_booked_fill_keeps_the_reports_maker_flag_and_receive_time",
+          "result": "passed"
+        },
+        {
+          "name": "a_parked_fill_keeps_them_until_it_is_booked",
+          "result": "passed"
+        },
+        {
+          "name": "absent_fields_are_not_written_and_old_records_keep_their_bytes",
+          "result": "passed"
+        },
+        {
+          "name": "a_fill_on_an_instrument_that_is_not_configured_is_booked_as_external_without_a_fault",
+          "result": "passed"
+        },
+        {
+          "name": "a_fill_for_a_purged_order_is_booked_as_external",
+          "result": "passed"
+        },
+        {
+          "name": "a_fill_that_contradicts_its_order_is_booked_to_the_account_and_flagged",
           "result": "passed"
         },
         {
@@ -81,19 +237,11 @@
           "result": "passed"
         },
         {
-          "name": "the_strategy_bound_binds_on_its_own",
+          "name": "a_fill_after_any_kind_of_close_is_booked_and_flagged",
           "result": "passed"
         },
         {
           "name": "an_acknowledged_order_the_venue_no_longer_knows_is_reported_not_closed",
-          "result": "passed"
-        },
-        {
-          "name": "the_three_ways_a_fill_input_changes_nothing",
-          "result": "passed"
-        },
-        {
-          "name": "a_fill_that_contradicts_its_order_is_booked_to_the_account_and_flagged",
           "result": "passed"
         },
         {
@@ -105,7 +253,11 @@
           "result": "passed"
         },
         {
-          "name": "a_fill_on_an_instrument_that_is_not_configured_is_booked_as_external_without_a_fault",
+          "name": "the_strategy_bound_binds_on_its_own",
+          "result": "passed"
+        },
+        {
+          "name": "the_three_ways_a_fill_input_changes_nothing",
           "result": "passed"
         },
         {
@@ -113,19 +265,83 @@
           "result": "passed"
         },
         {
-          "name": "a_fill_for_a_purged_order_is_booked_as_external",
-          "result": "passed"
-        },
-        {
           "name": "memory_capacity_and_arithmetic_overflow_are_rejections_not_faults",
           "result": "passed"
         },
         {
-          "name": "a_fill_after_any_kind_of_close_is_booked_and_flagged",
+          "name": "a_journal_with_a_venue_change_latches_on_replay",
+          "result": "passed"
+        },
+        {
+          "name": "a_new_trigger_after_an_unsupported_answer_records_nothing",
+          "result": "passed"
+        },
+        {
+          "name": "a_second_trigger_keeps_the_first_note",
+          "result": "passed"
+        },
+        {
+          "name": "a_watcher_input_without_a_detail_is_refused",
+          "result": "passed"
+        },
+        {
+          "name": "a_kill_is_not_cleared_while_the_book_has_open_orders",
+          "result": "passed"
+        },
+        {
+          "name": "a_venue_change_latches_without_a_new_event",
+          "result": "passed"
+        },
+        {
+          "name": "a_new_trigger_after_the_confirmation_resets_it_and_asks_for_a_new_loop",
+          "result": "passed"
+        },
+        {
+          "name": "clear_hold_refusals",
+          "result": "passed"
+        },
+        {
+          "name": "a_stream_loss_latches_the_kill_and_asks_for_the_loop",
+          "result": "passed"
+        },
+        {
+          "name": "resume_leaves_kill_and_watcher_mismatch",
+          "result": "passed"
+        },
+        {
+          "name": "the_kill_marker_latches_in_the_boot_record",
+          "result": "passed"
+        },
+        {
+          "name": "the_new_holds_come_last_in_their_order",
+          "result": "passed"
+        },
+        {
+          "name": "every_command_comes_from_command_for_on_a_recorded_event",
+          "result": "passed"
+        },
+        {
+          "name": "the_kill_latch_and_its_confirmation_survive_replay_and_a_boot_asks_for_a_new_loop",
+          "result": "passed"
+        },
+        {
+          "name": "the_hold_table_of_table_7_7",
           "result": "passed"
         },
         {
           "name": "a_cross_position_is_not_judged_by_the_mm_rule",
+          "result": "passed"
+        },
+        {
+          "name": "a_new_day_does_not_clear_reducing",
+          "result": "passed"
+        },
+        {
+          "name": "a_fresh_report_after_a_stale_episode_restores_acceptance_without_a_latch",
+          "result": "passed"
+        },
+        {
+          "name": "a_recorded_report_ends_the_last_rejection",
           "result": "passed"
         },
         {
@@ -137,15 +353,11 @@
           "result": "passed"
         },
         {
-          "name": "a_forward_clock_jump_reads_the_report_as_stale_and_cancels",
-          "result": "passed"
-        },
-        {
           "name": "a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again",
           "result": "passed"
         },
         {
-          "name": "a_new_day_does_not_clear_reducing",
+          "name": "a_forward_clock_jump_reads_the_report_as_stale_and_cancels",
           "result": "passed"
         },
         {
@@ -153,19 +365,7 @@
           "result": "passed"
         },
         {
-          "name": "a_recorded_report_ends_the_last_rejection",
-          "result": "passed"
-        },
-        {
           "name": "a_report_older_than_the_freshness_limit_on_arrival_is_still_judged",
-          "result": "passed"
-        },
-        {
-          "name": "a_fresh_report_after_a_stale_episode_restores_acceptance_without_a_latch",
-          "result": "passed"
-        },
-        {
-          "name": "a_report_of_an_earlier_day_does_not_change_the_day_base",
           "result": "passed"
         },
         {
@@ -173,7 +373,7 @@
           "result": "passed"
         },
         {
-          "name": "a_rule_cancel_that_races_a_fill_books_the_fill",
+          "name": "a_report_of_an_earlier_day_does_not_change_the_day_base",
           "result": "passed"
         },
         {
@@ -189,11 +389,23 @@
           "result": "passed"
         },
         {
-          "name": "a_withdrawal_without_rebase_reads_as_a_loss",
+          "name": "a_rule_cancel_that_races_a_fill_books_the_fill",
           "result": "passed"
         },
         {
           "name": "after_a_passive_breach_a_plain_reducing_order_passes_and_an_increasing_one_does_not",
+          "result": "passed"
+        },
+        {
+          "name": "a_withdrawal_without_rebase_reads_as_a_loss",
+          "result": "passed"
+        },
+        {
+          "name": "an_order_pending_send_at_entry_is_cancelled_once_acknowledged",
+          "result": "passed"
+        },
+        {
+          "name": "an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing",
           "result": "passed"
         },
         {
@@ -205,19 +417,7 @@
           "result": "passed"
         },
         {
-          "name": "an_account_mode_off_the_allow_list_or_unknown_holds_the_account",
-          "result": "passed"
-        },
-        {
-          "name": "an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing",
-          "result": "passed"
-        },
-        {
-          "name": "account_value_zero_or_negative_rejects",
-          "result": "passed"
-        },
-        {
-          "name": "an_order_pending_send_at_entry_is_cancelled_once_acknowledged",
+          "name": "clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing",
           "result": "passed"
         },
         {
@@ -225,7 +425,15 @@
           "result": "passed"
         },
         {
-          "name": "clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing",
+          "name": "empty_margin_section_takes_the_contract_defaults",
+          "result": "passed"
+        },
+        {
+          "name": "account_value_zero_or_negative_rejects",
+          "result": "passed"
+        },
+        {
+          "name": "an_account_mode_off_the_allow_list_or_unknown_holds_the_account",
           "result": "passed"
         },
         {
@@ -233,19 +441,11 @@
           "result": "passed"
         },
         {
-          "name": "empty_margin_section_takes_the_contract_defaults",
+          "name": "first_report_sets_the_day_base",
           "result": "passed"
         },
         {
           "name": "exposure_is_the_sum_over_instruments",
-          "result": "passed"
-        },
-        {
-          "name": "entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones",
-          "result": "passed"
-        },
-        {
-          "name": "first_report_sets_the_day_base",
           "result": "passed"
         },
         {
@@ -261,27 +461,7 @@
           "result": "passed"
         },
         {
-          "name": "isolated_margin_below_mmr_plus_buffer_enters_reducing",
-          "result": "passed"
-        },
-        {
-          "name": "late_margin_report_with_a_lower_sequence_is_ignored",
-          "result": "passed"
-        },
-        {
-          "name": "loss_greater_than_five_percent_of_the_base_enters_reducing",
-          "result": "passed"
-        },
-        {
-          "name": "margin_report_dated_after_the_record_time_is_not_fresh",
-          "result": "passed"
-        },
-        {
-          "name": "margin_report_of_an_old_session_or_with_the_link_down_is_ignored",
-          "result": "passed"
-        },
-        {
-          "name": "margin_report_of_the_current_session_is_recorded",
+          "name": "entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones",
           "result": "passed"
         },
         {
@@ -289,27 +469,11 @@
           "result": "passed"
         },
         {
-          "name": "order_exactly_at_the_limit_is_accepted",
-          "result": "passed"
-        },
-        {
-          "name": "order_past_twice_the_account_value_is_rejected_account_leverage",
-          "result": "passed"
-        },
-        {
-          "name": "partial_fill_then_cancel_frees_exposure_only_on_terminal_evidence",
-          "result": "passed"
-        },
-        {
-          "name": "rebase_day_sets_the_base_and_leaves_the_latch_alone",
-          "result": "passed"
-        },
-        {
           "name": "plain_order_is_rejected_margin_unavailable_without_a_fresh_report",
           "result": "passed"
         },
         {
-          "name": "margin_events_replay_to_the_same_state",
+          "name": "order_exactly_at_the_limit_is_accepted",
           "result": "passed"
         },
         {
@@ -317,11 +481,7 @@
           "result": "passed"
         },
         {
-          "name": "reduce_only_and_plain_buy_on_a_short_count_at_full_reach",
-          "result": "passed"
-        },
-        {
-          "name": "reduce_only_order_needs_no_fresh_report",
+          "name": "rebase_day_sets_the_base_and_leaves_the_latch_alone",
           "result": "passed"
         },
         {
@@ -329,15 +489,11 @@
           "result": "passed"
         },
         {
-          "name": "reduce_only_order_passes_the_venue_setting_and_account_mode_holds",
+          "name": "isolated_margin_below_mmr_plus_buffer_enters_reducing",
           "result": "passed"
         },
         {
-          "name": "latch_and_day_base_replay_to_the_same_state",
-          "result": "passed"
-        },
-        {
-          "name": "reducing_is_entered_once",
+          "name": "reduce_only_order_needs_no_fresh_report",
           "result": "passed"
         },
         {
@@ -346,6 +502,22 @@
         },
         {
           "name": "report_stale_past_the_cancel_limit_cancels_each_plain_order_once",
+          "result": "passed"
+        },
+        {
+          "name": "reduce_only_order_passes_the_venue_setting_and_account_mode_holds",
+          "result": "passed"
+        },
+        {
+          "name": "late_margin_report_with_a_lower_sequence_is_ignored",
+          "result": "passed"
+        },
+        {
+          "name": "latch_and_day_base_replay_to_the_same_state",
+          "result": "passed"
+        },
+        {
+          "name": "margin_report_of_an_old_session_or_with_the_link_down_is_ignored",
           "result": "passed"
         },
         {
@@ -365,7 +537,7 @@
           "result": "passed"
         },
         {
-          "name": "under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted",
+          "name": "stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off",
           "result": "passed"
         },
         {
@@ -381,11 +553,11 @@
           "result": "passed"
         },
         {
-          "name": "stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off",
+          "name": "without_a_margin_policy_no_margin_check_runs",
           "result": "passed"
         },
         {
-          "name": "without_a_margin_policy_no_margin_check_runs",
+          "name": "under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted",
           "result": "passed"
         },
         {
@@ -393,7 +565,35 @@
           "result": "passed"
         },
         {
-          "name": "an_unfilled_resting_order_keeps_its_exposure_and_is_never_repriced_or_expired_by_the_oms",
+          "name": "margin_report_of_the_current_session_is_recorded",
+          "result": "passed"
+        },
+        {
+          "name": "loss_greater_than_five_percent_of_the_base_enters_reducing",
+          "result": "passed"
+        },
+        {
+          "name": "reduce_only_and_plain_buy_on_a_short_count_at_full_reach",
+          "result": "passed"
+        },
+        {
+          "name": "partial_fill_then_cancel_frees_exposure_only_on_terminal_evidence",
+          "result": "passed"
+        },
+        {
+          "name": "margin_report_dated_after_the_record_time_is_not_fresh",
+          "result": "passed"
+        },
+        {
+          "name": "order_past_twice_the_account_value_is_rejected_account_leverage",
+          "result": "passed"
+        },
+        {
+          "name": "reducing_is_entered_once",
+          "result": "passed"
+        },
+        {
+          "name": "margin_events_replay_to_the_same_state",
           "result": "passed"
         },
         {
@@ -405,6 +605,10 @@
           "result": "passed"
         },
         {
+          "name": "an_unfilled_resting_order_keeps_its_exposure_and_is_never_repriced_or_expired_by_the_oms",
+          "result": "passed"
+        },
+        {
           "name": "adding_an_order_never_lowers_exposure",
           "result": "passed"
         },
@@ -413,19 +617,71 @@
           "result": "passed"
         },
         {
+          "name": "a_configuration_that_turns_the_gate_on_or_off",
+          "result": "passed"
+        },
+        {
+          "name": "a_heartbeat_from_the_future_is_refused",
+          "result": "passed"
+        },
+        {
+          "name": "a_boot_while_unmonitored_times_stage_two_from_the_boot",
+          "result": "passed"
+        },
+        {
+          "name": "missing_heartbeats_unmonitor_at_30_s_and_cancel_plain_orders_at_90_s",
+          "result": "passed"
+        },
+        {
+          "name": "stage_two_does_not_ask_again_for_an_exhausted_cancel",
+          "result": "passed"
+        },
+        {
+          "name": "a_fresh_heartbeat_monitors_again_and_stops_the_cancels",
+          "result": "passed"
+        },
+        {
+          "name": "a_heartbeat_with_w1_or_w2_older_than_10_s_unmonitors_and_cancels_60_s_later",
+          "result": "passed"
+        },
+        {
+          "name": "the_check_age_edge_and_a_check_without_success",
+          "result": "passed"
+        },
+        {
+          "name": "the_gate_survives_replay_and_a_boot_starts_unmonitored",
+          "result": "passed"
+        },
+        {
+          "name": "w3_and_w4_are_recorded_and_not_gated",
+          "result": "passed"
+        },
+        {
+          "name": "the_gate_values_are_bounded",
+          "result": "passed"
+        },
+        {
+          "name": "a_heartbeat_of_the_wrong_shape_or_without_a_gate_records_nothing",
+          "result": "passed"
+        },
+        {
+          "name": "stale_heartbeats_that_keep_coming_do_not_delay_the_cancels",
+          "result": "passed"
+        },
+        {
+          "name": "stage_two_asks_only_while_the_link_is_up",
+          "result": "passed"
+        },
+        {
+          "name": "the_gate_starts_unmonitored_at_boot_until_the_first_fresh_heartbeat",
+          "result": "passed"
+        },
+        {
+          "name": "a_clock_that_steps_back_holds_the_gates_timers",
+          "result": "passed"
+        },
+        {
           "name": "f10_config_validation_enforces_the_parked_fill_wait_rule",
-          "result": "passed"
-        },
-        {
-          "name": "f9_min_notional_is_not_passed_by_rounding_up",
-          "result": "passed"
-        },
-        {
-          "name": "f6_reporting_counter_overflow_does_not_fail_stop_fill_booking",
-          "result": "passed"
-        },
-        {
-          "name": "f4_stale_session_evidence_that_acknowledges_an_order_does_not_satisfy_resync",
           "result": "passed"
         },
         {
@@ -433,19 +689,11 @@
           "result": "passed"
         },
         {
-          "name": "f5_stale_link_down_does_not_take_a_newer_session_down",
-          "result": "passed"
-        },
-        {
-          "name": "f8_own_unacknowledged_order_listed_without_client_id_is_not_flagged_foreign",
+          "name": "f1_a_rejected_cancel_is_retried_only_while_the_order_is_not_terminal",
           "result": "passed"
         },
         {
           "name": "f1_acknowledging_cancel_stuck_releases_the_hold",
-          "result": "passed"
-        },
-        {
-          "name": "f1_cancel_attempts_spent_in_doubt_do_not_strand_the_order_once_it_is_found",
           "result": "passed"
         },
         {
@@ -457,7 +705,7 @@
           "result": "passed"
         },
         {
-          "name": "f3_a_reappearing_order_is_reported_as_open_after_close",
+          "name": "f1_cancel_attempts_spent_in_doubt_do_not_strand_the_order_once_it_is_found",
           "result": "passed"
         },
         {
@@ -465,11 +713,31 @@
           "result": "passed"
         },
         {
-          "name": "f1_a_rejected_cancel_is_retried_only_while_the_order_is_not_terminal",
+          "name": "f4_stale_session_evidence_that_acknowledges_an_order_does_not_satisfy_resync",
+          "result": "passed"
+        },
+        {
+          "name": "f5_stale_link_down_does_not_take_a_newer_session_down",
+          "result": "passed"
+        },
+        {
+          "name": "f3_a_reappearing_order_is_reported_as_open_after_close",
+          "result": "passed"
+        },
+        {
+          "name": "f6_reporting_counter_overflow_does_not_fail_stop_fill_booking",
           "result": "passed"
         },
         {
           "name": "f6_a_venue_order_id_reported_for_two_orders_keeps_the_state_recoverable",
+          "result": "passed"
+        },
+        {
+          "name": "f9_min_notional_is_not_passed_by_rounding_up",
+          "result": "passed"
+        },
+        {
+          "name": "f8_own_unacknowledged_order_listed_without_client_id_is_not_flagged_foreign",
           "result": "passed"
         },
         {
@@ -481,127 +749,7 @@
           "result": "passed"
         },
         {
-          "name": "no_configuration_means_nothing_is_accepted",
-          "result": "passed"
-        },
-        {
-          "name": "a_send_without_any_result_becomes_in_doubt_after_the_timeout",
-          "result": "passed"
-        },
-        {
-          "name": "fill_before_send_result_acknowledges_the_order",
-          "result": "passed"
-        },
-        {
-          "name": "a_rejection_does_not_consume_the_key",
-          "result": "passed"
-        },
-        {
-          "name": "an_in_doubt_order_seen_in_the_open_order_sweep_is_acknowledged",
-          "result": "passed"
-        },
-        {
-          "name": "field_validation_reasons",
-          "result": "passed"
-        },
-        {
-          "name": "cancel_is_retried_with_backoff_and_then_flagged",
-          "result": "passed"
-        },
-        {
-          "name": "cancel_is_authorised_per_owner_and_idempotent",
-          "result": "passed"
-        },
-        {
-          "name": "cancel_of_an_unacknowledged_order_is_sent_once_the_order_is_acknowledged",
-          "result": "passed"
-        },
-        {
-          "name": "expiry_rules",
-          "result": "passed"
-        },
-        {
-          "name": "foreign_and_orphan_open_orders_are_flagged",
-          "result": "passed"
-        },
-        {
-          "name": "acknowledging_one_mismatch_does_not_clear_another",
-          "result": "passed"
-        },
-        {
-          "name": "not_found_closes_an_in_doubt_order_only_after_expiry_plus_margin",
-          "result": "passed"
-        },
-        {
-          "name": "fill_by_venue_id_before_the_id_is_known_is_parked_then_booked",
-          "result": "passed"
-        },
-        {
-          "name": "missing_fills_after_sync_are_flagged_and_stay_reserved",
-          "result": "passed"
-        },
-        {
-          "name": "concurrent_requests_cannot_double_spend_headroom",
-          "result": "passed"
-        },
-        {
-          "name": "final_quantity_below_booked_fills_is_flagged",
-          "result": "passed"
-        },
-        {
-          "name": "holds_are_independent",
-          "result": "passed"
-        },
-        {
-          "name": "configuration_changes_are_validated_against_existing_exposure",
-          "result": "passed"
-        },
-        {
-          "name": "cancels_are_accepted_while_new_orders_are_held",
-          "result": "passed"
-        },
-        {
-          "name": "definite_gateway_failures_close_and_release",
-          "result": "passed"
-        },
-        {
-          "name": "a_pending_cancel_is_sent_when_the_link_returns",
-          "result": "passed"
-        },
-        {
-          "name": "duplicate_fill_is_booked_once",
-          "result": "passed"
-        },
-        {
-          "name": "link_loss_blocks_new_orders_and_resync_is_required_after_it_returns",
-          "result": "passed"
-        },
-        {
-          "name": "in_doubt_order_found_by_query_becomes_working",
-          "result": "passed"
-        },
-        {
-          "name": "capacity_limits_bound_open_orders_and_outstanding_sends",
-          "result": "passed"
-        },
-        {
-          "name": "cancel_all_requests_every_open_order_in_scope",
-          "result": "passed"
-        },
-        {
-          "name": "fia_7_1_reservation_follows_potential_fills",
-          "result": "passed"
-        },
-        {
-          "name": "cancel_race_final_status_decides",
-          "result": "passed"
-        },
-        {
-          "name": "full_fill_by_fills_alone_closes_the_order",
-          "result": "passed"
-        },
-        {
-          "name": "a_parked_fill_is_external_once_no_order_can_own_it",
+          "name": "a_key_is_forgotten_only_after_its_request_expired",
           "result": "passed"
         },
         {
@@ -609,11 +757,63 @@
           "result": "passed"
         },
         {
-          "name": "a_key_is_forgotten_only_after_its_request_expired",
+          "name": "a_parked_fill_is_external_once_no_order_can_own_it",
           "result": "passed"
         },
         {
-          "name": "not_found_is_ignored_while_the_send_is_simply_outstanding",
+          "name": "a_send_without_any_result_becomes_in_doubt_after_the_timeout",
+          "result": "passed"
+        },
+        {
+          "name": "cancel_race_final_status_decides",
+          "result": "passed"
+        },
+        {
+          "name": "concurrent_requests_cannot_double_spend_headroom",
+          "result": "passed"
+        },
+        {
+          "name": "expiry_rules",
+          "result": "passed"
+        },
+        {
+          "name": "an_in_doubt_order_seen_in_the_open_order_sweep_is_acknowledged",
+          "result": "passed"
+        },
+        {
+          "name": "definite_gateway_failures_close_and_release",
+          "result": "passed"
+        },
+        {
+          "name": "configuration_changes_are_validated_against_existing_exposure",
+          "result": "passed"
+        },
+        {
+          "name": "cancel_is_authorised_per_owner_and_idempotent",
+          "result": "passed"
+        },
+        {
+          "name": "cancels_are_accepted_while_new_orders_are_held",
+          "result": "passed"
+        },
+        {
+          "name": "fill_by_venue_id_before_the_id_is_known_is_parked_then_booked",
+          "result": "passed"
+        },
+        {
+          "name": "foreign_and_orphan_open_orders_are_flagged",
+          "result": "passed"
+        },
+        {
+          "name": "in_doubt_order_found_by_query_becomes_working",
+          "result": "passed"
+        },
+        {
+          "name": "no_configuration_means_nothing_is_accepted",
+          "result": "passed"
+        },
+        {
+          "name": "not_found_closes_an_in_doubt_order_only_after_expiry_plus_margin",
           "result": "passed"
         },
         {
@@ -621,51 +821,7 @@
           "result": "passed"
         },
         {
-          "name": "reduce_only_order_is_still_bound_by_the_strategy_position_limit",
-          "result": "passed"
-        },
-        {
-          "name": "same_key_different_request_is_a_conflict_without_effect",
-          "result": "passed"
-        },
-        {
-          "name": "restart_puts_outstanding_sends_in_doubt_and_never_resends",
-          "result": "passed"
-        },
-        {
-          "name": "same_key_same_request_creates_one_order_and_one_send",
-          "result": "passed"
-        },
-        {
-          "name": "open_orders_on_the_other_side_do_not_create_headroom",
-          "result": "passed"
-        },
-        {
-          "name": "significant_figure_rule_exempts_integers",
-          "result": "passed"
-        },
-        {
-          "name": "stale_session_evidence_does_not_satisfy_resync",
-          "result": "passed"
-        },
-        {
-          "name": "storage_low_blocks_new_orders_but_not_fills_or_cancels",
-          "result": "passed"
-        },
-        {
-          "name": "reduce_only_order_is_rejected_by_every_block_all_hold",
-          "result": "passed"
-        },
-        {
-          "name": "terminal_before_fills_keeps_the_unbooked_quantity_reserved",
-          "result": "passed"
-        },
-        {
-          "name": "terminal_without_final_quantity_waits_for_fill_sync",
-          "result": "passed"
-        },
-        {
-          "name": "strategy_reduction_is_not_account_reduction",
+          "name": "overfill_is_booked_in_full_and_flagged",
           "result": "passed"
         },
         {
@@ -673,39 +829,15 @@
           "result": "passed"
         },
         {
-          "name": "overfill_is_booked_in_full_and_flagged",
+          "name": "cancel_is_retried_with_backoff_and_then_flagged",
           "result": "passed"
         },
         {
-          "name": "the_duplicate_answer_survives_restart",
+          "name": "not_found_is_ignored_while_the_send_is_simply_outstanding",
           "result": "passed"
         },
         {
-          "name": "position_check_uses_the_reachable_range",
-          "result": "passed"
-        },
-        {
-          "name": "the_key_scope_is_per_strategy",
-          "result": "passed"
-        },
-        {
-          "name": "unidentified_fill_is_booked_as_external_after_the_wait_and_holds_trading",
-          "result": "passed"
-        },
-        {
-          "name": "reduce_only_order_is_accepted_while_another_order_is_in_doubt",
-          "result": "passed"
-        },
-        {
-          "name": "reduce_only_order_is_accepted_during_resync",
-          "result": "passed"
-        },
-        {
-          "name": "reduce_only_order_is_accepted_under_an_unacknowledged_mismatch",
-          "result": "passed"
-        },
-        {
-          "name": "unknown_send_outcome_keeps_the_reservation_and_blocks_new_exposure",
+          "name": "missing_fills_after_sync_are_flagged_and_stay_reserved",
           "result": "passed"
         },
         {
@@ -713,11 +845,211 @@
           "result": "passed"
         },
         {
-          "name": "without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order",
+          "name": "link_loss_blocks_new_orders_and_resync_is_required_after_it_returns",
+          "result": "passed"
+        },
+        {
+          "name": "reduce_only_order_is_accepted_during_resync",
+          "result": "passed"
+        },
+        {
+          "name": "position_check_uses_the_reachable_range",
+          "result": "passed"
+        },
+        {
+          "name": "cancel_of_an_unacknowledged_order_is_sent_once_the_order_is_acknowledged",
+          "result": "passed"
+        },
+        {
+          "name": "a_rejection_does_not_consume_the_key",
+          "result": "passed"
+        },
+        {
+          "name": "fia_7_1_reservation_follows_potential_fills",
           "result": "passed"
         },
         {
           "name": "recorded_inputs_re_decide_to_the_recorded_events",
+          "result": "passed"
+        },
+        {
+          "name": "fill_before_send_result_acknowledges_the_order",
+          "result": "passed"
+        },
+        {
+          "name": "open_orders_on_the_other_side_do_not_create_headroom",
+          "result": "passed"
+        },
+        {
+          "name": "field_validation_reasons",
+          "result": "passed"
+        },
+        {
+          "name": "final_quantity_below_booked_fills_is_flagged",
+          "result": "passed"
+        },
+        {
+          "name": "reduce_only_order_is_accepted_while_another_order_is_in_doubt",
+          "result": "passed"
+        },
+        {
+          "name": "reduce_only_order_is_accepted_under_an_unacknowledged_mismatch",
+          "result": "passed"
+        },
+        {
+          "name": "reduce_only_order_is_still_bound_by_the_strategy_position_limit",
+          "result": "passed"
+        },
+        {
+          "name": "restart_puts_outstanding_sends_in_doubt_and_never_resends",
+          "result": "passed"
+        },
+        {
+          "name": "same_key_different_request_is_a_conflict_without_effect",
+          "result": "passed"
+        },
+        {
+          "name": "same_key_same_request_creates_one_order_and_one_send",
+          "result": "passed"
+        },
+        {
+          "name": "significant_figure_rule_exempts_integers",
+          "result": "passed"
+        },
+        {
+          "name": "storage_low_blocks_new_orders_but_not_fills_or_cancels",
+          "result": "passed"
+        },
+        {
+          "name": "strategy_reduction_is_not_account_reduction",
+          "result": "passed"
+        },
+        {
+          "name": "holds_are_independent",
+          "result": "passed"
+        },
+        {
+          "name": "acknowledging_one_mismatch_does_not_clear_another",
+          "result": "passed"
+        },
+        {
+          "name": "duplicate_fill_is_booked_once",
+          "result": "passed"
+        },
+        {
+          "name": "a_pending_cancel_is_sent_when_the_link_returns",
+          "result": "passed"
+        },
+        {
+          "name": "cancel_all_requests_every_open_order_in_scope",
+          "result": "passed"
+        },
+        {
+          "name": "capacity_limits_bound_open_orders_and_outstanding_sends",
+          "result": "passed"
+        },
+        {
+          "name": "the_key_scope_is_per_strategy",
+          "result": "passed"
+        },
+        {
+          "name": "the_duplicate_answer_survives_restart",
+          "result": "passed"
+        },
+        {
+          "name": "unknown_send_outcome_keeps_the_reservation_and_blocks_new_exposure",
+          "result": "passed"
+        },
+        {
+          "name": "terminal_before_fills_keeps_the_unbooked_quantity_reserved",
+          "result": "passed"
+        },
+        {
+          "name": "full_fill_by_fills_alone_closes_the_order",
+          "result": "passed"
+        },
+        {
+          "name": "unidentified_fill_is_booked_as_external_after_the_wait_and_holds_trading",
+          "result": "passed"
+        },
+        {
+          "name": "terminal_without_final_quantity_waits_for_fill_sync",
+          "result": "passed"
+        },
+        {
+          "name": "stale_session_evidence_does_not_satisfy_resync",
+          "result": "passed"
+        },
+        {
+          "name": "reduce_only_order_is_rejected_by_every_block_all_hold",
+          "result": "passed"
+        },
+        {
+          "name": "without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order",
+          "result": "passed"
+        },
+        {
+          "name": "a_loss_of_an_unknown_strategy_records_nothing",
+          "result": "passed"
+        },
+        {
+          "name": "a_configuration_without_the_strategy_drops_its_hold",
+          "result": "passed"
+        },
+        {
+          "name": "hello_restores_only_a_held_strategy",
+          "result": "passed"
+        },
+        {
+          "name": "a_lost_strategy_gets_cancel_requests_for_its_plain_orders_only",
+          "result": "passed"
+        },
+        {
+          "name": "the_hold_survives_replay_and_a_restart",
+          "result": "passed"
+        },
+        {
+          "name": "a_second_loss_records_nothing_and_keeps_the_first_why",
+          "result": "passed"
+        },
+        {
+          "name": "the_hold_refuses_only_that_strategys_plain_orders",
+          "result": "passed"
+        },
+        {
+          "name": "a_positions_answer_of_an_old_session_does_not_end_the_wait",
+          "result": "passed"
+        },
+        {
+          "name": "a_positions_answer_equal_to_the_journal_settles_without_an_adjustment",
+          "result": "passed"
+        },
+        {
+          "name": "an_operator_adjustment_is_written_as_in_schema_1",
+          "result": "passed"
+        },
+        {
+          "name": "a_funding_payment_is_cash_only_and_booked_once",
+          "result": "passed"
+        },
+        {
+          "name": "an_unclassified_execution_holds_plain_orders",
+          "result": "passed"
+        },
+        {
+          "name": "a_venue_position_change_is_booked_flagged_and_holds_plain_orders",
+          "result": "passed"
+        },
+        {
+          "name": "an_unclassified_key_does_not_block_a_later_fill_with_the_same_key",
+          "result": "passed"
+        },
+        {
+          "name": "the_next_positions_answer_after_a_change_is_the_position_of_record",
+          "result": "passed"
+        },
+        {
+          "name": "the_wait_does_not_end_while_an_order_of_ours_can_still_fill",
           "result": "passed"
         }
       ],
@@ -730,12 +1062,8 @@
       "name": "journal",
       "notes": [],
       "ok": true,
-      "seconds": 0.1,
+      "seconds": 5.8,
       "tests": [
-        {
-          "name": "frame::tests::zero_filled_tail_is_not_a_frame",
-          "result": "passed"
-        },
         {
           "name": "frame::tests::finds_a_later_frame_behind_damage",
           "result": "passed"
@@ -745,15 +1073,19 @@
           "result": "passed"
         },
         {
+          "name": "frame::tests::zero_filled_tail_is_not_a_frame",
+          "result": "passed"
+        },
+        {
           "name": "frame::tests::every_truncation_and_every_bit_flip_is_detected",
           "result": "passed"
         },
         {
-          "name": "snapshot::tests::newest_valid_snapshot_wins_and_damaged_ones_are_skipped",
+          "name": "snapshot::tests::truncated_snapshot_is_rejected",
           "result": "passed"
         },
         {
-          "name": "snapshot::tests::truncated_snapshot_is_rejected",
+          "name": "snapshot::tests::newest_valid_snapshot_wins_and_damaged_ones_are_skipped",
           "result": "passed"
         },
         {
@@ -765,7 +1097,7 @@
           "result": "passed"
         },
         {
-          "name": "a_journal_of_another_instance_is_refused",
+          "name": "truncation_can_be_disabled",
           "result": "passed"
         },
         {
@@ -773,19 +1105,15 @@
           "result": "passed"
         },
         {
-          "name": "damage_in_the_last_record_is_treated_as_an_incomplete_tail",
-          "result": "passed"
-        },
-        {
-          "name": "verify_all_reads_without_modifying",
-          "result": "passed"
-        },
-        {
           "name": "records_are_durable_only_after_sync",
           "result": "passed"
         },
         {
-          "name": "truncation_can_be_disabled",
+          "name": "a_journal_of_another_instance_is_refused",
+          "result": "passed"
+        },
+        {
+          "name": "verify_all_reads_without_modifying",
           "result": "passed"
         },
         {
@@ -794,6 +1122,10 @@
         },
         {
           "name": "a_schema_change_starts_a_new_segment",
+          "result": "passed"
+        },
+        {
+          "name": "damage_in_the_last_record_is_treated_as_an_incomplete_tail",
           "result": "passed"
         },
         {
@@ -821,7 +1153,7 @@
           "result": "passed"
         },
         {
-          "name": "a_snapshot_without_any_segment_is_not_accepted_silently",
+          "name": "a_foreign_instance_journal_is_refused_without_being_modified",
           "result": "passed"
         },
         {
@@ -829,15 +1161,11 @@
           "result": "passed"
         },
         {
-          "name": "a_foreign_instance_journal_is_refused_without_being_modified",
-          "result": "passed"
-        },
-        {
-          "name": "a_schema_change_right_after_a_rotation_can_still_write",
-          "result": "passed"
-        },
-        {
           "name": "stale_and_out_of_order_frames_are_classified_conservatively",
+          "result": "passed"
+        },
+        {
+          "name": "a_snapshot_without_any_segment_is_not_accepted_silently",
           "result": "passed"
         },
         {
@@ -845,7 +1173,47 @@
           "result": "passed"
         },
         {
+          "name": "a_schema_change_right_after_a_rotation_can_still_write",
+          "result": "passed"
+        },
+        {
           "name": "an_incomplete_newest_segment_after_a_snapshot_at_the_boundary_is_set_aside",
+          "result": "passed"
+        },
+        {
+          "name": "a_frame_with_the_wrong_sequence_comes_after_the_good_records",
+          "result": "passed"
+        },
+        {
+          "name": "the_tail_never_takes_the_lock",
+          "result": "passed"
+        },
+        {
+          "name": "a_damaged_durable_frame_stops_the_tail_without_moving_it",
+          "result": "passed"
+        },
+        {
+          "name": "the_tail_reads_a_header_only_segment_rewritten_with_a_new_schema",
+          "result": "passed"
+        },
+        {
+          "name": "peek_beyond_shows_valid_frames_past_the_cap_without_moving",
+          "result": "passed"
+        },
+        {
+          "name": "the_tail_follows_a_schema_change_to_a_new_segment",
+          "result": "passed"
+        },
+        {
+          "name": "the_tail_never_returns_a_record_above_the_durable_cap",
+          "result": "passed"
+        },
+        {
+          "name": "damage_before_the_cursor_is_an_error",
+          "result": "passed"
+        },
+        {
+          "name": "the_tail_follows_segment_rotation_and_starts_after_a_cursor",
           "result": "passed"
         }
       ],
@@ -858,10 +1226,26 @@
       "name": "api",
       "notes": [],
       "ok": true,
-      "seconds": 0.1,
+      "seconds": 3.2,
       "tests": [
         {
+          "name": "ctl::tests::clear_hold_parses_its_reason_and_note",
+          "result": "passed"
+        },
+        {
+          "name": "tests::a_new_order_line_may_carry_a_market_ref",
+          "result": "passed"
+        },
+        {
+          "name": "tests::wire_example_of_the_heartbeat",
+          "result": "passed"
+        },
+        {
           "name": "tests::wire_examples",
+          "result": "passed"
+        },
+        {
+          "name": "tests::wire_examples_of_the_holds",
           "result": "passed"
         }
       ],
@@ -876,10 +1260,10 @@
         "caught as expected: [bridge] seed 1 profile lossy step 426: venue position -1.61 outside [-1.79, -1.71] (booked -1.71)",
         "caught as expected: [bridge] seed 1 profile lossy step 426: venue position -1.61 outside [-1.79, -1.71] (booked -1.71)",
         "profile=external seeds=400 inputs=1074783 records=388690 requests=198303 accepted=5955 rejected=186380 duplicates=4645 conflicts=1323 sends=5955 venue_orders=5166 venue_fills=6105 crashes=0 link_drops=3231 in_doubt=669 not_placed=475 parked=367 purged=0 mismatches=777 external_fills=3706",
-        "profile=weak_evidence seeds=400 inputs=821450 records=327965 requests=198272 accepted=13445 rejected=174742 duplicates=4944 conflicts=1297 sends=13445 venue_orders=11624 venue_fills=14109 crashes=7273 link_drops=1371 in_doubt=2083 not_placed=1110 parked=2060 purged=0 mismatches=0 external_fills=0",
-        "profile=crashy seeds=400 inputs=824380 records=331391 requests=198256 accepted=13835 rejected=174057 duplicates=5048 conflicts=1347 sends=13835 venue_orders=11923 venue_fills=14342 crashes=7296 link_drops=1397 in_doubt=2065 not_placed=1158 parked=0 purged=0 mismatches=0 external_fills=0",
         "profile=skewed seeds=400 inputs=823596 records=331701 requests=198224 accepted=13842 rejected=174106 duplicates=5020 conflicts=1303 sends=13842 venue_orders=12038 venue_fills=14548 crashes=7279 link_drops=1389 in_doubt=2047 not_placed=1066 parked=0 purged=0 mismatches=0 external_fills=0",
+        "profile=weak_evidence seeds=400 inputs=821450 records=327965 requests=198272 accepted=13445 rejected=174742 duplicates=4944 conflicts=1297 sends=13445 venue_orders=11624 venue_fills=14109 crashes=7273 link_drops=1371 in_doubt=2083 not_placed=1110 parked=2060 purged=0 mismatches=0 external_fills=0",
         "profile=purge seeds=400 inputs=1050152 records=463462 requests=269386 accepted=33952 rejected=213882 duplicates=14462 conflicts=4128 sends=33952 venue_orders=29329 venue_fills=34308 crashes=5957 link_drops=0 in_doubt=4200 not_placed=2878 parked=0 purged=33702 mismatches=0 external_fills=0",
+        "profile=crashy seeds=400 inputs=824380 records=331391 requests=198256 accepted=13835 rejected=174057 duplicates=5048 conflicts=1347 sends=13835 venue_orders=11923 venue_fills=14342 crashes=7296 link_drops=1397 in_doubt=2065 not_placed=1158 parked=0 purged=0 mismatches=0 external_fills=0",
         "profile=lossy seeds=400 inputs=1364431 records=475926 requests=197532 accepted=27817 rejected=157554 duplicates=9604 conflicts=2557 sends=27817 venue_orders=23963 venue_fills=27762 crashes=0 link_drops=3200 in_doubt=3246 not_placed=2367 parked=0 purged=0 mismatches=0 external_fills=0",
         "profile=margin_lossy seeds=400 inputs=1739891 records=1167809 requests=185537 accepted=24192 rejected=148367 duplicates=9976 conflicts=2588 sends=24192 venue_orders=15248 venue_fills=15711 crashes=1253 link_drops=1219 in_doubt=3062 not_placed=2638 parked=0 purged=0 mismatches=0 external_fills=0",
         "profile=margin_lossy margin: leverage_checked=15455 leverage_rejects=8893",
@@ -905,7 +1289,7 @@
         "profile=margin_calm margin: margin_polls=444553 margin_records=443753"
       ],
       "ok": true,
-      "seconds": 67.1,
+      "seconds": 74.3,
       "tests": [
         {
           "name": "rng::tests::matches_the_reference_sequence",
@@ -924,11 +1308,11 @@
           "result": "passed"
         },
         {
-          "name": "absence_rule_depends_on_venue_side_expiry",
+          "name": "absence_rule_depends_on_the_clock_margin",
           "result": "passed"
         },
         {
-          "name": "absence_rule_depends_on_the_clock_margin",
+          "name": "absence_rule_depends_on_venue_side_expiry",
           "result": "passed"
         },
         {
@@ -944,19 +1328,19 @@
           "result": "passed"
         },
         {
-          "name": "profile_weak_evidence",
-          "result": "passed"
-        },
-        {
-          "name": "profile_crashy",
-          "result": "passed"
-        },
-        {
           "name": "profile_skewed",
           "result": "passed"
         },
         {
+          "name": "profile_weak_evidence",
+          "result": "passed"
+        },
+        {
           "name": "profile_purge",
+          "result": "passed"
+        },
+        {
+          "name": "profile_crashy",
           "result": "passed"
         },
         {
@@ -984,51 +1368,55 @@
           "result": "passed"
         },
         {
-          "name": "profile_margin_calm_release_invariant",
+          "name": "profile_margin_calm_reducing_invariant",
           "result": "passed"
         },
         {
-          "name": "profile_margin_calm_reducing_invariant",
+          "name": "profile_margin_calm_release_invariant",
           "result": "passed"
         }
       ],
       "what": "deterministic simulation, 10 profiles (7 without a margin policy, 3 with one) and 2 broken-assumption runs; margin_days runs a tenth of the seeds"
     },
     {
-      "command": "cargo test -p oms-node --lib --test reconciler",
+      "command": "cargo test -p oms-node --lib --test reconciler --test record_schema --test alerts --test holds_node --test liveness --test monitor_node --test bybit_recorded",
       "exit_code": 0,
       "log": "evidence/latest/node-unit.log",
       "name": "node-unit",
       "notes": [],
       "ok": true,
-      "seconds": 2.7,
+      "seconds": 86.8,
       "tests": [
         {
-          "name": "venue::hyperliquid::tests::the_budget_stops_orders_before_cancels",
+          "name": "alerts::tests::the_fatal_text_holds_the_reason_and_the_seq_only",
           "result": "passed"
         },
         {
-          "name": "util::tests::quantiles_of_a_known_distribution",
+          "name": "alerts::tests::a_lost_strategy_link_is_its_own_condition_at_once",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::tests::a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time",
+          "name": "alerts::tests::a_mismatch_condition_per_kind_lists_the_count_and_the_newest_three",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::tests::a_fill_page_proves_completeness_only_when_it_is_certainly_the_last",
+          "name": "alerts::tests::conditions_give_the_keys_of_the_table",
           "result": "passed"
         },
         {
-          "name": "util::tests::histogram_bounds_hold_for_every_value",
+          "name": "alerts::tests::unmonitored_is_a_passing_condition_with_its_cancel_time",
           "result": "passed"
         },
         {
-          "name": "queues::tests::ticks_coalesce",
+          "name": "alerts::tests::every_hold_reason_has_a_text_and_the_grace_of_the_table",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::sign::tests::expires_after_is_appended_as_in_the_sdk_source",
+          "name": "alerts::tests::the_plain_only_hold_texts_follow_the_margin_policy",
+          "result": "passed"
+        },
+        {
+          "name": "config::tests::the_test_telegram_api_must_be_loopback_http",
           "result": "passed"
         },
         {
@@ -1036,7 +1424,47 @@
           "result": "passed"
         },
         {
-          "name": "queues::tests::every_lane_gets_a_share_of_each_batch",
+          "name": "liveness::tests::a_full_queue_is_retried_on_the_next_tick",
+          "result": "passed"
+        },
+        {
+          "name": "liveness::tests::a_hello_for_another_strategy_closes_the_connection_for_the_first",
+          "result": "passed"
+        },
+        {
+          "name": "liveness::tests::a_strategy_that_is_not_listed_has_no_liveness",
+          "result": "passed"
+        },
+        {
+          "name": "liveness::tests::a_hello_while_a_restore_is_in_flight_waits_for_it_too",
+          "result": "passed"
+        },
+        {
+          "name": "liveness::tests::at_start_only_strategies_with_plain_orders_are_armed",
+          "result": "passed"
+        },
+        {
+          "name": "liveness::tests::hello_after_a_loss_asks_for_the_restore_and_a_waiting_loss_goes_first",
+          "result": "passed"
+        },
+        {
+          "name": "liveness::tests::no_request_for_liveness_ms_reports_a_loss_and_any_request_keeps_it_alive",
+          "result": "passed"
+        },
+        {
+          "name": "liveness::tests::the_last_close_reports_one_loss_until_the_next_hello",
+          "result": "passed"
+        },
+        {
+          "name": "liveness::tests::two_connections_count_and_only_the_last_close_reports",
+          "result": "passed"
+        },
+        {
+          "name": "monitor::tests::a_heartbeat_line_becomes_a_core_input_in_microseconds",
+          "result": "passed"
+        },
+        {
+          "name": "monitor::tests::two_heartbeats_per_second_per_connection",
           "result": "passed"
         },
         {
@@ -1044,71 +1472,91 @@
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::wire::tests::status_mapping",
-          "result": "passed"
-        },
-        {
           "name": "queues::tests::close_drains_then_ends",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::wire::tests::user_abstraction_values_parse_and_an_unknown_value_stays_unknown",
+          "name": "config::tests::example_config_with_a_margin_policy_loads",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::wire::tests::odd_coin_names_are_mapped_not_dropped",
+          "name": "queues::tests::ticks_coalesce",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::wire::tests::fill_translation",
+          "name": "node::tests::a_marker_that_cannot_be_examined_latches",
           "result": "passed"
         },
         {
-          "name": "venue::simproto::tests::a_margin_answer_without_its_position_list_is_not_read",
+          "name": "queues::tests::every_lane_gets_a_share_of_each_batch",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::sign::tests::action_hash_matches_the_sdk_vector",
+          "name": "util::tests::quantiles_of_a_known_distribution",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::wire::tests::anything_else_is_unclear_not_a_failure",
+          "name": "venue::bybit::answer::tests::anything_but_a_documented_refusal_is_unknown",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::wire::tests::documented_active_asset_data_parses_leverage_and_mode",
+          "name": "util::tests::histogram_bounds_hold_for_every_value",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::wire::tests::documented_clearinghouse_state_parses_to_a_margin_report",
+          "name": "venue::bybit::answer::tests::code_zero_is_accepted_with_its_object_from_rest_or_ws",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::wire::tests::documented_place_answers",
+          "name": "venue::bybit::checks::tests::a_passing_ip_recheck_does_not_lift_a_failed_boot_check",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::wire::tests::documented_cancel_answers",
+          "name": "node::tests::the_kill_marker_is_whatever_is_at_its_path",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::wire::tests::margin_and_setting_request_json",
+          "name": "venue::bybit::checks::tests::an_ipv4_mapped_address_is_its_ipv4_address",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::wire::tests::missing_zero_or_unparseable_max_leverage_rejects_the_whole_report",
+          "name": "venue::bybit::exec::tests::a_funding_row_is_cash_and_never_a_fill",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::wire::tests::a_position_on_an_unconfigured_coin_is_kept",
+          "name": "venue::bybit::exec::tests::a_row_that_cannot_be_read_is_an_error_not_an_input",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::wire::tests::order_wire_json",
+          "name": "venue::bybit::exec::tests::a_trade_of_our_order_is_a_fill_of_that_order",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::sign::tests::the_address_is_derived_and_the_key_is_not_printed",
+          "name": "venue::bybit::exec::tests::a_trade_of_an_order_that_is_not_ours_is_an_external_fill",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::exec::tests::each_venue_made_execution_type_is_a_position_change_of_its_kind",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::exec::tests::every_other_execution_type_is_unclassified",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::checks::tests::the_clock_slot_blocks_creates_only",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::answer::tests::every_documented_code_has_exactly_one_class",
+          "result": "passed"
+        },
+        {
+          "name": "config::tests::the_bybit_reference_price_interval_is_bounded_by_one_second_and_half_the_freshness_limit",
+          "result": "passed"
+        },
+        {
+          "name": "config::tests::the_account_mm_limit_is_required_on_bybit_and_refused_elsewhere",
           "result": "passed"
         },
         {
@@ -1116,15 +1564,491 @@
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::wire::tests::any_unparseable_number_rejects_the_whole_report",
+          "name": "config::tests::the_monitoring_gate_is_validated_and_required_on_mainnet",
           "result": "passed"
         },
         {
-          "name": "venue::hyperliquid::sign::tests::schedule_cancel_signature_matches_the_sdk_vectors",
+          "name": "config::tests::the_kill_loop_fields_are_bounded",
+          "result": "passed"
+        },
+        {
+          "name": "config::tests::the_liveness_section_is_validated_and_required_on_mainnet",
+          "result": "passed"
+        },
+        {
+          "name": "config::tests::the_alert_table_is_validated_and_required_on_mainnet",
+          "result": "passed"
+        },
+        {
+          "name": "config::tests::steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused",
+          "result": "passed"
+        },
+        {
+          "name": "util::tests::a_tripped_flag_always_has_its_reason",
+          "result": "passed"
+        },
+        {
+          "name": "config::tests::a_bybit_configuration_loads_and_each_unsafe_value_is_refused",
+          "result": "passed"
+        },
+        {
+          "name": "config::tests::the_kill_marker_is_validated_and_required_on_mainnet",
+          "result": "passed"
+        },
+        {
+          "name": "alerts::tests::a_fatal_trip_during_an_evaluation_sets_nothing",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::checks::tests::requests_from_an_address_the_key_is_not_bound_to_are_an_auth_block",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::checks::tests::a_slow_clock_answer_proves_nothing",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::checks::tests::a_local_clock_ahead_by_more_than_half_a_second_blocks",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::checks::tests::the_boot_checks_pass_on_the_configured_account",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::checks::tests::a_later_ip_change_blocks_and_an_auth_block_is_not_cleared",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::checks::tests::a_rejected_key_is_an_auth_block_and_an_unanswered_check_is_unchecked",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::checks::tests::a_unified_status_outside_3_to_6_or_missing_blocks",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_row_without_a_symbol_takes_the_link_down",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_refused_subscription_never_brings_the_link_up_and_is_retried",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_403_on_the_public_upgrade_pauses_every_request",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_403_on_the_ws_trade_upgrade_pauses_every_request",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_connection_that_drops_after_reading_the_request_makes_it_unknown",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::an_order_and_a_cancel_each_go_out_once_over_rest_and_get_one_result",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::an_unreadable_row_or_a_closed_socket_takes_the_link_down_and_it_comes_back",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_key_rejected_by_a_query_takes_the_link_down_for_good",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_ban_met_by_the_clock_check_ends_the_round",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::answers_20006_and_10019_are_unknown_and_10019_reopens_the_connection",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_missing_pong_takes_the_link_down_and_the_reconnect_is_a_new_session",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_refused_ws_trade_auth_rejects_the_key_until_the_restart",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::checks::tests::steps_off_the_venue_steps_block_and_unreadable_steps_are_unchecked",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_local_clock_ahead_of_the_venue_keeps_orders_home_but_not_cancels_or_the_link",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::the_test_wiring_takes_only_hosts_on_127_0_0_1",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_refused_stream_auth_blocks_until_the_restart_and_nothing_is_sent_after",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::nothing_goes_out_while_blocked_or_for_an_untraded_symbol",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_late_answer_is_dropped",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::an_ip_change_while_up_takes_the_link_down_for_good",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::the_task_applies_a_ban_or_key_answer_before_its_next_write",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_ws_trade_that_stops_answering_pings_makes_its_pending_request_unknown",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_blocked_gateway_sends_no_cancel_all_and_says_why",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::the_task_writes_nothing_under_a_block_and_no_reqid_twice",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::a_count_change_is_shown_and_an_unknown_count_is_not_a_change",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::a_failed_count_is_never_zero",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_403_on_the_stream_upgrade_pauses_every_request_then_the_link_comes_up",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::a_late_order_in_the_watch_restarts_the_rounds",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_ws_ip_limit_answer_starts_the_ban_pause",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::a_slow_watch_check_answered_after_the_end_is_not_the_last_check",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::an_ip_ban_stops_every_request_for_the_pause_then_the_link_comes_back",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::a_stopped_machine_asks_for_nothing",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::the_ticker_stream_subscribes_ten_topics_per_request",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::checks::tests::each_wrong_account_fact_blocks",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::an_unreadable_ticker_frame_ends_the_connection_and_the_next_starts_with_no_mark",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::no_create_leaves_while_the_kill_loop_runs",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::ten_minutes_of_failed_queries_send_at_most_twelve_notices",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::the_liquidation_distance_is_rounded_down_and_unknown_without_a_price",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::the_machine_watches_30_s_after_the_first_zero",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::the_notice_texts_hold_the_tag_the_round_the_count_and_the_calls",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::the_position_block_lists_each_position_and_leaves_out_size_zero",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_refused_ticker_subscription_is_retried",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_silent_ws_trade_makes_every_unanswered_request_unknown_and_nothing_is_sent_again",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::a_stop_ends_the_loop_without_a_notice_or_an_input",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::orders::tests::a_block_after_the_wait_sends_nothing",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::orders::tests::a_create_is_one_signed_limit_order_and_its_ack_is_an_open_order",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::orders::tests::a_create_with_an_rsa_key_is_signed_in_base64_over_the_body_sent",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::a_hanging_position_read_holds_back_no_cancel_all",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::orders::tests::a_dead_venue_is_not_sent",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::orders::tests::a_request_goes_over_ws_trade_when_it_is_up_and_not_over_rest",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_ticker_connection_that_fails_before_its_first_pong_keeps_the_waits_growing",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::orders::tests::a_written_request_without_an_answer_is_unknown_and_not_sent_again",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_link_that_fails_before_its_first_pong_keeps_the_waits_growing",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::a_block_that_appears_during_the_budget_wait_keeps_the_cancel_all_home",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::orders::tests::an_expiry_inside_the_window_plus_one_second_sends_nothing",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::orders::tests::a_request_not_written_goes_over_rest_once_unless_a_block_came",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::orders::tests::refusals_are_rejected_and_the_key_and_ip_answers_have_their_effects",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::orders::tests::the_send_time_rule_is_exact_at_the_bound",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::the_stream_does_not_connect_while_a_boot_check_fails",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::orders::tests::a_cancel_goes_by_client_id_and_has_the_same_classes",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::the_link_comes_up_after_the_checks_auth_and_subscribe_and_stream_rows_become_inputs",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::an_unanswered_ticker_subscription_ends_the_connection_after_the_handshake_time",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::orders::tests::ws_answers_have_the_rest_classes_and_their_effects",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::query::tests::a_row_that_cannot_be_read_stops_the_sync_before_its_window_is_declared",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_missing_ticker_pong_ends_the_connection_and_the_public_pong_keeps_it",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::one_unanswered_subscribe_request_of_two_ends_the_connection",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::query::tests::a_status_answer_about_another_order_or_of_a_kind_we_never_send_concludes_nothing",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::the_emergency_budget_holds_two_per_second_with_a_short_round",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::query::tests::an_order_missing_from_the_open_order_view_is_looked_up_in_the_history",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::a_5xx_cancel_all_repeats_until_zero_and_never_exceeds_two_per_second",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::query::tests::fills_are_read_in_windows_of_at_most_seven_days_each_declared_synced",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::every_notice_lists_each_position_with_its_liquidation_distance_or_unknown",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::one_order_left_after_the_first_cancel_all_repeats_until_zero_then_watches_30_s",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::query::tests::the_gateway_has_no_order_request",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::query::tests::the_status_of_our_order_is_read_from_the_open_order_view",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::query::tests::the_status_table",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::query::tests::open_orders_are_read_through_every_page",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::query::tests::positions_are_signed_by_side",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::rest::tests::a_get_is_signed_over_the_query_string_it_sends",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::rest::tests::a_post_is_signed_over_the_exact_body_it_sends",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::rest::tests::an_rsa_credentials_file_is_read_and_its_refusals_quote_no_key",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::query::tests::fills_follow_the_cursor_and_a_window_whose_last_page_cannot_be_told_is_split",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::rest::tests::an_rsa_key_signs_a_get_in_base64_over_the_query_sent",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::rest::tests::the_credentials_file_must_be_owner_only_and_the_secret_never_prints",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::sign::tests::a_venue_cursor_is_sent_as_is_and_other_characters_are_refused",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::sign::tests::rsa_signatures_are_openssls_base64_and_verify_with_the_public_key",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::sign::tests::signatures_match_independent_hmac_values",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::sign::tests::the_strings_to_sign_are_the_venues_examples",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::stream::tests::an_order_row_becomes_a_stream_status_of_our_order_or_of_a_foreign_one",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::stream::tests::frames_are_read_by_their_documented_fields",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::stream::tests::the_auth_message_with_an_rsa_key_carries_the_base64_signature",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::stream::tests::the_sent_messages_have_the_documented_shapes",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::query::tests::an_order_is_not_found_only_when_neither_view_has_it",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::tests::endpoints_are_the_documented_hosts",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::ticker::tests::a_new_connection_knows_no_mark_until_its_snapshot_and_keeps_the_interval",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::ticker::tests::a_snapshot_then_deltas_give_the_mark_at_most_once_per_interval",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::ticker::tests::an_unreadable_ticker_frame_is_an_error",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::ticker::tests::frames_are_read_by_their_documented_fields",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::ticker::tests::subscribe_requests_hold_at_most_ten_topics_each",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::trade::tests::a_request_carries_its_id_time_window_op_and_the_rest_body",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::trade::tests::frames_are_read_by_their_documented_fields",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::trade::tests::req_ids_are_unique_per_request_and_fit_the_venue_limit",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::trade::tests::the_auth_message_is_the_private_stream_signature",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::trade::tests::the_auth_message_with_an_rsa_key_carries_the_base64_signature",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::sign::tests::action_hash_matches_the_sdk_vector",
           "result": "passed"
         },
         {
           "name": "venue::hyperliquid::sign::tests::dummy_action_signature_matches_the_sdk_vectors",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::sign::tests::expires_after_is_appended_as_in_the_sdk_source",
           "result": "passed"
         },
         {
@@ -1136,15 +2060,347 @@
           "result": "passed"
         },
         {
-          "name": "config::tests::example_config_with_a_margin_policy_loads",
+          "name": "venue::hyperliquid::sign::tests::schedule_cancel_signature_matches_the_sdk_vectors",
           "result": "passed"
         },
         {
-          "name": "util::tests::a_tripped_flag_always_has_its_reason",
+          "name": "venue::hyperliquid::sign::tests::the_address_is_derived_and_the_key_is_not_printed",
           "result": "passed"
         },
         {
-          "name": "config::tests::steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused",
+          "name": "venue::hyperliquid::tests::a_fill_page_proves_completeness_only_when_it_is_certainly_the_last",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::tests::a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::tests::the_budget_stops_orders_before_cancels",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::wire::tests::a_position_on_an_unconfigured_coin_is_kept",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::wire::tests::any_unparseable_number_rejects_the_whole_report",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::wire::tests::anything_else_is_unclear_not_a_failure",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::wire::tests::documented_active_asset_data_parses_leverage_and_mode",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::wire::tests::documented_cancel_answers",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::wire::tests::documented_clearinghouse_state_parses_to_a_margin_report",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::wire::tests::documented_place_answers",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::wire::tests::fill_translation",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::wire::tests::margin_and_setting_request_json",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::wire::tests::missing_zero_or_unparseable_max_leverage_rejects_the_whole_report",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::wire::tests::odd_coin_names_are_mapped_not_dropped",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::wire::tests::order_wire_json",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::wire::tests::status_mapping",
+          "result": "passed"
+        },
+        {
+          "name": "venue::hyperliquid::wire::tests::user_abstraction_values_parse_and_an_unknown_value_stays_unknown",
+          "result": "passed"
+        },
+        {
+          "name": "venue::simproto::tests::a_margin_answer_without_its_position_list_is_not_read",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::tests::cancel_all_fails_unless_the_venue_says_success_and_flags_the_cap",
+          "result": "passed"
+        },
+        {
+          "name": "venue::tests::a_gateway_plugged_in_through_the_trait_gets_each_command_and_query_once",
+          "result": "passed"
+        },
+        {
+          "name": "venue::tests::the_gateways_of_today_write_the_hex_form",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::orders_go_over_ws_trade_when_it_is_up_over_rest_while_it_is_down_and_back",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::query::tests::the_margin_report_maps_the_unified_account",
+          "result": "passed"
+        },
+        {
+          "name": "venue::tests::the_driver_bounds_concurrent_commands_and_queries_and_drops_none",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::rest::tests::other_answers_have_their_own_class",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::rest::tests::every_auth_code_is_a_rejected_key_after_one_request",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::the_ticker_stream_connects_only_without_a_block",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::kill_stop_ends_the_loop_and_creates_flow_again",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::time_spent_waiting_on_a_full_core_queue_does_not_count_against_the_pong",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::orders::tests::the_ninth_create_in_a_second_waits_across_both_paths",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::query::tests::the_venue_setting_and_the_account_mode_are_read_as_they_are",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::query::tests::a_margin_answer_that_cannot_be_read_as_a_whole_is_refused_as_a_whole",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::query::tests::the_account_mm_rate_field_is_not_used_for_the_judgment",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::orders::tests::the_ninth_create_in_a_second_waits_while_a_cancel_goes_out",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::the_kill_is_not_armed_before_the_boot_checks_pass",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_quiet_stream_that_answers_pings_never_fires_the_kill",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::the_ticker_mark_becomes_the_reference_price_at_most_once_per_interval",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::a_slow_position_read_lets_at_most_one_notice_wait_and_the_newest_wins",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::query::tests::a_snapshot_whose_last_page_cannot_be_told_gives_no_input",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::query::tests::a_long_gap_is_synced_over_several_queries_within_the_page_budget",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::query::tests::the_kill_count_is_every_open_row_of_every_page_and_never_a_guess",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::ws_trade_reconnect_waits_grow_until_a_pong_then_start_over",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::no_subscription_goes_out_before_the_auth_answer_and_a_silent_auth_is_retried",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::a_reconnect_before_the_deadline_does_not_fire",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::orders::tests::no_answer_is_unknown_and_nothing_is_sent_twice",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::orders::tests::a_ws_request_without_an_answer_counts_until_its_last_arrival_plus_a_second",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::the_reconnect_waits_start_over_after_a_link_that_came_up",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::time_waiting_on_the_core_queue_does_not_fire_the_kill",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::orders::tests::a_slot_without_an_answer_counts_until_its_last_arrival_plus_a_second",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::gateway::tests::the_kill_fires_kill_after_the_last_pong_and_not_before",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::while_requests_are_paused_no_count_and_no_position_read_go_out",
+          "result": "passed"
+        },
+        {
+          "name": "venue::bybit::kill::tests::ten_minutes_of_failed_queries_reach_the_fake_telegram_at_most_twelve_times",
+          "result": "passed"
+        },
+        {
+          "name": "the_token_file_is_loaded_with_its_rules",
+          "result": "passed"
+        },
+        {
+          "name": "the_shipped_binary_ignores_the_test_telegram_api",
+          "result": "passed"
+        },
+        {
+          "name": "a_hung_telegram_never_slows_the_commit_stage",
+          "result": "passed"
+        },
+        {
+          "name": "the_start_notice_counts_sent_and_pending_conditions_apart",
+          "result": "passed"
+        },
+        {
+          "name": "finish_sends_the_fatal_message_whatever_the_code",
+          "result": "passed"
+        },
+        {
+          "name": "after_a_fatal_stop_only_the_fatal_message_is_sent",
+          "result": "passed"
+        },
+        {
+          "name": "a_kill_latch_is_told_at_once_and_a_notice_goes_out_once",
+          "result": "passed"
+        },
+        {
+          "name": "telegram_failing_over_60s_notifies_the_second_channel",
+          "result": "passed"
+        },
+        {
+          "name": "nothing_is_sent_before_its_record_is_durable",
+          "result": "passed"
+        },
+        {
+          "name": "a_storage_low_that_lasts_past_the_grace_sends_one_start",
+          "result": "passed"
+        },
+        {
+          "name": "repeat_rule_with_an_injected_clock",
+          "result": "passed"
+        },
+        {
+          "name": "grace_hides_a_short_link_down_and_reports_a_long_one",
+          "result": "passed"
+        },
+        {
+          "name": "a_storage_low_that_flaps_inside_the_grace_sends_nothing",
+          "result": "passed"
+        },
+        {
+          "name": "outbox_bound_holds_and_drops_are_counted",
+          "result": "passed"
+        },
+        {
+          "name": "recorded_execution_rows_classify_as_our_fills",
+          "result": "passed"
+        },
+        {
+          "name": "recorded_refusals_read_as_rejected",
+          "result": "passed"
+        },
+        {
+          "name": "a_recorded_empty_cancel_all_reads_as_nothing_cancelled",
+          "result": "passed"
+        },
+        {
+          "name": "recorded_open_orders_positions_and_fills_become_core_inputs",
+          "result": "passed"
+        },
+        {
+          "name": "the_recorded_margin_report_and_account_mode_are_read",
+          "result": "passed"
+        },
+        {
+          "name": "a_marker_path_that_cannot_be_examined_latches",
+          "result": "passed"
+        },
+        {
+          "name": "an_unremovable_marker_is_reported_and_latches_the_next_boot",
+          "result": "passed"
+        },
+        {
+          "name": "watcher_mismatch_over_the_admin_socket_refuses_plain_orders_only",
+          "result": "passed"
+        },
+        {
+          "name": "a_kill_marker_at_boot_refuses_every_order_until_clear_hold_kill_removes_it",
+          "result": "passed"
+        },
+        {
+          "name": "a_hello_for_another_strategy_loses_the_first_on_that_connection",
+          "result": "passed"
+        },
+        {
+          "name": "closing_the_last_connection_cancels_that_strategys_plain_orders_only",
+          "result": "passed"
+        },
+        {
+          "name": "hello_after_a_loss_is_answered_after_the_restore_is_durable",
+          "result": "passed"
+        },
+        {
+          "name": "a_second_connection_keeps_the_strategy_alive",
+          "result": "passed"
+        },
+        {
+          "name": "after_a_restart_a_strategy_with_resting_plain_orders_is_armed_without_a_hello",
+          "result": "passed"
+        },
+        {
+          "name": "five_seconds_without_a_request_cancel_and_a_ping_keeps_it_alive",
+          "result": "passed"
+        },
+        {
+          "name": "without_the_gate_there_is_no_monitor_socket",
+          "result": "passed"
+        },
+        {
+          "name": "heartbeats_over_monitor_sock_open_the_gate_and_other_ops_are_forbidden",
+          "result": "passed"
+        },
+        {
+          "name": "a_stale_heartbeat_unmonitors_and_the_node_cancels_resting_plain_orders_later",
           "result": "passed"
         },
         {
@@ -1154,12 +2410,1340 @@
         {
           "name": "an_unanswered_setting_or_mode_query_is_repeated_at_the_setting_period_only",
           "result": "passed"
+        },
+        {
+          "name": "this_build_writes_schema_2_and_reads_1_and_2",
+          "result": "passed"
+        },
+        {
+          "name": "kill_holds_liveness_and_heartbeats_recover_to_the_live_state",
+          "result": "passed"
+        },
+        {
+          "name": "a_snapshot_of_state_schema_1_is_skipped_and_the_journal_replays_the_venue_change",
+          "result": "passed"
+        },
+        {
+          "name": "margin_reports_with_and_without_account_mm_recover_to_the_live_state",
+          "result": "passed"
+        },
+        {
+          "name": "a_schema_1_journal_and_a_schema_2_tail_replay_to_the_live_state",
+          "result": "passed"
         }
       ],
-      "what": "queues, histogram, Hyperliquid signing vectors and message translation; the reconciler task at its ports (pace of the margin, venue-setting and account-mode queries)"
+      "what": "queues, histogram, Hyperliquid signing vectors and message translation; the reconciler task at its ports (pace of the margin, venue-setting and account-mode queries); the record schema (old journals replay, recovery from disk); the direct alerts in-process (conditions, grace, repeat, fatal, durable only; loopback fake Telegram); the holds of C-HOLD through oms-node and simvenue processes (kill marker, clear-hold, the watcher's inputs); strategy liveness through oms-node and simvenue processes (C-LIVE: the last close, silence, a second connection, hello after a loss); the monitoring gate through oms-node and simvenue processes (C-LIVE part 2: monitor.sock, heartbeats, stage 2 at the venue, a restart); the Bybit gateway on answers recorded from the real testnet (loopback fake serving the recorded bodies)"
     },
     {
-      "command": "cargo test -p oms-node --features failpoints --test pipeline --test crash_points -- --nocapture",
+      "command": "cargo test -p alert-direct",
+      "exit_code": 0,
+      "log": "evidence/latest/alert.log",
+      "name": "alert",
+      "notes": [],
+      "ok": true,
+      "seconds": 5.9,
+      "tests": [
+        {
+          "name": "default_timeouts",
+          "result": "passed"
+        },
+        {
+          "name": "default_routes_are_telegram_and_pinned_ip",
+          "result": "passed"
+        },
+        {
+          "name": "config_refuses_unsafe_files",
+          "result": "passed"
+        },
+        {
+          "name": "outbox_bound_and_drop_notice",
+          "result": "passed"
+        },
+        {
+          "name": "outbox_outcomes",
+          "result": "passed"
+        },
+        {
+          "name": "repeat_rule_with_injected_clock",
+          "result": "passed"
+        },
+        {
+          "name": "split_matches_pr3",
+          "result": "passed"
+        },
+        {
+          "name": "set_never_waits",
+          "result": "passed"
+        },
+        {
+          "name": "forget_makes_the_next_start_send_again",
+          "result": "passed"
+        },
+        {
+          "name": "fallback_route_and_last_good_first",
+          "result": "passed"
+        },
+        {
+          "name": "handle_set_uses_the_repeat_rule_and_the_prefix",
+          "result": "passed"
+        },
+        {
+          "name": "repeat_state_survives_restart",
+          "result": "passed"
+        },
+        {
+          "name": "second_channel_gets_every_message",
+          "result": "passed"
+        },
+        {
+          "name": "send_outcomes",
+          "result": "passed"
+        },
+        {
+          "name": "timeout_keeps_the_part",
+          "result": "passed"
+        },
+        {
+          "name": "flush_for_waits_for_both",
+          "result": "passed"
+        },
+        {
+          "name": "failing_since_set_and_reset",
+          "result": "passed"
+        },
+        {
+          "name": "telegram_down_notice_after_60s",
+          "result": "passed"
+        },
+        {
+          "name": "second_outbox_bound",
+          "result": "passed"
+        },
+        {
+          "name": "second_off_by_default",
+          "result": "passed"
+        }
+      ],
+      "what": "direct Telegram alerts (alert-direct): delivery rules, repeat rule, Telegram failing since, the second channel and its Telegram-down notice; loopback fakes only"
+    },
+    {
+      "command": "cargo test -p watcher -p watcher-conformance",
+      "exit_code": 0,
+      "log": "evidence/latest/watcher.log",
+      "name": "watcher",
+      "notes": [],
+      "ok": true,
+      "seconds": 47.7,
+      "tests": [
+        {
+          "name": "decimal::tests::percent_floor_rounds_toward_zero_and_refuses_overflow",
+          "result": "passed"
+        },
+        {
+          "name": "decimal::tests::decimals_parse_exactly_and_refuse_other_forms",
+          "result": "passed"
+        },
+        {
+          "name": "runtime::tests::a_full_notice_queue_drops_the_oldest_progress_notice_never_a_start_or_a_final",
+          "result": "passed"
+        },
+        {
+          "name": "runtime::tests::the_refusal_names_a_latch_only_for_a_reply_that_latched",
+          "result": "passed"
+        },
+        {
+          "name": "runtime::tests::during_a_kill_an_answer_keeps_the_mismatch_p1_and_drops_every_request",
+          "result": "passed"
+        },
+        {
+          "name": "wire_id::tests::base32_pair_matches_the_documented_vector",
+          "result": "passed"
+        },
+        {
+          "name": "events::tests::the_known_events_are_the_rows_of_the_tail_table",
+          "result": "passed"
+        },
+        {
+          "name": "a_hold_seen_off_at_a_cap_sampled_before_the_answer_does_not_send",
+          "result": "passed"
+        },
+        {
+          "name": "a_confirmed_mismatch_is_sent_until_answered_even_after_the_difference_is_gone",
+          "result": "passed"
+        },
+        {
+          "name": "a_second_send_waits_for_the_first_answer",
+          "result": "passed"
+        },
+        {
+          "name": "a_difference_confirmed_under_a_hold_is_sent_after_the_clear",
+          "result": "passed"
+        },
+        {
+          "name": "a_late_report_of_one_send_pays_only_what_that_send_carried",
+          "result": "passed"
+        },
+        {
+          "name": "a_confirmed_mismatch_is_sent_once_and_again_after_a_clear",
+          "result": "passed"
+        },
+        {
+          "name": "the_admin_client_says_hello_and_reads_both_replies",
+          "result": "passed"
+        },
+        {
+          "name": "admin_kill_sends_hello_then_watcher_kill_and_reads_the_reply",
+          "result": "passed"
+        },
+        {
+          "name": "answers_400_and_413_drop_the_part_and_other_answers_keep_it",
+          "result": "passed"
+        },
+        {
+          "name": "a_message_has_the_watch_p1_header_with_the_name_and_kst",
+          "result": "passed"
+        },
+        {
+          "name": "mismatch_notices_are_at_most_one_per_check_per_60_s_and_collect_the_rest",
+          "result": "passed"
+        },
+        {
+          "name": "the_outbox_keeps_50_parts_and_reports_the_drops_once",
+          "result": "passed"
+        },
+        {
+          "name": "the_repeat_rule_sends_start_every_5_min_and_clear",
+          "result": "passed"
+        },
+        {
+          "name": "mismatch_notices_drain_tells_what_the_pace_holds",
+          "result": "passed"
+        },
+        {
+          "name": "the_start_refusal_reason_is_cut_to_200_characters",
+          "result": "passed"
+        },
+        {
+          "name": "messages_split_at_3500_utf16_units_at_line_ends",
+          "result": "passed"
+        },
+        {
+          "name": "the_token_is_never_in_debug",
+          "result": "passed"
+        },
+        {
+          "name": "the_token_is_never_in_a_log_line",
+          "result": "passed"
+        },
+        {
+          "name": "a_network_error_moves_to_the_pinned_route",
+          "result": "passed"
+        },
+        {
+          "name": "a_retry_keeps_the_part_for_the_next_flush",
+          "result": "passed"
+        },
+        {
+          "name": "a_confirmed_mismatch_sends_one_watch_p1",
+          "result": "passed"
+        },
+        {
+          "name": "set_queues_what_the_repeat_rule_gives",
+          "result": "passed"
+        },
+        {
+          "name": "public_ip_ok_0_sends_one_watch_p1_and_a_clear",
+          "result": "passed"
+        },
+        {
+          "name": "the_sender_task_flushes_on_the_manual_clock",
+          "result": "passed"
+        },
+        {
+          "name": "an_auth_answer_sends_one_watch_p1_at_once",
+          "result": "passed"
+        },
+        {
+          "name": "shutdown_flushes_within_5_s_and_counts_the_rest",
+          "result": "passed"
+        },
+        {
+          "name": "a_request_without_an_answer_fails_after_10_s",
+          "result": "passed"
+        },
+        {
+          "name": "version_prints_and_anything_else_exits_2",
+          "result": "passed"
+        },
+        {
+          "name": "at_30_executions_per_5_s_the_reconciliation_rate_in_a_simulated_minute_stays_at_or_below_2_7",
+          "result": "passed"
+        },
+        {
+          "name": "at_100_executions_per_5_s_the_rate_is_about_3_1_and_w4_keeps_up",
+          "result": "passed"
+        },
+        {
+          "name": "at_500_open_orders_the_guard_stretches_w1_rounds_below_10_s",
+          "result": "passed"
+        },
+        {
+          "name": "the_guard_holds_requests_beyond_60_in_10_s",
+          "result": "passed"
+        },
+        {
+          "name": "no_other_post_exists",
+          "result": "passed"
+        },
+        {
+          "name": "two_rejections_in_flight_write_one_error_line",
+          "result": "passed"
+        },
+        {
+          "name": "the_only_post_is_cancel_all_with_the_fixed_body",
+          "result": "passed"
+        },
+        {
+          "name": "every_request_carries_the_five_headers_and_the_signed_query",
+          "result": "passed"
+        },
+        {
+          "name": "a_redirect_is_not_followed",
+          "result": "passed"
+        },
+        {
+          "name": "auth_stop_keeps_the_first_text",
+          "result": "passed"
+        },
+        {
+          "name": "an_rsa_key_signs_the_get_and_the_cancel_all_in_base64",
+          "result": "passed"
+        },
+        {
+          "name": "http_403_pauses_every_request_for_600_s",
+          "result": "passed"
+        },
+        {
+          "name": "a_status_counts_when_its_body_is_cut",
+          "result": "passed"
+        },
+        {
+          "name": "auth_answers_are_never_retried",
+          "result": "passed"
+        },
+        {
+          "name": "cancel_all_answers_are_classified",
+          "result": "passed"
+        },
+        {
+          "name": "answers_are_classified",
+          "result": "passed"
+        },
+        {
+          "name": "a_request_beyond_the_guard_waits_for_the_window",
+          "result": "passed"
+        },
+        {
+          "name": "a_clock_step_back_does_not_hold_the_guard",
+          "result": "passed"
+        },
+        {
+          "name": "a_request_waiting_at_the_guard_sees_a_later_rejection_or_pause",
+          "result": "passed"
+        },
+        {
+          "name": "a_steady_clock_does_not_step_back",
+          "result": "passed"
+        },
+        {
+          "name": "the_config_file_is_read_and_its_refusals_name_the_file",
+          "result": "passed"
+        },
+        {
+          "name": "telegram_is_validated_and_required_on_mainnet",
+          "result": "passed"
+        },
+        {
+          "name": "kill_loop_fields_are_validated",
+          "result": "passed"
+        },
+        {
+          "name": "kill_and_w5_are_validated_and_kill_is_required_on_mainnet",
+          "result": "passed"
+        },
+        {
+          "name": "the_config_is_validated_and_mainnet_needs_confirmation",
+          "result": "passed"
+        },
+        {
+          "name": "the_credentials_file_must_be_owner_only_and_outside_the_data_dir",
+          "result": "passed"
+        },
+        {
+          "name": "the_token_file_must_be_owner_only_outside_any_repository",
+          "result": "passed"
+        },
+        {
+          "name": "an_rsa_credentials_file_is_read_and_its_refusals_quote_no_key",
+          "result": "passed"
+        },
+        {
+          "name": "a_late_round_runs_once_and_rounds_do_not_overlap",
+          "result": "passed"
+        },
+        {
+          "name": "a_request_without_an_answer_fails_its_round_at_the_deadline_and_a_late_answer_is_ignored",
+          "result": "passed"
+        },
+        {
+          "name": "the_first_rounds_and_heartbeat_are_due_at_start",
+          "result": "passed"
+        },
+        {
+          "name": "status_answers_in_reverse_order_are_each_used_by_their_own_round",
+          "result": "passed"
+        },
+        {
+          "name": "a_failed_round_keeps_the_sightings_of_the_last_completed_round",
+          "result": "passed"
+        },
+        {
+          "name": "a_retried_journal_error_heals_and_a_latched_one_fails_every_round",
+          "result": "passed"
+        },
+        {
+          "name": "mismatch_active_counts_the_confirmed_differences_a_round_still_sees",
+          "result": "passed"
+        },
+        {
+          "name": "a_confirmed_identity_is_counted_once",
+          "result": "passed"
+        },
+        {
+          "name": "a_status_of_another_instance_or_a_cap_below_the_read_before_the_request_stops_the_reader",
+          "result": "passed"
+        },
+        {
+          "name": "a_confirmation_emits_one_confirmed_action_per_identity",
+          "result": "passed"
+        },
+        {
+          "name": "the_detail_is_at_most_1024_bytes",
+          "result": "passed"
+        },
+        {
+          "name": "the_heartbeat_says_hello_first_and_reconnects",
+          "result": "passed"
+        },
+        {
+          "name": "heartbeats_carry_the_success_time_of_each_check",
+          "result": "passed"
+        },
+        {
+          "name": "w3_and_w4_success_times_reach_the_heartbeat",
+          "result": "passed"
+        },
+        {
+          "name": "a_reply_that_does_not_come_in_time_reopens_the_connection",
+          "result": "passed"
+        },
+        {
+          "name": "a_header_only_segment_rewritten_with_a_new_schema_is_read_again",
+          "result": "passed"
+        },
+        {
+          "name": "an_unknown_event_stops_the_reader",
+          "result": "passed"
+        },
+        {
+          "name": "the_reader_never_returns_a_record_above_the_durable_cap",
+          "result": "passed"
+        },
+        {
+          "name": "schema_1_and_2_are_read",
+          "result": "passed"
+        },
+        {
+          "name": "the_reader_follows_segment_rotation_and_a_schema_change",
+          "result": "passed"
+        },
+        {
+          "name": "io_damage_and_no_start_are_retried_and_the_other_errors_latch",
+          "result": "passed"
+        },
+        {
+          "name": "a_damaged_frame_at_or_below_the_cap_stops_without_moving",
+          "result": "passed"
+        },
+        {
+          "name": "frames_and_headers_follow_adr_011",
+          "result": "passed"
+        },
+        {
+          "name": "a_large_segment_is_read_frame_by_frame_in_bounded_calls",
+          "result": "passed"
+        },
+        {
+          "name": "a_cancel_all_not_sent_waits_for_the_next_round",
+          "result": "passed"
+        },
+        {
+          "name": "a_count_above_zero_waits_for_the_round",
+          "result": "passed"
+        },
+        {
+          "name": "a_cancel_all_that_succeeds_clears_the_last_error",
+          "result": "passed"
+        },
+        {
+          "name": "a_failed_position_read_says_unknown",
+          "result": "passed"
+        },
+        {
+          "name": "a_failed_cancel_all_is_still_followed_by_a_count",
+          "result": "passed"
+        },
+        {
+          "name": "a_failed_count_is_never_zero",
+          "result": "passed"
+        },
+        {
+          "name": "a_latched_key_says_the_watcher_must_restart",
+          "result": "passed"
+        },
+        {
+          "name": "a_request_past_its_deadline_fails_and_a_late_answer_is_ignored",
+          "result": "passed"
+        },
+        {
+          "name": "a_second_start_does_nothing",
+          "result": "passed"
+        },
+        {
+          "name": "a_watch_that_is_no_multiple_of_its_step_ends_at_watch_ms",
+          "result": "passed"
+        },
+        {
+          "name": "a_slow_paged_count_is_not_failed_while_pages_answer",
+          "result": "passed"
+        },
+        {
+          "name": "a_late_order_in_the_watch_goes_back_to_cancel_at_once",
+          "result": "passed"
+        },
+        {
+          "name": "an_answer_handled_at_its_deadline_is_past_it",
+          "result": "passed"
+        },
+        {
+          "name": "abort_sends_one_notice_and_ends",
+          "result": "passed"
+        },
+        {
+          "name": "the_abort_notice_says_positions_were_not_read",
+          "result": "passed"
+        },
+        {
+          "name": "the_final_notice_names_the_stop_outcome",
+          "result": "passed"
+        },
+        {
+          "name": "a_progress_notice_comes_every_60_s_also_with_an_unchanged_count",
+          "result": "passed"
+        },
+        {
+          "name": "the_next_wake_is_the_earliest_due_instant_or_progress_mark",
+          "result": "passed"
+        },
+        {
+          "name": "the_loop_cancels_counts_and_ends_after_the_watch",
+          "result": "passed"
+        },
+        {
+          "name": "the_outcome_set_during_the_loop_is_in_the_final_notice",
+          "result": "passed"
+        },
+        {
+          "name": "the_watch_ends_only_on_the_count_due_at_its_end",
+          "result": "passed"
+        },
+        {
+          "name": "two_requests_of_the_loop_are_never_in_flight",
+          "result": "passed"
+        },
+        {
+          "name": "the_notice_rule_sends_no_change_notice",
+          "result": "passed"
+        },
+        {
+          "name": "the_position_block_lists_size_upnl_mark_and_liquidation_distance",
+          "result": "passed"
+        },
+        {
+          "name": "ten_minutes_of_failing_queries_make_at_most_12_notices",
+          "result": "passed"
+        },
+        {
+          "name": "a_notice_fits_one_part_with_50_positions",
+          "result": "passed"
+        },
+        {
+          "name": "an_aborted_task_sends_no_answer_to_the_loop",
+          "result": "passed"
+        },
+        {
+          "name": "a_cancel_all_not_sent_is_told_from_the_state_before_the_call",
+          "result": "passed"
+        },
+        {
+          "name": "a_count_task_keeps_the_loops_deadline_from_its_emission",
+          "result": "passed"
+        },
+        {
+          "name": "foreign_orders_count",
+          "result": "passed"
+        },
+        {
+          "name": "one_order_left_after_the_first_cancel_all_repeats_until_zero_is_confirmed",
+          "result": "passed"
+        },
+        {
+          "name": "the_position_reader_pages_and_keeps_its_deadline",
+          "result": "passed"
+        },
+        {
+          "name": "the_order_budget_holds_under_any_answer_sequence",
+          "result": "passed"
+        },
+        {
+          "name": "a_dropped_inflight_aborts_its_tasks",
+          "result": "passed"
+        },
+        {
+          "name": "a_late_count_page_ends_the_count_task",
+          "result": "passed"
+        },
+        {
+          "name": "more_than_1000_open_orders_is_a_count_error",
+          "result": "passed"
+        },
+        {
+          "name": "a_5xx_cancel_all_or_count_repeats_until_zero_is_confirmed",
+          "result": "passed"
+        },
+        {
+          "name": "a_count_past_its_deadline_sends_no_further_page",
+          "result": "passed"
+        },
+        {
+          "name": "a_halt_without_an_outcome_goes_to_the_stop_at_its_deadline",
+          "result": "passed"
+        },
+        {
+          "name": "a_marker_that_cannot_be_written_does_not_stop_the_sequence",
+          "result": "passed"
+        },
+        {
+          "name": "a_stop_past_stop_wait_ms_is_unconfirmed_and_the_loop_starts",
+          "result": "passed"
+        },
+        {
+          "name": "a_retry_in_flight_at_the_loops_end_is_given_up",
+          "result": "passed"
+        },
+        {
+          "name": "an_existing_marker_is_left_as_it_is",
+          "result": "passed"
+        },
+        {
+          "name": "a_marker_write_that_does_not_return_does_not_hold_the_halt",
+          "result": "passed"
+        },
+        {
+          "name": "both_failed_says_oms_stop_failed_in_the_start_notice",
+          "result": "passed"
+        },
+        {
+          "name": "the_first_retry_after_a_halt_timeout_counts_from_its_deadline",
+          "result": "passed"
+        },
+        {
+          "name": "the_marker_text_and_detail_are_cut_at_a_character_boundary",
+          "result": "passed"
+        },
+        {
+          "name": "the_marker_and_the_halt_come_before_the_first_cancel_all",
+          "result": "passed"
+        },
+        {
+          "name": "an_oms_that_answers_during_the_loop_is_latched_at_once",
+          "result": "passed"
+        },
+        {
+          "name": "a_kill_without_a_confirmed_stop_owes_the_halt",
+          "result": "passed"
+        },
+        {
+          "name": "a_halt_answered_with_an_error_goes_to_the_stop",
+          "result": "passed"
+        },
+        {
+          "name": "no_halt_is_retried_when_the_halt_is_not_owed",
+          "result": "passed"
+        },
+        {
+          "name": "already_latched_and_the_rearm_reply_count_as_halted",
+          "result": "passed"
+        },
+        {
+          "name": "a_marker_written_before_the_path_check_says_so",
+          "result": "passed"
+        },
+        {
+          "name": "a_clock_step_back_does_not_hold_the_loop",
+          "result": "passed"
+        },
+        {
+          "name": "abort_before_the_loop_tells_the_steps_done",
+          "result": "passed"
+        },
+        {
+          "name": "a_marker_file_is_what_a_marker_rule_reads",
+          "result": "passed"
+        },
+        {
+          "name": "a_start_notice_with_the_longest_header_fits_one_part",
+          "result": "passed"
+        },
+        {
+          "name": "the_import_lines_are_victoria_metrics_json",
+          "result": "passed"
+        },
+        {
+          "name": "a_failed_push_is_dropped",
+          "result": "passed"
+        },
+        {
+          "name": "replay_speed_of_100000_records",
+          "result": "ignored"
+        },
+        {
+          "name": "a_start_refusal_ends_the_run_with_exit_code_2",
+          "result": "passed"
+        },
+        {
+          "name": "a_status_with_another_marker_path_refuses_the_start",
+          "result": "passed"
+        },
+        {
+          "name": "a_key_rejected_at_start_is_exported",
+          "result": "passed"
+        },
+        {
+          "name": "the_runtime_runs_w2_w3_and_w4_and_w2_reads_w4s_exec_times",
+          "result": "passed"
+        },
+        {
+          "name": "a_stop_that_ended_before_the_k3_deadline_tick_is_reported_as_stopped",
+          "result": "passed"
+        },
+        {
+          "name": "a_shutdown_while_a_refusal_waits_sends_the_abort_notice",
+          "result": "passed"
+        },
+        {
+          "name": "a_marker_written_by_the_watcher_is_read_by_a_marker_rule",
+          "result": "passed"
+        },
+        {
+          "name": "the_status_client_sends_the_loopback_host_and_follows_no_redirect",
+          "result": "passed"
+        },
+        {
+          "name": "a_marker_path_refusal_before_the_kill_loop_sends_the_halt_first",
+          "result": "passed"
+        },
+        {
+          "name": "a_watcher_started_with_the_oms_down_kills_after_the_silence",
+          "result": "passed"
+        },
+        {
+          "name": "oms_silence_writes_the_marker_and_halts_the_oms_before_the_first_cancel_all",
+          "result": "passed"
+        },
+        {
+          "name": "a_start_refusal_during_a_kill_sends_the_abort_notice_first",
+          "result": "passed"
+        },
+        {
+          "name": "a_slow_position_read_sends_the_notice_with_unknown_positions",
+          "result": "passed"
+        },
+        {
+          "name": "a_marker_path_refusal_during_k2_waits_for_the_kills_own_watcher_kill",
+          "result": "passed"
+        },
+        {
+          "name": "a_refusal_waiting_for_k2_ends_at_k2s_deadline",
+          "result": "passed"
+        },
+        {
+          "name": "a_key_rejected_at_start_is_told_on_telegram",
+          "result": "passed"
+        },
+        {
+          "name": "the_shutdown_input_ends_cleanly",
+          "result": "passed"
+        },
+        {
+          "name": "a_marker_path_refusal_sends_the_owed_halt_first",
+          "result": "passed"
+        },
+        {
+          "name": "a_loop_answer_during_a_refusals_wait_does_not_spin_the_runtime",
+          "result": "passed"
+        },
+        {
+          "name": "the_watcher_runs_against_loopback_fakes_end_to_end",
+          "result": "passed"
+        },
+        {
+          "name": "a_confirmed_mismatch_is_told_on_telegram_once",
+          "result": "passed"
+        },
+        {
+          "name": "a_mismatch_collected_inside_the_pace_is_sent_at_shutdown",
+          "result": "passed"
+        },
+        {
+          "name": "when_watcher_kill_fails_the_oms_unit_is_stopped_before_the_first_cancel_all",
+          "result": "passed"
+        },
+        {
+          "name": "the_ip_recheck_runs_during_the_boot_replay",
+          "result": "passed"
+        },
+        {
+          "name": "a_start_refusal_after_the_sender_is_up_sends_one_watch_p1",
+          "result": "passed"
+        },
+        {
+          "name": "a_halt_without_a_reply_is_aborted_at_its_deadline",
+          "result": "passed"
+        },
+        {
+          "name": "the_ip_recheck_runs_while_the_oms_is_down",
+          "result": "passed"
+        },
+        {
+          "name": "shutdown_during_a_kill_sends_one_abort_notice",
+          "result": "passed"
+        },
+        {
+          "name": "a_recheck_that_fails_a_start_rule_stops_every_bybit_request",
+          "result": "passed"
+        },
+        {
+          "name": "a_clock_step_back_during_a_kill_does_not_hold_the_loop",
+          "result": "passed"
+        },
+        {
+          "name": "a_marker_path_refusal_after_the_kill_waits_for_the_owed_halt_in_flight",
+          "result": "passed"
+        },
+        {
+          "name": "a_marker_path_change_after_the_boot_is_told",
+          "result": "passed"
+        },
+        {
+          "name": "shutdown_right_after_the_kill_ended_sends_the_final_notice",
+          "result": "passed"
+        },
+        {
+          "name": "a_round_in_flight_at_the_fire_sends_nothing_more_during_the_kill",
+          "result": "passed"
+        },
+        {
+          "name": "the_watchers_loop_repeats_until_zero_at_no_more_than_2_cancel_alls_per_second",
+          "result": "passed"
+        },
+        {
+          "name": "the_engine_is_paused_during_a_kill_and_resumes_after",
+          "result": "passed"
+        },
+        {
+          "name": "an_oms_that_comes_back_after_an_unconfirmed_stop_is_latched",
+          "result": "passed"
+        },
+        {
+          "name": "without_an_answering_oms_nothing_is_judged",
+          "result": "passed"
+        },
+        {
+          "name": "ten_minutes_of_failing_queries_send_at_most_12_p1_messages",
+          "result": "passed"
+        },
+        {
+          "name": "an_oms_that_comes_back_during_the_loop_is_latched_before_the_loop_ends",
+          "result": "passed"
+        },
+        {
+          "name": "every_kill_notice_carries_the_position_block",
+          "result": "passed"
+        },
+        {
+          "name": "query_strings_are_sorted_and_unsafe_values_refused",
+          "result": "passed"
+        },
+        {
+          "name": "the_post_string_to_sign_matches_the_published_example_and_independent_values",
+          "result": "passed"
+        },
+        {
+          "name": "the_strings_to_sign_and_signatures_match_independent_values",
+          "result": "passed"
+        },
+        {
+          "name": "an_rsa_signature_is_openssls_base64_and_verifies_with_the_public_key",
+          "result": "passed"
+        },
+        {
+          "name": "a_symbol_missing_from_instruments_info_refuses_the_start",
+          "result": "passed"
+        },
+        {
+          "name": "a_key_that_expires_in_10_days_gives_days_left_10",
+          "result": "passed"
+        },
+        {
+          "name": "an_answer_without_a_request_in_flight_changes_nothing",
+          "result": "passed"
+        },
+        {
+          "name": "the_public_ip_is_rechecked_every_60_s",
+          "result": "passed"
+        },
+        {
+          "name": "a_master_key_another_uid_or_a_key_bound_to_no_ip_refuses_the_start",
+          "result": "passed"
+        },
+        {
+          "name": "query_api_answers_other_than_auth_or_a_refusal_retry_every_5_s",
+          "result": "passed"
+        },
+        {
+          "name": "settle_coin_answers_other_than_auth_or_a_refusal_retry_every_5_s",
+          "result": "passed"
+        },
+        {
+          "name": "an_echo_failure_or_a_body_that_is_not_an_address_gives_public_ip_ok_0",
+          "result": "passed"
+        },
+        {
+          "name": "a_failed_recheck_sets_public_ip_ok_0_and_keeps_days_left",
+          "result": "passed"
+        },
+        {
+          "name": "the_documented_epoch_expiry_exports_no_days_left",
+          "result": "passed"
+        },
+        {
+          "name": "an_auth_answer_at_start_stays_up_without_requests",
+          "result": "passed"
+        },
+        {
+          "name": "a_traded_symbol_that_does_not_settle_in_usdt_refuses_the_start",
+          "result": "passed"
+        },
+        {
+          "name": "a_recheck_with_another_uid_a_master_key_or_no_bound_ip_stops_every_request",
+          "result": "passed"
+        },
+        {
+          "name": "a_key_that_must_cancel_needs_read_write_order_and_no_withdraw",
+          "result": "passed"
+        },
+        {
+          "name": "an_instrument_the_journal_never_changed_has_no_change_time",
+          "result": "passed"
+        },
+        {
+          "name": "purging_an_unknown_order_stops_the_state",
+          "result": "passed"
+        },
+        {
+          "name": "a_fill_after_close_uses_the_kept_order_info",
+          "result": "passed"
+        },
+        {
+          "name": "the_sets_follow_the_field_table",
+          "result": "passed"
+        },
+        {
+          "name": "the_fact_time_moves_only_on_the_compared_order_events",
+          "result": "passed"
+        },
+        {
+          "name": "records_that_break_the_rules_stop_the_state",
+          "result": "passed"
+        },
+        {
+          "name": "venue_terminal_marks_the_order_terminal_and_moves_its_fact_time",
+          "result": "passed"
+        },
+        {
+          "name": "funding_never_changes_a_position",
+          "result": "passed"
+        },
+        {
+          "name": "purged_forgets_closed_orders_and_old_keys",
+          "result": "passed"
+        },
+        {
+          "name": "the_fill_floor_never_goes_down",
+          "result": "passed"
+        },
+        {
+          "name": "the_watcher_starts_one_program_only",
+          "result": "passed"
+        },
+        {
+          "name": "the_stop_command_names_only_the_configured_unit",
+          "result": "passed"
+        },
+        {
+          "name": "a_child_that_keeps_stderr_open_does_not_block",
+          "result": "passed"
+        },
+        {
+          "name": "a_two_round_difference_older_than_2_s_alarms",
+          "result": "passed"
+        },
+        {
+          "name": "an_order_ended_at_the_venue_in_the_journal_and_not_listed_agrees",
+          "result": "passed"
+        },
+        {
+          "name": "an_order_closed_in_the_journal_and_open_at_the_venue_is_a_mismatch",
+          "result": "passed"
+        },
+        {
+          "name": "a_full_page_without_a_cursor_or_an_unchanged_cursor_fails_the_round",
+          "result": "passed"
+        },
+        {
+          "name": "an_order_ended_in_the_journal_and_still_open_at_the_venue_is_open_after_terminal",
+          "result": "passed"
+        },
+        {
+          "name": "an_unacked_order_missing_at_the_venue_is_not_compared",
+          "result": "passed"
+        },
+        {
+          "name": "a_one_round_difference_does_not_alarm",
+          "result": "passed"
+        },
+        {
+          "name": "a_foreign_order_at_the_venue_is_a_mismatch",
+          "result": "passed"
+        },
+        {
+          "name": "a_journal_entry_younger_than_2_s_does_not_alarm",
+          "result": "passed"
+        },
+        {
+          "name": "a_difference_whose_order_keeps_receiving_events_is_confirmed_by_its_fact_age",
+          "result": "passed"
+        },
+        {
+          "name": "a_young_difference_seen_twice_defers_the_round",
+          "result": "passed"
+        },
+        {
+          "name": "an_order_listed_on_two_pages_is_one_difference",
+          "result": "passed"
+        },
+        {
+          "name": "the_venue_is_read_before_the_journal",
+          "result": "passed"
+        },
+        {
+          "name": "a_venue_position_in_a_symbol_the_journal_never_changed_is_confirmed_on_the_second_round",
+          "result": "passed"
+        },
+        {
+          "name": "a_difference_too_large_to_subtract_is_still_a_difference",
+          "result": "passed"
+        },
+        {
+          "name": "a_young_journal_change_defers_even_at_the_first_sighting",
+          "result": "passed"
+        },
+        {
+          "name": "a_size_seen_by_a_round_that_then_fails_keeps_its_seen_time",
+          "result": "passed"
+        },
+        {
+          "name": "a_deferred_round_is_not_a_success",
+          "result": "passed"
+        },
+        {
+          "name": "a_round_that_failed_between_pages_leaves_no_observation",
+          "result": "passed"
+        },
+        {
+          "name": "a_changing_difference_restarts_the_count",
+          "result": "passed"
+        },
+        {
+          "name": "a_difference_that_changes_every_round_without_a_venue_time_is_not_a_success",
+          "result": "passed"
+        },
+        {
+          "name": "a_missing_updated_time_falls_back_to_w4s_last_exec_time",
+          "result": "passed"
+        },
+        {
+          "name": "a_closed_venue_position_defers_until_2_s_after_it_was_first_seen_flat",
+          "result": "passed"
+        },
+        {
+          "name": "sizes_found_at_the_first_round_have_no_seen_time",
+          "result": "passed"
+        },
+        {
+          "name": "hedge_mode_rows_are_unreadable",
+          "result": "passed"
+        },
+        {
+          "name": "bad_pages_and_rows_fail_the_round",
+          "result": "passed"
+        },
+        {
+          "name": "a_difference_planted_after_the_fills_stop_is_confirmed_within_3_s",
+          "result": "passed"
+        },
+        {
+          "name": "five_fills_per_second_for_60_s_give_no_mismatch",
+          "result": "passed"
+        },
+        {
+          "name": "an_unreadable_wallet_fails_the_round",
+          "result": "passed"
+        },
+        {
+          "name": "a_margin_rate_at_the_limit_on_two_rounds_alarms",
+          "result": "passed"
+        },
+        {
+          "name": "without_todays_base_only_the_margin_rate_is_judged",
+          "result": "passed"
+        },
+        {
+          "name": "a_daily_loss_beyond_todays_base_on_two_rounds_alarms",
+          "result": "passed"
+        },
+        {
+          "name": "a_failed_page_three_rounds_in_a_row_restarts_the_sweep_with_a_new_end",
+          "result": "passed"
+        },
+        {
+          "name": "a_funding_row_without_side_or_qty_is_ignored",
+          "result": "passed"
+        },
+        {
+          "name": "a_round_that_reads_a_page_ends_the_run_of_failed_rounds",
+          "result": "passed"
+        },
+        {
+          "name": "a_row_without_a_key_is_named_by_its_text",
+          "result": "passed"
+        },
+        {
+          "name": "a_trade_at_the_floor_itself_is_compared",
+          "result": "passed"
+        },
+        {
+          "name": "a_trade_row_without_qty_is_an_unreadable_row_and_needs_two_sweeps",
+          "result": "passed"
+        },
+        {
+          "name": "an_empty_page_ends_the_sweep",
+          "result": "passed"
+        },
+        {
+          "name": "a_missing_trade_needs_two_sweeps",
+          "result": "passed"
+        },
+        {
+          "name": "an_adl_trade_the_journal_lacks_is_a_mismatch",
+          "result": "passed"
+        },
+        {
+          "name": "a_young_difference_seen_twice_does_not_fail_the_sweep",
+          "result": "passed"
+        },
+        {
+          "name": "a_row_after_the_sweeps_end_is_an_unreadable_row_and_does_not_blind_w4",
+          "result": "passed"
+        },
+        {
+          "name": "a_trade_or_venue_change_of_quantity_0_is_ignored_as_the_oms_ignores_it",
+          "result": "passed"
+        },
+        {
+          "name": "an_empty_window_logs_once_per_state_change",
+          "result": "passed"
+        },
+        {
+          "name": "an_unconfirmed_row_without_a_readable_exec_time_holds_the_watermark",
+          "result": "passed"
+        },
+        {
+          "name": "a_trade_at_the_fill_floor_millisecond_is_ignored",
+          "result": "passed"
+        },
+        {
+          "name": "a_row_loaded_late_inside_the_overlap_is_compared",
+          "result": "passed"
+        },
+        {
+          "name": "a_trade_or_venue_change_with_other_details_is_a_difference",
+          "result": "passed"
+        },
+        {
+          "name": "the_watermark_never_moves_back",
+          "result": "passed"
+        },
+        {
+          "name": "an_already_held_answer_to_a_w4_send_does_not_pay_it",
+          "result": "passed"
+        },
+        {
+          "name": "an_unknown_exec_type_in_a_multi_round_sweep_is_confirmed_when_the_sweep_completes",
+          "result": "passed"
+        },
+        {
+          "name": "an_unchanged_cursor_is_a_failed_page",
+          "result": "passed"
+        },
+        {
+          "name": "an_unknown_exec_type_is_a_mismatch_at_once",
+          "result": "passed"
+        },
+        {
+          "name": "a_hold_seen_at_a_cap_sampled_before_the_answer_does_not_dismiss",
+          "result": "passed"
+        },
+        {
+          "name": "the_sweep_starts_10_s_before_the_last_confirmed_exec_time",
+          "result": "passed"
+        },
+        {
+          "name": "the_newest_agreeing_exec_time_is_kept_per_symbol",
+          "result": "passed"
+        },
+        {
+          "name": "the_restart_warn_line_is_logged_once_per_run_of_failed_rounds",
+          "result": "passed"
+        },
+        {
+          "name": "a_row_confirmed_under_an_older_hold_is_sent_once_after_that_hold_is_cleared",
+          "result": "passed"
+        },
+        {
+          "name": "a_dismissed_row_that_leaves_the_window_and_a_changed_value_are_sent_anew",
+          "result": "passed"
+        },
+        {
+          "name": "a_confirmed_row_is_not_sent_again_after_clear_hold_in_a_quiet_account",
+          "result": "passed"
+        },
+        {
+          "name": "a_sweep_not_complete_after_50_rounds_restarts",
+          "result": "passed"
+        },
+        {
+          "name": "funding_rows_beside_known_fills_are_no_mismatch_while_a_position_is_held",
+          "result": "passed"
+        },
+        {
+          "name": "a_round_of_250_executions_is_compared_in_full_over_3_pages",
+          "result": "passed"
+        },
+        {
+          "name": "executions_1200_are_compared_over_two_rounds_and_the_w4_age_rises_between",
+          "result": "passed"
+        },
+        {
+          "name": "a_gap_in_the_watchers_own_ticks_is_not_oms_silence",
+          "result": "passed"
+        },
+        {
+          "name": "a_clock_step_back_does_not_blind_w5",
+          "result": "passed"
+        },
+        {
+          "name": "a_lost_probe_is_failed_at_its_deadline",
+          "result": "passed"
+        },
+        {
+          "name": "probes_are_one_per_probe_ms_and_never_two_in_flight",
+          "result": "passed"
+        },
+        {
+          "name": "w5_fires_only_after_a_failed_probe",
+          "result": "passed"
+        },
+        {
+          "name": "an_owed_halt_is_sent_at_the_first_good_answer",
+          "result": "passed"
+        },
+        {
+          "name": "after_a_kill_w5_waits_for_a_good_answer_before_it_watches_again",
+          "result": "passed"
+        },
+        {
+          "name": "a_stall_of_the_watcher_shorter_than_a_gap_does_not_fire_at_the_silence_bound",
+          "result": "passed"
+        },
+        {
+          "name": "w5_is_not_armed_before_arm_and_off_without_kill",
+          "result": "passed"
+        },
+        {
+          "name": "ten_seconds_without_a_good_status_answer_fire_once",
+          "result": "passed"
+        },
+        {
+          "name": "one_lost_probe_and_a_slow_answer_at_the_silence_bound_do_not_fire",
+          "result": "passed"
+        },
+        {
+          "name": "only_a_2xx_status_with_a_16_hex_instance_id_is_good",
+          "result": "passed"
+        },
+        {
+          "name": "the_watcher_base32_pair_equals_the_core_form",
+          "result": "passed"
+        },
+        {
+          "name": "the_watcher_reads_while_the_oms_writer_holds_the_lock",
+          "result": "passed"
+        },
+        {
+          "name": "the_watcher_sets_equal_the_core_on_journals_with_every_event_kind",
+          "result": "passed"
+        },
+        {
+          "name": "the_oms_reads_the_watchers_marker_file",
+          "result": "passed"
+        }
+      ],
+      "what": "the independent watcher (U19a): its own journal reader at its failure boundaries (cap, rotation, damage, latched errors), known events against the C-TAIL table, decimals, Base32Pair, its journal state by the rows of the C-TAIL table; its own Bybit signer and client against a loopback fake on a manual clock (answer classes, never-retried key rejections, the 403 pause, the request guard) and its metrics registry and VM import client; its own Telegram sender against a loopback fake (the alert rules, the two routes, the flush pace on a manual clock, the shutdown flush); its config file and credentials file (every field and refusal, mainnet confirmation, owner and mode); its start checks and IP recheck as sans-IO steps on a manual clock (query-api rules, days left, public IP, settle coin, retries, the key stop); the sans-IO check engine, W1 and W2 on an in-process model venue and a manual clock (scheduler, status per round, journal errors, deadlines, the two-round rule, W1 paging and kinds, W2 positions with their change times and deferral); the resend rule of watcher_mismatch on the engine rig, the admin.sock and monitor.sock clients against fake sockets, and the runtime against loopback fakes (one end-to-end test in real time; status wait, IP recheck, key rejection, refusal, shutdown); conformance against oms-core and oms-journal (the sets after every record of scenarios with every event kind)"
+    },
+    {
+      "command": "cargo test -p oms-node --features failpoints --test pipeline --test crash_points --test bybit_node -- --nocapture",
       "exit_code": 0,
       "log": "evidence/latest/pipeline.log",
       "name": "pipeline",
@@ -1167,10 +3751,50 @@
         "40 requests accepted=10 commits=2"
       ],
       "ok": true,
-      "seconds": 5.4,
+      "seconds": 36.4,
       "tests": [
         {
+          "name": "an_order_waits_for_the_reference_price_and_goes_out_once",
+          "result": "passed"
+        },
+        {
+          "name": "an_unanswered_create_is_found_open_by_its_order_link_id_and_never_sent_again",
+          "result": "passed"
+        },
+        {
+          "name": "a_failed_flush_sends_nothing_and_the_restart_resolves_the_order_as_not_placed",
+          "result": "passed"
+        },
+        {
+          "name": "a_ten_second_stream_outage_latches_kill_through_a_restart_until_clear_hold_kill",
+          "result": "passed"
+        },
+        {
+          "name": "a_flush_failure_at_startup_exits_2_and_sends_the_fatal_message",
+          "result": "passed"
+        },
+        {
+          "name": "a_clear_refused_kill_unconfirmed_leaves_the_marker_and_the_next_start_latches",
+          "result": "passed"
+        },
+        {
+          "name": "a_clear_whose_record_fails_to_flush_leaves_the_marker_and_the_next_start_latches",
+          "result": "passed"
+        },
+        {
+          "name": "an_exit_3_after_activation_sends_one_start_failure_notice",
+          "result": "passed"
+        },
+        {
+          "name": "a_clean_stop_sends_the_stop_notice_with_the_open_orders",
+          "result": "passed"
+        },
+        {
           "name": "stopped_before_the_write_the_request_never_happened",
+          "result": "passed"
+        },
+        {
+          "name": "a_flush_failure_sends_one_fatal_alert_and_nothing_of_the_batch",
           "result": "passed"
         },
         {
@@ -1190,11 +3814,11 @@
           "result": "passed"
         },
         {
-          "name": "stopped_after_the_flush_the_order_is_in_doubt_and_never_sent",
+          "name": "stopped_after_the_write_the_order_exists_and_is_resolved_without_a_send",
           "result": "passed"
         },
         {
-          "name": "stopped_after_the_write_the_order_exists_and_is_resolved_without_a_send",
+          "name": "stopped_after_the_flush_the_order_is_in_doubt_and_never_sent",
           "result": "passed"
         },
         {
@@ -1202,19 +3826,27 @@
           "result": "passed"
         },
         {
-          "name": "outputs_follow_durability_with_inline_commit",
+          "name": "outputs_follow_durability_with_a_commit_thread",
           "result": "passed"
         },
         {
-          "name": "outputs_follow_durability_with_a_commit_thread",
+          "name": "outputs_follow_durability_with_inline_commit",
           "result": "passed"
         },
         {
           "name": "inputs_that_arrive_together_share_a_flush",
           "result": "passed"
+        },
+        {
+          "name": "a_kill_command_leaves_only_after_the_latch_is_durable",
+          "result": "passed"
+        },
+        {
+          "name": "no_alert_for_a_batch_that_failed_to_flush",
+          "result": "passed"
         }
       ],
-      "what": "commit gate with an injected flush failure (real threads, real file); the process stopped at each commit boundary"
+      "what": "commit gate with an injected flush failure (real threads, real file); the process stopped at each commit boundary; the Bybit node against fake venue servers; the direct alerts at a failed flush, a fatal exit and a clean stop (loopback fake Telegram)"
     },
     {
       "command": "OMS_KILL_ROUNDS=20 cargo test -p oms-node --test e2e --test review_node -- --nocapture --test-threads=4",
@@ -1222,12 +3854,12 @@
       "log": "evidence/latest/e2e.log",
       "name": "e2e",
       "notes": [
-        "accepted=101 rejected=8 overloaded=491 queues={\"accepted\":[210,4,110],\"capacity\":[4096,256,8],\"depth\":[0,0,0],\"high_water\":[76,2,8],\"refused\":[0,0,491]}",
-        "rounds=20 accepted=1016 venue_orders=1016",
-        "verify: {   \"records\": 5774,   \"last_seq\": 5774,   \"state_digest\": 8996097879237836719,   \"re_decided\": true,   \"torn_tail_bytes\": 0,   \"open_orders\": 0,   \"orders_in_memory\": 1025 } "
+        "accepted=110 rejected=29 overloaded=461 queues={\"accepted\":[228,4,140],\"capacity\":[4096,256,8],\"depth\":[0,0,0],\"high_water\":[92,2,8],\"refused\":[0,0,461]}",
+        "rounds=20 accepted=863 venue_orders=863",
+        "verify: {   \"records\": 5071,   \"last_seq\": 5071,   \"state_digest\": 10495268726469124164,   \"re_decided\": true,   \"torn_tail_bytes\": 0,   \"open_orders\": 0,   \"orders_in_memory\": 871 } "
       ],
       "ok": true,
-      "seconds": 33.9,
+      "seconds": 30.3,
       "tests": [
         {
           "name": "a_repeated_request_never_creates_a_second_order",
@@ -1250,11 +3882,11 @@
           "result": "passed"
         },
         {
-          "name": "external_activity_is_detected_and_needs_an_operator",
+          "name": "a_lost_response_is_covered_by_stream_evidence",
           "result": "passed"
         },
         {
-          "name": "a_lost_response_is_covered_by_stream_evidence",
+          "name": "external_activity_is_detected_and_needs_an_operator",
           "result": "passed"
         },
         {
@@ -1262,19 +3894,19 @@
           "result": "passed"
         },
         {
-          "name": "link_loss_holds_new_orders_until_resynchronised",
-          "result": "passed"
-        },
-        {
           "name": "margin_report_of_the_venue_process_carries_its_positions",
           "result": "passed"
         },
         {
-          "name": "omsctl_clear_reduce_and_rebase_day_work_end_to_end",
+          "name": "link_loss_holds_new_orders_until_resynchronised",
           "result": "passed"
         },
         {
           "name": "a_lost_request_is_closed_only_after_its_send_window",
+          "result": "passed"
+        },
+        {
+          "name": "omsctl_clear_reduce_and_rebase_day_work_end_to_end",
           "result": "passed"
         },
         {
@@ -1306,11 +3938,11 @@
           "result": "passed"
         },
         {
-          "name": "venue_process_states_the_margin_a_control_sets_and_the_mm_rule_latches_on_it",
+          "name": "node_reads_venue_setting_and_account_mode_and_status_shows_them",
           "result": "passed"
         },
         {
-          "name": "node_reads_venue_setting_and_account_mode_and_status_shows_them",
+          "name": "venue_process_states_the_margin_a_control_sets_and_the_mm_rule_latches_on_it",
           "result": "passed"
         },
         {
@@ -1361,150 +3993,64 @@
       "what": "real oms-node and simvenue processes: kills, lost messages, link loss, journal damage, the review's process tests"
     },
     {
-      "command": "OMS_SIM_SEEDS=3000 cargo test --release -p oms-sim -- --nocapture",
+      "command": "cargo test -p oms-node --test bybit_testnet -- --ignored --test-threads=1",
       "exit_code": 0,
-      "log": "evidence/latest/sim-extended.log",
-      "name": "sim-extended",
-      "notes": [
-        "caught as expected: [bridge] seed 1 profile lossy step 426: venue position -1.61 outside [-1.79, -1.71] (booked -1.71)",
-        "caught as expected: [bridge] seed 1 profile lossy step 426: venue position -1.61 outside [-1.79, -1.71] (booked -1.71)",
-        "profile=external seeds=3000 inputs=8068056 records=2926879 requests=1482659 accepted=48621 rejected=1385487 duplicates=38216 conflicts=10335 sends=48621 venue_orders=42103 venue_fills=49266 crashes=0 link_drops=23943 in_doubt=5497 not_placed=3988 parked=2989 purged=0 mismatches=5827 external_fills=27342",
-        "profile=purge seeds=3000 inputs=7864440 records=3481125 requests=2022360 accepted=254915 rejected=1607555 duplicates=107706 conflicts=29474 sends=254915 venue_orders=220660 venue_fills=259381 crashes=45205 link_drops=0 in_doubt=31056 not_placed=21189 parked=0 purged=253394 mismatches=0 external_fills=0",
-        "profile=skewed seeds=3000 inputs=6205299 records=2490939 requests=1484482 accepted=105770 rejected=1300839 duplicates=38836 conflicts=10291 sends=105770 venue_orders=91949 venue_fills=109143 crashes=54172 link_drops=10367 in_doubt=15740 not_placed=8129 parked=0 purged=0 mismatches=0 external_fills=0",
-        "profile=crashy seeds=3000 inputs=6204305 records=2488582 requests=1484629 accepted=105290 rejected=1301403 duplicates=38826 conflicts=10356 sends=105290 venue_orders=90680 venue_fills=107860 crashes=54155 link_drops=10404 in_doubt=15764 not_placed=8865 parked=0 purged=0 mismatches=0 external_fills=0",
-        "profile=weak_evidence seeds=3000 inputs=6213686 records=2471260 requests=1482619 accepted=105160 rejected=1299583 duplicates=38963 conflicts=10365 sends=105160 venue_orders=90486 venue_fills=110148 crashes=54359 link_drops=10357 in_doubt=16025 not_placed=8838 parked=15801 purged=0 mismatches=0 external_fills=0",
-        "profile=lossy seeds=3000 inputs=10307668 records=3589855 requests=1483634 accepted=213396 rejected=1179237 duplicates=71825 conflicts=19176 sends=213396 venue_orders=184375 venue_fills=212912 crashes=0 link_drops=23976 in_doubt=23978 not_placed=17562 parked=0 purged=0 mismatches=0 external_fills=0",
-        "profile=margin_lossy seeds=3000 inputs=13071990 records=8766075 requests=1394123 accepted=182846 rejected=1112573 duplicates=75878 conflicts=19809 sends=182846 venue_orders=117006 venue_fills=121932 crashes=8987 link_drops=9474 in_doubt=22280 not_placed=19076 parked=0 purged=0 mismatches=0 external_fills=0",
-        "profile=margin_lossy margin: leverage_checked=118946 leverage_rejects=68658",
-        "profile=margin_lossy margin: reducing_entries=3849 reducing_entry_cancels=7968 reducing_plain_rejects=137023 reducing_reduce_only_accepts=7927",
-        "profile=margin_lossy margin: reducing_clears=3847 clear_refusals=4366 reducing_day_rolls=376 reducing_recoveries=32223 reducing_restarts=1105",
-        "profile=margin_lossy margin: margin_unavailable_rejects=363126 reports_dropped=21539 stale_cancel_ticks=8096 stale_rule_cancels=1250 mm_entries=2537",
-        "profile=margin_lossy margin: day_rolls=3000 roll_losses=40",
-        "profile=margin_lossy margin: margin_polls=3146626 margin_records=3000042",
-        "profile=margin_days seeds=300 inputs=54334894 records=38479804 requests=1387162 accepted=271087 rejected=1091928 duplicates=17754 conflicts=4450 sends=271087 venue_orders=191432 venue_fills=174474 crashes=4407 link_drops=8418 in_doubt=29123 not_placed=25915 parked=0 purged=265653 mismatches=0 external_fills=0",
-        "profile=margin_days margin: leverage_checked=200919 leverage_rejects=80405",
-        "profile=margin_days margin: reducing_entries=4958 reducing_entry_cancels=11541 reducing_plain_rejects=369850 reducing_reduce_only_accepts=22801",
-        "profile=margin_days margin: reducing_clears=4966 clear_refusals=1065 reducing_day_rolls=273 reducing_recoveries=1843726 reducing_restarts=1427",
-        "profile=margin_days margin: margin_unavailable_rejects=168885 reports_dropped=905933 stale_cancel_ticks=1341 stale_rule_cancels=5655 mm_entries=2416",
-        "profile=margin_days margin: day_rolls=900 roll_losses=43",
-        "profile=margin_days margin: margin_polls=10814805 margin_records=7756569",
-        "profile=calm seeds=3000 inputs=12160230 records=5672361 requests=1125479 accepted=1042911 rejected=82568 duplicates=0 conflicts=0 sends=1042911 venue_orders=1014339 venue_fills=991662 crashes=0 link_drops=0 in_doubt=0 not_placed=0 parked=0 purged=0 mismatches=0 external_fills=0",
-        "profile=margin_calm seeds=3000 inputs=16976207 records=11370663 requests=1124773 accepted=869137 rejected=255636 duplicates=0 conflicts=0 sends=869137 venue_orders=744616 venue_fills=731173 crashes=0 link_drops=0 in_doubt=0 not_placed=0 parked=0 purged=0 mismatches=0 external_fills=0",
-        "profile=margin_calm margin: leverage_checked=707956 leverage_rejects=83747",
-        "profile=margin_calm margin: reducing_entries=4345 reducing_entry_cancels=8540 reducing_plain_rejects=158763 reducing_reduce_only_accepts=26876",
-        "profile=margin_calm margin: reducing_clears=4345 clear_refusals=0 reducing_day_rolls=462 reducing_recoveries=46149 reducing_restarts=0",
-        "profile=margin_calm margin: margin_unavailable_rejects=3498 reports_dropped=0 stale_cancel_ticks=0 stale_rule_cancels=0 mm_entries=0",
-        "profile=margin_calm margin: day_rolls=3000 roll_losses=15",
-        "profile=margin_calm margin: margin_polls=3334668 margin_records=3328668"
-      ],
+      "log": "evidence/latest/bybit-testnet.log",
+      "name": "bybit-testnet",
+      "notes": [],
       "ok": true,
-      "seconds": 506.9,
+      "seconds": 31.8,
       "tests": [
         {
-          "name": "rng::tests::matches_the_reference_sequence",
+          "name": "a_real_execution_row_becomes_our_fill_and_the_position_closes",
           "result": "passed"
         },
         {
-          "name": "a_loss_made_only_of_fees_and_funding_enters_reducing",
+          "name": "a_request_inside_the_receive_window_passes_the_time_check",
           "result": "passed"
         },
         {
-          "name": "world_account_value_follows_fills_price_fees_and_funding",
+          "name": "a_request_more_than_one_second_ahead_is_refused_and_places_nothing",
           "result": "passed"
         },
         {
-          "name": "world_refuses_a_reduce_only_order_that_would_grow_the_position",
+          "name": "a_request_older_than_the_receive_window_is_refused_and_places_nothing",
           "result": "passed"
         },
         {
-          "name": "absence_rule_depends_on_venue_side_expiry",
+          "name": "a_second_create_with_the_same_link_id_never_makes_a_second_order",
           "result": "passed"
         },
         {
-          "name": "absence_rule_depends_on_the_clock_margin",
+          "name": "cancel_all_answers_in_the_shape_the_kill_loop_reads",
           "result": "passed"
         },
         {
-          "name": "a_seed_reproduces_the_same_run",
+          "name": "cancel_all_then_the_open_count_reaches_zero",
           "result": "passed"
         },
         {
-          "name": "existing_profiles_give_the_same_run_with_margin_off",
+          "name": "every_refused_create_leaves_no_order_at_the_venue",
           "result": "passed"
         },
         {
-          "name": "profile_external",
+          "name": "the_account_and_margin_queries_read_the_real_answers",
           "result": "passed"
         },
         {
-          "name": "profile_purge",
+          "name": "the_clock_check_reads_the_venue_time",
           "result": "passed"
         },
         {
-          "name": "profile_skewed",
+          "name": "the_venue_answers_in_the_recorded_shapes",
           "result": "passed"
         },
         {
-          "name": "profile_crashy",
-          "result": "passed"
-        },
-        {
-          "name": "profile_weak_evidence",
-          "result": "passed"
-        },
-        {
-          "name": "profile_lossy",
-          "result": "passed"
-        },
-        {
-          "name": "profile_margin_lossy",
-          "result": "passed"
-        },
-        {
-          "name": "margin_journal_records_stay_within_one_per_poll",
-          "result": "passed"
-        },
-        {
-          "name": "profile_margin_days_crosses_three_utc_days_with_restarts",
-          "result": "passed"
-        },
-        {
-          "name": "profile_calm",
-          "result": "passed"
-        },
-        {
-          "name": "profile_margin_calm",
-          "result": "passed"
-        },
-        {
-          "name": "profile_margin_calm_release_invariant",
-          "result": "passed"
-        },
-        {
-          "name": "profile_margin_calm_reducing_invariant",
+          "name": "two_of_our_crossing_orders_do_not_trade_with_each_other",
           "result": "passed"
         }
       ],
-      "what": "deterministic simulation with 3000 seeds per profile (300 of margin_days)"
-    },
-    {
-      "command": "OMS_KILL_ROUNDS=60 OMS_TEST_DIR=/mnt/nvme/gitproject/.cargo-target/hl-oms-integ-extended cargo test -p oms-node --test e2e random_kills -- --nocapture",
-      "exit_code": 0,
-      "log": "evidence/latest/kills-extended.log",
-      "name": "kills-extended",
-      "notes": [
-        "rounds=60 accepted=3198 venue_orders=3198",
-        "verify: {   \"records\": 18152,   \"last_seq\": 18152,   \"state_digest\": 14497278719764306361,   \"re_decided\": true,   \"torn_tail_bytes\": 0,   \"open_orders\": 0,   \"orders_in_memory\": 3228 } "
-      ],
-      "ok": true,
-      "seconds": 113.6,
-      "tests": [
-        {
-          "name": "random_kills_under_load_keep_books_consistent",
-          "result": "passed"
-        }
-      ],
-      "what": "60 rounds of SIGKILL under load with the journal on the given directory"
+      "what": "the Bybit gateway against the real Bybit testnet: the receive-window rule, refusals that place nothing, cancel-all and the open count, the clock check, the account and margin queries"
     }
   ],
   "test_data_dir": "target tmp dir of the build"

@@ -1,0 +1,20 @@
+{
+  "body": {
+    "category": "linear",
+    "settleCoin": "USDT"
+  },
+  "http_status": 200,
+  "method": "POST",
+  "path": "/v5/order/cancel-all",
+  "query": "",
+  "response": {
+    "result": {
+      "list": [],
+      "success": "1"
+    },
+    "retCode": 0,
+    "retExtInfo": {},
+    "retMsg": "OK",
+    "time": 1795535962997
+  }
+}

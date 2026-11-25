@@ -1,0 +1,58 @@
+{
+  "body": null,
+  "http_status": 200,
+  "method": "GET",
+  "path": "/v5/account/wallet-balance",
+  "query": "accountType=UNIFIED",
+  "response": {
+    "result": {
+      "list": [
+        {
+          "accountIMRate": "0",
+          "accountIMRateByMp": "0",
+          "accountLTV": "0",
+          "accountMMRate": "0",
+          "accountMMRateByMp": "0",
+          "accountType": "UNIFIED",
+          "coin": [
+            {
+              "accruedInterest": "0",
+              "availableToBorrow": "",
+              "availableToWithdraw": "",
+              "bonus": "0",
+              "borrowAmount": "0.000000000000000000",
+              "coin": "USDT",
+              "colRes": "-1",
+              "collateralSwitch": true,
+              "cumRealisedPnl": "-0.13231793",
+              "equity": "999.86768207",
+              "locked": "0",
+              "marginCollateral": true,
+              "spotBorrow": "0",
+              "spotHedgingQty": "0",
+              "totalOrderIM": "0",
+              "totalPositionIM": "0",
+              "totalPositionMM": "0",
+              "unrealisedPnl": "0",
+              "usdValue": "998.6908378",
+              "walletBalance": "999.86768207"
+            }
+          ],
+          "totalAvailableBalance": "998.6908378",
+          "totalEquity": "998.6908378",
+          "totalInitialMargin": "0",
+          "totalInitialMarginByMp": "0",
+          "totalMaintenanceMargin": "0",
+          "totalMaintenanceMarginByMp": "0",
+          "totalMarginBalance": "998.6908378",
+          "totalPerpUPL": "0",
+          "totalWalletBalance": "998.6908378"
+        }
+      ]
+    },
+    "retCode": 0,
+    "retExtInfo": {},
+    "retMsg": "OK",
+    "time": 1795535959169
+  }
+}
