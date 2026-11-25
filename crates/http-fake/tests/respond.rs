@@ -1,5 +1,7 @@
 //! `FakeHttp::respond`: a handler that computes an answer from the request.
 
+#![allow(clippy::unwrap_used)]
+
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
