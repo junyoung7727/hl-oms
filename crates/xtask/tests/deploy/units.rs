@@ -1378,6 +1378,13 @@ fn the_install_map_covers_every_file_and_path() {
         t.replace(INSTALL, from, to);
         assert_rules(&crate::check(&t), &["U14"]);
     }
+    // The same entry twice: only the second dst is the finding.
+    let mut t = Tree::real();
+    let map = format!("{}{entry}", t.files[INSTALL]);
+    t.set(INSTALL, &map);
+    let f = crate::check(&t);
+    assert_rules(&f, &["U14"]);
+    assert!(f.len() == 1 && f[0].text.contains("given twice"), "{f:?}");
     // A file that is not installed listed as a src.
     let mut t = Tree::real();
     let map = format!(
