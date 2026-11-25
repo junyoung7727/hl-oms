@@ -249,8 +249,8 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "멈춘 호가 주제 비율 (채널별)",
-      "description": "마지막 메시지가 60초보다 오래된 주제의 비율. 10%를 5분 넘으면 MdTopicsStale(P2).",
+      "title": "멈춘 호가 주제 비율 (시장·채널별)",
+      "description": "호가 채널(orderbook.*)마다 마지막 메시지가 60초보다 오래된 주제의 비율. MdTopicsStale의 식에서 > 0.1을 뺀 값(G8이 같음을 확인). 10%를 5분 넘으면 MdTopicsStale(P2).",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -268,8 +268,8 @@
             "type": "prometheus",
             "uid": "vm"
           },
-          "expr": "count by (channel) (md_last_msg_age_s{venue=~\"$venue\"} > 60) / count by (channel) (md_last_msg_age_s{venue=~\"$venue\"})",
-          "legendFormat": "{{channel}}"
+          "expr": "count by (venue, market, channel) (md_last_msg_age_s{venue=~\"$venue\", channel=~\"orderbook.*\"} > 60) / count by (venue, market, channel) (md_last_msg_age_s{venue=~\"$venue\", channel=~\"orderbook.*\"})",
+          "legendFormat": "{{venue}} {{market}} {{channel}}"
         }
       ],
       "fieldConfig": {

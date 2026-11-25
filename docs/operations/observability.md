@@ -383,9 +383,11 @@ Grafana는 보기만 한다. 알림은 vmalert와 Alertmanager가 낸다(`[unifi
 - 이 값은 첫 시작 때 관리자 계정에 쓰인다(Grafana 13.3.2 `conf/defaults.ini`의 설명: "can be changed before first start of grafana, or in profile settings". 첫 시작 뒤에 파일만 바꾸면 어떻게 되는지는 시험하지 않음). 첫 시작 뒤에 파일을 바꾸면 이렇게 맞춘다(셸 기록에 암호가 남지 않게 표준 입력으로, `--password-from-stdin`은 이 판의 `grafana cli` 도움말에 있음):
 
   ```sh
-  sudo -u hlobs /opt/grafana/bin/grafana cli --homepath /opt/grafana --config /etc/hl-oms-obs/grafana/grafana.ini \
-    admin reset-admin-password --password-from-stdin < /etc/hl-oms/grafana-admin-password
+  sudo sh -c 'runuser -u hlobs -- /opt/grafana/bin/grafana cli --homepath /opt/grafana --config /etc/hl-oms-obs/grafana/grafana.ini \
+    admin reset-admin-password --password-from-stdin < /etc/hl-oms/grafana-admin-password'
   ```
+
+  `<` 넘겨주기는 그 명령을 부르는 셸이 연다. 그래서 root 셸(`sudo sh -c`) 안에 둔다: `hlobs` 그룹이 아닌 운영자의 셸에서 `sudo -u hlobs … < 파일`로 쓰면 Grafana가 돌기 전에 "permission denied"로 멈춘다. 이 명령은 시험하지 않았다(`--help`로 플래그만 확인).
 - 익명 접근은 꺼져 있다(`[auth.anonymous] enabled = false`, G2). 시험에서 로그인 없는 `/api/search`는 401이었다.
 - 바깥으로 나가는 호출은 끔(판단(모델 아님)): 사용 통계(`reporting_enabled`), 갱신 확인 둘, 뉴스, 미리 깔리는 플러그인(`preinstall_disabled`), 플러그인 서명 키 내려받기(`public_key_retrieval_disabled`: 첫 시험에서 Grafana가 시작하자마자 grafana.com에서 키를 받으려 한 줄이 있어 끔), 브라우저의 gravatar(`disable_gravatar`). 이 설정으로 돌린 두 번째 시험의 기록에는 바깥 주소로 가는 줄이 없었다.
 
@@ -395,8 +397,10 @@ Grafana는 보기만 한다. 알림은 vmalert와 Alertmanager가 낸다(`[unifi
 
 ```sh
 sudo -u hlobs /opt/grafana/bin/grafana cli --homepath /opt/grafana --pluginsDir /mnt/nvme/observability/grafana/plugins \
-  plugins install victoriametrics-logs-datasource
+  plugins install victoriametrics-logs-datasource <판>
 ```
+
+판을 적지 않으면 가장 새 판이 깔린다(`grafana cli plugins install --help`: "install <plugin id> <plugin version (optional)>"). 고른 판을 설치 기록에 적는다. 이 판과 VictoriaLogs v1.54.0이 맞는지, 플러그인을 깐 뒤의 시작은 시험하지 않았다.
 
 플러그인이 없어도 데이터 소스는 목록에 나온다(스펙 단계와 2026-11-25 시험). D2·D3는 VictoriaLogs를 읽지 않는다. 이 데이터 소스를 쓰는 화면(사건 타임라인)은 아직 없다.
 
@@ -409,7 +413,7 @@ sudo -u hlobs /opt/grafana/bin/grafana cli --homepath /opt/grafana --pluginsDir 
 | 초당 메시지, 초당 바이트(시장별) | `md_msgs`·`md_bytes`의 1분 합 / 60 | `MdConnectionSilent` |
 | 10분 공백, 10분 재연결(시장·채널별) | `increase(md_gaps_total[10m])`, `increase(md_reconnects_total[10m])` | `MdGapsHigh`, `MdReconnectsHigh` |
 | 수신 지연 p99(시장별) | `md_recv_lag_ms{quantile="0.99"}`, 선 1000 ms | `MdRecvLagHigh` |
-| 멈춘 호가 주제 비율(채널별) | 마지막 메시지가 60초보다 오래된 주제 / 모든 주제, 선 10% | `MdTopicsStale` |
+| 멈춘 호가 주제 비율(시장·채널별) | 호가 채널(`orderbook.*`)에서 마지막 메시지가 60초보다 오래된 주제 / 그 채널의 모든 주제, 선 10%. `MdTopicsStale`의 식에서 ` > 0.1`을 뺀 값에 거래소 변수만 더함(G8이 같음을 확인). 거래 채널은 넣지 않는다: 조용한 종목의 거래 채널은 늘 60초를 넘기 때문 | `MdTopicsStale` |
 | 마지막 메시지 경과 상위 20 | `topk(20, md_last_msg_age_s)` 표 | — |
 | 스프레드, 호가 수량(종목별) | `md_spread_bp`, `md_depth_qty` | — |
 | 연결별 큐 바이트 | `md_queue_bytes`, 선 8 MiB | `MdQueueHigh` |
@@ -419,9 +423,9 @@ sudo -u hlobs /opt/grafana/bin/grafana cli --homepath /opt/grafana --pluginsDir 
 | 패널 | 값 | 관련 알림(§9) |
 |---|---|---|
 | 수집기 심박 경과(거래소별) | `time() - md_collector_heartbeat_ts`, 선 60초 | `MdCollectorDown` |
-| 스택 생존 | `up`(작업별) | `ObsComponentDown` |
+| 스택 생존 | `up`(작업별) | `victorialogs`·`vmalert-logs`·`alertmanager`는 `ObsComponentDown`. `victoriametrics`·`vmalert-metrics`는 자기 알림을 낼 수 없어 `Watchdog`이 끊기는 것으로만 보인다(바깥 dead-man은 Q1 전까지 없음) |
 | 메모리 / 단위 상한 | 구성 요소마다 상주 메모리 / 그 단위의 `MemoryMax`(§3), 선 0.9와 1. G8이 상한을 U6 표와 맞춘다 | `ObsMemoryNearCap` |
-| 레이크 디스크 여유, 남은 일수 | `lake_disk_free_bytes`, `lake_disk_days_left`(2일 아래 빨강, 7일 아래 주황) | `LakeDiskDaysLeftLow`·`Critical` |
+| 레이크 디스크 여유, 남은 일수 | `lake_disk_free_bytes`, `lake_disk_days_left`(2일 아래 빨강, 7일 아래 주황, 축은 365일에서 자름: 디스크가 줄지 않으면 값이 남은 바이트만큼 커져 2일·7일 구간이 보이지 않기 때문, 판단(모델 아님)) | `LakeDiskDaysLeftLow`·`Critical` |
 | 봉인 지연 | `lake_seal_lag_hours`, 선 2시간 | `LakeSealLag` |
 | 시각 오프셋 | `node_clock_offset_ms` | `ClockOffsetHigh` |
 | 지표 전송 버림(10분) | `increase(obs_push_dropped_total[10m])` | `MdObsPushDropping` |

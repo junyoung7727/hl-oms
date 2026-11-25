@@ -73,7 +73,7 @@
       "id": 2,
       "type": "stat",
       "title": "스택 생존 (up)",
-      "description": "VictoriaMetrics가 15초마다 긁은 결과. 0이면 그 구성 요소가 응답하지 않는다(ObsComponentDown). Grafana는 긁지 않는다.",
+      "description": "VictoriaMetrics가 15초마다 긁은 결과. 0이면 그 구성 요소가 응답하지 않는다. victorialogs, vmalert-logs, alertmanager는 ObsComponentDown(P2)이 알린다. victoriametrics와 vmalert-metrics는 자기 알림을 낼 수 없어 Watchdog이 끊기는 것으로만 보인다(바깥 dead-man은 Q1 전까지 없음). Grafana는 긁지 않는다.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -208,7 +208,7 @@
       "id": 5,
       "type": "timeseries",
       "title": "레이크 디스크 남은 일수",
-      "description": "기록 규칙 lake_disk_days_left. 7일 아래 P2, 2일 아래 P1(12시간 준비 뒤).",
+      "description": "기록 규칙 lake_disk_days_left. 7일 아래 P2, 2일 아래 P1(12시간 준비 뒤). 디스크가 줄지 않으면 값이 매우 커서 축은 365일에서 자른다(판단(모델 아님)).",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -249,7 +249,8 @@
                 "value": 7
               }
             ]
-          }
+          },
+          "max": 365
         },
         "overrides": []
       }
