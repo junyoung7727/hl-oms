@@ -696,7 +696,7 @@ fn g8_boards(p: &Parsed, boards: &[(&str, &Value)], out: &mut Vec<Finding>) {
                 .strip_suffix(threshold)
                 .unwrap_or(&a)
                 .replace('{', &format!("{{{filter}"));
-            if !exprs.iter().any(|e| *e == want) {
+            if !exprs.contains(&want) {
                 finding(
                     out,
                     path,
