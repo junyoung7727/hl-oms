@@ -28,10 +28,13 @@
 | `victoriametrics/scrape.json` | VictoriaMetrics가 15초마다 스택 다섯(VM, VL, vmalert 둘, Alertmanager)의 `/metrics`를 긁는 설정 |
 | `metrics.toml` | 지표 목록: 규칙이 쓰는 지표 이름과 라벨, 그 이름을 내보내는 소스 파일(설치하지 않음, §7) |
 | `alertmanager/alertmanager.json` | 알림 전달: 등급별 경로, 묶음, 억제 규칙, Telegram 수신자와 문자 모양(§10) |
+| `grafana/grafana.ini` | Grafana 설정: 자리 표시 주소, 저장 경로, 끈 기능(§12) |
+| `grafana/provisioning/datasources/hl-oms.yaml`, `grafana/provisioning/dashboards/hl-oms.yaml` | Grafana의 데이터 소스 둘과 대시보드 제공자(§12) |
+| `grafana/dashboards/d2-market-data.json`, `d3-system.json` | 대시보드 D2(시세 수집), D3(시스템)(§12) |
 
 모든 JSON 파일은 도구가 읽는 YAML이기도 하다(JSON은 YAML이다). 주석을 쓸 수 없으므로 알림마다 `annotations.summary`에 뜻과 할 일을 적었다.
 
-아직 없는 파일: Grafana 설정과 대시보드. 단위의 명령줄은 그 설치 경로를 이미 가리킨다. 그 파일이 없는 동안 이 단위들은 시작하지 못한다(그래서 지금은 켜지 않는다).
+Grafana는 `grafana.ini`의 자리 표시 주소 `192.0.2.1`을 이 PC의 Tailscale 주소로 바꾸기 전에는 시작하지 않는다(§12.1).
 
 배치 검사(`cargo test --locked -p xtask --test deploy`)가 이 파일들을 읽고 규칙을 확인한다(§7). CI의 `cargo test --workspace`에도 들어간다.
 
@@ -193,7 +196,7 @@ chrony가 시작한 뒤 첫 세 번의 갱신에서만 1초가 넘는 차이를 
 
 ## 7. 설치 전 확인
 
-1. `cargo test --locked -p xtask --test deploy`. 실패하면 줄마다 `deploy: <파일>: <규칙>: <내용>`이 나온다. 규칙: P1(파일이 종류대로 읽힘), U1(서비스마다 `MemoryMax` 하나, 크기, `infinity` 아님), U2(oneshot 서비스 ↔ 같은 이름의 타이머, 타이머에 `Unit=` 없음), U3(수집기의 재시작·감시 설정과 보호 설정, 시작 제한의 옛 이름과 `[Service]` 쪽 키, `MemoryHigh` 없음), U4(슬라이스의 가중치와 예약), U5(세 타이머의 시각과 `Persistent`), U6(설계 상한), U7(아카이버와 감사의 일일 작업 잠금), U8(`127.0.0.1`에서만 듣고 Alertmanager 클러스터 포트 없음. 리스너 플래그는 어떤 철자로 써도 모두 셈), U9(저장소가 `/mnt/nvme/` 아래, 저장소마다 경로 플래그 한 번), U10(보관 1년, VM 메모리 한도), U11(vmalert 둘의 원본·알림·간격), U12(어느 배치 파일도 KR qdp 체크아웃을 이름하지 않음, 감사 스크립트의 `venue=$1`과 `--state "$STATE_DIRECTORY/audit-$venue.json"`, 감사 단위의 `StateDirectory=qdp-crypto-audit`. 스크립트는 CI에서 돌지 않으므로 다시 verify할 날짜와 종료 코드를 정하는 줄도 글자 그대로 고정: 9일 창, `-cnewer "$stamp"`, 지금보다 뒤인 도장 검사, 도장 → `sleep 1` → verify → `mv` 순서, 실패 시 옛 도장 유지, `exit 5`, `--vm-url http://127.0.0.1:8428`), U13(`venues.toml`의 거래소가 수집기와 아카이버 모두에 등록됨), U14(설치 지도), U15(스택은 `hlobs`, 어느 단위에도 `User=root`를 쓰지 않음), U16(`md-lake verify`나 감사 스크립트를 돌리는 단위가 읽기 전용 `l0` 아래의 `_verify`에, 감사는 `crypto/audit`에도 쓸 수 있음. 감사 스크립트를 돌리는 다른 단위도 `crypto/audit`에 쓸 수 있어야 함. 감사 단위의 두 경로 줄은 정확히 §4.1의 값이고 `LAKE=/mnt/nvme/lake` 한 번), U17(`Exec*` 줄에 `$(`, 백틱, `%i`·`%I`·`%n`·`%%`가 아닌 `%` 없음: systemd는 셸을 돌리지 않음), U18(스택 단위의 재시작·격리 설정, 쓰는 디렉터리, 다른 단위에 묶이지 않음), U19(봉인·아카이버·감사 실행의 시간 제한, 아카이버의 스레드 1개와 L1 삭제 꺼짐, `EnvironmentFile=` 없음). 규칙 파일과 지표 목록: R1(규칙의 모든 지표 이름이 목록에 있음: `metrics.toml`, 고정된 qdp `contracts/lake/xrepo/metrics.json`, 규칙 파일의 기록 규칙 이름), R2(`metrics.toml`의 `[[metric]]` 행마다 `source` 파일에 그 이름이 문자열 그대로 있음, `[[stack]]` 행은 구성 요소와 판이 있음), R2b(qdp가 hl-oms 몫으로 남긴 이름(`reserved`)마다 쓰는 쪽이 있음, 한 이름에 쓰는 쪽은 하나), R3(라벨이 목록의 어떤 지표의 라벨이거나 `job`·`instance`), R4(허용된 함수만, 검사기가 읽지 못하는 모양 없음), R5(알림마다 `severity` P1·P2·P3와 `summary`, `Watchdog`은 하나이고 `vector(1)`·`watchdog`, `for` 없음, `system.rules.json`의 그룹 `watchdog`), R6(`venues.toml`의 거래소마다 `MdCollectorDown`(P1)과 `MdLakeGaugesMissing`(P2)(그룹 `market-data`), `LakeAuditStale`(P2)(그룹 `lake-audit`)이 정확히 하나씩, 정해진 식과 그룹, `for` 없음, 목록에 없는 거래소의 것은 없음), R7(설계의 레이크·디스크 규칙: 남은 일수 기록 규칙, `LakeDiskDaysLeftLow`·`Critical`, `LakeL0WriteError`, `LakeSealLag`, `LakeAuditFailed`의 식·`for`·등급·그룹. R6·R7 규칙과 `Watchdog`이 든 그룹의 간격: `market-data` 10초, `lake-recording`·`lake-audit` 1분, `lake`·`watchdog`은 간격 없음(vmalert-metrics의 기본 10초, U11) 또는 `10s`), R8(`vmalert/logs/`의 그룹은 `type: vlogs`, `vmalert/metrics/`의 그룹은 `type` 없음), R9(`scrape.json`의 작업 다섯과 간격 15초, 작업마다 대상이 그 단위의 리스너, 규칙이 쓰는 `job` 값은 긁는 작업, `ObsMemoryNearCap`은 작업마다 `process_resident_memory_bytes{job="<작업>"} > 0.9 * <U6의 설계 상한>` 항 하나씩이고 다른 항은 없음. 항을 통째로 비교하므로 자릿수가 더 붙은 상한도 걸림), U8은 긁는 대상에도(`127.0.0.1`만). Alertmanager 설정: R10(경로 나무가 §10의 표 그대로: 기본 수신자 `null`은 아무 데도 보내지 않음, `group_by`에 `alertname`과 `venue`, 자식 경로 넷이 이 순서로 각각 맞춤 조건 하나: `Watchdog` → `deadman`, P1 → `telegram-p1`, `LakeAuditFailed` → `telegram-p2-noresolve`, P2 → `telegram-p2`. 자식 경로마다 묶음 대기·간격·반복 시간이 §10의 표 값 그대로 적혀 있음(빠지면 Alertmanager 기본값을 쓰므로 실패). 자식 경로에 `continue`·묶음·음소거·하위 경로 없음. 최상위 경로에는 수신자·묶음·자식 경로·시간 말고 다른 키 없음, `group_by`에 `...` 없음. `deadman`은 연동 없음(Q1 전까지), Telegram 수신자 셋은 `telegram_configs` 말고 다른 연동 없음. 경로가 이름한 수신자는 모두 있고 이름은 한 번씩. Telegram 수신자 셋은 설정 하나씩, 문자가 `[MON P1] `·`[MON P2] `로 시작, P2 둘은 소리 없음, P1은 소리 있음, `parse_mode` 빈 값, `LakeAuditFailed`의 수신자만 해소 문자 없음(키가 없으면 Alertmanager는 해소 문자를 보낸다). 억제 규칙은 정확히 하나: `MdCollectorDown`이 같은 거래소의 P2·P3 `Md.*|LakeSealLag|LakeDiskDaysLeft.*`를 막음. 이 이름 패턴에 걸리는 알림이 qdp 지표(`lake_audit_*`)를 읽으면 실패), R11(설정에 `bot_token`, `chat_id`, `api_url`, `http_config`, `telegram_api_url`, `url` 키 없음: 비밀과 웹훅 주소는 파일 경로로만, API는 기본값만. Telegram 설정마다 `bot_token_file`과 `chat_id_file`이 `/etc/` 아래 파일 경로. 어느 배치 파일에도 Telegram 토큰 모양(숫자 6개 이상`:`문자 30개 이상)이나 `chat` 키 옆의 6자리 이상 숫자가 없음. 찾아도 그 값을 출력하지 않는다. `*_file` 키에 토큰이나 채팅 ID를 붙여 넣어도 값은 출력하지 않는다). 검사기는 MetricsQL의 부분 집합만 읽는다(파서가 아님). 문법은 §11의 `vmalert -dryRun`이 본다. LogsQL 식은 읽지 않는다.
+1. `cargo test --locked -p xtask --test deploy`. 실패하면 줄마다 `deploy: <파일>: <규칙>: <내용>`이 나온다. 규칙: P1(파일이 종류대로 읽힘), U1(서비스마다 `MemoryMax` 하나, 크기, `infinity` 아님), U2(oneshot 서비스 ↔ 같은 이름의 타이머, 타이머에 `Unit=` 없음), U3(수집기의 재시작·감시 설정과 보호 설정, 시작 제한의 옛 이름과 `[Service]` 쪽 키, `MemoryHigh` 없음), U4(슬라이스의 가중치와 예약), U5(세 타이머의 시각과 `Persistent`), U6(설계 상한), U7(아카이버와 감사의 일일 작업 잠금), U8(`127.0.0.1`에서만 듣고 Alertmanager 클러스터 포트 없음. 리스너 플래그는 어떤 철자로 써도 모두 셈), U9(저장소가 `/mnt/nvme/` 아래, 저장소마다 경로 플래그 한 번), U10(보관 1년, VM 메모리 한도), U11(vmalert 둘의 원본·알림·간격), U12(어느 배치 파일도 KR qdp 체크아웃을 이름하지 않음, 감사 스크립트의 `venue=$1`과 `--state "$STATE_DIRECTORY/audit-$venue.json"`, 감사 단위의 `StateDirectory=qdp-crypto-audit`. 스크립트는 CI에서 돌지 않으므로 다시 verify할 날짜와 종료 코드를 정하는 줄도 글자 그대로 고정: 9일 창, `-cnewer "$stamp"`, 지금보다 뒤인 도장 검사, 도장 → `sleep 1` → verify → `mv` 순서, 실패 시 옛 도장 유지, `exit 5`, `--vm-url http://127.0.0.1:8428`), U13(`venues.toml`의 거래소가 수집기와 아카이버 모두에 등록됨), U14(설치 지도), U15(스택은 `hlobs`, 어느 단위에도 `User=root`를 쓰지 않음), U16(`md-lake verify`나 감사 스크립트를 돌리는 단위가 읽기 전용 `l0` 아래의 `_verify`에, 감사는 `crypto/audit`에도 쓸 수 있음. 감사 스크립트를 돌리는 다른 단위도 `crypto/audit`에 쓸 수 있어야 함. 감사 단위의 두 경로 줄은 정확히 §4.1의 값이고 `LAKE=/mnt/nvme/lake` 한 번), U17(`Exec*` 줄에 `$(`, 백틱, `%i`·`%I`·`%n`·`%%`가 아닌 `%` 없음: systemd는 셸을 돌리지 않음), U18(스택 단위의 재시작·격리 설정, 쓰는 디렉터리, 다른 단위에 묶이지 않음), U19(봉인·아카이버·감사 실행의 시간 제한, 아카이버의 스레드 1개와 L1 삭제 꺼짐, `EnvironmentFile=` 없음). 규칙 파일과 지표 목록: R1(규칙의 모든 지표 이름이 목록에 있음: `metrics.toml`, 고정된 qdp `contracts/lake/xrepo/metrics.json`, 규칙 파일의 기록 규칙 이름), R2(`metrics.toml`의 `[[metric]]` 행마다 `source` 파일에 그 이름이 문자열 그대로 있음, `[[stack]]` 행은 구성 요소와 판이 있음), R2b(qdp가 hl-oms 몫으로 남긴 이름(`reserved`)마다 쓰는 쪽이 있음, 한 이름에 쓰는 쪽은 하나), R3(라벨이 목록의 어떤 지표의 라벨이거나 `job`·`instance`), R4(허용된 함수만, 검사기가 읽지 못하는 모양 없음), R5(알림마다 `severity` P1·P2·P3와 `summary`, `Watchdog`은 하나이고 `vector(1)`·`watchdog`, `for` 없음, `system.rules.json`의 그룹 `watchdog`), R6(`venues.toml`의 거래소마다 `MdCollectorDown`(P1)과 `MdLakeGaugesMissing`(P2)(그룹 `market-data`), `LakeAuditStale`(P2)(그룹 `lake-audit`)이 정확히 하나씩, 정해진 식과 그룹, `for` 없음, 목록에 없는 거래소의 것은 없음), R7(설계의 레이크·디스크 규칙: 남은 일수 기록 규칙, `LakeDiskDaysLeftLow`·`Critical`, `LakeL0WriteError`, `LakeSealLag`, `LakeAuditFailed`의 식·`for`·등급·그룹. R6·R7 규칙과 `Watchdog`이 든 그룹의 간격: `market-data` 10초, `lake-recording`·`lake-audit` 1분, `lake`·`watchdog`은 간격 없음(vmalert-metrics의 기본 10초, U11) 또는 `10s`), R8(`vmalert/logs/`의 그룹은 `type: vlogs`, `vmalert/metrics/`의 그룹은 `type` 없음), R9(`scrape.json`의 작업 다섯과 간격 15초, 작업마다 대상이 그 단위의 리스너, 규칙이 쓰는 `job` 값은 긁는 작업, `ObsMemoryNearCap`은 작업마다 `process_resident_memory_bytes{job="<작업>"} > 0.9 * <U6의 설계 상한>` 항 하나씩이고 다른 항은 없음. 항을 통째로 비교하므로 자릿수가 더 붙은 상한도 걸림), U8은 긁는 대상에도(`127.0.0.1`만). Alertmanager 설정: R10(경로 나무가 §10의 표 그대로: 기본 수신자 `null`은 아무 데도 보내지 않음, `group_by`에 `alertname`과 `venue`, 자식 경로 넷이 이 순서로 각각 맞춤 조건 하나: `Watchdog` → `deadman`, P1 → `telegram-p1`, `LakeAuditFailed` → `telegram-p2-noresolve`, P2 → `telegram-p2`. 자식 경로마다 묶음 대기·간격·반복 시간이 §10의 표 값 그대로 적혀 있음(빠지면 Alertmanager 기본값을 쓰므로 실패). 자식 경로에 `continue`·묶음·음소거·하위 경로 없음. 최상위 경로에는 수신자·묶음·자식 경로·시간 말고 다른 키 없음, `group_by`에 `...` 없음. `deadman`은 연동 없음(Q1 전까지), Telegram 수신자 셋은 `telegram_configs` 말고 다른 연동 없음. 경로가 이름한 수신자는 모두 있고 이름은 한 번씩. Telegram 수신자 셋은 설정 하나씩, 문자가 `[MON P1] `·`[MON P2] `로 시작, P2 둘은 소리 없음, P1은 소리 있음, `parse_mode` 빈 값, `LakeAuditFailed`의 수신자만 해소 문자 없음(키가 없으면 Alertmanager는 해소 문자를 보낸다). 억제 규칙은 정확히 하나: `MdCollectorDown`이 같은 거래소의 P2·P3 `Md.*|LakeSealLag|LakeDiskDaysLeft.*`를 막음. 이 이름 패턴에 걸리는 알림이 qdp 지표(`lake_audit_*`)를 읽으면 실패), R11(설정에 `bot_token`, `chat_id`, `api_url`, `http_config`, `telegram_api_url`, `url` 키 없음: 비밀과 웹훅 주소는 파일 경로로만, API는 기본값만. Telegram 설정마다 `bot_token_file`과 `chat_id_file`이 `/etc/` 아래 파일 경로. 어느 배치 파일에도 Telegram 토큰 모양(숫자 6개 이상`:`문자 30개 이상)이나 `chat` 키 옆의 6자리 이상 숫자가 없음. 찾아도 그 값을 출력하지 않는다. `*_file` 키에 토큰이나 채팅 ID를 붙여 넣어도 값은 출력하지 않는다). Grafana: G1(`[server] http_addr`가 한 번, `192.0.2.1`이나 100.64.0.0/10의 Tailscale 주소. `grafana.service`에 `GF_*` 환경 변수가 없고 `Exec` 줄은 `ExecStart=/opt/grafana/bin/grafana server --homepath /opt/grafana --config /etc/hl-oms-obs/grafana/grafana.ini` 하나뿐: 환경 변수, `cfg:` 인자, `--configOverrides`는 파일을 덮고 `--profile-addr`는 리스너를 연다), G2(`[unified_alerting]`과 `[auth.anonymous]`의 `enabled = false`가 한 번씩), G3(`admin_password`가 `$__file{/etc/…}` 한 번. 값을 출력하지 않음), G4(데이터 소스 둘이 §12의 값 그대로: uid·형식·루프백 주소·`access: proxy`·VictoriaMetrics가 기본·화면에서 고칠 수 없음·다른 키 없음), G5(파일 제공자 하나가 대시보드가 설치되는 디렉터리를 읽고 화면에서 지우거나 저장하지 못함. `[paths] provisioning`이 프로비저닝 파일의 설치 위치), G6(대시보드 uid가 하나씩, 패널마다 제목, 패널과 식이 데이터 소스 `vm`이나 `vl`(식은 패널과 같은 것), 식이 비지 않음, 글 패널과 행에는 식이 없음, 변수는 `vm`의 질의 변수, D3에 글 패널 `매일 확인: 실패한 일일 작업`이 하나이고 `systemctl --failed 'md-*' 'crypto-lake-audit*'`를 담음), G7(VictoriaMetrics 식과 `label_values(<지표>, <라벨>)` 변수가 R1·R3·R4를 통과하고 라벨은 그 지표의 라벨. VictoriaLogs 식은 읽지 않음), G8(D2·D3가 그 uid와 제목으로 하나씩. D3는 `LakeAuditFailed`의 식에서 ` > 0`을 뺀 값과, 긁는 구성 요소마다 `process_resident_memory_bytes{job="<작업>"} / <U6의 설계 상한>` 항을 정확히 보여 줌), G9(`[paths] data`와 `plugins`가 `/mnt/nvme/` 아래). 검사기는 MetricsQL의 부분 집합만 읽는다(파서가 아님). 문법은 §11의 `vmalert -dryRun`이 본다. LogsQL 식은 읽지 않는다.
 2. `systemd-analyze verify`: 단위 사본의 실행 파일 경로(`/usr/local/bin/`, `/usr/local/lib/hl-oms-obs/`, `/opt/grafana/bin/`)를 내려받은 공식 바이너리와 `/bin/true` 링크가 있는 임시 디렉터리로 바꾸고, 템플릿은 인스턴스 링크(`md-collector@bybit.service` 등)로 검사한다. 모르는 키는 `Unknown key`로 나온다. 감사 스크립트는 `sh -n bin/crypto-lake-audit.sh`로 문법만 본다.
 
 ## 8. 설치 순서 (소유자, 운영 항목 X1)
@@ -225,8 +228,15 @@ chrony가 시작한 뒤 첫 세 번의 갱신에서만 1초가 넘는 차이를 
    install -D -m 0644 vmalert/metrics/system.rules.json      /etc/hl-oms-obs/vmalert/metrics/system.rules.json
    install -D -m 0644 vmalert/logs/market-data-logs.rules.json /etc/hl-oms-obs/vmalert/logs/market-data-logs.rules.json
    install -D -m 0644 alertmanager/alertmanager.json  /etc/hl-oms-obs/alertmanager/alertmanager.json
+   install -D -m 0644 grafana/grafana.ini             /etc/hl-oms-obs/grafana/grafana.ini
+   install -D -m 0644 grafana/provisioning/datasources/hl-oms.yaml /etc/hl-oms-obs/grafana/provisioning/datasources/hl-oms.yaml
+   install -D -m 0644 grafana/provisioning/dashboards/hl-oms.yaml  /etc/hl-oms-obs/grafana/provisioning/dashboards/hl-oms.yaml
+   install -D -m 0644 grafana/dashboards/d2-market-data.json /etc/hl-oms-obs/grafana/dashboards/d2-market-data.json
+   install -D -m 0644 grafana/dashboards/d3-system.json      /etc/hl-oms-obs/grafana/dashboards/d3-system.json
    ```
-5. 비밀 파일(토큰, 채팅 ID, Grafana 관리자 암호)은 `/etc/hl-oms/` 아래 권한 0640, 그룹 `hlobs`로 둔다. Alertmanager의 것은 `/etc/hl-oms/alertmanager-telegram-token`(봇 토큰 한 줄)과 `/etc/hl-oms/alertmanager-telegram-chat-id`(채팅 ID 한 줄)다(§10). 저장소에는 경로만 있다. `md-lake seal`의 `/etc/hl-oms/telegram.json`은 그대로(0600).
+
+   Grafana는 켜기 전에 설치본 `/etc/hl-oms-obs/grafana/grafana.ini`의 `http_addr`를 이 PC의 Tailscale 주소로 바꾸고(§12.1), VictoriaLogs 플러그인을 깐다(§12.3).
+5. 비밀 파일(토큰, 채팅 ID, Grafana 관리자 암호)은 `/etc/hl-oms/` 아래 권한 0640, 그룹 `hlobs`로 둔다. Alertmanager의 것은 `/etc/hl-oms/alertmanager-telegram-token`(봇 토큰 한 줄)과 `/etc/hl-oms/alertmanager-telegram-chat-id`(채팅 ID 한 줄)다(§10). Grafana 관리자 암호는 `/etc/hl-oms/grafana-admin-password`(암호 한 줄, §12.2). 저장소에는 경로만 있다. `md-lake seal`의 `/etc/hl-oms/telegram.json`은 그대로(0600).
 6. `systemctl daemon-reload` 뒤 `systemctl enable --now`는 소유자가 X1에서 한다. **수집기를 vmalert보다 먼저 켠다.** 그러면 수집기 생존 알림 `MdCollectorDown`(P1)을 막을 필요가 없다. vmalert를 먼저 켰을 때만 이 한 줄로 10분(판단(모델 아님)) 막는다:
 
    ```sh
@@ -346,3 +356,90 @@ amtool config routes test --config.file=alertmanager.json alertname=LakeNotAudit
 - `cargo test --locked -p xtask --test deploy`(§7)는 CI에서도 돈다. 규칙이 없는 지표를 쓰거나 등급이 없거나 설계의 식이 바뀌면 실패한다.
 
 주간 소음 검토(설계 §8.3): 매주 알림마다 울린 횟수와 조치 여부를 보고, 조치가 없던 알림은 문턱값을 고치거나 지운다. 고친 문턱값은 규칙 파일과 이 표에 함께 적는다.
+
+## 12. Grafana (화면 D2·D3)
+
+Grafana는 보기만 한다. 알림은 vmalert와 Alertmanager가 낸다(`[unified_alerting] enabled = false`, 설계 표 8-5). 거래 안전 경로는 Grafana에 기대지 않는다(설계 §2). Grafana 자신은 긁지 않으므로 그 메모리와 생존은 D3에 나오지 않는다.
+
+| 저장소 파일 | 설치 경로 | 내용 |
+|---|---|---|
+| `grafana/grafana.ini` | `/etc/hl-oms-obs/grafana/grafana.ini` | 주소, 포트 3000, 저장 경로(`/mnt/nvme/observability/grafana`, 플러그인은 그 아래 `plugins`), 프로비저닝 경로, 끈 기능 |
+| `grafana/provisioning/datasources/hl-oms.yaml` | `/etc/hl-oms-obs/grafana/provisioning/datasources/hl-oms.yaml` | 데이터 소스 둘: `VictoriaMetrics`(uid `vm`, `prometheus` 형식, `http://127.0.0.1:8428`, 기본), `VictoriaLogs`(uid `vl`, `victoriametrics-logs-datasource`, `http://127.0.0.1:9428`). 둘 다 Grafana 서버가 읽는다(`access: proxy`: iPhone의 브라우저는 이 PC의 127.0.0.1에 닿지 못한다). 화면에서 고칠 수 없다 |
+| `grafana/provisioning/dashboards/hl-oms.yaml` | `/etc/hl-oms-obs/grafana/provisioning/dashboards/hl-oms.yaml` | 파일 제공자 하나: `/etc/hl-oms-obs/grafana/dashboards`를 읽는다. 화면에서 지우거나 저장하지 못한다 |
+| `grafana/dashboards/d2-market-data.json`, `d3-system.json` | `/etc/hl-oms-obs/grafana/dashboards/` | 대시보드 둘 |
+
+모든 파일은 JSON으로 쓴 YAML이다(§1). 시작할 때 `provisioning/plugins`와 `provisioning/alerting` 디렉터리가 없다는 오류 줄이 나오지만 시작은 계속된다(2026-11-25 시험). 줄이 보기 싫으면 설치본 아래에 빈 디렉터리 둘을 만든다.
+
+### 12.1 주소 (소유자 질문 Q3)
+
+- 저장소의 `http_addr = 192.0.2.1`은 자리 표시다(RFC 5737 TEST-NET-1, 이 PC에 배정되지 않음). 이 값으로는 Grafana가 시작하지 않는다. 확인(2026-11-25, Grafana 13.3.2, 저장소 파일 그대로, 경로만 임시 디렉터리로): `failed to open listener on address 192.0.2.1:3000: listen tcp 192.0.2.1:3000: bind: cannot assign requested address`, 종료 코드 1.
+- 값이 비었거나 줄이 없으면 Grafana는 모든 인터페이스에서 듣는다(설계 §8.4). 그래서 비워 두지 않고, 시작을 거부하는 주소를 두었다.
+- 설치할 때 설치본만 이 PC의 Tailscale 주소(`tailscale ip -4`, 100.64.0.0/10)로 바꾼다. 저장소 파일은 자리 표시 그대로 둔다(공개 저장소에 이 PC의 주소를 올리지 않음). 다시 설치하면 다시 바꾼다. 배치 검사 G1은 `192.0.2.1`과 이 범위의 주소만 받는다.
+- 설정은 `grafana.ini`에만 둔다. `GF_*` 환경 변수, `cfg:` 인자, `--configOverrides`는 파일을 덮고 `--profile-addr`는 따로 리스너를 연다. 배치 검사는 파일만 읽으므로 단위에 이것들이 있으면 G1이 실패한다.
+
+### 12.2 관리자 암호와 접근
+
+- `[security] admin_password = $__file{/etc/hl-oms/grafana-admin-password}`: 암호 한 줄짜리 파일(0640, 그룹 `hlobs`, §8). 저장소에는 경로만 있다. 파일이 없으면 Grafana는 시작하지 않는다(2026-11-25 시험: `got error while expanding security.admin_password with expander 'file': … no such file or directory`, 종료 코드 1).
+- 이 값은 첫 시작 때 관리자 계정에 쓰인다(Grafana 13.3.2 `conf/defaults.ini`의 설명: "can be changed before first start of grafana, or in profile settings". 첫 시작 뒤에 파일만 바꾸면 어떻게 되는지는 시험하지 않음). 첫 시작 뒤에 파일을 바꾸면 이렇게 맞춘다(셸 기록에 암호가 남지 않게 표준 입력으로, `--password-from-stdin`은 이 판의 `grafana cli` 도움말에 있음):
+
+  ```sh
+  sudo -u hlobs /opt/grafana/bin/grafana cli --homepath /opt/grafana --config /etc/hl-oms-obs/grafana/grafana.ini \
+    admin reset-admin-password --password-from-stdin < /etc/hl-oms/grafana-admin-password
+  ```
+- 익명 접근은 꺼져 있다(`[auth.anonymous] enabled = false`, G2). 시험에서 로그인 없는 `/api/search`는 401이었다.
+- 바깥으로 나가는 호출은 끔(판단(모델 아님)): 사용 통계(`reporting_enabled`), 갱신 확인 둘, 뉴스, 미리 깔리는 플러그인(`preinstall_disabled`), 플러그인 서명 키 내려받기(`public_key_retrieval_disabled`: 첫 시험에서 Grafana가 시작하자마자 grafana.com에서 키를 받으려 한 줄이 있어 끔), 브라우저의 gravatar(`disable_gravatar`). 이 설정으로 돌린 두 번째 시험의 기록에는 바깥 주소로 가는 줄이 없었다.
+
+### 12.3 VictoriaLogs 플러그인
+
+`victoriametrics-logs-datasource`는 Grafana에 들어 있지 않다. 운영자가 한 번 깐다(VictoriaLogs v1.54.0과 맞는 판, 표 8-5):
+
+```sh
+sudo -u hlobs /opt/grafana/bin/grafana cli --homepath /opt/grafana --pluginsDir /mnt/nvme/observability/grafana/plugins \
+  plugins install victoriametrics-logs-datasource
+```
+
+플러그인이 없어도 데이터 소스는 목록에 나온다(스펙 단계와 2026-11-25 시험). D2·D3는 VictoriaLogs를 읽지 않는다. 이 데이터 소스를 쓰는 화면(사건 타임라인)은 아직 없다.
+
+### 12.4 D2 시세 수집: 어느 거래소·종목이 비거나 늦나
+
+변수: `거래소`(`label_values(md_collector_heartbeat_ts, venue)`), `종목`(그 거래소의 `md_spread_bp`에 있는 종목). 숫자는 그 알림의 문턱값을 선으로 보여 준다.
+
+| 패널 | 값 | 관련 알림(§9) |
+|---|---|---|
+| 초당 메시지, 초당 바이트(시장별) | `md_msgs`·`md_bytes`의 1분 합 / 60 | `MdConnectionSilent` |
+| 10분 공백, 10분 재연결(시장·채널별) | `increase(md_gaps_total[10m])`, `increase(md_reconnects_total[10m])` | `MdGapsHigh`, `MdReconnectsHigh` |
+| 수신 지연 p99(시장별) | `md_recv_lag_ms{quantile="0.99"}`, 선 1000 ms | `MdRecvLagHigh` |
+| 멈춘 호가 주제 비율(채널별) | 마지막 메시지가 60초보다 오래된 주제 / 모든 주제, 선 10% | `MdTopicsStale` |
+| 마지막 메시지 경과 상위 20 | `topk(20, md_last_msg_age_s)` 표 | — |
+| 스프레드, 호가 수량(종목별) | `md_spread_bp`, `md_depth_qty` | — |
+| 연결별 큐 바이트 | `md_queue_bytes`, 선 8 MiB | `MdQueueHigh` |
+
+### 12.5 D3 시스템: 서비스가 살아 있고 자원이 남았나
+
+| 패널 | 값 | 관련 알림(§9) |
+|---|---|---|
+| 수집기 심박 경과(거래소별) | `time() - md_collector_heartbeat_ts`, 선 60초 | `MdCollectorDown` |
+| 스택 생존 | `up`(작업별) | `ObsComponentDown` |
+| 메모리 / 단위 상한 | 구성 요소마다 상주 메모리 / 그 단위의 `MemoryMax`(§3), 선 0.9와 1. G8이 상한을 U6 표와 맞춘다 | `ObsMemoryNearCap` |
+| 레이크 디스크 여유, 남은 일수 | `lake_disk_free_bytes`, `lake_disk_days_left`(2일 아래 빨강, 7일 아래 주황) | `LakeDiskDaysLeftLow`·`Critical` |
+| 봉인 지연 | `lake_seal_lag_hours`, 선 2시간 | `LakeSealLag` |
+| 시각 오프셋 | `node_clock_offset_ms` | `ClockOffsetHigh` |
+| 지표 전송 버림(10분) | `increase(obs_push_dropped_total[10m])` | `MdObsPushDropping` |
+| 마지막 감사 경과 | `time() - lake_audit_last_run_ts`(최근 3일), 선 36시간 | `LakeAuditStale` |
+| 26시간 안의 새 감사 실패 | `LakeAuditFailed`의 식에서 ` > 0`을 뺀 값(G8이 같음을 확인). 0보다 크면 `crypto/audit/venue=<v>/date=<d>.json`을 읽는다 | `LakeAuditFailed` |
+| 감사 공백 행: `clock_step`, 종류별 | `lake_audit_gap_rows`(최근 값). `clock_step`은 §6 | — |
+| VictoriaMetrics·VictoriaLogs 디스크 여유 | `vm_free_disk_space_bytes`, `vl_free_disk_space_bytes` | — |
+| 울리는 알림 | `ALERTS{alertstate="firing"}` 표. 보냈는지는 Alertmanager가 정한다(§10) | — |
+| 매일 확인: 실패한 일일 작업 | 글: `systemctl --failed 'md-*' 'crypto-lake-audit*'`와, 알림이 없는 실패(감사 날짜 하나의 쓰기 오류 종료 코드 3, verify 실패 종료 코드 5, 아카이버 실패·강제 종료) | 없음(§4) |
+
+수집기의 메모리와 일일 작업 단위의 상태는 값으로 보여 주지 않는다. 내보내는 것이 없다(ADR-035).
+
+### 12.6 iPhone에서 보기 (운영 항목 X2)
+
+iPhone에서 Tailscale을 켜고 같은 tailnet에서 `http://<이 PC의 Tailscale 주소>:3000`을 연다. 관리자 계정과 §12.2의 암호로 들어간다. 연결은 Tailscale(WireGuard)이 암호화하므로 Grafana는 HTTP로 둔다(판단(모델 아님)). 이 접속은 아직 확인하지 않았다(X2, 소유자).
+
+### 12.7 고칠 때
+
+- 대시보드는 화면에서 저장되지 않는다(`allowUiUpdates: false`, 시험에서 `Cannot save provisioned dashboard`). 저장소의 JSON을 고치고 다시 설치하면 제공자가 파일을 다시 읽는다.
+- 패널 식은 규칙 파일과 같은 지표 목록으로 검사된다(G7). 없는 지표나 라벨, 허용되지 않은 함수를 쓰면 `cargo test --locked -p xtask --test deploy`가 실패한다.
+- D3의 감사 실패 패널은 `LakeAuditFailed`의 식을 따라간다. 그 알림을 고치면 패널도 고친다(G8).
