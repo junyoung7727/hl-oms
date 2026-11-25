@@ -2,10 +2,10 @@
 //! config. R1 every metric name is in the catalogue, R3 every label is
 //! known, R4 every function is allowed, R5 every alert has a severity and a
 //! summary and one Watchdog exists, R6 the liveness, lake-gauge and
-//! audit-age rules of every configured venue and the OMS, projector and
-//! journal-gauge rules of every trading venue, R7 the design's lake, disk
-//! and journal rules and the intervals of the groups that hold the pinned
-//! rules, R8 log groups are `vlogs` and metric groups are not, R9 the scrape
+//! audit-age rules of every configured venue and the OMS, projector,
+//! journal-gauge and watcher rules of every trading venue, R7 the design's
+//! lake, disk, journal and watcher rules and the intervals of the groups
+//! that hold the pinned rules, R8 log groups are `vlogs` and metric groups are not, R9 the scrape
 //! jobs, the job names the rules use and the memory alert's caps, R12 the
 //! hold alert classes, R13 the trading venues are the watcher's; U8 also
 //! covers scrape targets.
@@ -57,8 +57,10 @@ const PER_VENUE: &[PerVenue] = &[
 ];
 
 /// R6: the same, per trading venue (`trading` in `venues.toml`): the OMS's
-/// liveness (design §8.3 B3), the projector that is its only witness, and
-/// the journal gauge the days-left rules read (design R4 SHOULD 2).
+/// liveness (design §8.3 B3), the projector that is its only witness, the
+/// journal gauge the days-left rules read (design R4 SHOULD 2), and the
+/// watcher (design §8.3 P1 "모니터링 상실": a dead watcher neither kills a
+/// silent OMS nor reconciles).
 const TRADING_PER_VENUE: &[PerVenue] = &[
     (
         "JournalDiskGaugeMissing",
@@ -81,13 +83,20 @@ const TRADING_PER_VENUE: &[PerVenue] = &[
         "oms",
         "absent_over_time(projector_caught_up{venue=\"<V>\"}[2m])",
     ),
+    (
+        "WatcherDown",
+        "P1",
+        "watcher.rules.json",
+        "watcher",
+        "absent_over_time(watcher_up{venue=\"<V>\"}[1m])",
+    ),
 ];
 /// R13: the file whose literal `("venue", "<V>")` labels the watcher's
 /// series; a trading venue the watcher does not label has no watcher.
 const WATCHER_METRICS: &str = "crates/watcher/src/metrics.rs";
 
-/// R7: the design's lake and disk rules: (file, group, alert or record,
-/// expr, for, severity).
+/// R7: the design's lake, disk, journal and watcher rules: (file, group,
+/// alert or record, expr, for, severity).
 type DesignRule = (
     &'static str,
     &'static str,
@@ -170,6 +179,51 @@ const DESIGN: &[DesignRule] = &[
         Some("10m"),
         Some("P1"),
     ),
+    // The watcher's API key (design R5 SHOULD 4: under 14 days = P2).
+    (
+        "watcher.rules.json",
+        "watcher",
+        "WatcherApiKeyExpiring",
+        "min by (venue) (watcher_api_key_days_left) < 14",
+        None,
+        Some("P2"),
+    ),
+    // The watcher's P1 states (design §8.3 P1 "불일치", "킬 스위치 실행"),
+    // each at once: a kill under way, a kill that owes the OMS its halt
+    // (the OMS may trade without a latch), an open mismatch, a key Bybit
+    // rejects (no reconciliation and no cancel-all).
+    (
+        "watcher.rules.json",
+        "watcher",
+        "WatcherMismatchActive",
+        "max by (venue, check) (watcher_mismatch_active) > 0",
+        None,
+        Some("P1"),
+    ),
+    (
+        "watcher.rules.json",
+        "watcher",
+        "WatcherKillActive",
+        "max by (venue) (watcher_kill_active) > 0",
+        None,
+        Some("P1"),
+    ),
+    (
+        "watcher.rules.json",
+        "watcher",
+        "WatcherKillHaltOwed",
+        "max by (venue) (watcher_kill_halt_owed) > 0",
+        None,
+        Some("P1"),
+    ),
+    (
+        "watcher.rules.json",
+        "watcher",
+        "WatcherAuthRejected",
+        "max by (venue) (watcher_auth_rejected) > 0",
+        None,
+        Some("P1"),
+    ),
 ];
 /// R7: the groups that hold an R6, R7 or Watchdog rule, and their
 /// interval. `None`: no interval, or the default it stands for.
@@ -182,6 +236,7 @@ const GROUP_INTERVALS: &[(&str, &str, Option<&str>)] = &[
     ("oms.rules.json", "journal-recording", Some("1m")),
     ("oms.rules.json", "oms", None),
     ("oms.rules.json", "projector", None),
+    ("watcher.rules.json", "watcher", None),
 ];
 /// R12: the hold alert classes (design §8.3). Every reason of `HoldReason`
 /// that `Core::holds(None)` returns is in exactly one class, and each class
@@ -962,6 +1017,7 @@ fn a_rule_with_an_unknown_metric_fails() {
 }
 
 const OMS: &str = "deploy/observability/vmalert/metrics/oms.rules.json";
+const WATCHER: &str = "deploy/observability/vmalert/metrics/watcher.rules.json";
 
 #[test]
 fn a_rule_with_an_unknown_oms_metric_fails() {
@@ -980,6 +1036,15 @@ fn a_rule_with_an_unknown_oms_metric_fails() {
         "journal_disk_days_lft < 7 and on(venue) (time() - tfirst_over_time(journal_disk_free_bytes[24h])) > 43200",
         &["R1", "R7"],
     );
+    // A watcher name the watcher does not export (it exports
+    // watcher_journal_error).
+    let f = set_expr(
+        WATCHER,
+        "WatcherJournalError",
+        "max by (venue) (watcher_journal_errors) > 0",
+        &["R1"],
+    );
+    assert!(f[0].text.contains("watcher_journal_errors"), "{f:?}");
 }
 
 #[test]
@@ -1141,6 +1206,7 @@ fn copy_for(t: &mut Tree, name: &str, v: &str) {
     let file = match name {
         n if n.starts_with("Lake") => LAKE,
         n if n.starts_with("Md") => MD,
+        n if n.starts_with("Watcher") => WATCHER,
         _ => OMS,
     };
     edit(t, file, |doc| {
@@ -1316,19 +1382,34 @@ fn with_trading_okx() -> Tree {
 
 #[test]
 fn every_trading_venue_has_its_liveness_rules() {
-    const LIVENESS: [&str; 3] = ["JournalDiskGaugeMissing", "OmsDown", "ProjectorDown"];
+    const LIVENESS: [&str; 4] = [
+        "JournalDiskGaugeMissing",
+        "OmsDown",
+        "ProjectorDown",
+        "WatcherDown",
+    ];
     let f = crate::check(&with_trading_okx());
     assert_rules(&f, &["R6"]);
     for name in LIVENESS {
         let want = format!("venue okx needs exactly one {name}");
         assert!(f.iter().any(|x| x.text.contains(&want)), "{name}: {f:?}");
     }
-    // OmsDown alone is not enough: the journal gauge and the projector.
+    // OmsDown alone is not enough: the journal gauge, the projector and
+    // the watcher.
     let mut t = with_trading_okx();
     copy_for(&mut t, "OmsDown", "okx");
     let f = crate::check(&t);
     assert_rules(&f, &["R6"]);
-    assert_eq!(f.len(), 2, "{f:?}");
+    assert_eq!(f.len(), 3, "{f:?}");
+    // Without WatcherDown: a dead watcher of that venue (no W5 kill, no
+    // reconciliation) pages nobody.
+    let mut t = with_trading_okx();
+    for name in &LIVENESS[..3] {
+        copy_for(&mut t, name, "okx");
+    }
+    let f = crate::check(&t);
+    assert_rules(&f, &["R6"]);
+    assert!(f.len() == 1 && f[0].text.contains("venue okx needs exactly one WatcherDown"), "{f:?}");
     let mut t = with_trading_okx();
     for name in LIVENESS {
         copy_for(&mut t, name, "okx");
@@ -1372,6 +1453,18 @@ fn every_trading_venue_has_its_liveness_rules() {
     ] {
         set_expr(OMS, name, e, &["R6"]);
     }
+    for e in [
+        "absent_over_time(watcher_up{venue=\"bybit\"}[10m])",
+        "max by (venue) (watcher_up{venue=\"bybit\"}) == 0",
+    ] {
+        set_expr(WATCHER, "WatcherDown", e, &["R6"]);
+    }
+    plant_rule(
+        WATCHER,
+        "WatcherDown",
+        |r| r["labels"]["severity"] = Value::String("P2".into()),
+        &["R6"],
+    );
     plant_rule(
         OMS,
         "OmsDown",
@@ -1633,10 +1726,58 @@ fn the_design_journal_and_key_rules_are_present() {
             &["R7"],
         );
     }
-    // The recording group evaluated every hour; the OMS group every minute.
-    for (group, interval) in [("journal-recording", "1h"), ("oms", "1m"), ("projector", "5m")] {
+    // The key's days left: the design's 14 days (R5 SHOULD 4).
+    set_expr(
+        WATCHER,
+        "WatcherApiKeyExpiring",
+        "min by (venue) (watcher_api_key_days_left) < 7",
+        &["R7"],
+    );
+    plant_rule(
+        WATCHER,
+        "WatcherApiKeyExpiring",
+        |r| r["for"] = Value::String("1h".into()),
+        &["R7"],
+    );
+    // The watcher's P1 alerts: a kill, a halt owed, a mismatch, a rejected
+    // key each page at once.
+    for name in [
+        "WatcherMismatchActive",
+        "WatcherKillActive",
+        "WatcherKillHaltOwed",
+        "WatcherAuthRejected",
+    ] {
+        plant_rule(
+            WATCHER,
+            name,
+            |r| r["labels"]["severity"] = Value::String("P2".into()),
+            &["R7"],
+        );
+        plant_rule(WATCHER, name, |r| r["for"] = Value::String("5m".into()), &["R7"]);
         let mut t = Tree::real();
-        edit(&mut t, OMS, |v| {
+        edit(&mut t, WATCHER, |v| {
+            v["groups"][0]["rules"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|r| r["alert"] != name);
+        });
+        assert_rules(&crate::check(&t), &["R7"]);
+    }
+    set_expr(
+        WATCHER,
+        "WatcherKillHaltOwed",
+        "max by (venue) (watcher_kill_halt_owed) > 1",
+        &["R7"],
+    );
+    // The recording group evaluated every hour; the OMS group every minute.
+    for (file, group, interval) in [
+        (OMS, "journal-recording", "1h"),
+        (OMS, "oms", "1m"),
+        (OMS, "projector", "5m"),
+        (WATCHER, "watcher", "1m"),
+    ] {
+        let mut t = Tree::real();
+        edit(&mut t, file, |v| {
             let g = v["groups"]
                 .as_array_mut()
                 .unwrap()

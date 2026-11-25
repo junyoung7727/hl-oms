@@ -166,3 +166,8 @@ mode = "0644"
 src = "vmalert/metrics/system.rules.json"
 dst = "/etc/hl-oms-obs/vmalert/metrics/system.rules.json"
 mode = "0644"
+
+[[file]]
+src = "vmalert/metrics/watcher.rules.json"
+dst = "/etc/hl-oms-obs/vmalert/metrics/watcher.rules.json"
+mode = "0644"
