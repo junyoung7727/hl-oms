@@ -2013,12 +2013,13 @@ fn a_unit_path_without_an_install_dst_fails() {
         "Nice=10\nEnvironment=HOOK=/usr/local/lib/hl-oms-obs/hook.sh\n",
         &["U14"],
     );
-    // Grafana would read another file than the one the check reads.
+    // Grafana would read another file than the one the check reads (G1
+    // pins Grafana's command line too).
     plant(
         "grafana.service",
         "--config /etc/hl-oms-obs/grafana/grafana.ini",
         "--config /etc/hl-oms-obs/grafana/custom.ini",
-        &["U14"],
+        &["U14", "G1"],
     );
     // No path is pending: an install entry dropped leaves the unit's path
     // without a dst.

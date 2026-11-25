@@ -22,8 +22,9 @@ const DASHBOARDS: &str = "deploy/observability/grafana/dashboards/";
 /// files (under `deploy/observability/`).
 const DASHBOARD_SRC: &str = "grafana/dashboards/";
 const PROVISIONING_SRC: &str = "grafana/provisioning/";
-/// The unit that starts Grafana.
+/// The unit that starts Grafana, and its one command (ADR-035 D2).
 const UNIT: &str = "grafana.service";
+const EXEC: &str = "/opt/grafana/bin/grafana server --homepath /opt/grafana --config /etc/hl-oms-obs/grafana/grafana.ini";
 
 /// G1: the address in the repository. RFC 5737 TEST-NET-1 is never
 /// assigned to this PC, so Grafana refuses to start until the operator
@@ -171,21 +172,35 @@ fn g1_listener(p: &Parsed, ini: &Ini, out: &mut Vec<Finding>) {
         );
     }
     // Grafana reads `GF_<SECTION>_<KEY>` variables and `cfg:` arguments
-    // over its file: the check reads only the file.
+    // over its file, and `grafana server` has flags that do the same
+    // (`--configOverrides`) or open a listener (`--profile-addr`): the
+    // check reads only the file, so the unit sets no such variable and has
+    // exactly the one command.
     for u in p.units.iter().filter(|u| u.name == UNIT) {
-        for (s, k, v) in &u.ini.entries {
-            let env = k.ends_with("Environment") && v.contains("GF_");
-            let arg = k.starts_with("Exec") && v.contains("cfg:");
-            if s == "Service" && (env || arg) {
+        let mut exec = Vec::new();
+        for (_, k, v) in u.ini.entries.iter().filter(|(s, _, _)| s == "Service") {
+            if k.ends_with("Environment") && v.contains("GF_") {
                 finding(
                     out,
                     &u.path,
                     "G1",
-                    format!(
-                        "{k}: no GF_* variable and no cfg: argument (settings only in grafana.ini)"
-                    ),
+                    format!("{k}: no GF_* variable (settings only in grafana.ini)"),
                 );
             }
+            if k.starts_with("Exec") {
+                exec.push((k.as_str(), v.as_str()));
+            }
+        }
+        if exec != [("ExecStart", EXEC)] {
+            finding(
+                out,
+                &u.path,
+                "G1",
+                format!(
+                    "the one Exec line must be ExecStart={EXEC} (found {} Exec lines or another command)",
+                    exec.len()
+                ),
+            );
         }
     }
 }
@@ -752,6 +767,25 @@ fn grafana_listens_on_the_tailscale_placeholder_only() {
         UNIT_PATH,
         "--config /etc/hl-oms-obs/grafana/grafana.ini\n",
         "--config /etc/hl-oms-obs/grafana/grafana.ini cfg:server.http_addr=0.0.0.0\n",
+        &["G1"],
+    );
+    // Other flags of `grafana server` that change the settings or open a
+    // listener, and a second command.
+    for extra in [
+        " --configOverrides server.http_addr=0.0.0.0",
+        " --profile --profile-addr 0.0.0.0",
+    ] {
+        plant(
+            UNIT_PATH,
+            "--config /etc/hl-oms-obs/grafana/grafana.ini\n",
+            &format!("--config /etc/hl-oms-obs/grafana/grafana.ini{extra}\n"),
+            &["G1"],
+        );
+    }
+    plant(
+        UNIT_PATH,
+        wd,
+        "WorkingDirectory=/opt/grafana\nExecStartPost=/opt/grafana/bin/grafana cli admin reset-admin-password x\n",
         &["G1"],
     );
 }
