@@ -2,7 +2,7 @@
 //! the slice, the install map, the venue list, the metric catalogue, the
 //! vmalert rule files, the scrape config, the Alertmanager config, the
 //! Grafana config, provisioning and dashboards, the polkit rule) against the
-//! rules of ADR-035 and ADR-036.
+//! rules of ADR-035, ADR-036 and ADR-037.
 //! Pure over an in-memory tree: no network, no clock, no temp file.
 //! Run before an install with `cargo test --locked -p xtask --test deploy`.
 

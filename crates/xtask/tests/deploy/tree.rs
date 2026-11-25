@@ -12,8 +12,9 @@ use std::path::Path;
 use crate::ini::{self, Dialect, Ini};
 
 /// Files read besides `deploy/`: the registries that name the collector's
-/// and the archiver's venues (rule U13), the pinned qdp metric list, and the
-/// files that push the metrics of the catalogue (rule R2).
+/// and the archiver's venues (rule U13), the pinned qdp metric list, the
+/// files that push the metrics of the catalogue (rule R2), the hold reasons
+/// (rule R12) and the watcher's venue label (rule R13).
 pub const ANCHORS: &[&str] = &[
     "contracts/lake/xrepo/metrics.json",
     "crates/md-collector/src/registry.rs",
@@ -21,6 +22,10 @@ pub const ANCHORS: &[&str] = &[
     "crates/md-collector/src/obs.rs",
     "crates/md-collector/src/telemetry.rs",
     "crates/obs-push/src/lib.rs",
+    "crates/oms-projector/src/metrics.rs",
+    "crates/oms-projector/src/projector.rs",
+    "crates/oms-core/src/model.rs",
+    "crates/watcher/src/metrics.rs",
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]

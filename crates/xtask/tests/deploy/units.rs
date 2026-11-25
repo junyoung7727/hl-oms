@@ -2441,7 +2441,7 @@ fn an_unregistered_venue_fails() {
     let venues = format!("{OBS}venues.toml");
     // A listed venue also needs its liveness rules (R6).
     let mut t = Tree::real();
-    t.set(&venues, "venues = [\"bybit\", \"okx\"]\n");
+    t.set(&venues, "venues = [\"bybit\", \"okx\"]\ntrading = [\"bybit\"]\n");
     assert_rules(&crate::check(&t), &["R6", "U13"]);
     for text in [
         "venues = []\n",
@@ -2449,7 +2449,7 @@ fn an_unregistered_venue_fails() {
         "venues = [\"bybit\", 1]\n",
     ] {
         let mut t = Tree::real();
-        t.set(&venues, text);
+        t.set(&venues, &format!("{text}trading = [\"bybit\"]\n"));
         assert_rules(&crate::check(&t), &["U13"]);
     }
     for registry in [
@@ -2460,9 +2460,10 @@ fn an_unregistered_venue_fails() {
         t.replace(registry, "\"bybit\" => Some(", "\"bybit2\" => Some(");
         assert_rules(&crate::check(&t), &["U13"]);
     }
+    // Without the file the trading list is gone too (R13).
     let mut t = Tree::real();
     t.remove(&venues);
-    assert_rules(&crate::check(&t), &["U13"]);
+    assert_rules(&crate::check(&t), &["R13", "U13"]);
 }
 
 #[test]

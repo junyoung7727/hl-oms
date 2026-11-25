@@ -340,3 +340,63 @@ fn a_reserved_lake_name_nobody_produces_fails() {
         "{f:?}"
     );
 }
+
+/// The series the projector pushes and the labels it gives them
+/// (`crates/oms-projector/src/metrics.rs`; `journal_disk_free_bytes` in
+/// `projector.rs`).
+const PROJECTOR: &[(&str, &[&str])] = &[
+    ("oms_up", &["venue"]),
+    ("oms_heartbeat_ts", &["venue"]),
+    ("oms_journal_durable_seq", &["venue"]),
+    ("projector_lag_records", &["venue"]),
+    ("projector_cursor_seq", &["venue"]),
+    ("projector_pending_lines", &["venue"]),
+    ("projector_unconfirmed_records", &["venue"]),
+    ("projector_tail_error", &["venue"]),
+    ("projector_caught_up", &["venue"]),
+    ("projector_rejected_lines", &["venue"]),
+    ("oms_halt", &["venue"]),
+    ("oms_holds", &["venue", "reason"]),
+    ("oms_open_orders", &["venue"]),
+    ("oms_in_doubt_orders", &["venue"]),
+    ("oms_parked_fills", &["venue"]),
+    ("oms_position_qty", &["venue", "symbol"]),
+    ("oms_realized_pnl", &["venue", "symbol"]),
+    ("oms_upnl", &["venue", "symbol"]),
+    ("oms_account_value", &["venue"]),
+    ("oms_margin_ratio", &["venue", "symbol"]),
+    ("oms_limit", &["venue", "kind", "symbol"]),
+    ("oms_limit_distance", &["venue", "kind", "symbol"]),
+    ("journal_disk_free_bytes", &["venue"]),
+];
+
+#[test]
+fn every_projector_and_watcher_series_is_catalogued() {
+    let t = Tree::real();
+    let mut out = Vec::new();
+    let p = crate::tree::parse(&t, &mut out);
+    let c = build(&t, &p, &mut out);
+    assert!(out.is_empty(), "{out:?}");
+    for (name, labels) in PROJECTOR {
+        let want: BTreeSet<String> = labels.iter().map(|l| l.to_string()).collect();
+        assert_eq!(c.metrics.get(*name), Some(&(Writer::Hl, want)), "{name}");
+    }
+    // A row removed: the rule that reads it names an unknown metric.
+    let mut t = Tree::real();
+    t.replace(
+        CATALOGUE,
+        "[[metric]]\nname = \"oms_parked_fills\"\nlabels = [\"venue\"]\nsource = \"crates/oms-projector/src/metrics.rs\"\n",
+        "",
+    );
+    let f = check(&t);
+    assert_rules(&f, &["R1"]);
+    assert!(f[0].text.starts_with("OmsParkedFills: oms_parked_fills"), "{f:?}");
+    // The projector's file no longer has the name.
+    let mut t = Tree::real();
+    t.replace(
+        "crates/oms-projector/src/metrics.rs",
+        "o.push(\"oms_halt\",",
+        "o.push(\"oms_halted\",",
+    );
+    assert_rules(&check(&t), &["R2"]);
+}

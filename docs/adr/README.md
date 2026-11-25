@@ -44,3 +44,4 @@
 | [ADR-034](ADR-034-bybit-rsa-keys.md) | Bybit RSA 서명 키: 자격 파일의 `rsa_private_key`(PKCS#8 PEM 글, `api_secret`과 정확히 하나), crate마다 서명기 하나(HMAC은 hex, RSA는 base64), PKCS#1·암호화된 PEM은 변환 명령을 적어 거부, 서명 실패는 보내지 않음(워처와 OMS, 2026-11-25 구현) | 거래소 |
 | [ADR-035](ADR-035-observability-deployment-files.md) | 관측 스택과 시세 단위의 배치 파일: `deploy/observability/`의 파일만(설치 없음), 수집기의 재시작·보호 설정과 `trading.slice`, 거래소마다 템플릿과 일일 작업 잠금, 매시 5분 봉인·4G 아카이버, xtask 통합 시험 `tests/deploy`의 배치 검사 | 운영 |
 | [ADR-036](ADR-036-oms-deployment-files.md) | OMS·워처·프로젝터·내보내기의 배치 파일: OMS는 `Restart=no`에 `[Install]` 없음(모든 시작은 사람), 워처는 부팅 때 활성화하고 OMS와 같은 사용자, polkit 규칙으로 `oms-node.service`의 `stop`만, 저널 마운트 확인, `/var/lib/hl-oms`의 킬 마커, 배치 검사 U20~U24 | 운영 |
+| [ADR-037](ADR-037-oms-alert-rules.md) | OMS·프로젝터·저널 알림 규칙: 저널 남은 일수 7·2일과 5분 부재, 거래 거래소마다 `OmsDown`·`ProjectorDown`, 보류 알림 등급 넷(래치 곧바로, `unmonitored` 2분, 지나감 5분, 운영자 P3; 둘째와 셋째는 OMS가 살아 있을 때만), `ProjectorDown` 억제 규칙, OMS 장애 동안 시세 알림은 막지 않음, 배치 검사 R12·R13 | 운영 |

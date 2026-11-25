@@ -403,6 +403,14 @@ _Avoid_: kill permission (the kill itself is the marker, `watcher_kill` and the 
 `AssertPathIsMountPoint=/mnt/nvme/hl-oms-journal` in the OMS, watcher, projector and export units: without the journal's own file system the start fails loudly, because the path would be a plain directory where an OMS begins a new, empty journal without its kill latch (ADR-036).
 _Avoid_: `RequiresMountsFor=` (only orders and pulls in a mount unit that may not exist), condition (a `Condition…` skips the unit silently)
 
+**Trading venue list** (거래 거래소 목록):
+`trading` in `deploy/observability/venues.toml`: the venues an OMS on this PC trades. Each must be a venue the watcher labels (`("venue", "<V>")` in `crates/watcher/src/metrics.rs`, rule R13), and each gets `OmsDown`, `ProjectorDown` and `JournalDiskGaugeMissing` (rule R6). It is separate from `venues`, the venues the collector records (ADR-037).
+_Avoid_: venue list (that is the collector's `venues`)
+
+**Hold alert class** (보류 알림 등급):
+One of the four groups a hold reason of `Core::holds(None)` belongs to for alerting: latched (P1 at once, also while the OMS is down; a person clears it with a command, except `storage_low`, which clears by itself once space is made), gate (`unmonitored`, on at every start until the watcher's first heartbeat; P1 after 2 min with the OMS up, that is not `OmsDown` in the same 30 s window), passing (clears by itself; P1 after 5 min with the OMS up) and operator (`operator_account`; P3). Rule R12 keeps every reason in exactly one class (ADR-037).
+_Avoid_: hold severity (a class decides the delay and the OMS-up gate as well as the severity)
+
 **Install map** (설치 지도):
 `deploy/observability/install.toml`: each repository file under `deploy/observability/` with the absolute path and mode it is installed to. The operator installs from it; this repository installs nothing (ADR-035).
 _Avoid_: manifest (that is the lake's), package

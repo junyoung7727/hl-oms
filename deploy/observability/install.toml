@@ -153,6 +153,11 @@ dst = "/etc/hl-oms-obs/vmalert/metrics/lake.rules.json"
 mode = "0644"
 
 [[file]]
+src = "vmalert/metrics/oms.rules.json"
+dst = "/etc/hl-oms-obs/vmalert/metrics/oms.rules.json"
+mode = "0644"
+
+[[file]]
 src = "vmalert/metrics/market-data.rules.json"
 dst = "/etc/hl-oms-obs/vmalert/metrics/market-data.rules.json"
 mode = "0644"

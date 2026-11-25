@@ -102,7 +102,7 @@
         },
         {
           "alert": "MdObsPushDropping",
-          "expr": "sum by (venue, endpoint) (increase(obs_push_dropped_total[10m])) > 0",
+          "expr": "sum by (venue, endpoint) (increase(obs_push_dropped_total{service=\"md-collector\"}[10m])) > 0",
           "labels": {
             "severity": "P2"
           },
