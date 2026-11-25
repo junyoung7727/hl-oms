@@ -245,6 +245,11 @@ Unit rules (U20a1; U12, U16, U17 and the audit rows of U5, U6 and U7 in U20a1b, 
 | U16 | a unit whose `Exec*` lines name `md-lake verify` or `crypto-lake-audit.sh` and whose `ReadOnlyPaths` holds `/mnt/nvme/lake/crypto/l0` or a parent of it lists `/mnt/nvme/lake/crypto/l0/_verify` in `ReadWritePaths`; a unit that runs `crypto-lake-audit.sh` also lists `/mnt/nvme/lake/crypto/audit` there (review 1 M2) |
 | U17 | no `Exec*` line holds `$(` or a backtick, and no `%` that is not `%i`, `%I`, `%n` or `%%` (systemd would expand or reject it; review 1 N2) |
 
+Amendment (U20a1 review 1 S1, S2): U8, U9, U10 and U11 read a command-line flag in every spelling the tools accept (one or two dashes, `name=value` or `name value`, systemd quoting), U8 counts every listener value, and U9 also requires `storageDataPath` once in VM and VL, `storage.path` once in Alertmanager and `lake` once in the seal and the archiver (an empty `Environment=` clears the variables before it).
+Amendment (U20a1 review 1 S4): new rule U18: each D2 stack unit has `Restart=on-failure`, `RestartSec=5`, `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`, its `ReadWritePaths=` exactly (none for vmalert), and no `Requires=`, `Requisite=`, `BindsTo=` or `PartOf=`; test `units::stack_units_keep_their_restart_and_sandbox_settings`.
+Amendment (U20a1 review 1 S3): new rule U19: `md-lake-seal@` and `md-archiver@` have `TimeoutStartSec=6h` once and no `TimeoutSec=`; the archiver's `--threads` resolves to 1, `RETAIN_ARGS=` is empty once and `--retain-l1-days` is not on its command line; no unit under `deploy/` has `EnvironmentFile=`; test `units::the_seal_and_archiver_runs_are_bounded`. U20a1b adds the audit unit to U19's timeout list.
+Amendment (U20a1 review 1 N5): U3's collector group also refuses `StartLimitInterval=` in `[Unit]` and both start-limit keys in `[Service]`; the protected group refuses `MemoryHigh=`.
+
 Rule rules (U20a2), Alertmanager rules (U20a2b), Grafana rules (U20a3): D7, D8, D9.
 
 ### D7. Metric catalogue, rule files and the expression scanner (U20a2)

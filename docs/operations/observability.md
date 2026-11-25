@@ -36,7 +36,7 @@
 | `/mnt/nvme/observability/grafana` | Grafana 데이터와 플러그인 | 같음 |
 | `/mnt/nvme/hl-oms-journal` | OMS 저널(이 문서의 단위는 쓰지 않음) | 같은 장치의 전용 파일 시스템 |
 
-- 저장소마다 `/mnt/nvme` 아래 자기 디렉터리를 쓴다. 배치 검사가 `-storageDataPath=`, `--storage.path=`, `LAKE=`, `--lake` 값이 `/mnt/nvme/` 아래가 아니면 실패한다(`${LAKE}`는 단위의 `Environment=LAKE=` 값으로 바꿔 본다).
+- 저장소마다 `/mnt/nvme` 아래 자기 디렉터리를 쓴다. 배치 검사가 `-storageDataPath`, `--storage.path`, `LAKE=`, `--lake` 값이 `/mnt/nvme/` 아래가 아니면 실패한다(`${LAKE}`는 단위의 `Environment=LAKE=` 값으로 바꿔 본다). 플래그는 도구가 읽는 모든 철자로 읽는다: 대시 하나나 둘, `이름=값`이나 `이름 값`, 따옴표. 저장소마다(VM, VL, Alertmanager, 봉인, 아카이버) 이 플래그가 꼭 한 번 있어야 한다: 없으면 도구가 상대 경로의 기본값에 쓴다.
 - OMS 저널은 고정 크기(약 64 GB, 설계값) ext4 파일 시스템에 둔다. 예: 이미지 파일 `/mnt/nvme/hl-oms-journal.img`를 loop 장치로 `/mnt/nvme/hl-oms-journal`에 붙인다(운영 항목 X10). 레이크나 지표가 디스크를 채워도 저널이 쓸 자리가 남는다. 공간만 나누고 지연은 나누지 않는다(같은 장치).
 - 저널을 `/`(980 500GB)에 두지 않는다. 그 장치는 지연 수용 기준을 넘었다(ADR-012: p99 27.2 ms, 기준 20 ms).
 
@@ -57,7 +57,7 @@
 - 상한은 설계 §8.5(TN 표 8-6)의 값이다. 배치 검사가 이 표와 다르면 실패한다(`MemoryMax`는 바이트로 비교, `1024M` = `1G`).
 - VictoriaMetrics `-retentionPeriod=1y`, `-memory.allowedBytes=600MiB`(설계 §8.5 "약 0.6 GB"), VictoriaLogs도 1년과 600MiB(600MiB는 판단(모델 아님)). 기본 보관은 VM 1개월, VL 7일이다.
 - vmalert는 `-rule.evalDelay` 기본값(30초)을 쓴다. 규칙은 30초 전의 저장소를 본다. vmalert 둘은 VM·VL·Alertmanager 뒤에 시작하되(`After=`) `Requires=`는 없다: VM을 다시 시작해도 vmalert가 멈추지 않는다.
-- 스택 단위는 `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`이고 자기 데이터 디렉터리만 쓴다(`ReadWritePaths=`).
+- 스택 단위는 `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`이고 자기 데이터 디렉터리만 쓴다(`ReadWritePaths=`, vmalert는 없음). 배치 검사가 이 설정과 `Restart=on-failure`, `RestartSec=5`, 그리고 `Requires=`·`Requisite=`·`BindsTo=`·`PartOf=`가 없음을 고정한다.
 - 시세 단위(수집기, 봉인, 아카이버)는 지금처럼 root로 돈다(레이크의 소유자를 옮기지 않는 한. 소유자가 정할 것: ADR-035 §8).
 
 ### 3.1 수집기의 보호 설정 (TN 표 8-6a)
@@ -75,7 +75,7 @@
 | `RestartPreventExitStatus=2` | 설정 오류(종료 코드 2)는 다시 시작해도 낫지 않으니 다시 띄우지 않는다 |
 
 - **재시작 지연을 늘리지 않았다**(`RestartSteps=`, `RestartMaxDelaySec=` 없음, 배치 검사가 거부). systemd 문서는 재시작 횟수가 언제 0으로 돌아가는지 말하지 않는다. `Restart=always`에서 돌아가지 않는다면 수명 중 다섯 번째 충돌 뒤의 모든 재시작이 최대 지연을 기다리고 그만큼 원본 데이터를 잃는다(확인 안 함). 대가: 시작하자마자 죽는 수집기는 사람이 멈출 때까지 약 2초마다 거래소에 다시 접속한다(소유자가 정할 것: ADR-035 §8).
-- 다른 거래소를 더하면 그 거래소의 `MemoryMax`(설계 0.5 GB)와 `MemoryMin`(그 절반)을 drop-in(`/etc/systemd/system/md-collector@<거래소>.service.d/*.conf`)에 쓴다.
+- 다른 거래소를 더하면 그 거래소의 `MemoryMax`(설계 0.5 GB)와 `MemoryMin`(그 절반)을 drop-in(`/etc/systemd/system/md-collector@<거래소>.service.d/*.conf`)에 쓰고, `trading.slice`의 `MemoryMin`을 그 거래소의 `MemoryMin`만큼 손으로 올린다. 배치 검사는 템플릿 파일 하나의 `MemoryMin`만 세고 인스턴스 수와 drop-in은 읽지 못한다.
 - `trading.slice`: `CPUWeight=1000`, `MemoryMin=512M`. cgroup v2에서 자식의 실제 `memory.min`은 조상의 값으로 제한된다(커널 문서 `Documentation/admin-guide/cgroup-v2.rst`, memory.min). 그래서 슬라이스는 그 안 모든 단위의 `MemoryMin` 합 이상을 예약해야 한다. 단위를 슬라이스에 더하면 슬라이스의 `MemoryMin`도 올린다. 배치 검사가 합보다 작으면 실패한다.
 - 수집기 설정의 `telemetry.slow_ms`(기본 10 000)는 20 000 이하로 둔다. 생존 알림 규칙(심박이 60초 없음)과 남은 일수 알림의 준비 시간(12시간)이 이 주기로 오는 값에 기댄다. 배치 검사는 `/etc/md-collector/<거래소>.toml`을 읽지 못하므로 이것은 사람이 지킨다.
 
@@ -91,6 +91,7 @@
 - **일일 작업 잠금.** 아카이버의 명령은 `/usr/bin/flock /run/lock/hl-oms-daily.lock …`로 시작한다. 일일 작업(모든 거래소의 아카이버, 뒤에 더할 일일 작업)은 한 번에 하나만 돌아 4G 상한이 더해지지 않는다. `flock`은 기다리고, `TimeoutStartSec=6h`(판단(모델 아님))가 기다림을 포함한 한 번의 실행을 묶는다. 잠금을 쓰는 단위는 모두 root로 돈다: `/run/lock`은 누구나 쓰는 sticky 디렉터리라 `fs.protected_regular`이 켜져 있으면 다른 사용자가 root가 만든 잠금 파일을 `O_CREAT`로 열지 못한다.
 - **봉인의 6시간 제한**은 걸린 봉인을 끝낼 뿐이다. systemd는 돌고 있는 oneshot을 두 번 시작하지 않고, 봉인에는 자기 잠금이 있다(종료 코드 3). 짧은 제한이면 부하에서 오래 걸리는 시간이 매시 죽고 다시 시작해 영영 봉인되지 않는다. 제한에 걸려 죽은 봉인은 다음 시간에 봉인 기록부터 이어 한다.
 - **아카이버 4G의 여유.** 실측 2.57 GB / 320만 행(행당 약 800 B, [md-archiver.md](md-archiver.md) §5)이면 4 GB에 토픽 하루 약 500만 행, 실측 날짜의 1.6배다. 더 바쁜 날이 넘는지는 재지 않았다(판단(모델 아님). 소유자가 정할 것: ADR-035 §8). 넘으면 그 날짜에서 상한에 걸려 죽고, 아카이버는 가장 오래된 날짜부터 만들므로 뒤 날짜도 모두 막힌다. 손실은 없다(L0는 남고 `--retain-l1-days`는 꺼져 있음). 사람이 잠금을 잡고 더 높은 상한으로 한 번 돌린다: `systemd-run --wait -p MemoryMax=8G /usr/bin/flock /run/lock/hl-oms-daily.lock /usr/local/bin/md-archiver run --venue <v> --lake /mnt/nvme/lake --threads 1`(8G는 예, 판단(모델 아님)).
+- 배치 검사가 봉인과 아카이버의 `TimeoutStartSec=6h`(그리고 `TimeoutSec=` 없음), 아카이버의 `--threads`가 1이고 `RETAIN_ARGS=`가 비어 있으며 `--retain-l1-days`가 명령에 없음, 어느 단위에도 `EnvironmentFile=`이 없음(검사가 그 파일의 값을 읽지 못함)을 고정한다. `oneshot` 서비스에는 기본 시작 제한 시간이 없어, 제한이 없으면 걸린 아카이버가 일일 작업 잠금을 끝없이 쥔다.
 - **매일 확인**: `systemctl --failed 'md-*'`. 실패한 아카이버 실행은 지금 어떤 알림도 내지 않는다.
 - `--retain-l1-days`(L1 지우기)는 꺼 둔다(`RETAIN_ARGS=` 비움). 켜기 전 두 조건: (1) 바로 앞에 `--full` 감사를 돌린다(qdp `docs/crypto/auditor.md`, "Run `--full` right before `md-archiver --retain-l1-days`"), (2) md-archiver가 `lake_l1_build_lag_days`를 내보내고 그 알림이 있다. 그 지표가 없으면 죽은 아카이버 실행이 뒤 날짜를 모두 막아도 `systemctl --failed`만 보여 준다.
 
@@ -131,7 +132,7 @@ chrony가 시작한 뒤 첫 세 번의 갱신에서만 1초가 넘는 차이를 
 
 ## 7. 설치 전 확인
 
-1. `cargo test --locked -p xtask --test deploy`. 실패하면 줄마다 `deploy: <파일>: <규칙>: <내용>`이 나온다. 규칙: P1(파일이 종류대로 읽힘), U1(서비스마다 `MemoryMax` 하나, 크기, `infinity` 아님), U2(oneshot 서비스 ↔ 같은 이름의 타이머, 타이머에 `Unit=` 없음), U3(수집기의 재시작·감시 설정과 보호 설정), U4(슬라이스의 가중치와 예약), U5(타이머 시각과 `Persistent`), U6(설계 상한), U7(일일 작업 잠금), U8(`127.0.0.1`에서만 듣고 Alertmanager 클러스터 포트 없음), U9(저장소가 `/mnt/nvme/` 아래), U10(보관 1년, VM 메모리 한도), U11(vmalert 둘의 원본·알림·간격), U13(`venues.toml`의 거래소가 수집기와 아카이버 모두에 등록됨), U14(설치 지도), U15(스택은 `hlobs`, 어느 단위에도 `User=root`를 쓰지 않음).
+1. `cargo test --locked -p xtask --test deploy`. 실패하면 줄마다 `deploy: <파일>: <규칙>: <내용>`이 나온다. 규칙: P1(파일이 종류대로 읽힘), U1(서비스마다 `MemoryMax` 하나, 크기, `infinity` 아님), U2(oneshot 서비스 ↔ 같은 이름의 타이머, 타이머에 `Unit=` 없음), U3(수집기의 재시작·감시 설정과 보호 설정, 시작 제한의 옛 이름과 `[Service]` 쪽 키, `MemoryHigh` 없음), U4(슬라이스의 가중치와 예약), U5(타이머 시각과 `Persistent`), U6(설계 상한), U7(일일 작업 잠금), U8(`127.0.0.1`에서만 듣고 Alertmanager 클러스터 포트 없음. 리스너 플래그는 어떤 철자로 써도 모두 셈), U9(저장소가 `/mnt/nvme/` 아래, 저장소마다 경로 플래그 한 번), U10(보관 1년, VM 메모리 한도), U11(vmalert 둘의 원본·알림·간격), U13(`venues.toml`의 거래소가 수집기와 아카이버 모두에 등록됨), U14(설치 지도), U15(스택은 `hlobs`, 어느 단위에도 `User=root`를 쓰지 않음), U18(스택 단위의 재시작·격리 설정, 쓰는 디렉터리, 다른 단위에 묶이지 않음), U19(봉인과 아카이버 실행의 시간 제한, 아카이버의 스레드 1개와 L1 삭제 꺼짐, `EnvironmentFile=` 없음).
 2. `systemd-analyze verify`: 단위 사본의 실행 파일 경로(`/usr/local/bin/`, `/usr/local/lib/hl-oms-obs/`, `/opt/grafana/bin/`)를 내려받은 공식 바이너리와 `/bin/true` 링크가 있는 임시 디렉터리로 바꾸고, 템플릿은 인스턴스 링크(`md-collector@bybit.service` 등)로 검사한다. 모르는 키는 `Unknown key`로 나온다.
 
 ## 8. 설치 순서 (소유자, 운영 항목 X1)

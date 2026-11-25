@@ -18,7 +18,7 @@
 - 수집기는 죽으면 곧 다시 뜨고, 메모리 압박에서 마지막에 죽는다.
 - 큰 일일 작업은 한 번에 하나만 돌아 상한이 더해지지 않는다.
 - 모든 리스너는 루프백에만 묶인다(Grafana만 Tailscale 주소). 비밀은 파일 경로로만 저장소에 있다.
-- 설치하기 전에 없는 파일을 가리키는 단위, 없는 지표를 쓰는 규칙은 검사에서 실패한다.
+- 설치하기 전에 없는 파일을 가리키는 단위, 없는 지표를 쓰는 규칙은 검사에서 실패한다. 예외는 뒤 부분이 만들 설정 파일 다섯 개(`PENDING_DST`)다: 그 파일이 생기면 목록에서 지우고, 그동안 그 단위들은 시작하지 못한다.
 
 ## 3. 제약
 
@@ -76,7 +76,7 @@ B, E, H, J, L(스택 자신의 지표만 VictoriaMetrics가 루프백에서 긁�
 - D3 보호: `md-collector@.service`는 `Restart=always`, `RestartSec=2`, `StartLimitIntervalSec=0`, `WatchdogSec=30s`, `Type=notify`, `RestartPreventExitStatus=2`, `Slice=trading.slice`, `OOMScoreAdjust=-900`, `MemorySwapMax=0`, `MemoryMin=512M`(1G의 절반), `IOWeight=1000`. 슬라이스는 `CPUWeight=1000`이고 그 안 단위의 `MemoryMin` 합 이상을 예약한다(지금 512M). **재시작 지연을 늘리지 않는다**(`RestartSteps=`, `RestartMaxDelaySec=` 금지): systemd 문서는 재시작 횟수가 언제 0이 되는지 말하지 않고, `Restart=always`에서 0이 되지 않는다면 다섯 번째 충돌 뒤의 모든 재시작이 최대 지연만큼 원본 데이터를 잃는다(확인 안 함). 시작 횟수 제한을 끈 이유: 기본(10초에 5번)이면 2초 재시작이 수집기를 영영 멈출 수 있다.
 - D4 일일 작업: 거래소마다 템플릿. 모든 일일 작업(아카이버, 감사, 뒤의 `oms-export`)은 `/usr/bin/flock /run/lock/hl-oms-daily.lock <명령>`으로 시작하고 `TimeoutStartSec=6h`(판단)로 묶인다. 잠금을 쓰는 단위는 모두 root로 돈다: `/run/lock`은 sticky이고 `fs.protected_regular`이 켜지면 다른 사용자가 root의 잠금 파일을 `O_CREAT`로 열지 못한다(`oms-export`도 root로 돌거나 잠금을 자기용 디렉터리로 옮긴다). 시각(UTC): 봉인 매시 5분(`MemoryMax=1G`, `TimeoutStartSec=6h`: 걸린 봉인만 끝냄, 다음 시간이 봉인 기록부터 이음), 아카이버 01:10(`MemoryMax=4G`, 8G에서 낮춤), 감사 02:30(`MemoryMax=4G`, 아카이버 뒤 `After=`). 모든 타이머 `Persistent=true`.
   - 감사 단위(`crypto-lake-audit@.service`)는 스크립트 `bin/crypto-lake-audit.sh <거래소>` 하나를 잠금 아래서 돌린다: (0) `venue`, `LAKE`, `STATE_DIRECTORY`, `QDP_CHECKOUT`, `UV`, `MD_LAKE` 중 빈 것이 있으면 종료 코드 2; (1) 어제부터 9일 전까지 날짜마다, 봉인된 L0 파일이 있고 verify 결과가 없거나, 확인 도장(stamp)이 없거나, 도장 뒤에 상태가 바뀐(ctime) 봉인 파일이 있으면 도장을 먼저 찍고 1초 쉰 뒤 `md-lake verify`를 돌리며, 성공하면 도장을 바꾸고 실패하면 옛 도장을 둔다; (2) qdp 체크아웃(`/opt/qdp-crypto`, KR 파이프라인의 체크아웃이 아님)에서 감사기를 돌린다(상태 파일은 `StateDirectory` 아래, 레이크 밖); (3) 종료 코드는 0단계의 2, 아니면 0이 아닌 감사기의 코드, 아니면 verify 실패의 5, 아니면 0. 9일인 이유: 일별 봉인의 되돌아보기가 `last_closed`의 날부터 7일이라 다음 날 감사까지 닿는 날짜가 모두 창 안에 든다. 경로 줄은 정확히 `ReadOnlyPaths=…/crypto/l0 …/crypto/l1`, `ReadWritePaths=…/crypto/l0/_verify …/crypto/audit`이다(verify는 `_verify`에, 감사기는 `audit`에만 쓴다).
-- D6 검사: xtask의 통합 시험 `crates/xtask/tests/deploy/`(Cargo가 `[[test]]` 없이 찾는다). `deploy/`의 모든 파일과 고정된 qdp 지표 목록, 기준이 되는 소스 파일을 한 번 읽어 메모리의 나무로 만들고, 순수 함수 `check`가 발견 목록을 돌려준다. 시험은 실제 나무에서 발견이 없음을, 파일 하나를 메모리에서 바꾼 나무에서 그 규칙만 나옴을 확인한다. 하위 명령이나 CI 단계가 아닌 이유: `main.rs`, `registry.rs`, `.github/`는 소유자 확인 경로다. 주장(claim)은 두지 않는다: 주장은 검증 묶음이 필요하고 묶음 목록은 `registry.rs`에 있다. 검사는 어차피 `cargo test --workspace`로 CI에서 돈다.
+- D6 검사: xtask의 통합 시험 `crates/xtask/tests/deploy/`(Cargo가 `[[test]]` 없이 찾는다). `deploy/`의 모든 파일과 고정된 qdp 지표 목록, 기준이 되는 소스 파일을 한 번 읽어 메모리의 나무로 만들고, 순수 함수 `check`가 발견 목록을 돌려준다. 시험은 실제 나무에서 발견이 없음을, 파일 하나를 메모리에서 바꾼 나무에서 그 규칙만 나옴을 확인한다. 명령 줄의 플래그는 도구가 읽는 모든 철자(대시 하나나 둘, `이름=값`이나 `이름 값`, 따옴표)로 읽고, 검사가 읽을 수 없는 `EnvironmentFile=`은 거부한다. 스택 단위의 재시작·격리 설정(U18)과 봉인·아카이버의 실행 제한(U19)도 고정한다. 하위 명령이나 CI 단계가 아닌 이유: `main.rs`, `registry.rs`, `.github/`는 소유자 확인 경로다. 주장(claim)은 두지 않는다: 주장은 검증 묶음이 필요하고 묶음 목록은 `registry.rs`에 있다. 검사는 어차피 `cargo test --workspace`로 CI에서 돈다.
 - D7 지표 목록: 규칙이 쓰는 모든 지표 이름은 목록(`metrics.toml`의 행마다 그 이름이 문자 그대로 있는 소스 파일, 고정된 qdp `contracts/lake/xrepo/metrics.json`, 규칙 파일의 기록 규칙 이름)에 있어야 한다. 한 이름에 쓰는 쪽은 하나다.
 - D8 비밀과 dead-man: Alertmanager의 텔레그램 토큰과 채팅 ID는 `/etc/hl-oms/` 아래 파일 경로로만 둔다(인라인 값은 검사가 거부). Watchdog 알림은 연동이 없는 `deadman` 수신자로 간다(바깥 dead-man 서비스는 소유자가 정함).
 - D9 Grafana: `http_addr`는 자리 표시 `192.0.2.1`(RFC 5737 TEST-NET-1)이다. 이 PC가 묶을 수 없는 주소라 운영자가 Tailscale 주소를 쓰기 전까지 Grafana는 시작을 거부한다. 모든 인터페이스에 여는 것보다 거부를 골랐다.
@@ -92,8 +92,8 @@ B, E, H, J, L(스택 자신의 지표만 VictoriaMetrics가 루프백에서 긁�
 
 ## 9. 근거
 
-- 시험: `crates/xtask/tests/deploy/`의 `the_deploy_tree_passes`, `tree::every_file_parses_by_its_kind`, `ini::the_ini_reader_keeps_repeats_and_joins_lines`, `units::*`(수집기의 재시작·감시·보호, 상한, 타이머, 슬라이스, 잠금, 리스너, 저장 위치, 플래그, 거래소, 설치 지도, 신원).
-- 변이: M324~M332(xtask, `cargo run -p xtask -- mutants --only M3xx`).
+- 시험: `crates/xtask/tests/deploy/`의 `the_deploy_tree_passes`, `tree::every_file_parses_by_its_kind`, `ini::the_ini_reader_keeps_repeats_and_joins_lines`, `units::*`(수집기의 재시작·감시·보호, 상한, 타이머, 슬라이스, 잠금, 리스너, 저장 위치, 플래그, 거래소, 설치 지도, 신원, 스택 단위의 재시작·격리, 봉인과 아카이버의 실행 제한).
+- 변이: M324~M338(xtask, `cargo run -p xtask -- mutants --only M3xx`).
 - 도구: `systemd-analyze verify`(systemd 259)를 단위 사본에 돌렸다(바이너리 경로만 바꿈).
 
 ## 10. 재검토 조건
