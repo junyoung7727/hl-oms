@@ -53,14 +53,19 @@ while [ "$i" -le 9 ]; do
 	result="$LAKE/crypto/l0/_verify/venue=$venue/date=$d.json"
 	stamp="$STATE_DIRECTORY/verify-$venue-$d.stamp"
 	if [ -e "$result" ] && [ -e "$stamp" ]; then
-		# A rename changes a file's ctime, not its mtime: -cnewer compares the
-		# ctime with the stamp's mtime (the touch below).
-		if ! changed=$(sealed "$d" -cnewer "$stamp"); then
-			echo "crypto-lake-audit: cannot list the sealed files of $venue $d" >&2
-			verify_failed=1
-			continue
+		# A stamp later than now (the clock was set back after the touch)
+		# would hide the files sealed since: such a stamp counts as missing.
+		future=$(find "$stamp" -newermt "@$now" -print) || future=1
+		if [ -z "$future" ]; then
+			# A rename changes a file's ctime, not its mtime: -cnewer compares
+			# the ctime with the stamp's mtime (the touch below).
+			if ! changed=$(sealed "$d" -cnewer "$stamp"); then
+				echo "crypto-lake-audit: cannot list the sealed files of $venue $d" >&2
+				verify_failed=1
+				continue
+			fi
+			[ -n "$changed" ] || continue
 		fi
-		[ -n "$changed" ] || continue
 	fi
 	# The stamp is taken before verify lists the files: a file sealed while
 	# verify runs is newer than the stamp, so the next run verifies again.
