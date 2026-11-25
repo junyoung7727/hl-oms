@@ -837,14 +837,14 @@ fn u19_bounded_runs(p: &Parsed, out: &mut Vec<Finding>) {
         }
     }
     for u in named(p, "md-archiver@.service") {
-        // One topic-day in memory per thread; L1 is never deleted.
+        // L1 is never deleted; one topic-day in memory per thread.
         let env = environment(u);
-        if env_values(&env, "THREADS") != ["1"] || env_values(&env, "RETAIN_ARGS") != [""] {
+        if env_values(&env, "RETAIN_ARGS") != [""] {
             finding(
                 out,
                 &u.path,
                 "U19",
-                "Environment= must set THREADS=1 and an empty RETAIN_ARGS=, each once",
+                "Environment= must set an empty RETAIN_ARGS= once",
             );
         }
         let threads = flag_values(u, "threads");
@@ -1375,6 +1375,17 @@ fn a_listener_off_loopback_fails() {
         "--cluster.listen-address= --cluster.listen-address 0.0.0.0:9094",
         &["U8"],
     );
+    // Every value counts, also in a unit with no listener rule of its own.
+    let mut t = Tree::real();
+    let text = "[Unit]\nDescription=x\n\n[Service]\nType=simple\nMemoryMax=1G\nExecStart=/usr/local/bin/x -httpListenAddr=127.0.0.1:1 --httpListenAddr 0.0.0.0:2\n";
+    add_installed(
+        &mut t,
+        "systemd/extra.service",
+        text,
+        "/etc/systemd/system/extra.service",
+        "0644",
+    );
+    assert_rules(&crate::check(&t), &["U8"]);
     // The same loopback address in another spelling passes.
     plant(
         "victoriametrics.service",
