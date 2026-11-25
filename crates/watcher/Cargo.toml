@@ -25,6 +25,13 @@ sha2 = "0.11.0"
 tokio = { version = "1.53.1", features = ["rt", "time", "net", "io-util", "sync", "macros", "signal"] }
 toml = "1.1.6"
 
+[features]
+# The test build of the joint tests: the binary takes every endpoint from
+# WATCHER_TEST_ENDPOINTS (loopback only) and refuses to start without it
+# or on mainnet; `--version` ends in ` test-endpoints`. Never enabled for
+# the binary that is installed.
+test-endpoints = []
+
 [dev-dependencies]
 http-fake = { path = "../http-fake" }
 tokio = { version = "1.53.1", features = ["rt", "time", "macros"] }
