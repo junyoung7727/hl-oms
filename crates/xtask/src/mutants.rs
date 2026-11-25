@@ -3452,6 +3452,24 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "xtask", "--test", "deploy", "alertmanager::the_oms_inhibit_rules_hold_back_only_derived_alerts"],
         guards: "ADR-037",
     },
+    Mutant {
+        id: "M381-deploy-check-strategy-only-hold-class-accepted",
+        what: "rule R12 accepts a strategy-only reason (strategy_link) in a hold alert class: the projector never pushes it, so that alert term can never fire (ADR-037, U20b2 review 1 S2)",
+        file: "crates/xtask/tests/deploy/rules.rs",
+        find: "        if !reasons.iter().any(|r| r == c) || STRATEGY_ONLY.contains(c) {\n",
+        replace: "        if !reasons.iter().any(|r| r == c) {\n",
+        test: &["-p", "xtask", "--test", "deploy", "rules::every_hold_reason_has_an_alert_class"],
+        guards: "ADR-037",
+    },
+    Mutant {
+        id: "M382-deploy-check-collector-pattern-reads-journal",
+        what: "rule R10 does not see journal_ series as the projector's: an Md* alert on journal_disk_free_bytes goes quiet with the collector (ADR-037, U20b2 review 1 S3)",
+        file: "crates/xtask/tests/deploy/alertmanager.rs",
+        find: "\"watcher_\", \"journal_\"];\n",
+        replace: "\"watcher_\"];\n",
+        test: &["-p", "xtask", "--test", "deploy", "alertmanager::the_oms_inhibit_rules_hold_back_only_derived_alerts"],
+        guards: "ADR-037",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {

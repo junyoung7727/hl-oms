@@ -81,7 +81,7 @@ C, E, H, J. 돈과 데이터에 안전한 쪽이다.
 ## 9. 근거
 
 - 시험: `crates/xtask/tests/deploy/`의 `the_deploy_tree_passes`, `catalogue::every_projector_and_watcher_series_is_catalogued`, `rules::a_rule_with_an_unknown_oms_metric_fails`, `rules::the_design_journal_and_key_rules_are_present`, `rules::every_trading_venue_has_its_liveness_rules`, `rules::every_hold_reason_has_an_alert_class`, `alertmanager::the_oms_inhibit_rules_hold_back_only_derived_alerts`.
-- 변이: M376~M380(`cargo run -p xtask -- mutants --only M37`, `--only M38`).
+- 변이: M376~M382(`cargo run -p xtask -- mutants --only M37`, `--only M38`).
 - 도구(CI 밖, 이 PC): `vmalert -dryRun`(v1.157.0)이 규칙 파일 넷과 로그 규칙을 받아들였다. `vmalert-tool unittest`가 `oms.test.json`(알림마다 울리는 경우와 울리지 않는 경우, 등급과 `oms_up` 관문)과 기존 셋을 통과했다. `amtool check-config`(0.35.1)가 억제 규칙 둘을 받아들였다. loopback의 임시 Alertmanager에 `ProjectorDown`과 `JournalDiskGaugeMissing`(같은 거래소)을 넣자 둘째가 억제됐고, 다른 거래소의 것은 억제되지 않았다.
 
 ## 10. 재검토 조건
