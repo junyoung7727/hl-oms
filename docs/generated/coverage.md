@@ -1,7 +1,7 @@
 # 출처 요소별 대응표
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `a7e6bbc59d4f52ab`, 검증 결과의 다이제스트 `7f76e9bbc5ac8483`.
+> 소스 다이제스트 `e0c13649a4c6743e`, 검증 결과의 다이제스트 `7f76e9bbc5ac8483`.
 
 검토 기준의 모수다. 출처가 나누어 둔 요소마다 이 프로젝트가 어디에서 다뤘는지, 다루지 않았다면 왜인지를 적는다.
 요소 목록은 [조사 기록](../research/standards-sources.md) §3과 [Hyperliquid 조사](../research/hyperliquid-protocol.md) §2에서 왔다. 표준의 본문을 읽지 못한 요소는 제목만으로 판단했고 그렇게 적었다.
