@@ -3182,6 +3182,24 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "xtask", "--test", "deploy", "rules::memory_alerts_follow_the_unit_caps"],
         guards: "ADR-035",
     },
+    Mutant {
+        id: "M351-deploy-check-accepts-inline-chat-id",
+        what: "rule R11 accepts an inline chat_id key in the Alertmanager config: a chat id short of the digit pattern passes (ADR-035, spec mutant 17)",
+        file: "crates/xtask/tests/deploy/alertmanager.rs",
+        find: "    \"chat_id\",\n    \"api_url\",\n",
+        replace: "    \"api_url\",\n",
+        test: &["-p", "xtask", "--test", "deploy", "alertmanager::an_inline_token_or_chat_id_fails"],
+        guards: "ADR-035",
+    },
+    Mutant {
+        id: "M352-deploy-audit-failure-sends-resolved",
+        what: "the LakeAuditFailed receiver sends a resolved message: it says the failure is fixed when the alert ends by itself after 26 h (ADR-035, spec mutant 18)",
+        file: "deploy/observability/alertmanager/alertmanager.json",
+        find: "\"send_resolved\": false",
+        replace: "\"send_resolved\": true",
+        test: &["-p", "xtask", "--test", "deploy", "the_deploy_tree_passes"],
+        guards: "ADR-035",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
