@@ -13,7 +13,11 @@ const OBS: &str = "deploy/observability/";
 
 /// Units that the kernel must keep alive under memory pressure (U3,
 /// protected group).
-pub const PROTECTED: &[&str] = &["md-collector@.service"];
+pub const PROTECTED: &[&str] = &[
+    "md-collector@.service",
+    "oms-node.service",
+    "watcher.service",
+];
 
 /// The observability stack's own services (U15: they run as `hlobs`) and
 /// the one directory each may write (U18).
@@ -66,6 +70,7 @@ const BOUNDED: &[&str] = &[
     "md-lake-seal@.service",
     "md-archiver@.service",
     "crypto-lake-audit@.service",
+    "oms-export.service",
 ];
 const RUN_TIMEOUT: &str = "6h";
 
@@ -81,6 +86,10 @@ pub const MEMORY_MAX: &[(&str, &str)] = &[
     ("md-lake-seal@.service", "1G"),
     ("md-archiver@.service", "4G"),
     ("crypto-lake-audit@.service", "4G"),
+    ("oms-node.service", "512M"),
+    ("watcher.service", "100M"),
+    ("oms-projector.service", "100M"),
+    ("oms-export.service", "4G"),
 ];
 
 /// Timers and their `OnCalendar` (U5).
@@ -88,10 +97,15 @@ const TIMERS: &[(&str, &str)] = &[
     ("md-lake-seal@.timer", "*-*-* *:05:00 UTC"),
     ("md-archiver@.timer", "*-*-* 01:10:00 UTC"),
     ("crypto-lake-audit@.timer", "*-*-* 02:30:00 UTC"),
+    ("oms-export.timer", "*-*-* 03:30:00 UTC"),
 ];
 
 /// Daily jobs, which run one at a time under one lock (U7).
-const DAILY: &[&str] = &["md-archiver@.service", "crypto-lake-audit@.service"];
+const DAILY: &[&str] = &[
+    "md-archiver@.service",
+    "crypto-lake-audit@.service",
+    "oms-export.service",
+];
 const LOCK: &str = "/usr/bin/flock /run/lock/hl-oms-daily.lock ";
 
 /// The audit unit, its script, and the directories that verify and the
@@ -1307,6 +1321,44 @@ fn a_collector_unit_without_oom_score_adjust_fails() {
 }
 
 #[test]
+fn an_oms_or_watcher_unit_without_oom_score_adjust_fails() {
+    for name in ["oms-node.service", "watcher.service"] {
+        plant(name, "OOMScoreAdjust=-900\n", "", &["U3"]);
+        plant(name, "OOMScoreAdjust=-900\n", "OOMScoreAdjust=0\n", &["U3"]);
+        plant(
+            name,
+            "OOMScoreAdjust=-900\n",
+            "OOMScoreAdjust=-900\nOOMScoreAdjust=-1000\n",
+            &["U3"],
+        );
+    }
+    // The rest of the protected group: the slice, the reservation (half the
+    // cap) and the I/O weight.
+    plant("oms-node.service", "MemoryMin=256M\n", "MemoryMin=128M\n", &["U3"]);
+    plant("watcher.service", "IOWeight=1000\n", "", &["U3"]);
+    plant(
+        "watcher.service",
+        "Slice=trading.slice\n",
+        "Slice=system.slice\n",
+        &["U3"],
+    );
+    plant(
+        "oms-node.service",
+        "IOWeight=1000\n",
+        "IOWeight=1000\nMemoryHigh=256M\n",
+        &["U3"],
+    );
+}
+
+#[test]
+fn an_oms_or_watcher_unit_without_memory_swap_max_zero_fails() {
+    for name in ["oms-node.service", "watcher.service"] {
+        plant(name, "MemorySwapMax=0\n", "", &["U3"]);
+        plant(name, "MemorySwapMax=0\n", "MemorySwapMax=1G\n", &["U3"]);
+    }
+}
+
+#[test]
 fn a_collector_unit_without_memory_swap_max_zero_fails() {
     plant("md-collector@.service", "MemorySwapMax=0\n", "", &["U3"]);
     plant(
@@ -1478,6 +1530,33 @@ fn memory_max_follows_the_design_table() {
         "MemoryMax=8G\n",
         &["U6"],
     );
+    // The OMS, the watcher and the projector (design §8.5), and the export
+    // under the daily-job cap.
+    plant(
+        "oms-projector.service",
+        "MemoryMax=100M\n",
+        "MemoryMax=200M\n",
+        &["U6"],
+    );
+    plant(
+        "oms-export.service",
+        "MemoryMax=4G\n",
+        "MemoryMax=8G\n",
+        &["U6"],
+    );
+    // A protected unit's reservation follows its cap: U3 sees it too.
+    plant(
+        "oms-node.service",
+        "MemoryMax=512M\n",
+        "MemoryMax=1G\n",
+        &["U3", "U6"],
+    );
+    plant(
+        "watcher.service",
+        "MemoryMax=100M\n",
+        "MemoryMax=50M\n",
+        &["U3", "U6"],
+    );
     for &(name, _) in MEMORY_MAX {
         let mut t = Tree::real();
         t.remove(&unit(name));
@@ -1553,6 +1632,7 @@ fn the_seal_archiver_and_audit_timers_keep_their_schedule() {
     // The audit runs after the archiver's 01:10.
     plant("crypto-lake-audit@.timer", "02:30:00", "01:00:00", &["U5"]);
     plant("crypto-lake-audit@.timer", "Persistent=true\n", "", &["U5"]);
+    plant("oms-export.timer", "03:30:00", "00:30:00", &["U5"]);
 }
 
 #[test]
@@ -1592,6 +1672,19 @@ fn a_daily_job_without_the_lock_fails() {
         "crypto-lake-audit@.service",
         "Nice=10\n",
         "Nice=10\nExecStartPre=/usr/local/bin/md-lake verify --venue %i\n",
+        &["U7"],
+    );
+    // The export takes the same lock.
+    plant(
+        "oms-export.service",
+        "ExecStart=/usr/bin/flock /run/lock/hl-oms-daily.lock ",
+        "ExecStart=",
+        &["U7"],
+    );
+    plant(
+        "oms-export.service",
+        "Nice=10\n",
+        "Nice=10\nExecStartPost=/bin/true\n",
         &["U7"],
     );
     let mut t = Tree::real();
@@ -2165,6 +2258,12 @@ fn the_seal_and_archiver_runs_are_bounded() {
         ("md-archiver@.service", "TimeoutStartSec=6h\n", ""),
         ("md-lake-seal@.service", "TimeoutStartSec=6h\n", ""),
         ("crypto-lake-audit@.service", "TimeoutStartSec=6h\n", ""),
+        ("oms-export.service", "TimeoutStartSec=6h\n", ""),
+        (
+            "oms-export.service",
+            "TimeoutStartSec=6h\n",
+            "TimeoutStartSec=6h\nTimeoutSec=infinity\n",
+        ),
         (
             "crypto-lake-audit@.service",
             "TimeoutStartSec=6h\n",
