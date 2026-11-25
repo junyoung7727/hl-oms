@@ -189,3 +189,21 @@ basis = "테스트넷에서 봤다(2026-11-25, 녹화 order_realtime_one·positi
 if_broken = "커서가 끝나지 않으면 쪽 읽기가 'the cursor did not move'로 실패하고 대조·킬의 셈이 끝나지 않는다. 행이 있는데 커서가 비면 다음 쪽을 놓칠 수 있다"
 detection = "bybit-testnet 묶음의 녹화 모양 비교(V-BYBIT-LIVE-6)와 조회의 failed"
 checked = "테스트넷에서 확인함(한 쪽짜리 결과만). 500개 넘는 열린 주문이나 여러 쪽의 실행은 보지 않았다. 그래서 행이 있는 조회는 요청이 하나 더 든다"
+
+[[assumption]]
+id = "A-22"
+statement = "systemd 259는 StopUnit의 polkit 검사(org.freedesktop.systemd1.manage-units)에 세부 항목 unit(단위 이름)과 verb(stop)를 넘긴다. 그래서 polkit 규칙 50-hl-oms-watcher-stop.rules가 hloms의 oms-node.service 정지만 허락한다"
+depends_on = "systemd 259, polkit(JavaScript 규칙, 0.106 이상)"
+basis = "man polkit의 action.lookup(key)(메커니즘이 넘긴 변수). org.freedesktop.systemd1(5)에는 이 세부 항목이 적혀 있지 않다. libsystemd-core-259.so에 verb, polkit.message 문자열이 함께 있다(약한 근거)"
+if_broken = "규칙이 맞지 않아 워처의 K3(systemctl stop)가 거절된다. 워처는 OMS 정지 실패를 알리고 watcher_kill_step{step=\"stop\"} = 0이며 정지를 빚는다. 살아 있는 OMS는 K2(watcher_kill)가 여전히 래치한다. 규칙이 더 넓게 맞으면 hloms가 그 단위를 시작할 수도 있다"
+detection = "설치 확인(docs/operations/observability.md §13.6): OMS를 처음 띄우기 전에 sudo -u hloms systemctl --no-ask-password stop oms-node.service는 되고, stop grafana.service와 start oms-node.service는 거절돼야 한다"
+checked = "확인하지 않았다. polkit 규칙은 root 없이 불러올 수 없다. 규칙의 글은 node --check(문법만)를 통과했고, 배치 검사가 글자를 고정한다"
+
+[[assumption]]
+id = "A-23"
+statement = "읽기 전용 바인드 마운트(ReadOnlyPaths=) 위의 Unix 소켓에도 connect()가 된다. 그래서 데이터 디렉터리를 읽기만 하는 워처가 admin.sock과 monitor.sock에 연결한다"
+depends_on = "Linux 커널(마운트의 읽기 전용 표시는 소켓 연결을 막지 않음)"
+basis = "이 PC(커널 7.0)에서 bwrap --ro-bind로 재현했다(2026-11-25)"
+if_broken = "워처가 OMS에 하트비트도 watcher_mismatch도 watcher_kill도 보내지 못한다. OMS는 30초 뒤 감시 안 됨으로 일반 주문을 막고, 워처 킬의 K2가 실패해 K3만 남는다"
+detection = "워처 로그의 monitor.sock not connected, OMS의 hold:unmonitored와 모니터링 상실 P1"
+checked = "이 PC에서 bwrap으로 확인했다(2026-11-25). systemd의 ReadOnlyPaths=로 돌린 실제 워처에서는 확인하지 않았다"

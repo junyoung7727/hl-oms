@@ -1,7 +1,7 @@
 # 운영 절차
 
 주인: 준영
-검토일: 2026-11-24
+검토일: 2026-11-25
 
 대상: 단일 호스트에서 `oms-node` 하나를 운용하는 운영자. 기준: 2026-10-02.
 
@@ -15,7 +15,7 @@
 | 설정 버전 변경 | 자동 시험으로 확인 |
 | 운영 명령(중지, 재개, 전체 취소, 불일치 확인, 수동 종결, 포지션 조정) | 코어 시험으로 전부 확인. 실제 프로세스에서 실행한 것은 중지, 전체 취소, 불일치 확인, 상태 조회다. `omsctl` 자체의 자동 시험은 없다(§3의 명령을 손으로 실행했다) |
 | 커밋 경계마다의 프로세스 중단과 재시작 | 자동 시험으로 확인(`crash_points`) |
-| systemd 단위 | 적어만 둠. 이 호스트에서 설치해 보지 않았다. 관측 스택과 시세 단위(수집기·봉인·아카이버·레이크 감사)의 단위 파일은 `deploy/observability/`, 절차는 [observability.md](observability.md)(배치 검사 `cargo test -p xtask --test deploy`와 `systemd-analyze verify`로만 확인) |
+| systemd 단위 | 적어만 둠. 이 호스트에서 설치해 보지 않았다. 관측 스택, 시세 단위(수집기·봉인·아카이버·레이크 감사), OMS·워처·프로젝터·내보내기의 단위 파일과 워처의 정지 권한(polkit 규칙)은 `deploy/observability/`, 절차는 [observability.md](observability.md)(배치 검사 `cargo test -p xtask --test deploy`와 `systemd-analyze verify`로만 확인) |
 | 서버 유실 뒤 복구 | 적어만 둠. 연습하지 않았다 |
 | 증거금 규칙의 절차(7.8 감소 전용 상태의 해제, 7.9 입출금 뒤의 기준 재설정) | 명령은 자동 시험으로 확인(코어 시험, 가상 거래소에 붙인 노드 프로세스에서 `clear-reduce`, `rebase-day`, 강제 종료 뒤의 상태). `omsctl` 실행 파일 자체는 시험하지 않았다(그 본문 함수를 부른다). **실제 거래소에서는 한 번도 해 보지 않았다** |
 | testnet 실주문 | 실행하지 않았다(U-01). 증거금 규칙의 testnet 예행과 가정 T1~T11의 확인도 하지 않았다. mainnet 전에 필요하고 사용자의 승인이 필요하다(§10) |
@@ -112,36 +112,13 @@ $A resume --note "연습 끝"
 같은 키로 `new`를 다시 실행하면 `conflict`가 나온다. `omsctl`이 실행할 때마다 만료 시각을 새로 계산하기 때문이다.
 전략 프로그램은 재시도할 때 **같은 만료 시각**을 보내야 `duplicate`를 받는다(C-IDEM).
 
-## 4. systemd 단위 (예시, 설치해 보지 않았다)
+## 4. systemd 단위
 
-```ini
-[Unit]
-Description=OMS node
-After=network-online.target
-Wants=network-online.target
+OMS 단위는 [`deploy/observability/systemd/oms-node.service`](../../deploy/observability/systemd/oms-node.service)이고, 워처·프로젝터·내보내기 단위와 설치 절차는 [observability.md](observability.md) §13이다(설치해 보지 않았다, ADR-036).
 
-[Service]
-User=oms
-ExecStart=/opt/oms/oms-node run --config /etc/oms/node.toml
-EnvironmentFile=/etc/oms/agent-key.env
-Restart=on-failure
-RestartSec=5
-# 3은 시작 거부다. 사람이 봐야 하므로 다시 띄우지 않는다.
-RestartPreventExitStatus=3
-# panic(SIGABRT)도 on-failure에 해당해 다시 뜬다. 아래 제한이 반복을 막는다.
-# 2(치명 상태)는 저장 장치 문제일 수 있다. 반복 재시작을 막는다.
-StartLimitIntervalSec=300
-StartLimitBurst=3
-KillSignal=SIGTERM
-TimeoutStopSec=30
-UMask=0077
-
-[Install]
-WantedBy=multi-user.target
-```
-
-- `agent-key.env`는 `HL_AGENT_PRIVATE_KEY=0x…` 한 줄이다. 소유자만 읽을 수 있게 둔다(0600). 자금을 가진 마스터 지갑의 키는 어디에도 두지 않는다.
-- 재시작을 자동으로 할지는 사용자 결정 U-06이다. 자동 재시작해도 재확인이 끝날 때까지 신규 주문은 막힌다.
+- `Restart=no`이고 `[Install]`이 없다: 충돌, 치명 종료(종료 코드 2·3, panic), 워처 킬 뒤에도, 재부팅 뒤에도 OMS는 사람이 띄운다. 다른 단위는 OMS를 끌어들이지 못한다(배치 검사 U20).
+- 사용자 `hloms`, 저널 파일 시스템이 마운트돼 있지 않으면 시작이 실패한다. 자격 파일은 `EnvironmentFile=`이 아니라 OMS 설정이 가리키는 0600 파일이다.
+- 재시작 뒤 거래를 자동으로 재개할지는 사용자 결정 U-06이다(단위가 다시 띄우지는 않는다).
 - 로그는 표준 오류로 한 줄에 JSON 하나씩 나온다. journald가 보관한다. 로그에는 키가 나오지 않는다. 주문 내용은 나온다.
 
 ## 5. 시작과 종료
@@ -539,9 +516,9 @@ C-WATCH 12부([설명 §6](../explanation.md)). `[kill]`이 있는 워처는 OMS
    | `OMS는 래치됨(watcher_kill). 해제는 운영자만: …` | 래치가 디스크에 있다 | 2~4번 |
    | `OMS는 멈춤(systemctl stop). 다음 시작은 킬 마커로 래치됨. …` | OMS 단위가 멈췄고 OMS가 읽는 경로에 마커가 있다 | OMS를 다시 띄우면 래치된 채 시작한다. 그다음 4번 |
    | `OMS는 멈춤(systemctl stop). 킬 마커는 OMS가 읽는 경로인지 확인 못 함: …` / `… 킬 마커가 없어 다음 시작은 래치 없이 시작함: …` | 멈췄지만 다음 시작의 래치를 확인하지 못했다. 정지를 빚졌다 | OMS를 다시 띄우기 전에 마커와 OMS 설정의 `[kill] marker`를 본다. 띄우면 워처가 첫 정상 답에 `watcher_kill`을 보낸다 |
-   | `OMS 정지 미확인: OMS가 살아 있으면 래치 없이 주문을 낼 수 있음. …` | `watcher_kill`도 `systemctl stop`도 확인되지 않았다(U20b가 그 권한을 주기 전에는 K3가 늘 실패한다). 정지를 빚졌다 | OMS가 살아 있는지 본다. 살아 있으면 손으로 멈춘다(`systemctl stop <oms_unit>`, 적어도 `omsctl … halt`) |
+   | `OMS 정지 미확인: OMS가 살아 있으면 래치 없이 주문을 낼 수 있음. …` | `watcher_kill`도 `systemctl stop`도 확인되지 않았다(K3에는 polkit 규칙이 설치돼 있어야 한다: [observability.md](observability.md) §13.1, A-22). 정지를 빚졌다 | OMS가 살아 있는지 본다: 60초 기다린 뒤 `systemctl is-active oms-node`(systemd의 정지 작업은 `TimeoutStopSec=60`에 끝난다). `active`·`deactivating`이면 손으로 멈춘다(`systemctl kill -s SIGKILL oms-node`, 적어도 `omsctl … halt`). observability.md §13.6 |
 
-7. 빚진 정지: systemd가 다시 띄운 OMS(`Restart=on-failure`, 4장; 설계는 `Restart=no`, U20b)나 멈췄을 뿐인 OMS는 래치 없이 돌아온다. 워처는 루프 동안 5초마다, 루프 뒤에는 OMS의 첫 정상 답에 `watcher_kill`을 보낸다(`watcher_kill_halt_owed` = 1인 동안). `늦은 정지: OMS가 다시 답해 watcher_kill로 래치함(…)`이면 래치됐다(2~4번). `늦은 정지 실패: OMS가 답하지만 watcher_kill이 안 됨(…)`이면 **OMS가 래치 없이 거래한다: 손으로 멈춘다**(`systemctl stop <oms_unit>`). 빚은 워처의 메모리에만 있다: 워처를 다시 시작하면 잊는다.
+7. 빚진 정지: OMS 단위는 스스로 돌아오지 않는다(`Restart=no`, 4장). 그러나 사람이 다시 띄운 OMS나 멈췄을 뿐인 OMS는 마커를 확인하지 못했으면 래치 없이 돌아온다. 워처는 루프 동안 5초마다, 루프 뒤에는 OMS의 첫 정상 답에 `watcher_kill`을 보낸다(`watcher_kill_halt_owed` = 1인 동안). `늦은 정지: OMS가 다시 답해 watcher_kill로 래치함(…)`이면 래치됐다(2~4번). `늦은 정지 실패: OMS가 답하지만 watcher_kill이 안 됨(…)`이면 **OMS가 래치 없이 거래한다: 손으로 멈춘다**(`systemctl stop <oms_unit>`). 빚은 워처의 메모리에만 있다: 워처를 다시 시작하면 잊는다.
 
 **시작 순서**: OMS를 먼저 띄우고 `/api/status`가 답할 때까지 기다린 뒤 워처를 띄운다. 워처가 먼저 뜨거나, 사람이 띄운 OMS가 아직 부팅 중일 때 워처를 다시 띄우거나, `status_url`이 틀리면 워처는 `silence_ms` 뒤 건강하거나 부팅 중인 OMS를 킬한다(C-WATCH 12부, 소유자 질문 1). **정비**: OMS를 일부러 멈출 때는 워처를 먼저 멈춘다.
 
