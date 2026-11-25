@@ -3371,6 +3371,42 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "xtask", "--test", "deploy", "units::the_export_can_take_the_daily_lock"],
         guards: "ADR-036",
     },
+    Mutant {
+        id: "M372-deploy-check-oms-command-unpinned",
+        what: "rule U20 does not pin the OMS unit's command: an ExecStopPost= that starts it again, or a shell loop around the binary, brings a stopped OMS back under Restart=no (ADR-036, U20b1 review 1 S1)",
+        file: "crates/xtask/tests/deploy/units.rs",
+        find: "        one_command(u, \"U20\", OMS_EXEC, out);\n",
+        replace: "",
+        test: &["-p", "xtask", "--test", "deploy", "units::an_oms_node_unit_that_restarts_fails"],
+        guards: "ADR-036",
+    },
+    Mutant {
+        id: "M373-deploy-check-watcher-name-unscanned",
+        what: "rule U20's scan of the other units looks for the OMS's name only: a unit with Conflicts=watcher.service stops the watcher at each of its starts (ADR-036, U20b1 review 1 S2)",
+        file: "crates/xtask/tests/deploy/units.rs",
+        find: "    for name in [OMS, WATCHER] {\n        for u in p.units.iter()",
+        replace: "    for name in [OMS] {\n        for u in p.units.iter()",
+        test: &["-p", "xtask", "--test", "deploy", "units::the_watcher_restarts_but_never_follows_the_oms"],
+        guards: "ADR-036",
+    },
+    Mutant {
+        id: "M374-deploy-check-watcher-start-limit-unread",
+        what: "rule U21 does not read StartLimitBurst=: with StartLimitBurst=1 the second crash leaves the watcher down for good (ADR-036, U20b1 review 1 S2)",
+        file: "crates/xtask/tests/deploy/units.rs",
+        find: "    \"StartLimitInterval\",\n    \"StartLimitBurst\",\n",
+        replace: "    \"StartLimitInterval\",\n",
+        test: &["-p", "xtask", "--test", "deploy", "units::the_watcher_restarts_but_never_follows_the_oms"],
+        guards: "ADR-036",
+    },
+    Mutant {
+        id: "M375-deploy-check-polkit-lines-joined",
+        what: "rule U22 compares the polkit rule with its lines joined: a file on one line is all `//` comment, grants nothing, and passes (ADR-036, U20b1 review 1 S3)",
+        file: "crates/xtask/tests/deploy/units.rs",
+        find: "    text.lines()\n        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(\" \"))\n",
+        replace: "    std::iter::once(text)\n        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(\" \"))\n",
+        test: &["-p", "xtask", "--test", "deploy", "units::the_stop_permission_names_only_the_oms_unit_and_stop"],
+        guards: "ADR-036",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
