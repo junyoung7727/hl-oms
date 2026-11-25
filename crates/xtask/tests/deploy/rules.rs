@@ -679,8 +679,29 @@ fn hold_reasons(text: &str) -> Option<Vec<String>> {
     Some(out)
 }
 
+/// The R12 partition: every reason of `reasons` but the strategy-only ones
+/// is in exactly one class of `alerts`, and every class name is such a
+/// reason.
+fn partition(reasons: &[String], alerts: &[HoldAlert]) -> Vec<String> {
+    let classed: Vec<&str> = alerts.iter().flat_map(|a| a.1.iter().copied()).collect();
+    let mut out = Vec::new();
+    for r in reasons.iter().filter(|r| !STRATEGY_ONLY.contains(&r.as_str())) {
+        let n = classed.iter().filter(|c| **c == r.as_str()).count();
+        if n != 1 {
+            out.push(format!("hold reason {r} is in {n} hold alert classes (exactly one)"));
+        }
+    }
+    for c in &classed {
+        if !reasons.iter().any(|r| r == c) || STRATEGY_ONLY.contains(c) {
+            out.push(format!(
+                "{c} is in a hold alert class but Core::holds(None) has no such reason"
+            ));
+        }
+    }
+    out
+}
+
 fn r12_holds(t: &Tree, rules: &[Rule], out: &mut Vec<Finding>) {
-    let classed: Vec<&str> = HOLD_ALERTS.iter().flat_map(|a| a.1.iter().copied()).collect();
     match t.files.get(MODEL).and_then(|s| hold_reasons(s)) {
         None => finding(
             out,
@@ -689,26 +710,8 @@ fn r12_holds(t: &Tree, rules: &[Rule], out: &mut Vec<Finding>) {
             "no `pub enum HoldReason { … }` to read the hold reasons from",
         ),
         Some(reasons) => {
-            for r in reasons.iter().filter(|r| !STRATEGY_ONLY.contains(&r.as_str())) {
-                let n = classed.iter().filter(|c| **c == r.as_str()).count();
-                if n != 1 {
-                    finding(
-                        out,
-                        MODEL,
-                        "R12",
-                        format!("hold reason {r} is in {n} hold alert classes (exactly one)"),
-                    );
-                }
-            }
-            for c in &classed {
-                if !reasons.iter().any(|r| r == c) || STRATEGY_ONLY.contains(c) {
-                    finding(
-                        out,
-                        MODEL,
-                        "R12",
-                        format!("{c} is in a hold alert class but Core::holds(None) has no such reason"),
-                    );
-                }
+            for text in partition(&reasons, HOLD_ALERTS) {
+                finding(out, MODEL, "R12", text);
             }
         }
     }
@@ -1476,6 +1479,16 @@ fn every_hold_reason_has_an_alert_class() {
         v["groups"][2]["rules"].as_array_mut().unwrap().push(r);
     });
     assert_rules(&crate::check(&t), &["R12"]);
+    // The class table itself: a reason in two classes, or in none.
+    let reasons = hold_reasons(&Tree::real().files[model]).unwrap();
+    assert!(partition(&reasons, HOLD_ALERTS).is_empty());
+    let mut two = HOLD_ALERTS.to_vec();
+    two[1].1 = &["unmonitored", "link_down"];
+    let f = partition(&reasons, &two);
+    assert!(f.len() == 1 && f[0].contains("link_down is in 2"), "{f:?}");
+    two[1].1 = &[];
+    let f = partition(&reasons, &two);
+    assert!(f.len() == 1 && f[0].contains("unmonitored is in 0"), "{f:?}");
 }
 
 #[test]
