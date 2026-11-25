@@ -1,0 +1,3 @@
+# The venues this PC collects. Each must be a registered venue of the
+# collector and of the archiver; each gets the collector liveness rule.
+venues = ["bybit"]

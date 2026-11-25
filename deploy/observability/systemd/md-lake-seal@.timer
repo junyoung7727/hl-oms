@@ -1,0 +1,10 @@
+# Not installed or enabled by this repository: docs/operations/observability.md.
+[Unit]
+Description=Seal the closed hours of %i every hour at :05
+
+[Timer]
+OnCalendar=*-*-* *:05:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,21 @@
+# Not installed or enabled by this repository: docs/operations/observability.md.
+[Unit]
+Description=VictoriaMetrics: metrics store on 127.0.0.1:8428
+After=network.target
+
+[Service]
+Type=simple
+User=hlobs
+Group=hlobs
+ExecStart=/usr/local/bin/victoria-metrics-prod -storageDataPath=/mnt/nvme/observability/victoria-metrics -retentionPeriod=1y -memory.allowedBytes=600MiB -httpListenAddr=127.0.0.1:8428 -promscrape.config=/etc/hl-oms-obs/victoriametrics/scrape.json
+Restart=on-failure
+RestartSec=5
+MemoryMax=1G
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/mnt/nvme/observability/victoria-metrics
+
+[Install]
+WantedBy=multi-user.target

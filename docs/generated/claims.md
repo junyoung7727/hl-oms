@@ -1,146 +1,146 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `7f76e9bbc5ac8483`, 검증 결과의 다이제스트 `7f76e9bbc5ac8483`.
+> 소스 다이제스트 `7177e990dc137b5e`, 검증 결과의 다이제스트 `7f76e9bbc5ac8483`.
 
-주장 130건: 통과 115, 실패 0, 미실행 15. 결과는 현재 소스(다이제스트 `7f76e9bbc5ac8483`)에서 돌린 것만 센다. 다른 소스의 결과는 미실행으로 센다.
+주장 130건: 통과 0, 실패 0, 미실행 130. 결과는 현재 소스(다이제스트 `7177e990dc137b5e`)에서 돌린 것만 센다. 다른 소스의 결과는 미실행으로 센다.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
-| V-NUM-1 | 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다. 전략 이름은 [A-Za-z0-9_.:-]의 1~32자만 받는다. 문자열 식별자는 만들 때와 역직렬화할 때 같은 검사로 거부한다 | 단위 | 통과 | `cargo test -p oms-core --lib` |
-| V-NUM-2 | 한도 비교용 금액은 정확한 곱 이상인 가장 작은 1e-8 단위 값이고, 넘치면 보고된다 | 속성 | 통과 | `cargo test -p oms-core --lib notional` |
-| V-NEW-1 | 수용된 주문들이 어떤 순서로 체결되어도 계좌와 전략의 포지션은 설정한 구간을 벗어나지 않으며, 두 요청이 같은 여유를 쓰지 못한다. 수용은 그 방향의 예약(B 또는 S)을 수량만큼 늘리고 전송 명령을 한 번 내며, 거절은 예약도 전송 명령도 만들지 않는다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios` |
-| V-NEW-2 | 수량·가격 단위, 유효숫자, 최소·최대 금액, 가격대, 만료 시각, 종목·전략의 허용 여부, 용량을 검사하고 해당하는 사유를 모두 돌려준다. 거절 사유의 종류마다 시험이 있다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios && cargo test -p oms-core --test gaps` |
-| V-IDEM-1 | 같은 (전략, 키)로는 주문이 하나만 만들어지고 전송 명령도 한 번만 나온다. 다른 내용의 요청은 충돌로 거절된다. 키는 요청이 만료된 뒤에만 잊는다: 닫힌 주문은 닫힌 뒤 closed_retention_us와 만료 뒤 dedup_grace_us(기본 60초)가 모두 지나야 메모리에서 지워지고, 그 전까지 같은 키는 중복으로 답한다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios` |
-| V-IDEM-2 | 재전송, 충돌 요청, 재시작, 키 삭제가 임의로 섞여도 키당 수용 1회, 키당 전송 1회, 거래소의 클라이언트 ID당 접수 요청 1회가 유지된다 | 시뮬레이션 | 통과 | `OMS_SIM_SEEDS=400 cargo test --release -p oms-sim --test sim` |
-| V-IDEM-3 | 실제 소켓으로 여러 연결이 같은 요청을 동시에 보내도, 노드를 강제 종료한 뒤에도, 주문은 하나이고 거래소 접수 요청도 하나다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e a_repeated_request` |
-| V-DOUBT-1 | 전송 결과를 모르면 예약을 유지하고 신규 주문을 막으며 다시 보내지 않는다. 존재 증거가 오면 정상 주문이 된다. 결과보다 체결이 먼저 오면 그 체결로 주문이 접수되고, 뒤에 온 Placed는 아무것도 바꾸지 않으며 뒤에 온 Unknown은 결과 불명을 만들지 않는다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios` |
-| V-DOUBT-2 | '찾을 수 없음'은 전송 만료 + 여유가 지난 뒤의 조회일 때만 주문을 닫는다. 거래소가 만료를 강제하지 않는 설정에서는 절대 닫지 않는다. 결과 불명인 주문은 운영자의 resolve 명령으로 닫힌다. 결과 불명이 아닌 전송 대기 주문에 대한 '찾을 수 없음'은 만료 뒤의 조회라도 무시한다. '찾을 수 없음'으로 닫은 주문이 전송 응답이나 열린 주문 목록에서 열려 있다고 나오면 OpenAfterClose를 제기하고, 그 주문의 체결은 기장하고 FillAfterClose를 제기한다. 접수된 주문에 대한 '찾을 수 없음'은 주문을 닫지 않고 예약을 유지하며, 접수 시각 + 여유 뒤의 조회면 StatusConflict를 제기한다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios not_found && cargo test -p oms-node --test e2e a_lost_request` |
-| V-DOUBT-3 | 부재 판정은 두 가정(거래소가 만료를 강제한다, 시계 차이가 여유보다 작다)에 의존하며, 가정을 깨면 시험이 위반을 잡는다 | 시뮬레이션 | 통과 | `cargo test --release -p oms-sim --test sim absence_rule -- --nocapture` |
-| V-FILL-1 | 체결은 한 번만 기장되고, 접수 응답보다 먼저 와도, 주인을 아직 몰라도, 수량을 넘어도 버려지지 않는다. 기장은 주문의 누적 수량·금액·수수료와 계좌·전략의 포지션을 늘리고, 예약을 체결량과 남은 예약 가운데 작은 쪽만큼 줄인다. 대기 체결이 상한(max_parked_fills, 기본 1,024건)에 이르면 다음 체결은 기다리지 않고 외부 체결로 기장하며 ParkedFillOverflow를 제기한다. 주문과 종목이나 방향이 다른 체결은 그 주문에 기장하지 않고 외부 체결로 계좌에 기장하며 FillFieldConflict를 제기한다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios fill && cargo test -p oms-core --test gaps && cargo test -p oms-core --test review_core f2` |
-| V-CANCEL-1 | 취소 요청은 예약을 풀지 않고, 취소 중 체결은 기장되며, 최종 수량은 종결 통보가 정한다. 취소는 차단 중에도 받고, 간격을 두고 상한까지 재시도한다. 상한에 이른 뒤 다시 요청하면 새 시도가 나가고, 결과가 오지 않는 시도는 시간 초과 뒤 불명으로 처리된다. 운영자의 cancel_all은 범위 안의 미종결 주문마다 취소 요청을 낼 뿐 취소 완료가 아니다. 보낼 수 있는 주문의 취소 요청은 requested로 답하고 첫 시도의 취소 명령을 곧바로 낸다. 상한까지 확인되지 않은 취소는 CancelStuck을 한 번 제기하고, 운영자가 확인한 뒤에는 다시 제기하지 않는다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios cancel && cargo test -p oms-core --test review_core f1` |
-| V-TERM-1 | 종결 통보가 체결보다 먼저 와도 아직 기장되지 않은 수량은 예약에 남고, 최종 수량을 모를 때는 체결 동기화가 종결 시각을 지난 뒤에만 닫는다. 최종 수량을 모르는 Closing 주문이 있으면 코어는 체결 조회를 요구한다. 최종 누적이 기장된 체결보다 작으면 기장을 되돌리지 않고 CumExceedsFinal을 제기한다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios terminal` |
-| V-RECON-1 | 링크가 돌아오면 미종결 주문의 증거, 체결, 열린 주문, 포지션을 현재 세션에서 다시 확인할 때까지 신규 주문을 막는다. 포지션은 예약으로 설명되는 범위로 검사하고, 오래된 스냅샷은 판정하지 않는다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios` |
-| V-RECON-2 | 노드가 죽어 있는 동안 거래소에서 일어난 체결, 거래소 주도 취소, 부분 체결을 재시작 뒤 거래소 조회로 모두 반영한다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e events_missed` |
-| V-EXT-1 | OMS가 내지 않은 체결은 기장되고 불일치로 표시되어 신규 주문을 막으며, 운영자가 확인해야 풀린다 | 시뮬레이션 | 통과 | `cargo test --release -p oms-sim --test sim profile_external` |
-| V-REPLAY-1 | 기록된 이벤트만 적용해 만든 상태는 살아 있는 상태와 같고, 기록된 입력을 다시 판단하면 기록된 이벤트가 나온다. 구조 불변조건(Core::check_invariants)은 시뮬레이션에서 모든 입력과 복구 뒤에, 오프라인 검증(verify)에서 모든 기록 뒤에 검사한다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios && oms-node verify --data-dir <dir> --re-decide` |
-| V-SIM-1 | 네트워크 장애, 통보 중복·지연, 링크 단절, 프로세스 재시작, 키 삭제가 임의로 섞인 실행의 매 단계에서: 구조 불변조건이 성립하고, 거래소의 실제 포지션이 OMS가 설명하는 범위 안에 있고, 한도를 넘지 않고, 같은 주문이 두 번 전송되지 않는다. I-RES: 주문의 예약 수량은 미종결이면 수량 − 기장 체결, 종결 대기면 거래소 최종 누적 − 기장 체결(0 미만은 0, 잔량 이하, 최종 누적이 없으면 잔량), 종결이면 0이다. I-BOOK: 계좌·전략 장부의 매수·매도 미체결 합과 열린 주문 수는 그 장부에 속한 주문들의 예약과 미종결 수와 같다. I-ATTR: 종목별 계좌 포지션은 전략 포지션의 합 + 미귀속 포지션이다. I-KEY: (전략, 클라이언트 주문 ID)마다 주문은 하나이고 멱등 색인이 그 주문을 가리키며 색인 크기는 주문 수와 같다. I-PHASE: 종결 주문만 종결 기록을 갖고 열린 주문 색인에 없으며, 결과 불명 표시는 전송 대기 상태에만 있다 | 시뮬레이션 | 통과 | `OMS_SIM_SEEDS=400 cargo test --release -p oms-sim --test sim -- --nocapture   (실패 시: OMS_SIM_PROFILE=<이름> OMS_SIM_SEED=<n>)` |
-| V-SIM-2 | 장애가 멈추면 장부가 가상 거래소와 일치한다: 주문별 체결량과 상태, 포지션, 수수료 합. 차단 사유와 거짓 불일치가 남지 않는다 | 시뮬레이션 | 통과 | `V-SIM-1과 같다` |
-| V-SIM-3 | 같은 seed는 바이트 단위로 같은 저널을 만든다 | 시뮬레이션 | 통과 | `cargo test --release -p oms-sim` |
-| V-COMMIT-1 | flush가 실패하면 그 배치의 응답, 전송 명령, 읽기 모델 변경이 하나도 나가지 않고 프로세스가 입력을 닫는다. 성공한 경우 응답 시점에 읽기 모델은 이미 갱신돼 있다. flush가 실패하면 응답 채널이 닫혔을 때 치명 표시(사유 commit failed)가 이미 서 있다 | 프로세스 내부 | 통과 | `cargo test -p oms-node --features failpoints --test pipeline` |
-| V-COMMIT-2 | 부하 중 임의 시점에 노드를 강제 종료하고 다시 띄우기를 반복해도, 대조가 끝난 뒤 주문별 체결량·상태와 포지션이 거래소와 일치하고 같은 주문이 두 번 접수 요청되지 않는다 | 프로세스 | 통과 | `OMS_KILL_ROUNDS=20 cargo test -p oms-node --test e2e random_kills -- --nocapture` |
-| V-COMMIT-3 | 함께 도착한 입력은 flush를 공유하고, 응답은 판단 순서대로 나온다 | 프로세스 내부 | 통과 | `cargo test -p oms-node --features failpoints --test pipeline -- --nocapture` |
-| V-JRN-1 | 프레임의 모든 절단과 모든 단일 비트 반전이 감지되고, 0으로 채워진 꼬리는 프레임으로 읽히지 않는다 | 단위 | 통과 | `cargo test -p oms-journal --lib` |
-| V-JRN-2 | 저널의 끝이 불완전하면 유효한 접두부만 남기고 원본 바이트를 보존한 뒤 이어 쓸 수 있다. 중간이 손상됐거나 세그먼트가 빠졌거나 다른 인스턴스의 것이거나 스냅샷보다 짧으면 시작을 거부하고, 거부한 디렉터리의 파일은 건드리지 않는다 | 속성 | 통과 | `cargo test -p oms-journal && cargo test -p oms-node --test e2e journal_damage` |
-| V-JRN-3 | 같은 데이터 디렉터리를 두 프로세스가 쓸 수 없고, 다른 인스턴스의 저널은 거부된다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e only_one_node` |
-| V-JRN-4 | 스냅샷은 완전한 파일로만 나타나고, 손상된 스냅샷은 건너뛰며, 정상 종료 뒤 재시작은 스냅샷에서 같은 상태로 돌아온다 | 프로세스 | 통과 | `cargo test -p oms-journal --lib snapshot` |
-| V-JRN-5 | 기록 스키마가 다른 빌드는 옛 세그먼트를 읽고 새 세그먼트를 시작하며, 읽을 수 없는 스키마를 만난 빌드는 시작을 거부한다 | 단위 | 통과 | `cargo test -p oms-journal a_schema_change` |
-| V-BOOT-1 | 재시작은 결과 기록이 없는 전송을 불명으로 표시하고, 신규 주문을 다시 보내지 않으며, 요청돼 있던 취소만 다시 보낸다. Boot는 부팅 번호를 하나 올리고 연결을 내려간 상태로 둔다. 첫 부팅은 체결 바닥(이보다 이른 체결은 중복으로 보지 않고 버린다)을 현재 − absence_margin으로 정한다. 진행 중이던 취소 시도는 LostOnRestart로 적는다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e a_kill_during_send` |
-| V-CFG-1 | 설정은 버전이 커야 활성화되고, 같은 버전에 다른 내용이면 시작을 거부한다. 노출이 남은 종목·전략은 제거할 수 없다. mainnet은 증거금 정책(policy.margin) 없이는 시작하지 않고, 정책의 값이 C-MARGIN 설정 표의 범위를 벗어나면 어느 거래소 설정에서도 시작하지 않는다. 저장소의 Hyperliquid 예제 설정은 증거금 정책(소유자가 정한 값)을 담고 검사를 통과한다. Hyperliquid 설정에 증거금 정책이 있으면 설정에서 계산한 분당 조회 weight(216 + 종목마다 20, 기본 간격)가 600을 넘을 때 시작하지 않는다. 그 범위는 max_account_leverage, daily_loss_bps, margin_max_age_us, runtime.margin_poll_ms, runtime.venue_setting_poll_ms가 0보다 크고, venue_leverage가 1 이상이며, mm_buffer_bps는 0이어도 되고, stale_cancel_us는 margin_max_age_us보다 커야 한다(같으면 거부). runtime.margin_poll_ms의 기본은 5 000, runtime.venue_setting_poll_ms의 기본은 60 000이다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e configuration_changes && cargo test -p oms-node --lib config::tests` |
-| V-OVL-1 | 입력 큐는 상한을 넘지 않고, 가득 찬 큐는 다른 큐에 영향을 주지 않으며, 배치마다 세 큐가 지분을 받는다 | 단위 | 통과 | `cargo test -p oms-node --lib queues` |
-| V-OVL-2 | 큐보다 빠르게 온 요청은 즉시 거절되고 기록을 남기지 않으며, 그 직후에도 취소는 수용된다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e overload -- --nocapture` |
-| V-OVL-3 | 저장 공간이 부족하면 신규 주문만 거절하고 체결과 취소는 계속 처리한다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios storage_low` |
-| V-API-1 | 전략 연결은 자기 주문만 보고 취소하며, 운영 명령은 운영 소켓에서만 받아들여진다. 알 수 없는 전략과 잘못된 요청은 거절된다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e a_strategy_sees` |
-| V-API-2 | 문서의 요청 예가 그대로 해석되고, 수치에 JSON 숫자를 쓰면 거부된다 | 단위 | 통과 | `cargo test -p oms-api` |
-| V-SLICE-1 | 신규 주문 → 영속 접수 → 거래소 접수 → 부분 체결 → 잔량 취소 → 종결이 실제 프로세스에서 이어지고, 구독자는 저널 순서로 이벤트를 받으며, 정상 종료 뒤 재시작해도 상태가 같고 재전송이 없다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e vertical_slice` |
-| V-GW-SEAM-1 | VenueGateway를 구현한 세 번째(가짜) 게이트웨이가 oms-core를 고치지 않고 구동기에 꽂히며, 구동기는 상시 작업 시작(spawn_tasks)을 명령 루프를 띄우기 전에 한 번 동기적으로 부르고, 주문 명령은 send_order로, 취소 명령은 send_cancel로, 조회는 query로 각각 한 번씩 간다. 동시에 도는 명령은 max_concurrent, 조회는 QUERY_CONCURRENCY를 넘지 않고 넘치는 것은 기다렸다가 모두 처리된다 | 단위 | 통과 | `cargo test -p oms-node --lib venue::tests` |
-| V-LINK-1 | 스트림이 끊기면 신규 주문을 막고, 그동안의 취소 요청을 기억했다가 복귀 뒤 보내며, 놓친 체결을 메운 뒤에야 거래를 재개한다 | 프로세스 | 통과 | `cargo test -p oms-node --test e2e link_loss` |
-| V-HL-1 | L1 액션의 해시와 서명이 공식 Python SDK의 결과와 같고, 서명 키는 출력되지 않는다 | 단위 | 통과 | `cargo test -p oms-node --lib sign` |
-| V-HL-2 | 문서에 실린 응답 예를 올바르게 해석한다. 문서에 없는 주문 응답 형태와 최상위 오류는 결과 불명으로 두고, 문서의 표에 없는 상태 이름에서는 아무 결론도 내지 않으며, 종결 상태에서 최종 수량을 추정하지 않는다. 체결 조회는 마지막 쪽임이 확실할 때만 완료를 선언한다. 체결 키는 <time>:<coin>:<tid>:<oid>다 | 단위 | 통과 | `cargo test -p oms-node --lib hyperliquid` |
+| V-NUM-1 | 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다. 전략 이름은 [A-Za-z0-9_.:-]의 1~32자만 받는다. 문자열 식별자는 만들 때와 역직렬화할 때 같은 검사로 거부한다 | 단위 | 미실행 | `cargo test -p oms-core --lib` |
+| V-NUM-2 | 한도 비교용 금액은 정확한 곱 이상인 가장 작은 1e-8 단위 값이고, 넘치면 보고된다 | 속성 | 미실행 | `cargo test -p oms-core --lib notional` |
+| V-NEW-1 | 수용된 주문들이 어떤 순서로 체결되어도 계좌와 전략의 포지션은 설정한 구간을 벗어나지 않으며, 두 요청이 같은 여유를 쓰지 못한다. 수용은 그 방향의 예약(B 또는 S)을 수량만큼 늘리고 전송 명령을 한 번 내며, 거절은 예약도 전송 명령도 만들지 않는다 | 단위 | 미실행 | `cargo test -p oms-core --test scenarios` |
+| V-NEW-2 | 수량·가격 단위, 유효숫자, 최소·최대 금액, 가격대, 만료 시각, 종목·전략의 허용 여부, 용량을 검사하고 해당하는 사유를 모두 돌려준다. 거절 사유의 종류마다 시험이 있다 | 단위 | 미실행 | `cargo test -p oms-core --test scenarios && cargo test -p oms-core --test gaps` |
+| V-IDEM-1 | 같은 (전략, 키)로는 주문이 하나만 만들어지고 전송 명령도 한 번만 나온다. 다른 내용의 요청은 충돌로 거절된다. 키는 요청이 만료된 뒤에만 잊는다: 닫힌 주문은 닫힌 뒤 closed_retention_us와 만료 뒤 dedup_grace_us(기본 60초)가 모두 지나야 메모리에서 지워지고, 그 전까지 같은 키는 중복으로 답한다 | 단위 | 미실행 | `cargo test -p oms-core --test scenarios` |
+| V-IDEM-2 | 재전송, 충돌 요청, 재시작, 키 삭제가 임의로 섞여도 키당 수용 1회, 키당 전송 1회, 거래소의 클라이언트 ID당 접수 요청 1회가 유지된다 | 시뮬레이션 | 미실행 | `OMS_SIM_SEEDS=400 cargo test --release -p oms-sim --test sim` |
+| V-IDEM-3 | 실제 소켓으로 여러 연결이 같은 요청을 동시에 보내도, 노드를 강제 종료한 뒤에도, 주문은 하나이고 거래소 접수 요청도 하나다 | 프로세스 | 미실행 | `cargo test -p oms-node --test e2e a_repeated_request` |
+| V-DOUBT-1 | 전송 결과를 모르면 예약을 유지하고 신규 주문을 막으며 다시 보내지 않는다. 존재 증거가 오면 정상 주문이 된다. 결과보다 체결이 먼저 오면 그 체결로 주문이 접수되고, 뒤에 온 Placed는 아무것도 바꾸지 않으며 뒤에 온 Unknown은 결과 불명을 만들지 않는다 | 단위 | 미실행 | `cargo test -p oms-core --test scenarios` |
+| V-DOUBT-2 | '찾을 수 없음'은 전송 만료 + 여유가 지난 뒤의 조회일 때만 주문을 닫는다. 거래소가 만료를 강제하지 않는 설정에서는 절대 닫지 않는다. 결과 불명인 주문은 운영자의 resolve 명령으로 닫힌다. 결과 불명이 아닌 전송 대기 주문에 대한 '찾을 수 없음'은 만료 뒤의 조회라도 무시한다. '찾을 수 없음'으로 닫은 주문이 전송 응답이나 열린 주문 목록에서 열려 있다고 나오면 OpenAfterClose를 제기하고, 그 주문의 체결은 기장하고 FillAfterClose를 제기한다. 접수된 주문에 대한 '찾을 수 없음'은 주문을 닫지 않고 예약을 유지하며, 접수 시각 + 여유 뒤의 조회면 StatusConflict를 제기한다 | 단위 | 미실행 | `cargo test -p oms-core --test scenarios not_found && cargo test -p oms-node --test e2e a_lost_request` |
+| V-DOUBT-3 | 부재 판정은 두 가정(거래소가 만료를 강제한다, 시계 차이가 여유보다 작다)에 의존하며, 가정을 깨면 시험이 위반을 잡는다 | 시뮬레이션 | 미실행 | `cargo test --release -p oms-sim --test sim absence_rule -- --nocapture` |
+| V-FILL-1 | 체결은 한 번만 기장되고, 접수 응답보다 먼저 와도, 주인을 아직 몰라도, 수량을 넘어도 버려지지 않는다. 기장은 주문의 누적 수량·금액·수수료와 계좌·전략의 포지션을 늘리고, 예약을 체결량과 남은 예약 가운데 작은 쪽만큼 줄인다. 대기 체결이 상한(max_parked_fills, 기본 1,024건)에 이르면 다음 체결은 기다리지 않고 외부 체결로 기장하며 ParkedFillOverflow를 제기한다. 주문과 종목이나 방향이 다른 체결은 그 주문에 기장하지 않고 외부 체결로 계좌에 기장하며 FillFieldConflict를 제기한다 | 단위 | 미실행 | `cargo test -p oms-core --test scenarios fill && cargo test -p oms-core --test gaps && cargo test -p oms-core --test review_core f2` |
+| V-CANCEL-1 | 취소 요청은 예약을 풀지 않고, 취소 중 체결은 기장되며, 최종 수량은 종결 통보가 정한다. 취소는 차단 중에도 받고, 간격을 두고 상한까지 재시도한다. 상한에 이른 뒤 다시 요청하면 새 시도가 나가고, 결과가 오지 않는 시도는 시간 초과 뒤 불명으로 처리된다. 운영자의 cancel_all은 범위 안의 미종결 주문마다 취소 요청을 낼 뿐 취소 완료가 아니다. 보낼 수 있는 주문의 취소 요청은 requested로 답하고 첫 시도의 취소 명령을 곧바로 낸다. 상한까지 확인되지 않은 취소는 CancelStuck을 한 번 제기하고, 운영자가 확인한 뒤에는 다시 제기하지 않는다 | 단위 | 미실행 | `cargo test -p oms-core --test scenarios cancel && cargo test -p oms-core --test review_core f1` |
+| V-TERM-1 | 종결 통보가 체결보다 먼저 와도 아직 기장되지 않은 수량은 예약에 남고, 최종 수량을 모를 때는 체결 동기화가 종결 시각을 지난 뒤에만 닫는다. 최종 수량을 모르는 Closing 주문이 있으면 코어는 체결 조회를 요구한다. 최종 누적이 기장된 체결보다 작으면 기장을 되돌리지 않고 CumExceedsFinal을 제기한다 | 단위 | 미실행 | `cargo test -p oms-core --test scenarios terminal` |
+| V-RECON-1 | 링크가 돌아오면 미종결 주문의 증거, 체결, 열린 주문, 포지션을 현재 세션에서 다시 확인할 때까지 신규 주문을 막는다. 포지션은 예약으로 설명되는 범위로 검사하고, 오래된 스냅샷은 판정하지 않는다 | 단위 | 미실행 | `cargo test -p oms-core --test scenarios` |
+| V-RECON-2 | 노드가 죽어 있는 동안 거래소에서 일어난 체결, 거래소 주도 취소, 부분 체결을 재시작 뒤 거래소 조회로 모두 반영한다 | 프로세스 | 미실행 | `cargo test -p oms-node --test e2e events_missed` |
+| V-EXT-1 | OMS가 내지 않은 체결은 기장되고 불일치로 표시되어 신규 주문을 막으며, 운영자가 확인해야 풀린다 | 시뮬레이션 | 미실행 | `cargo test --release -p oms-sim --test sim profile_external` |
+| V-REPLAY-1 | 기록된 이벤트만 적용해 만든 상태는 살아 있는 상태와 같고, 기록된 입력을 다시 판단하면 기록된 이벤트가 나온다. 구조 불변조건(Core::check_invariants)은 시뮬레이션에서 모든 입력과 복구 뒤에, 오프라인 검증(verify)에서 모든 기록 뒤에 검사한다 | 단위 | 미실행 | `cargo test -p oms-core --test scenarios && oms-node verify --data-dir <dir> --re-decide` |
+| V-SIM-1 | 네트워크 장애, 통보 중복·지연, 링크 단절, 프로세스 재시작, 키 삭제가 임의로 섞인 실행의 매 단계에서: 구조 불변조건이 성립하고, 거래소의 실제 포지션이 OMS가 설명하는 범위 안에 있고, 한도를 넘지 않고, 같은 주문이 두 번 전송되지 않는다. I-RES: 주문의 예약 수량은 미종결이면 수량 − 기장 체결, 종결 대기면 거래소 최종 누적 − 기장 체결(0 미만은 0, 잔량 이하, 최종 누적이 없으면 잔량), 종결이면 0이다. I-BOOK: 계좌·전략 장부의 매수·매도 미체결 합과 열린 주문 수는 그 장부에 속한 주문들의 예약과 미종결 수와 같다. I-ATTR: 종목별 계좌 포지션은 전략 포지션의 합 + 미귀속 포지션이다. I-KEY: (전략, 클라이언트 주문 ID)마다 주문은 하나이고 멱등 색인이 그 주문을 가리키며 색인 크기는 주문 수와 같다. I-PHASE: 종결 주문만 종결 기록을 갖고 열린 주문 색인에 없으며, 결과 불명 표시는 전송 대기 상태에만 있다 | 시뮬레이션 | 미실행 | `OMS_SIM_SEEDS=400 cargo test --release -p oms-sim --test sim -- --nocapture   (실패 시: OMS_SIM_PROFILE=<이름> OMS_SIM_SEED=<n>)` |
+| V-SIM-2 | 장애가 멈추면 장부가 가상 거래소와 일치한다: 주문별 체결량과 상태, 포지션, 수수료 합. 차단 사유와 거짓 불일치가 남지 않는다 | 시뮬레이션 | 미실행 | `V-SIM-1과 같다` |
+| V-SIM-3 | 같은 seed는 바이트 단위로 같은 저널을 만든다 | 시뮬레이션 | 미실행 | `cargo test --release -p oms-sim` |
+| V-COMMIT-1 | flush가 실패하면 그 배치의 응답, 전송 명령, 읽기 모델 변경이 하나도 나가지 않고 프로세스가 입력을 닫는다. 성공한 경우 응답 시점에 읽기 모델은 이미 갱신돼 있다. flush가 실패하면 응답 채널이 닫혔을 때 치명 표시(사유 commit failed)가 이미 서 있다 | 프로세스 내부 | 미실행 | `cargo test -p oms-node --features failpoints --test pipeline` |
+| V-COMMIT-2 | 부하 중 임의 시점에 노드를 강제 종료하고 다시 띄우기를 반복해도, 대조가 끝난 뒤 주문별 체결량·상태와 포지션이 거래소와 일치하고 같은 주문이 두 번 접수 요청되지 않는다 | 프로세스 | 미실행 | `OMS_KILL_ROUNDS=20 cargo test -p oms-node --test e2e random_kills -- --nocapture` |
+| V-COMMIT-3 | 함께 도착한 입력은 flush를 공유하고, 응답은 판단 순서대로 나온다 | 프로세스 내부 | 미실행 | `cargo test -p oms-node --features failpoints --test pipeline -- --nocapture` |
+| V-JRN-1 | 프레임의 모든 절단과 모든 단일 비트 반전이 감지되고, 0으로 채워진 꼬리는 프레임으로 읽히지 않는다 | 단위 | 미실행 | `cargo test -p oms-journal --lib` |
+| V-JRN-2 | 저널의 끝이 불완전하면 유효한 접두부만 남기고 원본 바이트를 보존한 뒤 이어 쓸 수 있다. 중간이 손상됐거나 세그먼트가 빠졌거나 다른 인스턴스의 것이거나 스냅샷보다 짧으면 시작을 거부하고, 거부한 디렉터리의 파일은 건드리지 않는다 | 속성 | 미실행 | `cargo test -p oms-journal && cargo test -p oms-node --test e2e journal_damage` |
+| V-JRN-3 | 같은 데이터 디렉터리를 두 프로세스가 쓸 수 없고, 다른 인스턴스의 저널은 거부된다 | 프로세스 | 미실행 | `cargo test -p oms-node --test e2e only_one_node` |
+| V-JRN-4 | 스냅샷은 완전한 파일로만 나타나고, 손상된 스냅샷은 건너뛰며, 정상 종료 뒤 재시작은 스냅샷에서 같은 상태로 돌아온다 | 프로세스 | 미실행 | `cargo test -p oms-journal --lib snapshot` |
+| V-JRN-5 | 기록 스키마가 다른 빌드는 옛 세그먼트를 읽고 새 세그먼트를 시작하며, 읽을 수 없는 스키마를 만난 빌드는 시작을 거부한다 | 단위 | 미실행 | `cargo test -p oms-journal a_schema_change` |
+| V-BOOT-1 | 재시작은 결과 기록이 없는 전송을 불명으로 표시하고, 신규 주문을 다시 보내지 않으며, 요청돼 있던 취소만 다시 보낸다. Boot는 부팅 번호를 하나 올리고 연결을 내려간 상태로 둔다. 첫 부팅은 체결 바닥(이보다 이른 체결은 중복으로 보지 않고 버린다)을 현재 − absence_margin으로 정한다. 진행 중이던 취소 시도는 LostOnRestart로 적는다 | 프로세스 | 미실행 | `cargo test -p oms-node --test e2e a_kill_during_send` |
+| V-CFG-1 | 설정은 버전이 커야 활성화되고, 같은 버전에 다른 내용이면 시작을 거부한다. 노출이 남은 종목·전략은 제거할 수 없다. mainnet은 증거금 정책(policy.margin) 없이는 시작하지 않고, 정책의 값이 C-MARGIN 설정 표의 범위를 벗어나면 어느 거래소 설정에서도 시작하지 않는다. 저장소의 Hyperliquid 예제 설정은 증거금 정책(소유자가 정한 값)을 담고 검사를 통과한다. Hyperliquid 설정에 증거금 정책이 있으면 설정에서 계산한 분당 조회 weight(216 + 종목마다 20, 기본 간격)가 600을 넘을 때 시작하지 않는다. 그 범위는 max_account_leverage, daily_loss_bps, margin_max_age_us, runtime.margin_poll_ms, runtime.venue_setting_poll_ms가 0보다 크고, venue_leverage가 1 이상이며, mm_buffer_bps는 0이어도 되고, stale_cancel_us는 margin_max_age_us보다 커야 한다(같으면 거부). runtime.margin_poll_ms의 기본은 5 000, runtime.venue_setting_poll_ms의 기본은 60 000이다 | 프로세스 | 미실행 | `cargo test -p oms-node --test e2e configuration_changes && cargo test -p oms-node --lib config::tests` |
+| V-OVL-1 | 입력 큐는 상한을 넘지 않고, 가득 찬 큐는 다른 큐에 영향을 주지 않으며, 배치마다 세 큐가 지분을 받는다 | 단위 | 미실행 | `cargo test -p oms-node --lib queues` |
+| V-OVL-2 | 큐보다 빠르게 온 요청은 즉시 거절되고 기록을 남기지 않으며, 그 직후에도 취소는 수용된다 | 프로세스 | 미실행 | `cargo test -p oms-node --test e2e overload -- --nocapture` |
+| V-OVL-3 | 저장 공간이 부족하면 신규 주문만 거절하고 체결과 취소는 계속 처리한다 | 단위 | 미실행 | `cargo test -p oms-core --test scenarios storage_low` |
+| V-API-1 | 전략 연결은 자기 주문만 보고 취소하며, 운영 명령은 운영 소켓에서만 받아들여진다. 알 수 없는 전략과 잘못된 요청은 거절된다 | 프로세스 | 미실행 | `cargo test -p oms-node --test e2e a_strategy_sees` |
+| V-API-2 | 문서의 요청 예가 그대로 해석되고, 수치에 JSON 숫자를 쓰면 거부된다 | 단위 | 미실행 | `cargo test -p oms-api` |
+| V-SLICE-1 | 신규 주문 → 영속 접수 → 거래소 접수 → 부분 체결 → 잔량 취소 → 종결이 실제 프로세스에서 이어지고, 구독자는 저널 순서로 이벤트를 받으며, 정상 종료 뒤 재시작해도 상태가 같고 재전송이 없다 | 프로세스 | 미실행 | `cargo test -p oms-node --test e2e vertical_slice` |
+| V-GW-SEAM-1 | VenueGateway를 구현한 세 번째(가짜) 게이트웨이가 oms-core를 고치지 않고 구동기에 꽂히며, 구동기는 상시 작업 시작(spawn_tasks)을 명령 루프를 띄우기 전에 한 번 동기적으로 부르고, 주문 명령은 send_order로, 취소 명령은 send_cancel로, 조회는 query로 각각 한 번씩 간다. 동시에 도는 명령은 max_concurrent, 조회는 QUERY_CONCURRENCY를 넘지 않고 넘치는 것은 기다렸다가 모두 처리된다 | 단위 | 미실행 | `cargo test -p oms-node --lib venue::tests` |
+| V-LINK-1 | 스트림이 끊기면 신규 주문을 막고, 그동안의 취소 요청을 기억했다가 복귀 뒤 보내며, 놓친 체결을 메운 뒤에야 거래를 재개한다 | 프로세스 | 미실행 | `cargo test -p oms-node --test e2e link_loss` |
+| V-HL-1 | L1 액션의 해시와 서명이 공식 Python SDK의 결과와 같고, 서명 키는 출력되지 않는다 | 단위 | 미실행 | `cargo test -p oms-node --lib sign` |
+| V-HL-2 | 문서에 실린 응답 예를 올바르게 해석한다. 문서에 없는 주문 응답 형태와 최상위 오류는 결과 불명으로 두고, 문서의 표에 없는 상태 이름에서는 아무 결론도 내지 않으며, 종결 상태에서 최종 수량을 추정하지 않는다. 체결 조회는 마지막 쪽임이 확실할 때만 완료를 선언한다. 체결 키는 <time>:<coin>:<tid>:<oid>다 | 단위 | 미실행 | `cargo test -p oms-node --lib hyperliquid` |
 | V-HL-3 | 실제 testnet에 대해 게이트웨이가 메타를 읽어 종목 규칙을 통과시키고, 사용자 스트림을 구독해 링크를 올리고, 주문 조회(없음)·열린 주문·포지션·체결 조회·참조 가격을 해석한다 | 실제 거래소(읽기 전용) | 미실행 | `OMS_LIVE_TESTNET=1 cargo test -p oms-node --test hl_live -- --nocapture` |
-| V-PURE-1 | 도메인 코어의 소스에 시계·파일·네트워크·스레드·난수·해시 컬렉션·부동소수점·unsafe가 없고 의존성은 serde와 serde_json뿐이다 | 소스 검사 | 통과 | `cargo run -p xtask -- verify --quick` |
+| V-PURE-1 | 도메인 코어의 소스에 시계·파일·네트워크·스레드·난수·해시 컬렉션·부동소수점·unsafe가 없고 의존성은 serde와 serde_json뿐이다 | 소스 검사 | 미실행 | `cargo run -p xtask -- verify --quick` |
 | V-PERF-1 | 초당 200건의 open-loop 부하에서 로컬 응답 지연 p99가 20 ms 이하이고 오류와 미응답이 없다 | 측정 | 미실행 | `cargo run --release -p xtask -- perf --dir <NVMe 디렉터리> --rates 20,200,2000 --seconds 60 --label nvme-final` |
 | V-PERF-2 | 초당 2000건의 부하에서 (가) 수용 한도를 푼 설정에서는 큐가 상한 안에 머물고 미응답이 없으며, (나) 기본 한도에서는 초과분이 overloaded로 즉시 거절되고 저널에 기록을 남기지 않는다 | 측정 | 미실행 | `xtask perf --label nvme-final --rates 20,200,2000 --seconds 60  /  xtask perf --label nvme-default-limits --rates 2000 --seconds 60 --default-limits` |
 | V-PERF-3 | 스냅샷 이후 기록 5만 건의 재생이 5초 이내에 끝난다 | 측정 | 미실행 | `cargo run --release -p xtask -- recovery-time --dir <디렉터리>` |
 | V-MUT-1 | 핵심 보호 로직을 일부러 깨뜨리면 관련 시험이 실패한다 | 변이 | 미실행 | `cargo run -p xtask -- mutants` |
-| V-HIST-1 | 단계 지연 히스토그램이 보고하는 백분위는 실제 값 이상이고 12.5% 이내로 크다 | 단위 | 통과 | `cargo test -p oms-node --lib util` |
-| V-COMMIT-4 | 커밋 순서의 경계마다 프로세스를 멈추면 결과가 경계별 장애 표와 같다: 쓰기 전에 멈추면 요청이 없었던 것이 되고, 쓴 뒤·flush 뒤·응답 뒤에 멈추면 주문은 남되 한 번도 전송되지 않고 결과 불명을 거쳐 "놓이지 않음"으로 닫히며, 같은 요청을 다시 보내면 같은 주문으로 답한다. 쓴 뒤 flush가 실패하면 노드는 종료 코드 2로 멈추고 거래소에 요청을 보내지 않는다 | 프로세스 | 통과 | `cargo test -p oms-node --features failpoints --test crash_points` |
+| V-HIST-1 | 단계 지연 히스토그램이 보고하는 백분위는 실제 값 이상이고 12.5% 이내로 크다 | 단위 | 미실행 | `cargo test -p oms-node --lib util` |
+| V-COMMIT-4 | 커밋 순서의 경계마다 프로세스를 멈추면 결과가 경계별 장애 표와 같다: 쓰기 전에 멈추면 요청이 없었던 것이 되고, 쓴 뒤·flush 뒤·응답 뒤에 멈추면 주문은 남되 한 번도 전송되지 않고 결과 불명을 거쳐 "놓이지 않음"으로 닫히며, 같은 요청을 다시 보내면 같은 주문으로 답한다. 쓴 뒤 flush가 실패하면 노드는 종료 코드 2로 멈추고 거래소에 요청을 보내지 않는다 | 프로세스 | 미실행 | `cargo test -p oms-node --features failpoints --test crash_points` |
 | V-COMMIT-5 | 실제 디스크에 둔 저널로 강제 종료를 60회 반복해도 V-COMMIT-2의 성질이 유지된다 | 프로세스 | 미실행 | `cargo run --release -p xtask -- verify --extended <실제 디스크의 디렉터리>` |
-| V-BOOT-2 | 저널이 여러 세그먼트에 걸쳐 있어도 강제 종료 뒤 스냅샷과 저널로 같은 상태로 돌아오고, `verify --re-decide`는 입력과 맞지 않는 기록을 잡아내며, 종료 중의 저널 실패는 정상 종료로 보고되지 않는다 | 프로세스 | 통과 | `cargo test -p oms-node --test review_node` |
-| V-API-3 | 거래 소켓의 연결이 아무리 많아도 운영 소켓은 열리고, 끊긴 구독자는 연결 자리를 돌려주며, 한 연결은 구독을 하나만 가진다 | 프로세스 | 통과 | `cargo test -p oms-node --test review_node` |
-| V-DASH-1 | 대시보드의 문서 열람 경로는 docs/, crates/, registry/ 아래의 .md, .rs, .toml만 읽는다 | 단위 | 통과 | `cargo test -p oms-node --lib http` |
+| V-BOOT-2 | 저널이 여러 세그먼트에 걸쳐 있어도 강제 종료 뒤 스냅샷과 저널로 같은 상태로 돌아오고, `verify --re-decide`는 입력과 맞지 않는 기록을 잡아내며, 종료 중의 저널 실패는 정상 종료로 보고되지 않는다 | 프로세스 | 미실행 | `cargo test -p oms-node --test review_node` |
+| V-API-3 | 거래 소켓의 연결이 아무리 많아도 운영 소켓은 열리고, 끊긴 구독자는 연결 자리를 돌려주며, 한 연결은 구독을 하나만 가진다 | 프로세스 | 미실행 | `cargo test -p oms-node --test review_node` |
+| V-DASH-1 | 대시보드의 문서 열람 경로는 docs/, crates/, registry/ 아래의 .md, .rs, .toml만 읽는다 | 단위 | 미실행 | `cargo test -p oms-node --lib http` |
 | V-PERF-4 | 커밋 스레드 구성과 인라인 구성을 같은 조건에서 잰 결과가 보관돼 있다(ADR-012의 비교) | 측정 | 미실행 | `xtask perf --label nvme-compare-thread --rates 200,2000,8000 --seconds 10  /  같은 명령에 --inline --label nvme-compare-inline` |
 | V-PERF-5 | 저장 장치의 동기 쓰기 시간과 코어의 판단 시간을 잰 결과가 보관돼 있다 | 측정 | 미실행 | `xtask fsync-probe --dir <디렉터리> --label nvme  /  xtask core-bench` |
 | V-SIM-4 | 프로파일마다 seed 3000개로 V-SIM-1, V-SIM-2, V-EXT-1의 성질이 유지된다 | 시뮬레이션 | 미실행 | `cargo run --release -p xtask -- verify --extended <실제 디스크의 디렉터리>` |
-| V-FUZZ-1 | 가정을 지키지 않는 임의의 거래소 입력(순서 역전, 중복, 낡은 상태, 식별자 없는 체결, 부재 응답, 링크 변동, 재시작)에서도 코어는 결함으로 멈추지 않고, 불변조건과 재생 일치가 유지되고, 주문당 전송은 한 번이며, 차단 중 수용이 없고, 새 체결은 반드시 기장되거나 대기하고, 정직하게 정리된 뒤에는 차단이 남지 않는다 | 속성 | 통과 | `cargo test --release -p oms-core --test review_core examined_fuzz` |
-| V-MIS-1 | 불일치 14종 각각을 일으키는 시험이 있고, 같은 대상의 반복은 확인되기 전까지 한 건으로 남는다. 운영자가 resolve_order로 닫은 주문에 뒤늦게 온 체결도 기장되고 FillAfterClose로 제기된다 | 단위 | 통과 | `cargo test -p oms-core` |
-| V-MARGIN-1 | 증거금 정책이 있으면 감소 전용 주문은 재확인, 결과 불명, 불일치 차단을 통과하고, 일반 주문은 모든 차단에서 거절된다. 정책 구역은 선택이고, 없으면 저널 기록에 바이트를 더하지 않는다. 정책이 없으면 모든 차단이 감소 전용 주문을 포함한 모든 신규 주문을 막는다. 빈 정책 구역의 기본값은 max_account_leverage 2, daily_loss_bps 500, mm_buffer_bps 25, margin_max_age_us 30 000 000, stale_cancel_us 60 000 000, venue_leverage 2, isolated true, account_modes_allowed 빈 목록이고 account_mm_rate_max_bps는 없다 | 단위 | 통과 | `cargo test -p oms-core --test scenarios reduce_only && cargo test -p oms-core --test margin` |
-| V-MARGIN-2 | 증거금 정책이 있으면 현재 링크 세션의 증거금 보고가 마지막 보고로 기록된다. 다른 세션의 보고, 링크가 내려간 동안의 보고, 순번이 크지 않은 보고는 버린다. 읽지 못한 보고와 최대 레버리지가 0인 보고는 사유와 함께 거부로 기록되고 마지막 보고를 바꾸지 않는다. 나이가 0 이상 30초 이하인 보고가 없으면 일반 주문은 MarginUnavailable로 거절된다. 감소 전용 주문은 보고가 없어도 받는다. 정책이 없으면 증거금 입력은 상태를 바꾸지 않고 기록되지 않는다. 받은 보고는 마지막 거부 사유를 지운다(거부 사유는 그 뒤 보고를 받지 못한 동안만 남는다). 저널과 status에서 보고 포지션의 부호 있는 수량 키는 szi다(코드의 이름은 qty). 마지막 보고, 기준 금액, 감소 전용 상태는 링크가 바뀌어도 남는다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
-| V-MARGIN-3 | 증거금 정책이 있으면 일반 주문은 받은 뒤의 계좌 노출이 한도 × 계좌 가치를 넘고 받기 전보다 커질 때 AccountLeverage로 거절된다. 정확히 한도와 같으면 받는다. 계좌 가치가 0 이하면 일반 주문을 모두 거절한다. 노출은 포지션과 모든 미체결 주문(감소 전용 포함)을 지정가와 참조 가격 중 높은 값으로 센 종목별 값의 합이다. 미체결 주문은 종결 증거가 올 때까지 노출에 남고 OMS는 그 주문을 고치거나 만료시키지 않는다. 가격이 움직여 한도를 넘어도 래치는 없다. 감소 전용 주문은 검사를 건너뛰지만 합에는 들어간다. 신선한 증거금 보고가 없으면 검사는 오래된 계좌 가치로 판정하지 않고 주문은 MarginUnavailable 하나로 거절된다. 노출이 있는 종목에 신선한 참조 가격이 없으면 일반 주문은 MarginUnavailable로 거절된다. 참조 가격은 기록된 뒤 ref_price_max_age_us(기본 15초, 가격대와 같은 한도) 이내면 신선하고, 노출이 있는 종목은 포지션이나 남은 예약이 있는 종목과 새 주문의 종목이며, 이 조건은 차단이 아니어서 새 가격이 오면 끝나고 감소 전용 주문은 받지 않는다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
-| V-MARGIN-11 | 증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이, 계좌 노출을 보여 준다. 링크가 올라오면 종목마다 거래소 설정을, 그리고 계좌 모드를 묻고, 포지션이 없는 종목의 설정은 정해진 간격으로 다시 묻는다. status는 종목별 거래소 설정과 계좌 모드, 그것이 정책과 맞는지를 보여 준다. 정책이 없으면 묻지 않는다. 조회한 계좌 가치가 기준 금액보다 5 %를 넘게 낮아지면 status가 감소 전용 상태와 그 규칙, 기준 금액을 보여 주고 일반 주문이 Hold(Reducing)으로 거절된다. 해제(clear-reduce)와 기준 재설정(rebase-day)은 전략 소켓에서 forbidden으로 거절되고 코어에 닿지 않는다. 운영자 도구(omsctl)의 clear-reduce --note와 rebase-day --note는 운영자 소켓으로 실행 중인 노드의 코어에 닿고, 응답과 status(상태, 규칙, 기준 금액)가 그 결과를 보여 준다. 감소 전용 상태에서 노드 프로세스를 강제 종료(SIGKILL)하고 다시 띄우면 status가 같은 상태(규칙, 내용, 진입 시각)와 같은 기준 금액을 보여 주고, 해제한 뒤의 강제 종료도 해제와 운영자의 기준을 그대로 남긴다. 가상 거래소에 일반 주문 300건과 감소 전용 주문 3건이 걸린 채로 감소 전용 상태에 들어가면 일반 주문은 모두 거래소에서 취소되고 감소 전용 주문 3건은 열린 채로 남으며, 그 뒤에도 증거금 조회가 이어진다. 감소 전용 상태를 결정한 기록이 쓰이기 전에 노드가 멈추면 재시작 뒤에 상태도 취소 요청도 그 기록도 없고 기준 금액은 그대로이며, 다음에 한도를 넘는 보고가 한 번 다시 결정한다. 그 기록이 파일에 닿은 뒤(쓰기 뒤, 내구화 뒤, 읽기 모델 반영 뒤)에 취소가 나가기 전에 멈추면 재시작 뒤에 상태와 취소 요청이 저널에서 복원되고, 보내지 못한 취소가 거래소로 나가며, 감소 전용 주문은 남는다. 기준 금액을 정하는 기록의 각 경계에서 멈춰도 저널의 day_base_set은 정확히 하나이고, 그 날짜와 값은 같은 기록의 보고의 것이다(쓰기 전에 멈추면 다음 보고가 정한다). 가상 거래소 프로세스의 증거금 보고는 포지션(수량, 가치, 증거금, 증거금 방식, 레버리지, 최대 레버리지)을 담고 status가 그대로 보여 주며, 포지션이 있는 종목의 거래소 설정이 바뀌면 보고로 코어에 닿아 그 종목이 막힌다. 가상 거래소 프로세스가 말하는 포지션 증거금은 포지션 가치 ÷ 레버리지다(가치 100에서 50, 101에서 50.5). 모형은 진입 가격을 기억하지 않아 손실로 증거금이 줄지 않으므로 유지증거금 여유 규칙은 제어 명령 margin_used로 증거금을 다르게 말하게 할 때만 걸린다. 가상 거래소 프로세스는 처음에 모든 종목을 격리·레버리지 2로, 계좌 모드를 standard(이 모형의 이름이고 거래소의 값이 아니다)로 답하므로 일반 주문을 내려면 account_modes_allowed에 standard를 적어야 한다. 정책이 없으면 status의 core.margin은 null이다(감소 전용 상태가 남아 있어도 그렇다) | 프로세스 | 통과 | `cargo test -p oms-node --test e2e node_polls_margin && cargo test -p oms-node --test e2e status_shows_account_exposure && cargo test -p oms-node --test e2e status_shows_reducing && cargo test -p oms-node --test e2e node_reads_venue_setting && cargo test -p oms-node --test e2e -- strategy_socket_cannot omsctl_clear reducing_ && cargo test -p oms-node --test e2e margin_report_of_the_venue && cargo test -p oms-node --features failpoints --test crash_points -- reducing day_base` |
-| V-MARGIN-5 | 증거금 정책이 있으면 첫 증거금 보고가 그 계좌 가치를 조회 시각의 UTC 날짜와 함께 기준 금액으로 정한다. 같은 날의 뒤 보고는 기준을 바꾸지 않는다. 받은 보고의 계좌 가치가 기준 금액보다 5 %를 넘게 낮으면 계좌가 감소 전용 상태로 들어간다(기준 100에서 95.00은 아니고 94.99는 들어간다). 뒤 UTC 날짜의 첫 보고는 옛 기준으로 먼저 판정된 뒤에 새 기준이 되고, 여러 날의 공백 뒤에도 기준은 한 번만 넘어간다. 보고의 날짜가 기준의 날짜보다 앞서면 그 보고는 기준을 바꾸지 않는다(보고는 날짜를 뒤로 돌리지 않는다) | 단위 | 통과 | `cargo test -p oms-core --test margin` |
-| V-MARGIN-4 | 감소 전용 상태로 들어가는 입력 안에서, 감소 전용 표시가 없고 취소 요청이 없거나 취소 시도가 다 된 모든 열린 주문에 규칙 이름으로 취소 요청이 나간다. 표시 없는 익절 주문도 취소된다. 감소 전용 표시가 있는 주문은 그대로 둔다. 감소 전용 상태에서 일반 주문은 포지션을 줄이는 방향이어도 Hold(Reducing)으로 거절되고, 감소 전용 주문은 받는다. 유지증거금 여유 규칙으로 들어갈 때도 같다(취소의 이름은 Rule(MmBuffer)). 감소 전용 상태인 채로 정책이 없는 설정을 켜면 상태는 남지만 Reducing 차단은 없어 일반 주문과 감소 전용 주문을 받고, 정책이 돌아오면 같은 상태(같은 규칙, 같은 시각)가 다시 막으며 푸는 것은 운영자의 해제뿐이다. 규칙이 낸 취소가 막히면(CancelStuck) Mismatch 차단이 생기지만 감소 전용 주문은 계속 받는다. 진입 때 전송 결과를 기다리던 주문은 취소 요청을 바로 기록하고 거래소 접수 통보가 온 입력에서 취소를 보낸다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
-| V-MARGIN-9 | 증거금 정책이 있으면, 종목의 거래소 설정(증거금 방식과 레버리지)을 이번 링크 세션에서 받지 못한 동안 그 종목의 일반 주문은 VenueSetting(종목) 차단으로 거절된다. 옛 세션의 응답은 버린다. 받은 설정의 증거금 방식이나 레버리지가 정책과 다르면 그 종목만 같은 차단에 걸리고 다른 종목은 걸리지 않는다. 맞는 설정을 받으면 바로 풀리고, 링크가 바뀌면 다시 모르는 것이 된다. 증거금 보고의 포지션에 적힌 방식과 레버리지도 설정의 출처다. 차단 조회는 걸린 종목마다 그 종목 이름과 함께 차단을 보여 준다. 계좌 모드가 unifiedAccount나 portfolioMargin이면 허용 목록에 적혀 있어도 계좌의 모든 종목의 일반 주문이 AccountMode 차단으로 거절된다. 허용 목록에 없는 모드, 빈 응답, 이번 링크 세션에서 받지 못한 모드도 같다. 기본 허용 목록은 비어 있어서 운영자가 모드를 적기 전에는 일반 주문이 나가지 않는다. 감소 전용 주문은 두 차단을 모두 통과한다. OMS는 설정을 읽기만 하고 거래소로 아무것도 보내지 않는다. 보고의 포지션은 따로 이벤트를 내지 않고 설정에 있는 종목의 것만 그 종목의 거래소 설정이 되며, 설정에 없는 종목의 포지션은 보고에만 남는다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
-| V-MARGIN-6 | 운영자의 해제(clear-reduce)는 계좌가 감소 전용 상태가 아니면 NotReducing으로, 증거금 보고가 30초보다 오래됐으면 MarginUnavailable로, 사유가 비었으면 NoteRequired로 거절되고, 거절은 아무것도 기록하지 않는다. 받아들인 해제는 한 입력 안에서 마지막 보고의 계좌 가치를 새 기준 금액으로 정하고(day_base_set, set_by: operator) 감소 전용 상태를 끝낸다(reducing_cleared). 정확히 30초 된 보고는 신선하다. 그 뒤 새 기준 94에서 94와 89.30은 걸리지 않고 89.29는 다시 걸린다. 두 번째 해제는 NotReducing이다. 기준 재설정(rebase-day)은 신선한 보고와 사유가 있을 때 마지막 보고의 계좌 가치와 그 날짜(기준보다 앞선 날짜라도)를 기준 금액으로 정하고, 감소 전용 상태는 건드리지 않는다. 기준 재설정 없이 출금하면 그만큼이 손실로 읽힌다(100에서 6을 출금하면 걸린다). 마지막 보고에서 유지증거금 여유 조건이 참이면(어느 규칙으로 들어왔든) 해제는 MmBufferActive로 거절되고, 이 조건은 사유보다 먼저 본다. 포지션이 선 위로 돌아온 보고(가치 200, 최대 레버리지 40에서 3.00) 뒤에는 해제된다. 거절 응답 문자열은 사유 코드(not_reducing, margin_unavailable, mm_buffer_active, account_mm_active, note_required)로 시작한다. 공백뿐인 사유는 빈 것으로 본다. 기준 재설정의 사유는 이벤트에 없고 같은 저널 기록의 입력에 남는다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
-| V-MARGIN-7 | 증거금 정책이 있고 링크가 올라와 있을 때, 마지막으로 받은 증거금 보고의 조회 시각에서 60초가 넘게 지나면 틱이 감소 전용 표시가 없고 취소 요청이 없는 모든 열린 주문에 Rule(MarginStale) 이름으로 취소 요청을 한 번 낸다. 정확히 60초에는 내지 않는다. 감소 전용 표시가 있는 주문은 그대로 둔다. 아무 상태도 걸리지 않는다. 나이는 마지막 보고의 조회 시각과 현재 링크 세션이 올라온 시각 가운데 늦은 것에서 재고, 링크가 올라와 있는 동안 정책이 켜지면 그 설정 기록의 시각에서 잰다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
-| V-MARGIN-8 | 증거금 정책이 있으면, 받은 증거금 보고의 포지션 가운데 포지션 가치가 0보다 큰 것의 격리 증거금이 (유지증거금률 + 0.25 %p) × 포지션 가치보다 작으면 계좌가 감소 전용 상태로 들어가고 규칙은 MmBuffer로 남는다. 최대 레버리지 40, 포지션 가치 200에서 3.00은 걸리지 않고 2.99는 걸린다. 유지증거금률은 그 포지션의 최대 레버리지(같은 보고의 값)로 1 / (2 × 최대 레버리지)이다: 최대 레버리지 25, 가치 200에서 4.50은 걸리지 않고 4.49는 걸리며, 최대 레버리지 50에서는 2.50이 걸리지 않는다. 한 종목의 포지션이 걸려도 래치는 계좌 전체에 하나다: 다른 종목에 걸려 있는 일반 주문이 Rule(MmBuffer) 이름으로 취소되고, 모든 종목의 새 일반 주문이 Hold(Reducing)으로 거절되며, 감소 전용 주문은 받는다. 교차 증거금 포지션은 판정하지 않는다(그 종목은 VenueSetting 차단에 걸린다). 래치에는 먼저 건 규칙이 남는다: 일 손실로 들어간 뒤의 유지증거금 여유 판정도, 그 반대도 아무것도 내지 않고 바꾸지 않는다. 한 보고가 둘 다 걸면 유지증거금 여유를 먼저 판정하므로 MmBuffer가 남는다. 받은 보고는 도착했을 때 이미 30초보다 오래됐어도 판정한다(조회 뒤 40초에 기록된 보고의 2.99도 건다). 비교는 나눗셈 없는 정확한 곱으로 한다: 가장 큰 금액·최대 레버리지·여유에서도 넘침이 결과를 뒤집지 않고(곱이 i128에 들어가지 않으면 선 아래로 본다), 선 바로 옆에서 반올림이 결과를 뒤집지 않는다. 포지션 가치가 0 이하인 포지션은 판정하지 않는다. 설정에 없는 종목의 포지션도 판정한다. 음수 증거금은 언제나 선 아래다. detail은 「position <종목>: isolated margin <증거금> is below the maintenance margin at maximum leverage <최대 레버리지> plus <여유> bps of the position value <가치>」다 | 단위 | 통과 | `cargo test -p oms-core --test margin` |
-| V-MARGIN-13 | 증거금 정책에 account_mm_rate_max_bps가 있으면, 받은 증거금 보고의 교차 계좌 유지증거금이 0보다 크고 유지증거금 × 10 000 ≥ 한도 × 증거금 잔고일 때 계좌가 감소 전용 상태로 들어가고 규칙은 AccountMm(status의 account_mm)으로 남으며, 같은 입력에서 열린 일반 주문마다 Rule(AccountMm) 취소를 낸다(감소 전용 주문은 남는다). 한도 5000에서 잔고 1000: 499.99는 걸리지 않고 500은 건다. 한도 1에서 잔고 100: 0.00999999는 아니고 0.01은 건다. 잔고 0 이하에 유지증거금이 있으면 어느 한도에서도 건다. 유지증거금 0은 잔고가 얼마든(0, 음수 포함) 걸지 않는다. 가장 큰 금액에서도 나눗셈 없이 정확히 비교한다. 한도가 있는데 account_mm이 없거나 유지증거금이 음수인 보고는 통째로 MarginReportRejected이고 마지막 정상 보고가 나이를 먹는다. 한도가 없으면 같은 보고를 기록하고 숫자를 판정하지 않는다. 래치에는 먼저 건 규칙이 남는다(일 손실 뒤의 계좌 규칙도, 그 반대도 아무것도 내지 않는다). 한 보고가 여럿을 걸면 유지증거금 여유, 계좌 유지증거금률, 일 손실 순이다. clear-reduce는 마지막 보고에서 조건이 참이면 어느 규칙이 걸었든 account_mm_active로 거절된다. status는 마지막 보고의 두 숫자를 보이고 없으면 키가 없다. account_mm 없는 보고와 한도 없는 정책은 저널에 바이트를 남기지 않고(기록 스키마 2 그대로), 이 필드 전의 기록은 없음으로 읽히며, 두 종류의 저널 모두 재생·재결정·디스크 복구(verify --re-decide)에서 실시간 상태와 같다. 한도는 1..=9999다. 노드 설정은 Bybit에서 증거금 정책이 있으면 한도를 요구하고 Hyperliquid와 가상 거래소에서는 거부한다. Bybit 게이트웨이는 totalMaintenanceMargin과 totalMarginBalance를 보고에 싣고, 둘 중 하나라도 없거나 문자열 소수가 아니면 응답 전체가 MarginReportInvalid이며, accountMMRate는 무슨 값이든(없어도) 보고를 바꾸지 않는다. 그 거부 사유는 「account_mm is missing: …」와 「account_mm: maintenance margin … is negative」다. detail은 「account maintenance margin <유지증거금> is at or above <한도> bps of the margin balance <잔고>」다 | 단위 | 통과 | `cargo test -p oms-core --test account_mm; cargo test -p oms-node --test record_schema; cargo test -p oms-node --lib -- venue::bybit::query config::` |
-| V-MARGIN-12 | 시뮬레이션의 가상 거래소는 계좌 가치를 자기 모형으로 계산한다: 현금 + 포지션 × 기준 가격. 체결은 낸 값과 수수료만큼, 펀딩은 그 금액만큼 현금을 줄이고, 가격 변화는 포지션 가치를 바꾼다. 손으로 푼 예(입금 100, 100에 0.5 매수와 수수료 0.01, 가격 104, 펀딩 0.1 %)에서 계좌 가치는 99.99, 101.99, 101.938이다. 가격이 움직이지 않아도 수수료와 펀딩만으로 계좌가 기준 금액보다 5 %를 넘게 내려가면 감소 전용 상태로 들어간다(100에서 95.00은 아니고 94.99는 들어간다). 가상 거래소는 포지션을 키우거나 반대쪽으로 넘기는 감소 전용 주문을 거절하고, 걸려 있는 감소 전용 주문은 남은 포지션만큼만 체결한 뒤 나머지를 취소한다. 증거금 정책을 켠 임의 순서의 실행(체결, 가격 변화, 펀딩, 운영자 해제, 그리고 margin_lossy에서는 보고 유실·지연·무응답, 링크 단절, 재시작)의 매 입력 뒤에: 받아들인 일반 주문은 신선한 보고가 있었고 노출이 계좌 가치의 2배 이내이거나 노출을 올리지 않았다. 감소 전용 상태에 들어가면 열려 있는 일반 주문마다 취소 요청이 있고, 그 상태인 동안 일반 주문은 받아들여지지 않는다. 감소 전용 상태는 증거금 보고로만 들어가고 운영자의 해제로만 끝난다(재시작, 새 UTC 날, 회복된 계좌 가치는 끝내지 않는다). 보고가 한도보다 오래 끊긴 뒤의 틱이 끝나면 열려 있는 일반 주문마다 취소 요청이 있다. 증거금 정책이 없는 기존 프로파일 일곱 개는 seed 다섯 개씩 main(84db0f9)에서 기록한 것과 같은 저널을 쓴다. 가상 시간 50시간짜리 실행(margin_days: UTC 자정 1시간 전에 시작해 자정을 세 번 넘고, 그 사이에 재시작, 링크 단절, 손실, 출금과 입금, 운영자의 해제와 기준 재설정이 섞인다)에서도 위 검사가 매 입력 뒤에 성립하고, 기록된 보고가 그 전의 기준 금액보다 5 %를 넘게 낮으면 그 보고가 새 날의 기준을 정하는 보고여도 계좌는 감소 전용 상태가 되고, 저널의 기준 금액은 실행마다 자정을 정확히 세 번 넘고, 재시작과 새 날은 감소 전용 상태를 끝내지 않는다. 정해진 순서 하나(자정을 넘는 20초의 조회 끊김 동안 100에서 6 출금, 재시작, 자정 두 번 더)에서 새 날의 첫 보고 94는 상태를 걸고 나서 기준이 되고, 저널에는 날마다 기준이 하나다(100, 94, 100, 99). 저널의 증거금 기록(입력이 증거금 보고인 기록)은 조회 한 번에 하나를 넘지 않는다: 조용한 하루는 조회 17 280번에 기록 17 280건이고, 50시간 실행에서 기록 수는 조회 수 이하이고 같은 조회의 답은 두 번 기록되지 않는다 | 시뮬레이션 | 통과 | `cargo test -p oms-sim --test sim -- world_ a_loss_made profile_margin margin_journal existing_profiles --nocapture   (실패 시: OMS_SIM_PROFILE=<이름> OMS_SIM_SEED=<n>)` |
-| V-MARGIN-10 | Hyperliquid 게이트웨이는 문서의 clearinghouseState 응답 예를 증거금 보고 입력으로 옮긴다: 계좌 가치는 marginSummary.accountValue, 포지션마다 종목, 부호 있는 수량, 포지션 가치, 사용 증거금, 증거금 방식, 레버리지, 최대 레버리지. 어느 포지션이든 maxLeverage가 없거나 0이거나 정수가 아니면 보고 전체를 사유와 함께 거부 입력(MarginReportInvalid)으로 바꾸고, 멀쩡한 다른 포지션도 보고하지 않는다. 계좌 가치, 수량, 포지션 가치, 사용 증거금, 레버리지 가운데 하나라도 없거나 읽을 수 없을 때, 증거금 방식이 isolated도 cross도 아닐 때, 포지션 목록이 없을 때도 같다. 어떤 값도 0이나 기본값으로 채우지 않고 어떤 포지션도 건너뛰지 않는다. 설정에 없는 종목의 포지션도 보고에 남는다(번역 함수는 설정된 종목을 받지 않는다). activeAssetData 응답 예는 그 종목의 거래소 설정 입력(증거금 방식, 레버리지)이 된다. 방식이 isolated도 cross도 아니거나, 레버리지가 정수가 아니거나, 응답이 다른 종목의 것이면 입력을 만들지 않는다(설정은 모름으로 남아 그 종목이 막힌다). userAbstraction 응답(문자열 하나)은 글자 그대로 계좌 모드 입력이 된다. 문서에 없는 문자열을 문서에 있는 값으로 바꾸지 않고, 문자열이 아니거나 64자를 넘으면 입력을 만들지 않는다. 세 조회의 요청 본문은 문서의 것과 같다(clearinghouseState, activeAssetData, userAbstraction). 게이트웨이의 요청 예산은 취소를 막지 않으므로 취소 500건 뒤에는 조회가 기다린다: 가득 찬 예산(1200)에서는 700이 남아 증거금 조회가 바로 나가고, 시작 직후(600)에는 100이 남아 10.1초, 빈 예산에서는 15.1초를 기다린다. 종목 이름에서 식별자 규칙에 맞지 않는 글자는 _로 바꾼다(PURR/USDC는 PURR_USDC, @107은 _107). 게이트웨이가 스스로 세는 요청 예산은 최대 1200이고 시작할 때 600이며 초당 20씩 차고, 조회는 300(주문 몫 200, 취소 몫 100)을 남길 수 있을 때만 나가며 취소는 예산과 상관없이 나간다 | 단위 | 통과 | `cargo test -p oms-node --lib venue::hyperliquid` |
-| V-WIRE-ID-1 | 고객 주문번호 형식 Base32Pair는 VenueClientId와 일대일이고 27자(36자 이하, 0-9a-v와 -)이며 같은 입력에 같은 문자열을 내고, 서로 다른 100만 개 주문에 서로 다른 100만 개 문자열을 낸다. 해석은 그 형식이 쓴 문자열만 받는다(대문자·다른 길이·다른 구분자·64비트 초과·16진수 형식은 None). Hex128은 to_hex와 같은 문자열을 내고 소문자 16진수만 해석하며, 가상 거래소와 Hyperliquid 게이트웨이는 Hex128을 선언하고 보내는 번호를 그 형식으로 만든다 | 단위 | 통과 | `cargo test -p oms-core --lib ids::tests && cargo test -p oms-node --lib venue::tests` |
-| V-VENUE-EXEC-1 | 펀딩 입력은 포지션·주문·예약·체결 수를 바꾸지 않고 한 번만 기록된다. 거래소 포지션 변경은 부호 있는 수량을 계좌와 미귀속 장부에 더하고 VenuePositionChange 불일치로 일반 주문을 막으며(감소 전용은 통과) 재생 뒤에도 남는다. 분류 못 한 실행은 기장 없이 UnclassifiedExecution 불일치로 막는다. 변경 뒤 그보다 늦게 물은 현재 세션의 포지션 응답 중 그 종목에 열린 주문과 대기 체결이 없을 때의 첫 응답이 다르면 PositionAdjusted(snapshot_after_venue_change) 한 건으로 맞추고 같으면 VenueChangeSettled만 남기며(열린 주문이 있는 동안은 맞추지 않아 오는 중인 체결을 두 번 세지 않는다), 저널만으로 계산한 포지션이 거래소 값과 같다. 분류 못 한 실행의 키는 같은 키로 나중에 온 체결의 기장을 막지 않는다. 운영자 조정은 reason 없이 스키마 1과 같은 바이트로 쓰인다 | 단위 | 통과 | `cargo test -p oms-core --test venue_changes` |
-| V-SCHEMA-2-1 | 이 빌드는 기록 스키마 2를 쓰고 1과 2를 읽는다. 기록 스키마 1로 쓴 저널(체결, 운영자 조정, 정지 포함)을 복구하면 실시간 코어와 같은 상태(다이제스트 포함)가 되고, 그 뒤에 스키마 2로 이어 쓴 기록은 새 세그먼트에 들어가며, 두 세그먼트를 함께 복구해도 실시간 상태와 같고 --re-decide 검사도 통과한다 | 통합 | 통과 | `cargo test -p oms-node --test record_schema` |
-| V-ABSENCE-N-1 | absence_not_found_needed가 2이면 결과 불명 주문은 expires_at + absence_margin 뒤에 보낸 조회의 "없음"을 absence_margin 이상 떨어진 두 조회로 받아야 NotPlaced로 닫히고, 첫 번째는 AbsenceNoted로만 기록되며 예약은 그대로다. 만료 + 여유 전의 "없음", 같은 조회의 두 번째 답, 앞에 센 답보다 여유 시간 안쪽의 답은 세지 않고, 셈은 재생 뒤에도 같다. 기본값 1에서는 AbsenceNoted 없이 예전처럼 한 번에 닫히고, 기본값은 직렬화하지 않으며, 0은 설정 오류다. Bybit 설정은 absence_not_found_needed = 2가 아니면 거절된다 | 단위 | 통과 | `cargo test -p oms-core --test absence_and_market_ref` |
-| V-MARKET-REF-1 | 새 주문은 판단에 쓴 호가창 상태(market_ref)를 실을 수 있고, 그 값은 OrderAccepted.request로 저널 기록에 들어가 직렬화와 해석을 거쳐도 같다. market_ref가 없는 요청은 예전과 같은 바이트로 쓰인다. 같은 요청이 다른 market_ref로 다시 오면 duplicate다. 이름은 64자 이하의 [A-Za-z0-9_.:-]만 받고 거래 API는 형식이 틀린 market_ref를 해석 단계에서 거절한다 | 단위 | 통과 | `cargo test -p oms-core --test absence_and_market_ref && cargo test -p oms-api --lib` |
-| V-TAIL-1 | 꼬리 읽기는 디스크에 더 많은 기록이 있어도 호출자가 준 내구화 번호보다 큰 기록을 돌려주지 않고, 작은 세그먼트로 회전한 저널을 끊김 없이 순서대로 읽으며, 커서 다음 번호부터 다시 시작한다. 쓰는 쪽이 잠금을 쥔 동안에도 읽고, 읽는 동안 새 쓰는 쪽이 잠금을 잡을 수 있다(잠금을 잡지 않는다). 상한 이하의 손상된 프레임이나 번호가 튀는 프레임에서는 그 앞 기록을 돌려준 뒤 오류를 내고 위치를 움직이지 않으며, 커서 앞의 손상도 오류로 알린다(끝에서 쓰는 중인 프레임은 기다린다). 기록 스키마가 바뀌어 열린 새 세그먼트와, 헤더만 있다가 새 스키마 헤더로 다시 쓰인 세그먼트를 따라가고 기록마다 스키마를 알려 준다. 엿보기는 상한 너머의 유효한 프레임을 위치를 움직이지 않고 보여 주며 잘린 마지막 프레임에서 오류 없이 멈춘다 | 단위 | 통과 | `cargo test -p oms-journal --test tail` |
-| V-TAIL-2 | 모든 이벤트 종류(43가지)의 인스턴스를 선택 필드까지 채워 직렬화하면, 인코더가 쓰는 모든 필드 경로가 docs/contracts/tail.md의 필드 표에 있고, 표의 모든 행은 실제로 쓰이는 필드이며 타입 열이 실제 JSON 값의 종류(문자열, 정수, 불, 목록, 열거형, 객체, null 허용)와 맞는다. 통째로 읽는 행은 설정 하나와 열거형 값뿐이다. 이벤트 종류가 늘면 시험이 컴파일되지 않는다 | 소스 검사 | 통과 | `cargo test -p oms-core --test event_fields` |
-| V-BYBIT-READ-1 | Bybit 게이트웨이의 조회 일곱 가지는 읽기만 하고, 통째로 읽을 수 있는 응답만 입력으로 넘긴다. 쪽 넘김은 커서가 비고 쪽이 덜 찼을 때만 끝으로 보고, 다 찬 쪽에 커서가 없거나 커서가 그대로이거나 쪽이 20을 넘으면 스냅숏(열린 주문, 포지션, 증거금 보고)을 넘기지 않는다. 주문 상태는 우리 orderLinkId의 행만 보고 realtime, 기간 없는 주문 내역, 코어가 주문을 받은 시각 − 1분부터 7일의 주문 내역 셋 다에 없을 때만 StatusNotFound(첫 조회 전 시각)를 낸다. 체결은 since − 2분부터 7일 이하의 창으로 읽고(창 사이 1ms 겹침, 중복 키는 한 번), 한 번에 30쪽까지 읽고 다 읽은 창까지만 선언한 채 멈추며(오류 아님), 창을 다 읽은 뒤에만 그 끝 직전까지 FillsSynced를 내며, 끝을 알 수 없는 창은 반으로 나누고, 읽을 수 없는 행에서 멈춘다. 실행 행은 execType 표 하나로 Fill(우리 주문이면 order_id, 아니면 외부 체결), Funding, PositionChange(adl, takeover, delivery, settle), UnclassifiedExecution이 된다. 증거금 보고는 totalEquity, totalMaintenanceMargin, totalMarginBalance(U17d), positionIM, 계좌 증거금 모드, 정수 레버리지, maxLeverage로 만들고 한 값이라도 못 읽으면 MarginReportInvalid다. accountMMRate는 보고를 바꾸지 않는다. 이 코드에는 주문 생성·정정·단건 취소 요청이 없다. 설정은 Bybit에서 REGULAR_MARGIN 밖의 계좌 모드 허용을 거절한다. 조회용 REST 응답은 접속 단계 오류만 NotSent로 본다. retCode 10003·10004·10005·10007·10010·33004와 HTTP 401은 키 거부이고 다시 보내지 않는다. 10006과 HTTP 429는 요청 한도다. 10002는 시각 창 밖이다. 10016, HTTP 5xx, 읽을 수 없는 본문, retCode 없는 본문은 응답 없음이다. 그 밖의 0 아닌 retCode는 그 코드의 거부다. 키와 비밀은 데이터 디렉터리 밖의 소유자 전용(0600) 일반 파일에서만 읽고(심볼릭 링크는 거절), Debug 출력에 비밀이 없다. 체결 창의 끝은 지금 − fills_lag_ms다. 체결 키는 <symbol>:<execId>다. 주문 상태의 최종 누적 수량(cum)은 cumExecQty로 채운다. 주문 상태는 New·PartiallyFilled(열림), Filled, Cancelled, Rejected만 해석하고 조건부 주문 상태와 그 밖의 값에서는 결론을 내지 않는다 | 단위 | 통과 | `cargo test -p oms-node --lib venue::bybit` |
-| V-BYBIT-STREAM-1 | Bybit 게이트웨이는 시작 확인이 통과하고 막힘이 없을 때만 비공개 스트림에 접속하고, auth(GET/realtime + 만료 시각의 서명, 만료 = 지금 + recv_window)가 확인된 뒤 order.linear·execution.linear를 구독하며, 구독이 확인된 뒤에만 Link를 올린다. 접속마다 세션 번호가 커진다. ping 뒤 ping 간격 안에 pong이 없거나(코어 입력 큐를 기다린 시간은 빼고), 소켓이 닫히거나, 읽을 수 없는 행이나 symbol 없는 행이 오거나, 연결 중 막힘(IP 변경, 키 거부, IP 차단)이 생기면 Link를 내리고, 키 거부와 IP 변경이 아니면 다시 붙는다. 인증 거부, 조회의 키 거부 코드, IP 변경 뒤에는 재시작까지 접속도 요청도 하지 않는다. HTTP 403(REST든 스트림 업그레이드든) 뒤에는 멈춤 시간 동안 REST 요청과 스트림 접속이 없고, 끝나면 다시 붙는다. 구독 거부와 응답 없는 인증은 키 거부가 아니라 다시 시도하고, 인증 응답 전에는 구독을 보내지 않는다. 연결이 올라가 첫 pong을 받았으면 재연결 기다림은 처음 값으로 돌아가고, pong 전에 끊기면 기다림이 계속 는다. 설정한 종목의 주문 행은 OrderStatus(Stream), 실행 행은 실행 분류표를 거쳐 받은 시각이 실린 입력이 되고 다른 종목의 행은 넘기지 않는다. 주문과 취소는 V-BYBIT-ORDERS-1. 시작 확인은 키가 서브계정(isMaster = false)이고 설정의 sub_account_uid의 것이며 쓰기 가능하고 ContractTrade의 Order·Position 권한과 지금의 공인 IP를 포함한 바인딩 IP를 가질 때만 통과한다. 계좌는 REGULAR_MARGIN이고 unifiedMarginStatus가 3–6이어야 한다. 종목마다 settleCoin = USDT이고 단방향(positionIdx = 0)이어야 한다. 하나라도 어긋나면 막고, 시작 확인은 GET만 보내 거래소 설정을 바꾸지 않는다. 공인 IP는 시작할 때와 ip_check_secs마다 https인 ip_echo_url로 읽어 키의 IP와 비교한다. IP 확인의 통과는 시작 확인의 막힘을 풀지 않는다(막힘은 출처마다 따로다). 읽을 수 없는 메시지와 data 목록이 없는 order·execution 토픽 메시지도 끊고 다시 붙는 사유다 | 통합 | 통과 | `cargo test -p oms-node --lib venue::bybit` |
-| V-BYBIT-ORDERS-1 | Bybit 게이트웨이는 주문과 취소마다 결과 하나를 돌려주고 REST 요청을 많아야 하나 보내며 다시 보내지 않는다. 생성은 orderLinkId = 우리 고객 주문번호, category linear, Limit, 단방향(positionIdx 0)으로 보내고 보낸 본문에 서명한다. 요청 시각 + recv_window + 1초가 expires_at보다 늦거나, 막힘이 있거나, 거래하지 않는 종목이거나, 접속이 되지 않으면 보내지 않고 NotSent다. retCode 0은 생성이면 orderId가 있을 때만 Placed(Open, 누적 수량 없음), 취소면 Confirmed. 오류 문서의 0 아닌 코드는 UNKNOWN_CODES가 아니면 Rejected, 그 밖의 모든 응답(문서에 없는 코드, 2xx가 아닌 HTTP, 시간 초과, 끊김, 읽을 수 없는 본문)은 Unknown이다. HTTP 403과 retCode 10018은 IP 차단 멈춤을, HTTP 401과 키 거부 retCode는 키 거부를 건다. 요청은 자리를 잡은 때부터 응답 + 1초까지(응답이 없으면 요청 시각 + recv_window + 1초 + 1초까지) 세므로 보낸 때와 응답(또는 마지막 도착 가능 시각) 사이 어디에 도착하든 어느 1초에도 주문은 8개, 주문과 취소는 합쳐 10개를 넘지 않고, 주문이 8개를 다 써도 취소는 바로 나가며, 차면 기다린다(버리지 않는다). 아무 바이트도 나가지 않은 요청은 자리를 바로 돌려준다. 시작 확인은 설정의 px_tick·qty_step이 거래소 tickSize·qtyStep의 배수가 아니면 막고, 로컬 시계가 거래소보다 500ms 넘게 앞설 수 있으면(시작 확인 전, IP 확인 주기마다, 막힌 동안 10초마다, 왕복 250ms 넘는 측정은 판정 안 함) 생성만 막고 취소와 스트림은 막지 않는다. 서명은 hex(HMAC_SHA256(secret, timestamp + api_key + recv_window + payload))이고 payload는 GET이면 키 순서로 정렬해 보내는 질의 문자열, POST면 보내는 본문 그대로이며, 질의 값은 인코딩하지 않고 뜻을 바꾸는 문자가 있으면 보내지 않는다 | 통합 | 통과 | `cargo test -p oms-core --lib rate && cargo test -p oms-node --lib venue::bybit` |
-| V-BYBIT-TRADE-1 | Bybit 게이트웨이는 주문과 취소를 WS Trade(/v5/trade)로 보내고, REST로는 WS Trade 연결 작업이 그 요청의 아무 바이트도 쓰지 않았을 때(인증된 연결 없음, 쓰기 전 막힘)만, 막힘을 다시 본 뒤 같은 한도 자리와 같은 요청 시각으로 보낸다. 요청은 두 경로를 합쳐 많아야 한 번 나가고 한도 자리는 경로와 상관없이 하나다(1초 안의 9번째 생성은 경로가 섞여도 기다린다). 요청은 reqId(생성 c + 고객 주문번호, 취소 x + 36진 시도 번호 + 고객 주문번호, 36자 이하), header의 X-BAPI-TIMESTAMP·X-BAPI-RECV-WINDOW, op, REST 본문 하나인 args로 되어 있다. 응답은 REST와 같은 표로 분류하고, 20006·10019·10429는 결과 불명, 10019는 연결을 닫고 다시 열며, 10403과 10018은 IP 차단 멈춤을, 키 거부 코드는 키 거부를 건다. 쓴 요청에 request_timeout_ms 안에 응답이 없거나 그 사이 연결이 내려가면(pong 없음, 끊김, 막힘) 결과 불명이고 어느 경로로도 다시 보내지 않으며, 한도는 요청 시각 + recv_window + 1초 + 1초까지 센다. 늦은 응답은 버린다. 같은 reqId가 기다리는 중이면 다시 쓰지 않는다. WS Trade 연결은 막힘이 없을 때만 IPv4로 접속하고, auth(비공개 스트림의 서명)의 retCode가 0일 때만 올라가며, 0이 아니면 재시작까지 키 거부, 업그레이드의 HTTP 403은 IP 차단 멈춤이다. ping 뒤 간격 안에 pong이 없으면 내려가고, 재연결 기다림은 첫 pong을 받은 연결 뒤에만 처음 값으로 돌아간다. WS Trade는 Link를 움직이지 않는다. 키 거부·IP 차단 응답의 효과는 연결 작업이 다음 쓰기 전에 건다. 기다리는 요청이 없는 늦은 응답도 버리되 그 효과(키 거부)는 건다 | 통합 | 통과 | `cargo test -p oms-node --lib venue::bybit` |
-| V-BYBIT-REFPX-1 | Bybit 게이트웨이는 공개 linear 스트림에 거래하는 종목마다 tickers.<symbol>을 구독하고(구독 요청 하나에 토픽 10개까지, 모든 응답이 success: true일 때만 구독됨, 거부되거나 handshake 시간 안에 답이 없는 요청이 하나라도 있으면 pong이 와도 끊고 다시 붙음), 종목마다 그 연결의 스냅숏의 markPrice를 mark로 삼아 RefPrice(px = mark, venue_ts = 메시지 ts의 µs)로 코어에 보낸다. 스냅숏 전의 델타는 버리고, markPrice가 있는 델타는 mark를 바꾸며, markPrice 없는 델타는 든 mark를 그 델타의 ts로 다시 보낸다. 내보냄은 종목마다 ref_price_interval_ms에 많아야 한 번이고(재연결을 넘어 센다) 메시지 없이 다시 보내지 않는다. mark는 연결마다 비운다. 읽을 수 없는 티커 메시지(JSON 아님, type·data·symbol·markPrice·ts 이상, markPrice 없는 스냅숏, 소수 9자리, 0 이하)는 연결을 끊고 다시 붙으며, 거래하지 않는 종목의 메시지는 읽지 않고 버린다. 연결은 막힘이 없을 때만 IPv4로 접속하고, 연결 중 막힘이 생기면 끊고 막힌 동안 다시 붙지 않으며, 업그레이드의 HTTP 403은 IP 차단 멈춤이다. ping 뒤 간격 안에 pong(op = pong, 또는 공개 linear의 op = ping + ret_msg = pong)이 없으면 끊는다. 첫 pong 전에 끊긴 연결은 재연결 대기를 늘리고, 첫 pong 뒤에 끊긴 연결만 대기를 처음으로 되돌린다. 공개 스트림은 Link를 움직이지 않는다. 설정의 ref_price_interval_ms는 1000 이상, ref_price_max_age_us의 절반 이하만 받는다. 시험용 연결 주소 OMS_TEST_BYBIT_WIRING은 다섯 주소의 호스트가 모두 127.0.0.1일 때만 받는다 | 통합 | 통과 | `cargo test -p oms-node --lib -- venue::bybit config::tests` |
-| V-BYBIT-NODE-1 | kind = bybit인 oms-node 프로세스(failpoints 빌드, 시험용 연결 주소로 가짜 Bybit에 연결)는 참조 가격이 오기 전 가격 범위가 있는 주문을 RefPriceUnavailable로 거절하고 아무 요청도 보내지 않으며, 공개 스트림의 티커 스냅숏 뒤에는 같은 요청을 받아 WS Trade로 한 번 보내고, 가짜 WS Trade가 그 order.create를 읽을 때 디스크의 저널 파일에 그 주문의 수락 기록이 있다(이 확인은 순서의 증명이 아니다: 기록이 네트워크 왕복보다 먼저 파일에 닿으므로 쓰기 전에 보내도 통과한다. 기록이 내구화된 뒤에만 보낸다는 것은 다음 flush 실패 시험이 증명한다). 새 주문의 저널 flush가 실패하면(OMS_CRASH_AT=sync_error_after_write) 노드는 상태 2로 멈추고 REST와 WS Trade 어느 쪽에도 생성이 닿지 않으며, failpoint 없이 다시 시작하면 그 기록을 찾고 orderLinkId 조회(realtime과 history 두 번이 모두 비었음)로 주문을 '놓이지 않음'으로 닫고, 그래도 생성은 없다. WS Trade가 생성을 읽고 답하지 않으면 주문은 결과 불명(Transport)이 되고, orderLinkId로 묻는 realtime 조회가 열린 주문을 찾아 Working이 되며, 두 경로를 합친 생성은 하나다 | 프로세스 | 통과 | `cargo test -p oms-node --features failpoints --test bybit_node` |
-| V-ALERT-DIRECT-1 | alert-direct의 송신 스레드는 텔레그램 전송이 처음 다시 보내기(Retry)로 끝난 시도의 시각을 '실패 시작'으로 두고, 텔레그램이 답하면(전달 또는 400·413 거절) 지운다. 보낼 것이 없으면 실패 시작은 생기지 않는다. 둘째 채널을 설정하면 once와 set이 만든 모든 메시지가 같은 분할·같은 한도(50개)의 둘째 보관함에도 통째로 들어가 자기 스레드(alert-second)로 한 번씩 나가고, 넘치면 오래된 것부터 버리고 세어 자기 버림 알림을 보내며, 오류는 그 조각을 두고 그 전송을 끝낸다. 실패 시작에서 second_after_ms(기본 60초)를 넘게 지나면 둘째 채널에만 'Telegram 전송이 N초째 실패함' 알림이 시작 1번, repeat_ms마다 1번, 텔레그램이 다시 답하면 해소 1번 나간다. flush_for는 두 보관함을 모두 기다린다. 둘째 채널이 없으면 스레드도 복사도 없다. 전송 뒤 시간 초과면 같은 조각을 다시 보내므로 텔레그램이 같은 메시지를 두 번 받을 수 있다 | 통합 | 통과 | `cargo test -p alert-direct` |
-| V-ALERT-1 | OMS의 알림 스레드(oms-alert)는 공개된 읽기 모델만 읽으므로, 알림은 그 원인이 된 기록이 내구화된 뒤에만 나간다. 코어가 결정했지만 커밋 단계가 아직 내구화하지 않은 계좌 중지는 보내지 않고, 내구화되면 보낸다. flush에 실패한 묶음의 계좌 중지는 어떤 요청에도 나오지 않고, 그 뒤의 새 요청은 치명 알림 하나뿐이다. 치명 알림은 치명 사유와 마지막 내구 seq만 담고(실패한 묶음의 내용 없음) 치명 래치를 처음 본 때 한 번 나가며, 그 뒤에는 조건을 평가하지 않는다: 유예가 지난 연결 끊김도 시작하지 않고, 읽기 모델에서 사라진 중지도 해소를 보내지 않는다. 평가가 읽기 모델을 읽은 뒤 래치가 걸려 있으면 그 평가는 시작 알림도 set도 하지 않는다. 종료는 래치가 걸려 있으면 받은 종료 코드와 상관없이 치명 알림을 넣고 전송을 기다린다. 프로세스에서: 감소 전용 상태로 들어가는 기록의 flush가 실패하면 노드는 종료 코드 2로 exit_flush_ms + 5초 안에 끝나고, 가짜 텔레그램은 시작 알림과 치명 알림만 받으며(첫 시도 500 뒤 종료 전 전송에서 다시) REDUCING에 관한 것은 없다. 시작 뒤 첫 flush(Boot 기록)가 실패하면 설정이 활성화되기 전이어도 노드는 종료 코드 2로 끝나고, 가짜 텔레그램은 치명 알림 하나만 받는다(종료 전 전송) | 통합 | 통과 | `cargo test -p oms-node --features failpoints --test pipeline --test crash_points; cargo test -p oms-node --test alerts; cargo test -p oms-node --lib alerts::` |
-| V-ALERT-2 | 텔레그램이 계속 500으로 답하는 동안 시작 알림, 계좌 중지, 5분씩 시계를 58번 움직인 반복이 만든 60개 메시지 가운데 50개가 보관되고 10개가 버려져 status.alerts에 queued 50, dropped_total 10으로 보인다(failures와 failing_since_ms도 보이고, 토큰은 없다). 텔레그램이 다시 200으로 답하면 남은 50개가 나간 뒤 '[OMS P1] 전송 실패로 알림 10개를 버림' 하나가 나가고, 전달 51, 대기 0, failing_since_ms null이 된다 | 통합 | 통과 | `cargo test -p oms-node --test alerts outbox_bound` |
-| V-ALERT-3 | 알림 조건은 C-ALERT 표의 키와 유예를 따른다: 차단 사유마다 비어 있지 않은 문장(Mismatch와 OperatorStrategy는 조건 없음), 래치와 운영자 행위는 유예 0, 지나가는 상태와 저장 공간 부족은 grace_ms. Core::handle로 만든 상태에서 hold:link_down, gateway_block, hold:resync, hold:operator_account, hold:storage_low, halt_strategy:<s>, mismatch:<kind>, hold:venue_setting:<i>, hold:account_mode, margin_stale, hold:reducing이 나오고 문장 끝은 '근거: 저널 seq n'이다. 불일치는 종류마다 키 하나에 개수와 최근 3개(subject: detail)를 담고 확인한 것은 빠진다. 계좌 중지는 시작 1번, +4분 0번, +5분에 그때의 메모로 1번, +10분 1번, 재개에 '해소: <시작 문장>' 1번, 그 뒤 +5분 0번이다. 연결 끊김은 20초 만에 다시 붙으면 아무것도 보내지 않고, 29.999초에는 아니고 정확히 30초에 시작을, 31초에는 더 보내지 않고, 다시 붙으면 해소를 보낸다. 저장 공간 부족이 20초 낮음·5초 정상을 열 번 되풀이하면 아무것도 보내지 않고, 30초를 넘게 계속되면 시작 1번(29.999초에는 아니고 30초에, 35초에 더 없음), 풀리면 해소 1번이다. 메시지의 첫 줄은 '[OMS P1] <거래소> <KST 시각>'이다. 분류표에 없는 체결 하나는 hold:venue_change와 mismatch:unclassified_execution 두 조건을 함께 시작한다 | 통합 | 통과 | `cargo test -p oms-node --test alerts; cargo test -p oms-node --lib alerts::` |
-| V-ALERT-4 | OMS 알림에 둘째 채널을 주면(alerts::start) 모든 메시지의 사본이 바로 그쪽에 가고, 텔레그램이 500으로 답한 첫 시도부터 59초에는 장애 알림이 없고 61초가 되면 1초 안에 'Telegram 전송이 61초째 실패함'이 둘째 채널에만 가며(텔레그램 요청에는 없음), 텔레그램이 다시 답하면 해소가 간다. 텔레그램이 답하지 않아도(연결은 받고 답 없음) 계좌 중지·재개 1,000건이 5초 안에 내구화되고 알림 스레드는 계속 평가한다 | 통합 | 통과 | `cargo test -p oms-node --test alerts -- telegram_ a_hung` |
-| V-ALERT-5 | [alert] 설정은 절대 경로의 토큰 파일을 요구하고 그 파일을 설정을 읽을 때 alert-direct 규칙으로 읽는다: 0640, 심볼릭 링크, 저장소 안, 없는 파일은 '[alert] telegram: '로 시작하는 설정 오류이고 그 문장과 설정의 Debug에 토큰이 없다. 각 값(grace_ms, eval_ms, repeat_ms, exit_flush_ms, second_after_ms)은 양 끝에서 받고 바로 바깥에서 거부하며, second_channel은 "none"만 받는다. 표가 없으면 알림이 없고 status.alerts는 {"configured": false}다. mainnet(Hyperliquid, Bybit)은 표 없이 시작하지 않고, testnet과 가상 거래소에서는 선택이다. OMS_TEST_TELEGRAM_API는 loopback http만 받고, 배포하는 바이너리(failpoints 없음)는 그 변수를 무시해 저장소 안의 토큰 파일을 여전히 거부하고 종료 코드 2로 끝난다. 시작 알림은 그 평가에서 시작이 나간 조건과 유예 안의 조건을 따로 센다: 계좌 중지와 연결 끊김이면 '활성 조건 1개(유예 중 1개)'다. 프로세스에서: 시작 알림 'OMS 시작 (boot 1, config 1)'이 나가고, SIGTERM으로 정상 종료하면 'OMS 정상 종료. 걸린 주문 1개는 거래소에 남음'이 종료 전에 나간다. 설정이 활성화된 뒤 거래 소켓을 bind하지 못하면 종료 코드 3으로 끝나고 'OMS 시작 실패(exit 3): trading_socket' 하나가 종료 전에 나가며, 어떤 요청에도 소켓 경로·토큰·토큰 파일 이름이 없다 | 통합 | 통과 | `cargo test -p oms-node --lib config::; cargo test -p oms-node --test alerts the_; cargo test -p oms-node --features failpoints --test crash_points -- a_clean_stop an_exit_3` |
-| V-HOLD-1 | 증거금 정책이 있으면 워처 불일치와 거래소 변경 아래에서 감소 전용 주문은 통과하고 일반 주문은 거절되며, 킬 래치와 운영자 중지 아래에서는 둘 다 거절된다(TN 표 7-7). 정책이 없으면 모든 보류가 모든 주문을 거절한다. 새 사유 셋은 기존 사유 뒤에 붙어 기존 사유의 순서가 바뀌지 않는다. 프로세스에서: 운영 소켓의 watcher_mismatch 뒤 일반 주문은 Hold(WatcherMismatch)로 거절되고 감소 전용 주문은 받으며, watcher_kill 뒤에는 감소 전용도 Hold(KillLatched)로 거절된다. 워처 입력의 detail은 비지 않고 1 KiB(1024바이트) 이하여야 한다: 노드와 코어가 각각 거절하고 아무것도 기록하지 않는다 | 단위, 통합 | 통과 | `cargo test -p oms-core --test holds; cargo test -p oms-node --test holds_node watcher` |
-| V-HOLD-2 | clear_hold는 고정 코드로 거절한다: 걸려 있지 않음(not_held), 메모 없음(note_required), 이 프로세스의 킬 루프가 답하지 않음(kill_unconfirmed), 코어의 장부에 미체결이 있음(kill_orders_open, 킬 루프의 답이 confirmed든 unsupported든, kill_unconfirmed 다음에 본다), 거래소 변경 뒤 포지션을 아직 읽지 않음(venue_change_pending). 거절은 기록도 명령도 남기지 않는다. 래치 아래에서도 cancel-all은 받고, 거래소가 취소를 확인해 장부가 비면 킬의 해제를 받는다(코어와 가상 거래소 프로세스). 받으면 hold_cleared 하나와, 킬이면 KillStop 하나. 거래소 변경의 해제와 불일치 확인은 따로다. resume은 킬과 워처 불일치를 풀지 않는다. omsctl clear-hold는 세 사유와 메모를 읽는다. 운영자 중지가 없으면 resume은 오류다 | 단위 | 통과 | `cargo test -p oms-core --test holds clear_hold resume a_kill_is_not; cargo test -p oms-node --test holds_node watcher; cargo test -p oms-api` |
-| V-HOLD-3 | 킬 래치는 hold_set에서, 그 확인은 kill_loop_ended에서 재실행으로 같은 상태가 되고, 모든 boot가 확인을 지우고 래치의 필드 그대로 Kill 명령을 다시 요청한다. 래치가 없거나 이미 확인된 뒤의 KillLoopEnded는 기록되지 않는다. 모든 게이트웨이 명령은 기록된 이벤트에 command_for를 적용한 것과 같다. 커밋 단계는 Kill을 래치가 내구화된 뒤에만 넘기고, flush가 실패하면 Kill도 응답도 나가지 않으며 다시 시작한 노드에 래치가 없다 | 단위, 통합 | 통과 | `cargo test -p oms-core --test holds; cargo test -p oms-node --features failpoints --test pipeline a_kill_command` |
-| V-HOLD-4 | 킬 마커가 있으면 OMS는 시작할 때 boot 기록 안에서 KillLatched를 걸고(booted, hold_set), 감소 전용을 포함한 어떤 주문도 받지 않으며, 가상 거래소가 unsupported로 답한 뒤 clear_hold kill이 마커를 지운다. 거절된 해제(빈 메모, 다른 사유, not_held, 답을 붙잡아 둔 동안 메모가 있는 kill_unconfirmed)는 마커를 건드리지 않고, 해제 기록의 flush가 실패하면 응답이 없고 노드가 멈추며 마커가 남는다. 그 둘 뒤의 다음 시작은 다시 걸린다. 다음 시작은 걸리지 않고 주문을 받는다. 지우지 못한 마커는 응답이 말하고 다음 시작이 다시 건다. 볼 수 없는 마커 경로(권한)도 건다. 마커 파일은 처음 512바이트를 제어 문자를 바꿔 읽고, 디렉터리·심볼릭 링크도 마커다 | 통합, 단위 | 통과 | `cargo test -p oms-node --test holds_node; cargo test -p oms-node --features failpoints --test crash_points a_clear_; cargo test -p oms-node --lib node::tests; cargo test -p oms-core --test holds marker` |
-| V-HOLD-5 | 거래소 변경 보류는 새 이벤트 없이 venue_position_changed, unclassified_execution_noted, 종류가 venue_position_change인 mismatch_raised(넘침 경로)에서 apply가 건다. 그래서 U13b의 이벤트 목록은 그대로이고, U18b 전에 쓴 저널에 이 셋 중 하나가 있으면 재실행한 상태에 보류가 있다. 다른 종류의 불일치는 걸지 않는다. 불일치를 확인해도 보류는 남는다. 각 보류는 한 번만 걸리고 두 번째 원인은 첫 메모를 바꾸지 않는다. 워처 불일치 입력은 걸려 있지 않으면 hold_set 하나를 쓰고 'held'로, 걸려 있으면 아무것도 쓰지 않고 'already held'로 답한다. 워처 킬 입력은 걸려 있지 않으면 hold_set 하나를 쓰고 'latched'로, 걸려 있으면 아무것도 쓰지 않고 'already latched'로 답한다 | 단위 | 통과 | `cargo test -p oms-core --test holds venue second` |
-| V-HOLD-6 | 킬 래치·워처 불일치·거래소 변경의 상태 필드, Boot의 kill_marker, 워처 입력과 새 이벤트 셋은 기록 스키마를 올리지 않는다: 비어 있으면 쓰지 않아 옛 상태의 바이트가 그대로이고, 이들이 든 저널은 라이브 상태로 복구되며 verify --re-decide를 통과한다. 상태 스키마는 2로 올랐다: U18b 전의 스냅샷(상태 스키마 1, venue_change 없음)은 사유와 함께 건너뛰고 저널을 처음부터 재생해, 거래소 변경 보류가 스냅샷의 유무에 따라 달라지지 않는다. 이벤트 필드 표는 새 이벤트의 모든 필드를 적는다. 알림 조건 hold:kill_latched·hold:watcher_mismatch·hold:venue_change는 유예 0이고, 킬 문장은 출처·메모·확인 상태를 담으며, 워처 불일치와 거래소 변경의 문장은 증거금 정책이 있을 때만 감소 전용을 받는다고 말하며, Alerts::notice는 접두어를 붙여 한 번 보낸다. [kill] marker는 절대 경로, 데이터 디렉터리 밖, 읽을 때 디렉터리가 있어야 하고, mainnet은 그것 없이 시작하지 않는다 | 단위, 통합 | 통과 | `cargo test -p oms-node --test record_schema --test alerts; cargo test -p oms-node --lib alerts:: config::; cargo test -p oms-core --test event_fields` |
+| V-FUZZ-1 | 가정을 지키지 않는 임의의 거래소 입력(순서 역전, 중복, 낡은 상태, 식별자 없는 체결, 부재 응답, 링크 변동, 재시작)에서도 코어는 결함으로 멈추지 않고, 불변조건과 재생 일치가 유지되고, 주문당 전송은 한 번이며, 차단 중 수용이 없고, 새 체결은 반드시 기장되거나 대기하고, 정직하게 정리된 뒤에는 차단이 남지 않는다 | 속성 | 미실행 | `cargo test --release -p oms-core --test review_core examined_fuzz` |
+| V-MIS-1 | 불일치 14종 각각을 일으키는 시험이 있고, 같은 대상의 반복은 확인되기 전까지 한 건으로 남는다. 운영자가 resolve_order로 닫은 주문에 뒤늦게 온 체결도 기장되고 FillAfterClose로 제기된다 | 단위 | 미실행 | `cargo test -p oms-core` |
+| V-MARGIN-1 | 증거금 정책이 있으면 감소 전용 주문은 재확인, 결과 불명, 불일치 차단을 통과하고, 일반 주문은 모든 차단에서 거절된다. 정책 구역은 선택이고, 없으면 저널 기록에 바이트를 더하지 않는다. 정책이 없으면 모든 차단이 감소 전용 주문을 포함한 모든 신규 주문을 막는다. 빈 정책 구역의 기본값은 max_account_leverage 2, daily_loss_bps 500, mm_buffer_bps 25, margin_max_age_us 30 000 000, stale_cancel_us 60 000 000, venue_leverage 2, isolated true, account_modes_allowed 빈 목록이고 account_mm_rate_max_bps는 없다 | 단위 | 미실행 | `cargo test -p oms-core --test scenarios reduce_only && cargo test -p oms-core --test margin` |
+| V-MARGIN-2 | 증거금 정책이 있으면 현재 링크 세션의 증거금 보고가 마지막 보고로 기록된다. 다른 세션의 보고, 링크가 내려간 동안의 보고, 순번이 크지 않은 보고는 버린다. 읽지 못한 보고와 최대 레버리지가 0인 보고는 사유와 함께 거부로 기록되고 마지막 보고를 바꾸지 않는다. 나이가 0 이상 30초 이하인 보고가 없으면 일반 주문은 MarginUnavailable로 거절된다. 감소 전용 주문은 보고가 없어도 받는다. 정책이 없으면 증거금 입력은 상태를 바꾸지 않고 기록되지 않는다. 받은 보고는 마지막 거부 사유를 지운다(거부 사유는 그 뒤 보고를 받지 못한 동안만 남는다). 저널과 status에서 보고 포지션의 부호 있는 수량 키는 szi다(코드의 이름은 qty). 마지막 보고, 기준 금액, 감소 전용 상태는 링크가 바뀌어도 남는다 | 단위 | 미실행 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-3 | 증거금 정책이 있으면 일반 주문은 받은 뒤의 계좌 노출이 한도 × 계좌 가치를 넘고 받기 전보다 커질 때 AccountLeverage로 거절된다. 정확히 한도와 같으면 받는다. 계좌 가치가 0 이하면 일반 주문을 모두 거절한다. 노출은 포지션과 모든 미체결 주문(감소 전용 포함)을 지정가와 참조 가격 중 높은 값으로 센 종목별 값의 합이다. 미체결 주문은 종결 증거가 올 때까지 노출에 남고 OMS는 그 주문을 고치거나 만료시키지 않는다. 가격이 움직여 한도를 넘어도 래치는 없다. 감소 전용 주문은 검사를 건너뛰지만 합에는 들어간다. 신선한 증거금 보고가 없으면 검사는 오래된 계좌 가치로 판정하지 않고 주문은 MarginUnavailable 하나로 거절된다. 노출이 있는 종목에 신선한 참조 가격이 없으면 일반 주문은 MarginUnavailable로 거절된다. 참조 가격은 기록된 뒤 ref_price_max_age_us(기본 15초, 가격대와 같은 한도) 이내면 신선하고, 노출이 있는 종목은 포지션이나 남은 예약이 있는 종목과 새 주문의 종목이며, 이 조건은 차단이 아니어서 새 가격이 오면 끝나고 감소 전용 주문은 받지 않는다 | 단위 | 미실행 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-11 | 증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이, 계좌 노출을 보여 준다. 링크가 올라오면 종목마다 거래소 설정을, 그리고 계좌 모드를 묻고, 포지션이 없는 종목의 설정은 정해진 간격으로 다시 묻는다. status는 종목별 거래소 설정과 계좌 모드, 그것이 정책과 맞는지를 보여 준다. 정책이 없으면 묻지 않는다. 조회한 계좌 가치가 기준 금액보다 5 %를 넘게 낮아지면 status가 감소 전용 상태와 그 규칙, 기준 금액을 보여 주고 일반 주문이 Hold(Reducing)으로 거절된다. 해제(clear-reduce)와 기준 재설정(rebase-day)은 전략 소켓에서 forbidden으로 거절되고 코어에 닿지 않는다. 운영자 도구(omsctl)의 clear-reduce --note와 rebase-day --note는 운영자 소켓으로 실행 중인 노드의 코어에 닿고, 응답과 status(상태, 규칙, 기준 금액)가 그 결과를 보여 준다. 감소 전용 상태에서 노드 프로세스를 강제 종료(SIGKILL)하고 다시 띄우면 status가 같은 상태(규칙, 내용, 진입 시각)와 같은 기준 금액을 보여 주고, 해제한 뒤의 강제 종료도 해제와 운영자의 기준을 그대로 남긴다. 가상 거래소에 일반 주문 300건과 감소 전용 주문 3건이 걸린 채로 감소 전용 상태에 들어가면 일반 주문은 모두 거래소에서 취소되고 감소 전용 주문 3건은 열린 채로 남으며, 그 뒤에도 증거금 조회가 이어진다. 감소 전용 상태를 결정한 기록이 쓰이기 전에 노드가 멈추면 재시작 뒤에 상태도 취소 요청도 그 기록도 없고 기준 금액은 그대로이며, 다음에 한도를 넘는 보고가 한 번 다시 결정한다. 그 기록이 파일에 닿은 뒤(쓰기 뒤, 내구화 뒤, 읽기 모델 반영 뒤)에 취소가 나가기 전에 멈추면 재시작 뒤에 상태와 취소 요청이 저널에서 복원되고, 보내지 못한 취소가 거래소로 나가며, 감소 전용 주문은 남는다. 기준 금액을 정하는 기록의 각 경계에서 멈춰도 저널의 day_base_set은 정확히 하나이고, 그 날짜와 값은 같은 기록의 보고의 것이다(쓰기 전에 멈추면 다음 보고가 정한다). 가상 거래소 프로세스의 증거금 보고는 포지션(수량, 가치, 증거금, 증거금 방식, 레버리지, 최대 레버리지)을 담고 status가 그대로 보여 주며, 포지션이 있는 종목의 거래소 설정이 바뀌면 보고로 코어에 닿아 그 종목이 막힌다. 가상 거래소 프로세스가 말하는 포지션 증거금은 포지션 가치 ÷ 레버리지다(가치 100에서 50, 101에서 50.5). 모형은 진입 가격을 기억하지 않아 손실로 증거금이 줄지 않으므로 유지증거금 여유 규칙은 제어 명령 margin_used로 증거금을 다르게 말하게 할 때만 걸린다. 가상 거래소 프로세스는 처음에 모든 종목을 격리·레버리지 2로, 계좌 모드를 standard(이 모형의 이름이고 거래소의 값이 아니다)로 답하므로 일반 주문을 내려면 account_modes_allowed에 standard를 적어야 한다. 정책이 없으면 status의 core.margin은 null이다(감소 전용 상태가 남아 있어도 그렇다) | 프로세스 | 미실행 | `cargo test -p oms-node --test e2e node_polls_margin && cargo test -p oms-node --test e2e status_shows_account_exposure && cargo test -p oms-node --test e2e status_shows_reducing && cargo test -p oms-node --test e2e node_reads_venue_setting && cargo test -p oms-node --test e2e -- strategy_socket_cannot omsctl_clear reducing_ && cargo test -p oms-node --test e2e margin_report_of_the_venue && cargo test -p oms-node --features failpoints --test crash_points -- reducing day_base` |
+| V-MARGIN-5 | 증거금 정책이 있으면 첫 증거금 보고가 그 계좌 가치를 조회 시각의 UTC 날짜와 함께 기준 금액으로 정한다. 같은 날의 뒤 보고는 기준을 바꾸지 않는다. 받은 보고의 계좌 가치가 기준 금액보다 5 %를 넘게 낮으면 계좌가 감소 전용 상태로 들어간다(기준 100에서 95.00은 아니고 94.99는 들어간다). 뒤 UTC 날짜의 첫 보고는 옛 기준으로 먼저 판정된 뒤에 새 기준이 되고, 여러 날의 공백 뒤에도 기준은 한 번만 넘어간다. 보고의 날짜가 기준의 날짜보다 앞서면 그 보고는 기준을 바꾸지 않는다(보고는 날짜를 뒤로 돌리지 않는다) | 단위 | 미실행 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-4 | 감소 전용 상태로 들어가는 입력 안에서, 감소 전용 표시가 없고 취소 요청이 없거나 취소 시도가 다 된 모든 열린 주문에 규칙 이름으로 취소 요청이 나간다. 표시 없는 익절 주문도 취소된다. 감소 전용 표시가 있는 주문은 그대로 둔다. 감소 전용 상태에서 일반 주문은 포지션을 줄이는 방향이어도 Hold(Reducing)으로 거절되고, 감소 전용 주문은 받는다. 유지증거금 여유 규칙으로 들어갈 때도 같다(취소의 이름은 Rule(MmBuffer)). 감소 전용 상태인 채로 정책이 없는 설정을 켜면 상태는 남지만 Reducing 차단은 없어 일반 주문과 감소 전용 주문을 받고, 정책이 돌아오면 같은 상태(같은 규칙, 같은 시각)가 다시 막으며 푸는 것은 운영자의 해제뿐이다. 규칙이 낸 취소가 막히면(CancelStuck) Mismatch 차단이 생기지만 감소 전용 주문은 계속 받는다. 진입 때 전송 결과를 기다리던 주문은 취소 요청을 바로 기록하고 거래소 접수 통보가 온 입력에서 취소를 보낸다 | 단위 | 미실행 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-9 | 증거금 정책이 있으면, 종목의 거래소 설정(증거금 방식과 레버리지)을 이번 링크 세션에서 받지 못한 동안 그 종목의 일반 주문은 VenueSetting(종목) 차단으로 거절된다. 옛 세션의 응답은 버린다. 받은 설정의 증거금 방식이나 레버리지가 정책과 다르면 그 종목만 같은 차단에 걸리고 다른 종목은 걸리지 않는다. 맞는 설정을 받으면 바로 풀리고, 링크가 바뀌면 다시 모르는 것이 된다. 증거금 보고의 포지션에 적힌 방식과 레버리지도 설정의 출처다. 차단 조회는 걸린 종목마다 그 종목 이름과 함께 차단을 보여 준다. 계좌 모드가 unifiedAccount나 portfolioMargin이면 허용 목록에 적혀 있어도 계좌의 모든 종목의 일반 주문이 AccountMode 차단으로 거절된다. 허용 목록에 없는 모드, 빈 응답, 이번 링크 세션에서 받지 못한 모드도 같다. 기본 허용 목록은 비어 있어서 운영자가 모드를 적기 전에는 일반 주문이 나가지 않는다. 감소 전용 주문은 두 차단을 모두 통과한다. OMS는 설정을 읽기만 하고 거래소로 아무것도 보내지 않는다. 보고의 포지션은 따로 이벤트를 내지 않고 설정에 있는 종목의 것만 그 종목의 거래소 설정이 되며, 설정에 없는 종목의 포지션은 보고에만 남는다 | 단위 | 미실행 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-6 | 운영자의 해제(clear-reduce)는 계좌가 감소 전용 상태가 아니면 NotReducing으로, 증거금 보고가 30초보다 오래됐으면 MarginUnavailable로, 사유가 비었으면 NoteRequired로 거절되고, 거절은 아무것도 기록하지 않는다. 받아들인 해제는 한 입력 안에서 마지막 보고의 계좌 가치를 새 기준 금액으로 정하고(day_base_set, set_by: operator) 감소 전용 상태를 끝낸다(reducing_cleared). 정확히 30초 된 보고는 신선하다. 그 뒤 새 기준 94에서 94와 89.30은 걸리지 않고 89.29는 다시 걸린다. 두 번째 해제는 NotReducing이다. 기준 재설정(rebase-day)은 신선한 보고와 사유가 있을 때 마지막 보고의 계좌 가치와 그 날짜(기준보다 앞선 날짜라도)를 기준 금액으로 정하고, 감소 전용 상태는 건드리지 않는다. 기준 재설정 없이 출금하면 그만큼이 손실로 읽힌다(100에서 6을 출금하면 걸린다). 마지막 보고에서 유지증거금 여유 조건이 참이면(어느 규칙으로 들어왔든) 해제는 MmBufferActive로 거절되고, 이 조건은 사유보다 먼저 본다. 포지션이 선 위로 돌아온 보고(가치 200, 최대 레버리지 40에서 3.00) 뒤에는 해제된다. 거절 응답 문자열은 사유 코드(not_reducing, margin_unavailable, mm_buffer_active, account_mm_active, note_required)로 시작한다. 공백뿐인 사유는 빈 것으로 본다. 기준 재설정의 사유는 이벤트에 없고 같은 저널 기록의 입력에 남는다 | 단위 | 미실행 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-7 | 증거금 정책이 있고 링크가 올라와 있을 때, 마지막으로 받은 증거금 보고의 조회 시각에서 60초가 넘게 지나면 틱이 감소 전용 표시가 없고 취소 요청이 없는 모든 열린 주문에 Rule(MarginStale) 이름으로 취소 요청을 한 번 낸다. 정확히 60초에는 내지 않는다. 감소 전용 표시가 있는 주문은 그대로 둔다. 아무 상태도 걸리지 않는다. 나이는 마지막 보고의 조회 시각과 현재 링크 세션이 올라온 시각 가운데 늦은 것에서 재고, 링크가 올라와 있는 동안 정책이 켜지면 그 설정 기록의 시각에서 잰다 | 단위 | 미실행 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-8 | 증거금 정책이 있으면, 받은 증거금 보고의 포지션 가운데 포지션 가치가 0보다 큰 것의 격리 증거금이 (유지증거금률 + 0.25 %p) × 포지션 가치보다 작으면 계좌가 감소 전용 상태로 들어가고 규칙은 MmBuffer로 남는다. 최대 레버리지 40, 포지션 가치 200에서 3.00은 걸리지 않고 2.99는 걸린다. 유지증거금률은 그 포지션의 최대 레버리지(같은 보고의 값)로 1 / (2 × 최대 레버리지)이다: 최대 레버리지 25, 가치 200에서 4.50은 걸리지 않고 4.49는 걸리며, 최대 레버리지 50에서는 2.50이 걸리지 않는다. 한 종목의 포지션이 걸려도 래치는 계좌 전체에 하나다: 다른 종목에 걸려 있는 일반 주문이 Rule(MmBuffer) 이름으로 취소되고, 모든 종목의 새 일반 주문이 Hold(Reducing)으로 거절되며, 감소 전용 주문은 받는다. 교차 증거금 포지션은 판정하지 않는다(그 종목은 VenueSetting 차단에 걸린다). 래치에는 먼저 건 규칙이 남는다: 일 손실로 들어간 뒤의 유지증거금 여유 판정도, 그 반대도 아무것도 내지 않고 바꾸지 않는다. 한 보고가 둘 다 걸면 유지증거금 여유를 먼저 판정하므로 MmBuffer가 남는다. 받은 보고는 도착했을 때 이미 30초보다 오래됐어도 판정한다(조회 뒤 40초에 기록된 보고의 2.99도 건다). 비교는 나눗셈 없는 정확한 곱으로 한다: 가장 큰 금액·최대 레버리지·여유에서도 넘침이 결과를 뒤집지 않고(곱이 i128에 들어가지 않으면 선 아래로 본다), 선 바로 옆에서 반올림이 결과를 뒤집지 않는다. 포지션 가치가 0 이하인 포지션은 판정하지 않는다. 설정에 없는 종목의 포지션도 판정한다. 음수 증거금은 언제나 선 아래다. detail은 「position <종목>: isolated margin <증거금> is below the maintenance margin at maximum leverage <최대 레버리지> plus <여유> bps of the position value <가치>」다 | 단위 | 미실행 | `cargo test -p oms-core --test margin` |
+| V-MARGIN-13 | 증거금 정책에 account_mm_rate_max_bps가 있으면, 받은 증거금 보고의 교차 계좌 유지증거금이 0보다 크고 유지증거금 × 10 000 ≥ 한도 × 증거금 잔고일 때 계좌가 감소 전용 상태로 들어가고 규칙은 AccountMm(status의 account_mm)으로 남으며, 같은 입력에서 열린 일반 주문마다 Rule(AccountMm) 취소를 낸다(감소 전용 주문은 남는다). 한도 5000에서 잔고 1000: 499.99는 걸리지 않고 500은 건다. 한도 1에서 잔고 100: 0.00999999는 아니고 0.01은 건다. 잔고 0 이하에 유지증거금이 있으면 어느 한도에서도 건다. 유지증거금 0은 잔고가 얼마든(0, 음수 포함) 걸지 않는다. 가장 큰 금액에서도 나눗셈 없이 정확히 비교한다. 한도가 있는데 account_mm이 없거나 유지증거금이 음수인 보고는 통째로 MarginReportRejected이고 마지막 정상 보고가 나이를 먹는다. 한도가 없으면 같은 보고를 기록하고 숫자를 판정하지 않는다. 래치에는 먼저 건 규칙이 남는다(일 손실 뒤의 계좌 규칙도, 그 반대도 아무것도 내지 않는다). 한 보고가 여럿을 걸면 유지증거금 여유, 계좌 유지증거금률, 일 손실 순이다. clear-reduce는 마지막 보고에서 조건이 참이면 어느 규칙이 걸었든 account_mm_active로 거절된다. status는 마지막 보고의 두 숫자를 보이고 없으면 키가 없다. account_mm 없는 보고와 한도 없는 정책은 저널에 바이트를 남기지 않고(기록 스키마 2 그대로), 이 필드 전의 기록은 없음으로 읽히며, 두 종류의 저널 모두 재생·재결정·디스크 복구(verify --re-decide)에서 실시간 상태와 같다. 한도는 1..=9999다. 노드 설정은 Bybit에서 증거금 정책이 있으면 한도를 요구하고 Hyperliquid와 가상 거래소에서는 거부한다. Bybit 게이트웨이는 totalMaintenanceMargin과 totalMarginBalance를 보고에 싣고, 둘 중 하나라도 없거나 문자열 소수가 아니면 응답 전체가 MarginReportInvalid이며, accountMMRate는 무슨 값이든(없어도) 보고를 바꾸지 않는다. 그 거부 사유는 「account_mm is missing: …」와 「account_mm: maintenance margin … is negative」다. detail은 「account maintenance margin <유지증거금> is at or above <한도> bps of the margin balance <잔고>」다 | 단위 | 미실행 | `cargo test -p oms-core --test account_mm; cargo test -p oms-node --test record_schema; cargo test -p oms-node --lib -- venue::bybit::query config::` |
+| V-MARGIN-12 | 시뮬레이션의 가상 거래소는 계좌 가치를 자기 모형으로 계산한다: 현금 + 포지션 × 기준 가격. 체결은 낸 값과 수수료만큼, 펀딩은 그 금액만큼 현금을 줄이고, 가격 변화는 포지션 가치를 바꾼다. 손으로 푼 예(입금 100, 100에 0.5 매수와 수수료 0.01, 가격 104, 펀딩 0.1 %)에서 계좌 가치는 99.99, 101.99, 101.938이다. 가격이 움직이지 않아도 수수료와 펀딩만으로 계좌가 기준 금액보다 5 %를 넘게 내려가면 감소 전용 상태로 들어간다(100에서 95.00은 아니고 94.99는 들어간다). 가상 거래소는 포지션을 키우거나 반대쪽으로 넘기는 감소 전용 주문을 거절하고, 걸려 있는 감소 전용 주문은 남은 포지션만큼만 체결한 뒤 나머지를 취소한다. 증거금 정책을 켠 임의 순서의 실행(체결, 가격 변화, 펀딩, 운영자 해제, 그리고 margin_lossy에서는 보고 유실·지연·무응답, 링크 단절, 재시작)의 매 입력 뒤에: 받아들인 일반 주문은 신선한 보고가 있었고 노출이 계좌 가치의 2배 이내이거나 노출을 올리지 않았다. 감소 전용 상태에 들어가면 열려 있는 일반 주문마다 취소 요청이 있고, 그 상태인 동안 일반 주문은 받아들여지지 않는다. 감소 전용 상태는 증거금 보고로만 들어가고 운영자의 해제로만 끝난다(재시작, 새 UTC 날, 회복된 계좌 가치는 끝내지 않는다). 보고가 한도보다 오래 끊긴 뒤의 틱이 끝나면 열려 있는 일반 주문마다 취소 요청이 있다. 증거금 정책이 없는 기존 프로파일 일곱 개는 seed 다섯 개씩 main(84db0f9)에서 기록한 것과 같은 저널을 쓴다. 가상 시간 50시간짜리 실행(margin_days: UTC 자정 1시간 전에 시작해 자정을 세 번 넘고, 그 사이에 재시작, 링크 단절, 손실, 출금과 입금, 운영자의 해제와 기준 재설정이 섞인다)에서도 위 검사가 매 입력 뒤에 성립하고, 기록된 보고가 그 전의 기준 금액보다 5 %를 넘게 낮으면 그 보고가 새 날의 기준을 정하는 보고여도 계좌는 감소 전용 상태가 되고, 저널의 기준 금액은 실행마다 자정을 정확히 세 번 넘고, 재시작과 새 날은 감소 전용 상태를 끝내지 않는다. 정해진 순서 하나(자정을 넘는 20초의 조회 끊김 동안 100에서 6 출금, 재시작, 자정 두 번 더)에서 새 날의 첫 보고 94는 상태를 걸고 나서 기준이 되고, 저널에는 날마다 기준이 하나다(100, 94, 100, 99). 저널의 증거금 기록(입력이 증거금 보고인 기록)은 조회 한 번에 하나를 넘지 않는다: 조용한 하루는 조회 17 280번에 기록 17 280건이고, 50시간 실행에서 기록 수는 조회 수 이하이고 같은 조회의 답은 두 번 기록되지 않는다 | 시뮬레이션 | 미실행 | `cargo test -p oms-sim --test sim -- world_ a_loss_made profile_margin margin_journal existing_profiles --nocapture   (실패 시: OMS_SIM_PROFILE=<이름> OMS_SIM_SEED=<n>)` |
+| V-MARGIN-10 | Hyperliquid 게이트웨이는 문서의 clearinghouseState 응답 예를 증거금 보고 입력으로 옮긴다: 계좌 가치는 marginSummary.accountValue, 포지션마다 종목, 부호 있는 수량, 포지션 가치, 사용 증거금, 증거금 방식, 레버리지, 최대 레버리지. 어느 포지션이든 maxLeverage가 없거나 0이거나 정수가 아니면 보고 전체를 사유와 함께 거부 입력(MarginReportInvalid)으로 바꾸고, 멀쩡한 다른 포지션도 보고하지 않는다. 계좌 가치, 수량, 포지션 가치, 사용 증거금, 레버리지 가운데 하나라도 없거나 읽을 수 없을 때, 증거금 방식이 isolated도 cross도 아닐 때, 포지션 목록이 없을 때도 같다. 어떤 값도 0이나 기본값으로 채우지 않고 어떤 포지션도 건너뛰지 않는다. 설정에 없는 종목의 포지션도 보고에 남는다(번역 함수는 설정된 종목을 받지 않는다). activeAssetData 응답 예는 그 종목의 거래소 설정 입력(증거금 방식, 레버리지)이 된다. 방식이 isolated도 cross도 아니거나, 레버리지가 정수가 아니거나, 응답이 다른 종목의 것이면 입력을 만들지 않는다(설정은 모름으로 남아 그 종목이 막힌다). userAbstraction 응답(문자열 하나)은 글자 그대로 계좌 모드 입력이 된다. 문서에 없는 문자열을 문서에 있는 값으로 바꾸지 않고, 문자열이 아니거나 64자를 넘으면 입력을 만들지 않는다. 세 조회의 요청 본문은 문서의 것과 같다(clearinghouseState, activeAssetData, userAbstraction). 게이트웨이의 요청 예산은 취소를 막지 않으므로 취소 500건 뒤에는 조회가 기다린다: 가득 찬 예산(1200)에서는 700이 남아 증거금 조회가 바로 나가고, 시작 직후(600)에는 100이 남아 10.1초, 빈 예산에서는 15.1초를 기다린다. 종목 이름에서 식별자 규칙에 맞지 않는 글자는 _로 바꾼다(PURR/USDC는 PURR_USDC, @107은 _107). 게이트웨이가 스스로 세는 요청 예산은 최대 1200이고 시작할 때 600이며 초당 20씩 차고, 조회는 300(주문 몫 200, 취소 몫 100)을 남길 수 있을 때만 나가며 취소는 예산과 상관없이 나간다 | 단위 | 미실행 | `cargo test -p oms-node --lib venue::hyperliquid` |
+| V-WIRE-ID-1 | 고객 주문번호 형식 Base32Pair는 VenueClientId와 일대일이고 27자(36자 이하, 0-9a-v와 -)이며 같은 입력에 같은 문자열을 내고, 서로 다른 100만 개 주문에 서로 다른 100만 개 문자열을 낸다. 해석은 그 형식이 쓴 문자열만 받는다(대문자·다른 길이·다른 구분자·64비트 초과·16진수 형식은 None). Hex128은 to_hex와 같은 문자열을 내고 소문자 16진수만 해석하며, 가상 거래소와 Hyperliquid 게이트웨이는 Hex128을 선언하고 보내는 번호를 그 형식으로 만든다 | 단위 | 미실행 | `cargo test -p oms-core --lib ids::tests && cargo test -p oms-node --lib venue::tests` |
+| V-VENUE-EXEC-1 | 펀딩 입력은 포지션·주문·예약·체결 수를 바꾸지 않고 한 번만 기록된다. 거래소 포지션 변경은 부호 있는 수량을 계좌와 미귀속 장부에 더하고 VenuePositionChange 불일치로 일반 주문을 막으며(감소 전용은 통과) 재생 뒤에도 남는다. 분류 못 한 실행은 기장 없이 UnclassifiedExecution 불일치로 막는다. 변경 뒤 그보다 늦게 물은 현재 세션의 포지션 응답 중 그 종목에 열린 주문과 대기 체결이 없을 때의 첫 응답이 다르면 PositionAdjusted(snapshot_after_venue_change) 한 건으로 맞추고 같으면 VenueChangeSettled만 남기며(열린 주문이 있는 동안은 맞추지 않아 오는 중인 체결을 두 번 세지 않는다), 저널만으로 계산한 포지션이 거래소 값과 같다. 분류 못 한 실행의 키는 같은 키로 나중에 온 체결의 기장을 막지 않는다. 운영자 조정은 reason 없이 스키마 1과 같은 바이트로 쓰인다 | 단위 | 미실행 | `cargo test -p oms-core --test venue_changes` |
+| V-SCHEMA-2-1 | 이 빌드는 기록 스키마 2를 쓰고 1과 2를 읽는다. 기록 스키마 1로 쓴 저널(체결, 운영자 조정, 정지 포함)을 복구하면 실시간 코어와 같은 상태(다이제스트 포함)가 되고, 그 뒤에 스키마 2로 이어 쓴 기록은 새 세그먼트에 들어가며, 두 세그먼트를 함께 복구해도 실시간 상태와 같고 --re-decide 검사도 통과한다 | 통합 | 미실행 | `cargo test -p oms-node --test record_schema` |
+| V-ABSENCE-N-1 | absence_not_found_needed가 2이면 결과 불명 주문은 expires_at + absence_margin 뒤에 보낸 조회의 "없음"을 absence_margin 이상 떨어진 두 조회로 받아야 NotPlaced로 닫히고, 첫 번째는 AbsenceNoted로만 기록되며 예약은 그대로다. 만료 + 여유 전의 "없음", 같은 조회의 두 번째 답, 앞에 센 답보다 여유 시간 안쪽의 답은 세지 않고, 셈은 재생 뒤에도 같다. 기본값 1에서는 AbsenceNoted 없이 예전처럼 한 번에 닫히고, 기본값은 직렬화하지 않으며, 0은 설정 오류다. Bybit 설정은 absence_not_found_needed = 2가 아니면 거절된다 | 단위 | 미실행 | `cargo test -p oms-core --test absence_and_market_ref` |
+| V-MARKET-REF-1 | 새 주문은 판단에 쓴 호가창 상태(market_ref)를 실을 수 있고, 그 값은 OrderAccepted.request로 저널 기록에 들어가 직렬화와 해석을 거쳐도 같다. market_ref가 없는 요청은 예전과 같은 바이트로 쓰인다. 같은 요청이 다른 market_ref로 다시 오면 duplicate다. 이름은 64자 이하의 [A-Za-z0-9_.:-]만 받고 거래 API는 형식이 틀린 market_ref를 해석 단계에서 거절한다 | 단위 | 미실행 | `cargo test -p oms-core --test absence_and_market_ref && cargo test -p oms-api --lib` |
+| V-TAIL-1 | 꼬리 읽기는 디스크에 더 많은 기록이 있어도 호출자가 준 내구화 번호보다 큰 기록을 돌려주지 않고, 작은 세그먼트로 회전한 저널을 끊김 없이 순서대로 읽으며, 커서 다음 번호부터 다시 시작한다. 쓰는 쪽이 잠금을 쥔 동안에도 읽고, 읽는 동안 새 쓰는 쪽이 잠금을 잡을 수 있다(잠금을 잡지 않는다). 상한 이하의 손상된 프레임이나 번호가 튀는 프레임에서는 그 앞 기록을 돌려준 뒤 오류를 내고 위치를 움직이지 않으며, 커서 앞의 손상도 오류로 알린다(끝에서 쓰는 중인 프레임은 기다린다). 기록 스키마가 바뀌어 열린 새 세그먼트와, 헤더만 있다가 새 스키마 헤더로 다시 쓰인 세그먼트를 따라가고 기록마다 스키마를 알려 준다. 엿보기는 상한 너머의 유효한 프레임을 위치를 움직이지 않고 보여 주며 잘린 마지막 프레임에서 오류 없이 멈춘다 | 단위 | 미실행 | `cargo test -p oms-journal --test tail` |
+| V-TAIL-2 | 모든 이벤트 종류(43가지)의 인스턴스를 선택 필드까지 채워 직렬화하면, 인코더가 쓰는 모든 필드 경로가 docs/contracts/tail.md의 필드 표에 있고, 표의 모든 행은 실제로 쓰이는 필드이며 타입 열이 실제 JSON 값의 종류(문자열, 정수, 불, 목록, 열거형, 객체, null 허용)와 맞는다. 통째로 읽는 행은 설정 하나와 열거형 값뿐이다. 이벤트 종류가 늘면 시험이 컴파일되지 않는다 | 소스 검사 | 미실행 | `cargo test -p oms-core --test event_fields` |
+| V-BYBIT-READ-1 | Bybit 게이트웨이의 조회 일곱 가지는 읽기만 하고, 통째로 읽을 수 있는 응답만 입력으로 넘긴다. 쪽 넘김은 커서가 비고 쪽이 덜 찼을 때만 끝으로 보고, 다 찬 쪽에 커서가 없거나 커서가 그대로이거나 쪽이 20을 넘으면 스냅숏(열린 주문, 포지션, 증거금 보고)을 넘기지 않는다. 주문 상태는 우리 orderLinkId의 행만 보고 realtime, 기간 없는 주문 내역, 코어가 주문을 받은 시각 − 1분부터 7일의 주문 내역 셋 다에 없을 때만 StatusNotFound(첫 조회 전 시각)를 낸다. 체결은 since − 2분부터 7일 이하의 창으로 읽고(창 사이 1ms 겹침, 중복 키는 한 번), 한 번에 30쪽까지 읽고 다 읽은 창까지만 선언한 채 멈추며(오류 아님), 창을 다 읽은 뒤에만 그 끝 직전까지 FillsSynced를 내며, 끝을 알 수 없는 창은 반으로 나누고, 읽을 수 없는 행에서 멈춘다. 실행 행은 execType 표 하나로 Fill(우리 주문이면 order_id, 아니면 외부 체결), Funding, PositionChange(adl, takeover, delivery, settle), UnclassifiedExecution이 된다. 증거금 보고는 totalEquity, totalMaintenanceMargin, totalMarginBalance(U17d), positionIM, 계좌 증거금 모드, 정수 레버리지, maxLeverage로 만들고 한 값이라도 못 읽으면 MarginReportInvalid다. accountMMRate는 보고를 바꾸지 않는다. 이 코드에는 주문 생성·정정·단건 취소 요청이 없다. 설정은 Bybit에서 REGULAR_MARGIN 밖의 계좌 모드 허용을 거절한다. 조회용 REST 응답은 접속 단계 오류만 NotSent로 본다. retCode 10003·10004·10005·10007·10010·33004와 HTTP 401은 키 거부이고 다시 보내지 않는다. 10006과 HTTP 429는 요청 한도다. 10002는 시각 창 밖이다. 10016, HTTP 5xx, 읽을 수 없는 본문, retCode 없는 본문은 응답 없음이다. 그 밖의 0 아닌 retCode는 그 코드의 거부다. 키와 비밀은 데이터 디렉터리 밖의 소유자 전용(0600) 일반 파일에서만 읽고(심볼릭 링크는 거절), Debug 출력에 비밀이 없다. 체결 창의 끝은 지금 − fills_lag_ms다. 체결 키는 <symbol>:<execId>다. 주문 상태의 최종 누적 수량(cum)은 cumExecQty로 채운다. 주문 상태는 New·PartiallyFilled(열림), Filled, Cancelled, Rejected만 해석하고 조건부 주문 상태와 그 밖의 값에서는 결론을 내지 않는다 | 단위 | 미실행 | `cargo test -p oms-node --lib venue::bybit` |
+| V-BYBIT-STREAM-1 | Bybit 게이트웨이는 시작 확인이 통과하고 막힘이 없을 때만 비공개 스트림에 접속하고, auth(GET/realtime + 만료 시각의 서명, 만료 = 지금 + recv_window)가 확인된 뒤 order.linear·execution.linear를 구독하며, 구독이 확인된 뒤에만 Link를 올린다. 접속마다 세션 번호가 커진다. ping 뒤 ping 간격 안에 pong이 없거나(코어 입력 큐를 기다린 시간은 빼고), 소켓이 닫히거나, 읽을 수 없는 행이나 symbol 없는 행이 오거나, 연결 중 막힘(IP 변경, 키 거부, IP 차단)이 생기면 Link를 내리고, 키 거부와 IP 변경이 아니면 다시 붙는다. 인증 거부, 조회의 키 거부 코드, IP 변경 뒤에는 재시작까지 접속도 요청도 하지 않는다. HTTP 403(REST든 스트림 업그레이드든) 뒤에는 멈춤 시간 동안 REST 요청과 스트림 접속이 없고, 끝나면 다시 붙는다. 구독 거부와 응답 없는 인증은 키 거부가 아니라 다시 시도하고, 인증 응답 전에는 구독을 보내지 않는다. 연결이 올라가 첫 pong을 받았으면 재연결 기다림은 처음 값으로 돌아가고, pong 전에 끊기면 기다림이 계속 는다. 설정한 종목의 주문 행은 OrderStatus(Stream), 실행 행은 실행 분류표를 거쳐 받은 시각이 실린 입력이 되고 다른 종목의 행은 넘기지 않는다. 주문과 취소는 V-BYBIT-ORDERS-1. 시작 확인은 키가 서브계정(isMaster = false)이고 설정의 sub_account_uid의 것이며 쓰기 가능하고 ContractTrade의 Order·Position 권한과 지금의 공인 IP를 포함한 바인딩 IP를 가질 때만 통과한다. 계좌는 REGULAR_MARGIN이고 unifiedMarginStatus가 3–6이어야 한다. 종목마다 settleCoin = USDT이고 단방향(positionIdx = 0)이어야 한다. 하나라도 어긋나면 막고, 시작 확인은 GET만 보내 거래소 설정을 바꾸지 않는다. 공인 IP는 시작할 때와 ip_check_secs마다 https인 ip_echo_url로 읽어 키의 IP와 비교한다. IP 확인의 통과는 시작 확인의 막힘을 풀지 않는다(막힘은 출처마다 따로다). 읽을 수 없는 메시지와 data 목록이 없는 order·execution 토픽 메시지도 끊고 다시 붙는 사유다 | 통합 | 미실행 | `cargo test -p oms-node --lib venue::bybit` |
+| V-BYBIT-ORDERS-1 | Bybit 게이트웨이는 주문과 취소마다 결과 하나를 돌려주고 REST 요청을 많아야 하나 보내며 다시 보내지 않는다. 생성은 orderLinkId = 우리 고객 주문번호, category linear, Limit, 단방향(positionIdx 0)으로 보내고 보낸 본문에 서명한다. 요청 시각 + recv_window + 1초가 expires_at보다 늦거나, 막힘이 있거나, 거래하지 않는 종목이거나, 접속이 되지 않으면 보내지 않고 NotSent다. retCode 0은 생성이면 orderId가 있을 때만 Placed(Open, 누적 수량 없음), 취소면 Confirmed. 오류 문서의 0 아닌 코드는 UNKNOWN_CODES가 아니면 Rejected, 그 밖의 모든 응답(문서에 없는 코드, 2xx가 아닌 HTTP, 시간 초과, 끊김, 읽을 수 없는 본문)은 Unknown이다. HTTP 403과 retCode 10018은 IP 차단 멈춤을, HTTP 401과 키 거부 retCode는 키 거부를 건다. 요청은 자리를 잡은 때부터 응답 + 1초까지(응답이 없으면 요청 시각 + recv_window + 1초 + 1초까지) 세므로 보낸 때와 응답(또는 마지막 도착 가능 시각) 사이 어디에 도착하든 어느 1초에도 주문은 8개, 주문과 취소는 합쳐 10개를 넘지 않고, 주문이 8개를 다 써도 취소는 바로 나가며, 차면 기다린다(버리지 않는다). 아무 바이트도 나가지 않은 요청은 자리를 바로 돌려준다. 시작 확인은 설정의 px_tick·qty_step이 거래소 tickSize·qtyStep의 배수가 아니면 막고, 로컬 시계가 거래소보다 500ms 넘게 앞설 수 있으면(시작 확인 전, IP 확인 주기마다, 막힌 동안 10초마다, 왕복 250ms 넘는 측정은 판정 안 함) 생성만 막고 취소와 스트림은 막지 않는다. 서명은 hex(HMAC_SHA256(secret, timestamp + api_key + recv_window + payload))이고 payload는 GET이면 키 순서로 정렬해 보내는 질의 문자열, POST면 보내는 본문 그대로이며, 질의 값은 인코딩하지 않고 뜻을 바꾸는 문자가 있으면 보내지 않는다 | 통합 | 미실행 | `cargo test -p oms-core --lib rate && cargo test -p oms-node --lib venue::bybit` |
+| V-BYBIT-TRADE-1 | Bybit 게이트웨이는 주문과 취소를 WS Trade(/v5/trade)로 보내고, REST로는 WS Trade 연결 작업이 그 요청의 아무 바이트도 쓰지 않았을 때(인증된 연결 없음, 쓰기 전 막힘)만, 막힘을 다시 본 뒤 같은 한도 자리와 같은 요청 시각으로 보낸다. 요청은 두 경로를 합쳐 많아야 한 번 나가고 한도 자리는 경로와 상관없이 하나다(1초 안의 9번째 생성은 경로가 섞여도 기다린다). 요청은 reqId(생성 c + 고객 주문번호, 취소 x + 36진 시도 번호 + 고객 주문번호, 36자 이하), header의 X-BAPI-TIMESTAMP·X-BAPI-RECV-WINDOW, op, REST 본문 하나인 args로 되어 있다. 응답은 REST와 같은 표로 분류하고, 20006·10019·10429는 결과 불명, 10019는 연결을 닫고 다시 열며, 10403과 10018은 IP 차단 멈춤을, 키 거부 코드는 키 거부를 건다. 쓴 요청에 request_timeout_ms 안에 응답이 없거나 그 사이 연결이 내려가면(pong 없음, 끊김, 막힘) 결과 불명이고 어느 경로로도 다시 보내지 않으며, 한도는 요청 시각 + recv_window + 1초 + 1초까지 센다. 늦은 응답은 버린다. 같은 reqId가 기다리는 중이면 다시 쓰지 않는다. WS Trade 연결은 막힘이 없을 때만 IPv4로 접속하고, auth(비공개 스트림의 서명)의 retCode가 0일 때만 올라가며, 0이 아니면 재시작까지 키 거부, 업그레이드의 HTTP 403은 IP 차단 멈춤이다. ping 뒤 간격 안에 pong이 없으면 내려가고, 재연결 기다림은 첫 pong을 받은 연결 뒤에만 처음 값으로 돌아간다. WS Trade는 Link를 움직이지 않는다. 키 거부·IP 차단 응답의 효과는 연결 작업이 다음 쓰기 전에 건다. 기다리는 요청이 없는 늦은 응답도 버리되 그 효과(키 거부)는 건다 | 통합 | 미실행 | `cargo test -p oms-node --lib venue::bybit` |
+| V-BYBIT-REFPX-1 | Bybit 게이트웨이는 공개 linear 스트림에 거래하는 종목마다 tickers.<symbol>을 구독하고(구독 요청 하나에 토픽 10개까지, 모든 응답이 success: true일 때만 구독됨, 거부되거나 handshake 시간 안에 답이 없는 요청이 하나라도 있으면 pong이 와도 끊고 다시 붙음), 종목마다 그 연결의 스냅숏의 markPrice를 mark로 삼아 RefPrice(px = mark, venue_ts = 메시지 ts의 µs)로 코어에 보낸다. 스냅숏 전의 델타는 버리고, markPrice가 있는 델타는 mark를 바꾸며, markPrice 없는 델타는 든 mark를 그 델타의 ts로 다시 보낸다. 내보냄은 종목마다 ref_price_interval_ms에 많아야 한 번이고(재연결을 넘어 센다) 메시지 없이 다시 보내지 않는다. mark는 연결마다 비운다. 읽을 수 없는 티커 메시지(JSON 아님, type·data·symbol·markPrice·ts 이상, markPrice 없는 스냅숏, 소수 9자리, 0 이하)는 연결을 끊고 다시 붙으며, 거래하지 않는 종목의 메시지는 읽지 않고 버린다. 연결은 막힘이 없을 때만 IPv4로 접속하고, 연결 중 막힘이 생기면 끊고 막힌 동안 다시 붙지 않으며, 업그레이드의 HTTP 403은 IP 차단 멈춤이다. ping 뒤 간격 안에 pong(op = pong, 또는 공개 linear의 op = ping + ret_msg = pong)이 없으면 끊는다. 첫 pong 전에 끊긴 연결은 재연결 대기를 늘리고, 첫 pong 뒤에 끊긴 연결만 대기를 처음으로 되돌린다. 공개 스트림은 Link를 움직이지 않는다. 설정의 ref_price_interval_ms는 1000 이상, ref_price_max_age_us의 절반 이하만 받는다. 시험용 연결 주소 OMS_TEST_BYBIT_WIRING은 다섯 주소의 호스트가 모두 127.0.0.1일 때만 받는다 | 통합 | 미실행 | `cargo test -p oms-node --lib -- venue::bybit config::tests` |
+| V-BYBIT-NODE-1 | kind = bybit인 oms-node 프로세스(failpoints 빌드, 시험용 연결 주소로 가짜 Bybit에 연결)는 참조 가격이 오기 전 가격 범위가 있는 주문을 RefPriceUnavailable로 거절하고 아무 요청도 보내지 않으며, 공개 스트림의 티커 스냅숏 뒤에는 같은 요청을 받아 WS Trade로 한 번 보내고, 가짜 WS Trade가 그 order.create를 읽을 때 디스크의 저널 파일에 그 주문의 수락 기록이 있다(이 확인은 순서의 증명이 아니다: 기록이 네트워크 왕복보다 먼저 파일에 닿으므로 쓰기 전에 보내도 통과한다. 기록이 내구화된 뒤에만 보낸다는 것은 다음 flush 실패 시험이 증명한다). 새 주문의 저널 flush가 실패하면(OMS_CRASH_AT=sync_error_after_write) 노드는 상태 2로 멈추고 REST와 WS Trade 어느 쪽에도 생성이 닿지 않으며, failpoint 없이 다시 시작하면 그 기록을 찾고 orderLinkId 조회(realtime과 history 두 번이 모두 비었음)로 주문을 '놓이지 않음'으로 닫고, 그래도 생성은 없다. WS Trade가 생성을 읽고 답하지 않으면 주문은 결과 불명(Transport)이 되고, orderLinkId로 묻는 realtime 조회가 열린 주문을 찾아 Working이 되며, 두 경로를 합친 생성은 하나다 | 프로세스 | 미실행 | `cargo test -p oms-node --features failpoints --test bybit_node` |
+| V-ALERT-DIRECT-1 | alert-direct의 송신 스레드는 텔레그램 전송이 처음 다시 보내기(Retry)로 끝난 시도의 시각을 '실패 시작'으로 두고, 텔레그램이 답하면(전달 또는 400·413 거절) 지운다. 보낼 것이 없으면 실패 시작은 생기지 않는다. 둘째 채널을 설정하면 once와 set이 만든 모든 메시지가 같은 분할·같은 한도(50개)의 둘째 보관함에도 통째로 들어가 자기 스레드(alert-second)로 한 번씩 나가고, 넘치면 오래된 것부터 버리고 세어 자기 버림 알림을 보내며, 오류는 그 조각을 두고 그 전송을 끝낸다. 실패 시작에서 second_after_ms(기본 60초)를 넘게 지나면 둘째 채널에만 'Telegram 전송이 N초째 실패함' 알림이 시작 1번, repeat_ms마다 1번, 텔레그램이 다시 답하면 해소 1번 나간다. flush_for는 두 보관함을 모두 기다린다. 둘째 채널이 없으면 스레드도 복사도 없다. 전송 뒤 시간 초과면 같은 조각을 다시 보내므로 텔레그램이 같은 메시지를 두 번 받을 수 있다 | 통합 | 미실행 | `cargo test -p alert-direct` |
+| V-ALERT-1 | OMS의 알림 스레드(oms-alert)는 공개된 읽기 모델만 읽으므로, 알림은 그 원인이 된 기록이 내구화된 뒤에만 나간다. 코어가 결정했지만 커밋 단계가 아직 내구화하지 않은 계좌 중지는 보내지 않고, 내구화되면 보낸다. flush에 실패한 묶음의 계좌 중지는 어떤 요청에도 나오지 않고, 그 뒤의 새 요청은 치명 알림 하나뿐이다. 치명 알림은 치명 사유와 마지막 내구 seq만 담고(실패한 묶음의 내용 없음) 치명 래치를 처음 본 때 한 번 나가며, 그 뒤에는 조건을 평가하지 않는다: 유예가 지난 연결 끊김도 시작하지 않고, 읽기 모델에서 사라진 중지도 해소를 보내지 않는다. 평가가 읽기 모델을 읽은 뒤 래치가 걸려 있으면 그 평가는 시작 알림도 set도 하지 않는다. 종료는 래치가 걸려 있으면 받은 종료 코드와 상관없이 치명 알림을 넣고 전송을 기다린다. 프로세스에서: 감소 전용 상태로 들어가는 기록의 flush가 실패하면 노드는 종료 코드 2로 exit_flush_ms + 5초 안에 끝나고, 가짜 텔레그램은 시작 알림과 치명 알림만 받으며(첫 시도 500 뒤 종료 전 전송에서 다시) REDUCING에 관한 것은 없다. 시작 뒤 첫 flush(Boot 기록)가 실패하면 설정이 활성화되기 전이어도 노드는 종료 코드 2로 끝나고, 가짜 텔레그램은 치명 알림 하나만 받는다(종료 전 전송) | 통합 | 미실행 | `cargo test -p oms-node --features failpoints --test pipeline --test crash_points; cargo test -p oms-node --test alerts; cargo test -p oms-node --lib alerts::` |
+| V-ALERT-2 | 텔레그램이 계속 500으로 답하는 동안 시작 알림, 계좌 중지, 5분씩 시계를 58번 움직인 반복이 만든 60개 메시지 가운데 50개가 보관되고 10개가 버려져 status.alerts에 queued 50, dropped_total 10으로 보인다(failures와 failing_since_ms도 보이고, 토큰은 없다). 텔레그램이 다시 200으로 답하면 남은 50개가 나간 뒤 '[OMS P1] 전송 실패로 알림 10개를 버림' 하나가 나가고, 전달 51, 대기 0, failing_since_ms null이 된다 | 통합 | 미실행 | `cargo test -p oms-node --test alerts outbox_bound` |
+| V-ALERT-3 | 알림 조건은 C-ALERT 표의 키와 유예를 따른다: 차단 사유마다 비어 있지 않은 문장(Mismatch와 OperatorStrategy는 조건 없음), 래치와 운영자 행위는 유예 0, 지나가는 상태와 저장 공간 부족은 grace_ms. Core::handle로 만든 상태에서 hold:link_down, gateway_block, hold:resync, hold:operator_account, hold:storage_low, halt_strategy:<s>, mismatch:<kind>, hold:venue_setting:<i>, hold:account_mode, margin_stale, hold:reducing이 나오고 문장 끝은 '근거: 저널 seq n'이다. 불일치는 종류마다 키 하나에 개수와 최근 3개(subject: detail)를 담고 확인한 것은 빠진다. 계좌 중지는 시작 1번, +4분 0번, +5분에 그때의 메모로 1번, +10분 1번, 재개에 '해소: <시작 문장>' 1번, 그 뒤 +5분 0번이다. 연결 끊김은 20초 만에 다시 붙으면 아무것도 보내지 않고, 29.999초에는 아니고 정확히 30초에 시작을, 31초에는 더 보내지 않고, 다시 붙으면 해소를 보낸다. 저장 공간 부족이 20초 낮음·5초 정상을 열 번 되풀이하면 아무것도 보내지 않고, 30초를 넘게 계속되면 시작 1번(29.999초에는 아니고 30초에, 35초에 더 없음), 풀리면 해소 1번이다. 메시지의 첫 줄은 '[OMS P1] <거래소> <KST 시각>'이다. 분류표에 없는 체결 하나는 hold:venue_change와 mismatch:unclassified_execution 두 조건을 함께 시작한다 | 통합 | 미실행 | `cargo test -p oms-node --test alerts; cargo test -p oms-node --lib alerts::` |
+| V-ALERT-4 | OMS 알림에 둘째 채널을 주면(alerts::start) 모든 메시지의 사본이 바로 그쪽에 가고, 텔레그램이 500으로 답한 첫 시도부터 59초에는 장애 알림이 없고 61초가 되면 1초 안에 'Telegram 전송이 61초째 실패함'이 둘째 채널에만 가며(텔레그램 요청에는 없음), 텔레그램이 다시 답하면 해소가 간다. 텔레그램이 답하지 않아도(연결은 받고 답 없음) 계좌 중지·재개 1,000건이 5초 안에 내구화되고 알림 스레드는 계속 평가한다 | 통합 | 미실행 | `cargo test -p oms-node --test alerts -- telegram_ a_hung` |
+| V-ALERT-5 | [alert] 설정은 절대 경로의 토큰 파일을 요구하고 그 파일을 설정을 읽을 때 alert-direct 규칙으로 읽는다: 0640, 심볼릭 링크, 저장소 안, 없는 파일은 '[alert] telegram: '로 시작하는 설정 오류이고 그 문장과 설정의 Debug에 토큰이 없다. 각 값(grace_ms, eval_ms, repeat_ms, exit_flush_ms, second_after_ms)은 양 끝에서 받고 바로 바깥에서 거부하며, second_channel은 "none"만 받는다. 표가 없으면 알림이 없고 status.alerts는 {"configured": false}다. mainnet(Hyperliquid, Bybit)은 표 없이 시작하지 않고, testnet과 가상 거래소에서는 선택이다. OMS_TEST_TELEGRAM_API는 loopback http만 받고, 배포하는 바이너리(failpoints 없음)는 그 변수를 무시해 저장소 안의 토큰 파일을 여전히 거부하고 종료 코드 2로 끝난다. 시작 알림은 그 평가에서 시작이 나간 조건과 유예 안의 조건을 따로 센다: 계좌 중지와 연결 끊김이면 '활성 조건 1개(유예 중 1개)'다. 프로세스에서: 시작 알림 'OMS 시작 (boot 1, config 1)'이 나가고, SIGTERM으로 정상 종료하면 'OMS 정상 종료. 걸린 주문 1개는 거래소에 남음'이 종료 전에 나간다. 설정이 활성화된 뒤 거래 소켓을 bind하지 못하면 종료 코드 3으로 끝나고 'OMS 시작 실패(exit 3): trading_socket' 하나가 종료 전에 나가며, 어떤 요청에도 소켓 경로·토큰·토큰 파일 이름이 없다 | 통합 | 미실행 | `cargo test -p oms-node --lib config::; cargo test -p oms-node --test alerts the_; cargo test -p oms-node --features failpoints --test crash_points -- a_clean_stop an_exit_3` |
+| V-HOLD-1 | 증거금 정책이 있으면 워처 불일치와 거래소 변경 아래에서 감소 전용 주문은 통과하고 일반 주문은 거절되며, 킬 래치와 운영자 중지 아래에서는 둘 다 거절된다(TN 표 7-7). 정책이 없으면 모든 보류가 모든 주문을 거절한다. 새 사유 셋은 기존 사유 뒤에 붙어 기존 사유의 순서가 바뀌지 않는다. 프로세스에서: 운영 소켓의 watcher_mismatch 뒤 일반 주문은 Hold(WatcherMismatch)로 거절되고 감소 전용 주문은 받으며, watcher_kill 뒤에는 감소 전용도 Hold(KillLatched)로 거절된다. 워처 입력의 detail은 비지 않고 1 KiB(1024바이트) 이하여야 한다: 노드와 코어가 각각 거절하고 아무것도 기록하지 않는다 | 단위, 통합 | 미실행 | `cargo test -p oms-core --test holds; cargo test -p oms-node --test holds_node watcher` |
+| V-HOLD-2 | clear_hold는 고정 코드로 거절한다: 걸려 있지 않음(not_held), 메모 없음(note_required), 이 프로세스의 킬 루프가 답하지 않음(kill_unconfirmed), 코어의 장부에 미체결이 있음(kill_orders_open, 킬 루프의 답이 confirmed든 unsupported든, kill_unconfirmed 다음에 본다), 거래소 변경 뒤 포지션을 아직 읽지 않음(venue_change_pending). 거절은 기록도 명령도 남기지 않는다. 래치 아래에서도 cancel-all은 받고, 거래소가 취소를 확인해 장부가 비면 킬의 해제를 받는다(코어와 가상 거래소 프로세스). 받으면 hold_cleared 하나와, 킬이면 KillStop 하나. 거래소 변경의 해제와 불일치 확인은 따로다. resume은 킬과 워처 불일치를 풀지 않는다. omsctl clear-hold는 세 사유와 메모를 읽는다. 운영자 중지가 없으면 resume은 오류다 | 단위 | 미실행 | `cargo test -p oms-core --test holds clear_hold resume a_kill_is_not; cargo test -p oms-node --test holds_node watcher; cargo test -p oms-api` |
+| V-HOLD-3 | 킬 래치는 hold_set에서, 그 확인은 kill_loop_ended에서 재실행으로 같은 상태가 되고, 모든 boot가 확인을 지우고 래치의 필드 그대로 Kill 명령을 다시 요청한다. 래치가 없거나 이미 확인된 뒤의 KillLoopEnded는 기록되지 않는다. 모든 게이트웨이 명령은 기록된 이벤트에 command_for를 적용한 것과 같다. 커밋 단계는 Kill을 래치가 내구화된 뒤에만 넘기고, flush가 실패하면 Kill도 응답도 나가지 않으며 다시 시작한 노드에 래치가 없다 | 단위, 통합 | 미실행 | `cargo test -p oms-core --test holds; cargo test -p oms-node --features failpoints --test pipeline a_kill_command` |
+| V-HOLD-4 | 킬 마커가 있으면 OMS는 시작할 때 boot 기록 안에서 KillLatched를 걸고(booted, hold_set), 감소 전용을 포함한 어떤 주문도 받지 않으며, 가상 거래소가 unsupported로 답한 뒤 clear_hold kill이 마커를 지운다. 거절된 해제(빈 메모, 다른 사유, not_held, 답을 붙잡아 둔 동안 메모가 있는 kill_unconfirmed)는 마커를 건드리지 않고, 해제 기록의 flush가 실패하면 응답이 없고 노드가 멈추며 마커가 남는다. 그 둘 뒤의 다음 시작은 다시 걸린다. 다음 시작은 걸리지 않고 주문을 받는다. 지우지 못한 마커는 응답이 말하고 다음 시작이 다시 건다. 볼 수 없는 마커 경로(권한)도 건다. 마커 파일은 처음 512바이트를 제어 문자를 바꿔 읽고, 디렉터리·심볼릭 링크도 마커다 | 통합, 단위 | 미실행 | `cargo test -p oms-node --test holds_node; cargo test -p oms-node --features failpoints --test crash_points a_clear_; cargo test -p oms-node --lib node::tests; cargo test -p oms-core --test holds marker` |
+| V-HOLD-5 | 거래소 변경 보류는 새 이벤트 없이 venue_position_changed, unclassified_execution_noted, 종류가 venue_position_change인 mismatch_raised(넘침 경로)에서 apply가 건다. 그래서 U13b의 이벤트 목록은 그대로이고, U18b 전에 쓴 저널에 이 셋 중 하나가 있으면 재실행한 상태에 보류가 있다. 다른 종류의 불일치는 걸지 않는다. 불일치를 확인해도 보류는 남는다. 각 보류는 한 번만 걸리고 두 번째 원인은 첫 메모를 바꾸지 않는다. 워처 불일치 입력은 걸려 있지 않으면 hold_set 하나를 쓰고 'held'로, 걸려 있으면 아무것도 쓰지 않고 'already held'로 답한다. 워처 킬 입력은 걸려 있지 않으면 hold_set 하나를 쓰고 'latched'로, 걸려 있으면 아무것도 쓰지 않고 'already latched'로 답한다 | 단위 | 미실행 | `cargo test -p oms-core --test holds venue second` |
+| V-HOLD-6 | 킬 래치·워처 불일치·거래소 변경의 상태 필드, Boot의 kill_marker, 워처 입력과 새 이벤트 셋은 기록 스키마를 올리지 않는다: 비어 있으면 쓰지 않아 옛 상태의 바이트가 그대로이고, 이들이 든 저널은 라이브 상태로 복구되며 verify --re-decide를 통과한다. 상태 스키마는 2로 올랐다: U18b 전의 스냅샷(상태 스키마 1, venue_change 없음)은 사유와 함께 건너뛰고 저널을 처음부터 재생해, 거래소 변경 보류가 스냅샷의 유무에 따라 달라지지 않는다. 이벤트 필드 표는 새 이벤트의 모든 필드를 적는다. 알림 조건 hold:kill_latched·hold:watcher_mismatch·hold:venue_change는 유예 0이고, 킬 문장은 출처·메모·확인 상태를 담으며, 워처 불일치와 거래소 변경의 문장은 증거금 정책이 있을 때만 감소 전용을 받는다고 말하며, Alerts::notice는 접두어를 붙여 한 번 보낸다. [kill] marker는 절대 경로, 데이터 디렉터리 밖, 읽을 때 디렉터리가 있어야 하고, mainnet은 그것 없이 시작하지 않는다 | 단위, 통합 | 미실행 | `cargo test -p oms-node --test record_schema --test alerts; cargo test -p oms-node --lib alerts:: config::; cargo test -p oms-core --test event_fields` |
 | V-KILL-1 | Bybit 게이트웨이는 개인 스트림의 마지막 생존 증거(구독 확인, pong, 시작 확인의 첫 통과) 뒤 kill_after_ms가 지나도록 연결이 내려가 있으면 끊김 하나에 한 번 StreamLost를 보내고, 코어는 래치가 없으면 hold_set{kill, source: stream}과 Kill 명령을 한 기록으로 낸다. 마지막 pong 전에는 걸리지 않고, ping에 답하는 조용한 스트림, 기한 전에 다시 구독된 연결, 시작 확인 전의 끊김, 코어 큐를 기다린 시간은 킬을 부르지 않는다. 프로세스에서: 반쯤 열린 개인 스트림(ping 1초, kill_after 10초)은 마지막 pong 9초 뒤에는 디스크에 hold_set이 없고 11초까지 하나 있으며, 가짜 거래소의 첫 일괄 취소는 그 기록이 이미 저널 파일에 있을 때 온다. 다시 시작해도 래치가 남고, 새 프로세스의 루프가 끝나기 전 clear-hold는 kill_unconfirmed로 거절되며 끝난 뒤 받아들여지고 일반 주문이 다시 받아진다. StreamLost의 detail은 스트림이 마지막으로 끝난 이유를 담는다 | 단위, 통합 | 미실행 | `cargo test -p oms-node --lib venue::bybit::gateway::tests::; cargo test -p oms-core --test holds stream; cargo test -p oms-node --features failpoints --test bybit_node a_ten_second` |
 | V-KILL-2 | 킬 루프는 일괄 취소 뒤 거래소의 미체결을 세어 0이 될 때까지 회차의 시작부터 kill_round_ms마다 일괄 취소를 되풀이하고, 첫 0 뒤 kill_watch_every_ms마다 kill_watch_ms 동안 다시 세어 모두 0일 때만 KillLoopEnded{confirmed}를 보낸다. 실패한 셈은 0이 아니고, 감시 중의 늦은 주문은 곧바로 회차로 돌아간다. 거래소가 첫 일괄 취소 뒤 주문 하나를 남기거나 5xx로 답해도 0을 확인할 때까지 되풀이하고, 어느 1초 창에도 일괄 취소는 둘을 넘지 않으며(비상 예산 2/1초, 회차가 100 ms여도), 생성이나 단건 취소는 하나도 나가지 않는다. 막힘(IP 차단 등)에는 요청을 보내지 않고 막힘 문장으로 회차가 실패하며, 예산을 기다리는 동안 생긴 막힘도 그 요청을 집에 둔다. 셈은 모든 쪽의 열린 행(New, PartiallyFilled, Untriggered)을 orderLinkId와 상관없이 세고, 상태를 읽을 수 없는 행, 실패한 쪽, 20쪽 넘음은 오류다. 정지(IP 차단 뒤, 키 거부) 중에는 셈을 보내지 않는다. 감시는 첫 0 + kill_watch_ms에 나간 셈으로만 끝난다(그 전에 나가 늦게 답한 셈으로는 끝나지 않는다). cancel-all은 result.success가 「1」일 때만 성공이고, 500건을 취소했으면 남은 주문이 있을 수 있다고 알린다 | 단위, 통합(드라이버) | 미실행 | `cargo test -p oms-node --lib venue::bybit::kill::tests:: venue::bybit::gateway::tests::a_blocked venue::bybit::query::tests::the_kill_count` |
 | V-KILL-3 | 킬 루프의 P1은 시작, 알려진 수의 바뀜, kill_notice_ms마다의 반복, 마지막(0건 확인 뒤 감시를 마침)뿐이고 모르는 수는 바뀜이 아니다. 10분 동안 셈이 실패하면 정확히 시작 1 + 반복 10 + 마지막 1 = 12개이고, 드라이버와 Alerts를 loopback 가짜 텔레그램에 붙여도 '킬 루프'가 든 요청은 12개 이하다. 모든 알림은 태그, 회차, 남은 수(모르면 이유), 일괄 취소 수와 바로 전에 읽은 포지션 묶음(심볼마다 수량, 미실현손익, 마크, 마크에서 강제청산가까지의 거리 %, 0.01 %에서 내림, 청산가가 없으면 모름, 크기 0은 뺌, 조회 실패는 실패라고)을 담는다. 알림은 루프 옆에서 순서대로 나가서, 포지션 조회가 답하지 않아도 첫 일괄 취소와 감시 중 늦은 주문의 일괄 취소는 기다리지 않는다. 느린 조회 뒤에서 기다리는 알림은 하나이고 가장 새 수의 것이 남으며, 마지막 알림은 KillLoopEnded보다 먼저 나간다. status의 notices는 보낸 알림 수다. 일괄 취소가 나갈 수 없는 동안(정지, 막힘)은 포지션을 읽지 않고 그렇다고 말한다 | 단위, 통합(드라이버) | 미실행 | `cargo test -p oms-node --lib venue::bybit::kill::tests::` |
 | V-KILL-4 | Bybit 게이트웨이는 Kill을 받으면 곧바로 킬 활성을 켜서 루프가 도는 동안 어떤 생성도 내보내지 않고(래치 전에 풀린 생성도 NotSent), 루프가 도는 동안의 두 번째 Kill은 무시하며, KillStop은 다음 대기에서 알림도 입력도 없이 루프를 끝내고 생성이 다시 나간다 | 단위, 통합(게이트웨이·드라이버) | 미실행 | `cargo test -p oms-node --lib venue::bybit::gateway::tests::no_create venue::bybit::gateway::tests::kill_stop venue::bybit::kill::tests::a_stop` |
-| V-KILL-5 | 이 프로세스의 루프가 거래소에서 0건을 확인한 뒤(confirmed) 새 킬 계기(StreamLost, watcher_kill)가 오면 코어는 kill_rearmed{source, note}로 확인(confirmed_at, outcome)을 지우고 새 Kill을 부르며, 래치의 첫 메모는 그대로다. 새 루프가 확인하기 전 clear-hold는 kill_unconfirmed로 거절되고, 재실행이 같은 상태를 만든다. 확인 전의 두 번째 계기와 unsupported 답 뒤의 계기는 아무것도 쓰지 않는다. [venue]의 킬 필드 다섯은 설계 기본값으로 읽히고 각 경계 밖 한 걸음은 거절된다(kill_after_ms는 2 × ping 이상) | 단위 | 통과 | `cargo test -p oms-core --test holds a_new_trigger second; cargo test -p oms-node --lib config::tests::the_kill_loop; cargo test -p oms-core --test event_fields` |
-| V-LIVE-1 | [liveness]에 적힌 전략의 마지막 거래 연결이 닫히거나, 그 전략의 어느 연결에서도 liveness_ms 동안 요청이 없으면(ping도 요청이다), 노드는 다음 hello까지 한 번 Input::Session(Lost)를 넣고, 코어는 strategy_link_lost와 같은 기록에서 그 전략의 걸린 일반 주문 가운데 취소 요청이 없는 것마다 규칙 strategy_link의 취소를 요청한다. 그 전략의 감소 전용 주문과 다른 전략의 주문은 취소하지 않는다. 프로세스에서: a(5,000 ms)와 b가 적혔을 때 a의 연결을 닫으면 거래소에서 a의 일반 주문만 취소되고 a의 감소 전용과 b의 일반 주문은 남는다. ping만 8초 보내면 잃음이 없고, 멈추면 마지막 요청 5초 뒤에서 7초 사이에 잃음이 기록된다. 두 연결 가운데 하나가 닫혀도 잃음이 없고 마지막이 닫히면 있다. 운영 소켓의 hello는 세지 않는다. 한 연결이 다른 전략으로 다시 hello하면 앞 전략에서는 닫힌 연결이다: 그것이 a의 마지막 연결이면 곧바로 last trading connection closed로 잃음이 되고 a의 일반 주문이 취소된다. 노드의 표에서: 정확히 liveness_ms의 침묵은 잃음이 아니고 1 ms 넘으면 잃음이며, 침묵은 마지막 요청이나 마지막 hello부터 잰다. 같은 연결의 두 번째 hello는 연결 수를 다시 세지 않는다 | 단위, 통합 | 통과 | `cargo test -p oms-node --test liveness; cargo test -p oms-node --lib liveness::; cargo test -p oms-core --test strategy_link` |
-| V-LIVE-2 | StrategyLink는 그 전략의 일반 주문만 거절한다: holds(Some(s))에만 있고 holds(None)과 다른 전략의 목록에는 없다. 증거금 정책이 있으면 그 전략의 감소 전용 주문은 받고, 없으면 모든 보류처럼 감소 전용도 거절한다. 걸린 동안의 잃음은 기록하지 않고 첫 이유와 시각이 남으며, 설정에 없는 전략의 잃음은 bad_request로 기록하지 않는다. 그 전략이 없는 설정이 활성화되면 보류가 사라진다. 표 7-7의 시험에서 StrategyLink 줄은 일반 주문 거절, 감소 전용 받음이다 | 단위 | 통과 | `cargo test -p oms-core --test strategy_link --test holds` |
-| V-LIVE-3 | 잃음 뒤(또는 내구화된 코어가 그 전략을 보류 중일 때) 거래 소켓의 hello는 Input::Session(Hello)를 control 레인에 넣고, strategy_link_restored가 내구화된 뒤에 답한다: 답이 온 순간 같은 연결의 status(내구화된 기록만)에 보류가 없고 저널 파일에 복구가 있다. 복구가 아직 답을 받지 않은 동안 같은 전략의 hello(다른 연결이든 같은 연결이든)도 복구를 넣으므로 그 답도 앞 복구가 내구화된 뒤에 온다(코어에서는 기록 없는 not held, 커밋 단계가 순서대로 답한다). 큐를 기다리던 잃음은 복구보다 먼저 넣는다(표의 hello가 넣는 순서: lost, hello). 큐가 가득이면 잃음은 버리지 않고 틱마다 다시 넣는다. 재시작 뒤 보류는 저널에서 복원되고 다음 hello가 푼다. 시작할 때는 걸린 일반 주문이 있는 적힌 전략만 무장한다: 프로세스에서 강제 종료(SIGKILL) 뒤 다시 붙지 않으면, 일반·감소 전용 주문이 걸린 a는 시작 5초 뒤 no request for 5000 ms로 잃음이 되고 일반 주문만 취소되며, 감소 전용 주문만 걸린 b는 무장하지 않는다. 걸리지 않은 전략의 hello는 기록하지 않는다. 큐가 가득이라 복구를 넣지 못한 hello는 거절되고 연결을 세지 않으며, 다음 hello가 다시 복구를 넣는다. 재시작 전부터 코어가 보류 중인 전략은 시작 때 다시 잃음으로 알리지 않고 다음 hello가 복구한다. 코어가 보류 중이면 [liveness]에 적히지 않은 전략의 hello도 복구를 넣는다 | 단위, 통합 | 통과 | `cargo test -p oms-node --test liveness hello; cargo test -p oms-node --lib liveness::; cargo test -p oms-core --test strategy_link` |
-| V-LIVE-4 | Input::Session, strategy_link_lost, strategy_link_restored, core.strategy_link는 기록 스키마를 올리지 않는다(2 그대로): 비어 있으면 쓰지 않아 옛 상태의 바이트가 그대로이고, 잃음·복구·잃음이 든 저널은 라이브 상태로 복구되며 verify --re-decide를 통과한다. 이벤트 필드 표가 두 이벤트의 모든 필드를 적는다. 알림 strategy_link:<s>는 유예 0이고 이유·시각과 증거금 정책에 따른 감소 전용 문장을 담으며 hello로 해소된다. [liveness]의 값은 1,000..=60,000 ms, 이름은 [core]의 전략이어야 하고, mainnet은 사용 중인 전략이 모두 적혀야 시작한다. 적히지 않은 전략은 감시하지 않는다. 보류 사유 StrategyLink는 hold: 알림 조건을 만들지 않고 전략마다의 strategy_link:<s> 조건이 맡는다 | 단위, 통합 | 통과 | `cargo test -p oms-node --test record_schema; cargo test -p oms-node --lib alerts:: config:: liveness::; cargo test -p oms-core --test event_fields` |
-| V-GATE-1 | 모니터링 게이트는 기록 시각으로 판단한다(250 ms 틱, 엄격한 >): 하트비트가 0초에 오고 끊기면 30.0초까지 감시됨, 30.25초에 monitor_changed{false}, 그보다 60초 넘은 첫 틱(90.5초)에 걸린 일반 주문의 취소를 한 번 요청하고(규칙 unmonitored) 그 뒤 틱은 더 묻지 않는다. 5초마다 오는 하트비트에서 W1이나 W2가 0초에 멈추면 10초의 하트비트(정확히 10초)는 감시됨, 15초의 하트비트가 닫고, 하트비트가 계속 와도 취소는 닫은 기록보다 60초 넘은 첫 틱에 온다. 검사의 나이는 그것을 알린 하트비트의 시각에서 잰다. W3·W4는 기록할 뿐 판정하지 않는다. 알려진 한계(리뷰 1 M1): 기록 시각이 멈춘 동안(호스트 시계가 뒤로 감) 틱 2,400개에도 monitor_changed와 취소가 없고, 옛 시계로 찍은 W1·W2의 하트비트는 받아들여져 게이트가 열린 채이며, 새 시계로 590초 뒤에 찍힌 하트비트는 게이트를 닫는다. 감소 전용 주문은 취소하지 않고, 연결이 내려가 있는 동안은 묻지 않으며, 다한 취소는 다시 묻지 않는다. 프로세스에서: W2가 11초 전인 하트비트가 곧바로 닫고, 거래소의 일반 주문은 10초(unmonitored_cancel_us) 전에는 남고 그 뒤 규칙으로 취소되며 감소 전용 주문은 남는다. 감시 안 됨인 채 이유만 바뀌면 기록하지 않고 since도 그대로다 | 단위, 통합 | 통과 | `cargo test -p oms-core --test monitor; cargo test -p oms-node --test monitor_node a_stale_heartbeat` |
-| V-GATE-2 | 게이트가 있는 설정의 booted는 감시 안 됨(no heartbeat since the start, 하트비트 없음)으로 시작한다: 재시작 전의 하트비트는 세지 않고, 첫 신선한 하트비트까지 일반 주문은 Hold(Unmonitored)로 거절되며, 하트비트가 없으면 booted의 기록 시각보다 60초 넘은 첫 틱에 걸린 일반 주문의 취소를 요청한다. 이미 감시 안 됨일 때의 부팅도 since를 부팅 시각으로 다시 정해, 그보다 60초 전에는 취소하지 않는다. 게이트를 켜는 config_activated도 활성화 시각부터 같다(no heartbeat since the gate came on), 끄는 설정은 상태와 보류를 지우고, 값만 바꾸는 설정은 상태를 그대로 둔다. W1·W2가 신선한 첫 하트비트가 monitor_changed{true}로 풀고, 그 뒤 2단계는 새 요청을 하지 않으며 이미 한 요청은 남는다. 게이트 상태는 저널에서 같은 상태로 재실행된다. 표 7-7의 시험에서 Unmonitored 줄은 일반 주문 거절, 감소 전용 받음이다(증거금 정책 있음). 프로세스에서: 재시작한 노드는 직전에 감시됨이었어도 no heartbeat since the start로 감시 안 됨이다. 새 데이터 디렉터리의 첫 시작은 게이트를 켜는 config_activated의 경로를 따라 no heartbeat since the gate came on으로 감시 안 됨이 된다 | 단위, 통합 | 통과 | `cargo test -p oms-core --test monitor; cargo test -p oms-core --test holds the_hold_table` |
-| V-GATE-3 | monitor.sock은 게이트가 있을 때만 열리고(모드 0600) 자기 풀이 연결 둘이다: 셋째 연결은 거절된다. 그 소켓은 전략 없는 hello, ping, heartbeat만 받는다: status, list_open, new_order, halt, watcher_kill, snapshot은 forbidden, 전략을 단 hello는 unauthorized. heartbeat는 거래·운영 소켓에서 forbidden이고 기록되지 않는다. hello 전의 heartbeat는 unauthorized이고 기록되지 않는다. 계약의 줄(epoch ms, null 포함)은 해석되고, 기록이 내구화된 뒤 recorded로 답한다(답이 온 때 저널에 하트비트가 있다). 노드는 ms를 µs로 바꾸고(넘침은 거절), 연결마다 지난 1초에 둘을 받았으면 그 뒤를 overloaded로 거절한다(한꺼번에 보낸 넷 가운데 둘 기록). 코어는 검사 시각이 기록 시각보다 1초 넘게 뒤인 하트비트, W1·W2가 없거나 키가 W1..W9 밖이거나 이름이 1~64자가 아닌 하트비트, 게이트가 없을 때의 하트비트를 bad_request로 거절하고 아무것도 기록하지 않는다. 제어 문자가 든 워처 이름의 하트비트도 코어에 넘기기 전에 거절한다. 검사 값이 음수나 문자열인 heartbeat 줄은 해석되지 않는다 | 단위, 통합 | 통과 | `cargo test -p oms-node --test monitor_node; cargo test -p oms-node --lib monitor::; cargo test -p oms-core --test monitor; cargo test -p oms-api wire_example_of_the_heartbeat` |
-| V-GATE-4 | Input::Watcher(Heartbeat), watcher_heartbeat, monitor_changed, policy.monitor, core.monitor는 기록 스키마를 올리지 않는다(2 그대로): 게이트가 없으면 쓰지 않아 옛 상태와 설정의 바이트가 그대로이고, 게이트를 켜는 설정·신선한 하트비트·오래된 하트비트·2단계의 틱이 든 저널은 라이브 상태로 복구되며 verify --re-decide를 통과한다. 이벤트 필드 표가 두 이벤트의 모든 필드를 적는다(W1..W9 포함). [core.policy.monitor]의 값은 heartbeat_max_age_us 10..=300초, check_max_age_us 2..=60초, unmonitored_cancel_us 10..=600초이고, 모르는 키는 거부되며, mainnet은 표 없이 시작하지 않고 testnet과 가상 거래소는 선택이다. 표가 있으면 runtime.tick_ms는 1,000 이하다(1,001은 거부, 표가 없으면 60,000도 받음). 세 소켓 경로는 서로 달라야 한다. 알림 hold:unmonitored는 지나가는 상태의 유예(30초)를 받고 이유·시각·2단계까지 남은 초(또는 취소 중)와 증거금 정책에 따른 감소 전용 문장을 담으며, 신선한 하트비트로 해소된다. status.core.monitor는 게이트가 없으면 gate: false다 | 단위, 통합 | 통과 | `cargo test -p oms-node --test record_schema; cargo test -p oms-node --lib alerts:: config::; cargo test -p oms-core --test event_fields; cargo test -p oms-core --test monitor the_gate_values` |
-| V-WATCH-1 | 워처 crate는 OMS와 코드를 나누지 않는다: oms-*·md-* crate를 어떤 종류(정상, 빌드, 개발)와 target으로도 선언하지 않고, 개발 의존성 http-fake 말고는 작업 공간 crate를 쓰지 않으며, 그 정상·빌드 그래프에서 OMS·시세·작업 공간 crate에 닿지 않고, watcher-conformance 말고는 아무 작업 공간 crate도 워처에 의존하지 않으며, 소스가 #[path]·include!·속성 안의 path =·심볼릭 링크로, 매니페스트의 target이 소스 경로로 패키지 밖의 파일을 가져오지 않는다. 검사 스크립트는 그 각각을 심으면 그 결과 줄과 종료 코드 1을 내고, 확인할 수 없을 때(맞지 않는 잠금, 없는 매니페스트)는 ok가 아니라 종료 코드 2를 낸다 | 소스 검사 | 통과 | `tools/ci/watcher_independent.sh && tools/ci/selftest.sh` |
-| V-WATCH-2 | 워처의 독자 읽기와 저널 상태가 코어와 같은 집합을 세운다: 코어가 결정하고 oms-journal이 쓴 저널을 기록마다 읽어, 열린 주문 집합, 열린 주문마다 종목·방향·수량·전략·클라이언트 ID·거래소 주문 번호·누적 체결·결과 불명·거래소 종결, 종목마다 포지션, 체결·거래소 변경·펀딩 키와 그 거래소 시각, 체결 바닥, 킬 보류와 워처 불일치 보류, 일 기준값이 같은 기록을 재생한 코어와 같다. 시나리오들이 C-TAIL 표의 이벤트를 모두 쓴다. 닫힌 주문의 정보는 purged까지 남아 늦은 체결의 방향과 종목을 주고, 펀딩은 포지션을 바꾸지 않으며, 체결 바닥은 내려가지 않고 booted는 키를 잊지 않으며, 규칙에 맞지 않는 기록(모르는 주문의 체결, 열린 주문의 purged, 형식이 틀린 필드, 순서가 어긋난 기록)은 래치되는 오류다. 독자는 journal-<20자리>.oj만 읽기 전용으로 열고 LOCK을 열지 않으며 아무것도 만들거나 이름을 바꾸거나 쓰지 않아, OMS의 쓰는 쪽이 잠금을 쥔 동안 읽어도 디렉터리가 그대로이고 잠금이 쓰는 쪽에 남는다. 독자는 위치(세그먼트 첫 번호, 바이트 오프셋, 다음 번호)에서 16바이트 프레임 머리와 그 길이의 payload를 하나씩 읽어 max_records, 상한, 파일 끝에서 멈추고 세그먼트를 통째로 읽거나 나머지를 다시 읽지 않는다. 독자는 다음 번호가 상한보다 크면 읽지 않아 상한 너머의 쓰는 중인 프레임이나 쓰레기는 오류가 아니다. 세그먼트 헤더는 매직, 64 KiB 이하의 길이, CRC, format 1, record_schema 1·2, 기다리는 다음 번호인 first_seq, 모든 세그먼트에 같은 instance_id를 요구하고, 프레임을 아직 읽지 않은 세그먼트는 호출마다 헤더를 다시 읽는다. 프레임은 16 MiB 이하의 길이, 번호와 payload의 CRC-32, 기다리는 번호를 요구하고, payload는 seq가 프레임 번호와 같고 at이 앞 기록보다 작지 않으며 events가 키 하나인 객체의 목록인 JSON 객체여야 한다. 독자는 세그먼트 끝에서 다음 번호로 시작하는 세그먼트를 열어 회전과 스키마 변경을 따라간다. 워처는 상태를 저장하지 않고 시작마다 기록 1부터 읽으며, 가장 작은 세그먼트가 1에서 시작하지 않으면 NoStart다. 호출당 기록 수 MAX_RECORDS는 10,000이다(판단). 좋은 기록 뒤에 오류가 오면 그 호출은 좋은 기록을 돌려주고 다음 호출이 오류를 내며, 위치는 오류 앞에 머물러 파일이 바뀔 때까지 같은 오류를 낸다. Damaged·NoStart·Io는 위치를 움직이지 않고 다음 호출이 같은 자리에서 다시 읽어 재시작 없이 낫는다. UnknownEvent·Schema·Format·Instance는 래치되는 오류다. 래치된 Tail은 파일을 고쳐도 같은 오류만 내고 프로세스가 다시 시작해야 다시 읽는다. KNOWN은 C-TAIL 필드 표의 이벤트 51개이고, 시험이 tail.md를 읽어 양쪽 방향으로 비교하므로 OMS가 이벤트를 더하면 워처가 배울 때까지 실패한다. 소수 Dec(i128, 10^8 배)는 선택적 -, 숫자, 선택적 .과 1~8자리만 받고 지수, +, 9자리 이상, 빈 문자열, 앞뒤 공백은 거절하며, 덧셈·뺄셈·부호 바꿈은 정확하고 넘치면 오류다. Base32Pair는 13자리-13자리의 소문자 0-9a-v이고 첫 자리가 f 이하이며(인스턴스 0x0123456789abcdef, 주문 42 → 028q5cu4qnjff-000000000001a), 코어의 형식과 같게 부호화하고 거절한다 | 단위, 통합 | 통과 | `cargo test -p watcher --test state && cargo test -p watcher-conformance` |
-| V-WATCH-3 | 워처의 자기 Bybit 클라이언트는 GET을 거래소 문서대로 서명하고(정렬된 질의, 보낼 수 없는 값은 보내기 전에 거절, 머리글 다섯, 보내는 순간의 시계), 응답을 부류로 나누며(not_sent, no_answer, rate_limited, clock, refused, auth, ip_banned; unreadable은 검사가 만든다), 키 거절(HTTP 401, retCode 10003·10004·10005·10007·10010·33004) 뒤에는 프로세스가 다시 시작할 때까지 Bybit에 아무 요청도 보내지 않고, HTTP 403 뒤에는 응답 순간부터 600초 동안 모든 요청과 IP 반향을 보내지 않으며, 어느 10초 창에서도 60개를 넘겨 보내지 않고 넘는 요청은 버리지 않고 기다린다. 요청은 보내기 전에 세고, 지표는 VictoriaMetrics 가져오기 JSON 한 줄씩(watcher_up 포함) 큐 없이 밀어 넣는다. retCode 0이면 result를, 없으면 null을 돌려준다. 클라이언트 안에서는 다시 시도하지 않고 다음 라운드가 다시 묻는다. watcher_auth_rejected는 클라이언트를 만들 때 0, 래치할 때 1이다. 시계가 뒤로 가면 가드의 옛 기록이 창에 남아 시계가 그 값을 다시 지날 때까지 막는다. 지표 등록부는 모든 계열에 venue=bybit·host·watcher 이름표를 붙이고 이름표를 정렬하며, 값이 유한하지 않은 계열과 지운 게이지는 보내지 않는다. 실패한 밀어 넣기의 로그는 첫 실패와 그 뒤 1분에 한 번까지만 쓴다 | 단위, 통합(loopback) | 통과 | `cargo test -p watcher --test sign --test client --test metrics` |
-| V-WATCH-4 | 워처의 설정 파일은 스펙 표의 모든 필드를 그 기본값과 검사대로 읽는다: 모르는 키와 표는 거부하고, mainnet은 mainnet_confirmed = true일 때만 받으며, 범위는 양 끝을 포함하고, status_url과 vm_url은 loopback만, ip_echo_url은 https만, 자격 파일은 절대 경로이고 ..이 없으며 링크를 따라 봐도 데이터 디렉터리 밖이다. 자격 파일은 링크를 따르지 않고 FIFO를 기다리지 않는 한 핸들로, 이 프로세스의 uid가 소유하고 권한이 정확히 0600 또는 0400인 일반 파일일 때만, api_key와 api_secret 둘만 비어 있지 않게 읽는다. 모든 거부는 한 줄이고, 자격 파일의 오류는 내용을 인용하지 않으며 비밀은 어디에도 찍히지 않는다. 시작 확인(U19a4b)은 query-api의 마스터 키, 다른 userID, IP에 묶이지 않은 키([]·*)와 행이 없거나 USDT로 정산되지 않는 기호를 종료 2의 이유 한 줄로 거부하고, 키 거절(auth)이면 끝내지 않고 요청 없이 떠 있으며, 그 밖의 답은 답의 시각 + 5초(403이면 + 600초)에 다시 묻는다. watcher_api_key_days_left는 expiredAt까지의 날을 내림하고 해당 없음(없음, null, 1970-01-02 이하)이면 내보내지 않는다. watcher_public_ip_ok는 반향의 주소가 마지막으로 통과한 ips에 있을 때만 1이다. IP 재확인은 지난 재확인의 마지막 답 + ip_check_ms마다 돌고, 실패하면 0으로 두고 남은 날을 지키며, 시작 규칙에 더는 맞지 않는 키는 재시작까지 모든 Bybit 요청을 멈추고 0으로 둔다. 재확인이나 5단계에서 키가 거절되면 Bybit에는 묻지 않고 반향만 ip_check_ms마다 이어 간다. 요청이 답을 기다리지 않을 때 온 답은 아무것도 바꾸지 않는다. network는 testnet 또는 mainnet이고 REST 주소는 각각 https://api-testnet.bybit.com, https://api.bybit.com이다. 5단계에서는 실패한 그 기호만 다시 묻고 앞의 기호는 다시 묻지 않는다. 5단계 요청은 category와 symbol만 보내고(settleCoin 없음) 답에서 symbol이 같은 행을 고른다 | 단위 | 통과 | `cargo test -p watcher --test config --test creds --test start` |
-| V-WATCH-5 | 워처의 검사 엔진은 첫 라운드와 첫 하트비트를 start_ms에 내고, 한 검사의 라운드를 겹치지 않으며 늦은 라운드는 한 번만 돌린다. 라운드는 거래소 쪽을 모두 읽은 뒤에만 그 라운드만의 상태 요청을 내고, 그 답은 물은 라운드만 쓰며, 그 상한까지 저널을 읽은 뒤 비교한다. 다른 인스턴스의 상태와 그 요청을 낼 때 읽은 기록보다 낮은 상한은 읽기를 재시작까지 래치하고 그 뒤 라운드는 아무것도 묻지 않는다. 다시 읽는 저널 오류는 다음 라운드에 낫고 watcher_journal_error를 0으로 돌린다. 기한(낸 시각 + request_timeout_ms + 11초)까지 답이 없는 요청은 라운드를 실패로 닫고 늦은 답은 버린다. 차이는 지난 완료 라운드와 이번 라운드에 같은 정체로 있고 이번 라운드에서 min_age_ms 이상 늙었을 때만 확정되며(실패한 라운드는 지난 완료 라운드의 sighting을 바꾸지 않는다), 두 번 보았지만 어린 차이는 라운드를 성공으로 치지 않는다. 확정은 정체마다 한 번 세고(한 라운드에 두 번 실린 정체도 하나) 1024바이트 이하의 detail을 실은 Mismatch 하나를 내며, watcher_mismatch_active는 라운드가 그것을 보지 않으면 내려간다. W1은 OMS의 쪽 규칙대로 열린 주문을 읽고(커서 없는 가득 찬 쪽, 같은 커서, 필드 없는 행은 unreadable, 20쪽 한도), 모르는 주문(foreign), 저널에서 닫힘, 거래소 종결 뒤에도 열림, 종목·방향 다름, 확인된 주문의 거래소 부재를 차이로 보고, 확인되지 않았거나 결과 불명이거나 거래소 종결된 주문의 부재는 비교하지 않는다. 나이는 주문의 fact_at(다른 이벤트로 움직이지 않음) 또는 첫 sighting이다. W1은 order/realtime을 category=linear, settleCoin=USDT, limit=50으로 묻는다 | 단위(sans-IO, 수동 시계) | 통과 | `cargo test -p watcher --test w1 --test engine` |
-| V-WATCH-6 | 워처의 W2는 position/list(category=linear, settleCoin=USDT, 200개씩 5쪽까지)를 W1의 쪽 규칙으로 읽고(커서 없는 가득 찬 쪽, 같은 커서, 한 기호의 두 행(헤지 모드), 모르는 방향, 소수가 아닌 크기, 크기 있는 빈·없는 방향, 음수 크기, 기호 없는 행은 unreadable, 6쪽째는 실패), 기호마다 d = 거래소 − 저널(체결 + 외부 체결 + 거래소 변경 + 조정)을 차이 (W2, position, 기호, d)로 본다(범위를 넘은 d는 값 overflow인 차이). 다른 d는 처음부터 센다. 저널의 마지막 변경 시각과 거래소의 최근 변경 시각(updatedTime, 없으면 그 크기를 처음 본 라운드 seen_at) 중 알려진 것이 min_age_ms보다 어리면 첫 sighting이어도 미루고 라운드는 성공이 아니며, 모르는 시각은 늙음이라 저널이 바꾼 적 없는 기호의 거래소 포지션은 두 번째 라운드에 확정된다. 행이 없는 기호는 크기 0으로 보아 막 닫힌 포지션도 처음 0으로 본 라운드부터 2초 미루고, 첫 완전한 읽기의 크기에는 seen_at이 없으며, 모든 쪽을 읽은 뒤 실패한 라운드의 크기는 마지막 거래소 답의 시각으로 남고, 쪽 사이에서 실패한 라운드는 아무것도 남기지 않는다. 초당 5번의 체결이 60초 이어지는 동안 Mismatch가 없고, 체결이 멈춘 뒤 심은 차이는 라운드의 어느 위상에서도 3초 안에 확정된다 | 단위(sans-IO, 수동 시계) | 통과 | `cargo test -p watcher --test w2` |
-| V-WATCH-7 | 워처의 엔진은 확정된 차이를 그것을 실은 보내기가 "held"로 답할 때까지 빚으로 두고("already held", 보류를 보이는 저널, 실패는 갚지 않고, 라운드가 더 보지 않아도 확정 때의 detail로 보낸다), 저널 상태가 그 검사의 최근 held/already held 답 뒤에 낸 상태 요청의 상한에서 보류 꺼짐을 보일 때, 지난 보내기 시작부터 mismatch_resend_ms가 지났을 때, 그 검사의 보내기가 진행 중이 아닐 때만 보낸다(보고가 없는 보내기는 낸 시각 + 2 × request_timeout_ms + 1초에 실패하고, 그 뒤에 온 늦은 보고는 번호가 달라 아무것도 갚지 않는다). W1·W2는 라운드가 아직 보는 확정된 차이를 해제 뒤 다시 보낸다. admin.sock 클라이언트는 hello 다음 watcher_mismatch를 보내고 두 답을 읽는다. monitor.sock 클라이언트는 연결 하나를 유지하고 hello를 먼저, 그다음 W1~W4의 성공 시각(없으면 null)을 보내며, 끊김·답 없음 뒤 다음 하트비트에 다시 연다. 실행은 설정을 읽은 때부터 지표를 밀어 넣고, 시작 확인, /api/status 기다림, 재생 동안에도 IP를 다시 확인하고, 재확인에서 시작 규칙에 맞지 않는 키는 모든 Bybit 요청을 멈추며, OMS가 답하지 않으면 아무것도 판단하지 않고, 시작 거부는 코드 2, shutdown 입력은 새 라운드 없이 마지막 밀어 넣기와 모니터 연결 닫음 뒤 0으로 끝난다. 'recorded' 답이면 watcher_heartbeat_ok_ts를 그 하트비트의 시계(epoch 초)로 둔다. 하트비트의 오류 답은 연결을 그대로 두고 error 줄을 1분에 하나까지 쓴다 | 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나) | 통과 | `cargo test -p watcher --test admin --test heartbeat --test runtime --test binary` |
-| V-WATCH-8 | 워처의 W4는 execution/list를 고정된 끝(첫 쪽의 시계)과 시작 max(워터마크 − w4_overlap_ms, ⌈체결 바닥/1000⌉)(7일로 자름)의 창으로 훑고, 라운드마다 w4_max_pages쪽까지 읽어 더 긴 훑기는 다음 라운드가 같은 창과 커서로 이으며(성공 시각은 끝난 훑기에서만), 빈 쪽이나 빈 커서에서 끝내고, 바뀌지 않은 커서와 읽을 수 없는 쪽은 라운드를 실패시켜 같은 커서로 다시 읽되 연달아 3번이나 50라운드면 같은 시작과 새 끝으로 다시 시작한다. 행은 execType으로 먼저 나눠 Trade는 저널 체결과, AdlTrade·BustTrade·Delivery·Settle은 저널 거래소 변경과 키 <symbol>:<execId>로 비교하고, Funding은 비교하지 않으며, 모르는 형은 끝난 훑기에서 바로 확정하고, 형이 필요로 하는 필드가 없는 행과 execTime이 훑기의 끝보다 뒤인 행은 unreadable_row, 바닥 아래 행과 수량 0인 Trade·거래소 변경 행은 무시한다. 차이는 두 훑기와 execTime 나이로 확정하고 어린 차이는 훑기를 실패시키지 않는다. 워터마크는 확정되지 않은 가장 오래된 행(execTime 없는 행은 모든 행보다 오래됨) 아래의 가장 새 행으로만, 뒤로 가지 않게 움직인다. held 답(already held는 갚지 않는다)으로 갚고 그 답 뒤에 낸 상한에서 보류 꺼짐을 본 W4 정체는 거두어 다시 보내지도 세지도 않는다. 처음 워터마크는 첫 훑기 때의 now − w4_initial_lookback_ms(기본 600초)이고 ⌈체결 바닥/1000⌉보다 낮지 않다 | 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나) | 통과 | `cargo test -p watcher --test w4 --test runtime` |
-| V-WATCH-9 | 워처의 W3은 w3_ms마다 wallet-balance?accountType=UNIFIED의 UNIFIED 계좌 하나(정확히 하나, 세 필드가 저널 소수, 유지증거금이 음수가 아님; 아니면 unreadable로 라운드 실패)를 OMS의 공식으로 판단한다: account_mm_rate는 maintenance > 0이고 maintenance × 10 000 ≥ account_mm_rate_max_bps × margin_balance(같으면 건다), daily_loss는 저널의 일 기준값이 오늘의 UTC 날이고 (base − totalEquity) × 10 000 > daily_loss_bps × base(오늘의 기준이 없으면 판단하지 않는다). 정체는 종류뿐이고 두 라운드 연속에서 나이 없이 확정하며, 위반이 남아 있으면 해제 뒤 다시 보낸다. W2는 W4가 마지막으로 맞춘 그 기호의 execTime이 updatedTime이나 seen_at보다 새면 그것을 거래소의 변경 시각으로 쓴다. 하트비트의 W3·W4는 그 검사의 마지막 성공 시각이고, 실행은 W2(W4의 시각 지도와 함께), W3, W4를 돌리며 엔진 전에는 네 검사의 나이를 boot_ms부터 내보낸다. W4의 시각은 체결이 막 맞은 기호의 차이를 많아야 min_age_ms 동안만 미루고 그 뒤에는 확정되게 한다 | 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나) | 통과 | `cargo test -p watcher --test w3 --test w2 --test heartbeat --test runtime` |
-| V-WATCH-10 | W1·W2·W3·W4를 설계 간격(1초, 1초, 2초, 5초)으로 돌린 모의 1분(수동 시계, 실제 rest::Guard를 거친 모델 거래소, 요청 지연 0)에서 5초에 체결 30개를 고르게 주면 대조 요청은 W1 60 + W2 60 + W3 30 + W4 12 = 162개, 초당 2.7 이하이고 차이도 실패한 라운드도 없다. 5초에 100개면 192개(초당 3.2; 정상 상태는 훑기당 4쪽, 초당 3.3)로 설계 예산을 넘지만 W4는 12 훑기를 모두 자기 라운드에서 끝내고 정상 상태의 창은 15초다. 열린 주문 500개(W1 라운드 11쪽)에서는 가드가 10초에 60을 지키며 W1 라운드를 늘리지만 하트비트마다 W1·W2의 나이는 10초 아래다 | 단위(sans-IO 엔진과 sans-IO 가드, 수동 시계) | 통과 | `cargo test -p watcher --test budget -- --nocapture` |
-| V-WATCH-11 | 워처의 [telegram]은 token_file 하나만 받고(모르는 키 거부) mainnet은 그것 없이 시작하지 않는다(testnet은 warn 한 줄). 토큰 파일은 설정의 경로 규칙과 자격 파일의 파일 규칙(링크 아님, 일반 파일, 실효 uid 소유, 정확히 0600·0400)을 여는 핸들에 적용하고, 적힌 경로나 가리키는 곳이 git 저장소 안이면 읽기 전에 거부하며, {"token": "<digits>:<[A-Za-z0-9_-]+>", "chat_id": 비지 않은 문자열 또는 정수} 말고는 거부한다. 거부는 내용과 토큰을 인용하지 않고, 실행은 그것을 시작 확인 전에 종료 코드 2로 끝내며 요청을 보내지 않는다. 읽은 값과 설정의 Debug는 토큰을 보이지 않는다. 메시지는 [WATCH P1] bybit {name} {MM-DD HH:MM:SS KST}로 시작하고, split은 각 부분을 3,500 UTF-16 단위 이하로 줄 끝에서(긴 줄은 문자 단위로, 이모지를 쪼개지 않고) 자르며 글자를 잃지 않는다(부분 경계와 맨 앞의 빈 줄은 사라질 수 있고, 빈 부분은 만들지 않는다). Outbox는 50개를 넘으면 가장 오래된 부분을 버리고 세고, 큐가 빈 뒤 알림 하나로 그 수를 알리며, 보내는 중 버려진 부분을 두 번 지우거나 세지 않는다. outcome은 2xx와 ok true만 Delivered, 400·413은 Refused(버리고 셈), 나머지는 Retry(두고 흘려보내기를 끝냄)다. Repeat는 시작 한 번, 300,000 ms마다 최신 문구 한 번, 해소: <시작 문구> 한 번을 낸다. 송신 태스크(alert::spawn, U19b1b)는 경로를 순서대로 써서 네트워크 오류면 다음 경로(DNS 다음 고정 주소)로 가고, HTTP 답이 결정하며, 답한 경로가 다음부터 맨 앞이다. 부분을 순서대로 하나씩 보내고 Retry에서 그 부분을 두고 흘려보내기를 끝낸다. 새 메시지가 Notify로 바로 깨우고, 그 밖에는 흘려보내기가 끝난 주입된 시계 + 5,000 ms에 실행의 틱(Handle::tick)만 깨운다(자기 타이머 없음). 답이 오지 않는 요청은 실제 시간 10,000 ms의 요청 한도에서 실패로 세고 그 부분을 둔다. 로그 줄은 경로와 원인을 적고 토큰과 URL을 적지 않는다. finish(5,000)은 마지막 흘려보내기를 실제 시간 5,000 ms 안에서 하고 남은 부분을 한 줄로 센다. 네 지표(queued, delivered, dropped, failures)가 이것을 따른다. P1 조건(U19b1c): 엔진은 라운드마다 새로 확정한 식별자의 내용을 Action::Confirmed 하나로 그 라운드의 Mismatch보다 앞에 내고 다시 보내기는 내지 않는다. 불일치 P1은 확정마다이고 검사마다 첫 것은 바로, 그 뒤 마지막 메시지에서 60,000 ms에 하나이며 그 사이 확정은 모아(내용 다섯, 각 600 UTF-16 단위, 나머지는 수) 다음 메시지로 간다. Client::auth_stop은 래치를 건 첫 답(retMsg, HTTP 401의 본문)이나 규칙 멈춤의 이유를 바꾸지 않고 들며, 실행은 틱마다 그것과 start::PublicIp(게이지가 0인 이유)를 반복 규칙에 줘서 다시 보내지 않는 답(10010·10003·33004·401 포함)마다 답 뒤의 첫 틱에 하나, 5분마다 하나, 공인 IP는 해소 하나를 보낸다. 송신기는 시작 확인 전에 뜨고(2단계의 키 거부도 알림), 시작 거부는 P1 하나를 보내고 5,000 ms 안에 흘려보낸 뒤 종료 코드 2, 종료는 60초 간격 안에 모인 불일치 메시지를 간격과 상관없이 넣고 U19a 단계 뒤 흘려보낸다. 시작 거부의 이유는 200자로 자른다. 실행의 틱이 송신기의 다시 보내기를 깨운다. [telegram]이 없으면 모든 P1(불일치, 키 거부, 시작 거부)은 warn 한 줄이다. mainnet_confirmed 검사가 [telegram] 검사보다 먼저다 | 단위(순수 함수, 파일 시스템)와 통합(runtime::run과 송신 태스크, loopback 가짜, 실제 시간) | 통과 | `cargo test -p watcher --test alert --test config --test creds --test runtime --test engine --test client` |
+| V-KILL-5 | 이 프로세스의 루프가 거래소에서 0건을 확인한 뒤(confirmed) 새 킬 계기(StreamLost, watcher_kill)가 오면 코어는 kill_rearmed{source, note}로 확인(confirmed_at, outcome)을 지우고 새 Kill을 부르며, 래치의 첫 메모는 그대로다. 새 루프가 확인하기 전 clear-hold는 kill_unconfirmed로 거절되고, 재실행이 같은 상태를 만든다. 확인 전의 두 번째 계기와 unsupported 답 뒤의 계기는 아무것도 쓰지 않는다. [venue]의 킬 필드 다섯은 설계 기본값으로 읽히고 각 경계 밖 한 걸음은 거절된다(kill_after_ms는 2 × ping 이상) | 단위 | 미실행 | `cargo test -p oms-core --test holds a_new_trigger second; cargo test -p oms-node --lib config::tests::the_kill_loop; cargo test -p oms-core --test event_fields` |
+| V-LIVE-1 | [liveness]에 적힌 전략의 마지막 거래 연결이 닫히거나, 그 전략의 어느 연결에서도 liveness_ms 동안 요청이 없으면(ping도 요청이다), 노드는 다음 hello까지 한 번 Input::Session(Lost)를 넣고, 코어는 strategy_link_lost와 같은 기록에서 그 전략의 걸린 일반 주문 가운데 취소 요청이 없는 것마다 규칙 strategy_link의 취소를 요청한다. 그 전략의 감소 전용 주문과 다른 전략의 주문은 취소하지 않는다. 프로세스에서: a(5,000 ms)와 b가 적혔을 때 a의 연결을 닫으면 거래소에서 a의 일반 주문만 취소되고 a의 감소 전용과 b의 일반 주문은 남는다. ping만 8초 보내면 잃음이 없고, 멈추면 마지막 요청 5초 뒤에서 7초 사이에 잃음이 기록된다. 두 연결 가운데 하나가 닫혀도 잃음이 없고 마지막이 닫히면 있다. 운영 소켓의 hello는 세지 않는다. 한 연결이 다른 전략으로 다시 hello하면 앞 전략에서는 닫힌 연결이다: 그것이 a의 마지막 연결이면 곧바로 last trading connection closed로 잃음이 되고 a의 일반 주문이 취소된다. 노드의 표에서: 정확히 liveness_ms의 침묵은 잃음이 아니고 1 ms 넘으면 잃음이며, 침묵은 마지막 요청이나 마지막 hello부터 잰다. 같은 연결의 두 번째 hello는 연결 수를 다시 세지 않는다 | 단위, 통합 | 미실행 | `cargo test -p oms-node --test liveness; cargo test -p oms-node --lib liveness::; cargo test -p oms-core --test strategy_link` |
+| V-LIVE-2 | StrategyLink는 그 전략의 일반 주문만 거절한다: holds(Some(s))에만 있고 holds(None)과 다른 전략의 목록에는 없다. 증거금 정책이 있으면 그 전략의 감소 전용 주문은 받고, 없으면 모든 보류처럼 감소 전용도 거절한다. 걸린 동안의 잃음은 기록하지 않고 첫 이유와 시각이 남으며, 설정에 없는 전략의 잃음은 bad_request로 기록하지 않는다. 그 전략이 없는 설정이 활성화되면 보류가 사라진다. 표 7-7의 시험에서 StrategyLink 줄은 일반 주문 거절, 감소 전용 받음이다 | 단위 | 미실행 | `cargo test -p oms-core --test strategy_link --test holds` |
+| V-LIVE-3 | 잃음 뒤(또는 내구화된 코어가 그 전략을 보류 중일 때) 거래 소켓의 hello는 Input::Session(Hello)를 control 레인에 넣고, strategy_link_restored가 내구화된 뒤에 답한다: 답이 온 순간 같은 연결의 status(내구화된 기록만)에 보류가 없고 저널 파일에 복구가 있다. 복구가 아직 답을 받지 않은 동안 같은 전략의 hello(다른 연결이든 같은 연결이든)도 복구를 넣으므로 그 답도 앞 복구가 내구화된 뒤에 온다(코어에서는 기록 없는 not held, 커밋 단계가 순서대로 답한다). 큐를 기다리던 잃음은 복구보다 먼저 넣는다(표의 hello가 넣는 순서: lost, hello). 큐가 가득이면 잃음은 버리지 않고 틱마다 다시 넣는다. 재시작 뒤 보류는 저널에서 복원되고 다음 hello가 푼다. 시작할 때는 걸린 일반 주문이 있는 적힌 전략만 무장한다: 프로세스에서 강제 종료(SIGKILL) 뒤 다시 붙지 않으면, 일반·감소 전용 주문이 걸린 a는 시작 5초 뒤 no request for 5000 ms로 잃음이 되고 일반 주문만 취소되며, 감소 전용 주문만 걸린 b는 무장하지 않는다. 걸리지 않은 전략의 hello는 기록하지 않는다. 큐가 가득이라 복구를 넣지 못한 hello는 거절되고 연결을 세지 않으며, 다음 hello가 다시 복구를 넣는다. 재시작 전부터 코어가 보류 중인 전략은 시작 때 다시 잃음으로 알리지 않고 다음 hello가 복구한다. 코어가 보류 중이면 [liveness]에 적히지 않은 전략의 hello도 복구를 넣는다 | 단위, 통합 | 미실행 | `cargo test -p oms-node --test liveness hello; cargo test -p oms-node --lib liveness::; cargo test -p oms-core --test strategy_link` |
+| V-LIVE-4 | Input::Session, strategy_link_lost, strategy_link_restored, core.strategy_link는 기록 스키마를 올리지 않는다(2 그대로): 비어 있으면 쓰지 않아 옛 상태의 바이트가 그대로이고, 잃음·복구·잃음이 든 저널은 라이브 상태로 복구되며 verify --re-decide를 통과한다. 이벤트 필드 표가 두 이벤트의 모든 필드를 적는다. 알림 strategy_link:<s>는 유예 0이고 이유·시각과 증거금 정책에 따른 감소 전용 문장을 담으며 hello로 해소된다. [liveness]의 값은 1,000..=60,000 ms, 이름은 [core]의 전략이어야 하고, mainnet은 사용 중인 전략이 모두 적혀야 시작한다. 적히지 않은 전략은 감시하지 않는다. 보류 사유 StrategyLink는 hold: 알림 조건을 만들지 않고 전략마다의 strategy_link:<s> 조건이 맡는다 | 단위, 통합 | 미실행 | `cargo test -p oms-node --test record_schema; cargo test -p oms-node --lib alerts:: config:: liveness::; cargo test -p oms-core --test event_fields` |
+| V-GATE-1 | 모니터링 게이트는 기록 시각으로 판단한다(250 ms 틱, 엄격한 >): 하트비트가 0초에 오고 끊기면 30.0초까지 감시됨, 30.25초에 monitor_changed{false}, 그보다 60초 넘은 첫 틱(90.5초)에 걸린 일반 주문의 취소를 한 번 요청하고(규칙 unmonitored) 그 뒤 틱은 더 묻지 않는다. 5초마다 오는 하트비트에서 W1이나 W2가 0초에 멈추면 10초의 하트비트(정확히 10초)는 감시됨, 15초의 하트비트가 닫고, 하트비트가 계속 와도 취소는 닫은 기록보다 60초 넘은 첫 틱에 온다. 검사의 나이는 그것을 알린 하트비트의 시각에서 잰다. W3·W4는 기록할 뿐 판정하지 않는다. 알려진 한계(리뷰 1 M1): 기록 시각이 멈춘 동안(호스트 시계가 뒤로 감) 틱 2,400개에도 monitor_changed와 취소가 없고, 옛 시계로 찍은 W1·W2의 하트비트는 받아들여져 게이트가 열린 채이며, 새 시계로 590초 뒤에 찍힌 하트비트는 게이트를 닫는다. 감소 전용 주문은 취소하지 않고, 연결이 내려가 있는 동안은 묻지 않으며, 다한 취소는 다시 묻지 않는다. 프로세스에서: W2가 11초 전인 하트비트가 곧바로 닫고, 거래소의 일반 주문은 10초(unmonitored_cancel_us) 전에는 남고 그 뒤 규칙으로 취소되며 감소 전용 주문은 남는다. 감시 안 됨인 채 이유만 바뀌면 기록하지 않고 since도 그대로다 | 단위, 통합 | 미실행 | `cargo test -p oms-core --test monitor; cargo test -p oms-node --test monitor_node a_stale_heartbeat` |
+| V-GATE-2 | 게이트가 있는 설정의 booted는 감시 안 됨(no heartbeat since the start, 하트비트 없음)으로 시작한다: 재시작 전의 하트비트는 세지 않고, 첫 신선한 하트비트까지 일반 주문은 Hold(Unmonitored)로 거절되며, 하트비트가 없으면 booted의 기록 시각보다 60초 넘은 첫 틱에 걸린 일반 주문의 취소를 요청한다. 이미 감시 안 됨일 때의 부팅도 since를 부팅 시각으로 다시 정해, 그보다 60초 전에는 취소하지 않는다. 게이트를 켜는 config_activated도 활성화 시각부터 같다(no heartbeat since the gate came on), 끄는 설정은 상태와 보류를 지우고, 값만 바꾸는 설정은 상태를 그대로 둔다. W1·W2가 신선한 첫 하트비트가 monitor_changed{true}로 풀고, 그 뒤 2단계는 새 요청을 하지 않으며 이미 한 요청은 남는다. 게이트 상태는 저널에서 같은 상태로 재실행된다. 표 7-7의 시험에서 Unmonitored 줄은 일반 주문 거절, 감소 전용 받음이다(증거금 정책 있음). 프로세스에서: 재시작한 노드는 직전에 감시됨이었어도 no heartbeat since the start로 감시 안 됨이다. 새 데이터 디렉터리의 첫 시작은 게이트를 켜는 config_activated의 경로를 따라 no heartbeat since the gate came on으로 감시 안 됨이 된다 | 단위, 통합 | 미실행 | `cargo test -p oms-core --test monitor; cargo test -p oms-core --test holds the_hold_table` |
+| V-GATE-3 | monitor.sock은 게이트가 있을 때만 열리고(모드 0600) 자기 풀이 연결 둘이다: 셋째 연결은 거절된다. 그 소켓은 전략 없는 hello, ping, heartbeat만 받는다: status, list_open, new_order, halt, watcher_kill, snapshot은 forbidden, 전략을 단 hello는 unauthorized. heartbeat는 거래·운영 소켓에서 forbidden이고 기록되지 않는다. hello 전의 heartbeat는 unauthorized이고 기록되지 않는다. 계약의 줄(epoch ms, null 포함)은 해석되고, 기록이 내구화된 뒤 recorded로 답한다(답이 온 때 저널에 하트비트가 있다). 노드는 ms를 µs로 바꾸고(넘침은 거절), 연결마다 지난 1초에 둘을 받았으면 그 뒤를 overloaded로 거절한다(한꺼번에 보낸 넷 가운데 둘 기록). 코어는 검사 시각이 기록 시각보다 1초 넘게 뒤인 하트비트, W1·W2가 없거나 키가 W1..W9 밖이거나 이름이 1~64자가 아닌 하트비트, 게이트가 없을 때의 하트비트를 bad_request로 거절하고 아무것도 기록하지 않는다. 제어 문자가 든 워처 이름의 하트비트도 코어에 넘기기 전에 거절한다. 검사 값이 음수나 문자열인 heartbeat 줄은 해석되지 않는다 | 단위, 통합 | 미실행 | `cargo test -p oms-node --test monitor_node; cargo test -p oms-node --lib monitor::; cargo test -p oms-core --test monitor; cargo test -p oms-api wire_example_of_the_heartbeat` |
+| V-GATE-4 | Input::Watcher(Heartbeat), watcher_heartbeat, monitor_changed, policy.monitor, core.monitor는 기록 스키마를 올리지 않는다(2 그대로): 게이트가 없으면 쓰지 않아 옛 상태와 설정의 바이트가 그대로이고, 게이트를 켜는 설정·신선한 하트비트·오래된 하트비트·2단계의 틱이 든 저널은 라이브 상태로 복구되며 verify --re-decide를 통과한다. 이벤트 필드 표가 두 이벤트의 모든 필드를 적는다(W1..W9 포함). [core.policy.monitor]의 값은 heartbeat_max_age_us 10..=300초, check_max_age_us 2..=60초, unmonitored_cancel_us 10..=600초이고, 모르는 키는 거부되며, mainnet은 표 없이 시작하지 않고 testnet과 가상 거래소는 선택이다. 표가 있으면 runtime.tick_ms는 1,000 이하다(1,001은 거부, 표가 없으면 60,000도 받음). 세 소켓 경로는 서로 달라야 한다. 알림 hold:unmonitored는 지나가는 상태의 유예(30초)를 받고 이유·시각·2단계까지 남은 초(또는 취소 중)와 증거금 정책에 따른 감소 전용 문장을 담으며, 신선한 하트비트로 해소된다. status.core.monitor는 게이트가 없으면 gate: false다 | 단위, 통합 | 미실행 | `cargo test -p oms-node --test record_schema; cargo test -p oms-node --lib alerts:: config::; cargo test -p oms-core --test event_fields; cargo test -p oms-core --test monitor the_gate_values` |
+| V-WATCH-1 | 워처 crate는 OMS와 코드를 나누지 않는다: oms-*·md-* crate를 어떤 종류(정상, 빌드, 개발)와 target으로도 선언하지 않고, 개발 의존성 http-fake 말고는 작업 공간 crate를 쓰지 않으며, 그 정상·빌드 그래프에서 OMS·시세·작업 공간 crate에 닿지 않고, watcher-conformance 말고는 아무 작업 공간 crate도 워처에 의존하지 않으며, 소스가 #[path]·include!·속성 안의 path =·심볼릭 링크로, 매니페스트의 target이 소스 경로로 패키지 밖의 파일을 가져오지 않는다. 검사 스크립트는 그 각각을 심으면 그 결과 줄과 종료 코드 1을 내고, 확인할 수 없을 때(맞지 않는 잠금, 없는 매니페스트)는 ok가 아니라 종료 코드 2를 낸다 | 소스 검사 | 미실행 | `tools/ci/watcher_independent.sh && tools/ci/selftest.sh` |
+| V-WATCH-2 | 워처의 독자 읽기와 저널 상태가 코어와 같은 집합을 세운다: 코어가 결정하고 oms-journal이 쓴 저널을 기록마다 읽어, 열린 주문 집합, 열린 주문마다 종목·방향·수량·전략·클라이언트 ID·거래소 주문 번호·누적 체결·결과 불명·거래소 종결, 종목마다 포지션, 체결·거래소 변경·펀딩 키와 그 거래소 시각, 체결 바닥, 킬 보류와 워처 불일치 보류, 일 기준값이 같은 기록을 재생한 코어와 같다. 시나리오들이 C-TAIL 표의 이벤트를 모두 쓴다. 닫힌 주문의 정보는 purged까지 남아 늦은 체결의 방향과 종목을 주고, 펀딩은 포지션을 바꾸지 않으며, 체결 바닥은 내려가지 않고 booted는 키를 잊지 않으며, 규칙에 맞지 않는 기록(모르는 주문의 체결, 열린 주문의 purged, 형식이 틀린 필드, 순서가 어긋난 기록)은 래치되는 오류다. 독자는 journal-<20자리>.oj만 읽기 전용으로 열고 LOCK을 열지 않으며 아무것도 만들거나 이름을 바꾸거나 쓰지 않아, OMS의 쓰는 쪽이 잠금을 쥔 동안 읽어도 디렉터리가 그대로이고 잠금이 쓰는 쪽에 남는다. 독자는 위치(세그먼트 첫 번호, 바이트 오프셋, 다음 번호)에서 16바이트 프레임 머리와 그 길이의 payload를 하나씩 읽어 max_records, 상한, 파일 끝에서 멈추고 세그먼트를 통째로 읽거나 나머지를 다시 읽지 않는다. 독자는 다음 번호가 상한보다 크면 읽지 않아 상한 너머의 쓰는 중인 프레임이나 쓰레기는 오류가 아니다. 세그먼트 헤더는 매직, 64 KiB 이하의 길이, CRC, format 1, record_schema 1·2, 기다리는 다음 번호인 first_seq, 모든 세그먼트에 같은 instance_id를 요구하고, 프레임을 아직 읽지 않은 세그먼트는 호출마다 헤더를 다시 읽는다. 프레임은 16 MiB 이하의 길이, 번호와 payload의 CRC-32, 기다리는 번호를 요구하고, payload는 seq가 프레임 번호와 같고 at이 앞 기록보다 작지 않으며 events가 키 하나인 객체의 목록인 JSON 객체여야 한다. 독자는 세그먼트 끝에서 다음 번호로 시작하는 세그먼트를 열어 회전과 스키마 변경을 따라간다. 워처는 상태를 저장하지 않고 시작마다 기록 1부터 읽으며, 가장 작은 세그먼트가 1에서 시작하지 않으면 NoStart다. 호출당 기록 수 MAX_RECORDS는 10,000이다(판단). 좋은 기록 뒤에 오류가 오면 그 호출은 좋은 기록을 돌려주고 다음 호출이 오류를 내며, 위치는 오류 앞에 머물러 파일이 바뀔 때까지 같은 오류를 낸다. Damaged·NoStart·Io는 위치를 움직이지 않고 다음 호출이 같은 자리에서 다시 읽어 재시작 없이 낫는다. UnknownEvent·Schema·Format·Instance는 래치되는 오류다. 래치된 Tail은 파일을 고쳐도 같은 오류만 내고 프로세스가 다시 시작해야 다시 읽는다. KNOWN은 C-TAIL 필드 표의 이벤트 51개이고, 시험이 tail.md를 읽어 양쪽 방향으로 비교하므로 OMS가 이벤트를 더하면 워처가 배울 때까지 실패한다. 소수 Dec(i128, 10^8 배)는 선택적 -, 숫자, 선택적 .과 1~8자리만 받고 지수, +, 9자리 이상, 빈 문자열, 앞뒤 공백은 거절하며, 덧셈·뺄셈·부호 바꿈은 정확하고 넘치면 오류다. Base32Pair는 13자리-13자리의 소문자 0-9a-v이고 첫 자리가 f 이하이며(인스턴스 0x0123456789abcdef, 주문 42 → 028q5cu4qnjff-000000000001a), 코어의 형식과 같게 부호화하고 거절한다 | 단위, 통합 | 미실행 | `cargo test -p watcher --test state && cargo test -p watcher-conformance` |
+| V-WATCH-3 | 워처의 자기 Bybit 클라이언트는 GET을 거래소 문서대로 서명하고(정렬된 질의, 보낼 수 없는 값은 보내기 전에 거절, 머리글 다섯, 보내는 순간의 시계), 응답을 부류로 나누며(not_sent, no_answer, rate_limited, clock, refused, auth, ip_banned; unreadable은 검사가 만든다), 키 거절(HTTP 401, retCode 10003·10004·10005·10007·10010·33004) 뒤에는 프로세스가 다시 시작할 때까지 Bybit에 아무 요청도 보내지 않고, HTTP 403 뒤에는 응답 순간부터 600초 동안 모든 요청과 IP 반향을 보내지 않으며, 어느 10초 창에서도 60개를 넘겨 보내지 않고 넘는 요청은 버리지 않고 기다린다. 요청은 보내기 전에 세고, 지표는 VictoriaMetrics 가져오기 JSON 한 줄씩(watcher_up 포함) 큐 없이 밀어 넣는다. retCode 0이면 result를, 없으면 null을 돌려준다. 클라이언트 안에서는 다시 시도하지 않고 다음 라운드가 다시 묻는다. watcher_auth_rejected는 클라이언트를 만들 때 0, 래치할 때 1이다. 시계가 뒤로 가면 가드의 옛 기록이 창에 남아 시계가 그 값을 다시 지날 때까지 막는다. 지표 등록부는 모든 계열에 venue=bybit·host·watcher 이름표를 붙이고 이름표를 정렬하며, 값이 유한하지 않은 계열과 지운 게이지는 보내지 않는다. 실패한 밀어 넣기의 로그는 첫 실패와 그 뒤 1분에 한 번까지만 쓴다 | 단위, 통합(loopback) | 미실행 | `cargo test -p watcher --test sign --test client --test metrics` |
+| V-WATCH-4 | 워처의 설정 파일은 스펙 표의 모든 필드를 그 기본값과 검사대로 읽는다: 모르는 키와 표는 거부하고, mainnet은 mainnet_confirmed = true일 때만 받으며, 범위는 양 끝을 포함하고, status_url과 vm_url은 loopback만, ip_echo_url은 https만, 자격 파일은 절대 경로이고 ..이 없으며 링크를 따라 봐도 데이터 디렉터리 밖이다. 자격 파일은 링크를 따르지 않고 FIFO를 기다리지 않는 한 핸들로, 이 프로세스의 uid가 소유하고 권한이 정확히 0600 또는 0400인 일반 파일일 때만, api_key와 api_secret 둘만 비어 있지 않게 읽는다. 모든 거부는 한 줄이고, 자격 파일의 오류는 내용을 인용하지 않으며 비밀은 어디에도 찍히지 않는다. 시작 확인(U19a4b)은 query-api의 마스터 키, 다른 userID, IP에 묶이지 않은 키([]·*)와 행이 없거나 USDT로 정산되지 않는 기호를 종료 2의 이유 한 줄로 거부하고, 키 거절(auth)이면 끝내지 않고 요청 없이 떠 있으며, 그 밖의 답은 답의 시각 + 5초(403이면 + 600초)에 다시 묻는다. watcher_api_key_days_left는 expiredAt까지의 날을 내림하고 해당 없음(없음, null, 1970-01-02 이하)이면 내보내지 않는다. watcher_public_ip_ok는 반향의 주소가 마지막으로 통과한 ips에 있을 때만 1이다. IP 재확인은 지난 재확인의 마지막 답 + ip_check_ms마다 돌고, 실패하면 0으로 두고 남은 날을 지키며, 시작 규칙에 더는 맞지 않는 키는 재시작까지 모든 Bybit 요청을 멈추고 0으로 둔다. 재확인이나 5단계에서 키가 거절되면 Bybit에는 묻지 않고 반향만 ip_check_ms마다 이어 간다. 요청이 답을 기다리지 않을 때 온 답은 아무것도 바꾸지 않는다. network는 testnet 또는 mainnet이고 REST 주소는 각각 https://api-testnet.bybit.com, https://api.bybit.com이다. 5단계에서는 실패한 그 기호만 다시 묻고 앞의 기호는 다시 묻지 않는다. 5단계 요청은 category와 symbol만 보내고(settleCoin 없음) 답에서 symbol이 같은 행을 고른다 | 단위 | 미실행 | `cargo test -p watcher --test config --test creds --test start` |
+| V-WATCH-5 | 워처의 검사 엔진은 첫 라운드와 첫 하트비트를 start_ms에 내고, 한 검사의 라운드를 겹치지 않으며 늦은 라운드는 한 번만 돌린다. 라운드는 거래소 쪽을 모두 읽은 뒤에만 그 라운드만의 상태 요청을 내고, 그 답은 물은 라운드만 쓰며, 그 상한까지 저널을 읽은 뒤 비교한다. 다른 인스턴스의 상태와 그 요청을 낼 때 읽은 기록보다 낮은 상한은 읽기를 재시작까지 래치하고 그 뒤 라운드는 아무것도 묻지 않는다. 다시 읽는 저널 오류는 다음 라운드에 낫고 watcher_journal_error를 0으로 돌린다. 기한(낸 시각 + request_timeout_ms + 11초)까지 답이 없는 요청은 라운드를 실패로 닫고 늦은 답은 버린다. 차이는 지난 완료 라운드와 이번 라운드에 같은 정체로 있고 이번 라운드에서 min_age_ms 이상 늙었을 때만 확정되며(실패한 라운드는 지난 완료 라운드의 sighting을 바꾸지 않는다), 두 번 보았지만 어린 차이는 라운드를 성공으로 치지 않는다. 확정은 정체마다 한 번 세고(한 라운드에 두 번 실린 정체도 하나) 1024바이트 이하의 detail을 실은 Mismatch 하나를 내며, watcher_mismatch_active는 라운드가 그것을 보지 않으면 내려간다. W1은 OMS의 쪽 규칙대로 열린 주문을 읽고(커서 없는 가득 찬 쪽, 같은 커서, 필드 없는 행은 unreadable, 20쪽 한도), 모르는 주문(foreign), 저널에서 닫힘, 거래소 종결 뒤에도 열림, 종목·방향 다름, 확인된 주문의 거래소 부재를 차이로 보고, 확인되지 않았거나 결과 불명이거나 거래소 종결된 주문의 부재는 비교하지 않는다. 나이는 주문의 fact_at(다른 이벤트로 움직이지 않음) 또는 첫 sighting이다. W1은 order/realtime을 category=linear, settleCoin=USDT, limit=50으로 묻는다 | 단위(sans-IO, 수동 시계) | 미실행 | `cargo test -p watcher --test w1 --test engine` |
+| V-WATCH-6 | 워처의 W2는 position/list(category=linear, settleCoin=USDT, 200개씩 5쪽까지)를 W1의 쪽 규칙으로 읽고(커서 없는 가득 찬 쪽, 같은 커서, 한 기호의 두 행(헤지 모드), 모르는 방향, 소수가 아닌 크기, 크기 있는 빈·없는 방향, 음수 크기, 기호 없는 행은 unreadable, 6쪽째는 실패), 기호마다 d = 거래소 − 저널(체결 + 외부 체결 + 거래소 변경 + 조정)을 차이 (W2, position, 기호, d)로 본다(범위를 넘은 d는 값 overflow인 차이). 다른 d는 처음부터 센다. 저널의 마지막 변경 시각과 거래소의 최근 변경 시각(updatedTime, 없으면 그 크기를 처음 본 라운드 seen_at) 중 알려진 것이 min_age_ms보다 어리면 첫 sighting이어도 미루고 라운드는 성공이 아니며, 모르는 시각은 늙음이라 저널이 바꾼 적 없는 기호의 거래소 포지션은 두 번째 라운드에 확정된다. 행이 없는 기호는 크기 0으로 보아 막 닫힌 포지션도 처음 0으로 본 라운드부터 2초 미루고, 첫 완전한 읽기의 크기에는 seen_at이 없으며, 모든 쪽을 읽은 뒤 실패한 라운드의 크기는 마지막 거래소 답의 시각으로 남고, 쪽 사이에서 실패한 라운드는 아무것도 남기지 않는다. 초당 5번의 체결이 60초 이어지는 동안 Mismatch가 없고, 체결이 멈춘 뒤 심은 차이는 라운드의 어느 위상에서도 3초 안에 확정된다 | 단위(sans-IO, 수동 시계) | 미실행 | `cargo test -p watcher --test w2` |
+| V-WATCH-7 | 워처의 엔진은 확정된 차이를 그것을 실은 보내기가 "held"로 답할 때까지 빚으로 두고("already held", 보류를 보이는 저널, 실패는 갚지 않고, 라운드가 더 보지 않아도 확정 때의 detail로 보낸다), 저널 상태가 그 검사의 최근 held/already held 답 뒤에 낸 상태 요청의 상한에서 보류 꺼짐을 보일 때, 지난 보내기 시작부터 mismatch_resend_ms가 지났을 때, 그 검사의 보내기가 진행 중이 아닐 때만 보낸다(보고가 없는 보내기는 낸 시각 + 2 × request_timeout_ms + 1초에 실패하고, 그 뒤에 온 늦은 보고는 번호가 달라 아무것도 갚지 않는다). W1·W2는 라운드가 아직 보는 확정된 차이를 해제 뒤 다시 보낸다. admin.sock 클라이언트는 hello 다음 watcher_mismatch를 보내고 두 답을 읽는다. monitor.sock 클라이언트는 연결 하나를 유지하고 hello를 먼저, 그다음 W1~W4의 성공 시각(없으면 null)을 보내며, 끊김·답 없음 뒤 다음 하트비트에 다시 연다. 실행은 설정을 읽은 때부터 지표를 밀어 넣고, 시작 확인, /api/status 기다림, 재생 동안에도 IP를 다시 확인하고, 재확인에서 시작 규칙에 맞지 않는 키는 모든 Bybit 요청을 멈추며, OMS가 답하지 않으면 아무것도 판단하지 않고, 시작 거부는 코드 2, shutdown 입력은 새 라운드 없이 마지막 밀어 넣기와 모니터 연결 닫음 뒤 0으로 끝난다. 'recorded' 답이면 watcher_heartbeat_ok_ts를 그 하트비트의 시계(epoch 초)로 둔다. 하트비트의 오류 답은 연결을 그대로 두고 error 줄을 1분에 하나까지 쓴다 | 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나) | 미실행 | `cargo test -p watcher --test admin --test heartbeat --test runtime --test binary` |
+| V-WATCH-8 | 워처의 W4는 execution/list를 고정된 끝(첫 쪽의 시계)과 시작 max(워터마크 − w4_overlap_ms, ⌈체결 바닥/1000⌉)(7일로 자름)의 창으로 훑고, 라운드마다 w4_max_pages쪽까지 읽어 더 긴 훑기는 다음 라운드가 같은 창과 커서로 이으며(성공 시각은 끝난 훑기에서만), 빈 쪽이나 빈 커서에서 끝내고, 바뀌지 않은 커서와 읽을 수 없는 쪽은 라운드를 실패시켜 같은 커서로 다시 읽되 연달아 3번이나 50라운드면 같은 시작과 새 끝으로 다시 시작한다. 행은 execType으로 먼저 나눠 Trade는 저널 체결과, AdlTrade·BustTrade·Delivery·Settle은 저널 거래소 변경과 키 <symbol>:<execId>로 비교하고, Funding은 비교하지 않으며, 모르는 형은 끝난 훑기에서 바로 확정하고, 형이 필요로 하는 필드가 없는 행과 execTime이 훑기의 끝보다 뒤인 행은 unreadable_row, 바닥 아래 행과 수량 0인 Trade·거래소 변경 행은 무시한다. 차이는 두 훑기와 execTime 나이로 확정하고 어린 차이는 훑기를 실패시키지 않는다. 워터마크는 확정되지 않은 가장 오래된 행(execTime 없는 행은 모든 행보다 오래됨) 아래의 가장 새 행으로만, 뒤로 가지 않게 움직인다. held 답(already held는 갚지 않는다)으로 갚고 그 답 뒤에 낸 상한에서 보류 꺼짐을 본 W4 정체는 거두어 다시 보내지도 세지도 않는다. 처음 워터마크는 첫 훑기 때의 now − w4_initial_lookback_ms(기본 600초)이고 ⌈체결 바닥/1000⌉보다 낮지 않다 | 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나) | 미실행 | `cargo test -p watcher --test w4 --test runtime` |
+| V-WATCH-9 | 워처의 W3은 w3_ms마다 wallet-balance?accountType=UNIFIED의 UNIFIED 계좌 하나(정확히 하나, 세 필드가 저널 소수, 유지증거금이 음수가 아님; 아니면 unreadable로 라운드 실패)를 OMS의 공식으로 판단한다: account_mm_rate는 maintenance > 0이고 maintenance × 10 000 ≥ account_mm_rate_max_bps × margin_balance(같으면 건다), daily_loss는 저널의 일 기준값이 오늘의 UTC 날이고 (base − totalEquity) × 10 000 > daily_loss_bps × base(오늘의 기준이 없으면 판단하지 않는다). 정체는 종류뿐이고 두 라운드 연속에서 나이 없이 확정하며, 위반이 남아 있으면 해제 뒤 다시 보낸다. W2는 W4가 마지막으로 맞춘 그 기호의 execTime이 updatedTime이나 seen_at보다 새면 그것을 거래소의 변경 시각으로 쓴다. 하트비트의 W3·W4는 그 검사의 마지막 성공 시각이고, 실행은 W2(W4의 시각 지도와 함께), W3, W4를 돌리며 엔진 전에는 네 검사의 나이를 boot_ms부터 내보낸다. W4의 시각은 체결이 막 맞은 기호의 차이를 많아야 min_age_ms 동안만 미루고 그 뒤에는 확정되게 한다 | 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나) | 미실행 | `cargo test -p watcher --test w3 --test w2 --test heartbeat --test runtime` |
+| V-WATCH-10 | W1·W2·W3·W4를 설계 간격(1초, 1초, 2초, 5초)으로 돌린 모의 1분(수동 시계, 실제 rest::Guard를 거친 모델 거래소, 요청 지연 0)에서 5초에 체결 30개를 고르게 주면 대조 요청은 W1 60 + W2 60 + W3 30 + W4 12 = 162개, 초당 2.7 이하이고 차이도 실패한 라운드도 없다. 5초에 100개면 192개(초당 3.2; 정상 상태는 훑기당 4쪽, 초당 3.3)로 설계 예산을 넘지만 W4는 12 훑기를 모두 자기 라운드에서 끝내고 정상 상태의 창은 15초다. 열린 주문 500개(W1 라운드 11쪽)에서는 가드가 10초에 60을 지키며 W1 라운드를 늘리지만 하트비트마다 W1·W2의 나이는 10초 아래다 | 단위(sans-IO 엔진과 sans-IO 가드, 수동 시계) | 미실행 | `cargo test -p watcher --test budget -- --nocapture` |
+| V-WATCH-11 | 워처의 [telegram]은 token_file 하나만 받고(모르는 키 거부) mainnet은 그것 없이 시작하지 않는다(testnet은 warn 한 줄). 토큰 파일은 설정의 경로 규칙과 자격 파일의 파일 규칙(링크 아님, 일반 파일, 실효 uid 소유, 정확히 0600·0400)을 여는 핸들에 적용하고, 적힌 경로나 가리키는 곳이 git 저장소 안이면 읽기 전에 거부하며, {"token": "<digits>:<[A-Za-z0-9_-]+>", "chat_id": 비지 않은 문자열 또는 정수} 말고는 거부한다. 거부는 내용과 토큰을 인용하지 않고, 실행은 그것을 시작 확인 전에 종료 코드 2로 끝내며 요청을 보내지 않는다. 읽은 값과 설정의 Debug는 토큰을 보이지 않는다. 메시지는 [WATCH P1] bybit {name} {MM-DD HH:MM:SS KST}로 시작하고, split은 각 부분을 3,500 UTF-16 단위 이하로 줄 끝에서(긴 줄은 문자 단위로, 이모지를 쪼개지 않고) 자르며 글자를 잃지 않는다(부분 경계와 맨 앞의 빈 줄은 사라질 수 있고, 빈 부분은 만들지 않는다). Outbox는 50개를 넘으면 가장 오래된 부분을 버리고 세고, 큐가 빈 뒤 알림 하나로 그 수를 알리며, 보내는 중 버려진 부분을 두 번 지우거나 세지 않는다. outcome은 2xx와 ok true만 Delivered, 400·413은 Refused(버리고 셈), 나머지는 Retry(두고 흘려보내기를 끝냄)다. Repeat는 시작 한 번, 300,000 ms마다 최신 문구 한 번, 해소: <시작 문구> 한 번을 낸다. 송신 태스크(alert::spawn, U19b1b)는 경로를 순서대로 써서 네트워크 오류면 다음 경로(DNS 다음 고정 주소)로 가고, HTTP 답이 결정하며, 답한 경로가 다음부터 맨 앞이다. 부분을 순서대로 하나씩 보내고 Retry에서 그 부분을 두고 흘려보내기를 끝낸다. 새 메시지가 Notify로 바로 깨우고, 그 밖에는 흘려보내기가 끝난 주입된 시계 + 5,000 ms에 실행의 틱(Handle::tick)만 깨운다(자기 타이머 없음). 답이 오지 않는 요청은 실제 시간 10,000 ms의 요청 한도에서 실패로 세고 그 부분을 둔다. 로그 줄은 경로와 원인을 적고 토큰과 URL을 적지 않는다. finish(5,000)은 마지막 흘려보내기를 실제 시간 5,000 ms 안에서 하고 남은 부분을 한 줄로 센다. 네 지표(queued, delivered, dropped, failures)가 이것을 따른다. P1 조건(U19b1c): 엔진은 라운드마다 새로 확정한 식별자의 내용을 Action::Confirmed 하나로 그 라운드의 Mismatch보다 앞에 내고 다시 보내기는 내지 않는다. 불일치 P1은 확정마다이고 검사마다 첫 것은 바로, 그 뒤 마지막 메시지에서 60,000 ms에 하나이며 그 사이 확정은 모아(내용 다섯, 각 600 UTF-16 단위, 나머지는 수) 다음 메시지로 간다. Client::auth_stop은 래치를 건 첫 답(retMsg, HTTP 401의 본문)이나 규칙 멈춤의 이유를 바꾸지 않고 들며, 실행은 틱마다 그것과 start::PublicIp(게이지가 0인 이유)를 반복 규칙에 줘서 다시 보내지 않는 답(10010·10003·33004·401 포함)마다 답 뒤의 첫 틱에 하나, 5분마다 하나, 공인 IP는 해소 하나를 보낸다. 송신기는 시작 확인 전에 뜨고(2단계의 키 거부도 알림), 시작 거부는 P1 하나를 보내고 5,000 ms 안에 흘려보낸 뒤 종료 코드 2, 종료는 60초 간격 안에 모인 불일치 메시지를 간격과 상관없이 넣고 U19a 단계 뒤 흘려보낸다. 시작 거부의 이유는 200자로 자른다. 실행의 틱이 송신기의 다시 보내기를 깨운다. [telegram]이 없으면 모든 P1(불일치, 키 거부, 시작 거부)은 warn 한 줄이다. mainnet_confirmed 검사가 [telegram] 검사보다 먼저다 | 단위(순수 함수, 파일 시스템)와 통합(runtime::run과 송신 태스크, loopback 가짜, 실제 시간) | 미실행 | `cargo test -p watcher --test alert --test config --test creds --test runtime --test engine --test client` |
 | V-WATCH-12 | 워처의 서명된 POST는 Client::cancel_all 하나뿐이다: 경로 /v5/order/cancel-all과 본문 {"category":"linear","settleCoin":"USDT"}는 상수이고, 서명은 timestamp + api_key + recv_window + 보내는 본문의 바이트 위에 하며(거래소의 POST 예와 독립 HMAC 값), 머리글 다섯과 Content-Type application/json을 달고, 요청 제한·403 멈춤·키 래치를 지나며 보내기 전에 watcher_requests_total에 센다. 답은 success가 없거나 "1"이면 result.list의 길이, "0"이면 refused, 목록이 아니거나 다른 값이면 unreadable이다. crates/watcher/src의 글자에는 .post(가 rest.rs·metrics.rs·alert.rs에 하나씩만 있고 Method::·.request(·.put(·.patch(·.delete(는 없다. [kill]은 round_ms·watch_ms·watch_every_ms·notice_ms를 OMS의 kill_* 기본값과 범위로 받고, 그것이 있으면 시작 2단계와 재확인은 readOnly 0(정수), ContractTrade의 Order, 어느 목록에도 Withdraw 없음을 요구한다(시작은 종료 2, 재확인은 재시작까지 모든 Bybit 요청과 일괄 취소를 멈춤). 읽히는 규칙 하나가 맞지 않으면 다른 필드나 목록을 읽을 수 없어도 거부하고, 읽히는 규칙이 모두 맞는데 읽을 수 없는 것이 있으면 시작은 5초 뒤, 재확인은 ip_check_ms 뒤 다시 묻는다(재확인 실패, 멈춤 아님). [kill]이 없으면 그것을 읽지 않는다. Dec::percent_floor는 0.01 %로 내리고 넘치면 None이다. 킬 알림의 포지션 묶음은 기호마다 방향·수량·미실현손익·마크·마크에서 강제청산가까지의 거리(내림)를 적고, 청산가가 비었거나 0이거나 마크가 0 이하면 모름, 크기 0인 행은 빼고 크기를 읽을 수 없는 행은 수량 모름으로 보이며(포지션 없음이라 하지 않음) 20행 뒤는 수로 센다. 포지션 읽기는 5쪽까지, 읽기 시작 + request_timeout_ms + 11,000 ms의 기한 때나 뒤에 답한 쪽에서 끝내고 다음 쪽을 보내지 않으며, 래치나 멈춤이면 묻지 않는다. 알림 문구는 워처 킬로 시작하고, 마지막 알림의 줄은 StopOutcome 다섯을 따르며 래치와 경로를 확인한 마커의 멈춤만 clear-hold를 말하고, 키 래치와 403 멈춤의 진행 문구는 정한 줄이며, 중단 알림은 포지션 조회 안 함(워처 종료 중)으로 끝난다. sans-IO KillLoop(U19b2b)는 보낸 모든 일괄 취소 뒤(실패해도) 세고, 보내지 않은 것 뒤에는 세지 않고 다음 라운드를 기다리며, 세기 오류는 0이 아니고, n > 0이면 t_r + round_ms까지 기다리며, 첫 0의 z부터 watch_every_ms마다 세어 z + watch_ms 때나 뒤에 낸 세기의 0에서만 끝난다(지켜봄의 늦은 주문은 곧바로 일괄 취소, C5에 들어올 때마다 새 z, watch_ms가 watch_every_ms의 배수가 아니어도 마지막 세기는 z + watch_ms, 지켜봄의 늦은 주문이 연 라운드는 그 세기의 시각에 시작). 두 번째 start는 아무것도 하지 않는다. 요청 둘이 함께 열리지 않고, 어느 [t, t + 1,000) ms에도 일괄 취소를 둘 넘게 내지 않으며(설정에 맞는 타이밍에서는 예산이 잡지 않고 두 일괄 취소가 1,000 ms보다 가깝지 않다), 요청의 기한은 낸 시각 + request_timeout_ms + 11,000 ms이고 세기는 기한 전에 답한 쪽마다 그것을 옮기며, 기한 때나 뒤의 답·쪽은 기한 뒤(세기 오류, 일괄 취소 Failed)이고 그 뒤의 같은 req_id 답과 쪽은 버리며(버린 세기의 쪽은 지금 열린 세기의 기한을 옮기지 않는다), next_wake는 기한·라운드·지켜봄·예산의 시각과 다음 진행 표시 중 가장 이른 것이다. 알림은 시작, 시작에 묶인 notice_ms 표시마다 진행 하나(건수가 같아도; 바뀐 건수의 알림은 없다), 끝에서 곧바로 마지막, 중단 하나와 끝이고, 10분 동안 조회가 실패해도 600초 창마다 12개 이하(시작 1 + 진행 10 + 마지막 1)다. U19b2c의 세기는 /v5/order/realtime linear USDT의 모든 쪽을 W1의 쪽 규칙으로 20쪽까지 읽고(20쪽째에도 커서가 있으면 세기 오류), orderStatus가 New·PartiallyFilled·Untriggered인 행을 orderLinkId와 상관없이 세며(남의 주문도), orderStatus가 없거나 읽을 수 없는 쪽은 세기 오류다. 세기 태스크는 루프가 그 세기를 낸 시각(첫 실행이 아님), 그 뒤 쪽마다 답한 시각 + request_timeout_ms + 11,000 ms의 기한을 스스로 지켜 기한 때나 뒤에 답한 쪽 뒤에는 묻지 않는다. 일괄 취소가 나갔는지는 보내기 전 상태로 가린다(래치 NotSent(Latched), 403 멈춤 동안 NotSent(Paused)이고 멈춤이 끝나면 다시 보냄, 연결 못 함 NotSent(Local), 그 밖은 Failed). kill::Inflight는 루프의 요청마다 태스크 하나를 돌리고 루프의 기한(open_request) 때나 뒤에, 또는 루프가 버린 요청이면 곧바로 끊고 그 태스크가 보낸 것을 루프에 주지 않으며, 새 요청 전에 산 태스크를 끊고, Inflight가 사라질 때 모두 끊는다. http-fake와 수동 시계의 시험 장치에서 일괄 취소 뒤 한 건이 남거나 5xx가 와도 루프는 0을 확인할 때까지 되풀이하고 어느 [t, t + 1,000) ms에도 일괄 취소가 거래소에 둘 넘게 닿지 않는다. 킬 알림의 초는 ms를 정확히 쓴다(12,500 → 12.5). cancel_all_calls는 일괄 취소의 답(Done·Failed, 기한 뒤 포함)에서 세고 버린 늦은 답은 세지 않는다. 세기 태스크는 기한 전에 돌아온 쪽 요청마다 on_page를 부르고, 클라이언트가 보내지 않은 요청(래치, 멈춤)도 한 쪽으로 알린 뒤 그 오류를 세기 결과로 준다 | 단위(순수 함수)와 통합(실제 Client, loopback 가짜, 수동 시계); 루프는 sans-IO 상태 기계(손으로 준 시각, 시드 무작위 답 순서); 세기·Inflight·시험 장치는 통합(실제 Client와 tokio 태스크, loopback 가짜, 수동 시계, 실제 시간으로 기다린 뒤에만 시계를 옮김) | 미실행 | `cargo test -p watcher --lib --test sign --test client --test config --test start --test kill` |
 | V-WATCH-13 | [w5]은 probe_ms 1,000(500~5,000)과 silence_ms 10,000(3,000~60,000)을 받고 [kill]이 있으면 silence_ms ≥ 3 × probe_ms + 3 × request_timeout_ms + 1,000이어야 한다(잃은 탐침 하나도, 틈 한계보다 짧은 워처의 멈춤 하나도 건강한 OMS를 킬하지 않게). [kill]은 marker(OMS의 규칙: 절대 경로, .. 없음, 가리키는 곳이 data_dir 밖, 디렉터리가 있음)와 oms_unit([A-Za-z0-9:_.@-] 1~255자, .service로 끝남, -로 시작하지 않음)이 필수이고 systemd system\|user와 stop_wait_ms 10,000(1,000~120,000)을 받으며, mainnet은 [kill] 없이 시작하지 않고 testnet은 warn 한 줄을 남긴다. sans-IO W5는 [kill]이 없으면 Off, arm 전에는 탐침도 쏨도 없고, Armed와 Rearming에서 앞 탐침을 낸 때부터 probe_ms마다 탐침 하나를 내되 둘을 함께 열지 않으며, 낸 시각 + request_timeout_ms + 1,000 ms 때나 뒤에 답 없는 탐침은 실패이고, 탐침의 답은 온 때 받으며(기한 정각이라도 poll이 적용하기 전이면), 열리지 않은 탐침의 답은 버리고, 2xx JSON에 16자리 16진수 core.instance_id인 답만 정상이다. Armed에서 now − last_good_ms ≥ silence_ms이고 last_good_ms 때나 뒤에 낸 탐침이 실패했을 때만 Fire를 한 번 내고 Killing에서는 탐침이 없다. 두 시각이 2 × probe_ms + request_timeout_ms보다 멀면 W5가 가진 시각을 모두 그 틈만큼 옮기고 warn 한 줄을 남긴다(보지 못한 시간은 침묵이 아니다). kill_ended 뒤에는 정상 응답 하나가 Armed로 돌리고, 정지를 빚졌으면 그 응답이 OwedHalt 하나를 내며(진행 중에는 둘째가 없음) latched나 already latched로 시작하는 답이면 늦은 정지 P1과 Armed, 그 밖에는 빚이 남고 첫 실패에만 늦은 정지 실패 P1, 실패 뒤의 래치는 해소 줄을 단다. clock::Steady는 안쪽 시계가 뒤로 가도 앞서 준 값보다 작은 값을 주지 않고 그 뒤의 진행은 그대로 더하며 앞으로 뛴 걸음은 지나가게 하고 모든 읽는 쪽에 한 시간선을 준다. oms::admin_kill은 연결 하나에 hello 다음 watcher_kill {detail}을 보내 답마다 timeout_ms, 전체 2 × timeout_ms 안에 result나 이유를 준다. stop::Stopper는 정확히 <systemctl> [--user] --no-ask-password stop -- <oms_unit>을 stdin·stdout null, stderr 비차단 파이프로 띄우고, 틱마다 try_wait만 하며 끝난 뒤에만 stderr를 4 KiB까지 기다리지 않고 읽어, 0이면 Stopped, 다른 끝은 exit <code>: <첫 줄>이나 signal <n>, 주입된 시계의 기한 때나 뒤에 아직 돌면 죽이고 Unconfirmed, 그 뒤의 틱이 거둔다. crates/watcher/src의 글자에 Command::new는 stop.rs에 하나뿐이다. 킬 순서 kill::Kill(U19b3b, sans-IO)은 K1 WriteMarker(기한 2,000 ms, 실패나 기한에도 계속, 늦은 결과는 버림) → K2 Halt(기한 2 × request_timeout_ms + 1,000 ms; latched·already latched·재무장 답만 정지; 열린 시도의 답은 기한 정각이라도 poll 전이면 받고 닫힌 시도의 답은 버림) → K2가 정지하지 못했을 때만 K3 StopUnit(now + stop_wait_ms; 지나면 Unconfirmed, 늦은 결과는 버림) → KillLoop::start의 순서로 내고, 첫 CancelAll과 시작 알림은 그 뒤에만 나온다. 머리는 W5의 침묵, 원래 시계의 마지막 정상 응답 KST(없으면 이 프로세스에서 없음), 킬 마커(씀·이미 있음, 경로를 확인하지 않았으면 그 말, 쓰지 못함(<kind>), 시간 초과), OMS 정지(watcher_kill → <답>, 또는 watcher_kill 실패(<이유>) → systemctl stop <unit>: 정지됨·실패·정지 확인 못 함)를 말하고 K2가 실패하고 멈춤이 확인되지 않으면 X8 줄을 달며, 자유 문구는 글자 경계에서 200 UTF-16 단위로 잘리고(BMP 밖 글자는 2단위) 제어 문자가 없어 머리는 침묵 10초에서 가장 길 때 1,029 단위이고 침묵의 초 문구 글자 하나마다 1단위 늘어 가장 길 때 1,048 단위다(래치한 답도 같이 자름). 루프를 시작할 때 halt_owed = !halted && !(stopped && marker_in_place)이고 marker_in_place는 Written·AlreadyPresent와 marker_checked다; StopOutcome은 Latched·StoppedMarked·StoppedUncheckedMarker·StoppedUnmarked·Unconfirmed이고 마지막 알림의 줄과 Ended의 halt_owed가 같다. 빚이 있는 동안 루프에서 앞 시도가 끝난 때(답이 온 때나 기한, 답 없는 K2의 기한 포함)부터 5,000 ms마다 Halt를 다시 내되 둘을 함께 열지 않고(워처 키가 래치되어도), 루프가 끝날 때 열린 시도는 닫으며(halt_open 없음, 늦은 답은 버림, Ended의 halt_owed는 참), 래치한 답은 LateHalt 알림 하나, 빚 없음, 마지막 줄 Latched와 재시도 끝을 준다. Kill::abort는 루프 전이면 그때까지의 머리(끝나지 않은 단계는 진행 중)와 일괄 취소 전 줄, 포지션 조회 안 함 줄의 알림 하나와 Ended(aborted, halt_owed)를, 루프 안이면 루프의 중단을 준다. clock::Steady 위의 Kill은 원래 시계가 킬 전과 루프 중에 60초 뒤로 가도 일괄 취소·재시도·진행 알림을 진행 기준으로 제때 내고, 마커 문구와 머리의 시각은 원래 시계다. kill::write_marker는 무엇이든 있으면 AlreadyPresent로 건드리지 않고, 없으면 자기 임시 이름(옛 것은 먼저 지움)에 0600으로 써 sync_all, hard_link, 임시 이름 지움, 디렉터리 sync_all 뒤 Written, 오류는 Failed(<io 종류>); 문구는 512바이트, detail은 1,024바이트 이하로 글자 경계에서 자르고 OMS의 read_kill_marker는 그 파일에서 marker: <문구>를 읽는다. 실행(U19b3c)은 시작 확인이 끝난 때 W5를 무장하고 그 뒤 모든 단계에서 틱마다 돌린다. [kill]이 있으면 node.kill_marker가 워처의 마커와 같은 파일(가리키는 곳으로 비교)을 가리키지 않는 상태 답(configured false 포함)에 시작을 거부한다(종료 코드 2, 시작 거부 P1, 같은 파일을 가리키는 링크는 됨). W5가 쏘면 마커를 쓰고, watcher_kill을 보내고(답 없는 시도는 K2 기한에 태스크를 끊어 연결을 닫음), 그것이 래치하지 못했을 때만 systemctl stop을 돌린 뒤에야 첫 일괄 취소를 보내며, 루프를 Inflight로 돌려 남은 주문·5xx 일괄 취소·5xx 세기에도 0건 확인까지 round_ms마다(어느 1초에도 둘 이하, 보낸 일괄 취소마다 세기 하나) 되풀이한다. 빚진 정지는 루프 중 5초마다 다시 보내 돌아온 OMS를 킬 동안 래치하고(watcher_kill 하나, 늦은 정지 알림 하나, 마지막 알림 OMS는 래치됨, 워처 키가 10010으로 래치되어 일괄 취소가 없어도), 킬 동안 엔진은 라운드도 하트비트도 내지 않고 검사 나이는 계속 오르며, 끝나면 엔진이 다시 돌고 정상 응답 하나 뒤 W5가 다시 무장한다. 시계가 루프 중 60초 뒤로 가도 다음 일괄 취소는 round_ms + 한 걸음 안에 나간다. OMS가 내려간 채 시작한 워처도 침묵 뒤 킬하고 시작 알림은 이 프로세스에서 없음과 경로 확인 못 함을 말하며, 실행이 남긴 마커는 0600 일반 파일이고 임시 파일이 남지 않는다. 킬 알림마다 포지션 묶음이 붙는다. 루프 뒤 정지를 빚진 킬 다음 OMS가 다시 답하면 watcher_kill 하나를 보내고(K2의 기한, 답이 없으면 늦은 정지 실패 P1 하나, 래치하면 늦은 정지 P1과 해소, W5가 다시 지킴), 시작 뒤 탐침 답의 마커 경로가 다르면 marker_path P1과 함께 마커를 제자리로 세지 않아 그때의 킬이 정지를 빚으며, 킬 중의 종료는 중단 알림 하나로 끝나고 그 뒤 일괄 취소가 없고 systemctl 클라이언트를 죽이지 않으며, 킬이 끝난 바로 뒤의 종료도 포지션 읽기를 기다리던 마지막 알림을 조회 안 함 줄과 함께 보내고, 킬 중의 시작 거부는 중단 알림 다음 거부 P1과 종료 코드 2이고 정지를 빚졌으면(루프 전 K1~K3 중이면 빚으로 봄) 그 전에 watcher_kill 하나(나가 있는 것이 있으면 그것)를 보내 결과를 거부 P1에 적는다. 600초 동안 조회가 실패해도 [s, s + 600 s]의 메시지는 12개 이하이고, 킬의 모든 메시지가 포지션 묶음이나 조회 실패나 조회 안 함 줄을 가지며, 기한 뒤에 답한 포지션 읽기는 시간 초과이고 다음 쪽을 묻지 않는다. 루프 전에 중단된 킬의 Ended는 halt_owed = true다. K2의 detail은 W5: /api/status gave no good answer for <s> s; watcher <name>이고, 루프 중 재시도·루프 뒤 빚진 정지·거부 전 정지의 detail은 W5: 늦은 정지: watcher <name>의 킬이 OMS 래치나 정지를 확인하지 못함이다. 클라이언트의 요청 가드는 clock::Steady를 읽어 시계가 뒤로 간 걸음이 가득 찬 창을 그만큼 늘리지 않고, 서명의 시각은 원래 시계다. 킬 알림은 한 번에 하나씩 낸 순서대로 가고, 16개를 넘게 기다리면 가장 오래 기다린 진행 알림만 버리며 시작·마지막·늦은 정지 알림은 버리지 않는다. 킬 중 이미 나간 엔진 요청의 답이 내는 다음 쪽·상태 요청·watcher_mismatch는 보내지 않고 불일치 P1은 보낸다. 두 틱 사이에 끝난 K3의 정지는 K3 기한 정각의 틱에도 정지됨으로 알린다. 루프 뒤의 빚진 정지는 새 킬을 시작하지 않고, 시작 뒤 탐침 답의 마커 경로가 다시 맞으면 marker_path를 해소한다. 거부 P1의 늦은 정지: 뒤에는 래치한 답만 그대로 적고 다른 답과 오류는 실패(<이유>)로 적으며, 거부가 watcher_kill을 기다리는 동안 SIGTERM이 오면 종료가 이겨 중단 알림 하나만 가고 거부 P1 없이 종료 코드 0이며, 그동안 잡아 두었다 놓은 루프의 답에 실행이 쉬지 않고 돌지 않는다 | 단위(sans-IO W5, 손으로 준 시각과 Steady 위의 수동 시계; 설정의 순수 검증; Steady의 두 스레드)와 통합(oms::admin_kill과 시험의 UnixListener, w5::good_answer와 http-fake의 /api/status, stop::Stopper와 OMS_TEST_DIR 아래의 셸 스크립트, 실제 프로세스와 실제 시간); 단위(sans-IO Kill, 손으로 준 시각과 Steady 위의 수동 시계)와 통합(kill::write_marker와 OMS_TEST_DIR 아래의 실제 파일, spawn_blocking; watcher-conformance에서 OMS 자신의 read_kill_marker); 통합(runtime::run과 loopback http-fake의 Bybit·/api/status·텔레그램·VM, 시험의 admin.sock·monitor.sock, OMS_TEST_DIR 아래의 가짜 systemctl, 시험 디렉터리의 마커, 수동 시계와 실제 시간의 walk_kill) | 미실행 | `cargo test -p watcher --test config --test clock --test w5 --test admin --test stop --test runtime --test kill_sequence && cargo test -p watcher-conformance --test marker` |
-| V-BYBIT-LIVE-1 | 실제 Bybit 테스트넷은 요청 시각이 recv_window(5초)보다 오래됐거나 거래소 시계보다 1초 넘게 앞선 주문 요청을 10002로 거절하고, 그 주문은 거래소에 없다. 4초 지났거나 0.5초 앞선 요청은 시각 검사를 통과한다. 게이트웨이는 거절을 Rejected로 읽고, 상태 조회(실시간, 이력 두 번)는 그 주문을 '없음'으로 답한다 | 실제 거래소(테스트넷) | 통과 | `OMS_BYBIT_TESTNET_CREDS=<파일> cargo run --release -p xtask -- verify --bybit-testnet` |
-| V-BYBIT-LIVE-2 | 실제 Bybit 테스트넷은 같은 orderLinkId의 두 번째 주문 요청을 110072로 답하고 주문을 하나 더 만들지 않는다. 첫 주문이 취소된 뒤에도 같은 orderLinkId는 다시 받지 않는다(110072). 게이트웨이는 110072를 Unknown으로 읽는다(주문이 이미 있을 수 있으므로) | 실제 거래소(테스트넷) | 통과 | `OMS_BYBIT_TESTNET_CREDS=<파일> cargo run --release -p xtask -- verify --bybit-testnet` |
-| V-BYBIT-LIVE-3 | 실제 Bybit 테스트넷에서 킬 루프의 두 요청이 읽힌다: 일괄 취소(linear, USDT)는 걸린 주문 셋을 모두 취소했다고 답하고(빈 계좌에서는 빈 목록과 success 1), 그 뒤 열린 주문 수가 10초 안에 0이 된다. 시계 검사(/v5/market/time)가 앞섬 한도 안으로 판정한다 | 실제 거래소(테스트넷) | 통과 | `OMS_BYBIT_TESTNET_CREDS=<파일> cargo run --release -p xtask -- verify --bybit-testnet` |
-| V-BYBIT-LIVE-4 | 실제 Bybit 테스트넷의 실행 행(/v5/execution/list)이 게이트웨이의 분류(exec::classify)에서 우리 주문의 체결로 읽힌다: orderLinkId가 우리 인스턴스와 주문 번호로 풀리고, 방향과 수량의 합이 주문과 같고, 테이커 수수료는 비용(양수)이다. 감소 전용 IOC가 포지션을 0으로 닫는다 | 실제 거래소(테스트넷) | 통과 | `OMS_BYBIT_TESTNET_CREDS=<파일> cargo run --release -p xtask -- verify --bybit-testnet` |
-| V-BYBIT-LIVE-5 | 같은 계좌의 두 주문이 서로 반대로 만나면, 이 계좌의 기본 설정에서 Bybit 테스트넷은 자기 체결 방지로 걸려 있던 주문(메이커)을 취소하고(cancelType CancelBySmp) 체결은 일어나지 않는다. 남는 포지션은 없다 | 실제 거래소(테스트넷) | 통과 | `OMS_BYBIT_TESTNET_CREDS=<파일> cargo run --release -p xtask -- verify --bybit-testnet` |
-| V-BYBIT-LIVE-6 | 실제 Bybit 테스트넷의 조회 응답(열린 주문, 포지션, 체결, 증거금 보고, 계좌 모드, 종목 설정)을 게이트웨이의 조회(Queries)가 실패 없이 코어 입력으로 바꾼다. 거래소의 응답 모양(키와 값의 종류)이 crates/http-fake/recorded/bybit-testnet/에 녹화한 모양과 같다 | 실제 거래소(테스트넷) | 통과 | `OMS_BYBIT_TESTNET_CREDS=<파일> cargo run --release -p xtask -- verify --bybit-testnet. 다시 녹화: OMS_BYBIT_TESTNET_RECORD=1 cargo test -p oms-node --test bybit_testnet -- --ignored the_venue_answers` |
-| V-BYBIT-RECORDED-1 | 가짜 Bybit가 테스트넷에서 녹화한 실제 응답을 그대로 보낼 때, 게이트웨이가 그것을 읽는다: 오래된 요청(10002)·최소 수량 미만(10001)·모르는 주문의 취소(110001)는 Rejected, 빈 일괄 취소는 취소 0건, 열린 주문·포지션·실행 행은 코어 입력(우리 주문의 체결, 비용인 수수료), 증거금 보고·계좌 모드·종목 설정은 실패 없이 읽힌다 | 통합 | 통과 | `cargo test -p oms-node --test bybit_recorded` |
-| V-WATCH-14 | 워처는 자격 파일의 RSA 키(rsa_private_key, PKCS#8 PEM 글)로도 서명한다: 같은 문자열(timestamp + api_key + recv_window + 질의 또는 본문)의 RSA-SHA256 PKCS#1 v1.5 서명을 표준 base64(패딩 있음)로 X-BAPI-SIGN에 싣고 X-BAPI-SIGN-TYPE은 보내지 않는다. GET과 일괄 취소 POST가 모두 Credentials::sign을 지난다. 자격 파일은 api_key와 api_secret 또는 rsa_private_key 중 정확히 하나만 받고, 둘 다·둘 다 없음·PKCS#1·암호화된 PEM·PEM이 아닌 글·키가 아닌 본문·잘린 본문·빈 키·1024비트 키는 키의 바이트를 담지 않는 한 줄로 시작을 거부하며(PKCS#1과 암호화된 PEM은 openssl 변환 명령을 적는다), Debug는 키를 찍지 않는다. HMAC 키의 서명은 전과 바이트까지 같다. api_secret에 PEM 개인 키가 있으면 HMAC 비밀로 쓰지 않고 rsa_private_key 자리를 말하는 한 줄로 시작을 거부한다 | 단위, 통합(loopback) | 통과 | `cargo test -p watcher --test sign --test creds --test client` |
-| V-BYBIT-RSA-1 | OMS의 Bybit 게이트웨이는 자격 파일의 RSA 키(rsa_private_key, PKCS#8 PEM 글)로도 서명한다: REST(GET의 질의, POST의 본문)는 같은 문자열의 RSA-SHA256 PKCS#1 v1.5 서명을 표준 base64로 X-BAPI-SIGN에 싣고 X-BAPI-SIGN-TYPE은 보내지 않으며, 비공개 스트림과 WS Trade의 auth는 GET/realtime + expires의 같은 서명을 base64로 싣는다. 모든 서명이 Credentials::sign을 지나고 서명을 만들지 못한 요청은 보내지 않는다(NotSent, auth not sent). 자격 파일은 api_key와 api_secret 또는 rsa_private_key 중 정확히 하나만 받고 워처와 같은 거부를 키의 바이트 없이 한 줄로 내며, Debug는 키를 찍지 않는다. HMAC 키의 서명은 전과 바이트까지 같다. api_secret에 PEM 개인 키가 있으면 HMAC 비밀로 쓰지 않고 rsa_private_key 자리를 말하는 한 줄로 거부한다 | 단위, 통합(loopback) | 통과 | `cargo test -p oms-node --lib venue::bybit` |
+| V-BYBIT-LIVE-1 | 실제 Bybit 테스트넷은 요청 시각이 recv_window(5초)보다 오래됐거나 거래소 시계보다 1초 넘게 앞선 주문 요청을 10002로 거절하고, 그 주문은 거래소에 없다. 4초 지났거나 0.5초 앞선 요청은 시각 검사를 통과한다. 게이트웨이는 거절을 Rejected로 읽고, 상태 조회(실시간, 이력 두 번)는 그 주문을 '없음'으로 답한다 | 실제 거래소(테스트넷) | 미실행 | `OMS_BYBIT_TESTNET_CREDS=<파일> cargo run --release -p xtask -- verify --bybit-testnet` |
+| V-BYBIT-LIVE-2 | 실제 Bybit 테스트넷은 같은 orderLinkId의 두 번째 주문 요청을 110072로 답하고 주문을 하나 더 만들지 않는다. 첫 주문이 취소된 뒤에도 같은 orderLinkId는 다시 받지 않는다(110072). 게이트웨이는 110072를 Unknown으로 읽는다(주문이 이미 있을 수 있으므로) | 실제 거래소(테스트넷) | 미실행 | `OMS_BYBIT_TESTNET_CREDS=<파일> cargo run --release -p xtask -- verify --bybit-testnet` |
+| V-BYBIT-LIVE-3 | 실제 Bybit 테스트넷에서 킬 루프의 두 요청이 읽힌다: 일괄 취소(linear, USDT)는 걸린 주문 셋을 모두 취소했다고 답하고(빈 계좌에서는 빈 목록과 success 1), 그 뒤 열린 주문 수가 10초 안에 0이 된다. 시계 검사(/v5/market/time)가 앞섬 한도 안으로 판정한다 | 실제 거래소(테스트넷) | 미실행 | `OMS_BYBIT_TESTNET_CREDS=<파일> cargo run --release -p xtask -- verify --bybit-testnet` |
+| V-BYBIT-LIVE-4 | 실제 Bybit 테스트넷의 실행 행(/v5/execution/list)이 게이트웨이의 분류(exec::classify)에서 우리 주문의 체결로 읽힌다: orderLinkId가 우리 인스턴스와 주문 번호로 풀리고, 방향과 수량의 합이 주문과 같고, 테이커 수수료는 비용(양수)이다. 감소 전용 IOC가 포지션을 0으로 닫는다 | 실제 거래소(테스트넷) | 미실행 | `OMS_BYBIT_TESTNET_CREDS=<파일> cargo run --release -p xtask -- verify --bybit-testnet` |
+| V-BYBIT-LIVE-5 | 같은 계좌의 두 주문이 서로 반대로 만나면, 이 계좌의 기본 설정에서 Bybit 테스트넷은 자기 체결 방지로 걸려 있던 주문(메이커)을 취소하고(cancelType CancelBySmp) 체결은 일어나지 않는다. 남는 포지션은 없다 | 실제 거래소(테스트넷) | 미실행 | `OMS_BYBIT_TESTNET_CREDS=<파일> cargo run --release -p xtask -- verify --bybit-testnet` |
+| V-BYBIT-LIVE-6 | 실제 Bybit 테스트넷의 조회 응답(열린 주문, 포지션, 체결, 증거금 보고, 계좌 모드, 종목 설정)을 게이트웨이의 조회(Queries)가 실패 없이 코어 입력으로 바꾼다. 거래소의 응답 모양(키와 값의 종류)이 crates/http-fake/recorded/bybit-testnet/에 녹화한 모양과 같다 | 실제 거래소(테스트넷) | 미실행 | `OMS_BYBIT_TESTNET_CREDS=<파일> cargo run --release -p xtask -- verify --bybit-testnet. 다시 녹화: OMS_BYBIT_TESTNET_RECORD=1 cargo test -p oms-node --test bybit_testnet -- --ignored the_venue_answers` |
+| V-BYBIT-RECORDED-1 | 가짜 Bybit가 테스트넷에서 녹화한 실제 응답을 그대로 보낼 때, 게이트웨이가 그것을 읽는다: 오래된 요청(10002)·최소 수량 미만(10001)·모르는 주문의 취소(110001)는 Rejected, 빈 일괄 취소는 취소 0건, 열린 주문·포지션·실행 행은 코어 입력(우리 주문의 체결, 비용인 수수료), 증거금 보고·계좌 모드·종목 설정은 실패 없이 읽힌다 | 통합 | 미실행 | `cargo test -p oms-node --test bybit_recorded` |
+| V-WATCH-14 | 워처는 자격 파일의 RSA 키(rsa_private_key, PKCS#8 PEM 글)로도 서명한다: 같은 문자열(timestamp + api_key + recv_window + 질의 또는 본문)의 RSA-SHA256 PKCS#1 v1.5 서명을 표준 base64(패딩 있음)로 X-BAPI-SIGN에 싣고 X-BAPI-SIGN-TYPE은 보내지 않는다. GET과 일괄 취소 POST가 모두 Credentials::sign을 지난다. 자격 파일은 api_key와 api_secret 또는 rsa_private_key 중 정확히 하나만 받고, 둘 다·둘 다 없음·PKCS#1·암호화된 PEM·PEM이 아닌 글·키가 아닌 본문·잘린 본문·빈 키·1024비트 키는 키의 바이트를 담지 않는 한 줄로 시작을 거부하며(PKCS#1과 암호화된 PEM은 openssl 변환 명령을 적는다), Debug는 키를 찍지 않는다. HMAC 키의 서명은 전과 바이트까지 같다. api_secret에 PEM 개인 키가 있으면 HMAC 비밀로 쓰지 않고 rsa_private_key 자리를 말하는 한 줄로 시작을 거부한다 | 단위, 통합(loopback) | 미실행 | `cargo test -p watcher --test sign --test creds --test client` |
+| V-BYBIT-RSA-1 | OMS의 Bybit 게이트웨이는 자격 파일의 RSA 키(rsa_private_key, PKCS#8 PEM 글)로도 서명한다: REST(GET의 질의, POST의 본문)는 같은 문자열의 RSA-SHA256 PKCS#1 v1.5 서명을 표준 base64로 X-BAPI-SIGN에 싣고 X-BAPI-SIGN-TYPE은 보내지 않으며, 비공개 스트림과 WS Trade의 auth는 GET/realtime + expires의 같은 서명을 base64로 싣는다. 모든 서명이 Credentials::sign을 지나고 서명을 만들지 못한 요청은 보내지 않는다(NotSent, auth not sent). 자격 파일은 api_key와 api_secret 또는 rsa_private_key 중 정확히 하나만 받고 워처와 같은 거부를 키의 바이트 없이 한 줄로 내며, Debug는 키를 찍지 않는다. HMAC 키의 서명은 전과 바이트까지 같다. api_secret에 PEM 개인 키가 있으면 HMAC 비밀로 쓰지 않고 rsa_private_key 자리를 말하는 한 줄로 거부한다 | 단위, 통합(loopback) | 미실행 | `cargo test -p oms-node --lib venue::bybit` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다. 전략 이름은 [A-Za-z0-9_.:-]의 1~32자만 받는다. 문자열 식별자는 만들 때와 역직렬화할 때 같은 검사로 거부한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 수치 오류는 모든 한도 검사를 무력화한다
 - 수준: 단위
 - 전제와 범위: 손으로 쓴 예제와, 모든 i64 값에 대한 왕복(property test, 기본 256회)
@@ -154,18 +154,18 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/num::tests::parses_business_examples` | 통과 |  |
-| `core/num::tests::rejects_instead_of_rounding` | 통과 |  |
-| `core/num::tests::formats_canonically` | 통과 |  |
-| `core/num::tests::format_parse_roundtrip` | 통과 |  |
-| `core/num::tests::serde_roundtrip_is_exact` | 통과 |  |
-| `core/num::tests::significant_digits_examples` | 통과 |  |
-| `core/ids::tests::rejects_invalid_identifiers` | 통과 |  |
-| `core/ids::tests::venue_client_id_roundtrip` | 통과 |  |
+| `core/num::tests::parses_business_examples` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/num::tests::rejects_instead_of_rounding` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/num::tests::formats_canonically` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/num::tests::format_parse_roundtrip` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/num::tests::serde_roundtrip_is_exact` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/num::tests::significant_digits_examples` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/ids::tests::rejects_invalid_identifiers` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/ids::tests::venue_client_id_roundtrip` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-NUM-2 — 한도 비교용 금액은 정확한 곱 이상인 가장 작은 1e-8 단위 값이고, 넘치면 보고된다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 노출을 과소 계산하면 한도가 뚫린다
 - 수준: 속성
 - 전제와 범위: 가격 0~2e7, 수량 0~2e4 범위의 임의 값(property test)
@@ -179,13 +179,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/num::tests::notional_ceil_is_the_least_upper_bound` | 통과 |  |
-| `core/num::tests::notional_rounds_in_the_documented_direction` | 통과 |  |
-| `core/num::tests::notional_overflow_is_reported` | 통과 |  |
+| `core/num::tests::notional_ceil_is_the_least_upper_bound` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/num::tests::notional_rounds_in_the_documented_direction` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/num::tests::notional_overflow_is_reported` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-NEW-1 — 수용된 주문들이 어떤 순서로 체결되어도 계좌와 전략의 포지션은 설정한 구간을 벗어나지 않으며, 두 요청이 같은 여유를 쓰지 못한다. 수용은 그 방향의 예약(B 또는 S)을 수량만큼 늘리고 전송 명령을 한 번 내며, 거절은 예약도 전송 명령도 만들지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 요구 R02. 한도 초과는 직접 손실 위험이다
 - 수준: 단위
 - 전제와 범위: 요구 문서의 실행 예와 반례 넷(동시 요청, 반대 방향 미체결, 전략 청산 대 계좌 한도). 한 종목, 두 전략
@@ -199,15 +199,15 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/fia_7_1_reservation_follows_potential_fills` | 통과 |  |
-| `core/concurrent_requests_cannot_double_spend_headroom` | 통과 |  |
-| `core/open_orders_on_the_other_side_do_not_create_headroom` | 통과 |  |
-| `core/strategy_reduction_is_not_account_reduction` | 통과 |  |
-| `core/capacity_limits_bound_open_orders_and_outstanding_sends` | 통과 |  |
+| `core/fia_7_1_reservation_follows_potential_fills` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/concurrent_requests_cannot_double_spend_headroom` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/open_orders_on_the_other_side_do_not_create_headroom` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/strategy_reduction_is_not_account_reduction` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/capacity_limits_bound_open_orders_and_outstanding_sends` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-NEW-2 — 수량·가격 단위, 유효숫자, 최소·최대 금액, 가격대, 만료 시각, 종목·전략의 허용 여부, 용량을 검사하고 해당하는 사유를 모두 돌려준다. 거절 사유의 종류마다 시험이 있다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 거래소가 거부할 주문을 미리 걸러 한도를 아끼고, 가격 입력 실수를 막는다
 - 수준: 단위
 - 전제와 범위: 경계값 예제. 가격대는 5%에서 정확히 경계 양쪽. 최소 금액은 내림, 최대 금액은 올림으로 비교한다
@@ -221,19 +221,19 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/field_validation_reasons` | 통과 |  |
-| `core/significant_figure_rule_exempts_integers` | 통과 |  |
-| `core/price_band_bounds_only_the_aggressive_side_and_needs_a_fresh_reference` | 통과 |  |
-| `core/expiry_rules` | 통과 |  |
-| `core/no_configuration_means_nothing_is_accepted` | 통과 |  |
-| `core/every_remaining_reject_reason_has_a_case` | 통과 |  |
-| `core/the_strategy_bound_binds_on_its_own` | 통과 |  |
-| `core/memory_capacity_and_arithmetic_overflow_are_rejections_not_faults` | 통과 |  |
-| `core/f9_min_notional_is_not_passed_by_rounding_up` | 통과 |  |
+| `core/field_validation_reasons` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/significant_figure_rule_exempts_integers` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/price_band_bounds_only_the_aggressive_side_and_needs_a_fresh_reference` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/expiry_rules` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/no_configuration_means_nothing_is_accepted` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/every_remaining_reject_reason_has_a_case` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_strategy_bound_binds_on_its_own` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/memory_capacity_and_arithmetic_overflow_are_rejections_not_faults` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/f9_min_notional_is_not_passed_by_rounding_up` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-IDEM-1 — 같은 (전략, 키)로는 주문이 하나만 만들어지고 전송 명령도 한 번만 나온다. 다른 내용의 요청은 충돌로 거절된다. 키는 요청이 만료된 뒤에만 잊는다: 닫힌 주문은 닫힌 뒤 closed_retention_us와 만료 뒤 dedup_grace_us(기본 60초)가 모두 지나야 메모리에서 지워지고, 그 전까지 같은 키는 중복으로 답한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 재전송이 주문을 복제하면 안 된다
 - 수준: 단위
 - 전제와 범위: 같은 요청, 다른 요청, 다른 전략의 같은 키, 거절 뒤 재시도, 재시작 뒤, 삭제 전후
@@ -247,16 +247,16 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/same_key_same_request_creates_one_order_and_one_send` | 통과 |  |
-| `core/same_key_different_request_is_a_conflict_without_effect` | 통과 |  |
-| `core/the_key_scope_is_per_strategy` | 통과 |  |
-| `core/a_rejection_does_not_consume_the_key` | 통과 |  |
-| `core/the_duplicate_answer_survives_restart` | 통과 |  |
-| `core/a_key_is_forgotten_only_after_its_request_expired` | 통과 |  |
+| `core/same_key_same_request_creates_one_order_and_one_send` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/same_key_different_request_is_a_conflict_without_effect` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_key_scope_is_per_strategy` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_rejection_does_not_consume_the_key` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_duplicate_answer_survives_restart` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_key_is_forgotten_only_after_its_request_expired` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-IDEM-2 — 재전송, 충돌 요청, 재시작, 키 삭제가 임의로 섞여도 키당 수용 1회, 키당 전송 1회, 거래소의 클라이언트 ID당 접수 요청 1회가 유지된다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: V-IDEM-1의 예제가 놓친 조합을 찾는다
 - 수준: 시뮬레이션
 - 전제와 범위: 프로파일 lossy, crashy, purge. 프로파일당 seed 수는 결과의 notes에 있다. purge는 보존 1초, 재전송 20%
@@ -270,13 +270,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `sim/profile_lossy` | 통과 |  |
-| `sim/profile_crashy` | 통과 |  |
-| `sim/profile_purge` | 통과 |  |
+| `sim/profile_lossy` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_crashy` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_purge` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-IDEM-3 — 실제 소켓으로 여러 연결이 같은 요청을 동시에 보내도, 노드를 강제 종료한 뒤에도, 주문은 하나이고 거래소 접수 요청도 하나다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 코어의 성질이 실제 프로세스 경계를 넘어 유지되는지 확인한다
 - 수준: 프로세스
 - 전제와 범위: 연결 8개의 동시 요청 1회, 강제 종료 1회
@@ -290,11 +290,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/a_repeated_request_never_creates_a_second_order` | 통과 |  |
+| `e2e/a_repeated_request_never_creates_a_second_order` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-DOUBT-1 — 전송 결과를 모르면 예약을 유지하고 신규 주문을 막으며 다시 보내지 않는다. 존재 증거가 오면 정상 주문이 된다. 결과보다 체결이 먼저 오면 그 체결로 주문이 접수되고, 뒤에 온 Placed는 아무것도 바꾸지 않으며 뒤에 온 Unknown은 결과 불명을 만들지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 응답 유실을 실패로 읽으면 예약 없는 체결이나 중복 주문이 생긴다
 - 수준: 단위
 - 전제와 범위: 불명 → 차단, 조회로 발견, 확실한 실패(미전송, 거부)는 즉시 종결, 결과가 아예 없을 때의 시간 초과
@@ -308,16 +308,16 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/unknown_send_outcome_keeps_the_reservation_and_blocks_new_exposure` | 통과 |  |
-| `core/in_doubt_order_found_by_query_becomes_working` | 통과 |  |
-| `core/definite_gateway_failures_close_and_release` | 통과 |  |
-| `core/a_send_without_any_result_becomes_in_doubt_after_the_timeout` | 통과 |  |
-| `core/an_in_doubt_order_seen_in_the_open_order_sweep_is_acknowledged` | 통과 |  |
-| `core/fill_before_send_result_acknowledges_the_order` | 통과 |  |
+| `core/unknown_send_outcome_keeps_the_reservation_and_blocks_new_exposure` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/in_doubt_order_found_by_query_becomes_working` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/definite_gateway_failures_close_and_release` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_send_without_any_result_becomes_in_doubt_after_the_timeout` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/an_in_doubt_order_seen_in_the_open_order_sweep_is_acknowledged` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/fill_before_send_result_acknowledges_the_order` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-DOUBT-2 — '찾을 수 없음'은 전송 만료 + 여유가 지난 뒤의 조회일 때만 주문을 닫는다. 거래소가 만료를 강제하지 않는 설정에서는 절대 닫지 않는다. 결과 불명인 주문은 운영자의 resolve 명령으로 닫힌다. 결과 불명이 아닌 전송 대기 주문에 대한 '찾을 수 없음'은 만료 뒤의 조회라도 무시한다. '찾을 수 없음'으로 닫은 주문이 전송 응답이나 열린 주문 목록에서 열려 있다고 나오면 OpenAfterClose를 제기하고, 그 주문의 체결은 기장하고 FillAfterClose를 제기한다. 접수된 주문에 대한 '찾을 수 없음'은 주문을 닫지 않고 예약을 유지하며, 접수 시각 + 여유 뒤의 조회면 StatusConflict를 제기한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 너무 일찍 닫으면 그 뒤에 놓인 주문이 예약 없이 체결된다
 - 수준: 단위
 - 전제와 범위: 여유 10초의 경계 양쪽. 실제 프로세스에서는 만료 1.5초 + 여유 0.3초 이전에 닫히지 않음을 시간으로 확인
@@ -331,18 +331,18 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/not_found_closes_an_in_doubt_order_only_after_expiry_plus_margin` | 통과 |  |
-| `core/not_found_never_closes_when_the_venue_does_not_enforce_expiry` | 통과 |  |
-| `core/not_found_is_ignored_while_the_send_is_simply_outstanding` | 통과 |  |
-| `e2e/a_lost_request_is_closed_only_after_its_send_window` | 통과 |  |
-| `core/f3_placed_evidence_for_an_order_closed_as_not_placed_is_flagged` | 통과 |  |
-| `core/f3_a_reappearing_order_is_reported_as_open_after_close` | 통과 |  |
-| `core/a_fill_after_any_kind_of_close_is_booked_and_flagged` | 통과 |  |
-| `core/an_acknowledged_order_the_venue_no_longer_knows_is_reported_not_closed` | 통과 |  |
+| `core/not_found_closes_an_in_doubt_order_only_after_expiry_plus_margin` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/not_found_never_closes_when_the_venue_does_not_enforce_expiry` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/not_found_is_ignored_while_the_send_is_simply_outstanding` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/a_lost_request_is_closed_only_after_its_send_window` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/f3_placed_evidence_for_an_order_closed_as_not_placed_is_flagged` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/f3_a_reappearing_order_is_reported_as_open_after_close` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_fill_after_any_kind_of_close_is_booked_and_flagged` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/an_acknowledged_order_the_venue_no_longer_knows_is_reported_not_closed` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-DOUBT-3 — 부재 판정은 두 가정(거래소가 만료를 강제한다, 시계 차이가 여유보다 작다)에 의존하며, 가정을 깨면 시험이 위반을 잡는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 가정이 실제로 필요한지, 그리고 검사가 실제로 잡아내는지 확인한다
 - 수준: 시뮬레이션
 - 전제와 범위: 거래소가 만료를 무시하는 실행과 시계가 6초 어긋난 실행(여유 2초). 각각 seed 60개 안에서 위반을 찾는다
@@ -356,12 +356,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `sim/absence_rule_depends_on_venue_side_expiry` | 통과 |  |
-| `sim/absence_rule_depends_on_the_clock_margin` | 통과 |  |
+| `sim/absence_rule_depends_on_venue_side_expiry` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/absence_rule_depends_on_the_clock_margin` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-FILL-1 — 체결은 한 번만 기장되고, 접수 응답보다 먼저 와도, 주인을 아직 몰라도, 수량을 넘어도 버려지지 않는다. 기장은 주문의 누적 수량·금액·수수료와 계좌·전략의 포지션을 늘리고, 예약을 체결량과 남은 예약 가운데 작은 쪽만큼 줄인다. 대기 체결이 상한(max_parked_fills, 기본 1,024건)에 이르면 다음 체결은 기다리지 않고 외부 체결로 기장하며 ParkedFillOverflow를 제기한다. 주문과 종목이나 방향이 다른 체결은 그 주문에 기장하지 않고 외부 체결로 계좌에 기장하며 FillFieldConflict를 제기한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 체결 유실이나 이중 기장은 포지션 오차다
 - 수준: 단위
 - 전제와 범위: 중복, 순서 역전, 거래소 ID만 있는 체결의 대기와 해소(상태 통보로, 다른 체결로), 주인 없는 체결의 외부 기장, 초과 체결, 체결만으로 전량 체결 종결, 취소·부재·수동으로 닫은 주문의 체결, 메모리에서 지워진 주문의 체결, 설정에 없는 종목의 체결, 통계 합계가 넘치는 체결
@@ -375,26 +375,26 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/duplicate_fill_is_booked_once` | 통과 |  |
-| `core/fill_before_send_result_acknowledges_the_order` | 통과 |  |
-| `core/fill_by_venue_id_before_the_id_is_known_is_parked_then_booked` | 통과 |  |
-| `core/unidentified_fill_is_booked_as_external_after_the_wait_and_holds_trading` | 통과 |  |
-| `core/a_parked_fill_is_external_once_no_order_can_own_it` | 통과 |  |
-| `core/overfill_is_booked_in_full_and_flagged` | 통과 |  |
-| `core/full_fill_by_fills_alone_closes_the_order` | 통과 |  |
-| `core/f2_parked_fill_is_booked_to_its_order_when_another_fill_reveals_the_venue_id` | 통과 |  |
-| `core/a_fill_after_any_kind_of_close_is_booked_and_flagged` | 통과 |  |
-| `core/a_fill_for_a_purged_order_is_booked_as_external` | 통과 |  |
-| `core/a_fill_on_an_instrument_that_is_not_configured_is_booked_as_external_without_a_fault` | 통과 |  |
-| `core/the_three_ways_a_fill_input_changes_nothing` | 통과 |  |
-| `core/f6_reporting_counter_overflow_does_not_fail_stop_fill_booking` | 통과 |  |
-| `core/fia_7_1_reservation_follows_potential_fills` | 통과 |  |
-| `core/too_many_unidentified_fills_are_booked_as_external_instead_of_waiting` | 통과 |  |
-| `core/a_fill_that_contradicts_its_order_is_booked_to_the_account_and_flagged` | 통과 |  |
+| `core/duplicate_fill_is_booked_once` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/fill_before_send_result_acknowledges_the_order` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/fill_by_venue_id_before_the_id_is_known_is_parked_then_booked` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/unidentified_fill_is_booked_as_external_after_the_wait_and_holds_trading` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_parked_fill_is_external_once_no_order_can_own_it` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/overfill_is_booked_in_full_and_flagged` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/full_fill_by_fills_alone_closes_the_order` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/f2_parked_fill_is_booked_to_its_order_when_another_fill_reveals_the_venue_id` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_fill_after_any_kind_of_close_is_booked_and_flagged` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_fill_for_a_purged_order_is_booked_as_external` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_fill_on_an_instrument_that_is_not_configured_is_booked_as_external_without_a_fault` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_three_ways_a_fill_input_changes_nothing` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/f6_reporting_counter_overflow_does_not_fail_stop_fill_booking` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/fia_7_1_reservation_follows_potential_fills` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/too_many_unidentified_fills_are_booked_as_external_instead_of_waiting` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_fill_that_contradicts_its_order_is_booked_to_the_account_and_flagged` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-CANCEL-1 — 취소 요청은 예약을 풀지 않고, 취소 중 체결은 기장되며, 최종 수량은 종결 통보가 정한다. 취소는 차단 중에도 받고, 간격을 두고 상한까지 재시도한다. 상한에 이른 뒤 다시 요청하면 새 시도가 나가고, 결과가 오지 않는 시도는 시간 초과 뒤 불명으로 처리된다. 운영자의 cancel_all은 범위 안의 미종결 주문마다 취소 요청을 낼 뿐 취소 완료가 아니다. 보낼 수 있는 주문의 취소 요청은 requested로 답하고 첫 시도의 취소 명령을 곧바로 낸다. 상한까지 확인되지 않은 취소는 CancelStuck을 한 번 제기하고, 운영자가 확인한 뒤에는 다시 제기하지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 취소했다는 이유로 위험을 0으로 보면 안 된다
 - 수준: 단위
 - 전제와 범위: 기존 계약 문서의 취소 경합 사례 4a, 4b, 4c. 소유권, 중복 취소, 미접수 주문의 취소, 재시도 상한, 상한 뒤의 재요청(전략과 운영자), 결과 불명 중에 쓴 시도, 거부된 취소, 결과 없는 취소, 중지 중 취소, 링크 복귀 시 전송
@@ -408,24 +408,24 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/cancel_race_final_status_decides` | 통과 |  |
-| `core/final_quantity_below_booked_fills_is_flagged` | 통과 |  |
-| `core/cancel_is_authorised_per_owner_and_idempotent` | 통과 |  |
-| `core/cancel_of_an_unacknowledged_order_is_sent_once_the_order_is_acknowledged` | 통과 |  |
-| `core/cancel_is_retried_with_backoff_and_then_flagged` | 통과 |  |
-| `core/cancels_are_accepted_while_new_orders_are_held` | 통과 |  |
-| `core/a_pending_cancel_is_sent_when_the_link_returns` | 통과 |  |
-| `core/cancel_all_requests_every_open_order_in_scope` | 통과 |  |
-| `core/holds_are_independent` | 통과 |  |
-| `core/f1_cancel_can_be_reissued_after_transient_failures_used_up_the_attempts` | 통과 |  |
-| `core/f1_acknowledging_cancel_stuck_releases_the_hold` | 통과 |  |
-| `core/f1_cancel_attempts_spent_in_doubt_do_not_strand_the_order_once_it_is_found` | 통과 |  |
-| `core/f1_a_rejected_cancel_is_retried_only_while_the_order_is_not_terminal` | 통과 |  |
-| `core/f1_a_cancel_without_any_result_is_retried_after_a_timeout` | 통과 |  |
+| `core/cancel_race_final_status_decides` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/final_quantity_below_booked_fills_is_flagged` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/cancel_is_authorised_per_owner_and_idempotent` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/cancel_of_an_unacknowledged_order_is_sent_once_the_order_is_acknowledged` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/cancel_is_retried_with_backoff_and_then_flagged` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/cancels_are_accepted_while_new_orders_are_held` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_pending_cancel_is_sent_when_the_link_returns` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/cancel_all_requests_every_open_order_in_scope` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/holds_are_independent` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/f1_cancel_can_be_reissued_after_transient_failures_used_up_the_attempts` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/f1_acknowledging_cancel_stuck_releases_the_hold` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/f1_cancel_attempts_spent_in_doubt_do_not_strand_the_order_once_it_is_found` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/f1_a_rejected_cancel_is_retried_only_while_the_order_is_not_terminal` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/f1_a_cancel_without_any_result_is_retried_after_a_timeout` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-TERM-1 — 종결 통보가 체결보다 먼저 와도 아직 기장되지 않은 수량은 예약에 남고, 최종 수량을 모를 때는 체결 동기화가 종결 시각을 지난 뒤에만 닫는다. 최종 수량을 모르는 Closing 주문이 있으면 코어는 체결 조회를 요구한다. 최종 누적이 기장된 체결보다 작으면 기장을 되돌리지 않고 CumExceedsFinal을 제기한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 종결을 일찍 확정하면 뒤이은 체결이 예약 없이 기장된다
 - 수준: 단위
 - 전제와 범위: 최종 수량을 아는 경우와 모르는 경우. 체결이 끝내 오지 않는 경우
@@ -439,14 +439,14 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/terminal_before_fills_keeps_the_unbooked_quantity_reserved` | 통과 |  |
-| `core/terminal_without_final_quantity_waits_for_fill_sync` | 통과 |  |
-| `core/missing_fills_after_sync_are_flagged_and_stay_reserved` | 통과 |  |
-| `core/final_quantity_below_booked_fills_is_flagged` | 통과 |  |
+| `core/terminal_before_fills_keeps_the_unbooked_quantity_reserved` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/terminal_without_final_quantity_waits_for_fill_sync` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/missing_fills_after_sync_are_flagged_and_stay_reserved` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/final_quantity_below_booked_fills_is_flagged` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-RECON-1 — 링크가 돌아오면 미종결 주문의 증거, 체결, 열린 주문, 포지션을 현재 세션에서 다시 확인할 때까지 신규 주문을 막는다. 포지션은 예약으로 설명되는 범위로 검사하고, 오래된 스냅샷은 판정하지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 끊긴 동안의 변화를 모른 채 주문하면 안 되고, 거짓 불일치로 거래를 막아도 안 된다
 - 수준: 단위
 - 전제와 범위: 세션 전환, 이전 세션의 늦은 답(접수 증거 포함)과 늦은 단절 통보, 네 확인을 하나씩 뺀 경우, 범위 안/밖의 포지션, 조회 뒤 기장된 체결, 외부 주문과 고아 주문, 클라이언트 ID 없이 나열된 우리 주문, 불일치 확인의 독립성, 명시적 조정
@@ -460,21 +460,21 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/link_loss_blocks_new_orders_and_resync_is_required_after_it_returns` | 통과 |  |
-| `core/stale_session_evidence_does_not_satisfy_resync` | 통과 |  |
-| `core/position_check_uses_the_reachable_range` | 통과 |  |
-| `core/a_position_snapshot_older_than_the_last_booked_fill_is_inconclusive` | 통과 |  |
-| `core/foreign_and_orphan_open_orders_are_flagged` | 통과 |  |
-| `core/acknowledging_one_mismatch_does_not_clear_another` | 통과 |  |
-| `core/position_adjustment_is_explicit_and_keeps_the_ledgers_consistent` | 통과 |  |
-| `core/each_part_of_the_re_confirmation_is_required` | 통과 |  |
-| `core/f4_stale_session_evidence_that_acknowledges_an_order_does_not_satisfy_resync` | 통과 |  |
-| `core/f5_stale_link_down_does_not_take_a_newer_session_down` | 통과 |  |
-| `core/f8_own_unacknowledged_order_listed_without_client_id_is_not_flagged_foreign` | 통과 |  |
+| `core/link_loss_blocks_new_orders_and_resync_is_required_after_it_returns` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/stale_session_evidence_does_not_satisfy_resync` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/position_check_uses_the_reachable_range` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_position_snapshot_older_than_the_last_booked_fill_is_inconclusive` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/foreign_and_orphan_open_orders_are_flagged` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/acknowledging_one_mismatch_does_not_clear_another` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/position_adjustment_is_explicit_and_keeps_the_ledgers_consistent` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/each_part_of_the_re_confirmation_is_required` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/f4_stale_session_evidence_that_acknowledges_an_order_does_not_satisfy_resync` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/f5_stale_link_down_does_not_take_a_newer_session_down` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/f8_own_unacknowledged_order_listed_without_client_id_is_not_flagged_foreign` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-RECON-2 — 노드가 죽어 있는 동안 거래소에서 일어난 체결, 거래소 주도 취소, 부분 체결을 재시작 뒤 거래소 조회로 모두 반영한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 복구가 저널만이 아니라 거래소 상태까지 맞추는지 확인한다
 - 수준: 프로세스
 - 전제와 범위: 주문 3건(전량 체결, 부분 체결 후 거래소 취소, 부분 체결 후 잔존). 1회
@@ -488,11 +488,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/events_missed_while_down_are_recovered_from_the_venue` | 통과 |  |
+| `e2e/events_missed_while_down_are_recovered_from_the_venue` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-EXT-1 — OMS가 내지 않은 체결은 기장되고 불일치로 표시되어 신규 주문을 막으며, 운영자가 확인해야 풀린다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 외부 활동은 한도 계산의 전제를 깬다
 - 수준: 시뮬레이션
 - 전제와 범위: 코어 예제, 시뮬레이션 external 프로파일(외부 체결을 임의 시점에 주입), 실제 프로세스 1회
@@ -506,13 +506,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/unidentified_fill_is_booked_as_external_after_the_wait_and_holds_trading` | 통과 |  |
-| `sim/profile_external` | 통과 |  |
-| `e2e/external_activity_is_detected_and_needs_an_operator` | 통과 |  |
+| `core/unidentified_fill_is_booked_as_external_after_the_wait_and_holds_trading` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_external` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/external_activity_is_detected_and_needs_an_operator` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-REPLAY-1 — 기록된 이벤트만 적용해 만든 상태는 살아 있는 상태와 같고, 기록된 입력을 다시 판단하면 기록된 이벤트가 나온다. 구조 불변조건(Core::check_invariants)은 시뮬레이션에서 모든 입력과 복구 뒤에, 오프라인 검증(verify)에서 모든 기록 뒤에 검사한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 복구의 정확성과 판단의 재현성
 - 수준: 단위
 - 전제와 범위: 시나리오 시험 전부(매 입력 뒤 그림자 상태 비교), 시뮬레이션의 최종 검사, 실제 저널에 대한 verify --re-decide
@@ -526,17 +526,17 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/recorded_inputs_re_decide_to_the_recorded_events` | 통과 |  |
-| `core/restart_puts_outstanding_sends_in_doubt_and_never_resends` | 통과 |  |
-| `sim/profile_crashy` | 통과 |  |
-| `e2e/vertical_slice_new_partial_fill_cancel_restart` | 통과 |  |
-| `e2e/random_kills_under_load_keep_books_consistent` | 통과 |  |
-| `core/margin_events_replay_to_the_same_state` | 통과 |  |
-| `core/latch_and_day_base_replay_to_the_same_state` | 통과 |  |
+| `core/recorded_inputs_re_decide_to_the_recorded_events` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/restart_puts_outstanding_sends_in_doubt_and_never_resends` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_crashy` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/vertical_slice_new_partial_fill_cancel_restart` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/random_kills_under_load_keep_books_consistent` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/margin_events_replay_to_the_same_state` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/latch_and_day_base_replay_to_the_same_state` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-SIM-1 — 네트워크 장애, 통보 중복·지연, 링크 단절, 프로세스 재시작, 키 삭제가 임의로 섞인 실행의 매 단계에서: 구조 불변조건이 성립하고, 거래소의 실제 포지션이 OMS가 설명하는 범위 안에 있고, 한도를 넘지 않고, 같은 주문이 두 번 전송되지 않는다. I-RES: 주문의 예약 수량은 미종결이면 수량 − 기장 체결, 종결 대기면 거래소 최종 누적 − 기장 체결(0 미만은 0, 잔량 이하, 최종 누적이 없으면 잔량), 종결이면 0이다. I-BOOK: 계좌·전략 장부의 매수·매도 미체결 합과 열린 주문 수는 그 장부에 속한 주문들의 예약과 미종결 수와 같다. I-ATTR: 종목별 계좌 포지션은 전략 포지션의 합 + 미귀속 포지션이다. I-KEY: (전략, 클라이언트 주문 ID)마다 주문은 하나이고 멱등 색인이 그 주문을 가리키며 색인 크기는 주문 수와 같다. I-PHASE: 종결 주문만 종결 기록을 갖고 열린 주문 색인에 없으며, 결과 불명 표시는 전송 대기 상태에만 있다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 예제 시험이 생각하지 못한 순서를 찾는다. 실제로 결함 넷을 찾아 고쳤다
 - 수준: 시뮬레이션
 - 전제와 범위: 프로파일 6개(calm, lossy, crashy, weak_evidence, purge, skewed)와 증거금 정책을 켠 3개(margin_calm, margin_lossy, margin_days: 증거금 검사는 V-MARGIN-12). 실행당 1500단계(margin_days는 가상 시간 50시간, 약 15 000단계이고 seed는 10분의 1). seed 수는 결과의 notes에 있다. 한 종목, 두 전략, 가상 시계
@@ -550,19 +550,19 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `sim/profile_calm` | 통과 |  |
-| `sim/profile_lossy` | 통과 |  |
-| `sim/profile_crashy` | 통과 |  |
-| `sim/profile_weak_evidence` | 통과 |  |
-| `sim/profile_purge` | 통과 |  |
-| `sim/profile_skewed` | 통과 |  |
-| `sim/profile_margin_calm` | 통과 |  |
-| `sim/profile_margin_lossy` | 통과 |  |
-| `sim/profile_margin_days_crosses_three_utc_days_with_restarts` | 통과 |  |
+| `sim/profile_calm` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_lossy` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_crashy` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_weak_evidence` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_purge` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_skewed` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_margin_calm` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_margin_lossy` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_margin_days_crosses_three_utc_days_with_restarts` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-SIM-2 — 장애가 멈추면 장부가 가상 거래소와 일치한다: 주문별 체결량과 상태, 포지션, 수수료 합. 차단 사유와 거짓 불일치가 남지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 안전 조건만으로는 '모두 거절'도 통과한다. 수렴을 따로 확인한다
 - 수준: 시뮬레이션
 - 전제와 범위: V-SIM-1과 같은 실행의 끝. 장애 주입을 멈추고 가상 시간 최대 90초를 준다
@@ -576,16 +576,16 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `sim/profile_calm` | 통과 |  |
-| `sim/profile_lossy` | 통과 |  |
-| `sim/profile_crashy` | 통과 |  |
-| `sim/profile_weak_evidence` | 통과 |  |
-| `sim/profile_purge` | 통과 |  |
-| `sim/profile_skewed` | 통과 |  |
+| `sim/profile_calm` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_lossy` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_crashy` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_weak_evidence` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_purge` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_skewed` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-SIM-3 — 같은 seed는 바이트 단위로 같은 저널을 만든다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 실패한 실행을 재현할 수 있어야 한다
 - 수준: 시뮬레이션
 - 전제와 범위: seed 3개, crashy 프로파일
@@ -599,12 +599,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `sim/a_seed_reproduces_the_same_run` | 통과 |  |
-| `sim/rng::tests::matches_the_reference_sequence` | 통과 |  |
+| `sim/a_seed_reproduces_the_same_run` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/rng::tests::matches_the_reference_sequence` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-COMMIT-1 — flush가 실패하면 그 배치의 응답, 전송 명령, 읽기 모델 변경이 하나도 나가지 않고 프로세스가 입력을 닫는다. 성공한 경우 응답 시점에 읽기 모델은 이미 갱신돼 있다. flush가 실패하면 응답 채널이 닫혔을 때 치명 표시(사유 commit failed)가 이미 서 있다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 커밋 게이트(I-WAL)의 핵심
 - 수준: 프로세스 내부
 - 전제와 범위: 커밋 스레드 구성과 인라인 구성 각각 1회. 주문 1건 성공 후 1건 실패
@@ -618,12 +618,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `pipeline/outputs_follow_durability_with_a_commit_thread` | 통과 |  |
-| `pipeline/outputs_follow_durability_with_inline_commit` | 통과 |  |
+| `pipeline/outputs_follow_durability_with_a_commit_thread` | 미실행 | result of another source, not counted (last result: passed) |
+| `pipeline/outputs_follow_durability_with_inline_commit` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-COMMIT-2 — 부하 중 임의 시점에 노드를 강제 종료하고 다시 띄우기를 반복해도, 대조가 끝난 뒤 주문별 체결량·상태와 포지션이 거래소와 일치하고 같은 주문이 두 번 접수 요청되지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 실제 스레드·저널·소켓에서 커밋 게이트와 복구가 함께 성립하는지
 - 수준: 프로세스
 - 전제와 범위: 회차 수는 결과의 notes에 있다(시험의 기본 12, 수용 시험 20). 두 전략이 주문과 취소를 계속 보낸다. 종료 시점은 60~460 ms 뒤 임의
@@ -637,12 +637,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/random_kills_under_load_keep_books_consistent` | 통과 |  |
-| `e2e/a_kill_during_send_does_not_duplicate_the_order` | 통과 |  |
+| `e2e/random_kills_under_load_keep_books_consistent` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/a_kill_during_send_does_not_duplicate_the_order` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-COMMIT-3 — 함께 도착한 입력은 flush를 공유하고, 응답은 판단 순서대로 나온다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 그룹 커밋이 실제로 일어나는지
 - 수준: 프로세스 내부
 - 전제와 범위: 요청 40건을 한꺼번에
@@ -656,11 +656,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `pipeline/inputs_that_arrive_together_share_a_flush` | 통과 |  |
+| `pipeline/inputs_that_arrive_together_share_a_flush` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-JRN-1 — 프레임의 모든 절단과 모든 단일 비트 반전이 감지되고, 0으로 채워진 꼬리는 프레임으로 읽히지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 손상 감지의 기초
 - 수준: 단위
 - 전제와 범위: 프레임 하나의 모든 절단 위치와 모든 비트
@@ -674,14 +674,14 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `journal/frame::tests::roundtrip_and_layout` | 통과 |  |
-| `journal/frame::tests::every_truncation_and_every_bit_flip_is_detected` | 통과 |  |
-| `journal/frame::tests::zero_filled_tail_is_not_a_frame` | 통과 |  |
-| `journal/frame::tests::finds_a_later_frame_behind_damage` | 통과 |  |
+| `journal/frame::tests::roundtrip_and_layout` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/frame::tests::every_truncation_and_every_bit_flip_is_detected` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/frame::tests::zero_filled_tail_is_not_a_frame` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/frame::tests::finds_a_later_frame_behind_damage` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-JRN-2 — 저널의 끝이 불완전하면 유효한 접두부만 남기고 원본 바이트를 보존한 뒤 이어 쓸 수 있다. 중간이 손상됐거나 세그먼트가 빠졌거나 다른 인스턴스의 것이거나 스냅샷보다 짧으면 시작을 거부하고, 거부한 디렉터리의 파일은 건드리지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 손상을 건너뛰고 복구했다고 말하면 안 된다
 - 수준: 속성
 - 전제와 범위: 마지막 기록의 모든 절단 위치, 임의 크기·배치·절단 위치(property test 64회), 쓰레기·0 꼬리, 중간 비트 반전, 세그먼트 누락, 회전 중 중단. 실제 노드에서 꼬리와 중간 손상 각 1회
@@ -695,29 +695,29 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `journal/every_truncation_of_the_last_record_recovers_the_prefix` | 통과 |  |
-| `journal/recovery_returns_the_longest_valid_prefix` | 통과 |  |
-| `journal/garbage_and_zero_tails_are_truncated` | 통과 |  |
-| `journal/damage_in_the_middle_is_refused_and_nothing_is_modified` | 통과 |  |
-| `journal/a_missing_middle_segment_is_a_gap` | 통과 |  |
-| `journal/an_incomplete_newest_segment_is_removed_and_preserved` | 통과 |  |
-| `journal/truncation_can_be_disabled` | 통과 |  |
-| `journal/damage_in_the_last_record_is_treated_as_an_incomplete_tail` | 통과 |  |
-| `journal/rotation_keeps_sequences_consecutive_across_segments` | 통과 |  |
-| `journal/verify_all_reads_without_modifying` | 통과 |  |
-| `journal/records_are_durable_only_after_sync` | 통과 |  |
-| `journal/appends_must_be_consecutive` | 통과 |  |
-| `e2e/journal_damage_is_handled_by_position` | 통과 |  |
-| `journal/a_foreign_instance_journal_is_refused_without_being_modified` | 통과 |  |
-| `journal/a_snapshot_newer_than_the_journal_is_refused_without_modifying_it` | 통과 |  |
-| `journal/a_snapshot_without_any_segment_is_not_accepted_silently` | 통과 |  |
-| `journal/header_only_newest_segment_is_clean` | 통과 |  |
-| `journal/stale_and_out_of_order_frames_are_classified_conservatively` | 통과 |  |
-| `journal/an_incomplete_newest_segment_after_a_snapshot_at_the_boundary_is_set_aside` | 통과 |  |
+| `journal/every_truncation_of_the_last_record_recovers_the_prefix` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/recovery_returns_the_longest_valid_prefix` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/garbage_and_zero_tails_are_truncated` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/damage_in_the_middle_is_refused_and_nothing_is_modified` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/a_missing_middle_segment_is_a_gap` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/an_incomplete_newest_segment_is_removed_and_preserved` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/truncation_can_be_disabled` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/damage_in_the_last_record_is_treated_as_an_incomplete_tail` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/rotation_keeps_sequences_consecutive_across_segments` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/verify_all_reads_without_modifying` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/records_are_durable_only_after_sync` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/appends_must_be_consecutive` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/journal_damage_is_handled_by_position` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/a_foreign_instance_journal_is_refused_without_being_modified` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/a_snapshot_newer_than_the_journal_is_refused_without_modifying_it` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/a_snapshot_without_any_segment_is_not_accepted_silently` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/header_only_newest_segment_is_clean` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/stale_and_out_of_order_frames_are_classified_conservatively` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/an_incomplete_newest_segment_after_a_snapshot_at_the_boundary_is_set_aside` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-JRN-3 — 같은 데이터 디렉터리를 두 프로세스가 쓸 수 없고, 다른 인스턴스의 저널은 거부된다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 두 writer는 순번과 주문 ID를 충돌시킨다
 - 수준: 프로세스
 - 전제와 범위: 같은 호스트
@@ -731,13 +731,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `journal/a_second_writer_is_refused` | 통과 |  |
-| `journal/a_journal_of_another_instance_is_refused` | 통과 |  |
-| `e2e/only_one_node_can_own_a_data_directory` | 통과 |  |
+| `journal/a_second_writer_is_refused` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/a_journal_of_another_instance_is_refused` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/only_one_node_can_own_a_data_directory` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-JRN-4 — 스냅샷은 완전한 파일로만 나타나고, 손상된 스냅샷은 건너뛰며, 정상 종료 뒤 재시작은 스냅샷에서 같은 상태로 돌아온다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 스냅샷이 복구를 오염시키면 안 된다
 - 수준: 프로세스
 - 전제와 범위: 스냅샷 파일의 모든 절단 위치, 비트 반전, 임시 파일 잔존. 실제 노드의 정상 종료·재시작 1회
@@ -751,14 +751,14 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `journal/snapshot::tests::newest_valid_snapshot_wins_and_damaged_ones_are_skipped` | 통과 |  |
-| `journal/snapshot::tests::truncated_snapshot_is_rejected` | 통과 |  |
-| `e2e/vertical_slice_new_partial_fill_cancel_restart` | 통과 |  |
-| `e2e/a_snapshot_whose_digest_does_not_match_is_skipped_not_fatal` | 통과 |  |
+| `journal/snapshot::tests::newest_valid_snapshot_wins_and_damaged_ones_are_skipped` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/snapshot::tests::truncated_snapshot_is_rejected` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/vertical_slice_new_partial_fill_cancel_restart` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/a_snapshot_whose_digest_does_not_match_is_skipped_not_fatal` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-JRN-5 — 기록 스키마가 다른 빌드는 옛 세그먼트를 읽고 새 세그먼트를 시작하며, 읽을 수 없는 스키마를 만난 빌드는 시작을 거부한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 형식 변경이 조용한 오독으로 이어지면 안 된다
 - 수준: 단위
 - 전제와 범위: 스키마 1 → 2 전환 1회(저널 계층)
@@ -772,12 +772,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `journal/a_schema_change_starts_a_new_segment` | 통과 |  |
-| `journal/a_schema_change_right_after_a_rotation_can_still_write` | 통과 |  |
+| `journal/a_schema_change_starts_a_new_segment` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/a_schema_change_right_after_a_rotation_can_still_write` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-BOOT-1 — 재시작은 결과 기록이 없는 전송을 불명으로 표시하고, 신규 주문을 다시 보내지 않으며, 요청돼 있던 취소만 다시 보낸다. Boot는 부팅 번호를 하나 올리고 연결을 내려간 상태로 둔다. 첫 부팅은 체결 바닥(이보다 이른 체결은 중복으로 보지 않고 버린다)을 현재 − absence_margin으로 정한다. 진행 중이던 취소 시도는 LostOnRestart로 적는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 재시작이 주문을 복제하면 안 된다
 - 수준: 프로세스
 - 전제와 범위: 코어 예제 1건, 실제 프로세스에서 전송 중 강제 종료 1회(거래소가 400 ms 지연 중)
@@ -791,12 +791,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/restart_puts_outstanding_sends_in_doubt_and_never_resends` | 통과 |  |
-| `e2e/a_kill_during_send_does_not_duplicate_the_order` | 통과 |  |
+| `core/restart_puts_outstanding_sends_in_doubt_and_never_resends` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/a_kill_during_send_does_not_duplicate_the_order` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-CFG-1 — 설정은 버전이 커야 활성화되고, 같은 버전에 다른 내용이면 시작을 거부한다. 노출이 남은 종목·전략은 제거할 수 없다. mainnet은 증거금 정책(policy.margin) 없이는 시작하지 않고, 정책의 값이 C-MARGIN 설정 표의 범위를 벗어나면 어느 거래소 설정에서도 시작하지 않는다. 저장소의 Hyperliquid 예제 설정은 증거금 정책(소유자가 정한 값)을 담고 검사를 통과한다. Hyperliquid 설정에 증거금 정책이 있으면 설정에서 계산한 분당 조회 weight(216 + 종목마다 20, 기본 간격)가 600을 넘을 때 시작하지 않는다. 그 범위는 max_account_leverage, daily_loss_bps, margin_max_age_us, runtime.margin_poll_ms, runtime.venue_setting_poll_ms가 0보다 크고, venue_leverage가 1 이상이며, mm_buffer_bps는 0이어도 되고, stale_cancel_us는 margin_max_age_us보다 커야 한다(같으면 거부). runtime.margin_poll_ms의 기본은 5 000, runtime.venue_setting_poll_ms의 기본은 60 000이다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 설정 변경이 추적되지 않으면 사고 분석이 불가능하다
 - 수준: 프로세스
 - 전제와 범위: 코어 예제, 실제 노드 1회, 노드 설정 검사의 단위 시험(증거금 정책)
@@ -810,16 +810,16 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/configuration_changes_are_validated_against_existing_exposure` | 통과 |  |
-| `e2e/configuration_changes_need_a_new_version` | 통과 |  |
-| `core/f10_config_validation_enforces_the_parked_fill_wait_rule` | 통과 |  |
-| `node-unit/config::tests::mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused` | 통과 |  |
-| `node-unit/config::tests::example_config_with_a_margin_policy_loads` | 통과 |  |
-| `node-unit/config::tests::steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused` | 통과 |  |
+| `core/configuration_changes_are_validated_against_existing_exposure` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/configuration_changes_need_a_new_version` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/f10_config_validation_enforces_the_parked_fill_wait_rule` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/config::tests::mainnet_is_refused_without_a_margin_policy_and_bad_margin_values_are_refused` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/config::tests::example_config_with_a_margin_policy_loads` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/config::tests::steady_state_query_weight_is_computed_from_config_and_a_budget_above_600_is_refused` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-OVL-1 — 입력 큐는 상한을 넘지 않고, 가득 찬 큐는 다른 큐에 영향을 주지 않으며, 배치마다 세 큐가 지분을 받는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 과부하가 메모리 고갈이나 취소 굶주림으로 바뀌면 안 된다
 - 수준: 단위
 - 전제와 범위: 큐 자료구조
@@ -833,14 +833,14 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/queues::tests::a_full_lane_refuses_and_never_grows` | 통과 |  |
-| `node-unit/queues::tests::every_lane_gets_a_share_of_each_batch` | 통과 |  |
-| `node-unit/queues::tests::ticks_coalesce` | 통과 |  |
-| `node-unit/queues::tests::close_drains_then_ends` | 통과 |  |
+| `node-unit/queues::tests::a_full_lane_refuses_and_never_grows` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/queues::tests::every_lane_gets_a_share_of_each_batch` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/queues::tests::ticks_coalesce` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/queues::tests::close_drains_then_ends` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-OVL-2 — 큐보다 빠르게 온 요청은 즉시 거절되고 기록을 남기지 않으며, 그 직후에도 취소는 수용된다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 과부하 보호가 실제 프로세스에서 작동하는지
 - 수준: 프로세스
 - 전제와 범위: 주문 큐 8, 한 연결에서 600건을 응답을 읽지 않고 전송. 1회
@@ -854,11 +854,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/overload_is_refused_at_the_door_and_cancels_still_work` | 통과 |  |
+| `e2e/overload_is_refused_at_the_door_and_cancels_still_work` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-OVL-3 — 저장 공간이 부족하면 신규 주문만 거절하고 체결과 취소는 계속 처리한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 저장 공간 부족이 체결 유실로 이어지면 안 된다
 - 수준: 단위
 - 전제와 범위: 코어 예제
@@ -872,11 +872,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/storage_low_blocks_new_orders_but_not_fills_or_cancels` | 통과 |  |
+| `core/storage_low_blocks_new_orders_but_not_fills_or_cancels` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-API-1 — 전략 연결은 자기 주문만 보고 취소하며, 운영 명령은 운영 소켓에서만 받아들여진다. 알 수 없는 전략과 잘못된 요청은 거절된다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 권한 경계
 - 수준: 프로세스
 - 전제와 범위: 두 전략, 거래 소켓과 운영 소켓. 같은 OS 사용자
@@ -890,12 +890,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/a_strategy_sees_and_cancels_only_its_own_orders` | 통과 |  |
-| `e2e/external_activity_is_detected_and_needs_an_operator` | 통과 |  |
+| `e2e/a_strategy_sees_and_cancels_only_its_own_orders` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/external_activity_is_detected_and_needs_an_operator` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-API-2 — 문서의 요청 예가 그대로 해석되고, 수치에 JSON 숫자를 쓰면 거부된다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 프로토콜 문서와 구현의 일치
 - 수준: 단위
 - 전제와 범위: 신규 주문 요청과 응답의 예
@@ -909,11 +909,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `api/tests::wire_examples` | 통과 |  |
+| `api/tests::wire_examples` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-SLICE-1 — 신규 주문 → 영속 접수 → 거래소 접수 → 부분 체결 → 잔량 취소 → 종결이 실제 프로세스에서 이어지고, 구독자는 저널 순서로 이벤트를 받으며, 정상 종료 뒤 재시작해도 상태가 같고 재전송이 없다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 첫 수직 구현의 완료 조건
 - 수준: 프로세스
 - 전제와 범위: 주문 1건, 1회
@@ -927,12 +927,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/vertical_slice_new_partial_fill_cancel_restart` | 통과 |  |
-| `e2e/a_lost_response_is_covered_by_stream_evidence` | 통과 |  |
+| `e2e/vertical_slice_new_partial_fill_cancel_restart` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/a_lost_response_is_covered_by_stream_evidence` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-GW-SEAM-1 — VenueGateway를 구현한 세 번째(가짜) 게이트웨이가 oms-core를 고치지 않고 구동기에 꽂히며, 구동기는 상시 작업 시작(spawn_tasks)을 명령 루프를 띄우기 전에 한 번 동기적으로 부르고, 주문 명령은 send_order로, 취소 명령은 send_cancel로, 조회는 query로 각각 한 번씩 간다. 동시에 도는 명령은 max_concurrent, 조회는 QUERY_CONCURRENCY를 넘지 않고 넘치는 것은 기다렸다가 모두 처리된다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: Bybit 게이트웨이가 배선을 복사하지 않고 같은 상한과 시작 순서를 물려받는 전제
 - 수준: 단위
 - 전제와 범위: 명령 13건, 조회 8건
@@ -946,12 +946,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/venue::tests::a_gateway_plugged_in_through_the_trait_gets_each_command_and_query_once` | 통과 |  |
-| `node-unit/venue::tests::the_driver_bounds_concurrent_commands_and_queries_and_drops_none` | 통과 |  |
+| `node-unit/venue::tests::a_gateway_plugged_in_through_the_trait_gets_each_command_and_query_once` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::tests::the_driver_bounds_concurrent_commands_and_queries_and_drops_none` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-LINK-1 — 스트림이 끊기면 신규 주문을 막고, 그동안의 취소 요청을 기억했다가 복귀 뒤 보내며, 놓친 체결을 메운 뒤에야 거래를 재개한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 실제 소켓 단절에서의 재확인
 - 수준: 프로세스
 - 전제와 범위: 단절 1회, 그 사이 체결 1건과 취소 요청 1건
@@ -965,11 +965,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/link_loss_holds_new_orders_until_resynchronised` | 통과 |  |
+| `e2e/link_loss_holds_new_orders_until_resynchronised` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-HL-1 — L1 액션의 해시와 서명이 공식 Python SDK의 결과와 같고, 서명 키는 출력되지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 서명이 한 바이트라도 다르면 모든 요청이 거부된다
 - 수준: 단위
 - 전제와 범위: SDK 시험 벡터 5종(액션 해시, 임의 액션, 주문, cloid 주문, 예약 취소 2종; mainnet과 testnet). expiresAfter는 바이트 배치만
@@ -983,17 +983,17 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/venue::hyperliquid::sign::tests::action_hash_matches_the_sdk_vector` | 통과 |  |
-| `node-unit/venue::hyperliquid::sign::tests::dummy_action_signature_matches_the_sdk_vectors` | 통과 |  |
-| `node-unit/venue::hyperliquid::sign::tests::order_signature_matches_the_sdk_vectors` | 통과 |  |
-| `node-unit/venue::hyperliquid::sign::tests::order_with_cloid_signature_matches_the_sdk_vectors` | 통과 |  |
-| `node-unit/venue::hyperliquid::sign::tests::schedule_cancel_signature_matches_the_sdk_vectors` | 통과 |  |
-| `node-unit/venue::hyperliquid::sign::tests::expires_after_is_appended_as_in_the_sdk_source` | 통과 |  |
-| `node-unit/venue::hyperliquid::sign::tests::the_address_is_derived_and_the_key_is_not_printed` | 통과 |  |
+| `node-unit/venue::hyperliquid::sign::tests::action_hash_matches_the_sdk_vector` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::sign::tests::dummy_action_signature_matches_the_sdk_vectors` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::sign::tests::order_signature_matches_the_sdk_vectors` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::sign::tests::order_with_cloid_signature_matches_the_sdk_vectors` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::sign::tests::schedule_cancel_signature_matches_the_sdk_vectors` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::sign::tests::expires_after_is_appended_as_in_the_sdk_source` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::sign::tests::the_address_is_derived_and_the_key_is_not_printed` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-HL-2 — 문서에 실린 응답 예를 올바르게 해석한다. 문서에 없는 주문 응답 형태와 최상위 오류는 결과 불명으로 두고, 문서의 표에 없는 상태 이름에서는 아무 결론도 내지 않으며, 종결 상태에서 최종 수량을 추정하지 않는다. 체결 조회는 마지막 쪽임이 확실할 때만 완료를 선언한다. 체결 키는 <time>:<coin>:<tid>:<oid>다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 모르는 응답을 실패로 읽으면 예약 없는 주문이 생긴다
 - 수준: 단위
 - 전제와 범위: 문서의 주문·취소 응답 예, 상태 이름 표 전체(29개), 체결 필드, 체결 쪽 판정의 경계(499, 500, 2000, 겹침만 있는 쪽, 10000건)
@@ -1007,16 +1007,16 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/venue::hyperliquid::wire::tests::documented_place_answers` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::anything_else_is_unclear_not_a_failure` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::documented_cancel_answers` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::status_mapping` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::fill_translation` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::order_wire_json` | 통과 |  |
-| `node-unit/venue::hyperliquid::tests::the_budget_stops_orders_before_cancels` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::odd_coin_names_are_mapped_not_dropped` | 통과 |  |
-| `node-unit/venue::hyperliquid::tests::a_fill_page_proves_completeness_only_when_it_is_certainly_the_last` | 통과 |  |
-| `e2e/hyperliquid_fills_on_spot_coins_are_translatable` | 통과 |  |
+| `node-unit/venue::hyperliquid::wire::tests::documented_place_answers` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::wire::tests::anything_else_is_unclear_not_a_failure` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::wire::tests::documented_cancel_answers` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::wire::tests::status_mapping` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::wire::tests::fill_translation` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::wire::tests::order_wire_json` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::tests::the_budget_stops_orders_before_cancels` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::wire::tests::odd_coin_names_are_mapped_not_dropped` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::tests::a_fill_page_proves_completeness_only_when_it_is_certainly_the_last` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/hyperliquid_fills_on_spot_coins_are_translatable` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-HL-3 — 실제 testnet에 대해 게이트웨이가 메타를 읽어 종목 규칙을 통과시키고, 사용자 스트림을 구독해 링크를 올리고, 주문 조회(없음)·열린 주문·포지션·체결 조회·참조 가격을 해석한다
 
@@ -1038,7 +1038,7 @@
 
 ## V-PURE-1 — 도메인 코어의 소스에 시계·파일·네트워크·스레드·난수·해시 컬렉션·부동소수점·unsafe가 없고 의존성은 serde와 serde_json뿐이다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 결정적 실행의 전제
 - 수준: 소스 검사
 - 전제와 범위: crates/oms-core/src의 모든 줄(주석 제외)과 Cargo.toml
@@ -1052,7 +1052,7 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `source/core_purity` | 통과 |  |
+| `source/core_purity` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-PERF-1 — 초당 200건의 open-loop 부하에서 로컬 응답 지연 p99가 20 ms 이하이고 오류와 미응답이 없다
 
@@ -1129,7 +1129,7 @@
 
 ## V-HIST-1 — 단계 지연 히스토그램이 보고하는 백분위는 실제 값 이상이고 12.5% 이내로 크다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 대시보드의 지연 수치를 얼마나 믿을 수 있는지
 - 수준: 단위
 - 전제와 범위: 0~5000과 큰 값 몇 개
@@ -1143,12 +1143,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/util::tests::histogram_bounds_hold_for_every_value` | 통과 |  |
-| `node-unit/util::tests::quantiles_of_a_known_distribution` | 통과 |  |
+| `node-unit/util::tests::histogram_bounds_hold_for_every_value` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/util::tests::quantiles_of_a_known_distribution` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-COMMIT-4 — 커밋 순서의 경계마다 프로세스를 멈추면 결과가 경계별 장애 표와 같다: 쓰기 전에 멈추면 요청이 없었던 것이 되고, 쓴 뒤·flush 뒤·응답 뒤에 멈추면 주문은 남되 한 번도 전송되지 않고 결과 불명을 거쳐 "놓이지 않음"으로 닫히며, 같은 요청을 다시 보내면 같은 주문으로 답한다. 쓴 뒤 flush가 실패하면 노드는 종료 코드 2로 멈추고 거래소에 요청을 보내지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: C-COMMIT의 표가 설계에 그치지 않고 실제 프로세스에서 성립하는지. 간격 검토에서 이 표에 대응하는 시험이 없다는 지적을 받았다
 - 수준: 프로세스
 - 전제와 범위: 경계 넷(쓰기 전, 쓴 뒤 flush 전, flush 뒤 공개 전, 응답 뒤 전송 명령 전)과 flush 오류 뒤 프로세스가 살아 있는 경우 하나. 각 1회, 주문 1건
@@ -1162,11 +1162,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `pipeline/stopped_before_the_write_the_request_never_happened` | 통과 |  |
-| `pipeline/stopped_after_the_write_the_order_exists_and_is_resolved_without_a_send` | 통과 |  |
-| `pipeline/stopped_after_the_flush_the_order_is_in_doubt_and_never_sent` | 통과 |  |
-| `pipeline/stopped_after_the_reply_the_accepted_order_is_never_sent_and_closes_as_not_placed` | 통과 |  |
-| `pipeline/a_flush_error_after_the_write_stops_the_node_and_the_record_may_survive` | 통과 |  |
+| `pipeline/stopped_before_the_write_the_request_never_happened` | 미실행 | result of another source, not counted (last result: passed) |
+| `pipeline/stopped_after_the_write_the_order_exists_and_is_resolved_without_a_send` | 미실행 | result of another source, not counted (last result: passed) |
+| `pipeline/stopped_after_the_flush_the_order_is_in_doubt_and_never_sent` | 미실행 | result of another source, not counted (last result: passed) |
+| `pipeline/stopped_after_the_reply_the_accepted_order_is_never_sent_and_closes_as_not_placed` | 미실행 | result of another source, not counted (last result: passed) |
+| `pipeline/a_flush_error_after_the_write_stops_the_node_and_the_record_may_survive` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-COMMIT-5 — 실제 디스크에 둔 저널로 강제 종료를 60회 반복해도 V-COMMIT-2의 성질이 유지된다
 
@@ -1188,7 +1188,7 @@
 
 ## V-BOOT-2 — 저널이 여러 세그먼트에 걸쳐 있어도 강제 종료 뒤 스냅샷과 저널로 같은 상태로 돌아오고, `verify --re-decide`는 입력과 맞지 않는 기록을 잡아내며, 종료 중의 저널 실패는 정상 종료로 보고되지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 간격 검토가 찾은 결함(종료 중 실패의 종료 코드)과, 검토자가 깨려다 실패한 것의 기록
 - 수준: 프로세스
 - 전제와 범위: 4 KiB 세그먼트와 25건 주기 스냅샷으로 주문 60건. 체크섬이 맞는 기록 하나의 이벤트 조작. 데이터 디렉터리를 읽기 전용으로 만든 뒤 종료
@@ -1202,13 +1202,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/many_small_segments_survive_a_kill_and_a_clean_restart` | 통과 |  |
-| `e2e/re_decide_detects_a_record_whose_events_differ_from_the_decision` | 통과 |  |
-| `e2e/a_journal_failure_during_the_shutdown_drain_is_not_reported_as_a_clean_stop` | 통과 |  |
+| `e2e/many_small_segments_survive_a_kill_and_a_clean_restart` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/re_decide_detects_a_record_whose_events_differ_from_the_decision` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/a_journal_failure_during_the_shutdown_drain_is_not_reported_as_a_clean_stop` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-API-3 — 거래 소켓의 연결이 아무리 많아도 운영 소켓은 열리고, 끊긴 구독자는 연결 자리를 돌려주며, 한 연결은 구독을 하나만 가진다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 간격 검토가 찾은 결함: 구독하고 떠난 연결 넷이 운영자까지 막을 수 있었다
 - 수준: 프로세스
 - 전제와 범위: 연결 상한 4에서 침묵하는 연결 4개, 구독 후 끊은 연결 4개, 한 연결의 구독 3000회
@@ -1222,13 +1222,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/idle_trading_connections_do_not_lock_the_operator_out` | 통과 |  |
-| `e2e/a_departed_subscriber_gives_its_connection_slot_back` | 통과 |  |
-| `e2e/one_connection_cannot_register_thousands_of_subscriptions` | 통과 |  |
+| `e2e/idle_trading_connections_do_not_lock_the_operator_out` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/a_departed_subscriber_gives_its_connection_slot_back` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/one_connection_cannot_register_thousands_of_subscriptions` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-DASH-1 — 대시보드의 문서 열람 경로는 docs/, crates/, registry/ 아래의 .md, .rs, .toml만 읽는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 읽기 전용 화면이 설정 파일이나 데이터 디렉터리를 내보내면 안 된다
 - 수준: 단위
 - 전제와 범위: 허용되는 경로 4개와 거부돼야 하는 경로 14개
@@ -1242,7 +1242,7 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/http::tests::the_document_viewer_cannot_leave_its_directories` | 통과 |  |
+| `node-unit/http::tests::the_document_viewer_cannot_leave_its_directories` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-PERF-4 — 커밋 스레드 구성과 인라인 구성을 같은 조건에서 잰 결과가 보관돼 있다(ADR-012의 비교)
 
@@ -1308,7 +1308,7 @@
 
 ## V-FUZZ-1 — 가정을 지키지 않는 임의의 거래소 입력(순서 역전, 중복, 낡은 상태, 식별자 없는 체결, 부재 응답, 링크 변동, 재시작)에서도 코어는 결함으로 멈추지 않고, 불변조건과 재생 일치가 유지되고, 주문당 전송은 한 번이며, 차단 중 수용이 없고, 새 체결은 반드시 기장되거나 대기하고, 정직하게 정리된 뒤에는 차단이 남지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 간격 검토에서 검토자가 코어를 깨려고 쓴 시험이다. 깨지지 않은 범위를 기록으로 남긴다
 - 수준: 속성
 - 전제와 범위: seed 3000개 × 800단계. 한 종목, 두 전략. 거래소 주문 ID와 체결 키는 일관되게 유지한다
@@ -1322,11 +1322,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/examined_fuzz_arbitrary_venue_input_keeps_invariants_and_liveness` | 통과 |  |
+| `core/examined_fuzz_arbitrary_venue_input_keeps_invariants_and_liveness` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-MIS-1 — 불일치 14종 각각을 일으키는 시험이 있고, 같은 대상의 반복은 확인되기 전까지 한 건으로 남는다. 운영자가 resolve_order로 닫은 주문에 뒤늦게 온 체결도 기장되고 FillAfterClose로 제기된다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 탐지 수단으로 문서에 적은 불일치가 실제로 제기되는지. 간격 검토에서 시험 없는 종류 다섯이 지적됐다
 - 수준: 단위
 - 전제와 범위: Overfill, FillAfterClose, CumExceedsFinal, MissingFills, ExternalFill, FillFieldConflict, OrphanOrder, ForeignOrder, OpenAfterClose, PositionOutOfRange, ForeignPosition, StatusConflict, CancelStuck, ParkedFillOverflow. 외부 체결 300건
@@ -1340,26 +1340,26 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/overfill_is_booked_in_full_and_flagged` | 통과 |  |
-| `core/a_fill_after_any_kind_of_close_is_booked_and_flagged` | 통과 |  |
-| `core/final_quantity_below_booked_fills_is_flagged` | 통과 |  |
-| `core/missing_fills_after_sync_are_flagged_and_stay_reserved` | 통과 |  |
-| `core/unidentified_fill_is_booked_as_external_after_the_wait_and_holds_trading` | 통과 |  |
-| `core/a_fill_that_contradicts_its_order_is_booked_to_the_account_and_flagged` | 통과 |  |
-| `core/foreign_and_orphan_open_orders_are_flagged` | 통과 |  |
-| `core/f3_placed_evidence_for_an_order_closed_as_not_placed_is_flagged` | 통과 |  |
-| `core/f3_a_reappearing_order_is_reported_as_open_after_close` | 통과 |  |
-| `core/position_check_uses_the_reachable_range` | 통과 |  |
-| `core/a_position_on_an_instrument_that_is_not_configured_is_flagged` | 통과 |  |
-| `core/an_acknowledged_order_the_venue_no_longer_knows_is_reported_not_closed` | 통과 |  |
-| `core/f6_a_venue_order_id_reported_for_two_orders_keeps_the_state_recoverable` | 통과 |  |
-| `core/cancel_is_retried_with_backoff_and_then_flagged` | 통과 |  |
-| `core/too_many_unidentified_fills_are_booked_as_external_instead_of_waiting` | 통과 |  |
-| `core/f7_external_fills_do_not_grow_the_mismatch_list_without_bound` | 통과 |  |
+| `core/overfill_is_booked_in_full_and_flagged` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_fill_after_any_kind_of_close_is_booked_and_flagged` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/final_quantity_below_booked_fills_is_flagged` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/missing_fills_after_sync_are_flagged_and_stay_reserved` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/unidentified_fill_is_booked_as_external_after_the_wait_and_holds_trading` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_fill_that_contradicts_its_order_is_booked_to_the_account_and_flagged` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/foreign_and_orphan_open_orders_are_flagged` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/f3_placed_evidence_for_an_order_closed_as_not_placed_is_flagged` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/f3_a_reappearing_order_is_reported_as_open_after_close` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/position_check_uses_the_reachable_range` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_position_on_an_instrument_that_is_not_configured_is_flagged` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/an_acknowledged_order_the_venue_no_longer_knows_is_reported_not_closed` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/f6_a_venue_order_id_reported_for_two_orders_keeps_the_state_recoverable` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/cancel_is_retried_with_backoff_and_then_flagged` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/too_many_unidentified_fills_are_booked_as_external_instead_of_waiting` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/f7_external_fills_do_not_grow_the_mismatch_list_without_bound` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-MARGIN-1 — 증거금 정책이 있으면 감소 전용 주문은 재확인, 결과 불명, 불일치 차단을 통과하고, 일반 주문은 모든 차단에서 거절된다. 정책 구역은 선택이고, 없으면 저널 기록에 바이트를 더하지 않는다. 정책이 없으면 모든 차단이 감소 전용 주문을 포함한 모든 신규 주문을 막는다. 빈 정책 구역의 기본값은 max_account_leverage 2, daily_loss_bps 500, mm_buffer_bps 25, margin_max_age_us 30 000 000, stale_cancel_us 60 000 000, venue_leverage 2, isolated true, account_modes_allowed 빈 목록이고 account_mm_rate_max_bps는 없다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 모든 차단이 줄이는 주문까지 막으면 '줄이기만 허용'하는 상태를 만들 수 없다. 정책이 없는 실행의 저널은 바뀌면 안 된다
 - 수준: 단위
 - 전제와 범위: 차단 표(ADR-008 §7 개정)의 사유별 시험, 정책 구역의 직렬화와 기본값
@@ -1373,18 +1373,18 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/absent_margin_policy_adds_no_bytes_to_a_journal_record` | 통과 |  |
-| `core/empty_margin_section_takes_the_contract_defaults` | 통과 |  |
-| `core/reduce_only_order_is_accepted_during_resync` | 통과 |  |
-| `core/reduce_only_order_is_accepted_while_another_order_is_in_doubt` | 통과 |  |
-| `core/reduce_only_order_is_accepted_under_an_unacknowledged_mismatch` | 통과 |  |
-| `core/reduce_only_order_is_rejected_by_every_block_all_hold` | 통과 |  |
-| `core/reduce_only_order_is_still_bound_by_the_strategy_position_limit` | 통과 |  |
-| `core/without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order` | 통과 |  |
+| `core/absent_margin_policy_adds_no_bytes_to_a_journal_record` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/empty_margin_section_takes_the_contract_defaults` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/reduce_only_order_is_accepted_during_resync` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/reduce_only_order_is_accepted_while_another_order_is_in_doubt` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/reduce_only_order_is_accepted_under_an_unacknowledged_mismatch` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/reduce_only_order_is_rejected_by_every_block_all_hold` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/reduce_only_order_is_still_bound_by_the_strategy_position_limit` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/without_a_margin_policy_every_hold_still_refuses_a_reduce_only_order` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-MARGIN-2 — 증거금 정책이 있으면 현재 링크 세션의 증거금 보고가 마지막 보고로 기록된다. 다른 세션의 보고, 링크가 내려간 동안의 보고, 순번이 크지 않은 보고는 버린다. 읽지 못한 보고와 최대 레버리지가 0인 보고는 사유와 함께 거부로 기록되고 마지막 보고를 바꾸지 않는다. 나이가 0 이상 30초 이하인 보고가 없으면 일반 주문은 MarginUnavailable로 거절된다. 감소 전용 주문은 보고가 없어도 받는다. 정책이 없으면 증거금 입력은 상태를 바꾸지 않고 기록되지 않는다. 받은 보고는 마지막 거부 사유를 지운다(거부 사유는 그 뒤 보고를 받지 못한 동안만 남는다). 저널과 status에서 보고 포지션의 부호 있는 수량 키는 szi다(코드의 이름은 qty). 마지막 보고, 기준 금액, 감소 전용 상태는 링크가 바뀌어도 남는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 규칙이 읽는 계좌 가치는 거래소 보고에서만 온다. 늦거나 다른 세션의 보고, 읽지 못한 보고가 마지막 보고가 되면 규칙이 틀린 값으로 판정한다
 - 수준: 단위
 - 전제와 범위: 증거금 보고 입력 둘(MarginReport, MarginReportInvalid)과 이벤트 둘(margin_reported, margin_report_rejected)
@@ -1398,24 +1398,24 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/margin_report_of_the_current_session_is_recorded` | 통과 |  |
-| `core/margin_report_of_an_old_session_or_with_the_link_down_is_ignored` | 통과 |  |
-| `core/late_margin_report_with_a_lower_sequence_is_ignored` | 통과 |  |
-| `core/invalid_margin_report_is_journaled_and_never_becomes_fresh` | 통과 |  |
-| `core/plain_order_is_rejected_margin_unavailable_without_a_fresh_report` | 통과 |  |
-| `core/margin_report_dated_after_the_record_time_is_not_fresh` | 통과 |  |
-| `core/reduce_only_order_needs_no_fresh_report` | 통과 |  |
-| `core/without_a_margin_policy_no_margin_check_runs` | 통과 |  |
-| `core/margin_events_replay_to_the_same_state` | 통과 |  |
-| `core/a_recorded_report_ends_the_last_rejection` | 통과 |  |
-| `node-unit/venue::simproto::tests::a_margin_answer_without_its_position_list_is_not_read` | 통과 |  |
-| `core/the_field_table_lists_every_field_the_encoder_writes` | 통과 |  |
-| `e2e/margin_report_of_the_venue_process_carries_its_positions` | 통과 |  |
-| `core/latch_and_day_base_replay_to_the_same_state` | 통과 |  |
+| `core/margin_report_of_the_current_session_is_recorded` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/margin_report_of_an_old_session_or_with_the_link_down_is_ignored` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/late_margin_report_with_a_lower_sequence_is_ignored` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/invalid_margin_report_is_journaled_and_never_becomes_fresh` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/plain_order_is_rejected_margin_unavailable_without_a_fresh_report` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/margin_report_dated_after_the_record_time_is_not_fresh` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/reduce_only_order_needs_no_fresh_report` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/without_a_margin_policy_no_margin_check_runs` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/margin_events_replay_to_the_same_state` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_recorded_report_ends_the_last_rejection` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::simproto::tests::a_margin_answer_without_its_position_list_is_not_read` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_field_table_lists_every_field_the_encoder_writes` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/margin_report_of_the_venue_process_carries_its_positions` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/latch_and_day_base_replay_to_the_same_state` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-MARGIN-3 — 증거금 정책이 있으면 일반 주문은 받은 뒤의 계좌 노출이 한도 × 계좌 가치를 넘고 받기 전보다 커질 때 AccountLeverage로 거절된다. 정확히 한도와 같으면 받는다. 계좌 가치가 0 이하면 일반 주문을 모두 거절한다. 노출은 포지션과 모든 미체결 주문(감소 전용 포함)을 지정가와 참조 가격 중 높은 값으로 센 종목별 값의 합이다. 미체결 주문은 종결 증거가 올 때까지 노출에 남고 OMS는 그 주문을 고치거나 만료시키지 않는다. 가격이 움직여 한도를 넘어도 래치는 없다. 감소 전용 주문은 검사를 건너뛰지만 합에는 들어간다. 신선한 증거금 보고가 없으면 검사는 오래된 계좌 가치로 판정하지 않고 주문은 MarginUnavailable 하나로 거절된다. 노출이 있는 종목에 신선한 참조 가격이 없으면 일반 주문은 MarginUnavailable로 거절된다. 참조 가격은 기록된 뒤 ref_price_max_age_us(기본 15초, 가격대와 같은 한도) 이내면 신선하고, 노출이 있는 종목은 포지션이나 남은 예약이 있는 종목과 새 주문의 종목이며, 이 조건은 차단이 아니어서 새 가격이 오면 끝나고 감소 전용 주문은 받지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 수량 한도만으로는 계좌 가치의 몇 배가 되는 포지션을 막지 못한다. 아직 체결되지 않은 주문도 나중에 체결되면 한도를 넘길 수 있다
 - 수준: 단위
 - 전제와 범위: 신규 주문 검사 안의 레버리지 검사. 계좌 가치 100, 한도 2.0, 참조 가격 100의 손 계산 값. 성질 시험 셋(proptest 256건씩): 주문을 더하면 노출이 줄지 않는다, 롱과 숏을 뒤집어도 같다, 가장 큰 가격과 수량에서 정확하다
@@ -1429,26 +1429,26 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/order_past_twice_the_account_value_is_rejected_account_leverage` | 통과 |  |
-| `core/order_exactly_at_the_limit_is_accepted` | 통과 |  |
-| `core/without_a_fresh_report_an_order_past_the_limit_is_rejected_margin_unavailable_only` | 통과 |  |
-| `core/an_unfilled_resting_order_keeps_its_exposure_and_is_never_repriced_or_expired_by_the_oms` | 통과 |  |
-| `core/resting_order_counts_at_the_higher_of_limit_and_reference` | 통과 |  |
-| `core/reduce_only_and_plain_buy_on_a_short_count_at_full_reach` | 통과 |  |
-| `core/exposure_is_the_sum_over_instruments` | 통과 |  |
-| `core/partial_fill_then_cancel_frees_exposure_only_on_terminal_evidence` | 통과 |  |
-| `core/a_venue_rejection_of_an_accepted_order_frees_its_exposure` | 통과 |  |
-| `core/after_a_passive_breach_a_plain_reducing_order_passes_and_an_increasing_one_does_not` | 통과 |  |
-| `core/reduce_only_order_skips_the_leverage_gate` | 통과 |  |
-| `core/plain_order_is_rejected_when_an_exposed_instrument_has_no_fresh_reference_price` | 통과 |  |
-| `core/account_value_zero_or_negative_rejects` | 통과 |  |
-| `core/adding_an_order_never_lowers_exposure` | 통과 |  |
-| `core/mirrored_books_have_equal_exposure_and_equal_decisions` | 통과 |  |
-| `core/exposure_is_exact_at_extreme_price_and_quantity` | 통과 |  |
+| `core/order_past_twice_the_account_value_is_rejected_account_leverage` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/order_exactly_at_the_limit_is_accepted` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/without_a_fresh_report_an_order_past_the_limit_is_rejected_margin_unavailable_only` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/an_unfilled_resting_order_keeps_its_exposure_and_is_never_repriced_or_expired_by_the_oms` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/resting_order_counts_at_the_higher_of_limit_and_reference` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/reduce_only_and_plain_buy_on_a_short_count_at_full_reach` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/exposure_is_the_sum_over_instruments` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/partial_fill_then_cancel_frees_exposure_only_on_terminal_evidence` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_venue_rejection_of_an_accepted_order_frees_its_exposure` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/after_a_passive_breach_a_plain_reducing_order_passes_and_an_increasing_one_does_not` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/reduce_only_order_skips_the_leverage_gate` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/plain_order_is_rejected_when_an_exposed_instrument_has_no_fresh_reference_price` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/account_value_zero_or_negative_rejects` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/adding_an_order_never_lowers_exposure` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/mirrored_books_have_equal_exposure_and_equal_decisions` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/exposure_is_exact_at_extreme_price_and_quantity` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-MARGIN-11 — 증거금 정책이 있으면 노드는 정해진 간격으로 거래소에 증거금 보고를 묻고, 응답은 오르는 순번과 함께 코어 입력이 되며, status가 계좌 가치와 그 나이, 계좌 노출을 보여 준다. 링크가 올라오면 종목마다 거래소 설정을, 그리고 계좌 모드를 묻고, 포지션이 없는 종목의 설정은 정해진 간격으로 다시 묻는다. status는 종목별 거래소 설정과 계좌 모드, 그것이 정책과 맞는지를 보여 준다. 정책이 없으면 묻지 않는다. 조회한 계좌 가치가 기준 금액보다 5 %를 넘게 낮아지면 status가 감소 전용 상태와 그 규칙, 기준 금액을 보여 주고 일반 주문이 Hold(Reducing)으로 거절된다. 해제(clear-reduce)와 기준 재설정(rebase-day)은 전략 소켓에서 forbidden으로 거절되고 코어에 닿지 않는다. 운영자 도구(omsctl)의 clear-reduce --note와 rebase-day --note는 운영자 소켓으로 실행 중인 노드의 코어에 닿고, 응답과 status(상태, 규칙, 기준 금액)가 그 결과를 보여 준다. 감소 전용 상태에서 노드 프로세스를 강제 종료(SIGKILL)하고 다시 띄우면 status가 같은 상태(규칙, 내용, 진입 시각)와 같은 기준 금액을 보여 주고, 해제한 뒤의 강제 종료도 해제와 운영자의 기준을 그대로 남긴다. 가상 거래소에 일반 주문 300건과 감소 전용 주문 3건이 걸린 채로 감소 전용 상태에 들어가면 일반 주문은 모두 거래소에서 취소되고 감소 전용 주문 3건은 열린 채로 남으며, 그 뒤에도 증거금 조회가 이어진다. 감소 전용 상태를 결정한 기록이 쓰이기 전에 노드가 멈추면 재시작 뒤에 상태도 취소 요청도 그 기록도 없고 기준 금액은 그대로이며, 다음에 한도를 넘는 보고가 한 번 다시 결정한다. 그 기록이 파일에 닿은 뒤(쓰기 뒤, 내구화 뒤, 읽기 모델 반영 뒤)에 취소가 나가기 전에 멈추면 재시작 뒤에 상태와 취소 요청이 저널에서 복원되고, 보내지 못한 취소가 거래소로 나가며, 감소 전용 주문은 남는다. 기준 금액을 정하는 기록의 각 경계에서 멈춰도 저널의 day_base_set은 정확히 하나이고, 그 날짜와 값은 같은 기록의 보고의 것이다(쓰기 전에 멈추면 다음 보고가 정한다). 가상 거래소 프로세스의 증거금 보고는 포지션(수량, 가치, 증거금, 증거금 방식, 레버리지, 최대 레버리지)을 담고 status가 그대로 보여 주며, 포지션이 있는 종목의 거래소 설정이 바뀌면 보고로 코어에 닿아 그 종목이 막힌다. 가상 거래소 프로세스가 말하는 포지션 증거금은 포지션 가치 ÷ 레버리지다(가치 100에서 50, 101에서 50.5). 모형은 진입 가격을 기억하지 않아 손실로 증거금이 줄지 않으므로 유지증거금 여유 규칙은 제어 명령 margin_used로 증거금을 다르게 말하게 할 때만 걸린다. 가상 거래소 프로세스는 처음에 모든 종목을 격리·레버리지 2로, 계좌 모드를 standard(이 모형의 이름이고 거래소의 값이 아니다)로 답하므로 일반 주문을 내려면 account_modes_allowed에 standard를 적어야 한다. 정책이 없으면 status의 core.margin은 null이다(감소 전용 상태가 남아 있어도 그렇다)
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 코어의 규칙이 옳아도 조회가 연결되지 않으면 보고가 없어 모든 일반 주문이 거절되거나, 운영자가 왜 거절되는지 볼 수 없다
 - 수준: 프로세스
 - 전제와 범위: 실제 oms-node와 simvenue 프로세스. 조회 간격 100 ms(거래소 설정은 200 ms)로 줄인 설정 3회(계좌 가치 따라가기, 일 손실 진입, 거래소 설정과 계좌 모드), 정책 없는 설정 2회. 티켓 05: 운영자 명령, 강제 종료 2회, 주문 303건의 감소 전용 상태 진입. 중단 지점 시험은 failpoints 기능으로 빌드한 노드. 코드 검토 뒤(2026-11-16): simvenue의 제어 명령 margin_used로 증거금을 정해 유지증거금 여유 규칙으로 들어가는 실행 1회, 그리고 프로세스 없이 대조기 태스크의 두 포트(공개된 상태, 조회 채널)에서 조회 간격을 보는 시험 2건(간격 10초에서 2.5초 동안 설정 조회와 모드 조회가 한 번씩, 큐에 자리가 없던 증거금 조회가 다음 바퀴에 순번 1로 나간다). simvenue는 참조 가격을 스스로 내지 않고 제어 명령 ref_price를 받을 때만 내며(그 가격이 모형의 기준 가격도 된다), 그래서 정책을 켠 simvenue는 그 명령 뒤 15초 동안만 일반 주문을 받는다
@@ -1462,25 +1462,25 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `e2e/node_polls_margin_and_status_shows_value_and_age` | 통과 |  |
-| `e2e/status_shows_account_exposure` | 통과 |  |
-| `e2e/status_shows_reducing_its_rule_and_the_day_base` | 통과 |  |
-| `e2e/node_reads_venue_setting_and_account_mode_and_status_shows_them` | 통과 |  |
-| `e2e/strategy_socket_cannot_clear_reducing_or_rebase` | 통과 |  |
-| `e2e/omsctl_clear_reduce_and_rebase_day_work_end_to_end` | 통과 |  |
-| `e2e/reducing_and_day_base_survive_a_node_kill` | 통과 |  |
-| `e2e/reducing_cancels_every_resting_plain_order_through_the_node` | 통과 |  |
-| `pipeline/stopped_before_the_write_of_a_reducing_decision_the_next_report_decides_again` | 통과 |  |
-| `pipeline/stopped_after_the_reducing_decision_is_durable_the_cancels_are_sent_after_restart` | 통과 |  |
-| `pipeline/stopped_around_a_day_base_set_the_base_is_set_exactly_once` | 통과 |  |
-| `e2e/margin_report_of_the_venue_process_carries_its_positions` | 통과 |  |
-| `e2e/venue_process_states_the_margin_a_control_sets_and_the_mm_rule_latches_on_it` | 통과 |  |
-| `node-unit/a_margin_query_the_gateway_had_no_room_for_goes_out_on_the_next_round` | 통과 |  |
-| `node-unit/an_unanswered_setting_or_mode_query_is_repeated_at_the_setting_period_only` | 통과 |  |
+| `e2e/node_polls_margin_and_status_shows_value_and_age` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/status_shows_account_exposure` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/status_shows_reducing_its_rule_and_the_day_base` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/node_reads_venue_setting_and_account_mode_and_status_shows_them` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/strategy_socket_cannot_clear_reducing_or_rebase` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/omsctl_clear_reduce_and_rebase_day_work_end_to_end` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/reducing_and_day_base_survive_a_node_kill` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/reducing_cancels_every_resting_plain_order_through_the_node` | 미실행 | result of another source, not counted (last result: passed) |
+| `pipeline/stopped_before_the_write_of_a_reducing_decision_the_next_report_decides_again` | 미실행 | result of another source, not counted (last result: passed) |
+| `pipeline/stopped_after_the_reducing_decision_is_durable_the_cancels_are_sent_after_restart` | 미실행 | result of another source, not counted (last result: passed) |
+| `pipeline/stopped_around_a_day_base_set_the_base_is_set_exactly_once` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/margin_report_of_the_venue_process_carries_its_positions` | 미실행 | result of another source, not counted (last result: passed) |
+| `e2e/venue_process_states_the_margin_a_control_sets_and_the_mm_rule_latches_on_it` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/a_margin_query_the_gateway_had_no_room_for_goes_out_on_the_next_round` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/an_unanswered_setting_or_mode_query_is_repeated_at_the_setting_period_only` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-MARGIN-5 — 증거금 정책이 있으면 첫 증거금 보고가 그 계좌 가치를 조회 시각의 UTC 날짜와 함께 기준 금액으로 정한다. 같은 날의 뒤 보고는 기준을 바꾸지 않는다. 받은 보고의 계좌 가치가 기준 금액보다 5 %를 넘게 낮으면 계좌가 감소 전용 상태로 들어간다(기준 100에서 95.00은 아니고 94.99는 들어간다). 뒤 UTC 날짜의 첫 보고는 옛 기준으로 먼저 판정된 뒤에 새 기준이 되고, 여러 날의 공백 뒤에도 기준은 한 번만 넘어간다. 보고의 날짜가 기준의 날짜보다 앞서면 그 보고는 기준을 바꾸지 않는다(보고는 날짜를 뒤로 돌리지 않는다)
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 일 손실은 기준 금액에 대해 잰다. 기준이 저널 상태가 아니면 재시작이 손실을 지운다
 - 수준: 단위
 - 전제와 범위: 이벤트 day_base_set, reducing_entered와 상태 day_base, reducing
@@ -1494,17 +1494,17 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/first_report_sets_the_day_base` | 통과 |  |
-| `core/loss_greater_than_five_percent_of_the_base_enters_reducing` | 통과 |  |
-| `core/first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day` | 통과 |  |
-| `core/a_report_of_an_earlier_day_does_not_change_the_day_base` | 통과 |  |
-| `core/a_loss_between_two_reports_enters_reducing_on_the_next_report` | 통과 |  |
-| `core/a_report_older_than_the_freshness_limit_on_arrival_is_still_judged` | 통과 |  |
-| `core/latch_and_day_base_replay_to_the_same_state` | 통과 |  |
+| `core/first_report_sets_the_day_base` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/loss_greater_than_five_percent_of_the_base_enters_reducing` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/first_report_after_midnight_is_judged_against_the_old_base_then_rolls_the_day` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_report_of_an_earlier_day_does_not_change_the_day_base` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_loss_between_two_reports_enters_reducing_on_the_next_report` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_report_older_than_the_freshness_limit_on_arrival_is_still_judged` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/latch_and_day_base_replay_to_the_same_state` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-MARGIN-4 — 감소 전용 상태로 들어가는 입력 안에서, 감소 전용 표시가 없고 취소 요청이 없거나 취소 시도가 다 된 모든 열린 주문에 규칙 이름으로 취소 요청이 나간다. 표시 없는 익절 주문도 취소된다. 감소 전용 표시가 있는 주문은 그대로 둔다. 감소 전용 상태에서 일반 주문은 포지션을 줄이는 방향이어도 Hold(Reducing)으로 거절되고, 감소 전용 주문은 받는다. 유지증거금 여유 규칙으로 들어갈 때도 같다(취소의 이름은 Rule(MmBuffer)). 감소 전용 상태인 채로 정책이 없는 설정을 켜면 상태는 남지만 Reducing 차단은 없어 일반 주문과 감소 전용 주문을 받고, 정책이 돌아오면 같은 상태(같은 규칙, 같은 시각)가 다시 막으며 푸는 것은 운영자의 해제뿐이다. 규칙이 낸 취소가 막히면(CancelStuck) Mismatch 차단이 생기지만 감소 전용 주문은 계속 받는다. 진입 때 전송 결과를 기다리던 주문은 취소 요청을 바로 기록하고 거래소 접수 통보가 온 입력에서 취소를 보낸다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 손실 한도를 넘은 계좌에 걸려 있는 일반 주문이 체결되면 위험이 더 는다. 줄이는 주문까지 취소하면 포지션을 줄일 길이 없다
 - 수준: 단위
 - 전제와 범위: 이벤트 reducing_entered와 그 입력 안의 cancel_requested(by: Rule(DailyLoss) 또는 Rule(MmBuffer)), cancel_sent
@@ -1518,22 +1518,22 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones` | 통과 |  |
-| `core/under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted` | 통과 |  |
-| `core/an_order_pending_send_at_entry_is_cancelled_once_acknowledged` | 통과 |  |
-| `core/a_rule_cancel_that_races_a_fill_books_the_fill` | 통과 |  |
-| `core/a_stuck_rule_cancel_does_not_block_reduce_only_orders` | 통과 |  |
-| `core/reducing_is_entered_once` | 통과 |  |
-| `core/a_new_day_does_not_clear_reducing` | 통과 |  |
-| `core/an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing` | 통과 |  |
-| `core/latch_and_day_base_replay_to_the_same_state` | 통과 |  |
-| `core/a_trigger_on_one_instrument_blocks_plain_orders_on_all` | 통과 |  |
-| `core/reducing_records_the_rule_that_tripped_first` | 통과 |  |
-| `core/without_a_margin_policy_the_reducing_latch_refuses_no_order_and_returns_with_the_policy` | 통과 |  |
+| `core/entering_reducing_cancels_plain_orders_and_keeps_reduce_only_ones` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/under_reducing_a_plain_order_is_rejected_and_a_reduce_only_one_is_accepted` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/an_order_pending_send_at_entry_is_cancelled_once_acknowledged` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_rule_cancel_that_races_a_fill_books_the_fill` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_stuck_rule_cancel_does_not_block_reduce_only_orders` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/reducing_is_entered_once` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_new_day_does_not_clear_reducing` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/an_external_fill_raises_a_mismatch_and_a_loss_report_enters_reducing` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/latch_and_day_base_replay_to_the_same_state` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_trigger_on_one_instrument_blocks_plain_orders_on_all` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/reducing_records_the_rule_that_tripped_first` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/without_a_margin_policy_the_reducing_latch_refuses_no_order_and_returns_with_the_policy` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-MARGIN-9 — 증거금 정책이 있으면, 종목의 거래소 설정(증거금 방식과 레버리지)을 이번 링크 세션에서 받지 못한 동안 그 종목의 일반 주문은 VenueSetting(종목) 차단으로 거절된다. 옛 세션의 응답은 버린다. 받은 설정의 증거금 방식이나 레버리지가 정책과 다르면 그 종목만 같은 차단에 걸리고 다른 종목은 걸리지 않는다. 맞는 설정을 받으면 바로 풀리고, 링크가 바뀌면 다시 모르는 것이 된다. 증거금 보고의 포지션에 적힌 방식과 레버리지도 설정의 출처다. 차단 조회는 걸린 종목마다 그 종목 이름과 함께 차단을 보여 준다. 계좌 모드가 unifiedAccount나 portfolioMargin이면 허용 목록에 적혀 있어도 계좌의 모든 종목의 일반 주문이 AccountMode 차단으로 거절된다. 허용 목록에 없는 모드, 빈 응답, 이번 링크 세션에서 받지 못한 모드도 같다. 기본 허용 목록은 비어 있어서 운영자가 모드를 적기 전에는 일반 주문이 나가지 않는다. 감소 전용 주문은 두 차단을 모두 통과한다. OMS는 설정을 읽기만 하고 거래소로 아무것도 보내지 않는다. 보고의 포지션은 따로 이벤트를 내지 않고 설정에 있는 종목의 것만 그 종목의 거래소 설정이 되며, 설정에 없는 종목의 포지션은 보고에만 남는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 거래소의 레버리지나 증거금 방식이 계획과 다르면 주문이 계획하지 않은 증거금을 쓴다. 확인하지 못한 설정을 맞다고 가정하면 그 차이를 아무도 모른다
 - 수준: 단위
 - 전제와 범위: 코어의 차단 계산과 신규 주문 검사. 정책 기본값(격리, 레버리지 2), 종목 하나 또는 둘
@@ -1547,19 +1547,19 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/instrument_with_unknown_venue_setting_holds_plain_orders` | 통과 |  |
-| `core/a_setting_that_differs_from_config_holds_only_that_instrument` | 통과 |  |
-| `core/a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again` | 통과 |  |
-| `core/a_cross_position_in_a_margin_report_raises_the_hold` | 통과 |  |
-| `core/venue_setting_hold_names_its_instrument_in_holds` | 통과 |  |
-| `core/unified_or_portfolio_account_mode_holds_the_account` | 통과 |  |
-| `core/an_account_mode_off_the_allow_list_or_unknown_holds_the_account` | 통과 |  |
-| `core/reduce_only_order_passes_the_venue_setting_and_account_mode_holds` | 통과 |  |
-| `core/a_report_position_on_an_unconfigured_instrument_leaves_no_venue_setting` | 통과 |  |
+| `core/instrument_with_unknown_venue_setting_holds_plain_orders` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_setting_that_differs_from_config_holds_only_that_instrument` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_matching_setting_releases_the_hold_and_link_loss_makes_it_unknown_again` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_cross_position_in_a_margin_report_raises_the_hold` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/venue_setting_hold_names_its_instrument_in_holds` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/unified_or_portfolio_account_mode_holds_the_account` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/an_account_mode_off_the_allow_list_or_unknown_holds_the_account` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/reduce_only_order_passes_the_venue_setting_and_account_mode_holds` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_report_position_on_an_unconfigured_instrument_leaves_no_venue_setting` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-MARGIN-6 — 운영자의 해제(clear-reduce)는 계좌가 감소 전용 상태가 아니면 NotReducing으로, 증거금 보고가 30초보다 오래됐으면 MarginUnavailable로, 사유가 비었으면 NoteRequired로 거절되고, 거절은 아무것도 기록하지 않는다. 받아들인 해제는 한 입력 안에서 마지막 보고의 계좌 가치를 새 기준 금액으로 정하고(day_base_set, set_by: operator) 감소 전용 상태를 끝낸다(reducing_cleared). 정확히 30초 된 보고는 신선하다. 그 뒤 새 기준 94에서 94와 89.30은 걸리지 않고 89.29는 다시 걸린다. 두 번째 해제는 NotReducing이다. 기준 재설정(rebase-day)은 신선한 보고와 사유가 있을 때 마지막 보고의 계좌 가치와 그 날짜(기준보다 앞선 날짜라도)를 기준 금액으로 정하고, 감소 전용 상태는 건드리지 않는다. 기준 재설정 없이 출금하면 그만큼이 손실로 읽힌다(100에서 6을 출금하면 걸린다). 마지막 보고에서 유지증거금 여유 조건이 참이면(어느 규칙으로 들어왔든) 해제는 MmBufferActive로 거절되고, 이 조건은 사유보다 먼저 본다. 포지션이 선 위로 돌아온 보고(가치 200, 최대 레버리지 40에서 3.00) 뒤에는 해제된다. 거절 응답 문자열은 사유 코드(not_reducing, margin_unavailable, mm_buffer_active, account_mm_active, note_required)로 시작한다. 공백뿐인 사유는 빈 것으로 본다. 기준 재설정의 사유는 이벤트에 없고 같은 저널 기록의 입력에 남는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 해제는 위험을 다시 여는 유일한 길이다. 오래된 숫자로, 또는 사유 없이 풀리면 손실 한도가 뜻을 잃는다
 - 수준: 단위
 - 전제와 범위: 운영자 입력 ClearReduce와 RebaseDay, 그 거절 사유, 이벤트 day_base_set(운영자)과 reducing_cleared
@@ -1573,15 +1573,15 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing` | 통과 |  |
-| `core/clear_reduce_rebases_the_day_and_a_further_loss_latches_again` | 통과 |  |
-| `core/rebase_day_sets_the_base_and_leaves_the_latch_alone` | 통과 |  |
-| `core/a_withdrawal_without_rebase_reads_as_a_loss` | 통과 |  |
-| `core/clear_reduce_is_refused_while_the_mm_condition_holds` | 통과 |  |
+| `core/clear_reduce_is_refused_when_stale_or_without_a_note_or_when_not_reducing` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/clear_reduce_rebases_the_day_and_a_further_loss_latches_again` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/rebase_day_sets_the_base_and_leaves_the_latch_alone` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_withdrawal_without_rebase_reads_as_a_loss` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/clear_reduce_is_refused_while_the_mm_condition_holds` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-MARGIN-7 — 증거금 정책이 있고 링크가 올라와 있을 때, 마지막으로 받은 증거금 보고의 조회 시각에서 60초가 넘게 지나면 틱이 감소 전용 표시가 없고 취소 요청이 없는 모든 열린 주문에 Rule(MarginStale) 이름으로 취소 요청을 한 번 낸다. 정확히 60초에는 내지 않는다. 감소 전용 표시가 있는 주문은 그대로 둔다. 아무 상태도 걸리지 않는다. 나이는 마지막 보고의 조회 시각과 현재 링크 세션이 올라온 시각 가운데 늦은 것에서 재고, 링크가 올라와 있는 동안 정책이 켜지면 그 설정 기록의 시각에서 잰다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 증거금 보고를 못 받는 동안에는 일 손실도 유지증거금 여유도 판정하지 못한다. 그동안 걸려 있는 일반 주문이 체결되면 보지 못하는 채로 위험이 는다
 - 수준: 단위
 - 전제와 범위: 틱 안의 cancel_requested(by: Rule(MarginStale)), cancel_sent
@@ -1595,17 +1595,17 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/report_stale_past_the_cancel_limit_cancels_each_plain_order_once` | 통과 |  |
-| `core/stale_age_starts_at_link_up_when_no_report_has_arrived` | 통과 |  |
-| `core/stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off` | 통과 |  |
-| `core/stale_cancel_does_not_reissue_an_exhausted_cancel` | 통과 |  |
-| `core/a_fresh_report_after_a_stale_episode_restores_acceptance_without_a_latch` | 통과 |  |
-| `core/a_forward_clock_jump_reads_the_report_as_stale_and_cancels` | 통과 |  |
-| `core/stale_age_starts_at_policy_activation_when_the_link_is_already_up` | 통과 |  |
+| `core/report_stale_past_the_cancel_limit_cancels_each_plain_order_once` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/stale_age_starts_at_link_up_when_no_report_has_arrived` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/stale_cancel_is_silent_while_the_link_is_down_or_the_policy_is_off` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/stale_cancel_does_not_reissue_an_exhausted_cancel` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_fresh_report_after_a_stale_episode_restores_acceptance_without_a_latch` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_forward_clock_jump_reads_the_report_as_stale_and_cancels` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/stale_age_starts_at_policy_activation_when_the_link_is_already_up` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-MARGIN-8 — 증거금 정책이 있으면, 받은 증거금 보고의 포지션 가운데 포지션 가치가 0보다 큰 것의 격리 증거금이 (유지증거금률 + 0.25 %p) × 포지션 가치보다 작으면 계좌가 감소 전용 상태로 들어가고 규칙은 MmBuffer로 남는다. 최대 레버리지 40, 포지션 가치 200에서 3.00은 걸리지 않고 2.99는 걸린다. 유지증거금률은 그 포지션의 최대 레버리지(같은 보고의 값)로 1 / (2 × 최대 레버리지)이다: 최대 레버리지 25, 가치 200에서 4.50은 걸리지 않고 4.49는 걸리며, 최대 레버리지 50에서는 2.50이 걸리지 않는다. 한 종목의 포지션이 걸려도 래치는 계좌 전체에 하나다: 다른 종목에 걸려 있는 일반 주문이 Rule(MmBuffer) 이름으로 취소되고, 모든 종목의 새 일반 주문이 Hold(Reducing)으로 거절되며, 감소 전용 주문은 받는다. 교차 증거금 포지션은 판정하지 않는다(그 종목은 VenueSetting 차단에 걸린다). 래치에는 먼저 건 규칙이 남는다: 일 손실로 들어간 뒤의 유지증거금 여유 판정도, 그 반대도 아무것도 내지 않고 바꾸지 않는다. 한 보고가 둘 다 걸면 유지증거금 여유를 먼저 판정하므로 MmBuffer가 남는다. 받은 보고는 도착했을 때 이미 30초보다 오래됐어도 판정한다(조회 뒤 40초에 기록된 보고의 2.99도 건다). 비교는 나눗셈 없는 정확한 곱으로 한다: 가장 큰 금액·최대 레버리지·여유에서도 넘침이 결과를 뒤집지 않고(곱이 i128에 들어가지 않으면 선 아래로 본다), 선 바로 옆에서 반올림이 결과를 뒤집지 않는다. 포지션 가치가 0 이하인 포지션은 판정하지 않는다. 설정에 없는 종목의 포지션도 판정한다. 음수 증거금은 언제나 선 아래다. detail은 「position <종목>: isolated margin <증거금> is below the maintenance margin at maximum leverage <최대 레버리지> plus <여유> bps of the position value <가치>」다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 격리 포지션이 청산에 가까운 계좌에 일반 주문을 더 받으면 위험이 는다. 판정은 거래소가 준 보고만 읽으므로 OMS 장부의 오류가 이 규칙을 끄지 못한다
 - 수준: 단위
 - 전제와 범위: 이벤트 reducing_entered(rule: mm_buffer)와 상태 reducing
@@ -1619,17 +1619,17 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/isolated_margin_below_mmr_plus_buffer_enters_reducing` | 통과 |  |
-| `core/mmr_follows_the_max_leverage_of_each_position` | 통과 |  |
-| `core/a_trigger_on_one_instrument_blocks_plain_orders_on_all` | 통과 |  |
-| `core/a_cross_position_is_not_judged_by_the_mm_rule` | 통과 |  |
-| `core/reducing_records_the_rule_that_tripped_first` | 통과 |  |
-| `core/an_old_report_on_arrival_is_still_judged_by_the_mm_rule` | 통과 |  |
-| `core/mm_comparison_is_exact_at_extreme_values` | 통과 |  |
+| `core/isolated_margin_below_mmr_plus_buffer_enters_reducing` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/mmr_follows_the_max_leverage_of_each_position` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_trigger_on_one_instrument_blocks_plain_orders_on_all` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_cross_position_is_not_judged_by_the_mm_rule` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/reducing_records_the_rule_that_tripped_first` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/an_old_report_on_arrival_is_still_judged_by_the_mm_rule` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/mm_comparison_is_exact_at_extreme_values` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-MARGIN-13 — 증거금 정책에 account_mm_rate_max_bps가 있으면, 받은 증거금 보고의 교차 계좌 유지증거금이 0보다 크고 유지증거금 × 10 000 ≥ 한도 × 증거금 잔고일 때 계좌가 감소 전용 상태로 들어가고 규칙은 AccountMm(status의 account_mm)으로 남으며, 같은 입력에서 열린 일반 주문마다 Rule(AccountMm) 취소를 낸다(감소 전용 주문은 남는다). 한도 5000에서 잔고 1000: 499.99는 걸리지 않고 500은 건다. 한도 1에서 잔고 100: 0.00999999는 아니고 0.01은 건다. 잔고 0 이하에 유지증거금이 있으면 어느 한도에서도 건다. 유지증거금 0은 잔고가 얼마든(0, 음수 포함) 걸지 않는다. 가장 큰 금액에서도 나눗셈 없이 정확히 비교한다. 한도가 있는데 account_mm이 없거나 유지증거금이 음수인 보고는 통째로 MarginReportRejected이고 마지막 정상 보고가 나이를 먹는다. 한도가 없으면 같은 보고를 기록하고 숫자를 판정하지 않는다. 래치에는 먼저 건 규칙이 남는다(일 손실 뒤의 계좌 규칙도, 그 반대도 아무것도 내지 않는다). 한 보고가 여럿을 걸면 유지증거금 여유, 계좌 유지증거금률, 일 손실 순이다. clear-reduce는 마지막 보고에서 조건이 참이면 어느 규칙이 걸었든 account_mm_active로 거절된다. status는 마지막 보고의 두 숫자를 보이고 없으면 키가 없다. account_mm 없는 보고와 한도 없는 정책은 저널에 바이트를 남기지 않고(기록 스키마 2 그대로), 이 필드 전의 기록은 없음으로 읽히며, 두 종류의 저널 모두 재생·재결정·디스크 복구(verify --re-decide)에서 실시간 상태와 같다. 한도는 1..=9999다. 노드 설정은 Bybit에서 증거금 정책이 있으면 한도를 요구하고 Hyperliquid와 가상 거래소에서는 거부한다. Bybit 게이트웨이는 totalMaintenanceMargin과 totalMarginBalance를 보고에 싣고, 둘 중 하나라도 없거나 문자열 소수가 아니면 응답 전체가 MarginReportInvalid이며, accountMMRate는 무슨 값이든(없어도) 보고를 바꾸지 않는다. 그 거부 사유는 「account_mm is missing: …」와 「account_mm: maintenance margin … is negative」다. detail은 「account maintenance margin <유지증거금> is at or above <한도> bps of the margin balance <잔고>」다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 교차 계좌에는 격리 포지션이 없어 유지증거금 여유 규칙이 걸리지 않는다. 계좌가 청산에 가까울 때 일반 주문을 더 받지 않고 걸려 있는 일반 주문을 거둔다는 전제(U17d, 소유자 질문의 기본값 50 %)
 - 수준: 단위
 - 전제와 범위: oms-core 시험 11개, 디스크 저널 복구 시험 1개, loopback 가짜 HTTP 서버(http-fake)의 wallet-balance 응답 시험 3개, 설정 시험 1개
@@ -1643,26 +1643,26 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/rate_just_below_the_limit_does_not_latch_and_at_the_limit_latches_with_the_cancels` | 통과 |  |
-| `core/the_limit_is_judged_exactly_at_one_basis_point` | 통과 |  |
-| `core/a_margin_balance_of_zero_or_below_with_maintenance_latches` | 통과 |  |
-| `core/no_maintenance_margin_latches_nothing_whatever_the_balance` | 통과 |  |
-| `core/the_comparison_is_exact_at_the_largest_amounts` | 통과 |  |
-| `core/a_report_without_account_mm_is_rejected_under_the_limit_and_recorded_without_it` | 통과 |  |
-| `core/the_latch_is_not_replaced_by_a_later_rule` | 통과 |  |
-| `core/clear_reduce_is_refused_while_the_account_rate_is_at_or_above_the_limit` | 통과 |  |
-| `core/status_shows_the_account_numbers_and_the_rule` | 통과 |  |
-| `core/journals_with_and_without_account_mm_replay_to_the_live_state` | 통과 |  |
-| `core/the_limit_is_one_to_9999_bps` | 통과 |  |
-| `node-unit/margin_reports_with_and_without_account_mm_recover_to_the_live_state` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::the_margin_report_maps_the_unified_account` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::a_margin_answer_that_cannot_be_read_as_a_whole_is_refused_as_a_whole` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::the_account_mm_rate_field_is_not_used_for_the_judgment` | 통과 |  |
-| `node-unit/config::tests::the_account_mm_limit_is_required_on_bybit_and_refused_elsewhere` | 통과 |  |
+| `core/rate_just_below_the_limit_does_not_latch_and_at_the_limit_latches_with_the_cancels` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_limit_is_judged_exactly_at_one_basis_point` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_margin_balance_of_zero_or_below_with_maintenance_latches` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/no_maintenance_margin_latches_nothing_whatever_the_balance` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_comparison_is_exact_at_the_largest_amounts` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_report_without_account_mm_is_rejected_under_the_limit_and_recorded_without_it` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_latch_is_not_replaced_by_a_later_rule` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/clear_reduce_is_refused_while_the_account_rate_is_at_or_above_the_limit` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/status_shows_the_account_numbers_and_the_rule` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/journals_with_and_without_account_mm_replay_to_the_live_state` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_limit_is_one_to_9999_bps` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/margin_reports_with_and_without_account_mm_recover_to_the_live_state` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::the_margin_report_maps_the_unified_account` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::a_margin_answer_that_cannot_be_read_as_a_whole_is_refused_as_a_whole` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::the_account_mm_rate_field_is_not_used_for_the_judgment` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/config::tests::the_account_mm_limit_is_required_on_bybit_and_refused_elsewhere` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-MARGIN-12 — 시뮬레이션의 가상 거래소는 계좌 가치를 자기 모형으로 계산한다: 현금 + 포지션 × 기준 가격. 체결은 낸 값과 수수료만큼, 펀딩은 그 금액만큼 현금을 줄이고, 가격 변화는 포지션 가치를 바꾼다. 손으로 푼 예(입금 100, 100에 0.5 매수와 수수료 0.01, 가격 104, 펀딩 0.1 %)에서 계좌 가치는 99.99, 101.99, 101.938이다. 가격이 움직이지 않아도 수수료와 펀딩만으로 계좌가 기준 금액보다 5 %를 넘게 내려가면 감소 전용 상태로 들어간다(100에서 95.00은 아니고 94.99는 들어간다). 가상 거래소는 포지션을 키우거나 반대쪽으로 넘기는 감소 전용 주문을 거절하고, 걸려 있는 감소 전용 주문은 남은 포지션만큼만 체결한 뒤 나머지를 취소한다. 증거금 정책을 켠 임의 순서의 실행(체결, 가격 변화, 펀딩, 운영자 해제, 그리고 margin_lossy에서는 보고 유실·지연·무응답, 링크 단절, 재시작)의 매 입력 뒤에: 받아들인 일반 주문은 신선한 보고가 있었고 노출이 계좌 가치의 2배 이내이거나 노출을 올리지 않았다. 감소 전용 상태에 들어가면 열려 있는 일반 주문마다 취소 요청이 있고, 그 상태인 동안 일반 주문은 받아들여지지 않는다. 감소 전용 상태는 증거금 보고로만 들어가고 운영자의 해제로만 끝난다(재시작, 새 UTC 날, 회복된 계좌 가치는 끝내지 않는다). 보고가 한도보다 오래 끊긴 뒤의 틱이 끝나면 열려 있는 일반 주문마다 취소 요청이 있다. 증거금 정책이 없는 기존 프로파일 일곱 개는 seed 다섯 개씩 main(84db0f9)에서 기록한 것과 같은 저널을 쓴다. 가상 시간 50시간짜리 실행(margin_days: UTC 자정 1시간 전에 시작해 자정을 세 번 넘고, 그 사이에 재시작, 링크 단절, 손실, 출금과 입금, 운영자의 해제와 기준 재설정이 섞인다)에서도 위 검사가 매 입력 뒤에 성립하고, 기록된 보고가 그 전의 기준 금액보다 5 %를 넘게 낮으면 그 보고가 새 날의 기준을 정하는 보고여도 계좌는 감소 전용 상태가 되고, 저널의 기준 금액은 실행마다 자정을 정확히 세 번 넘고, 재시작과 새 날은 감소 전용 상태를 끝내지 않는다. 정해진 순서 하나(자정을 넘는 20초의 조회 끊김 동안 100에서 6 출금, 재시작, 자정 두 번 더)에서 새 날의 첫 보고 94는 상태를 걸고 나서 기준이 되고, 저널에는 날마다 기준이 하나다(100, 94, 100, 99). 저널의 증거금 기록(입력이 증거금 보고인 기록)은 조회 한 번에 하나를 넘지 않는다: 조용한 하루는 조회 17 280번에 기록 17 280건이고, 50시간 실행에서 기록 수는 조회 수 이하이고 같은 조회의 답은 두 번 기록되지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 일 손실 규칙은 거래소가 말한 계좌 가치만 읽는다. 시뮬레이션이 그 값을 체결·가격·수수료·펀딩에서 스스로 만들어야 규칙을 임의 순서의 실행에서 볼 수 있다. 예제 시험이 생각하지 못한 순서(취소 중의 진입, 재시작 직후의 보고, 앞지른 늦은 보고)는 여기서만 나온다
 - 수준: 시뮬레이션
 - 전제와 범위: 가상 거래소의 증거금 모형(단위 3건). 프로파일 margin_calm, margin_lossy: 실행당 1500단계, 한 종목, 두 전략, 계좌 100, 증거금 시계는 계약 기본값의 50분의 1(조회 100 ms, 신선도 600 ms, 끊김 취소 1.2초), UTC 자정을 한 번 넘는다. 프로파일 margin_days: 가상 시간 50시간, 증거금 시계는 계약 기본값(조회 5초, 신선도 30초, 끊김 취소 60초), UTC 자정을 세 번 넘는다. 활동은 묶음으로 오고 그 사이 5초~10분은 타이머만 돈다. seed는 표준 실행의 10분의 1(최소 2개). 기존 프로파일 7개 × seed 5개의 저널 해시
@@ -1676,20 +1676,20 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `sim/world_account_value_follows_fills_price_fees_and_funding` | 통과 |  |
-| `sim/a_loss_made_only_of_fees_and_funding_enters_reducing` | 통과 |  |
-| `sim/world_refuses_a_reduce_only_order_that_would_grow_the_position` | 통과 |  |
-| `sim/profile_margin_calm` | 통과 |  |
-| `sim/profile_margin_calm_reducing_invariant` | 통과 |  |
-| `sim/profile_margin_calm_release_invariant` | 통과 |  |
-| `sim/profile_margin_lossy` | 통과 |  |
-| `sim/existing_profiles_give_the_same_run_with_margin_off` | 통과 |  |
-| `sim/profile_margin_days_crosses_three_utc_days_with_restarts` | 통과 |  |
-| `sim/margin_journal_records_stay_within_one_per_poll` | 통과 |  |
+| `sim/world_account_value_follows_fills_price_fees_and_funding` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/a_loss_made_only_of_fees_and_funding_enters_reducing` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/world_refuses_a_reduce_only_order_that_would_grow_the_position` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_margin_calm` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_margin_calm_reducing_invariant` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_margin_calm_release_invariant` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_margin_lossy` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/existing_profiles_give_the_same_run_with_margin_off` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/profile_margin_days_crosses_three_utc_days_with_restarts` | 미실행 | result of another source, not counted (last result: passed) |
+| `sim/margin_journal_records_stay_within_one_per_poll` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-MARGIN-10 — Hyperliquid 게이트웨이는 문서의 clearinghouseState 응답 예를 증거금 보고 입력으로 옮긴다: 계좌 가치는 marginSummary.accountValue, 포지션마다 종목, 부호 있는 수량, 포지션 가치, 사용 증거금, 증거금 방식, 레버리지, 최대 레버리지. 어느 포지션이든 maxLeverage가 없거나 0이거나 정수가 아니면 보고 전체를 사유와 함께 거부 입력(MarginReportInvalid)으로 바꾸고, 멀쩡한 다른 포지션도 보고하지 않는다. 계좌 가치, 수량, 포지션 가치, 사용 증거금, 레버리지 가운데 하나라도 없거나 읽을 수 없을 때, 증거금 방식이 isolated도 cross도 아닐 때, 포지션 목록이 없을 때도 같다. 어떤 값도 0이나 기본값으로 채우지 않고 어떤 포지션도 건너뛰지 않는다. 설정에 없는 종목의 포지션도 보고에 남는다(번역 함수는 설정된 종목을 받지 않는다). activeAssetData 응답 예는 그 종목의 거래소 설정 입력(증거금 방식, 레버리지)이 된다. 방식이 isolated도 cross도 아니거나, 레버리지가 정수가 아니거나, 응답이 다른 종목의 것이면 입력을 만들지 않는다(설정은 모름으로 남아 그 종목이 막힌다). userAbstraction 응답(문자열 하나)은 글자 그대로 계좌 모드 입력이 된다. 문서에 없는 문자열을 문서에 있는 값으로 바꾸지 않고, 문자열이 아니거나 64자를 넘으면 입력을 만들지 않는다. 세 조회의 요청 본문은 문서의 것과 같다(clearinghouseState, activeAssetData, userAbstraction). 게이트웨이의 요청 예산은 취소를 막지 않으므로 취소 500건 뒤에는 조회가 기다린다: 가득 찬 예산(1200)에서는 700이 남아 증거금 조회가 바로 나가고, 시작 직후(600)에는 100이 남아 10.1초, 빈 예산에서는 15.1초를 기다린다. 종목 이름에서 식별자 규칙에 맞지 않는 글자는 _로 바꾼다(PURR/USDC는 PURR_USDC, @107은 _107). 게이트웨이가 스스로 세는 요청 예산은 최대 1200이고 시작할 때 600이며 초당 20씩 차고, 조회는 300(주문 몫 200, 취소 몫 100)을 남길 수 있을 때만 나가며 취소는 예산과 상관없이 나간다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 증거금 규칙이 읽는 숫자는 모두 이 번역을 거친다. 필드를 하나 잘못 옮기면 규칙이 틀린 값으로 판정한다
 - 수준: 단위
 - 전제와 범위: 게이트웨이의 순수 번역 함수(JSON 응답 → 코어 입력)와 요청 본문 함수. 문서의 응답 예가 입력. 요청 예산은 시각을 시험이 주는 단위 시험
@@ -1703,19 +1703,19 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/venue::hyperliquid::wire::tests::documented_clearinghouse_state_parses_to_a_margin_report` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::missing_zero_or_unparseable_max_leverage_rejects_the_whole_report` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::any_unparseable_number_rejects_the_whole_report` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::a_position_on_an_unconfigured_coin_is_kept` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::documented_active_asset_data_parses_leverage_and_mode` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::user_abstraction_values_parse_and_an_unknown_value_stays_unknown` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::margin_and_setting_request_json` | 통과 |  |
-| `node-unit/venue::hyperliquid::tests::a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time` | 통과 |  |
-| `node-unit/venue::hyperliquid::wire::tests::odd_coin_names_are_mapped_not_dropped` | 통과 |  |
+| `node-unit/venue::hyperliquid::wire::tests::documented_clearinghouse_state_parses_to_a_margin_report` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::wire::tests::missing_zero_or_unparseable_max_leverage_rejects_the_whole_report` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::wire::tests::any_unparseable_number_rejects_the_whole_report` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::wire::tests::a_position_on_an_unconfigured_coin_is_kept` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::wire::tests::documented_active_asset_data_parses_leverage_and_mode` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::wire::tests::user_abstraction_values_parse_and_an_unknown_value_stays_unknown` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::wire::tests::margin_and_setting_request_json` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::tests::a_full_cancel_burst_leaves_the_margin_query_waiting_for_a_known_time` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::hyperliquid::wire::tests::odd_coin_names_are_mapped_not_dropped` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-WIRE-ID-1 — 고객 주문번호 형식 Base32Pair는 VenueClientId와 일대일이고 27자(36자 이하, 0-9a-v와 -)이며 같은 입력에 같은 문자열을 내고, 서로 다른 100만 개 주문에 서로 다른 100만 개 문자열을 낸다. 해석은 그 형식이 쓴 문자열만 받는다(대문자·다른 길이·다른 구분자·64비트 초과·16진수 형식은 None). Hex128은 to_hex와 같은 문자열을 내고 소문자 16진수만 해석하며, 가상 거래소와 Hyperliquid 게이트웨이는 Hex128을 선언하고 보내는 번호를 그 형식으로 만든다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: Bybit orderLinkId로 낸 주문을 우리 것으로 알아보고 남의 주문을 우리 것으로 잘못 읽지 않으며, 기존 두 거래소의 요청은 바뀌지 않는다는 전제
 - 수준: 단위
 - 전제와 범위: 경계값 36쌍, 100만 개 주문(인스턴스 2개 × 50만), 잘못된 문자열 Base32Pair 11개·Hex128 4개
@@ -1729,15 +1729,15 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/ids::tests::hex128_is_the_hex_form_of_today` | 통과 |  |
-| `core/ids::tests::base32_pair_roundtrips_and_fits_an_order_link_id` | 통과 |  |
-| `core/ids::tests::base32_pair_gives_a_million_distinct_ids` | 통과 |  |
-| `core/ids::tests::base32_pair_decoding_is_strict` | 통과 |  |
-| `node-unit/venue::tests::the_gateways_of_today_write_the_hex_form` | 통과 |  |
+| `core/ids::tests::hex128_is_the_hex_form_of_today` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/ids::tests::base32_pair_roundtrips_and_fits_an_order_link_id` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/ids::tests::base32_pair_gives_a_million_distinct_ids` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/ids::tests::base32_pair_decoding_is_strict` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::tests::the_gateways_of_today_write_the_hex_form` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-VENUE-EXEC-1 — 펀딩 입력은 포지션·주문·예약·체결 수를 바꾸지 않고 한 번만 기록된다. 거래소 포지션 변경은 부호 있는 수량을 계좌와 미귀속 장부에 더하고 VenuePositionChange 불일치로 일반 주문을 막으며(감소 전용은 통과) 재생 뒤에도 남는다. 분류 못 한 실행은 기장 없이 UnclassifiedExecution 불일치로 막는다. 변경 뒤 그보다 늦게 물은 현재 세션의 포지션 응답 중 그 종목에 열린 주문과 대기 체결이 없을 때의 첫 응답이 다르면 PositionAdjusted(snapshot_after_venue_change) 한 건으로 맞추고 같으면 VenueChangeSettled만 남기며(열린 주문이 있는 동안은 맞추지 않아 오는 중인 체결을 두 번 세지 않는다), 저널만으로 계산한 포지션이 거래소 값과 같다. 분류 못 한 실행의 키는 같은 키로 나중에 온 체결의 기장을 막지 않는다. 운영자 조정은 reason 없이 스키마 1과 같은 바이트로 쓰인다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: Bybit의 펀딩·ADL·청산 인수가 포지션이나 체결을 틀어지게 하지 않고, 사람이 볼 때까지 노출을 늘리지 않으며, 감시자 W2가 저널 합만으로 포지션을 비교할 수 있다는 전제
 - 수준: 단위
 - 전제와 범위: 종목 하나, 전략 하나, 시험 9개
@@ -1751,19 +1751,19 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/a_funding_payment_is_cash_only_and_booked_once` | 통과 |  |
-| `core/a_venue_position_change_is_booked_flagged_and_holds_plain_orders` | 통과 |  |
-| `core/an_unclassified_execution_holds_plain_orders` | 통과 |  |
-| `core/the_next_positions_answer_after_a_change_is_the_position_of_record` | 통과 |  |
-| `core/a_positions_answer_equal_to_the_journal_settles_without_an_adjustment` | 통과 |  |
-| `core/a_positions_answer_of_an_old_session_does_not_end_the_wait` | 통과 |  |
-| `core/an_operator_adjustment_is_written_as_in_schema_1` | 통과 |  |
-| `core/the_wait_does_not_end_while_an_order_of_ours_can_still_fill` | 통과 |  |
-| `core/an_unclassified_key_does_not_block_a_later_fill_with_the_same_key` | 통과 |  |
+| `core/a_funding_payment_is_cash_only_and_booked_once` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_venue_position_change_is_booked_flagged_and_holds_plain_orders` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/an_unclassified_execution_holds_plain_orders` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_next_positions_answer_after_a_change_is_the_position_of_record` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_positions_answer_equal_to_the_journal_settles_without_an_adjustment` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_positions_answer_of_an_old_session_does_not_end_the_wait` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/an_operator_adjustment_is_written_as_in_schema_1` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_wait_does_not_end_while_an_order_of_ours_can_still_fill` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/an_unclassified_key_does_not_block_a_later_fill_with_the_same_key` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-SCHEMA-2-1 — 이 빌드는 기록 스키마 2를 쓰고 1과 2를 읽는다. 기록 스키마 1로 쓴 저널(체결, 운영자 조정, 정지 포함)을 복구하면 실시간 코어와 같은 상태(다이제스트 포함)가 되고, 그 뒤에 스키마 2로 이어 쓴 기록은 새 세그먼트에 들어가며, 두 세그먼트를 함께 복구해도 실시간 상태와 같고 --re-decide 검사도 통과한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 기록 형식을 올려도 그 전에 쓴 저널이 그대로 다시 읽힌다는 전제
 - 수준: 통합
 - 전제와 범위: 기록 스키마 1 세그먼트 하나와 스키마 2 세그먼트 하나, 시험 때 만든 저널(커밋하지 않음)
@@ -1777,12 +1777,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/this_build_writes_schema_2_and_reads_1_and_2` | 통과 |  |
-| `node-unit/a_schema_1_journal_and_a_schema_2_tail_replay_to_the_live_state` | 통과 |  |
+| `node-unit/this_build_writes_schema_2_and_reads_1_and_2` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/a_schema_1_journal_and_a_schema_2_tail_replay_to_the_live_state` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-ABSENCE-N-1 — absence_not_found_needed가 2이면 결과 불명 주문은 expires_at + absence_margin 뒤에 보낸 조회의 "없음"을 absence_margin 이상 떨어진 두 조회로 받아야 NotPlaced로 닫히고, 첫 번째는 AbsenceNoted로만 기록되며 예약은 그대로다. 만료 + 여유 전의 "없음", 같은 조회의 두 번째 답, 앞에 센 답보다 여유 시간 안쪽의 답은 세지 않고, 셈은 재생 뒤에도 같다. 기본값 1에서는 AbsenceNoted 없이 예전처럼 한 번에 닫히고, 기본값은 직렬화하지 않으며, 0은 설정 오류다. Bybit 설정은 absence_not_found_needed = 2가 아니면 거절된다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: Bybit 조회 사본의 짧은 불일치로 한 번 "없음"이 나와도 예약을 풀지 않는다는 전제. 500건 한도·서비스 재시작은 이 횟수가 아니라 게이트웨이의 주문 내역 확인이 막는다. Hyperliquid 동작은 그대로다
 - 수준: 단위
 - 전제와 범위: 결과 불명 주문 하나, 시험 4개
@@ -1796,15 +1796,15 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/two_answers_after_expiry_plus_margin_are_needed_when_the_policy_asks_for_two` | 통과 |  |
-| `core/one_answer_is_enough_by_default_and_writes_no_new_event` | 통과 |  |
-| `core/the_policy_refuses_zero_answers` | 통과 |  |
-| `core/a_policy_at_its_default_writes_no_new_key` | 통과 |  |
-| `node-unit/config::tests::a_bybit_configuration_loads_and_each_unsafe_value_is_refused` | 통과 |  |
+| `core/two_answers_after_expiry_plus_margin_are_needed_when_the_policy_asks_for_two` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/one_answer_is_enough_by_default_and_writes_no_new_event` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_policy_refuses_zero_answers` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_policy_at_its_default_writes_no_new_key` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/config::tests::a_bybit_configuration_loads_and_each_unsafe_value_is_refused` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-MARKET-REF-1 — 새 주문은 판단에 쓴 호가창 상태(market_ref)를 실을 수 있고, 그 값은 OrderAccepted.request로 저널 기록에 들어가 직렬화와 해석을 거쳐도 같다. market_ref가 없는 요청은 예전과 같은 바이트로 쓰인다. 같은 요청이 다른 market_ref로 다시 오면 duplicate다. 이름은 64자 이하의 [A-Za-z0-9_.:-]만 받고 거래 API는 형식이 틀린 market_ref를 해석 단계에서 거절한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 주문을 시세 레이크의 호가창 상태와 이을 수 있고, 재시도가 conflict로 바뀌지 않는다는 전제
 - 수준: 단위
 - 전제와 범위: 시험 5개
@@ -1818,15 +1818,15 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/market_ref_round_trips_through_the_journal` | 통과 |  |
-| `core/a_request_without_market_ref_keeps_its_bytes` | 통과 |  |
-| `core/a_repeated_request_with_another_market_ref_is_a_duplicate` | 통과 |  |
-| `core/market_ref_names_are_validated` | 통과 |  |
-| `api/tests::a_new_order_line_may_carry_a_market_ref` | 통과 |  |
+| `core/market_ref_round_trips_through_the_journal` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_request_without_market_ref_keeps_its_bytes` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_repeated_request_with_another_market_ref_is_a_duplicate` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/market_ref_names_are_validated` | 미실행 | result of another source, not counted (last result: passed) |
+| `api/tests::a_new_order_line_may_carry_a_market_ref` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-TAIL-1 — 꼬리 읽기는 디스크에 더 많은 기록이 있어도 호출자가 준 내구화 번호보다 큰 기록을 돌려주지 않고, 작은 세그먼트로 회전한 저널을 끊김 없이 순서대로 읽으며, 커서 다음 번호부터 다시 시작한다. 쓰는 쪽이 잠금을 쥔 동안에도 읽고, 읽는 동안 새 쓰는 쪽이 잠금을 잡을 수 있다(잠금을 잡지 않는다). 상한 이하의 손상된 프레임이나 번호가 튀는 프레임에서는 그 앞 기록을 돌려준 뒤 오류를 내고 위치를 움직이지 않으며, 커서 앞의 손상도 오류로 알린다(끝에서 쓰는 중인 프레임은 기다린다). 기록 스키마가 바뀌어 열린 새 세그먼트와, 헤더만 있다가 새 스키마 헤더로 다시 쓰인 세그먼트를 따라가고 기록마다 스키마를 알려 준다. 엿보기는 상한 너머의 유효한 프레임을 위치를 움직이지 않고 보여 주며 잘린 마지막 프레임에서 오류 없이 멈춘다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 프로젝터와 감시자가 OMS를 방해하지 않고, 아직 내구화되지 않아 복구가 다시 쓸 수 있는 기록을 확정된 것처럼 내보내지 않는다는 전제
 - 수준: 단위
 - 전제와 범위: 기록 최대 90개, 세그먼트 256바이트(회전 3개 이상)와 1 MiB, 스키마 1→2, 시험 9개
@@ -1840,19 +1840,19 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `journal/the_tail_never_returns_a_record_above_the_durable_cap` | 통과 |  |
-| `journal/the_tail_follows_segment_rotation_and_starts_after_a_cursor` | 통과 |  |
-| `journal/the_tail_never_takes_the_lock` | 통과 |  |
-| `journal/a_damaged_durable_frame_stops_the_tail_without_moving_it` | 통과 |  |
-| `journal/peek_beyond_shows_valid_frames_past_the_cap_without_moving` | 통과 |  |
-| `journal/a_frame_with_the_wrong_sequence_comes_after_the_good_records` | 통과 |  |
-| `journal/damage_before_the_cursor_is_an_error` | 통과 |  |
-| `journal/the_tail_follows_a_schema_change_to_a_new_segment` | 통과 |  |
-| `journal/the_tail_reads_a_header_only_segment_rewritten_with_a_new_schema` | 통과 |  |
+| `journal/the_tail_never_returns_a_record_above_the_durable_cap` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/the_tail_follows_segment_rotation_and_starts_after_a_cursor` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/the_tail_never_takes_the_lock` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/a_damaged_durable_frame_stops_the_tail_without_moving_it` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/peek_beyond_shows_valid_frames_past_the_cap_without_moving` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/a_frame_with_the_wrong_sequence_comes_after_the_good_records` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/damage_before_the_cursor_is_an_error` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/the_tail_follows_a_schema_change_to_a_new_segment` | 미실행 | result of another source, not counted (last result: passed) |
+| `journal/the_tail_reads_a_header_only_segment_rewritten_with_a_new_schema` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-TAIL-2 — 모든 이벤트 종류(43가지)의 인스턴스를 선택 필드까지 채워 직렬화하면, 인코더가 쓰는 모든 필드 경로가 docs/contracts/tail.md의 필드 표에 있고, 표의 모든 행은 실제로 쓰이는 필드이며 타입 열이 실제 JSON 값의 종류(문자열, 정수, 불, 목록, 열거형, 객체, null 허용)와 맞는다. 통째로 읽는 행은 설정 하나와 열거형 값뿐이다. 이벤트 종류가 늘면 시험이 컴파일되지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 감시자(U19a)를 OMS 코드 없이 이 표만으로 만들 수 있다는 전제
 - 수준: 소스 검사
 - 전제와 범위: 이벤트 43종, 필드 경로 172개(설정은 통째로 한 행)
@@ -1866,13 +1866,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/the_field_table_lists_every_field_the_encoder_writes` | 통과 |  |
-| `core/every_row_of_the_table_is_a_field_the_encoder_writes` | 통과 |  |
-| `core/only_the_configuration_and_enums_are_read_as_a_whole` | 통과 |  |
+| `core/the_field_table_lists_every_field_the_encoder_writes` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/every_row_of_the_table_is_a_field_the_encoder_writes` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/only_the_configuration_and_enums_are_read_as_a_whole` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-BYBIT-READ-1 — Bybit 게이트웨이의 조회 일곱 가지는 읽기만 하고, 통째로 읽을 수 있는 응답만 입력으로 넘긴다. 쪽 넘김은 커서가 비고 쪽이 덜 찼을 때만 끝으로 보고, 다 찬 쪽에 커서가 없거나 커서가 그대로이거나 쪽이 20을 넘으면 스냅숏(열린 주문, 포지션, 증거금 보고)을 넘기지 않는다. 주문 상태는 우리 orderLinkId의 행만 보고 realtime, 기간 없는 주문 내역, 코어가 주문을 받은 시각 − 1분부터 7일의 주문 내역 셋 다에 없을 때만 StatusNotFound(첫 조회 전 시각)를 낸다. 체결은 since − 2분부터 7일 이하의 창으로 읽고(창 사이 1ms 겹침, 중복 키는 한 번), 한 번에 30쪽까지 읽고 다 읽은 창까지만 선언한 채 멈추며(오류 아님), 창을 다 읽은 뒤에만 그 끝 직전까지 FillsSynced를 내며, 끝을 알 수 없는 창은 반으로 나누고, 읽을 수 없는 행에서 멈춘다. 실행 행은 execType 표 하나로 Fill(우리 주문이면 order_id, 아니면 외부 체결), Funding, PositionChange(adl, takeover, delivery, settle), UnclassifiedExecution이 된다. 증거금 보고는 totalEquity, totalMaintenanceMargin, totalMarginBalance(U17d), positionIM, 계좌 증거금 모드, 정수 레버리지, maxLeverage로 만들고 한 값이라도 못 읽으면 MarginReportInvalid다. accountMMRate는 보고를 바꾸지 않는다. 이 코드에는 주문 생성·정정·단건 취소 요청이 없다. 설정은 Bybit에서 REGULAR_MARGIN 밖의 계좌 모드 허용을 거절한다. 조회용 REST 응답은 접속 단계 오류만 NotSent로 본다. retCode 10003·10004·10005·10007·10010·33004와 HTTP 401은 키 거부이고 다시 보내지 않는다. 10006과 HTTP 429는 요청 한도다. 10002는 시각 창 밖이다. 10016, HTTP 5xx, 읽을 수 없는 본문, retCode 없는 본문은 응답 없음이다. 그 밖의 0 아닌 retCode는 그 코드의 거부다. 키와 비밀은 데이터 디렉터리 밖의 소유자 전용(0600) 일반 파일에서만 읽고(심볼릭 링크는 거절), Debug 출력에 비밀이 없다. 체결 창의 끝은 지금 − fills_lag_ms다. 체결 키는 <symbol>:<execId>다. 주문 상태의 최종 누적 수량(cum)은 cumExecQty로 채운다. 주문 상태는 New·PartiallyFilled(열림), Filled, Cancelled, Rejected만 해석하고 조건부 주문 상태와 그 밖의 값에서는 결론을 내지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: Bybit 계좌를 대조할 때 반쯤 읽은 응답으로 포지션·열린 주문을 틀리게 보거나, 닫힌 주문을 500건 한도·서비스 재시작 때문에 없다고 보거나, 펀딩·ADL을 체결로 기장하지 않는다는 전제
 - 수준: 단위
 - 전제와 범위: loopback 가짜 HTTP 서버(http-fake)에 문서 모양의 응답을 경로별로 준비, 시험 24개
@@ -1886,37 +1886,37 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/venue::bybit::exec::tests::a_trade_of_our_order_is_a_fill_of_that_order` | 통과 |  |
-| `node-unit/venue::bybit::exec::tests::a_trade_of_an_order_that_is_not_ours_is_an_external_fill` | 통과 |  |
-| `node-unit/venue::bybit::exec::tests::a_funding_row_is_cash_and_never_a_fill` | 통과 |  |
-| `node-unit/venue::bybit::exec::tests::each_venue_made_execution_type_is_a_position_change_of_its_kind` | 통과 |  |
-| `node-unit/venue::bybit::exec::tests::every_other_execution_type_is_unclassified` | 통과 |  |
-| `node-unit/venue::bybit::exec::tests::a_row_that_cannot_be_read_is_an_error_not_an_input` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::the_status_of_our_order_is_read_from_the_open_order_view` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::an_order_missing_from_the_open_order_view_is_looked_up_in_the_history` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::an_order_is_not_found_only_when_neither_view_has_it` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::a_status_answer_about_another_order_or_of_a_kind_we_never_send_concludes_nothing` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::the_status_table` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::open_orders_are_read_through_every_page` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::a_snapshot_whose_last_page_cannot_be_told_gives_no_input` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::positions_are_signed_by_side` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::the_margin_report_maps_the_unified_account` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::a_margin_answer_that_cannot_be_read_as_a_whole_is_refused_as_a_whole` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::the_account_mm_rate_field_is_not_used_for_the_judgment` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::the_venue_setting_and_the_account_mode_are_read_as_they_are` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::fills_are_read_in_windows_of_at_most_seven_days_each_declared_synced` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::a_row_that_cannot_be_read_stops_the_sync_before_its_window_is_declared` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::fills_follow_the_cursor_and_a_window_whose_last_page_cannot_be_told_is_split` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::a_long_gap_is_synced_over_several_queries_within_the_page_budget` | 통과 |  |
-| `node-unit/venue::bybit::query::tests::the_gateway_has_no_order_request` | 통과 |  |
-| `node-unit/config::tests::a_bybit_configuration_loads_and_each_unsafe_value_is_refused` | 통과 |  |
-| `node-unit/venue::bybit::rest::tests::other_answers_have_their_own_class` | 통과 |  |
-| `node-unit/venue::bybit::rest::tests::every_auth_code_is_a_rejected_key_after_one_request` | 통과 |  |
-| `node-unit/venue::bybit::rest::tests::the_credentials_file_must_be_owner_only_and_the_secret_never_prints` | 통과 |  |
+| `node-unit/venue::bybit::exec::tests::a_trade_of_our_order_is_a_fill_of_that_order` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::exec::tests::a_trade_of_an_order_that_is_not_ours_is_an_external_fill` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::exec::tests::a_funding_row_is_cash_and_never_a_fill` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::exec::tests::each_venue_made_execution_type_is_a_position_change_of_its_kind` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::exec::tests::every_other_execution_type_is_unclassified` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::exec::tests::a_row_that_cannot_be_read_is_an_error_not_an_input` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::the_status_of_our_order_is_read_from_the_open_order_view` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::an_order_missing_from_the_open_order_view_is_looked_up_in_the_history` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::an_order_is_not_found_only_when_neither_view_has_it` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::a_status_answer_about_another_order_or_of_a_kind_we_never_send_concludes_nothing` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::the_status_table` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::open_orders_are_read_through_every_page` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::a_snapshot_whose_last_page_cannot_be_told_gives_no_input` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::positions_are_signed_by_side` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::the_margin_report_maps_the_unified_account` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::a_margin_answer_that_cannot_be_read_as_a_whole_is_refused_as_a_whole` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::the_account_mm_rate_field_is_not_used_for_the_judgment` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::the_venue_setting_and_the_account_mode_are_read_as_they_are` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::fills_are_read_in_windows_of_at_most_seven_days_each_declared_synced` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::a_row_that_cannot_be_read_stops_the_sync_before_its_window_is_declared` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::fills_follow_the_cursor_and_a_window_whose_last_page_cannot_be_told_is_split` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::a_long_gap_is_synced_over_several_queries_within_the_page_budget` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::query::tests::the_gateway_has_no_order_request` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/config::tests::a_bybit_configuration_loads_and_each_unsafe_value_is_refused` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::rest::tests::other_answers_have_their_own_class` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::rest::tests::every_auth_code_is_a_rejected_key_after_one_request` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::rest::tests::the_credentials_file_must_be_owner_only_and_the_secret_never_prints` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-BYBIT-STREAM-1 — Bybit 게이트웨이는 시작 확인이 통과하고 막힘이 없을 때만 비공개 스트림에 접속하고, auth(GET/realtime + 만료 시각의 서명, 만료 = 지금 + recv_window)가 확인된 뒤 order.linear·execution.linear를 구독하며, 구독이 확인된 뒤에만 Link를 올린다. 접속마다 세션 번호가 커진다. ping 뒤 ping 간격 안에 pong이 없거나(코어 입력 큐를 기다린 시간은 빼고), 소켓이 닫히거나, 읽을 수 없는 행이나 symbol 없는 행이 오거나, 연결 중 막힘(IP 변경, 키 거부, IP 차단)이 생기면 Link를 내리고, 키 거부와 IP 변경이 아니면 다시 붙는다. 인증 거부, 조회의 키 거부 코드, IP 변경 뒤에는 재시작까지 접속도 요청도 하지 않는다. HTTP 403(REST든 스트림 업그레이드든) 뒤에는 멈춤 시간 동안 REST 요청과 스트림 접속이 없고, 끝나면 다시 붙는다. 구독 거부와 응답 없는 인증은 키 거부가 아니라 다시 시도하고, 인증 응답 전에는 구독을 보내지 않는다. 연결이 올라가 첫 pong을 받았으면 재연결 기다림은 처음 값으로 돌아가고, pong 전에 끊기면 기다림이 계속 는다. 설정한 종목의 주문 행은 OrderStatus(Stream), 실행 행은 실행 분류표를 거쳐 받은 시각이 실린 입력이 되고 다른 종목의 행은 넘기지 않는다. 주문과 취소는 V-BYBIT-ORDERS-1. 시작 확인은 키가 서브계정(isMaster = false)이고 설정의 sub_account_uid의 것이며 쓰기 가능하고 ContractTrade의 Order·Position 권한과 지금의 공인 IP를 포함한 바인딩 IP를 가질 때만 통과한다. 계좌는 REGULAR_MARGIN이고 unifiedMarginStatus가 3–6이어야 한다. 종목마다 settleCoin = USDT이고 단방향(positionIdx = 0)이어야 한다. 하나라도 어긋나면 막고, 시작 확인은 GET만 보내 거래소 설정을 바꾸지 않는다. 공인 IP는 시작할 때와 ip_check_secs마다 https인 ip_echo_url로 읽어 키의 IP와 비교한다. IP 확인의 통과는 시작 확인의 막힘을 풀지 않는다(막힘은 출처마다 따로다). 읽을 수 없는 메시지와 data 목록이 없는 order·execution 토픽 메시지도 끊고 다시 붙는 사유다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: Bybit 연결이 확인되지 않은 키·계좌·구독으로 올라오지 않고, 조용히 죽은 연결을 살아 있다고 보지 않으며, 거부된 키나 차단된 IP로 요청을 계속 보내지 않는다는 전제
 - 수준: 통합
 - 전제와 범위: loopback 가짜 웹소켓 서버(auth·subscribe·ping 응답을 시험이 고른다)와 가짜 HTTP 서버(REST, IP 확인), 짧게 줄인 시간, 코어 쪽 소비를 멈출 수 있는 입력 큐, 시험 18개
@@ -1930,35 +1930,35 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/venue::bybit::stream::tests::the_sent_messages_have_the_documented_shapes` | 통과 |  |
-| `node-unit/venue::bybit::stream::tests::frames_are_read_by_their_documented_fields` | 통과 |  |
-| `node-unit/venue::bybit::stream::tests::an_order_row_becomes_a_stream_status_of_our_order_or_of_a_foreign_one` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::the_link_comes_up_after_the_checks_auth_and_subscribe_and_stream_rows_become_inputs` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::the_stream_does_not_connect_while_a_boot_check_fails` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_missing_pong_takes_the_link_down_and_the_reconnect_is_a_new_session` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::an_unreadable_row_or_a_closed_socket_takes_the_link_down_and_it_comes_back` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_refused_stream_auth_blocks_until_the_restart_and_nothing_is_sent_after` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_refused_subscription_never_brings_the_link_up_and_is_retried` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::an_ip_change_while_up_takes_the_link_down_for_good` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::an_ip_ban_stops_every_request_for_the_pause_then_the_link_comes_back` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_key_rejected_by_a_query_takes_the_link_down_for_good` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_403_on_the_stream_upgrade_pauses_every_request_then_the_link_comes_up` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::no_subscription_goes_out_before_the_auth_answer_and_a_silent_auth_is_retried` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_row_without_a_symbol_takes_the_link_down` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::time_spent_waiting_on_a_full_core_queue_does_not_count_against_the_pong` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::the_reconnect_waits_start_over_after_a_link_that_came_up` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_link_that_fails_before_its_first_pong_keeps_the_waits_growing` | 통과 |  |
-| `node-unit/venue::bybit::checks::tests::each_wrong_account_fact_blocks` | 통과 |  |
-| `node-unit/venue::bybit::checks::tests::requests_from_an_address_the_key_is_not_bound_to_are_an_auth_block` | 통과 |  |
-| `node-unit/venue::bybit::checks::tests::a_unified_status_outside_3_to_6_or_missing_blocks` | 통과 |  |
-| `node-unit/venue::bybit::checks::tests::the_boot_checks_pass_on_the_configured_account` | 통과 |  |
-| `node-unit/venue::bybit::checks::tests::a_later_ip_change_blocks_and_an_auth_block_is_not_cleared` | 통과 |  |
-| `node-unit/config::tests::a_bybit_configuration_loads_and_each_unsafe_value_is_refused` | 통과 |  |
-| `node-unit/venue::bybit::checks::tests::a_passing_ip_recheck_does_not_lift_a_failed_boot_check` | 통과 |  |
+| `node-unit/venue::bybit::stream::tests::the_sent_messages_have_the_documented_shapes` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::stream::tests::frames_are_read_by_their_documented_fields` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::stream::tests::an_order_row_becomes_a_stream_status_of_our_order_or_of_a_foreign_one` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::the_link_comes_up_after_the_checks_auth_and_subscribe_and_stream_rows_become_inputs` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::the_stream_does_not_connect_while_a_boot_check_fails` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_missing_pong_takes_the_link_down_and_the_reconnect_is_a_new_session` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::an_unreadable_row_or_a_closed_socket_takes_the_link_down_and_it_comes_back` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_refused_stream_auth_blocks_until_the_restart_and_nothing_is_sent_after` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_refused_subscription_never_brings_the_link_up_and_is_retried` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::an_ip_change_while_up_takes_the_link_down_for_good` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::an_ip_ban_stops_every_request_for_the_pause_then_the_link_comes_back` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_key_rejected_by_a_query_takes_the_link_down_for_good` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_403_on_the_stream_upgrade_pauses_every_request_then_the_link_comes_up` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::no_subscription_goes_out_before_the_auth_answer_and_a_silent_auth_is_retried` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_row_without_a_symbol_takes_the_link_down` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::time_spent_waiting_on_a_full_core_queue_does_not_count_against_the_pong` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::the_reconnect_waits_start_over_after_a_link_that_came_up` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_link_that_fails_before_its_first_pong_keeps_the_waits_growing` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::checks::tests::each_wrong_account_fact_blocks` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::checks::tests::requests_from_an_address_the_key_is_not_bound_to_are_an_auth_block` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::checks::tests::a_unified_status_outside_3_to_6_or_missing_blocks` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::checks::tests::the_boot_checks_pass_on_the_configured_account` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::checks::tests::a_later_ip_change_blocks_and_an_auth_block_is_not_cleared` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/config::tests::a_bybit_configuration_loads_and_each_unsafe_value_is_refused` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::checks::tests::a_passing_ip_recheck_does_not_lift_a_failed_boot_check` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-BYBIT-ORDERS-1 — Bybit 게이트웨이는 주문과 취소마다 결과 하나를 돌려주고 REST 요청을 많아야 하나 보내며 다시 보내지 않는다. 생성은 orderLinkId = 우리 고객 주문번호, category linear, Limit, 단방향(positionIdx 0)으로 보내고 보낸 본문에 서명한다. 요청 시각 + recv_window + 1초가 expires_at보다 늦거나, 막힘이 있거나, 거래하지 않는 종목이거나, 접속이 되지 않으면 보내지 않고 NotSent다. retCode 0은 생성이면 orderId가 있을 때만 Placed(Open, 누적 수량 없음), 취소면 Confirmed. 오류 문서의 0 아닌 코드는 UNKNOWN_CODES가 아니면 Rejected, 그 밖의 모든 응답(문서에 없는 코드, 2xx가 아닌 HTTP, 시간 초과, 끊김, 읽을 수 없는 본문)은 Unknown이다. HTTP 403과 retCode 10018은 IP 차단 멈춤을, HTTP 401과 키 거부 retCode는 키 거부를 건다. 요청은 자리를 잡은 때부터 응답 + 1초까지(응답이 없으면 요청 시각 + recv_window + 1초 + 1초까지) 세므로 보낸 때와 응답(또는 마지막 도착 가능 시각) 사이 어디에 도착하든 어느 1초에도 주문은 8개, 주문과 취소는 합쳐 10개를 넘지 않고, 주문이 8개를 다 써도 취소는 바로 나가며, 차면 기다린다(버리지 않는다). 아무 바이트도 나가지 않은 요청은 자리를 바로 돌려준다. 시작 확인은 설정의 px_tick·qty_step이 거래소 tickSize·qtyStep의 배수가 아니면 막고, 로컬 시계가 거래소보다 500ms 넘게 앞설 수 있으면(시작 확인 전, IP 확인 주기마다, 막힌 동안 10초마다, 왕복 250ms 넘는 측정은 판정 안 함) 생성만 막고 취소와 스트림은 막지 않는다. 서명은 hex(HMAC_SHA256(secret, timestamp + api_key + recv_window + payload))이고 payload는 GET이면 키 순서로 정렬해 보내는 질의 문자열, POST면 보내는 본문 그대로이며, 질의 값은 인코딩하지 않고 뜻을 바꾸는 문자가 있으면 보내지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 결과를 모르는 주문을 거부로 보거나 다시 보내 두 번 놓지 않고, 만료 뒤에 처리될 수 있는 주문을 보내지 않으며, 거래소 요청 한도를 넘어 IP 차단을 부르지 않는다는 전제
 - 수준: 통합
 - 전제와 범위: loopback 가짜 HTTP 서버(경로별 응답: 답, 끊김, 무응답, 오류 상태), 고정한 시계, 오류 문서의 코드 번호 목록(2026-11-21), 시각을 입력으로 받는 한도 규칙, 시험 27개
@@ -1972,42 +1972,42 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/rate::tests::the_ninth_order_in_a_second_waits_while_two_cancels_still_go_out` | 통과 |  |
-| `core/rate::tests::the_window_slides_with_each_request` | 통과 |  |
-| `core/rate::tests::cancels_may_take_the_reserve_and_then_block_orders_too` | 통과 |  |
-| `core/rate::tests::a_clock_that_goes_back_does_not_free_a_slot` | 통과 |  |
-| `core/rate::tests::a_request_counts_until_one_window_after_it_finished` | 통과 |  |
-| `core/rate::tests::no_rolling_second_of_arrivals_holds_more_than_the_limits` | 통과 |  |
-| `node-unit/venue::bybit::answer::tests::every_documented_code_has_exactly_one_class` | 통과 |  |
-| `node-unit/venue::bybit::answer::tests::anything_but_a_documented_refusal_is_unknown` | 통과 |  |
-| `node-unit/venue::bybit::answer::tests::code_zero_is_accepted_with_its_object_from_rest_or_ws` | 통과 |  |
-| `node-unit/venue::bybit::orders::tests::a_create_is_one_signed_limit_order_and_its_ack_is_an_open_order` | 통과 |  |
-| `node-unit/venue::bybit::orders::tests::an_expiry_inside_the_window_plus_one_second_sends_nothing` | 통과 |  |
-| `node-unit/venue::bybit::orders::tests::a_block_after_the_wait_sends_nothing` | 통과 |  |
-| `node-unit/venue::bybit::orders::tests::no_answer_is_unknown_and_nothing_is_sent_twice` | 통과 |  |
-| `node-unit/venue::bybit::orders::tests::a_dead_venue_is_not_sent` | 통과 |  |
-| `node-unit/venue::bybit::orders::tests::refusals_are_rejected_and_the_key_and_ip_answers_have_their_effects` | 통과 |  |
-| `node-unit/venue::bybit::orders::tests::a_cancel_goes_by_client_id_and_has_the_same_classes` | 통과 |  |
-| `node-unit/venue::bybit::orders::tests::the_ninth_create_in_a_second_waits_while_a_cancel_goes_out` | 통과 |  |
-| `node-unit/venue::bybit::orders::tests::the_send_time_rule_is_exact_at_the_bound` | 통과 |  |
-| `node-unit/venue::bybit::orders::tests::a_slot_without_an_answer_counts_until_its_last_arrival_plus_a_second` | 통과 |  |
-| `node-unit/venue::bybit::checks::tests::a_local_clock_ahead_by_more_than_half_a_second_blocks` | 통과 |  |
-| `node-unit/venue::bybit::checks::tests::a_slow_clock_answer_proves_nothing` | 통과 |  |
-| `node-unit/venue::bybit::checks::tests::the_clock_slot_blocks_creates_only` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_local_clock_ahead_of_the_venue_keeps_orders_home_but_not_cancels_or_the_link` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_ban_met_by_the_clock_check_ends_the_round` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::an_order_and_a_cancel_each_go_out_once_over_rest_and_get_one_result` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::nothing_goes_out_while_blocked_or_for_an_untraded_symbol` | 통과 |  |
-| `node-unit/venue::bybit::checks::tests::steps_off_the_venue_steps_block_and_unreadable_steps_are_unchecked` | 통과 |  |
-| `node-unit/venue::bybit::sign::tests::the_strings_to_sign_are_the_venues_examples` | 통과 |  |
-| `node-unit/venue::bybit::sign::tests::signatures_match_independent_hmac_values` | 통과 |  |
-| `node-unit/venue::bybit::sign::tests::a_venue_cursor_is_sent_as_is_and_other_characters_are_refused` | 통과 |  |
-| `node-unit/venue::bybit::rest::tests::a_get_is_signed_over_the_query_string_it_sends` | 통과 |  |
-| `node-unit/venue::bybit::rest::tests::a_post_is_signed_over_the_exact_body_it_sends` | 통과 |  |
+| `core/rate::tests::the_ninth_order_in_a_second_waits_while_two_cancels_still_go_out` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/rate::tests::the_window_slides_with_each_request` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/rate::tests::cancels_may_take_the_reserve_and_then_block_orders_too` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/rate::tests::a_clock_that_goes_back_does_not_free_a_slot` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/rate::tests::a_request_counts_until_one_window_after_it_finished` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/rate::tests::no_rolling_second_of_arrivals_holds_more_than_the_limits` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::answer::tests::every_documented_code_has_exactly_one_class` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::answer::tests::anything_but_a_documented_refusal_is_unknown` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::answer::tests::code_zero_is_accepted_with_its_object_from_rest_or_ws` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::orders::tests::a_create_is_one_signed_limit_order_and_its_ack_is_an_open_order` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::orders::tests::an_expiry_inside_the_window_plus_one_second_sends_nothing` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::orders::tests::a_block_after_the_wait_sends_nothing` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::orders::tests::no_answer_is_unknown_and_nothing_is_sent_twice` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::orders::tests::a_dead_venue_is_not_sent` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::orders::tests::refusals_are_rejected_and_the_key_and_ip_answers_have_their_effects` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::orders::tests::a_cancel_goes_by_client_id_and_has_the_same_classes` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::orders::tests::the_ninth_create_in_a_second_waits_while_a_cancel_goes_out` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::orders::tests::the_send_time_rule_is_exact_at_the_bound` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::orders::tests::a_slot_without_an_answer_counts_until_its_last_arrival_plus_a_second` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::checks::tests::a_local_clock_ahead_by_more_than_half_a_second_blocks` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::checks::tests::a_slow_clock_answer_proves_nothing` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::checks::tests::the_clock_slot_blocks_creates_only` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_local_clock_ahead_of_the_venue_keeps_orders_home_but_not_cancels_or_the_link` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_ban_met_by_the_clock_check_ends_the_round` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::an_order_and_a_cancel_each_go_out_once_over_rest_and_get_one_result` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::nothing_goes_out_while_blocked_or_for_an_untraded_symbol` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::checks::tests::steps_off_the_venue_steps_block_and_unreadable_steps_are_unchecked` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::sign::tests::the_strings_to_sign_are_the_venues_examples` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::sign::tests::signatures_match_independent_hmac_values` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::sign::tests::a_venue_cursor_is_sent_as_is_and_other_characters_are_refused` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::rest::tests::a_get_is_signed_over_the_query_string_it_sends` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::rest::tests::a_post_is_signed_over_the_exact_body_it_sends` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-BYBIT-TRADE-1 — Bybit 게이트웨이는 주문과 취소를 WS Trade(/v5/trade)로 보내고, REST로는 WS Trade 연결 작업이 그 요청의 아무 바이트도 쓰지 않았을 때(인증된 연결 없음, 쓰기 전 막힘)만, 막힘을 다시 본 뒤 같은 한도 자리와 같은 요청 시각으로 보낸다. 요청은 두 경로를 합쳐 많아야 한 번 나가고 한도 자리는 경로와 상관없이 하나다(1초 안의 9번째 생성은 경로가 섞여도 기다린다). 요청은 reqId(생성 c + 고객 주문번호, 취소 x + 36진 시도 번호 + 고객 주문번호, 36자 이하), header의 X-BAPI-TIMESTAMP·X-BAPI-RECV-WINDOW, op, REST 본문 하나인 args로 되어 있다. 응답은 REST와 같은 표로 분류하고, 20006·10019·10429는 결과 불명, 10019는 연결을 닫고 다시 열며, 10403과 10018은 IP 차단 멈춤을, 키 거부 코드는 키 거부를 건다. 쓴 요청에 request_timeout_ms 안에 응답이 없거나 그 사이 연결이 내려가면(pong 없음, 끊김, 막힘) 결과 불명이고 어느 경로로도 다시 보내지 않으며, 한도는 요청 시각 + recv_window + 1초 + 1초까지 센다. 늦은 응답은 버린다. 같은 reqId가 기다리는 중이면 다시 쓰지 않는다. WS Trade 연결은 막힘이 없을 때만 IPv4로 접속하고, auth(비공개 스트림의 서명)의 retCode가 0일 때만 올라가며, 0이 아니면 재시작까지 키 거부, 업그레이드의 HTTP 403은 IP 차단 멈춤이다. ping 뒤 간격 안에 pong이 없으면 내려가고, 재연결 기다림은 첫 pong을 받은 연결 뒤에만 처음 값으로 돌아간다. WS Trade는 Link를 움직이지 않는다. 키 거부·IP 차단 응답의 효과는 연결 작업이 다음 쓰기 전에 건다. 기다리는 요청이 없는 늦은 응답도 버리되 그 효과(키 거부)는 건다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 주문 경로가 둘이 되어도 같은 주문이 두 번 놓이지 않고(G-3), 결과를 모르는 요청을 거부나 미전송으로 보지 않으며(G-2), 막힘·차단·거부된 키로 요청을 보내지 않고, 두 경로를 합쳐 거래소 요청 한도를 넘지 않는다는 전제
 - 수준: 통합
 - 전제와 범위: loopback 가짜 WS Trade 서버(auth·pong·주문 응답을 시험이 고른다: 응답 코드, 침묵, 요청 뒤 끊음, ping 무응답, auth 거부, 업그레이드 403, auth 뒤 읽을 수 없는 메시지)와 가짜 비공개 스트림·가짜 HTTP 서버, 가짜 연결 작업(orders 시험), 막힘을 시험이 정하는 가짜 Host(연결 작업 시험), 짧게 줄인 시간, 시험 23개
@@ -2021,33 +2021,33 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/venue::bybit::trade::tests::req_ids_are_unique_per_request_and_fit_the_venue_limit` | 통과 |  |
-| `node-unit/venue::bybit::trade::tests::a_request_carries_its_id_time_window_op_and_the_rest_body` | 통과 |  |
-| `node-unit/venue::bybit::trade::tests::the_auth_message_is_the_private_stream_signature` | 통과 |  |
-| `node-unit/venue::bybit::trade::tests::frames_are_read_by_their_documented_fields` | 통과 |  |
-| `node-unit/venue::bybit::orders::tests::a_request_goes_over_ws_trade_when_it_is_up_and_not_over_rest` | 통과 |  |
-| `node-unit/venue::bybit::orders::tests::a_request_not_written_goes_over_rest_once_unless_a_block_came` | 통과 |  |
-| `node-unit/venue::bybit::orders::tests::a_written_request_without_an_answer_is_unknown_and_not_sent_again` | 통과 |  |
-| `node-unit/venue::bybit::orders::tests::ws_answers_have_the_rest_classes_and_their_effects` | 통과 |  |
-| `node-unit/venue::bybit::orders::tests::the_ninth_create_in_a_second_waits_across_both_paths` | 통과 |  |
-| `node-unit/venue::bybit::orders::tests::a_ws_request_without_an_answer_counts_until_its_last_arrival_plus_a_second` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::orders_go_over_ws_trade_when_it_is_up_over_rest_while_it_is_down_and_back` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_silent_ws_trade_makes_every_unanswered_request_unknown_and_nothing_is_sent_again` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_ws_trade_that_stops_answering_pings_makes_its_pending_request_unknown` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_connection_that_drops_after_reading_the_request_makes_it_unknown` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::answers_20006_and_10019_are_unknown_and_10019_reopens_the_connection` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_late_answer_is_dropped` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_refused_ws_trade_auth_rejects_the_key_until_the_restart` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_ws_ip_limit_answer_starts_the_ban_pause` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_403_on_the_ws_trade_upgrade_pauses_every_request` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::ws_trade_reconnect_waits_grow_until_a_pong_then_start_over` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::the_task_writes_nothing_under_a_block_and_no_reqid_twice` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::the_task_applies_a_ban_or_key_answer_before_its_next_write` | 통과 |  |
-| `node-unit/venue::bybit::tests::endpoints_are_the_documented_hosts` | 통과 |  |
+| `node-unit/venue::bybit::trade::tests::req_ids_are_unique_per_request_and_fit_the_venue_limit` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::trade::tests::a_request_carries_its_id_time_window_op_and_the_rest_body` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::trade::tests::the_auth_message_is_the_private_stream_signature` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::trade::tests::frames_are_read_by_their_documented_fields` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::orders::tests::a_request_goes_over_ws_trade_when_it_is_up_and_not_over_rest` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::orders::tests::a_request_not_written_goes_over_rest_once_unless_a_block_came` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::orders::tests::a_written_request_without_an_answer_is_unknown_and_not_sent_again` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::orders::tests::ws_answers_have_the_rest_classes_and_their_effects` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::orders::tests::the_ninth_create_in_a_second_waits_across_both_paths` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::orders::tests::a_ws_request_without_an_answer_counts_until_its_last_arrival_plus_a_second` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::orders_go_over_ws_trade_when_it_is_up_over_rest_while_it_is_down_and_back` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_silent_ws_trade_makes_every_unanswered_request_unknown_and_nothing_is_sent_again` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_ws_trade_that_stops_answering_pings_makes_its_pending_request_unknown` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_connection_that_drops_after_reading_the_request_makes_it_unknown` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::answers_20006_and_10019_are_unknown_and_10019_reopens_the_connection` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_late_answer_is_dropped` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_refused_ws_trade_auth_rejects_the_key_until_the_restart` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_ws_ip_limit_answer_starts_the_ban_pause` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_403_on_the_ws_trade_upgrade_pauses_every_request` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::ws_trade_reconnect_waits_grow_until_a_pong_then_start_over` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::the_task_writes_nothing_under_a_block_and_no_reqid_twice` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::the_task_applies_a_ban_or_key_answer_before_its_next_write` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::tests::endpoints_are_the_documented_hosts` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-BYBIT-REFPX-1 — Bybit 게이트웨이는 공개 linear 스트림에 거래하는 종목마다 tickers.<symbol>을 구독하고(구독 요청 하나에 토픽 10개까지, 모든 응답이 success: true일 때만 구독됨, 거부되거나 handshake 시간 안에 답이 없는 요청이 하나라도 있으면 pong이 와도 끊고 다시 붙음), 종목마다 그 연결의 스냅숏의 markPrice를 mark로 삼아 RefPrice(px = mark, venue_ts = 메시지 ts의 µs)로 코어에 보낸다. 스냅숏 전의 델타는 버리고, markPrice가 있는 델타는 mark를 바꾸며, markPrice 없는 델타는 든 mark를 그 델타의 ts로 다시 보낸다. 내보냄은 종목마다 ref_price_interval_ms에 많아야 한 번이고(재연결을 넘어 센다) 메시지 없이 다시 보내지 않는다. mark는 연결마다 비운다. 읽을 수 없는 티커 메시지(JSON 아님, type·data·symbol·markPrice·ts 이상, markPrice 없는 스냅숏, 소수 9자리, 0 이하)는 연결을 끊고 다시 붙으며, 거래하지 않는 종목의 메시지는 읽지 않고 버린다. 연결은 막힘이 없을 때만 IPv4로 접속하고, 연결 중 막힘이 생기면 끊고 막힌 동안 다시 붙지 않으며, 업그레이드의 HTTP 403은 IP 차단 멈춤이다. ping 뒤 간격 안에 pong(op = pong, 또는 공개 linear의 op = ping + ret_msg = pong)이 없으면 끊는다. 첫 pong 전에 끊긴 연결은 재연결 대기를 늘리고, 첫 pong 뒤에 끊긴 연결만 대기를 처음으로 되돌린다. 공개 스트림은 Link를 움직이지 않는다. 설정의 ref_price_interval_ms는 1000 이상, ref_price_max_age_us의 절반 이하만 받는다. 시험용 연결 주소 OMS_TEST_BYBIT_WIRING은 다섯 주소의 호스트가 모두 127.0.0.1일 때만 받는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 가격 범위의 기준이 거래소가 정한 공정 가격이고, 게이트웨이가 앞 연결의 mark를 새 연결에서 다시 보내지 않으며(코어는 마지막으로 받은 가격의 나이를 ref_price_max_age_us로 제한한다. 재연결 직후 간격 안에서는 앞 연결이 보낸 마지막 가격으로 판정될 수 있다), 거래소가 멈춘 종목의 가격을 OMS가 살려 두지 않는다는 전제. 시험용 주소가 실제 거래소나 다른 호스트로 새지 않는다는 전제
 - 수준: 통합
 - 전제와 범위: loopback 가짜 공개 웹소켓 서버(구독 응답·pong을 시험이 고른다, 공개 linear의 pong 모양)와 가짜 비공개 스트림·가짜 HTTP 서버, 시각을 입력으로 받는 mark 상태, 짧게 줄인 시간(ping 150ms, 간격 300ms), 시험 18개
@@ -2061,28 +2061,28 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/venue::bybit::ticker::tests::subscribe_requests_hold_at_most_ten_topics_each` | 통과 |  |
-| `node-unit/venue::bybit::ticker::tests::frames_are_read_by_their_documented_fields` | 통과 |  |
-| `node-unit/venue::bybit::ticker::tests::an_unreadable_ticker_frame_is_an_error` | 통과 |  |
-| `node-unit/venue::bybit::ticker::tests::a_snapshot_then_deltas_give_the_mark_at_most_once_per_interval` | 통과 |  |
-| `node-unit/venue::bybit::ticker::tests::a_new_connection_knows_no_mark_until_its_snapshot_and_keeps_the_interval` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::the_ticker_mark_becomes_the_reference_price_at_most_once_per_interval` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::an_unreadable_ticker_frame_ends_the_connection_and_the_next_starts_with_no_mark` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_refused_ticker_subscription_is_retried` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::an_unanswered_ticker_subscription_ends_the_connection_after_the_handshake_time` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::one_unanswered_subscribe_request_of_two_ends_the_connection` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_ticker_connection_that_fails_before_its_first_pong_keeps_the_waits_growing` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_missing_ticker_pong_ends_the_connection_and_the_public_pong_keeps_it` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::a_403_on_the_public_upgrade_pauses_every_request` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::the_ticker_stream_connects_only_without_a_block` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::the_ticker_stream_subscribes_ten_topics_per_request` | 통과 |  |
-| `node-unit/venue::bybit::gateway::tests::the_test_wiring_takes_only_hosts_on_127_0_0_1` | 통과 |  |
-| `node-unit/venue::bybit::tests::endpoints_are_the_documented_hosts` | 통과 |  |
-| `node-unit/config::tests::the_bybit_reference_price_interval_is_bounded_by_one_second_and_half_the_freshness_limit` | 통과 |  |
+| `node-unit/venue::bybit::ticker::tests::subscribe_requests_hold_at_most_ten_topics_each` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::ticker::tests::frames_are_read_by_their_documented_fields` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::ticker::tests::an_unreadable_ticker_frame_is_an_error` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::ticker::tests::a_snapshot_then_deltas_give_the_mark_at_most_once_per_interval` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::ticker::tests::a_new_connection_knows_no_mark_until_its_snapshot_and_keeps_the_interval` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::the_ticker_mark_becomes_the_reference_price_at_most_once_per_interval` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::an_unreadable_ticker_frame_ends_the_connection_and_the_next_starts_with_no_mark` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_refused_ticker_subscription_is_retried` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::an_unanswered_ticker_subscription_ends_the_connection_after_the_handshake_time` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::one_unanswered_subscribe_request_of_two_ends_the_connection` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_ticker_connection_that_fails_before_its_first_pong_keeps_the_waits_growing` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_missing_ticker_pong_ends_the_connection_and_the_public_pong_keeps_it` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::a_403_on_the_public_upgrade_pauses_every_request` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::the_ticker_stream_connects_only_without_a_block` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::the_ticker_stream_subscribes_ten_topics_per_request` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::gateway::tests::the_test_wiring_takes_only_hosts_on_127_0_0_1` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::tests::endpoints_are_the_documented_hosts` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/config::tests::the_bybit_reference_price_interval_is_bounded_by_one_second_and_half_the_freshness_limit` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-BYBIT-NODE-1 — kind = bybit인 oms-node 프로세스(failpoints 빌드, 시험용 연결 주소로 가짜 Bybit에 연결)는 참조 가격이 오기 전 가격 범위가 있는 주문을 RefPriceUnavailable로 거절하고 아무 요청도 보내지 않으며, 공개 스트림의 티커 스냅숏 뒤에는 같은 요청을 받아 WS Trade로 한 번 보내고, 가짜 WS Trade가 그 order.create를 읽을 때 디스크의 저널 파일에 그 주문의 수락 기록이 있다(이 확인은 순서의 증명이 아니다: 기록이 네트워크 왕복보다 먼저 파일에 닿으므로 쓰기 전에 보내도 통과한다. 기록이 내구화된 뒤에만 보낸다는 것은 다음 flush 실패 시험이 증명한다). 새 주문의 저널 flush가 실패하면(OMS_CRASH_AT=sync_error_after_write) 노드는 상태 2로 멈추고 REST와 WS Trade 어느 쪽에도 생성이 닿지 않으며, failpoint 없이 다시 시작하면 그 기록을 찾고 orderLinkId 조회(realtime과 history 두 번이 모두 비었음)로 주문을 '놓이지 않음'으로 닫고, 그래도 생성은 없다. WS Trade가 생성을 읽고 답하지 않으면 주문은 결과 불명(Transport)이 되고, orderLinkId로 묻는 realtime 조회가 열린 주문을 찾아 Working이 되며, 두 경로를 합친 생성은 하나다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: Bybit 게이트웨이를 실제 노드에 붙였을 때 커밋 순서(기록이 내구화된 뒤에만 전송, C-COMMIT, flush 실패 시험)와 결과 불명의 해소(G-2, G-3)가 프로세스 경계를 넘어 지켜진다는 전제. 단위 시험의 가짜 연결 작업이 아니라 실제 바이너리의 연결 전체
 - 수준: 프로세스
 - 전제와 범위: 시험 3개, 각 주문 1건. 노드는 실제 바이너리로 따로 돌고 가짜 REST(http-fake)·비공개 스트림·WS Trade·공개 스트림은 시험 프로세스 안의 loopback 서버. ping 1초, 요청 제한 500ms, 수신 창 1초, 조회 주기 50ms, 정기 열린 주문 조회 60초
@@ -2096,13 +2096,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `pipeline/an_order_waits_for_the_reference_price_and_goes_out_once` | 통과 |  |
-| `pipeline/a_failed_flush_sends_nothing_and_the_restart_resolves_the_order_as_not_placed` | 통과 |  |
-| `pipeline/an_unanswered_create_is_found_open_by_its_order_link_id_and_never_sent_again` | 통과 |  |
+| `pipeline/an_order_waits_for_the_reference_price_and_goes_out_once` | 미실행 | result of another source, not counted (last result: passed) |
+| `pipeline/a_failed_flush_sends_nothing_and_the_restart_resolves_the_order_as_not_placed` | 미실행 | result of another source, not counted (last result: passed) |
+| `pipeline/an_unanswered_create_is_found_open_by_its_order_link_id_and_never_sent_again` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-ALERT-DIRECT-1 — alert-direct의 송신 스레드는 텔레그램 전송이 처음 다시 보내기(Retry)로 끝난 시도의 시각을 '실패 시작'으로 두고, 텔레그램이 답하면(전달 또는 400·413 거절) 지운다. 보낼 것이 없으면 실패 시작은 생기지 않는다. 둘째 채널을 설정하면 once와 set이 만든 모든 메시지가 같은 분할·같은 한도(50개)의 둘째 보관함에도 통째로 들어가 자기 스레드(alert-second)로 한 번씩 나가고, 넘치면 오래된 것부터 버리고 세어 자기 버림 알림을 보내며, 오류는 그 조각을 두고 그 전송을 끝낸다. 실패 시작에서 second_after_ms(기본 60초)를 넘게 지나면 둘째 채널에만 'Telegram 전송이 N초째 실패함' 알림이 시작 1번, repeat_ms마다 1번, 텔레그램이 다시 답하면 해소 1번 나간다. flush_for는 두 보관함을 모두 기다린다. 둘째 채널이 없으면 스레드도 복사도 없다. 전송 뒤 시간 초과면 같은 조각을 다시 보내므로 텔레그램이 같은 메시지를 두 번 받을 수 있다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 텔레그램이 막혔을 때 그것을 알릴 다른 길(설계 §7.7, D3). U18a2의 OMS 직접 알림이 이 송신기를 쓴다. md-collector와 md-lake는 둘째 채널 없이 쓰므로 동작이 그대로여야 한다
 - 수준: 통합
 - 전제와 범위: 시험 6개(alert 5, second_off 1). 텔레그램은 loopback http-fake(500, 400, 200을 바꿔 가며), 둘째 채널은 시험 안의 가짜(성공, 실패, 300ms 지연). 시계는 시험이 움직인다(+59초, 정확히 +60초, +61초, +5분). flush 주기 20~50ms
@@ -2116,17 +2116,17 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `alert/failing_since_set_and_reset` | 통과 |  |
-| `alert/second_channel_gets_every_message` | 통과 |  |
-| `alert/second_outbox_bound` | 통과 |  |
-| `alert/telegram_down_notice_after_60s` | 통과 |  |
-| `alert/flush_for_waits_for_both` | 통과 |  |
-| `alert/second_off_by_default` | 통과 |  |
-| `alert/timeout_keeps_the_part` | 통과 |  |
+| `alert/failing_since_set_and_reset` | 미실행 | result of another source, not counted (last result: passed) |
+| `alert/second_channel_gets_every_message` | 미실행 | result of another source, not counted (last result: passed) |
+| `alert/second_outbox_bound` | 미실행 | result of another source, not counted (last result: passed) |
+| `alert/telegram_down_notice_after_60s` | 미실행 | result of another source, not counted (last result: passed) |
+| `alert/flush_for_waits_for_both` | 미실행 | result of another source, not counted (last result: passed) |
+| `alert/second_off_by_default` | 미실행 | result of another source, not counted (last result: passed) |
+| `alert/timeout_keeps_the_part` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-ALERT-1 — OMS의 알림 스레드(oms-alert)는 공개된 읽기 모델만 읽으므로, 알림은 그 원인이 된 기록이 내구화된 뒤에만 나간다. 코어가 결정했지만 커밋 단계가 아직 내구화하지 않은 계좌 중지는 보내지 않고, 내구화되면 보낸다. flush에 실패한 묶음의 계좌 중지는 어떤 요청에도 나오지 않고, 그 뒤의 새 요청은 치명 알림 하나뿐이다. 치명 알림은 치명 사유와 마지막 내구 seq만 담고(실패한 묶음의 내용 없음) 치명 래치를 처음 본 때 한 번 나가며, 그 뒤에는 조건을 평가하지 않는다: 유예가 지난 연결 끊김도 시작하지 않고, 읽기 모델에서 사라진 중지도 해소를 보내지 않는다. 평가가 읽기 모델을 읽은 뒤 래치가 걸려 있으면 그 평가는 시작 알림도 set도 하지 않는다. 종료는 래치가 걸려 있으면 받은 종료 코드와 상관없이 치명 알림을 넣고 전송을 기다린다. 프로세스에서: 감소 전용 상태로 들어가는 기록의 flush가 실패하면 노드는 종료 코드 2로 exit_flush_ms + 5초 안에 끝나고, 가짜 텔레그램은 시작 알림과 치명 알림만 받으며(첫 시도 500 뒤 종료 전 전송에서 다시) REDUCING에 관한 것은 없다. 시작 뒤 첫 flush(Boot 기록)가 실패하면 설정이 활성화되기 전이어도 노드는 종료 코드 2로 끝나고, 가짜 텔레그램은 치명 알림 하나만 받는다(종료 전 전송)
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: ADR-004의 '내구화 전에는 아무것도 밖으로 나가지 않는다'를 알림도 지켜야 한다. 복구한 노드가 모르는 사건을 사람에게 알리면 운영자가 저널에 없는 상태를 찾게 된다(ADR-029)
 - 수준: 통합
 - 전제와 범위: 시험 8개: 프로세스 안(실제 코어 스레드·커밋 스레드·저널 파일·알림 스레드, loopback http-fake 텔레그램) 4개, 실제 oms-node·simvenue 프로세스 2개, 단위 2개. 커밋 단계는 가득 찬 게이트웨이 큐로 붙잡거나 failpoints의 flush 실패(fail_next_sync, OMS_CRASH_AT=sync_error_after_write와 OMS_CRASH_ON=reducing_entered 또는 boot)로 멈춘다
@@ -2140,18 +2140,18 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `pipeline/no_alert_for_a_batch_that_failed_to_flush` | 통과 |  |
-| `pipeline/a_flush_failure_sends_one_fatal_alert_and_nothing_of_the_batch` | 통과 |  |
-| `pipeline/a_flush_failure_at_startup_exits_2_and_sends_the_fatal_message` | 통과 |  |
-| `node-unit/nothing_is_sent_before_its_record_is_durable` | 통과 |  |
-| `node-unit/after_a_fatal_stop_only_the_fatal_message_is_sent` | 통과 |  |
-| `node-unit/finish_sends_the_fatal_message_whatever_the_code` | 통과 |  |
-| `node-unit/alerts::tests::the_fatal_text_holds_the_reason_and_the_seq_only` | 통과 |  |
-| `node-unit/alerts::tests::a_fatal_trip_during_an_evaluation_sets_nothing` | 통과 |  |
+| `pipeline/no_alert_for_a_batch_that_failed_to_flush` | 미실행 | result of another source, not counted (last result: passed) |
+| `pipeline/a_flush_failure_sends_one_fatal_alert_and_nothing_of_the_batch` | 미실행 | result of another source, not counted (last result: passed) |
+| `pipeline/a_flush_failure_at_startup_exits_2_and_sends_the_fatal_message` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/nothing_is_sent_before_its_record_is_durable` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/after_a_fatal_stop_only_the_fatal_message_is_sent` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/finish_sends_the_fatal_message_whatever_the_code` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/alerts::tests::the_fatal_text_holds_the_reason_and_the_seq_only` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/alerts::tests::a_fatal_trip_during_an_evaluation_sets_nothing` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-ALERT-2 — 텔레그램이 계속 500으로 답하는 동안 시작 알림, 계좌 중지, 5분씩 시계를 58번 움직인 반복이 만든 60개 메시지 가운데 50개가 보관되고 10개가 버려져 status.alerts에 queued 50, dropped_total 10으로 보인다(failures와 failing_since_ms도 보이고, 토큰은 없다). 텔레그램이 다시 200으로 답하면 남은 50개가 나간 뒤 '[OMS P1] 전송 실패로 알림 10개를 버림' 하나가 나가고, 전달 51, 대기 0, failing_since_ms null이 된다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 긴 텔레그램 장애 동안 메모리를 묶고, 잃은 알림이 있다는 사실은 알려야 한다(PR #3의 보관함 규칙, 설계 §7.7)
 - 수준: 통합
 - 전제와 범위: 프로세스 안 시험 1개(실제 파이프라인, 알림 스레드, alert-direct, loopback http-fake). 시계는 시험이 움직인다(5분 × 58), flush 주기 20 ms
@@ -2165,11 +2165,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/outbox_bound_holds_and_drops_are_counted` | 통과 |  |
+| `node-unit/outbox_bound_holds_and_drops_are_counted` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-ALERT-3 — 알림 조건은 C-ALERT 표의 키와 유예를 따른다: 차단 사유마다 비어 있지 않은 문장(Mismatch와 OperatorStrategy는 조건 없음), 래치와 운영자 행위는 유예 0, 지나가는 상태와 저장 공간 부족은 grace_ms. Core::handle로 만든 상태에서 hold:link_down, gateway_block, hold:resync, hold:operator_account, hold:storage_low, halt_strategy:<s>, mismatch:<kind>, hold:venue_setting:<i>, hold:account_mode, margin_stale, hold:reducing이 나오고 문장 끝은 '근거: 저널 seq n'이다. 불일치는 종류마다 키 하나에 개수와 최근 3개(subject: detail)를 담고 확인한 것은 빠진다. 계좌 중지는 시작 1번, +4분 0번, +5분에 그때의 메모로 1번, +10분 1번, 재개에 '해소: <시작 문장>' 1번, 그 뒤 +5분 0번이다. 연결 끊김은 20초 만에 다시 붙으면 아무것도 보내지 않고, 29.999초에는 아니고 정확히 30초에 시작을, 31초에는 더 보내지 않고, 다시 붙으면 해소를 보낸다. 저장 공간 부족이 20초 낮음·5초 정상을 열 번 되풀이하면 아무것도 보내지 않고, 30초를 넘게 계속되면 시작 1번(29.999초에는 아니고 30초에, 35초에 더 없음), 풀리면 해소 1번이다. 메시지의 첫 줄은 '[OMS P1] <거래소> <KST 시각>'이다. 분류표에 없는 체결 하나는 hold:venue_change와 mismatch:unclassified_execution 두 조건을 함께 시작한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 알림이 소음이 되지 않고(지나가는 상태), 중요한 것은 바로 알리며(래치), 새 차단 사유가 알림 없이 들어오지 못해야 한다(와일드카드 없는 match, ADR-029)
 - 수준: 통합
 - 전제와 범위: 프로세스 안 시험 4개(실제 파이프라인, 알림 스레드, loopback http-fake, 시험이 움직이는 시계), 단위 시험 3개(Core::handle로 만든 코어와 직접 넣은 불일치)
@@ -2183,18 +2183,18 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/repeat_rule_with_an_injected_clock` | 통과 |  |
-| `node-unit/grace_hides_a_short_link_down_and_reports_a_long_one` | 통과 |  |
-| `node-unit/a_storage_low_that_flaps_inside_the_grace_sends_nothing` | 통과 |  |
-| `node-unit/a_storage_low_that_lasts_past_the_grace_sends_one_start` | 통과 |  |
-| `node-unit/alerts::tests::every_hold_reason_has_a_text_and_the_grace_of_the_table` | 통과 |  |
-| `node-unit/alerts::tests::conditions_give_the_keys_of_the_table` | 통과 |  |
-| `node-unit/alerts::tests::a_mismatch_condition_per_kind_lists_the_count_and_the_newest_three` | 통과 |  |
-| `alert/handle_set_uses_the_repeat_rule_and_the_prefix` | 통과 |  |
+| `node-unit/repeat_rule_with_an_injected_clock` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/grace_hides_a_short_link_down_and_reports_a_long_one` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/a_storage_low_that_flaps_inside_the_grace_sends_nothing` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/a_storage_low_that_lasts_past_the_grace_sends_one_start` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/alerts::tests::every_hold_reason_has_a_text_and_the_grace_of_the_table` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/alerts::tests::conditions_give_the_keys_of_the_table` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/alerts::tests::a_mismatch_condition_per_kind_lists_the_count_and_the_newest_three` | 미실행 | result of another source, not counted (last result: passed) |
+| `alert/handle_set_uses_the_repeat_rule_and_the_prefix` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-ALERT-4 — OMS 알림에 둘째 채널을 주면(alerts::start) 모든 메시지의 사본이 바로 그쪽에 가고, 텔레그램이 500으로 답한 첫 시도부터 59초에는 장애 알림이 없고 61초가 되면 1초 안에 'Telegram 전송이 61초째 실패함'이 둘째 채널에만 가며(텔레그램 요청에는 없음), 텔레그램이 다시 답하면 해소가 간다. 텔레그램이 답하지 않아도(연결은 받고 답 없음) 계좌 중지·재개 1,000건이 5초 안에 내구화되고 알림 스레드는 계속 평가한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 텔레그램이 막혔을 때 그것을 알릴 다른 길(설계 §7.7, D3), 그리고 알림이 주문 경로를 늦추지 않아야 한다(ADR-029 §2)
 - 수준: 통합
 - 전제와 범위: 프로세스 안 시험 2개(실제 파이프라인, 알림 스레드, alert-direct, loopback http-fake, 시험 안의 둘째 채널, 시험이 움직이는 시계). 1,000건의 5초는 판단(모델 아님)
@@ -2208,12 +2208,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/telegram_failing_over_60s_notifies_the_second_channel` | 통과 |  |
-| `node-unit/a_hung_telegram_never_slows_the_commit_stage` | 통과 |  |
+| `node-unit/telegram_failing_over_60s_notifies_the_second_channel` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/a_hung_telegram_never_slows_the_commit_stage` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-ALERT-5 — [alert] 설정은 절대 경로의 토큰 파일을 요구하고 그 파일을 설정을 읽을 때 alert-direct 규칙으로 읽는다: 0640, 심볼릭 링크, 저장소 안, 없는 파일은 '[alert] telegram: '로 시작하는 설정 오류이고 그 문장과 설정의 Debug에 토큰이 없다. 각 값(grace_ms, eval_ms, repeat_ms, exit_flush_ms, second_after_ms)은 양 끝에서 받고 바로 바깥에서 거부하며, second_channel은 "none"만 받는다. 표가 없으면 알림이 없고 status.alerts는 {"configured": false}다. mainnet(Hyperliquid, Bybit)은 표 없이 시작하지 않고, testnet과 가상 거래소에서는 선택이다. OMS_TEST_TELEGRAM_API는 loopback http만 받고, 배포하는 바이너리(failpoints 없음)는 그 변수를 무시해 저장소 안의 토큰 파일을 여전히 거부하고 종료 코드 2로 끝난다. 시작 알림은 그 평가에서 시작이 나간 조건과 유예 안의 조건을 따로 센다: 계좌 중지와 연결 끊김이면 '활성 조건 1개(유예 중 1개)'다. 프로세스에서: 시작 알림 'OMS 시작 (boot 1, config 1)'이 나가고, SIGTERM으로 정상 종료하면 'OMS 정상 종료. 걸린 주문 1개는 거래소에 남음'이 종료 전에 나간다. 설정이 활성화된 뒤 거래 소켓을 bind하지 못하면 종료 코드 3으로 끝나고 'OMS 시작 실패(exit 3): trading_socket' 하나가 종료 전에 나가며, 어떤 요청에도 소켓 경로·토큰·토큰 파일 이름이 없다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 토큰이 저장소나 로그로 새지 않고, 실거래는 알림 없이 하지 않으며(소유자 질문 1의 기본값), 시험용 훅이 배포 바이너리에 없어야 한다(ADR-029)
 - 수준: 통합
 - 전제와 범위: 설정 단위 시험 2개, 설정 파일을 디스크에서 읽는 시험 1개, oms-node 실행 파일 시험 1개(failpoints 없는 빌드에서만), 프로세스 안 시험 1개(시작 알림의 수), 실제 oms-node·simvenue 프로세스 시험 2개(failpoints 빌드, loopback http-fake)
@@ -2227,17 +2227,17 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/config::tests::the_alert_table_is_validated_and_required_on_mainnet` | 통과 |  |
-| `node-unit/config::tests::the_test_telegram_api_must_be_loopback_http` | 통과 |  |
-| `node-unit/the_token_file_is_loaded_with_its_rules` | 통과 |  |
-| `node-unit/the_shipped_binary_ignores_the_test_telegram_api` | 통과 |  |
-| `node-unit/the_start_notice_counts_sent_and_pending_conditions_apart` | 통과 |  |
-| `pipeline/a_clean_stop_sends_the_stop_notice_with_the_open_orders` | 통과 |  |
-| `pipeline/an_exit_3_after_activation_sends_one_start_failure_notice` | 통과 |  |
+| `node-unit/config::tests::the_alert_table_is_validated_and_required_on_mainnet` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/config::tests::the_test_telegram_api_must_be_loopback_http` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/the_token_file_is_loaded_with_its_rules` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/the_shipped_binary_ignores_the_test_telegram_api` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/the_start_notice_counts_sent_and_pending_conditions_apart` | 미실행 | result of another source, not counted (last result: passed) |
+| `pipeline/a_clean_stop_sends_the_stop_notice_with_the_open_orders` | 미실행 | result of another source, not counted (last result: passed) |
+| `pipeline/an_exit_3_after_activation_sends_one_start_failure_notice` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-HOLD-1 — 증거금 정책이 있으면 워처 불일치와 거래소 변경 아래에서 감소 전용 주문은 통과하고 일반 주문은 거절되며, 킬 래치와 운영자 중지 아래에서는 둘 다 거절된다(TN 표 7-7). 정책이 없으면 모든 보류가 모든 주문을 거절한다. 새 사유 셋은 기존 사유 뒤에 붙어 기존 사유의 순서가 바뀌지 않는다. 프로세스에서: 운영 소켓의 watcher_mismatch 뒤 일반 주문은 Hold(WatcherMismatch)로 거절되고 감소 전용 주문은 받으며, watcher_kill 뒤에는 감소 전용도 Hold(KillLatched)로 거절된다. 워처 입력의 detail은 비지 않고 1 KiB(1024바이트) 이하여야 한다: 노드와 코어가 각각 거절하고 아무것도 기록하지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 킬 루프는 미체결 0건을 확인해야 끝나므로 어떤 새 주문도 받으면 안 되고, 불일치나 거래소 변경에서는 포지션을 줄이는 길을 막으면 안 된다(설계 R5, Q22)
 - 수준: 단위, 통합
 - 전제와 범위: 보류 사유마다 한 줄(증거금 정책 있음, 신선한 보고, 롱 2), 정책 없음 한 경우, 사유의 순서. 실제 oms-node·simvenue 프로세스 하나(증거금 정책)
@@ -2251,14 +2251,14 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/the_hold_table_of_table_7_7` | 통과 |  |
-| `core/the_new_holds_come_last_in_their_order` | 통과 |  |
-| `core/a_watcher_input_without_a_detail_is_refused` | 통과 |  |
-| `node-unit/watcher_mismatch_over_the_admin_socket_refuses_plain_orders_only` | 통과 |  |
+| `core/the_hold_table_of_table_7_7` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_new_holds_come_last_in_their_order` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_watcher_input_without_a_detail_is_refused` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/watcher_mismatch_over_the_admin_socket_refuses_plain_orders_only` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-HOLD-2 — clear_hold는 고정 코드로 거절한다: 걸려 있지 않음(not_held), 메모 없음(note_required), 이 프로세스의 킬 루프가 답하지 않음(kill_unconfirmed), 코어의 장부에 미체결이 있음(kill_orders_open, 킬 루프의 답이 confirmed든 unsupported든, kill_unconfirmed 다음에 본다), 거래소 변경 뒤 포지션을 아직 읽지 않음(venue_change_pending). 거절은 기록도 명령도 남기지 않는다. 래치 아래에서도 cancel-all은 받고, 거래소가 취소를 확인해 장부가 비면 킬의 해제를 받는다(코어와 가상 거래소 프로세스). 받으면 hold_cleared 하나와, 킬이면 KillStop 하나. 거래소 변경의 해제와 불일치 확인은 따로다. resume은 킬과 워처 불일치를 풀지 않는다. omsctl clear-hold는 세 사유와 메모를 읽는다. 운영자 중지가 없으면 resume은 오류다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 사람만 풀어야 하는 보류가 다른 명령이나 확인 없는 해제로 풀리면 킬 스위치가 뜻을 잃는다(ADR-030, 소유자 질문 2)
 - 수준: 단위
 - 전제와 범위: 코드마다 한 경우와 받는 경우, 거래소 변경의 두 단계, 운영자 중지와 함께 걸린 킬, 열린 주문 둘과 두 가지 답(confirmed, unsupported), 실제 oms-node·simvenue 프로세스에서 걸린 주문 둘과 cancel-all, omsctl 인자
@@ -2272,16 +2272,16 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/clear_hold_refusals` | 통과 |  |
-| `core/a_kill_is_not_cleared_while_the_book_has_open_orders` | 통과 |  |
-| `node-unit/watcher_mismatch_over_the_admin_socket_refuses_plain_orders_only` | 통과 |  |
-| `core/resume_leaves_kill_and_watcher_mismatch` | 통과 |  |
-| `api/ctl::tests::clear_hold_parses_its_reason_and_note` | 통과 |  |
-| `api/tests::wire_examples_of_the_holds` | 통과 |  |
+| `core/clear_hold_refusals` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_kill_is_not_cleared_while_the_book_has_open_orders` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/watcher_mismatch_over_the_admin_socket_refuses_plain_orders_only` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/resume_leaves_kill_and_watcher_mismatch` | 미실행 | result of another source, not counted (last result: passed) |
+| `api/ctl::tests::clear_hold_parses_its_reason_and_note` | 미실행 | result of another source, not counted (last result: passed) |
+| `api/tests::wire_examples_of_the_holds` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-HOLD-3 — 킬 래치는 hold_set에서, 그 확인은 kill_loop_ended에서 재실행으로 같은 상태가 되고, 모든 boot가 확인을 지우고 래치의 필드 그대로 Kill 명령을 다시 요청한다. 래치가 없거나 이미 확인된 뒤의 KillLoopEnded는 기록되지 않는다. 모든 게이트웨이 명령은 기록된 이벤트에 command_for를 적용한 것과 같다. 커밋 단계는 Kill을 래치가 내구화된 뒤에만 넘기고, flush가 실패하면 Kill도 응답도 나가지 않으며 다시 시작한 노드에 래치가 없다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 킬 루프의 일괄 취소는 래치가 디스크에 있은 뒤에만 나가야 하고(ADR-004), 앞 프로세스의 확인은 새 프로세스가 모르는 주문을 덮지 않는다(소유자 질문 5)
 - 수준: 단위, 통합
 - 전제와 범위: 코어: 래치, 확인, 재시작, unsupported 확인과 해제, 해제 뒤 재시작. 프로세스 안: 실제 코어 스레드·커밋 스레드·저널 파일로 정상과 flush 실패
@@ -2295,13 +2295,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/the_kill_latch_and_its_confirmation_survive_replay_and_a_boot_asks_for_a_new_loop` | 통과 |  |
-| `core/every_command_comes_from_command_for_on_a_recorded_event` | 통과 |  |
-| `pipeline/a_kill_command_leaves_only_after_the_latch_is_durable` | 통과 |  |
+| `core/the_kill_latch_and_its_confirmation_survive_replay_and_a_boot_asks_for_a_new_loop` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/every_command_comes_from_command_for_on_a_recorded_event` | 미실행 | result of another source, not counted (last result: passed) |
+| `pipeline/a_kill_command_leaves_only_after_the_latch_is_durable` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-HOLD-4 — 킬 마커가 있으면 OMS는 시작할 때 boot 기록 안에서 KillLatched를 걸고(booted, hold_set), 감소 전용을 포함한 어떤 주문도 받지 않으며, 가상 거래소가 unsupported로 답한 뒤 clear_hold kill이 마커를 지운다. 거절된 해제(빈 메모, 다른 사유, not_held, 답을 붙잡아 둔 동안 메모가 있는 kill_unconfirmed)는 마커를 건드리지 않고, 해제 기록의 flush가 실패하면 응답이 없고 노드가 멈추며 마커가 남는다. 그 둘 뒤의 다음 시작은 다시 걸린다. 다음 시작은 걸리지 않고 주문을 받는다. 지우지 못한 마커는 응답이 말하고 다음 시작이 다시 건다. 볼 수 없는 마커 경로(권한)도 건다. 마커 파일은 처음 512바이트를 제어 문자를 바꿔 읽고, 디렉터리·심볼릭 링크도 마커다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 워처가 킬한 사실은 OMS 재시작을 넘어 남아야 하고(U-06), 확인할 수 없는 경로는 킬하지 않았다는 증거가 아니다. 마커를 해제 전에 지우면 래치를 잃을 수 있다
 - 수준: 통합, 단위
 - 전제와 범위: 실제 oms-node·simvenue 프로세스 다섯 개(증거금 정책 하나, failpoints 둘), 재시작 네 번, 권한을 바꾼 디렉터리. 단위: 파일 종류와 내용, 권한 거부, 디렉터리가 아닌 경로
@@ -2315,19 +2315,19 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/the_kill_marker_latches_in_the_boot_record` | 통과 |  |
-| `core/a_second_trigger_keeps_the_first_note` | 통과 |  |
-| `node-unit/a_kill_marker_at_boot_refuses_every_order_until_clear_hold_kill_removes_it` | 통과 |  |
-| `pipeline/a_clear_refused_kill_unconfirmed_leaves_the_marker_and_the_next_start_latches` | 통과 |  |
-| `pipeline/a_clear_whose_record_fails_to_flush_leaves_the_marker_and_the_next_start_latches` | 통과 |  |
-| `node-unit/an_unremovable_marker_is_reported_and_latches_the_next_boot` | 통과 |  |
-| `node-unit/a_marker_path_that_cannot_be_examined_latches` | 통과 |  |
-| `node-unit/node::tests::the_kill_marker_is_whatever_is_at_its_path` | 통과 |  |
-| `node-unit/node::tests::a_marker_that_cannot_be_examined_latches` | 통과 |  |
+| `core/the_kill_marker_latches_in_the_boot_record` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_second_trigger_keeps_the_first_note` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/a_kill_marker_at_boot_refuses_every_order_until_clear_hold_kill_removes_it` | 미실행 | result of another source, not counted (last result: passed) |
+| `pipeline/a_clear_refused_kill_unconfirmed_leaves_the_marker_and_the_next_start_latches` | 미실행 | result of another source, not counted (last result: passed) |
+| `pipeline/a_clear_whose_record_fails_to_flush_leaves_the_marker_and_the_next_start_latches` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/an_unremovable_marker_is_reported_and_latches_the_next_boot` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/a_marker_path_that_cannot_be_examined_latches` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/node::tests::the_kill_marker_is_whatever_is_at_its_path` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/node::tests::a_marker_that_cannot_be_examined_latches` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-HOLD-5 — 거래소 변경 보류는 새 이벤트 없이 venue_position_changed, unclassified_execution_noted, 종류가 venue_position_change인 mismatch_raised(넘침 경로)에서 apply가 건다. 그래서 U13b의 이벤트 목록은 그대로이고, U18b 전에 쓴 저널에 이 셋 중 하나가 있으면 재실행한 상태에 보류가 있다. 다른 종류의 불일치는 걸지 않는다. 불일치를 확인해도 보류는 남는다. 각 보류는 한 번만 걸리고 두 번째 원인은 첫 메모를 바꾸지 않는다. 워처 불일치 입력은 걸려 있지 않으면 hold_set 하나를 쓰고 'held'로, 걸려 있으면 아무것도 쓰지 않고 'already held'로 답한다. 워처 킬 입력은 걸려 있지 않으면 hold_set 하나를 쓰고 'latched'로, 걸려 있으면 아무것도 쓰지 않고 'already latched'로 답한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 불일치 확인 한 번으로 바뀐 포지션을 보지 않고 일반 주문이 흐르면 안 된다. 보류가 결정에 있으면 옛 저널의 재실행이 그것을 잃는다
 - 수준: 단위
 - 전제와 범위: 세 경로, 손으로 만든 옛 기록 세 개와 다른 종류 하나, 각 보류의 두 번째 원인(워처 킬, 시작 마커, 워처 불일치, 거래소 변경)
@@ -2341,13 +2341,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/a_venue_change_latches_without_a_new_event` | 통과 |  |
-| `core/a_journal_with_a_venue_change_latches_on_replay` | 통과 |  |
-| `core/a_second_trigger_keeps_the_first_note` | 통과 |  |
+| `core/a_venue_change_latches_without_a_new_event` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_journal_with_a_venue_change_latches_on_replay` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_second_trigger_keeps_the_first_note` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-HOLD-6 — 킬 래치·워처 불일치·거래소 변경의 상태 필드, Boot의 kill_marker, 워처 입력과 새 이벤트 셋은 기록 스키마를 올리지 않는다: 비어 있으면 쓰지 않아 옛 상태의 바이트가 그대로이고, 이들이 든 저널은 라이브 상태로 복구되며 verify --re-decide를 통과한다. 상태 스키마는 2로 올랐다: U18b 전의 스냅샷(상태 스키마 1, venue_change 없음)은 사유와 함께 건너뛰고 저널을 처음부터 재생해, 거래소 변경 보류가 스냅샷의 유무에 따라 달라지지 않는다. 이벤트 필드 표는 새 이벤트의 모든 필드를 적는다. 알림 조건 hold:kill_latched·hold:watcher_mismatch·hold:venue_change는 유예 0이고, 킬 문장은 출처·메모·확인 상태를 담으며, 워처 불일치와 거래소 변경의 문장은 증거금 정책이 있을 때만 감소 전용을 받는다고 말하며, Alerts::notice는 접두어를 붙여 한 번 보낸다. [kill] marker는 절대 경로, 데이터 디렉터리 밖, 읽을 때 디렉터리가 있어야 하고, mainnet은 그것 없이 시작하지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 기존 저널은 읽히고 기존 시험의 기대값이 바뀌지 않아야 하며(스펙 완료 기준), 복구한 보류가 스냅샷의 유무에 따라 달라지면 안 되고(리뷰 S3), 워처(U19a)는 필드 표만으로 만든다. 래치는 사람에게 곧바로 알려야 한다(C-ALERT)
 - 수준: 단위, 통합
 - 전제와 범위: 저널 하나를 쓰고 복구·재결정, 필드 표 대조, 알림 조건 표와 loopback 가짜 텔레그램, 설정 검증
@@ -2361,13 +2361,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/kill_holds_liveness_and_heartbeats_recover_to_the_live_state` | 통과 |  |
-| `node-unit/a_snapshot_of_state_schema_1_is_skipped_and_the_journal_replays_the_venue_change` | 통과 |  |
-| `node-unit/alerts::tests::the_plain_only_hold_texts_follow_the_margin_policy` | 통과 |  |
-| `core/the_field_table_lists_every_field_the_encoder_writes` | 통과 |  |
-| `node-unit/alerts::tests::every_hold_reason_has_a_text_and_the_grace_of_the_table` | 통과 |  |
-| `node-unit/a_kill_latch_is_told_at_once_and_a_notice_goes_out_once` | 통과 |  |
-| `node-unit/config::tests::the_kill_marker_is_validated_and_required_on_mainnet` | 통과 |  |
+| `node-unit/kill_holds_liveness_and_heartbeats_recover_to_the_live_state` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/a_snapshot_of_state_schema_1_is_skipped_and_the_journal_replays_the_venue_change` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/alerts::tests::the_plain_only_hold_texts_follow_the_margin_policy` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_field_table_lists_every_field_the_encoder_writes` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/alerts::tests::every_hold_reason_has_a_text_and_the_grace_of_the_table` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/a_kill_latch_is_told_at_once_and_a_notice_goes_out_once` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/config::tests::the_kill_marker_is_validated_and_required_on_mainnet` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-KILL-1 — Bybit 게이트웨이는 개인 스트림의 마지막 생존 증거(구독 확인, pong, 시작 확인의 첫 통과) 뒤 kill_after_ms가 지나도록 연결이 내려가 있으면 끊김 하나에 한 번 StreamLost를 보내고, 코어는 래치가 없으면 hold_set{kill, source: stream}과 Kill 명령을 한 기록으로 낸다. 마지막 pong 전에는 걸리지 않고, ping에 답하는 조용한 스트림, 기한 전에 다시 구독된 연결, 시작 확인 전의 끊김, 코어 큐를 기다린 시간은 킬을 부르지 않는다. 프로세스에서: 반쯤 열린 개인 스트림(ping 1초, kill_after 10초)은 마지막 pong 9초 뒤에는 디스크에 hold_set이 없고 11초까지 하나 있으며, 가짜 거래소의 첫 일괄 취소는 그 기록이 이미 저널 파일에 있을 때 온다. 다시 시작해도 래치가 남고, 새 프로세스의 루프가 끝나기 전 clear-hold는 kill_unconfirmed로 거절되며 끝난 뒤 받아들여지고 일반 주문이 다시 받아진다. StreamLost의 detail은 스트림이 마지막으로 끝난 이유를 담는다
 
@@ -2390,8 +2390,8 @@
 | `node-unit/a_reconnect_before_the_deadline_does_not_fire` | 미실행 |  |
 | `node-unit/the_kill_is_not_armed_before_the_boot_checks_pass` | 미실행 |  |
 | `node-unit/time_waiting_on_the_core_queue_does_not_fire_the_kill` | 미실행 |  |
-| `core/a_stream_loss_latches_the_kill_and_asks_for_the_loop` | 통과 |  |
-| `pipeline/a_ten_second_stream_outage_latches_kill_through_a_restart_until_clear_hold_kill` | 통과 |  |
+| `core/a_stream_loss_latches_the_kill_and_asks_for_the_loop` | 미실행 | result of another source, not counted (last result: passed) |
+| `pipeline/a_ten_second_stream_outage_latches_kill_through_a_restart_until_clear_hold_kill` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-KILL-2 — 킬 루프는 일괄 취소 뒤 거래소의 미체결을 세어 0이 될 때까지 회차의 시작부터 kill_round_ms마다 일괄 취소를 되풀이하고, 첫 0 뒤 kill_watch_every_ms마다 kill_watch_ms 동안 다시 세어 모두 0일 때만 KillLoopEnded{confirmed}를 보낸다. 실패한 셈은 0이 아니고, 감시 중의 늦은 주문은 곧바로 회차로 돌아간다. 거래소가 첫 일괄 취소 뒤 주문 하나를 남기거나 5xx로 답해도 0을 확인할 때까지 되풀이하고, 어느 1초 창에도 일괄 취소는 둘을 넘지 않으며(비상 예산 2/1초, 회차가 100 ms여도), 생성이나 단건 취소는 하나도 나가지 않는다. 막힘(IP 차단 등)에는 요청을 보내지 않고 막힘 문장으로 회차가 실패하며, 예산을 기다리는 동안 생긴 막힘도 그 요청을 집에 둔다. 셈은 모든 쪽의 열린 행(New, PartiallyFilled, Untriggered)을 orderLinkId와 상관없이 세고, 상태를 읽을 수 없는 행, 실패한 쪽, 20쪽 넘음은 오류다. 정지(IP 차단 뒤, 키 거부) 중에는 셈을 보내지 않는다. 감시는 첫 0 + kill_watch_ms에 나간 셈으로만 끝난다(그 전에 나가 늦게 답한 셈으로는 끝나지 않는다). cancel-all은 result.success가 「1」일 때만 성공이고, 500건을 취소했으면 남은 주문이 있을 수 있다고 알린다
 
@@ -2420,7 +2420,7 @@
 | `node-unit/the_kill_count_is_every_open_row_of_every_page_and_never_a_guess` | 미실행 |  |
 | `node-unit/while_requests_are_paused_no_count_and_no_position_read_go_out` | 미실행 |  |
 | `node-unit/a_slow_watch_check_answered_after_the_end_is_not_the_last_check` | 미실행 |  |
-| `node-unit/venue::bybit::tests::cancel_all_fails_unless_the_venue_says_success_and_flags_the_cap` | 통과 |  |
+| `node-unit/venue::bybit::tests::cancel_all_fails_unless_the_venue_says_success_and_flags_the_cap` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-KILL-3 — 킬 루프의 P1은 시작, 알려진 수의 바뀜, kill_notice_ms마다의 반복, 마지막(0건 확인 뒤 감시를 마침)뿐이고 모르는 수는 바뀜이 아니다. 10분 동안 셈이 실패하면 정확히 시작 1 + 반복 10 + 마지막 1 = 12개이고, 드라이버와 Alerts를 loopback 가짜 텔레그램에 붙여도 '킬 루프'가 든 요청은 12개 이하다. 모든 알림은 태그, 회차, 남은 수(모르면 이유), 일괄 취소 수와 바로 전에 읽은 포지션 묶음(심볼마다 수량, 미실현손익, 마크, 마크에서 강제청산가까지의 거리 %, 0.01 %에서 내림, 청산가가 없으면 모름, 크기 0은 뺌, 조회 실패는 실패라고)을 담는다. 알림은 루프 옆에서 순서대로 나가서, 포지션 조회가 답하지 않아도 첫 일괄 취소와 감시 중 늦은 주문의 일괄 취소는 기다리지 않는다. 느린 조회 뒤에서 기다리는 알림은 하나이고 가장 새 수의 것이 남으며, 마지막 알림은 KillLoopEnded보다 먼저 나간다. status의 notices는 보낸 알림 수다. 일괄 취소가 나갈 수 없는 동안(정지, 막힘)은 포지션을 읽지 않고 그렇다고 말한다
 
@@ -2471,7 +2471,7 @@
 
 ## V-KILL-5 — 이 프로세스의 루프가 거래소에서 0건을 확인한 뒤(confirmed) 새 킬 계기(StreamLost, watcher_kill)가 오면 코어는 kill_rearmed{source, note}로 확인(confirmed_at, outcome)을 지우고 새 Kill을 부르며, 래치의 첫 메모는 그대로다. 새 루프가 확인하기 전 clear-hold는 kill_unconfirmed로 거절되고, 재실행이 같은 상태를 만든다. 확인 전의 두 번째 계기와 unsupported 답 뒤의 계기는 아무것도 쓰지 않는다. [venue]의 킬 필드 다섯은 설계 기본값으로 읽히고 각 경계 밖 한 걸음은 거절된다(kill_after_ms는 2 × ping 이상)
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 확인 뒤의 새 끊김은 새 위험이다. 옛 확인으로 풀 수 있으면 그 뒤에 남은 주문을 아무도 확인하지 않는다(U18b1 리뷰 N3)
 - 수준: 단위
 - 전제와 범위: 코어 시험 하나(워처와 스트림 두 계기, 재실행), 설정 검증
@@ -2485,15 +2485,15 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/a_new_trigger_after_the_confirmation_resets_it_and_asks_for_a_new_loop` | 통과 |  |
-| `core/a_new_trigger_after_an_unsupported_answer_records_nothing` | 통과 |  |
-| `core/a_second_trigger_keeps_the_first_note` | 통과 |  |
-| `node-unit/config::tests::the_kill_loop_fields_are_bounded` | 통과 |  |
-| `core/the_field_table_lists_every_field_the_encoder_writes` | 통과 |  |
+| `core/a_new_trigger_after_the_confirmation_resets_it_and_asks_for_a_new_loop` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_new_trigger_after_an_unsupported_answer_records_nothing` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_second_trigger_keeps_the_first_note` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/config::tests::the_kill_loop_fields_are_bounded` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_field_table_lists_every_field_the_encoder_writes` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-LIVE-1 — [liveness]에 적힌 전략의 마지막 거래 연결이 닫히거나, 그 전략의 어느 연결에서도 liveness_ms 동안 요청이 없으면(ping도 요청이다), 노드는 다음 hello까지 한 번 Input::Session(Lost)를 넣고, 코어는 strategy_link_lost와 같은 기록에서 그 전략의 걸린 일반 주문 가운데 취소 요청이 없는 것마다 규칙 strategy_link의 취소를 요청한다. 그 전략의 감소 전용 주문과 다른 전략의 주문은 취소하지 않는다. 프로세스에서: a(5,000 ms)와 b가 적혔을 때 a의 연결을 닫으면 거래소에서 a의 일반 주문만 취소되고 a의 감소 전용과 b의 일반 주문은 남는다. ping만 8초 보내면 잃음이 없고, 멈추면 마지막 요청 5초 뒤에서 7초 사이에 잃음이 기록된다. 두 연결 가운데 하나가 닫혀도 잃음이 없고 마지막이 닫히면 있다. 운영 소켓의 hello는 세지 않는다. 한 연결이 다른 전략으로 다시 hello하면 앞 전략에서는 닫힌 연결이다: 그것이 a의 마지막 연결이면 곧바로 last trading connection closed로 잃음이 되고 a의 일반 주문이 취소된다. 노드의 표에서: 정확히 liveness_ms의 침묵은 잃음이 아니고 1 ms 넘으면 잃음이며, 침묵은 마지막 요청이나 마지막 hello부터 잰다. 같은 연결의 두 번째 hello는 연결 수를 다시 세지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 전략 프로세스가 죽으면 그 호가가 거래소에 남고, 전에는 OMS가 아무것도 취소하지 않았다(설계 R5 SHOULD 7). 한 전략의 죽음이 다른 전략의 주문이나 포지션을 줄이는 주문을 건드리면 안 된다
 - 수준: 단위, 통합
 - 전제와 범위: 코어 시험(H 하네스, 매 입력 재실행 대조), 노드의 표(시간이 입력, 큐는 주입한 함수), 실제 oms-node·simvenue 프로세스 셋(실제 시간)
@@ -2507,19 +2507,19 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/closing_the_last_connection_cancels_that_strategys_plain_orders_only` | 통과 |  |
-| `node-unit/five_seconds_without_a_request_cancel_and_a_ping_keeps_it_alive` | 통과 |  |
-| `node-unit/a_second_connection_keeps_the_strategy_alive` | 통과 |  |
-| `core/a_lost_strategy_gets_cancel_requests_for_its_plain_orders_only` | 통과 |  |
-| `node-unit/liveness::tests::no_request_for_liveness_ms_reports_a_loss_and_any_request_keeps_it_alive` | 통과 |  |
-| `node-unit/liveness::tests::the_last_close_reports_one_loss_until_the_next_hello` | 통과 |  |
-| `node-unit/liveness::tests::two_connections_count_and_only_the_last_close_reports` | 통과 |  |
-| `node-unit/a_hello_for_another_strategy_loses_the_first_on_that_connection` | 통과 |  |
-| `node-unit/liveness::tests::a_hello_for_another_strategy_closes_the_connection_for_the_first` | 통과 |  |
+| `node-unit/closing_the_last_connection_cancels_that_strategys_plain_orders_only` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/five_seconds_without_a_request_cancel_and_a_ping_keeps_it_alive` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/a_second_connection_keeps_the_strategy_alive` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_lost_strategy_gets_cancel_requests_for_its_plain_orders_only` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/liveness::tests::no_request_for_liveness_ms_reports_a_loss_and_any_request_keeps_it_alive` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/liveness::tests::the_last_close_reports_one_loss_until_the_next_hello` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/liveness::tests::two_connections_count_and_only_the_last_close_reports` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/a_hello_for_another_strategy_loses_the_first_on_that_connection` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/liveness::tests::a_hello_for_another_strategy_closes_the_connection_for_the_first` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-LIVE-2 — StrategyLink는 그 전략의 일반 주문만 거절한다: holds(Some(s))에만 있고 holds(None)과 다른 전략의 목록에는 없다. 증거금 정책이 있으면 그 전략의 감소 전용 주문은 받고, 없으면 모든 보류처럼 감소 전용도 거절한다. 걸린 동안의 잃음은 기록하지 않고 첫 이유와 시각이 남으며, 설정에 없는 전략의 잃음은 bad_request로 기록하지 않는다. 그 전략이 없는 설정이 활성화되면 보류가 사라진다. 표 7-7의 시험에서 StrategyLink 줄은 일반 주문 거절, 감소 전용 받음이다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 죽은 전략의 새 노출을 막되 그 전략의 포지션을 줄이는 길은 열어 둔다(R5). 다른 전략은 거래를 계속한다
 - 수준: 단위
 - 전제와 범위: 코어 시험(H 하네스)
@@ -2533,15 +2533,15 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/the_hold_refuses_only_that_strategys_plain_orders` | 통과 |  |
-| `core/the_hold_table_of_table_7_7` | 통과 |  |
-| `core/a_second_loss_records_nothing_and_keeps_the_first_why` | 통과 |  |
-| `core/a_loss_of_an_unknown_strategy_records_nothing` | 통과 |  |
-| `core/a_configuration_without_the_strategy_drops_its_hold` | 통과 |  |
+| `core/the_hold_refuses_only_that_strategys_plain_orders` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_hold_table_of_table_7_7` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_second_loss_records_nothing_and_keeps_the_first_why` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_loss_of_an_unknown_strategy_records_nothing` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_configuration_without_the_strategy_drops_its_hold` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-LIVE-3 — 잃음 뒤(또는 내구화된 코어가 그 전략을 보류 중일 때) 거래 소켓의 hello는 Input::Session(Hello)를 control 레인에 넣고, strategy_link_restored가 내구화된 뒤에 답한다: 답이 온 순간 같은 연결의 status(내구화된 기록만)에 보류가 없고 저널 파일에 복구가 있다. 복구가 아직 답을 받지 않은 동안 같은 전략의 hello(다른 연결이든 같은 연결이든)도 복구를 넣으므로 그 답도 앞 복구가 내구화된 뒤에 온다(코어에서는 기록 없는 not held, 커밋 단계가 순서대로 답한다). 큐를 기다리던 잃음은 복구보다 먼저 넣는다(표의 hello가 넣는 순서: lost, hello). 큐가 가득이면 잃음은 버리지 않고 틱마다 다시 넣는다. 재시작 뒤 보류는 저널에서 복원되고 다음 hello가 푼다. 시작할 때는 걸린 일반 주문이 있는 적힌 전략만 무장한다: 프로세스에서 강제 종료(SIGKILL) 뒤 다시 붙지 않으면, 일반·감소 전용 주문이 걸린 a는 시작 5초 뒤 no request for 5000 ms로 잃음이 되고 일반 주문만 취소되며, 감소 전용 주문만 걸린 b는 무장하지 않는다. 걸리지 않은 전략의 hello는 기록하지 않는다. 큐가 가득이라 복구를 넣지 못한 hello는 거절되고 연결을 세지 않으며, 다음 hello가 다시 복구를 넣는다. 재시작 전부터 코어가 보류 중인 전략은 시작 때 다시 잃음으로 알리지 않고 다음 hello가 복구한다. 코어가 보류 중이면 [liveness]에 적히지 않은 전략의 hello도 복구를 넣는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 전략이 답을 받은 뒤의 첫 일반 주문이 보류로 거절되면 안 되고, 잃음과 복구가 겹쳐도 잃음의 취소가 사라지면 안 된다
 - 수준: 단위, 통합
 - 전제와 범위: 코어 시험, 노드의 표(큐가 가득인 경우 포함), 실제 oms-node·simvenue 프로세스(재시작 한 번)
@@ -2555,18 +2555,18 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/hello_after_a_loss_is_answered_after_the_restore_is_durable` | 통과 |  |
-| `core/hello_restores_only_a_held_strategy` | 통과 |  |
-| `core/the_hold_survives_replay_and_a_restart` | 통과 |  |
-| `node-unit/liveness::tests::hello_after_a_loss_asks_for_the_restore_and_a_waiting_loss_goes_first` | 통과 |  |
-| `node-unit/liveness::tests::a_full_queue_is_retried_on_the_next_tick` | 통과 |  |
-| `node-unit/liveness::tests::at_start_only_strategies_with_plain_orders_are_armed` | 통과 |  |
-| `node-unit/liveness::tests::a_hello_while_a_restore_is_in_flight_waits_for_it_too` | 통과 |  |
-| `node-unit/after_a_restart_a_strategy_with_resting_plain_orders_is_armed_without_a_hello` | 통과 |  |
+| `node-unit/hello_after_a_loss_is_answered_after_the_restore_is_durable` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/hello_restores_only_a_held_strategy` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_hold_survives_replay_and_a_restart` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/liveness::tests::hello_after_a_loss_asks_for_the_restore_and_a_waiting_loss_goes_first` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/liveness::tests::a_full_queue_is_retried_on_the_next_tick` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/liveness::tests::at_start_only_strategies_with_plain_orders_are_armed` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/liveness::tests::a_hello_while_a_restore_is_in_flight_waits_for_it_too` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/after_a_restart_a_strategy_with_resting_plain_orders_is_armed_without_a_hello` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-LIVE-4 — Input::Session, strategy_link_lost, strategy_link_restored, core.strategy_link는 기록 스키마를 올리지 않는다(2 그대로): 비어 있으면 쓰지 않아 옛 상태의 바이트가 그대로이고, 잃음·복구·잃음이 든 저널은 라이브 상태로 복구되며 verify --re-decide를 통과한다. 이벤트 필드 표가 두 이벤트의 모든 필드를 적는다. 알림 strategy_link:<s>는 유예 0이고 이유·시각과 증거금 정책에 따른 감소 전용 문장을 담으며 hello로 해소된다. [liveness]의 값은 1,000..=60,000 ms, 이름은 [core]의 전략이어야 하고, mainnet은 사용 중인 전략이 모두 적혀야 시작한다. 적히지 않은 전략은 감시하지 않는다. 보류 사유 StrategyLink는 hold: 알림 조건을 만들지 않고 전략마다의 strategy_link:<s> 조건이 맡는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 기존 저널과 시험이 그대로여야 하고(스펙 완료 기준), 워처(U19a)는 필드 표만으로 만든다. 전략의 죽음은 사람에게 곧바로 알려야 한다(C-ALERT)
 - 수준: 단위, 통합
 - 전제와 범위: 저널 하나를 쓰고 복구·재결정, 필드 표 대조, 알림 조건, 설정 검증, 노드의 표
@@ -2580,16 +2580,16 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/kill_holds_liveness_and_heartbeats_recover_to_the_live_state` | 통과 |  |
-| `core/the_field_table_lists_every_field_the_encoder_writes` | 통과 |  |
-| `node-unit/alerts::tests::a_lost_strategy_link_is_its_own_condition_at_once` | 통과 |  |
-| `node-unit/config::tests::the_liveness_section_is_validated_and_required_on_mainnet` | 통과 |  |
-| `node-unit/liveness::tests::a_strategy_that_is_not_listed_has_no_liveness` | 통과 |  |
-| `node-unit/alerts::tests::every_hold_reason_has_a_text_and_the_grace_of_the_table` | 통과 |  |
+| `node-unit/kill_holds_liveness_and_heartbeats_recover_to_the_live_state` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_field_table_lists_every_field_the_encoder_writes` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/alerts::tests::a_lost_strategy_link_is_its_own_condition_at_once` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/config::tests::the_liveness_section_is_validated_and_required_on_mainnet` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/liveness::tests::a_strategy_that_is_not_listed_has_no_liveness` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/alerts::tests::every_hold_reason_has_a_text_and_the_grace_of_the_table` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-GATE-1 — 모니터링 게이트는 기록 시각으로 판단한다(250 ms 틱, 엄격한 >): 하트비트가 0초에 오고 끊기면 30.0초까지 감시됨, 30.25초에 monitor_changed{false}, 그보다 60초 넘은 첫 틱(90.5초)에 걸린 일반 주문의 취소를 한 번 요청하고(규칙 unmonitored) 그 뒤 틱은 더 묻지 않는다. 5초마다 오는 하트비트에서 W1이나 W2가 0초에 멈추면 10초의 하트비트(정확히 10초)는 감시됨, 15초의 하트비트가 닫고, 하트비트가 계속 와도 취소는 닫은 기록보다 60초 넘은 첫 틱에 온다. 검사의 나이는 그것을 알린 하트비트의 시각에서 잰다. W3·W4는 기록할 뿐 판정하지 않는다. 알려진 한계(리뷰 1 M1): 기록 시각이 멈춘 동안(호스트 시계가 뒤로 감) 틱 2,400개에도 monitor_changed와 취소가 없고, 옛 시계로 찍은 W1·W2의 하트비트는 받아들여져 게이트가 열린 채이며, 새 시계로 590초 뒤에 찍힌 하트비트는 게이트를 닫는다. 감소 전용 주문은 취소하지 않고, 연결이 내려가 있는 동안은 묻지 않으며, 다한 취소는 다시 묻지 않는다. 프로세스에서: W2가 11초 전인 하트비트가 곧바로 닫고, 거래소의 일반 주문은 10초(unmonitored_cancel_us) 전에는 남고 그 뒤 규칙으로 취소되며 감소 전용 주문은 남는다. 감시 안 됨인 채 이유만 바뀌면 기록하지 않고 since도 그대로다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 워처가 없어지거나 검사가 실패하면 거래가 멈춰야 하고(설계 §7.5, R2), 걸린 호가도 60초 뒤에는 취소돼야 한다. 감소 전용 주문은 포지션을 줄이는 길이다
 - 수준: 단위, 통합
 - 전제와 범위: 코어 시험(H 하네스, 기록 시각을 정확히 넣음, 매 입력 재실행 대조), 실제 oms-node·simvenue 프로세스(실제 시간)
@@ -2603,19 +2603,19 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/missing_heartbeats_unmonitor_at_30_s_and_cancel_plain_orders_at_90_s` | 통과 |  |
-| `core/a_heartbeat_with_w1_or_w2_older_than_10_s_unmonitors_and_cancels_60_s_later` | 통과 |  |
-| `core/stale_heartbeats_that_keep_coming_do_not_delay_the_cancels` | 통과 |  |
-| `core/the_check_age_edge_and_a_check_without_success` | 통과 |  |
-| `core/w3_and_w4_are_recorded_and_not_gated` | 통과 |  |
-| `core/stage_two_asks_only_while_the_link_is_up` | 통과 |  |
-| `core/stage_two_does_not_ask_again_for_an_exhausted_cancel` | 통과 |  |
-| `core/a_clock_that_steps_back_holds_the_gates_timers` | 통과 |  |
-| `node-unit/a_stale_heartbeat_unmonitors_and_the_node_cancels_resting_plain_orders_later` | 통과 |  |
+| `core/missing_heartbeats_unmonitor_at_30_s_and_cancel_plain_orders_at_90_s` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_heartbeat_with_w1_or_w2_older_than_10_s_unmonitors_and_cancels_60_s_later` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/stale_heartbeats_that_keep_coming_do_not_delay_the_cancels` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_check_age_edge_and_a_check_without_success` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/w3_and_w4_are_recorded_and_not_gated` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/stage_two_asks_only_while_the_link_is_up` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/stage_two_does_not_ask_again_for_an_exhausted_cancel` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_clock_that_steps_back_holds_the_gates_timers` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/a_stale_heartbeat_unmonitors_and_the_node_cancels_resting_plain_orders_later` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-GATE-2 — 게이트가 있는 설정의 booted는 감시 안 됨(no heartbeat since the start, 하트비트 없음)으로 시작한다: 재시작 전의 하트비트는 세지 않고, 첫 신선한 하트비트까지 일반 주문은 Hold(Unmonitored)로 거절되며, 하트비트가 없으면 booted의 기록 시각보다 60초 넘은 첫 틱에 걸린 일반 주문의 취소를 요청한다. 이미 감시 안 됨일 때의 부팅도 since를 부팅 시각으로 다시 정해, 그보다 60초 전에는 취소하지 않는다. 게이트를 켜는 config_activated도 활성화 시각부터 같다(no heartbeat since the gate came on), 끄는 설정은 상태와 보류를 지우고, 값만 바꾸는 설정은 상태를 그대로 둔다. W1·W2가 신선한 첫 하트비트가 monitor_changed{true}로 풀고, 그 뒤 2단계는 새 요청을 하지 않으며 이미 한 요청은 남는다. 게이트 상태는 저널에서 같은 상태로 재실행된다. 표 7-7의 시험에서 Unmonitored 줄은 일반 주문 거절, 감소 전용 받음이다(증거금 정책 있음). 프로세스에서: 재시작한 노드는 직전에 감시됨이었어도 no heartbeat since the start로 감시 안 됨이다. 새 데이터 디렉터리의 첫 시작은 게이트를 켜는 config_activated의 경로를 따라 no heartbeat since the gate came on으로 감시 안 됨이 된다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 재시작 전의 하트비트는 지금 워처가 살아 있다는 증거가 아니다(설계 §7.5 의도된 동작). 풀린 뒤에도 2단계가 계속 취소하면 안 된다
 - 수준: 단위, 통합
 - 전제와 범위: 코어 시험(H 하네스와 저널 재실행), 실제 oms-node·simvenue 프로세스의 재시작 한 번
@@ -2629,18 +2629,18 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `core/the_gate_starts_unmonitored_at_boot_until_the_first_fresh_heartbeat` | 통과 |  |
-| `core/a_fresh_heartbeat_monitors_again_and_stops_the_cancels` | 통과 |  |
-| `core/a_configuration_that_turns_the_gate_on_or_off` | 통과 |  |
-| `core/the_gate_survives_replay_and_a_boot_starts_unmonitored` | 통과 |  |
-| `core/a_boot_while_unmonitored_times_stage_two_from_the_boot` | 통과 |  |
-| `core/the_hold_table_of_table_7_7` | 통과 |  |
-| `node-unit/a_stale_heartbeat_unmonitors_and_the_node_cancels_resting_plain_orders_later` | 통과 |  |
-| `node-unit/heartbeats_over_monitor_sock_open_the_gate_and_other_ops_are_forbidden` | 통과 |  |
+| `core/the_gate_starts_unmonitored_at_boot_until_the_first_fresh_heartbeat` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_fresh_heartbeat_monitors_again_and_stops_the_cancels` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_configuration_that_turns_the_gate_on_or_off` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_gate_survives_replay_and_a_boot_starts_unmonitored` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_boot_while_unmonitored_times_stage_two_from_the_boot` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_hold_table_of_table_7_7` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/a_stale_heartbeat_unmonitors_and_the_node_cancels_resting_plain_orders_later` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/heartbeats_over_monitor_sock_open_the_gate_and_other_ops_are_forbidden` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-GATE-3 — monitor.sock은 게이트가 있을 때만 열리고(모드 0600) 자기 풀이 연결 둘이다: 셋째 연결은 거절된다. 그 소켓은 전략 없는 hello, ping, heartbeat만 받는다: status, list_open, new_order, halt, watcher_kill, snapshot은 forbidden, 전략을 단 hello는 unauthorized. heartbeat는 거래·운영 소켓에서 forbidden이고 기록되지 않는다. hello 전의 heartbeat는 unauthorized이고 기록되지 않는다. 계약의 줄(epoch ms, null 포함)은 해석되고, 기록이 내구화된 뒤 recorded로 답한다(답이 온 때 저널에 하트비트가 있다). 노드는 ms를 µs로 바꾸고(넘침은 거절), 연결마다 지난 1초에 둘을 받았으면 그 뒤를 overloaded로 거절한다(한꺼번에 보낸 넷 가운데 둘 기록). 코어는 검사 시각이 기록 시각보다 1초 넘게 뒤인 하트비트, W1·W2가 없거나 키가 W1..W9 밖이거나 이름이 1~64자가 아닌 하트비트, 게이트가 없을 때의 하트비트를 bad_request로 거절하고 아무것도 기록하지 않는다. 제어 문자가 든 워처 이름의 하트비트도 코어에 넘기기 전에 거절한다. 검사 값이 음수나 문자열인 heartbeat 줄은 해석되지 않는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 거래 소켓의 클라이언트가 게이트를 열어 두거나 고장 난 워처가 저널을 채우면 안 되고, 노드보다 앞선 시각을 찍는 워처가 검사를 신선해 보이게 하면 안 된다. 워처(U19a)는 계약의 줄만으로 만든다
 - 수준: 단위, 통합
 - 전제와 범위: 코어 시험, 노드의 순수 함수(시간이 입력), oms-api의 줄 해석, 실제 oms-node·simvenue 프로세스(실제 소켓)
@@ -2654,17 +2654,17 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/heartbeats_over_monitor_sock_open_the_gate_and_other_ops_are_forbidden` | 통과 |  |
-| `node-unit/without_the_gate_there_is_no_monitor_socket` | 통과 |  |
-| `core/a_heartbeat_from_the_future_is_refused` | 통과 |  |
-| `core/a_heartbeat_of_the_wrong_shape_or_without_a_gate_records_nothing` | 통과 |  |
-| `node-unit/monitor::tests::two_heartbeats_per_second_per_connection` | 통과 |  |
-| `node-unit/monitor::tests::a_heartbeat_line_becomes_a_core_input_in_microseconds` | 통과 |  |
-| `api/tests::wire_example_of_the_heartbeat` | 통과 |  |
+| `node-unit/heartbeats_over_monitor_sock_open_the_gate_and_other_ops_are_forbidden` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/without_the_gate_there_is_no_monitor_socket` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_heartbeat_from_the_future_is_refused` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/a_heartbeat_of_the_wrong_shape_or_without_a_gate_records_nothing` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/monitor::tests::two_heartbeats_per_second_per_connection` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/monitor::tests::a_heartbeat_line_becomes_a_core_input_in_microseconds` | 미실행 | result of another source, not counted (last result: passed) |
+| `api/tests::wire_example_of_the_heartbeat` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-GATE-4 — Input::Watcher(Heartbeat), watcher_heartbeat, monitor_changed, policy.monitor, core.monitor는 기록 스키마를 올리지 않는다(2 그대로): 게이트가 없으면 쓰지 않아 옛 상태와 설정의 바이트가 그대로이고, 게이트를 켜는 설정·신선한 하트비트·오래된 하트비트·2단계의 틱이 든 저널은 라이브 상태로 복구되며 verify --re-decide를 통과한다. 이벤트 필드 표가 두 이벤트의 모든 필드를 적는다(W1..W9 포함). [core.policy.monitor]의 값은 heartbeat_max_age_us 10..=300초, check_max_age_us 2..=60초, unmonitored_cancel_us 10..=600초이고, 모르는 키는 거부되며, mainnet은 표 없이 시작하지 않고 testnet과 가상 거래소는 선택이다. 표가 있으면 runtime.tick_ms는 1,000 이하다(1,001은 거부, 표가 없으면 60,000도 받음). 세 소켓 경로는 서로 달라야 한다. 알림 hold:unmonitored는 지나가는 상태의 유예(30초)를 받고 이유·시각·2단계까지 남은 초(또는 취소 중)와 증거금 정책에 따른 감소 전용 문장을 담으며, 신선한 하트비트로 해소된다. status.core.monitor는 게이트가 없으면 gate: false다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 기존 저널과 시험이 그대로여야 하고(스펙 완료 기준), 워처(U19a)는 필드 표만으로 만든다. 모든 시작이 이 상태를 지나므로 알림은 유예를 받는다(U18a의 지나가는 상태 규칙)
 - 수준: 단위, 통합
 - 전제와 범위: 저널 하나를 쓰고 복구·재결정, 필드 표 대조, 알림 조건, 설정 검증, 상태 문서
@@ -2678,16 +2678,16 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/kill_holds_liveness_and_heartbeats_recover_to_the_live_state` | 통과 |  |
-| `core/the_field_table_lists_every_field_the_encoder_writes` | 통과 |  |
-| `core/the_gate_values_are_bounded` | 통과 |  |
-| `node-unit/config::tests::the_monitoring_gate_is_validated_and_required_on_mainnet` | 통과 |  |
-| `node-unit/alerts::tests::unmonitored_is_a_passing_condition_with_its_cancel_time` | 통과 |  |
-| `node-unit/without_the_gate_there_is_no_monitor_socket` | 통과 |  |
+| `node-unit/kill_holds_liveness_and_heartbeats_recover_to_the_live_state` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_field_table_lists_every_field_the_encoder_writes` | 미실행 | result of another source, not counted (last result: passed) |
+| `core/the_gate_values_are_bounded` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/config::tests::the_monitoring_gate_is_validated_and_required_on_mainnet` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/alerts::tests::unmonitored_is_a_passing_condition_with_its_cancel_time` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/without_the_gate_there_is_no_monitor_socket` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-WATCH-1 — 워처 crate는 OMS와 코드를 나누지 않는다: oms-*·md-* crate를 어떤 종류(정상, 빌드, 개발)와 target으로도 선언하지 않고, 개발 의존성 http-fake 말고는 작업 공간 crate를 쓰지 않으며, 그 정상·빌드 그래프에서 OMS·시세·작업 공간 crate에 닿지 않고, watcher-conformance 말고는 아무 작업 공간 crate도 워처에 의존하지 않으며, 소스가 #[path]·include!·속성 안의 path =·심볼릭 링크로, 매니페스트의 target이 소스 경로로 패키지 밖의 파일을 가져오지 않는다. 검사 스크립트는 그 각각을 심으면 그 결과 줄과 종료 코드 1을 내고, 확인할 수 없을 때(맞지 않는 잠금, 없는 매니페스트)는 ok가 아니라 종료 코드 2를 낸다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: OMS의 저널 인코딩·대조·Bybit 해석의 결함을 같은 코드로 확인하면 확인이 아니다(ADR-031). 독립성은 사람의 약속이 아니라 매 변경의 CI가 지킨다
 - 수준: 소스 검사
 - 전제와 범위: 실제 트리 한 번(--locked, 호스트 플랫폼)과 합성 작업 공간의 22가지(실제 모양, 정상·빌드·개발·cfg(unix)·cfg(windows) 의존성, 거쳐서 닿는 oms-api, 다른 작업 공간 crate, 역방향, #[path], 시험의 include_str!, 패키지 안의 #[path], cfg_attr의 path =, 심볼릭 링크, 공백이 든 # [path]와 include_str !, 패키지 밖의 [lib] path·[[test]] path·build, 패키지 안의 [lib] path, 다시 만들지 않은 잠금, 없는 매니페스트)
@@ -2701,12 +2701,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `source/watcher_independent` | 통과 |  |
-| `source/selftest` | 통과 |  |
+| `source/watcher_independent` | 미실행 | result of another source, not counted (last result: passed) |
+| `source/selftest` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-WATCH-2 — 워처의 독자 읽기와 저널 상태가 코어와 같은 집합을 세운다: 코어가 결정하고 oms-journal이 쓴 저널을 기록마다 읽어, 열린 주문 집합, 열린 주문마다 종목·방향·수량·전략·클라이언트 ID·거래소 주문 번호·누적 체결·결과 불명·거래소 종결, 종목마다 포지션, 체결·거래소 변경·펀딩 키와 그 거래소 시각, 체결 바닥, 킬 보류와 워처 불일치 보류, 일 기준값이 같은 기록을 재생한 코어와 같다. 시나리오들이 C-TAIL 표의 이벤트를 모두 쓴다. 닫힌 주문의 정보는 purged까지 남아 늦은 체결의 방향과 종목을 주고, 펀딩은 포지션을 바꾸지 않으며, 체결 바닥은 내려가지 않고 booted는 키를 잊지 않으며, 규칙에 맞지 않는 기록(모르는 주문의 체결, 열린 주문의 purged, 형식이 틀린 필드, 순서가 어긋난 기록)은 래치되는 오류다. 독자는 journal-<20자리>.oj만 읽기 전용으로 열고 LOCK을 열지 않으며 아무것도 만들거나 이름을 바꾸거나 쓰지 않아, OMS의 쓰는 쪽이 잠금을 쥔 동안 읽어도 디렉터리가 그대로이고 잠금이 쓰는 쪽에 남는다. 독자는 위치(세그먼트 첫 번호, 바이트 오프셋, 다음 번호)에서 16바이트 프레임 머리와 그 길이의 payload를 하나씩 읽어 max_records, 상한, 파일 끝에서 멈추고 세그먼트를 통째로 읽거나 나머지를 다시 읽지 않는다. 독자는 다음 번호가 상한보다 크면 읽지 않아 상한 너머의 쓰는 중인 프레임이나 쓰레기는 오류가 아니다. 세그먼트 헤더는 매직, 64 KiB 이하의 길이, CRC, format 1, record_schema 1·2, 기다리는 다음 번호인 first_seq, 모든 세그먼트에 같은 instance_id를 요구하고, 프레임을 아직 읽지 않은 세그먼트는 호출마다 헤더를 다시 읽는다. 프레임은 16 MiB 이하의 길이, 번호와 payload의 CRC-32, 기다리는 번호를 요구하고, payload는 seq가 프레임 번호와 같고 at이 앞 기록보다 작지 않으며 events가 키 하나인 객체의 목록인 JSON 객체여야 한다. 독자는 세그먼트 끝에서 다음 번호로 시작하는 세그먼트를 열어 회전과 스키마 변경을 따라간다. 워처는 상태를 저장하지 않고 시작마다 기록 1부터 읽으며, 가장 작은 세그먼트가 1에서 시작하지 않으면 NoStart다. 호출당 기록 수 MAX_RECORDS는 10,000이다(판단). 좋은 기록 뒤에 오류가 오면 그 호출은 좋은 기록을 돌려주고 다음 호출이 오류를 내며, 위치는 오류 앞에 머물러 파일이 바뀔 때까지 같은 오류를 낸다. Damaged·NoStart·Io는 위치를 움직이지 않고 다음 호출이 같은 자리에서 다시 읽어 재시작 없이 낫는다. UnknownEvent·Schema·Format·Instance는 래치되는 오류다. 래치된 Tail은 파일을 고쳐도 같은 오류만 내고 프로세스가 다시 시작해야 다시 읽는다. KNOWN은 C-TAIL 필드 표의 이벤트 51개이고, 시험이 tail.md를 읽어 양쪽 방향으로 비교하므로 OMS가 이벤트를 더하면 워처가 배울 때까지 실패한다. 소수 Dec(i128, 10^8 배)는 선택적 -, 숫자, 선택적 .과 1~8자리만 받고 지수, +, 9자리 이상, 빈 문자열, 앞뒤 공백은 거절하며, 덧셈·뺄셈·부호 바꿈은 정확하고 넘치면 오류다. Base32Pair는 13자리-13자리의 소문자 0-9a-v이고 첫 자리가 f 이하이며(인스턴스 0x0123456789abcdef, 주문 42 → 028q5cu4qnjff-000000000001a), 코어의 형식과 같게 부호화하고 거절한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: OMS의 저널 인코딩이나 집합 계산의 결함을 같은 코드가 확인하면 확인이 아니다(ADR-031). 워처의 W1·W2·W4는 이 집합과 거래소를 비교하므로, 집합이 코어와 다르면 거짓 불일치나 놓친 불일치가 된다
 - 수준: 단위, 통합
 - 전제와 범위: 메모리에서 만든 기록의 규칙 시험 10개. 핵심 시험 도구(H)로 코어를 움직이는 시나리오 열 개(이벤트 51개 모두, 4 KiB 세그먼트 회전 포함), 기록마다 비교
@@ -2720,35 +2720,35 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `watcher/the_watcher_sets_equal_the_core_on_journals_with_every_event_kind` | 통과 |  |
-| `watcher/the_sets_follow_the_field_table` | 통과 |  |
-| `watcher/a_fill_after_close_uses_the_kept_order_info` | 통과 |  |
-| `watcher/purged_forgets_closed_orders_and_old_keys` | 통과 |  |
-| `watcher/purging_an_unknown_order_stops_the_state` | 통과 |  |
-| `watcher/the_fill_floor_never_goes_down` | 통과 |  |
-| `watcher/the_fact_time_moves_only_on_the_compared_order_events` | 통과 |  |
-| `watcher/funding_never_changes_a_position` | 통과 |  |
-| `watcher/venue_terminal_marks_the_order_terminal_and_moves_its_fact_time` | 통과 |  |
-| `watcher/an_instrument_the_journal_never_changed_has_no_change_time` | 통과 |  |
-| `watcher/records_that_break_the_rules_stop_the_state` | 통과 |  |
-| `watcher/the_watcher_reads_while_the_oms_writer_holds_the_lock` | 통과 |  |
-| `watcher/a_large_segment_is_read_frame_by_frame_in_bounded_calls` | 통과 |  |
-| `watcher/the_reader_never_returns_a_record_above_the_durable_cap` | 통과 |  |
-| `watcher/frames_and_headers_follow_adr_011` | 통과 |  |
-| `watcher/schema_1_and_2_are_read` | 통과 |  |
-| `watcher/a_header_only_segment_rewritten_with_a_new_schema_is_read_again` | 통과 |  |
-| `watcher/a_damaged_frame_at_or_below_the_cap_stops_without_moving` | 통과 |  |
-| `watcher/the_reader_follows_segment_rotation_and_a_schema_change` | 통과 |  |
-| `watcher/io_damage_and_no_start_are_retried_and_the_other_errors_latch` | 통과 |  |
-| `watcher/an_unknown_event_stops_the_reader` | 통과 |  |
-| `watcher/events::tests::the_known_events_are_the_rows_of_the_tail_table` | 통과 |  |
-| `watcher/decimal::tests::decimals_parse_exactly_and_refuse_other_forms` | 통과 |  |
-| `watcher/wire_id::tests::base32_pair_matches_the_documented_vector` | 통과 |  |
-| `watcher/the_watcher_base32_pair_equals_the_core_form` | 통과 |  |
+| `watcher/the_watcher_sets_equal_the_core_on_journals_with_every_event_kind` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_sets_follow_the_field_table` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_fill_after_close_uses_the_kept_order_info` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/purged_forgets_closed_orders_and_old_keys` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/purging_an_unknown_order_stops_the_state` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_fill_floor_never_goes_down` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_fact_time_moves_only_on_the_compared_order_events` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/funding_never_changes_a_position` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/venue_terminal_marks_the_order_terminal_and_moves_its_fact_time` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_instrument_the_journal_never_changed_has_no_change_time` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/records_that_break_the_rules_stop_the_state` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_watcher_reads_while_the_oms_writer_holds_the_lock` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_large_segment_is_read_frame_by_frame_in_bounded_calls` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_reader_never_returns_a_record_above_the_durable_cap` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/frames_and_headers_follow_adr_011` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/schema_1_and_2_are_read` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_header_only_segment_rewritten_with_a_new_schema_is_read_again` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_damaged_frame_at_or_below_the_cap_stops_without_moving` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_reader_follows_segment_rotation_and_a_schema_change` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/io_damage_and_no_start_are_retried_and_the_other_errors_latch` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_unknown_event_stops_the_reader` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/events::tests::the_known_events_are_the_rows_of_the_tail_table` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/decimal::tests::decimals_parse_exactly_and_refuse_other_forms` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/wire_id::tests::base32_pair_matches_the_documented_vector` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_watcher_base32_pair_equals_the_core_form` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-WATCH-3 — 워처의 자기 Bybit 클라이언트는 GET을 거래소 문서대로 서명하고(정렬된 질의, 보낼 수 없는 값은 보내기 전에 거절, 머리글 다섯, 보내는 순간의 시계), 응답을 부류로 나누며(not_sent, no_answer, rate_limited, clock, refused, auth, ip_banned; unreadable은 검사가 만든다), 키 거절(HTTP 401, retCode 10003·10004·10005·10007·10010·33004) 뒤에는 프로세스가 다시 시작할 때까지 Bybit에 아무 요청도 보내지 않고, HTTP 403 뒤에는 응답 순간부터 600초 동안 모든 요청과 IP 반향을 보내지 않으며, 어느 10초 창에서도 60개를 넘겨 보내지 않고 넘는 요청은 버리지 않고 기다린다. 요청은 보내기 전에 세고, 지표는 VictoriaMetrics 가져오기 JSON 한 줄씩(watcher_up 포함) 큐 없이 밀어 넣는다. retCode 0이면 result를, 없으면 null을 돌려준다. 클라이언트 안에서는 다시 시도하지 않고 다음 라운드가 다시 묻는다. watcher_auth_rejected는 클라이언트를 만들 때 0, 래치할 때 1이다. 시계가 뒤로 가면 가드의 옛 기록이 창에 남아 시계가 그 값을 다시 지날 때까지 막는다. 지표 등록부는 모든 계열에 venue=bybit·host·watcher 이름표를 붙이고 이름표를 정렬하며, 값이 유한하지 않은 계열과 지운 게이지는 보내지 않는다. 실패한 밀어 넣기의 로그는 첫 실패와 그 뒤 1분에 한 번까지만 쓴다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: OMS의 Bybit 해석 결함을 같은 코드로 확인하면 확인이 아니다(ADR-031). 거절된 키로 계속 보내거나 403 뒤에 일찍 보내면 OMS와 같이 쓰는 IP가 더 오래 막히고, 폭주 루프는 그 IP 한도를 먹는다
 - 수준: 단위, 통합(loopback)
 - 전제와 범위: 서명 함수와 질의 문자열, 수동 시계 위의 가드(1분 폭주 루프 포함), loopback 가짜 Bybit·반향·VM에 붙인 클라이언트와 내보내기(부류마다 한 번, 거절 코드 일곱 각각 10분, 403 전후, 가득 찬 가드의 대기)
@@ -2762,24 +2762,24 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `watcher/the_strings_to_sign_and_signatures_match_independent_values` | 통과 |  |
-| `watcher/query_strings_are_sorted_and_unsafe_values_refused` | 통과 |  |
-| `watcher/every_request_carries_the_five_headers_and_the_signed_query` | 통과 |  |
-| `watcher/answers_are_classified` | 통과 |  |
-| `watcher/auth_answers_are_never_retried` | 통과 |  |
-| `watcher/http_403_pauses_every_request_for_600_s` | 통과 |  |
-| `watcher/the_guard_holds_requests_beyond_60_in_10_s` | 통과 |  |
-| `watcher/a_request_beyond_the_guard_waits_for_the_window` | 통과 |  |
-| `watcher/a_request_waiting_at_the_guard_sees_a_later_rejection_or_pause` | 통과 |  |
-| `watcher/a_redirect_is_not_followed` | 통과 |  |
-| `watcher/a_status_counts_when_its_body_is_cut` | 통과 |  |
-| `watcher/two_rejections_in_flight_write_one_error_line` | 통과 |  |
-| `watcher/the_import_lines_are_victoria_metrics_json` | 통과 |  |
-| `watcher/a_failed_push_is_dropped` | 통과 |  |
+| `watcher/the_strings_to_sign_and_signatures_match_independent_values` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/query_strings_are_sorted_and_unsafe_values_refused` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/every_request_carries_the_five_headers_and_the_signed_query` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/answers_are_classified` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/auth_answers_are_never_retried` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/http_403_pauses_every_request_for_600_s` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_guard_holds_requests_beyond_60_in_10_s` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_request_beyond_the_guard_waits_for_the_window` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_request_waiting_at_the_guard_sees_a_later_rejection_or_pause` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_redirect_is_not_followed` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_status_counts_when_its_body_is_cut` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/two_rejections_in_flight_write_one_error_line` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_import_lines_are_victoria_metrics_json` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_failed_push_is_dropped` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-WATCH-4 — 워처의 설정 파일은 스펙 표의 모든 필드를 그 기본값과 검사대로 읽는다: 모르는 키와 표는 거부하고, mainnet은 mainnet_confirmed = true일 때만 받으며, 범위는 양 끝을 포함하고, status_url과 vm_url은 loopback만, ip_echo_url은 https만, 자격 파일은 절대 경로이고 ..이 없으며 링크를 따라 봐도 데이터 디렉터리 밖이다. 자격 파일은 링크를 따르지 않고 FIFO를 기다리지 않는 한 핸들로, 이 프로세스의 uid가 소유하고 권한이 정확히 0600 또는 0400인 일반 파일일 때만, api_key와 api_secret 둘만 비어 있지 않게 읽는다. 모든 거부는 한 줄이고, 자격 파일의 오류는 내용을 인용하지 않으며 비밀은 어디에도 찍히지 않는다. 시작 확인(U19a4b)은 query-api의 마스터 키, 다른 userID, IP에 묶이지 않은 키([]·*)와 행이 없거나 USDT로 정산되지 않는 기호를 종료 2의 이유 한 줄로 거부하고, 키 거절(auth)이면 끝내지 않고 요청 없이 떠 있으며, 그 밖의 답은 답의 시각 + 5초(403이면 + 600초)에 다시 묻는다. watcher_api_key_days_left는 expiredAt까지의 날을 내림하고 해당 없음(없음, null, 1970-01-02 이하)이면 내보내지 않는다. watcher_public_ip_ok는 반향의 주소가 마지막으로 통과한 ips에 있을 때만 1이다. IP 재확인은 지난 재확인의 마지막 답 + ip_check_ms마다 돌고, 실패하면 0으로 두고 남은 날을 지키며, 시작 규칙에 더는 맞지 않는 키는 재시작까지 모든 Bybit 요청을 멈추고 0으로 둔다. 재확인이나 5단계에서 키가 거절되면 Bybit에는 묻지 않고 반향만 ip_check_ms마다 이어 간다. 요청이 답을 기다리지 않을 때 온 답은 아무것도 바꾸지 않는다. network는 testnet 또는 mainnet이고 REST 주소는 각각 https://api-testnet.bybit.com, https://api.bybit.com이다. 5단계에서는 실패한 그 기호만 다시 묻고 앞의 기호는 다시 묻지 않는다. 5단계 요청은 category와 symbol만 보내고(settleCoin 없음) 답에서 symbol이 같은 행을 고른다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 틀린 키 이름이 기본값으로 조용히 바뀌거나 단어 하나로 mainnet에 붙거나, 다른 사용자가 읽을 수 있는 키 파일이나 OMS 데이터 디렉터리 안의 키 파일로 시작하면 워처의 독립성과 키 분리(설계 §7.4)가 깨진다. 거부의 이유가 여러 줄이면 시작 거부 한 줄(스펙)을 지키지 못한다. 마스터 키나 다른 계정의 키, USDC 기호로 시작하면 워처가 OMS와 다른 계정이나 자기 조회(category=linear, settleCoin=USDT)가 보지 못하는 주문을 본다. 남은 날을 올리면 만료 경보가 하루 늦고, 403 뒤 일찍 다시 물으면 OMS와 함께 쓰는 IP의 차단을 늘린다
 - 수준: 단위
 - 전제와 범위: 필수 필드만의 설정과 기본값, 필드마다의 거부와 수용(범위 16개의 양 끝과 그 밖), 파일 읽기, 링크로 가린 디렉터리와 ..로 쓴 소켓. OMS_TEST_DIR 아래 실제 파일의 권한 열둘, 다른 소유자(메타데이터 규칙 함수, 그리고 root가 소유한 /etc/hostname을 creds::load로), 심볼릭 링크, 디렉터리, FIFO, 내용 여덟 가지, 데이터 디렉터리 안·링크로 가린 경우. 시작 확인과 IP 재확인의 sans-IO 단계를 수동 시계로, 부류마다의 답과 기다림, 거부 뒤와 키 거절 뒤의 요청 없음은 loopback 가짜 Bybit·반향과 실제 클라이언트로
@@ -2793,26 +2793,26 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `watcher/the_config_is_validated_and_mainnet_needs_confirmation` | 통과 |  |
-| `watcher/the_config_file_is_read_and_its_refusals_name_the_file` | 통과 |  |
-| `watcher/the_credentials_file_must_be_owner_only_and_outside_the_data_dir` | 통과 |  |
-| `watcher/a_traded_symbol_that_does_not_settle_in_usdt_refuses_the_start` | 통과 |  |
-| `watcher/a_key_that_expires_in_10_days_gives_days_left_10` | 통과 |  |
-| `watcher/a_symbol_missing_from_instruments_info_refuses_the_start` | 통과 |  |
-| `watcher/a_master_key_another_uid_or_a_key_bound_to_no_ip_refuses_the_start` | 통과 |  |
-| `watcher/the_documented_epoch_expiry_exports_no_days_left` | 통과 |  |
-| `watcher/the_public_ip_is_rechecked_every_60_s` | 통과 |  |
-| `watcher/query_api_answers_other_than_auth_or_a_refusal_retry_every_5_s` | 통과 |  |
-| `watcher/an_echo_failure_or_a_body_that_is_not_an_address_gives_public_ip_ok_0` | 통과 |  |
-| `watcher/settle_coin_answers_other_than_auth_or_a_refusal_retry_every_5_s` | 통과 |  |
-| `watcher/an_auth_answer_at_start_stays_up_without_requests` | 통과 |  |
-| `watcher/a_failed_recheck_sets_public_ip_ok_0_and_keeps_days_left` | 통과 |  |
-| `watcher/a_recheck_with_another_uid_a_master_key_or_no_bound_ip_stops_every_request` | 통과 |  |
-| `watcher/an_answer_without_a_request_in_flight_changes_nothing` | 통과 |  |
+| `watcher/the_config_is_validated_and_mainnet_needs_confirmation` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_config_file_is_read_and_its_refusals_name_the_file` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_credentials_file_must_be_owner_only_and_outside_the_data_dir` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_traded_symbol_that_does_not_settle_in_usdt_refuses_the_start` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_key_that_expires_in_10_days_gives_days_left_10` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_symbol_missing_from_instruments_info_refuses_the_start` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_master_key_another_uid_or_a_key_bound_to_no_ip_refuses_the_start` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_documented_epoch_expiry_exports_no_days_left` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_public_ip_is_rechecked_every_60_s` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/query_api_answers_other_than_auth_or_a_refusal_retry_every_5_s` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_echo_failure_or_a_body_that_is_not_an_address_gives_public_ip_ok_0` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/settle_coin_answers_other_than_auth_or_a_refusal_retry_every_5_s` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_auth_answer_at_start_stays_up_without_requests` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_failed_recheck_sets_public_ip_ok_0_and_keeps_days_left` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_recheck_with_another_uid_a_master_key_or_no_bound_ip_stops_every_request` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_answer_without_a_request_in_flight_changes_nothing` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-WATCH-5 — 워처의 검사 엔진은 첫 라운드와 첫 하트비트를 start_ms에 내고, 한 검사의 라운드를 겹치지 않으며 늦은 라운드는 한 번만 돌린다. 라운드는 거래소 쪽을 모두 읽은 뒤에만 그 라운드만의 상태 요청을 내고, 그 답은 물은 라운드만 쓰며, 그 상한까지 저널을 읽은 뒤 비교한다. 다른 인스턴스의 상태와 그 요청을 낼 때 읽은 기록보다 낮은 상한은 읽기를 재시작까지 래치하고 그 뒤 라운드는 아무것도 묻지 않는다. 다시 읽는 저널 오류는 다음 라운드에 낫고 watcher_journal_error를 0으로 돌린다. 기한(낸 시각 + request_timeout_ms + 11초)까지 답이 없는 요청은 라운드를 실패로 닫고 늦은 답은 버린다. 차이는 지난 완료 라운드와 이번 라운드에 같은 정체로 있고 이번 라운드에서 min_age_ms 이상 늙었을 때만 확정되며(실패한 라운드는 지난 완료 라운드의 sighting을 바꾸지 않는다), 두 번 보았지만 어린 차이는 라운드를 성공으로 치지 않는다. 확정은 정체마다 한 번 세고(한 라운드에 두 번 실린 정체도 하나) 1024바이트 이하의 detail을 실은 Mismatch 하나를 내며, watcher_mismatch_active는 라운드가 그것을 보지 않으면 내려간다. W1은 OMS의 쪽 규칙대로 열린 주문을 읽고(커서 없는 가득 찬 쪽, 같은 커서, 필드 없는 행은 unreadable, 20쪽 한도), 모르는 주문(foreign), 저널에서 닫힘, 거래소 종결 뒤에도 열림, 종목·방향 다름, 확인된 주문의 거래소 부재를 차이로 보고, 확인되지 않았거나 결과 불명이거나 거래소 종결된 주문의 부재는 비교하지 않는다. 나이는 주문의 fact_at(다른 이벤트로 움직이지 않음) 또는 첫 sighting이다. W1은 order/realtime을 category=linear, settleCoin=USDT, limit=50으로 묻는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 한 번 본 차이나 막 기록된 저널 항목으로 울리면 체결이 오가는 중에 거짓 보류가 걸리고, 두 번 본 어린 차이를 성공으로 치면 하트비트가 아무것도 확정하지 않는 동안 신선한 W1을 알린다. 저널을 거래소보다 먼저 읽거나 다른 라운드의 상한을 쓰면 OMS가 방금 보낸 주문을 모르는 주문으로 본다. 답 하나를 잃어 라운드가 영영 열리면 검사가 멈춘다
 - 수준: 단위(sans-IO, 수동 시계)
 - 전제와 범위: 엔진 시험 도구(프로세스 안의 모델 거래소, 시험 저널 쓰기, 지연 0의 답 또는 시험이 손으로 답함): W1 시험 13개, 엔진 시험 10개. 두 검사의 라운드가 함께 열린 경우는 W1과 W2(U19a5에서는 시험의 대역 검사, U19a6부터 실제 W2의 빈 쪽)
@@ -2826,33 +2826,33 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `watcher/a_one_round_difference_does_not_alarm` | 통과 |  |
-| `watcher/a_two_round_difference_older_than_2_s_alarms` | 통과 |  |
-| `watcher/a_journal_entry_younger_than_2_s_does_not_alarm` | 통과 |  |
-| `watcher/an_unacked_order_missing_at_the_venue_is_not_compared` | 통과 |  |
-| `watcher/a_foreign_order_at_the_venue_is_a_mismatch` | 통과 |  |
-| `watcher/an_order_closed_in_the_journal_and_open_at_the_venue_is_a_mismatch` | 통과 |  |
-| `watcher/the_venue_is_read_before_the_journal` | 통과 |  |
-| `watcher/a_difference_whose_order_keeps_receiving_events_is_confirmed_by_its_fact_age` | 통과 |  |
-| `watcher/a_young_difference_seen_twice_defers_the_round` | 통과 |  |
-| `watcher/a_full_page_without_a_cursor_or_an_unchanged_cursor_fails_the_round` | 통과 |  |
-| `watcher/an_order_ended_at_the_venue_in_the_journal_and_not_listed_agrees` | 통과 |  |
-| `watcher/an_order_ended_in_the_journal_and_still_open_at_the_venue_is_open_after_terminal` | 통과 |  |
-| `watcher/a_late_round_runs_once_and_rounds_do_not_overlap` | 통과 |  |
-| `watcher/the_first_rounds_and_heartbeat_are_due_at_start` | 통과 |  |
-| `watcher/a_retried_journal_error_heals_and_a_latched_one_fails_every_round` | 통과 |  |
-| `watcher/a_status_of_another_instance_or_a_cap_below_the_read_before_the_request_stops_the_reader` | 통과 |  |
-| `watcher/status_answers_in_reverse_order_are_each_used_by_their_own_round` | 통과 |  |
-| `watcher/the_detail_is_at_most_1024_bytes` | 통과 |  |
-| `watcher/a_confirmed_identity_is_counted_once` | 통과 |  |
-| `watcher/a_request_without_an_answer_fails_its_round_at_the_deadline_and_a_late_answer_is_ignored` | 통과 |  |
-| `watcher/mismatch_active_counts_the_confirmed_differences_a_round_still_sees` | 통과 |  |
-| `watcher/a_failed_round_keeps_the_sightings_of_the_last_completed_round` | 통과 |  |
-| `watcher/an_order_listed_on_two_pages_is_one_difference` | 통과 |  |
+| `watcher/a_one_round_difference_does_not_alarm` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_two_round_difference_older_than_2_s_alarms` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_journal_entry_younger_than_2_s_does_not_alarm` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_unacked_order_missing_at_the_venue_is_not_compared` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_foreign_order_at_the_venue_is_a_mismatch` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_order_closed_in_the_journal_and_open_at_the_venue_is_a_mismatch` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_venue_is_read_before_the_journal` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_difference_whose_order_keeps_receiving_events_is_confirmed_by_its_fact_age` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_young_difference_seen_twice_defers_the_round` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_full_page_without_a_cursor_or_an_unchanged_cursor_fails_the_round` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_order_ended_at_the_venue_in_the_journal_and_not_listed_agrees` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_order_ended_in_the_journal_and_still_open_at_the_venue_is_open_after_terminal` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_late_round_runs_once_and_rounds_do_not_overlap` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_first_rounds_and_heartbeat_are_due_at_start` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_retried_journal_error_heals_and_a_latched_one_fails_every_round` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_status_of_another_instance_or_a_cap_below_the_read_before_the_request_stops_the_reader` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/status_answers_in_reverse_order_are_each_used_by_their_own_round` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_detail_is_at_most_1024_bytes` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_confirmed_identity_is_counted_once` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_request_without_an_answer_fails_its_round_at_the_deadline_and_a_late_answer_is_ignored` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/mismatch_active_counts_the_confirmed_differences_a_round_still_sees` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_failed_round_keeps_the_sightings_of_the_last_completed_round` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_order_listed_on_two_pages_is_one_difference` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-WATCH-6 — 워처의 W2는 position/list(category=linear, settleCoin=USDT, 200개씩 5쪽까지)를 W1의 쪽 규칙으로 읽고(커서 없는 가득 찬 쪽, 같은 커서, 한 기호의 두 행(헤지 모드), 모르는 방향, 소수가 아닌 크기, 크기 있는 빈·없는 방향, 음수 크기, 기호 없는 행은 unreadable, 6쪽째는 실패), 기호마다 d = 거래소 − 저널(체결 + 외부 체결 + 거래소 변경 + 조정)을 차이 (W2, position, 기호, d)로 본다(범위를 넘은 d는 값 overflow인 차이). 다른 d는 처음부터 센다. 저널의 마지막 변경 시각과 거래소의 최근 변경 시각(updatedTime, 없으면 그 크기를 처음 본 라운드 seen_at) 중 알려진 것이 min_age_ms보다 어리면 첫 sighting이어도 미루고 라운드는 성공이 아니며, 모르는 시각은 늙음이라 저널이 바꾼 적 없는 기호의 거래소 포지션은 두 번째 라운드에 확정된다. 행이 없는 기호는 크기 0으로 보아 막 닫힌 포지션도 처음 0으로 본 라운드부터 2초 미루고, 첫 완전한 읽기의 크기에는 seen_at이 없으며, 모든 쪽을 읽은 뒤 실패한 라운드의 크기는 마지막 거래소 답의 시각으로 남고, 쪽 사이에서 실패한 라운드는 아무것도 남기지 않는다. 초당 5번의 체결이 60초 이어지는 동안 Mismatch가 없고, 체결이 멈춘 뒤 심은 차이는 라운드의 어느 위상에서도 3초 안에 확정된다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 체결이 오가는 동안 W2가 울리면 거짓 보류가 걸리고, 어린 차이를 성공으로 치면 아무것도 확정하지 않는 동안 하트비트가 신선한 W2를 알린다. 모르는 시각을 어림으로 보면 OMS가 모르는 포지션(수동 거래, 놓친 체결)을 영영 확정하지 못하고, 막 닫힌 포지션을 늙게 보면 OMS가 기록하기 전에 확정한다. 다른 두 값을 확정하면 움직이는 포지션에 보류를 건다
 - 수준: 단위(sans-IO, 수동 시계)
 - 전제와 범위: 엔진 시험 도구(프로세스 안의 모델 거래소: 열린 주문과 포지션 목록, 경로마다의 스크립트; 시험 저널 쓰기; 상태 무응답; 지연 0의 답): W2 시험 14개, W1과 함께 돈다
@@ -2866,24 +2866,24 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `watcher/five_fills_per_second_for_60_s_give_no_mismatch` | 통과 |  |
-| `watcher/a_difference_planted_after_the_fills_stop_is_confirmed_within_3_s` | 통과 |  |
-| `watcher/a_changing_difference_restarts_the_count` | 통과 |  |
-| `watcher/a_deferred_round_is_not_a_success` | 통과 |  |
-| `watcher/a_venue_position_in_a_symbol_the_journal_never_changed_is_confirmed_on_the_second_round` | 통과 |  |
-| `watcher/a_young_journal_change_defers_even_at_the_first_sighting` | 통과 |  |
-| `watcher/hedge_mode_rows_are_unreadable` | 통과 |  |
-| `watcher/bad_pages_and_rows_fail_the_round` | 통과 |  |
-| `watcher/a_closed_venue_position_defers_until_2_s_after_it_was_first_seen_flat` | 통과 |  |
-| `watcher/a_difference_that_changes_every_round_without_a_venue_time_is_not_a_success` | 통과 |  |
-| `watcher/sizes_found_at_the_first_round_have_no_seen_time` | 통과 |  |
-| `watcher/a_size_seen_by_a_round_that_then_fails_keeps_its_seen_time` | 통과 |  |
-| `watcher/a_round_that_failed_between_pages_leaves_no_observation` | 통과 |  |
-| `watcher/a_difference_too_large_to_subtract_is_still_a_difference` | 통과 |  |
+| `watcher/five_fills_per_second_for_60_s_give_no_mismatch` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_difference_planted_after_the_fills_stop_is_confirmed_within_3_s` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_changing_difference_restarts_the_count` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_deferred_round_is_not_a_success` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_venue_position_in_a_symbol_the_journal_never_changed_is_confirmed_on_the_second_round` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_young_journal_change_defers_even_at_the_first_sighting` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/hedge_mode_rows_are_unreadable` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/bad_pages_and_rows_fail_the_round` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_closed_venue_position_defers_until_2_s_after_it_was_first_seen_flat` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_difference_that_changes_every_round_without_a_venue_time_is_not_a_success` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/sizes_found_at_the_first_round_have_no_seen_time` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_size_seen_by_a_round_that_then_fails_keeps_its_seen_time` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_round_that_failed_between_pages_leaves_no_observation` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_difference_too_large_to_subtract_is_still_a_difference` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-WATCH-7 — 워처의 엔진은 확정된 차이를 그것을 실은 보내기가 "held"로 답할 때까지 빚으로 두고("already held", 보류를 보이는 저널, 실패는 갚지 않고, 라운드가 더 보지 않아도 확정 때의 detail로 보낸다), 저널 상태가 그 검사의 최근 held/already held 답 뒤에 낸 상태 요청의 상한에서 보류 꺼짐을 보일 때, 지난 보내기 시작부터 mismatch_resend_ms가 지났을 때, 그 검사의 보내기가 진행 중이 아닐 때만 보낸다(보고가 없는 보내기는 낸 시각 + 2 × request_timeout_ms + 1초에 실패하고, 그 뒤에 온 늦은 보고는 번호가 달라 아무것도 갚지 않는다). W1·W2는 라운드가 아직 보는 확정된 차이를 해제 뒤 다시 보낸다. admin.sock 클라이언트는 hello 다음 watcher_mismatch를 보내고 두 답을 읽는다. monitor.sock 클라이언트는 연결 하나를 유지하고 hello를 먼저, 그다음 W1~W4의 성공 시각(없으면 null)을 보내며, 끊김·답 없음 뒤 다음 하트비트에 다시 연다. 실행은 설정을 읽은 때부터 지표를 밀어 넣고, 시작 확인, /api/status 기다림, 재생 동안에도 IP를 다시 확인하고, 재확인에서 시작 규칙에 맞지 않는 키는 모든 Bybit 요청을 멈추며, OMS가 답하지 않으면 아무것도 판단하지 않고, 시작 거부는 코드 2, shutdown 입력은 새 라운드 없이 마지막 밀어 넣기와 모니터 연결 닫음 뒤 0으로 끝난다. 'recorded' 답이면 watcher_heartbeat_ok_ts를 그 하트비트의 시계(epoch 초)로 둔다. 하트비트의 오류 답은 연결을 그대로 두고 error 줄을 1분에 하나까지 쓴다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 빚을 잃으면 OMS의 메모가 이름하지 않는 차이가 사라지고, 답 앞의 상한으로 보류 꺼짐을 믿으면 보류가 걸린 줄 모르고 보내거나 거둔다. 진행 중 보내기가 둘이면 held가 무엇을 갚는지 모른다. 하트비트가 다른 검사의 시각을 실으면 게이트가 틀리게 열리고, hello 없는 하트비트는 거절된다. OMS가 내려간 동안 판단하면 저널 없이 확정한다
 - 수준: 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나)
 - 전제와 범위: 엔진 시험 도구(모델 거래소, 시험 저널, 시험 도구의 OMS가 watcher_mismatch에 답하고 hold_set을 씀), 가짜 admin.sock·monitor.sock(UnixListener), runtime::run과 http-fake의 Bybit·반향·/api/status·VictoriaMetrics, 바이너리의 --version과 네트워크 전 거부: 시험 20개
@@ -2897,30 +2897,30 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `watcher/a_confirmed_mismatch_is_sent_once_and_again_after_a_clear` | 통과 |  |
-| `watcher/a_confirmed_mismatch_is_sent_until_answered_even_after_the_difference_is_gone` | 통과 |  |
-| `watcher/a_difference_confirmed_under_a_hold_is_sent_after_the_clear` | 통과 |  |
-| `watcher/a_second_send_waits_for_the_first_answer` | 통과 |  |
-| `watcher/a_hold_seen_off_at_a_cap_sampled_before_the_answer_does_not_send` | 통과 |  |
-| `watcher/a_late_report_of_one_send_pays_only_what_that_send_carried` | 통과 |  |
-| `watcher/the_admin_client_says_hello_and_reads_both_replies` | 통과 |  |
-| `watcher/heartbeats_carry_the_success_time_of_each_check` | 통과 |  |
-| `watcher/the_heartbeat_says_hello_first_and_reconnects` | 통과 |  |
-| `watcher/a_reply_that_does_not_come_in_time_reopens_the_connection` | 통과 |  |
-| `watcher/the_watcher_runs_against_loopback_fakes_end_to_end` | 통과 |  |
-| `watcher/without_an_answering_oms_nothing_is_judged` | 통과 |  |
-| `watcher/the_shutdown_input_ends_cleanly` | 통과 |  |
-| `watcher/the_ip_recheck_runs_while_the_oms_is_down` | 통과 |  |
-| `watcher/the_ip_recheck_runs_during_the_boot_replay` | 통과 |  |
-| `watcher/a_recheck_that_fails_a_start_rule_stops_every_bybit_request` | 통과 |  |
-| `watcher/a_key_rejected_at_start_is_exported` | 통과 |  |
-| `watcher/the_status_client_sends_the_loopback_host_and_follows_no_redirect` | 통과 |  |
-| `watcher/a_start_refusal_ends_the_run_with_exit_code_2` | 통과 |  |
-| `watcher/version_prints_and_anything_else_exits_2` | 통과 |  |
+| `watcher/a_confirmed_mismatch_is_sent_once_and_again_after_a_clear` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_confirmed_mismatch_is_sent_until_answered_even_after_the_difference_is_gone` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_difference_confirmed_under_a_hold_is_sent_after_the_clear` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_second_send_waits_for_the_first_answer` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_hold_seen_off_at_a_cap_sampled_before_the_answer_does_not_send` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_late_report_of_one_send_pays_only_what_that_send_carried` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_admin_client_says_hello_and_reads_both_replies` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/heartbeats_carry_the_success_time_of_each_check` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_heartbeat_says_hello_first_and_reconnects` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_reply_that_does_not_come_in_time_reopens_the_connection` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_watcher_runs_against_loopback_fakes_end_to_end` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/without_an_answering_oms_nothing_is_judged` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_shutdown_input_ends_cleanly` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_ip_recheck_runs_while_the_oms_is_down` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_ip_recheck_runs_during_the_boot_replay` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_recheck_that_fails_a_start_rule_stops_every_bybit_request` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_key_rejected_at_start_is_exported` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_status_client_sends_the_loopback_host_and_follows_no_redirect` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_start_refusal_ends_the_run_with_exit_code_2` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/version_prints_and_anything_else_exits_2` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-WATCH-8 — 워처의 W4는 execution/list를 고정된 끝(첫 쪽의 시계)과 시작 max(워터마크 − w4_overlap_ms, ⌈체결 바닥/1000⌉)(7일로 자름)의 창으로 훑고, 라운드마다 w4_max_pages쪽까지 읽어 더 긴 훑기는 다음 라운드가 같은 창과 커서로 이으며(성공 시각은 끝난 훑기에서만), 빈 쪽이나 빈 커서에서 끝내고, 바뀌지 않은 커서와 읽을 수 없는 쪽은 라운드를 실패시켜 같은 커서로 다시 읽되 연달아 3번이나 50라운드면 같은 시작과 새 끝으로 다시 시작한다. 행은 execType으로 먼저 나눠 Trade는 저널 체결과, AdlTrade·BustTrade·Delivery·Settle은 저널 거래소 변경과 키 <symbol>:<execId>로 비교하고, Funding은 비교하지 않으며, 모르는 형은 끝난 훑기에서 바로 확정하고, 형이 필요로 하는 필드가 없는 행과 execTime이 훑기의 끝보다 뒤인 행은 unreadable_row, 바닥 아래 행과 수량 0인 Trade·거래소 변경 행은 무시한다. 차이는 두 훑기와 execTime 나이로 확정하고 어린 차이는 훑기를 실패시키지 않는다. 워터마크는 확정되지 않은 가장 오래된 행(execTime 없는 행은 모든 행보다 오래됨) 아래의 가장 새 행으로만, 뒤로 가지 않게 움직인다. held 답(already held는 갚지 않는다)으로 갚고 그 답 뒤에 낸 상한에서 보류 꺼짐을 본 W4 정체는 거두어 다시 보내지도 세지도 않는다. 처음 워터마크는 첫 훑기 때의 now − w4_initial_lookback_ms(기본 600초)이고 ⌈체결 바닥/1000⌉보다 낮지 않다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 쪽 상한이 없으면 큰 창이 예산을 넘기고, 이은 훑기가 1쪽부터면 끝나지 않는다. 겹침이 없으면 늦게 실린 행을 놓치고, 워터마크가 확정되지 않은 행을 지나면 그 행을 다시 읽지 않는다. Funding을 체결로 보거나 ADL을 체결과 맞추면 맞는 저널에서 보류가 걸린다. 모르는 형이 두 번째 훑기를 기다리면 OMS가 분류하지 못한 실행의 확정이 늦다. 해제 뒤 W4를 다시 보내면 조용한 계좌에서 운영자가 보류를 풀 수 없고, 답 앞의 상한이나 held 없이 거두면 어느 메모에도 없는 차이가 사라진다. 끝 뒤의 execTime을 워터마크로 믿으면 그 뒤 창이 [end, end]가 되어 W4가 조용히 멈추고, 수량 0 행을 비교하면 OMS가 기록하지 않는 행으로 거짓 보류가 걸린다
 - 수준: 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나)
 - 전제와 범위: 엔진 시험 도구(프로세스 안의 모델 거래소의 체결 목록: 창 안을 새것부터 100개씩, 커서 e<번호>; 시험 저널; 시험 도구의 OMS가 watcher_mismatch에 답하고 hold_set을 씀), 종단 시험의 http-fake execution/list: 시험 34개
@@ -2934,44 +2934,44 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `watcher/a_missing_trade_needs_two_sweeps` | 통과 |  |
-| `watcher/the_sweep_starts_10_s_before_the_last_confirmed_exec_time` | 통과 |  |
-| `watcher/a_round_of_250_executions_is_compared_in_full_over_3_pages` | 통과 |  |
-| `watcher/a_row_loaded_late_inside_the_overlap_is_compared` | 통과 |  |
-| `watcher/the_watermark_never_moves_back` | 통과 |  |
-| `watcher/executions_1200_are_compared_over_two_rounds_and_the_w4_age_rises_between` | 통과 |  |
-| `watcher/an_empty_page_ends_the_sweep` | 통과 |  |
-| `watcher/an_unchanged_cursor_is_a_failed_page` | 통과 |  |
-| `watcher/a_failed_page_three_rounds_in_a_row_restarts_the_sweep_with_a_new_end` | 통과 |  |
-| `watcher/a_sweep_not_complete_after_50_rounds_restarts` | 통과 |  |
-| `watcher/an_adl_trade_the_journal_lacks_is_a_mismatch` | 통과 |  |
-| `watcher/a_trade_or_venue_change_with_other_details_is_a_difference` | 통과 |  |
-| `watcher/funding_rows_beside_known_fills_are_no_mismatch_while_a_position_is_held` | 통과 |  |
-| `watcher/an_unknown_exec_type_is_a_mismatch_at_once` | 통과 |  |
-| `watcher/an_unknown_exec_type_in_a_multi_round_sweep_is_confirmed_when_the_sweep_completes` | 통과 |  |
-| `watcher/a_funding_row_without_side_or_qty_is_ignored` | 통과 |  |
-| `watcher/a_trade_row_without_qty_is_an_unreadable_row_and_needs_two_sweeps` | 통과 |  |
-| `watcher/a_row_without_a_key_is_named_by_its_text` | 통과 |  |
-| `watcher/an_unconfirmed_row_without_a_readable_exec_time_holds_the_watermark` | 통과 |  |
-| `watcher/a_trade_at_the_fill_floor_millisecond_is_ignored` | 통과 |  |
-| `watcher/an_empty_window_logs_once_per_state_change` | 통과 |  |
-| `watcher/the_newest_agreeing_exec_time_is_kept_per_symbol` | 통과 |  |
-| `watcher/a_confirmed_row_is_not_sent_again_after_clear_hold_in_a_quiet_account` | 통과 |  |
-| `watcher/a_dismissed_row_that_leaves_the_window_and_a_changed_value_are_sent_anew` | 통과 |  |
-| `watcher/a_hold_seen_at_a_cap_sampled_before_the_answer_does_not_dismiss` | 통과 |  |
-| `watcher/a_row_confirmed_under_an_older_hold_is_sent_once_after_that_hold_is_cleared` | 통과 |  |
-| `watcher/a_young_difference_seen_twice_does_not_fail_the_sweep` | 통과 |  |
-| `watcher/a_trade_at_the_floor_itself_is_compared` | 통과 |  |
-| `watcher/a_round_that_reads_a_page_ends_the_run_of_failed_rounds` | 통과 |  |
-| `watcher/a_row_after_the_sweeps_end_is_an_unreadable_row_and_does_not_blind_w4` | 통과 |  |
-| `watcher/a_trade_or_venue_change_of_quantity_0_is_ignored_as_the_oms_ignores_it` | 통과 |  |
-| `watcher/an_already_held_answer_to_a_w4_send_does_not_pay_it` | 통과 |  |
-| `watcher/the_restart_warn_line_is_logged_once_per_run_of_failed_rounds` | 통과 |  |
-| `watcher/the_watcher_runs_against_loopback_fakes_end_to_end` | 통과 |  |
+| `watcher/a_missing_trade_needs_two_sweeps` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_sweep_starts_10_s_before_the_last_confirmed_exec_time` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_round_of_250_executions_is_compared_in_full_over_3_pages` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_row_loaded_late_inside_the_overlap_is_compared` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_watermark_never_moves_back` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/executions_1200_are_compared_over_two_rounds_and_the_w4_age_rises_between` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_empty_page_ends_the_sweep` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_unchanged_cursor_is_a_failed_page` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_failed_page_three_rounds_in_a_row_restarts_the_sweep_with_a_new_end` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_sweep_not_complete_after_50_rounds_restarts` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_adl_trade_the_journal_lacks_is_a_mismatch` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_trade_or_venue_change_with_other_details_is_a_difference` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/funding_rows_beside_known_fills_are_no_mismatch_while_a_position_is_held` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_unknown_exec_type_is_a_mismatch_at_once` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_unknown_exec_type_in_a_multi_round_sweep_is_confirmed_when_the_sweep_completes` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_funding_row_without_side_or_qty_is_ignored` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_trade_row_without_qty_is_an_unreadable_row_and_needs_two_sweeps` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_row_without_a_key_is_named_by_its_text` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_unconfirmed_row_without_a_readable_exec_time_holds_the_watermark` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_trade_at_the_fill_floor_millisecond_is_ignored` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_empty_window_logs_once_per_state_change` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_newest_agreeing_exec_time_is_kept_per_symbol` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_confirmed_row_is_not_sent_again_after_clear_hold_in_a_quiet_account` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_dismissed_row_that_leaves_the_window_and_a_changed_value_are_sent_anew` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_hold_seen_at_a_cap_sampled_before_the_answer_does_not_dismiss` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_row_confirmed_under_an_older_hold_is_sent_once_after_that_hold_is_cleared` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_young_difference_seen_twice_does_not_fail_the_sweep` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_trade_at_the_floor_itself_is_compared` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_round_that_reads_a_page_ends_the_run_of_failed_rounds` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_row_after_the_sweeps_end_is_an_unreadable_row_and_does_not_blind_w4` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_trade_or_venue_change_of_quantity_0_is_ignored_as_the_oms_ignores_it` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_already_held_answer_to_a_w4_send_does_not_pay_it` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_restart_warn_line_is_logged_once_per_run_of_failed_rounds` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_watcher_runs_against_loopback_fakes_end_to_end` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-WATCH-9 — 워처의 W3은 w3_ms마다 wallet-balance?accountType=UNIFIED의 UNIFIED 계좌 하나(정확히 하나, 세 필드가 저널 소수, 유지증거금이 음수가 아님; 아니면 unreadable로 라운드 실패)를 OMS의 공식으로 판단한다: account_mm_rate는 maintenance > 0이고 maintenance × 10 000 ≥ account_mm_rate_max_bps × margin_balance(같으면 건다), daily_loss는 저널의 일 기준값이 오늘의 UTC 날이고 (base − totalEquity) × 10 000 > daily_loss_bps × base(오늘의 기준이 없으면 판단하지 않는다). 정체는 종류뿐이고 두 라운드 연속에서 나이 없이 확정하며, 위반이 남아 있으면 해제 뒤 다시 보낸다. W2는 W4가 마지막으로 맞춘 그 기호의 execTime이 updatedTime이나 seen_at보다 새면 그것을 거래소의 변경 시각으로 쓴다. 하트비트의 W3·W4는 그 검사의 마지막 성공 시각이고, 실행은 W2(W4의 시각 지도와 함께), W3, W4를 돌리며 엔진 전에는 네 검사의 나이를 boot_ms부터 내보낸다. W4의 시각은 체결이 막 맞은 기호의 차이를 많아야 min_age_ms 동안만 미루고 그 뒤에는 확정되게 한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: W3이 한 라운드로 확정하면 순간의 값 하나로 보류가 걸리고(설계 "한도 위반 2회 연속"), 한도와 같은 값을 통과시키면 OMS가 감소 전용으로 들어가는 계좌를 워처가 괜찮다고 본다. 어제의 기준으로 일 손실을 판단하면 새 날의 첫 시세 변동이 거짓 보류가 된다. 두 UNIFIED 계좌 중 하나를 고르거나 음수 유지증거금을 읽으면 OMS가 거부하는 보고로 판단한다. W2가 W4의 체결 시각을 쓰지 않으면 updatedTime이 없거나 움직이지 않는 거래소에서 체결이 막 맞은 기호의 차이를 어린 채로 확정한다. 하트비트가 W3·W4를 null로 보내면 OMS 기록에서 두 검사가 사라진다
 - 수준: 단위(sans-IO, 수동 시계)와 통합(loopback 가짜, 실제 시간 하나)
 - 전제와 범위: 엔진 시험 도구(프로세스 안의 모델 거래소에 지갑 계좌 목록과 대본, 포지션과 체결; 시험 저널의 day_base_set·hold_cleared; 시험 도구의 OMS), 가짜 monitor.sock과 실제 oms::Monitor, runtime::checks, runtime::run과 http-fake의 wallet-balance 경로: 시험 9개
@@ -2985,19 +2985,19 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `watcher/a_margin_rate_at_the_limit_on_two_rounds_alarms` | 통과 |  |
-| `watcher/a_daily_loss_beyond_todays_base_on_two_rounds_alarms` | 통과 |  |
-| `watcher/without_todays_base_only_the_margin_rate_is_judged` | 통과 |  |
-| `watcher/an_unreadable_wallet_fails_the_round` | 통과 |  |
-| `watcher/a_missing_updated_time_falls_back_to_w4s_last_exec_time` | 통과 |  |
-| `watcher/w3_and_w4_success_times_reach_the_heartbeat` | 통과 |  |
-| `watcher/the_runtime_runs_w2_w3_and_w4_and_w2_reads_w4s_exec_times` | 통과 |  |
-| `watcher/a_key_rejected_at_start_is_exported` | 통과 |  |
-| `watcher/the_watcher_runs_against_loopback_fakes_end_to_end` | 통과 |  |
+| `watcher/a_margin_rate_at_the_limit_on_two_rounds_alarms` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_daily_loss_beyond_todays_base_on_two_rounds_alarms` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/without_todays_base_only_the_margin_rate_is_judged` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_unreadable_wallet_fails_the_round` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_missing_updated_time_falls_back_to_w4s_last_exec_time` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/w3_and_w4_success_times_reach_the_heartbeat` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_runtime_runs_w2_w3_and_w4_and_w2_reads_w4s_exec_times` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_key_rejected_at_start_is_exported` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_watcher_runs_against_loopback_fakes_end_to_end` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-WATCH-10 — W1·W2·W3·W4를 설계 간격(1초, 1초, 2초, 5초)으로 돌린 모의 1분(수동 시계, 실제 rest::Guard를 거친 모델 거래소, 요청 지연 0)에서 5초에 체결 30개를 고르게 주면 대조 요청은 W1 60 + W2 60 + W3 30 + W4 12 = 162개, 초당 2.7 이하이고 차이도 실패한 라운드도 없다. 5초에 100개면 192개(초당 3.2; 정상 상태는 훑기당 4쪽, 초당 3.3)로 설계 예산을 넘지만 W4는 12 훑기를 모두 자기 라운드에서 끝내고 정상 상태의 창은 15초다. 열린 주문 500개(W1 라운드 11쪽)에서는 가드가 10초에 60을 지키며 W1 라운드를 늘리지만 하트비트마다 W1·W2의 나이는 10초 아래다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 완료 기준이 요구하는 대조 예산(2.7 req/s, 설계 §7.5)을 잰다. W4의 겹침과 모든 커서 규칙이 큰 부하에서 그것을 넘는다는 충돌(소유자 질문 1)을 숫자로 보인다. 많은 열린 주문에서 가드가 W1·W2를 게이트의 10초 너머로 늘리면 OMS가 감시 없음으로 거래를 멈춘다
 - 수준: 단위(sans-IO 엔진과 sans-IO 가드, 수동 시계)
 - 전제와 범위: 시험 쪽 스케줄러(10ms 단계, 가드 앞에서 기다리는 요청은 먼저 온 것부터), 엔진 시험 도구의 모델 거래소(열린 주문, 포지션, 체결, 지갑)와 시험 저널: 시험 3개
@@ -3011,13 +3011,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `watcher/at_30_executions_per_5_s_the_reconciliation_rate_in_a_simulated_minute_stays_at_or_below_2_7` | 통과 |  |
-| `watcher/at_100_executions_per_5_s_the_rate_is_about_3_1_and_w4_keeps_up` | 통과 |  |
-| `watcher/at_500_open_orders_the_guard_stretches_w1_rounds_below_10_s` | 통과 |  |
+| `watcher/at_30_executions_per_5_s_the_reconciliation_rate_in_a_simulated_minute_stays_at_or_below_2_7` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/at_100_executions_per_5_s_the_rate_is_about_3_1_and_w4_keeps_up` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/at_500_open_orders_the_guard_stretches_w1_rounds_below_10_s` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-WATCH-11 — 워처의 [telegram]은 token_file 하나만 받고(모르는 키 거부) mainnet은 그것 없이 시작하지 않는다(testnet은 warn 한 줄). 토큰 파일은 설정의 경로 규칙과 자격 파일의 파일 규칙(링크 아님, 일반 파일, 실효 uid 소유, 정확히 0600·0400)을 여는 핸들에 적용하고, 적힌 경로나 가리키는 곳이 git 저장소 안이면 읽기 전에 거부하며, {"token": "<digits>:<[A-Za-z0-9_-]+>", "chat_id": 비지 않은 문자열 또는 정수} 말고는 거부한다. 거부는 내용과 토큰을 인용하지 않고, 실행은 그것을 시작 확인 전에 종료 코드 2로 끝내며 요청을 보내지 않는다. 읽은 값과 설정의 Debug는 토큰을 보이지 않는다. 메시지는 [WATCH P1] bybit {name} {MM-DD HH:MM:SS KST}로 시작하고, split은 각 부분을 3,500 UTF-16 단위 이하로 줄 끝에서(긴 줄은 문자 단위로, 이모지를 쪼개지 않고) 자르며 글자를 잃지 않는다(부분 경계와 맨 앞의 빈 줄은 사라질 수 있고, 빈 부분은 만들지 않는다). Outbox는 50개를 넘으면 가장 오래된 부분을 버리고 세고, 큐가 빈 뒤 알림 하나로 그 수를 알리며, 보내는 중 버려진 부분을 두 번 지우거나 세지 않는다. outcome은 2xx와 ok true만 Delivered, 400·413은 Refused(버리고 셈), 나머지는 Retry(두고 흘려보내기를 끝냄)다. Repeat는 시작 한 번, 300,000 ms마다 최신 문구 한 번, 해소: <시작 문구> 한 번을 낸다. 송신 태스크(alert::spawn, U19b1b)는 경로를 순서대로 써서 네트워크 오류면 다음 경로(DNS 다음 고정 주소)로 가고, HTTP 답이 결정하며, 답한 경로가 다음부터 맨 앞이다. 부분을 순서대로 하나씩 보내고 Retry에서 그 부분을 두고 흘려보내기를 끝낸다. 새 메시지가 Notify로 바로 깨우고, 그 밖에는 흘려보내기가 끝난 주입된 시계 + 5,000 ms에 실행의 틱(Handle::tick)만 깨운다(자기 타이머 없음). 답이 오지 않는 요청은 실제 시간 10,000 ms의 요청 한도에서 실패로 세고 그 부분을 둔다. 로그 줄은 경로와 원인을 적고 토큰과 URL을 적지 않는다. finish(5,000)은 마지막 흘려보내기를 실제 시간 5,000 ms 안에서 하고 남은 부분을 한 줄로 센다. 네 지표(queued, delivered, dropped, failures)가 이것을 따른다. P1 조건(U19b1c): 엔진은 라운드마다 새로 확정한 식별자의 내용을 Action::Confirmed 하나로 그 라운드의 Mismatch보다 앞에 내고 다시 보내기는 내지 않는다. 불일치 P1은 확정마다이고 검사마다 첫 것은 바로, 그 뒤 마지막 메시지에서 60,000 ms에 하나이며 그 사이 확정은 모아(내용 다섯, 각 600 UTF-16 단위, 나머지는 수) 다음 메시지로 간다. Client::auth_stop은 래치를 건 첫 답(retMsg, HTTP 401의 본문)이나 규칙 멈춤의 이유를 바꾸지 않고 들며, 실행은 틱마다 그것과 start::PublicIp(게이지가 0인 이유)를 반복 규칙에 줘서 다시 보내지 않는 답(10010·10003·33004·401 포함)마다 답 뒤의 첫 틱에 하나, 5분마다 하나, 공인 IP는 해소 하나를 보낸다. 송신기는 시작 확인 전에 뜨고(2단계의 키 거부도 알림), 시작 거부는 P1 하나를 보내고 5,000 ms 안에 흘려보낸 뒤 종료 코드 2, 종료는 60초 간격 안에 모인 불일치 메시지를 간격과 상관없이 넣고 U19a 단계 뒤 흘려보낸다. 시작 거부의 이유는 200자로 자른다. 실행의 틱이 송신기의 다시 보내기를 깨운다. [telegram]이 없으면 모든 P1(불일치, 키 거부, 시작 거부)은 warn 한 줄이다. mainnet_confirmed 검사가 [telegram] 검사보다 먼저다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 토큰이 오류·로그·Debug·git 저장소에 나오면 누구나 그 봇으로 운영자 채팅에 쓸 수 있다. mainnet의 워처가 [telegram] 없이 돌면 OMS가 죽었을 때 아무도 모른다(설계 §7.7). 보관함이 새 부분을 버리면 가장 최근의 P1(대개 가장 중요한 것)을 잃고, 400을 다시 보내면 낫지 않는 메시지가 큐를 막으며, 500을 버리면 텔레그램이 잠깐 아플 때 P1을 잃는다. 반복 규칙이 매번 보내면 지속 조건 하나가 채팅을 덮는다. 4,096 UTF-16을 넘는 메시지는 텔레그램이 거부한다. DNS가 막힌 곳에서 고정 경로로 가지 않으면 OMS가 죽었다는 P1이 닿지 않는다. 송신이 자기 실제 시간 타이머로 돌면 수동 시계 시험이 간격을 증명하지 못하고, 종료가 한도 없이 기다리면 워처가 멈추지 않는다
 - 수준: 단위(순수 함수, 파일 시스템)와 통합(runtime::run과 송신 태스크, loopback 가짜, 실제 시간)
 - 전제와 범위: watcher::alert의 순수 부분, Config::from_toml, creds::load_token과 token_file_rules(시험 디렉터리 OMS_TEST_DIR의 파일, 링크, FIFO, .git 디렉터리와 worktree의 .git 파일), runtime::run의 시작(http-fake), alert::spawn의 송신 태스크(런타임 없이, http-fake와 dead_addr, telegram.invalid의 고정 경로), U19b1c의 P1 조건(엔진 rig와 수동 시계, Start·IpCheck를 손으로, 클라이언트는 http-fake)과 runtime::run의 연결(loopback 텔레그램 가짜, 수동 시계와 실제 시계): 시험 29개
@@ -3031,36 +3031,36 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `watcher/a_confirmation_emits_one_confirmed_action_per_identity` | 통과 |  |
-| `watcher/mismatch_notices_are_at_most_one_per_check_per_60_s_and_collect_the_rest` | 통과 |  |
-| `watcher/an_auth_answer_sends_one_watch_p1_at_once` | 통과 |  |
-| `watcher/public_ip_ok_0_sends_one_watch_p1_and_a_clear` | 통과 |  |
-| `watcher/a_confirmed_mismatch_sends_one_watch_p1` | 통과 |  |
-| `watcher/auth_stop_keeps_the_first_text` | 통과 |  |
-| `watcher/a_key_rejected_at_start_is_told_on_telegram` | 통과 |  |
-| `watcher/a_start_refusal_after_the_sender_is_up_sends_one_watch_p1` | 통과 |  |
-| `watcher/a_confirmed_mismatch_is_told_on_telegram_once` | 통과 |  |
-| `watcher/a_mismatch_collected_inside_the_pace_is_sent_at_shutdown` | 통과 |  |
-| `watcher/mismatch_notices_drain_tells_what_the_pace_holds` | 통과 |  |
-| `watcher/the_start_refusal_reason_is_cut_to_200_characters` | 통과 |  |
-| `watcher/a_recheck_that_fails_a_start_rule_stops_every_bybit_request` | 통과 |  |
-| `watcher/a_network_error_moves_to_the_pinned_route` | 통과 |  |
-| `watcher/the_token_is_never_in_a_log_line` | 통과 |  |
-| `watcher/the_sender_task_flushes_on_the_manual_clock` | 통과 |  |
-| `watcher/a_retry_keeps_the_part_for_the_next_flush` | 통과 |  |
-| `watcher/shutdown_flushes_within_5_s_and_counts_the_rest` | 통과 |  |
-| `watcher/set_queues_what_the_repeat_rule_gives` | 통과 |  |
-| `watcher/a_request_without_an_answer_fails_after_10_s` | 통과 |  |
-| `watcher/messages_split_at_3500_utf16_units_at_line_ends` | 통과 |  |
-| `watcher/the_outbox_keeps_50_parts_and_reports_the_drops_once` | 통과 |  |
-| `watcher/answers_400_and_413_drop_the_part_and_other_answers_keep_it` | 통과 |  |
-| `watcher/the_repeat_rule_sends_start_every_5_min_and_clear` | 통과 |  |
-| `watcher/the_token_is_never_in_debug` | 통과 |  |
-| `watcher/a_message_has_the_watch_p1_header_with_the_name_and_kst` | 통과 |  |
-| `watcher/telegram_is_validated_and_required_on_mainnet` | 통과 |  |
-| `watcher/the_token_file_must_be_owner_only_outside_any_repository` | 통과 |  |
-| `watcher/a_start_refusal_ends_the_run_with_exit_code_2` | 통과 |  |
-| `watcher/the_config_is_validated_and_mainnet_needs_confirmation` | 통과 |  |
+| `watcher/a_confirmation_emits_one_confirmed_action_per_identity` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/mismatch_notices_are_at_most_one_per_check_per_60_s_and_collect_the_rest` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_auth_answer_sends_one_watch_p1_at_once` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/public_ip_ok_0_sends_one_watch_p1_and_a_clear` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_confirmed_mismatch_sends_one_watch_p1` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/auth_stop_keeps_the_first_text` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_key_rejected_at_start_is_told_on_telegram` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_start_refusal_after_the_sender_is_up_sends_one_watch_p1` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_confirmed_mismatch_is_told_on_telegram_once` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_mismatch_collected_inside_the_pace_is_sent_at_shutdown` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/mismatch_notices_drain_tells_what_the_pace_holds` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_start_refusal_reason_is_cut_to_200_characters` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_recheck_that_fails_a_start_rule_stops_every_bybit_request` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_network_error_moves_to_the_pinned_route` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_token_is_never_in_a_log_line` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_sender_task_flushes_on_the_manual_clock` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_retry_keeps_the_part_for_the_next_flush` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/shutdown_flushes_within_5_s_and_counts_the_rest` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/set_queues_what_the_repeat_rule_gives` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_request_without_an_answer_fails_after_10_s` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/messages_split_at_3500_utf16_units_at_line_ends` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_outbox_keeps_50_parts_and_reports_the_drops_once` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/answers_400_and_413_drop_the_part_and_other_answers_keep_it` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_repeat_rule_sends_start_every_5_min_and_clear` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_token_is_never_in_debug` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_message_has_the_watch_p1_header_with_the_name_and_kst` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/telegram_is_validated_and_required_on_mainnet` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_token_file_must_be_owner_only_outside_any_repository` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_start_refusal_ends_the_run_with_exit_code_2` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_config_is_validated_and_mainnet_needs_confirmation` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-WATCH-12 — 워처의 서명된 POST는 Client::cancel_all 하나뿐이다: 경로 /v5/order/cancel-all과 본문 {"category":"linear","settleCoin":"USDT"}는 상수이고, 서명은 timestamp + api_key + recv_window + 보내는 본문의 바이트 위에 하며(거래소의 POST 예와 독립 HMAC 값), 머리글 다섯과 Content-Type application/json을 달고, 요청 제한·403 멈춤·키 래치를 지나며 보내기 전에 watcher_requests_total에 센다. 답은 success가 없거나 "1"이면 result.list의 길이, "0"이면 refused, 목록이 아니거나 다른 값이면 unreadable이다. crates/watcher/src의 글자에는 .post(가 rest.rs·metrics.rs·alert.rs에 하나씩만 있고 Method::·.request(·.put(·.patch(·.delete(는 없다. [kill]은 round_ms·watch_ms·watch_every_ms·notice_ms를 OMS의 kill_* 기본값과 범위로 받고, 그것이 있으면 시작 2단계와 재확인은 readOnly 0(정수), ContractTrade의 Order, 어느 목록에도 Withdraw 없음을 요구한다(시작은 종료 2, 재확인은 재시작까지 모든 Bybit 요청과 일괄 취소를 멈춤). 읽히는 규칙 하나가 맞지 않으면 다른 필드나 목록을 읽을 수 없어도 거부하고, 읽히는 규칙이 모두 맞는데 읽을 수 없는 것이 있으면 시작은 5초 뒤, 재확인은 ip_check_ms 뒤 다시 묻는다(재확인 실패, 멈춤 아님). [kill]이 없으면 그것을 읽지 않는다. Dec::percent_floor는 0.01 %로 내리고 넘치면 None이다. 킬 알림의 포지션 묶음은 기호마다 방향·수량·미실현손익·마크·마크에서 강제청산가까지의 거리(내림)를 적고, 청산가가 비었거나 0이거나 마크가 0 이하면 모름, 크기 0인 행은 빼고 크기를 읽을 수 없는 행은 수량 모름으로 보이며(포지션 없음이라 하지 않음) 20행 뒤는 수로 센다. 포지션 읽기는 5쪽까지, 읽기 시작 + request_timeout_ms + 11,000 ms의 기한 때나 뒤에 답한 쪽에서 끝내고 다음 쪽을 보내지 않으며, 래치나 멈춤이면 묻지 않는다. 알림 문구는 워처 킬로 시작하고, 마지막 알림의 줄은 StopOutcome 다섯을 따르며 래치와 경로를 확인한 마커의 멈춤만 clear-hold를 말하고, 키 래치와 403 멈춤의 진행 문구는 정한 줄이며, 중단 알림은 포지션 조회 안 함(워처 종료 중)으로 끝난다. sans-IO KillLoop(U19b2b)는 보낸 모든 일괄 취소 뒤(실패해도) 세고, 보내지 않은 것 뒤에는 세지 않고 다음 라운드를 기다리며, 세기 오류는 0이 아니고, n > 0이면 t_r + round_ms까지 기다리며, 첫 0의 z부터 watch_every_ms마다 세어 z + watch_ms 때나 뒤에 낸 세기의 0에서만 끝난다(지켜봄의 늦은 주문은 곧바로 일괄 취소, C5에 들어올 때마다 새 z, watch_ms가 watch_every_ms의 배수가 아니어도 마지막 세기는 z + watch_ms, 지켜봄의 늦은 주문이 연 라운드는 그 세기의 시각에 시작). 두 번째 start는 아무것도 하지 않는다. 요청 둘이 함께 열리지 않고, 어느 [t, t + 1,000) ms에도 일괄 취소를 둘 넘게 내지 않으며(설정에 맞는 타이밍에서는 예산이 잡지 않고 두 일괄 취소가 1,000 ms보다 가깝지 않다), 요청의 기한은 낸 시각 + request_timeout_ms + 11,000 ms이고 세기는 기한 전에 답한 쪽마다 그것을 옮기며, 기한 때나 뒤의 답·쪽은 기한 뒤(세기 오류, 일괄 취소 Failed)이고 그 뒤의 같은 req_id 답과 쪽은 버리며(버린 세기의 쪽은 지금 열린 세기의 기한을 옮기지 않는다), next_wake는 기한·라운드·지켜봄·예산의 시각과 다음 진행 표시 중 가장 이른 것이다. 알림은 시작, 시작에 묶인 notice_ms 표시마다 진행 하나(건수가 같아도; 바뀐 건수의 알림은 없다), 끝에서 곧바로 마지막, 중단 하나와 끝이고, 10분 동안 조회가 실패해도 600초 창마다 12개 이하(시작 1 + 진행 10 + 마지막 1)다. U19b2c의 세기는 /v5/order/realtime linear USDT의 모든 쪽을 W1의 쪽 규칙으로 20쪽까지 읽고(20쪽째에도 커서가 있으면 세기 오류), orderStatus가 New·PartiallyFilled·Untriggered인 행을 orderLinkId와 상관없이 세며(남의 주문도), orderStatus가 없거나 읽을 수 없는 쪽은 세기 오류다. 세기 태스크는 루프가 그 세기를 낸 시각(첫 실행이 아님), 그 뒤 쪽마다 답한 시각 + request_timeout_ms + 11,000 ms의 기한을 스스로 지켜 기한 때나 뒤에 답한 쪽 뒤에는 묻지 않는다. 일괄 취소가 나갔는지는 보내기 전 상태로 가린다(래치 NotSent(Latched), 403 멈춤 동안 NotSent(Paused)이고 멈춤이 끝나면 다시 보냄, 연결 못 함 NotSent(Local), 그 밖은 Failed). kill::Inflight는 루프의 요청마다 태스크 하나를 돌리고 루프의 기한(open_request) 때나 뒤에, 또는 루프가 버린 요청이면 곧바로 끊고 그 태스크가 보낸 것을 루프에 주지 않으며, 새 요청 전에 산 태스크를 끊고, Inflight가 사라질 때 모두 끊는다. http-fake와 수동 시계의 시험 장치에서 일괄 취소 뒤 한 건이 남거나 5xx가 와도 루프는 0을 확인할 때까지 되풀이하고 어느 [t, t + 1,000) ms에도 일괄 취소가 거래소에 둘 넘게 닿지 않는다. 킬 알림의 초는 ms를 정확히 쓴다(12,500 → 12.5). cancel_all_calls는 일괄 취소의 답(Done·Failed, 기한 뒤 포함)에서 세고 버린 늦은 답은 세지 않는다. 세기 태스크는 기한 전에 돌아온 쪽 요청마다 on_page를 부르고, 클라이언트가 보내지 않은 요청(래치, 멈춤)도 한 쪽으로 알린 뒤 그 오류를 세기 결과로 준다
 
@@ -3078,51 +3078,51 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `watcher/the_post_string_to_sign_matches_the_published_example_and_independent_values` | 통과 |  |
-| `watcher/the_only_post_is_cancel_all_with_the_fixed_body` | 통과 |  |
-| `watcher/cancel_all_answers_are_classified` | 통과 |  |
-| `watcher/no_other_post_exists` | 통과 |  |
-| `watcher/kill_loop_fields_are_validated` | 통과 |  |
-| `watcher/a_key_that_must_cancel_needs_read_write_order_and_no_withdraw` | 통과 |  |
+| `watcher/the_post_string_to_sign_matches_the_published_example_and_independent_values` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_only_post_is_cancel_all_with_the_fixed_body` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/cancel_all_answers_are_classified` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/no_other_post_exists` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/kill_loop_fields_are_validated` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_key_that_must_cancel_needs_read_write_order_and_no_withdraw` | 미실행 | result of another source, not counted (last result: passed) |
 | `watcher/percent_floor_rounds_toward_zero_and_refuses_overflow` | 미실행 |  |
-| `watcher/the_position_block_lists_size_upnl_mark_and_liquidation_distance` | 통과 |  |
-| `watcher/a_failed_position_read_says_unknown` | 통과 |  |
-| `watcher/a_notice_fits_one_part_with_50_positions` | 통과 |  |
-| `watcher/the_final_notice_names_the_stop_outcome` | 통과 |  |
-| `watcher/a_latched_key_says_the_watcher_must_restart` | 통과 |  |
-| `watcher/the_abort_notice_says_positions_were_not_read` | 통과 |  |
-| `watcher/the_position_reader_pages_and_keeps_its_deadline` | 통과 |  |
-| `watcher/the_loop_cancels_counts_and_ends_after_the_watch` | 통과 |  |
-| `watcher/a_count_above_zero_waits_for_the_round` | 통과 |  |
-| `watcher/a_failed_cancel_all_is_still_followed_by_a_count` | 통과 |  |
-| `watcher/a_cancel_all_that_succeeds_clears_the_last_error` | 통과 |  |
-| `watcher/a_cancel_all_not_sent_waits_for_the_next_round` | 통과 |  |
-| `watcher/a_failed_count_is_never_zero` | 통과 |  |
-| `watcher/a_late_order_in_the_watch_goes_back_to_cancel_at_once` | 통과 |  |
-| `watcher/the_watch_ends_only_on_the_count_due_at_its_end` | 통과 |  |
-| `watcher/two_requests_of_the_loop_are_never_in_flight` | 통과 |  |
-| `watcher/a_request_past_its_deadline_fails_and_a_late_answer_is_ignored` | 통과 |  |
-| `watcher/an_answer_handled_at_its_deadline_is_past_it` | 통과 |  |
-| `watcher/a_slow_paged_count_is_not_failed_while_pages_answer` | 통과 |  |
-| `watcher/a_progress_notice_comes_every_60_s_also_with_an_unchanged_count` | 통과 |  |
-| `watcher/the_notice_rule_sends_no_change_notice` | 통과 |  |
-| `watcher/ten_minutes_of_failing_queries_make_at_most_12_notices` | 통과 |  |
-| `watcher/abort_sends_one_notice_and_ends` | 통과 |  |
-| `watcher/the_outcome_set_during_the_loop_is_in_the_final_notice` | 통과 |  |
-| `watcher/the_order_budget_holds_under_any_answer_sequence` | 통과 |  |
-| `watcher/a_watch_that_is_no_multiple_of_its_step_ends_at_watch_ms` | 통과 |  |
-| `watcher/a_second_start_does_nothing` | 통과 |  |
-| `watcher/the_next_wake_is_the_earliest_due_instant_or_progress_mark` | 통과 |  |
-| `watcher/foreign_orders_count` | 통과 |  |
-| `watcher/an_aborted_task_sends_no_answer_to_the_loop` | 통과 |  |
-| `watcher/one_order_left_after_the_first_cancel_all_repeats_until_zero_is_confirmed` | 통과 |  |
-| `watcher/a_5xx_cancel_all_or_count_repeats_until_zero_is_confirmed` | 통과 |  |
-| `watcher/a_late_count_page_ends_the_count_task` | 통과 |  |
-| `watcher/a_count_past_its_deadline_sends_no_further_page` | 통과 |  |
-| `watcher/more_than_1000_open_orders_is_a_count_error` | 통과 |  |
-| `watcher/a_cancel_all_not_sent_is_told_from_the_state_before_the_call` | 통과 |  |
-| `watcher/a_count_task_keeps_the_loops_deadline_from_its_emission` | 통과 |  |
-| `watcher/a_dropped_inflight_aborts_its_tasks` | 통과 |  |
+| `watcher/the_position_block_lists_size_upnl_mark_and_liquidation_distance` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_failed_position_read_says_unknown` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_notice_fits_one_part_with_50_positions` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_final_notice_names_the_stop_outcome` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_latched_key_says_the_watcher_must_restart` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_abort_notice_says_positions_were_not_read` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_position_reader_pages_and_keeps_its_deadline` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_loop_cancels_counts_and_ends_after_the_watch` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_count_above_zero_waits_for_the_round` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_failed_cancel_all_is_still_followed_by_a_count` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_cancel_all_that_succeeds_clears_the_last_error` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_cancel_all_not_sent_waits_for_the_next_round` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_failed_count_is_never_zero` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_late_order_in_the_watch_goes_back_to_cancel_at_once` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_watch_ends_only_on_the_count_due_at_its_end` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/two_requests_of_the_loop_are_never_in_flight` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_request_past_its_deadline_fails_and_a_late_answer_is_ignored` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_answer_handled_at_its_deadline_is_past_it` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_slow_paged_count_is_not_failed_while_pages_answer` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_progress_notice_comes_every_60_s_also_with_an_unchanged_count` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_notice_rule_sends_no_change_notice` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/ten_minutes_of_failing_queries_make_at_most_12_notices` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/abort_sends_one_notice_and_ends` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_outcome_set_during_the_loop_is_in_the_final_notice` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_order_budget_holds_under_any_answer_sequence` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_watch_that_is_no_multiple_of_its_step_ends_at_watch_ms` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_second_start_does_nothing` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_next_wake_is_the_earliest_due_instant_or_progress_mark` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/foreign_orders_count` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_aborted_task_sends_no_answer_to_the_loop` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/one_order_left_after_the_first_cancel_all_repeats_until_zero_is_confirmed` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_5xx_cancel_all_or_count_repeats_until_zero_is_confirmed` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_late_count_page_ends_the_count_task` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_count_past_its_deadline_sends_no_further_page` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/more_than_1000_open_orders_is_a_count_error` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_cancel_all_not_sent_is_told_from_the_state_before_the_call` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_count_task_keeps_the_loops_deadline_from_its_emission` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_dropped_inflight_aborts_its_tasks` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-WATCH-13 — [w5]은 probe_ms 1,000(500~5,000)과 silence_ms 10,000(3,000~60,000)을 받고 [kill]이 있으면 silence_ms ≥ 3 × probe_ms + 3 × request_timeout_ms + 1,000이어야 한다(잃은 탐침 하나도, 틈 한계보다 짧은 워처의 멈춤 하나도 건강한 OMS를 킬하지 않게). [kill]은 marker(OMS의 규칙: 절대 경로, .. 없음, 가리키는 곳이 data_dir 밖, 디렉터리가 있음)와 oms_unit([A-Za-z0-9:_.@-] 1~255자, .service로 끝남, -로 시작하지 않음)이 필수이고 systemd system|user와 stop_wait_ms 10,000(1,000~120,000)을 받으며, mainnet은 [kill] 없이 시작하지 않고 testnet은 warn 한 줄을 남긴다. sans-IO W5는 [kill]이 없으면 Off, arm 전에는 탐침도 쏨도 없고, Armed와 Rearming에서 앞 탐침을 낸 때부터 probe_ms마다 탐침 하나를 내되 둘을 함께 열지 않으며, 낸 시각 + request_timeout_ms + 1,000 ms 때나 뒤에 답 없는 탐침은 실패이고, 탐침의 답은 온 때 받으며(기한 정각이라도 poll이 적용하기 전이면), 열리지 않은 탐침의 답은 버리고, 2xx JSON에 16자리 16진수 core.instance_id인 답만 정상이다. Armed에서 now − last_good_ms ≥ silence_ms이고 last_good_ms 때나 뒤에 낸 탐침이 실패했을 때만 Fire를 한 번 내고 Killing에서는 탐침이 없다. 두 시각이 2 × probe_ms + request_timeout_ms보다 멀면 W5가 가진 시각을 모두 그 틈만큼 옮기고 warn 한 줄을 남긴다(보지 못한 시간은 침묵이 아니다). kill_ended 뒤에는 정상 응답 하나가 Armed로 돌리고, 정지를 빚졌으면 그 응답이 OwedHalt 하나를 내며(진행 중에는 둘째가 없음) latched나 already latched로 시작하는 답이면 늦은 정지 P1과 Armed, 그 밖에는 빚이 남고 첫 실패에만 늦은 정지 실패 P1, 실패 뒤의 래치는 해소 줄을 단다. clock::Steady는 안쪽 시계가 뒤로 가도 앞서 준 값보다 작은 값을 주지 않고 그 뒤의 진행은 그대로 더하며 앞으로 뛴 걸음은 지나가게 하고 모든 읽는 쪽에 한 시간선을 준다. oms::admin_kill은 연결 하나에 hello 다음 watcher_kill {detail}을 보내 답마다 timeout_ms, 전체 2 × timeout_ms 안에 result나 이유를 준다. stop::Stopper는 정확히 <systemctl> [--user] --no-ask-password stop -- <oms_unit>을 stdin·stdout null, stderr 비차단 파이프로 띄우고, 틱마다 try_wait만 하며 끝난 뒤에만 stderr를 4 KiB까지 기다리지 않고 읽어, 0이면 Stopped, 다른 끝은 exit <code>: <첫 줄>이나 signal <n>, 주입된 시계의 기한 때나 뒤에 아직 돌면 죽이고 Unconfirmed, 그 뒤의 틱이 거둔다. crates/watcher/src의 글자에 Command::new는 stop.rs에 하나뿐이다. 킬 순서 kill::Kill(U19b3b, sans-IO)은 K1 WriteMarker(기한 2,000 ms, 실패나 기한에도 계속, 늦은 결과는 버림) → K2 Halt(기한 2 × request_timeout_ms + 1,000 ms; latched·already latched·재무장 답만 정지; 열린 시도의 답은 기한 정각이라도 poll 전이면 받고 닫힌 시도의 답은 버림) → K2가 정지하지 못했을 때만 K3 StopUnit(now + stop_wait_ms; 지나면 Unconfirmed, 늦은 결과는 버림) → KillLoop::start의 순서로 내고, 첫 CancelAll과 시작 알림은 그 뒤에만 나온다. 머리는 W5의 침묵, 원래 시계의 마지막 정상 응답 KST(없으면 이 프로세스에서 없음), 킬 마커(씀·이미 있음, 경로를 확인하지 않았으면 그 말, 쓰지 못함(<kind>), 시간 초과), OMS 정지(watcher_kill → <답>, 또는 watcher_kill 실패(<이유>) → systemctl stop <unit>: 정지됨·실패·정지 확인 못 함)를 말하고 K2가 실패하고 멈춤이 확인되지 않으면 X8 줄을 달며, 자유 문구는 글자 경계에서 200 UTF-16 단위로 잘리고(BMP 밖 글자는 2단위) 제어 문자가 없어 머리는 침묵 10초에서 가장 길 때 1,029 단위이고 침묵의 초 문구 글자 하나마다 1단위 늘어 가장 길 때 1,048 단위다(래치한 답도 같이 자름). 루프를 시작할 때 halt_owed = !halted && !(stopped && marker_in_place)이고 marker_in_place는 Written·AlreadyPresent와 marker_checked다; StopOutcome은 Latched·StoppedMarked·StoppedUncheckedMarker·StoppedUnmarked·Unconfirmed이고 마지막 알림의 줄과 Ended의 halt_owed가 같다. 빚이 있는 동안 루프에서 앞 시도가 끝난 때(답이 온 때나 기한, 답 없는 K2의 기한 포함)부터 5,000 ms마다 Halt를 다시 내되 둘을 함께 열지 않고(워처 키가 래치되어도), 루프가 끝날 때 열린 시도는 닫으며(halt_open 없음, 늦은 답은 버림, Ended의 halt_owed는 참), 래치한 답은 LateHalt 알림 하나, 빚 없음, 마지막 줄 Latched와 재시도 끝을 준다. Kill::abort는 루프 전이면 그때까지의 머리(끝나지 않은 단계는 진행 중)와 일괄 취소 전 줄, 포지션 조회 안 함 줄의 알림 하나와 Ended(aborted, halt_owed)를, 루프 안이면 루프의 중단을 준다. clock::Steady 위의 Kill은 원래 시계가 킬 전과 루프 중에 60초 뒤로 가도 일괄 취소·재시도·진행 알림을 진행 기준으로 제때 내고, 마커 문구와 머리의 시각은 원래 시계다. kill::write_marker는 무엇이든 있으면 AlreadyPresent로 건드리지 않고, 없으면 자기 임시 이름(옛 것은 먼저 지움)에 0600으로 써 sync_all, hard_link, 임시 이름 지움, 디렉터리 sync_all 뒤 Written, 오류는 Failed(<io 종류>); 문구는 512바이트, detail은 1,024바이트 이하로 글자 경계에서 자르고 OMS의 read_kill_marker는 그 파일에서 marker: <문구>를 읽는다. 실행(U19b3c)은 시작 확인이 끝난 때 W5를 무장하고 그 뒤 모든 단계에서 틱마다 돌린다. [kill]이 있으면 node.kill_marker가 워처의 마커와 같은 파일(가리키는 곳으로 비교)을 가리키지 않는 상태 답(configured false 포함)에 시작을 거부한다(종료 코드 2, 시작 거부 P1, 같은 파일을 가리키는 링크는 됨). W5가 쏘면 마커를 쓰고, watcher_kill을 보내고(답 없는 시도는 K2 기한에 태스크를 끊어 연결을 닫음), 그것이 래치하지 못했을 때만 systemctl stop을 돌린 뒤에야 첫 일괄 취소를 보내며, 루프를 Inflight로 돌려 남은 주문·5xx 일괄 취소·5xx 세기에도 0건 확인까지 round_ms마다(어느 1초에도 둘 이하, 보낸 일괄 취소마다 세기 하나) 되풀이한다. 빚진 정지는 루프 중 5초마다 다시 보내 돌아온 OMS를 킬 동안 래치하고(watcher_kill 하나, 늦은 정지 알림 하나, 마지막 알림 OMS는 래치됨, 워처 키가 10010으로 래치되어 일괄 취소가 없어도), 킬 동안 엔진은 라운드도 하트비트도 내지 않고 검사 나이는 계속 오르며, 끝나면 엔진이 다시 돌고 정상 응답 하나 뒤 W5가 다시 무장한다. 시계가 루프 중 60초 뒤로 가도 다음 일괄 취소는 round_ms + 한 걸음 안에 나간다. OMS가 내려간 채 시작한 워처도 침묵 뒤 킬하고 시작 알림은 이 프로세스에서 없음과 경로 확인 못 함을 말하며, 실행이 남긴 마커는 0600 일반 파일이고 임시 파일이 남지 않는다. 킬 알림마다 포지션 묶음이 붙는다. 루프 뒤 정지를 빚진 킬 다음 OMS가 다시 답하면 watcher_kill 하나를 보내고(K2의 기한, 답이 없으면 늦은 정지 실패 P1 하나, 래치하면 늦은 정지 P1과 해소, W5가 다시 지킴), 시작 뒤 탐침 답의 마커 경로가 다르면 marker_path P1과 함께 마커를 제자리로 세지 않아 그때의 킬이 정지를 빚으며, 킬 중의 종료는 중단 알림 하나로 끝나고 그 뒤 일괄 취소가 없고 systemctl 클라이언트를 죽이지 않으며, 킬이 끝난 바로 뒤의 종료도 포지션 읽기를 기다리던 마지막 알림을 조회 안 함 줄과 함께 보내고, 킬 중의 시작 거부는 중단 알림 다음 거부 P1과 종료 코드 2이고 정지를 빚졌으면(루프 전 K1~K3 중이면 빚으로 봄) 그 전에 watcher_kill 하나(나가 있는 것이 있으면 그것)를 보내 결과를 거부 P1에 적는다. 600초 동안 조회가 실패해도 [s, s + 600 s]의 메시지는 12개 이하이고, 킬의 모든 메시지가 포지션 묶음이나 조회 실패나 조회 안 함 줄을 가지며, 기한 뒤에 답한 포지션 읽기는 시간 초과이고 다음 쪽을 묻지 않는다. 루프 전에 중단된 킬의 Ended는 halt_owed = true다. K2의 detail은 W5: /api/status gave no good answer for <s> s; watcher <name>이고, 루프 중 재시도·루프 뒤 빚진 정지·거부 전 정지의 detail은 W5: 늦은 정지: watcher <name>의 킬이 OMS 래치나 정지를 확인하지 못함이다. 클라이언트의 요청 가드는 clock::Steady를 읽어 시계가 뒤로 간 걸음이 가득 찬 창을 그만큼 늘리지 않고, 서명의 시각은 원래 시계다. 킬 알림은 한 번에 하나씩 낸 순서대로 가고, 16개를 넘게 기다리면 가장 오래 기다린 진행 알림만 버리며 시작·마지막·늦은 정지 알림은 버리지 않는다. 킬 중 이미 나간 엔진 요청의 답이 내는 다음 쪽·상태 요청·watcher_mismatch는 보내지 않고 불일치 P1은 보낸다. 두 틱 사이에 끝난 K3의 정지는 K3 기한 정각의 틱에도 정지됨으로 알린다. 루프 뒤의 빚진 정지는 새 킬을 시작하지 않고, 시작 뒤 탐침 답의 마커 경로가 다시 맞으면 marker_path를 해소한다. 거부 P1의 늦은 정지: 뒤에는 래치한 답만 그대로 적고 다른 답과 오류는 실패(<이유>)로 적으며, 거부가 watcher_kill을 기다리는 동안 SIGTERM이 오면 종료가 이겨 중단 알림 하나만 가고 거부 P1 없이 종료 코드 0이며, 그동안 잡아 두었다 놓은 루프의 답에 실행이 쉬지 않고 돌지 않는다
 
@@ -3140,82 +3140,82 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `watcher/kill_and_w5_are_validated_and_kill_is_required_on_mainnet` | 통과 |  |
-| `watcher/kill_loop_fields_are_validated` | 통과 |  |
-| `watcher/a_steady_clock_does_not_step_back` | 통과 |  |
-| `watcher/w5_is_not_armed_before_arm_and_off_without_kill` | 통과 |  |
-| `watcher/probes_are_one_per_probe_ms_and_never_two_in_flight` | 통과 |  |
-| `watcher/a_lost_probe_is_failed_at_its_deadline` | 통과 |  |
-| `watcher/ten_seconds_without_a_good_status_answer_fire_once` | 통과 |  |
-| `watcher/w5_fires_only_after_a_failed_probe` | 통과 |  |
-| `watcher/one_lost_probe_and_a_slow_answer_at_the_silence_bound_do_not_fire` | 통과 |  |
-| `watcher/a_stall_of_the_watcher_shorter_than_a_gap_does_not_fire_at_the_silence_bound` | 통과 |  |
-| `watcher/a_gap_in_the_watchers_own_ticks_is_not_oms_silence` | 통과 |  |
-| `watcher/a_clock_step_back_does_not_blind_w5` | 통과 |  |
-| `watcher/after_a_kill_w5_waits_for_a_good_answer_before_it_watches_again` | 통과 |  |
-| `watcher/an_owed_halt_is_sent_at_the_first_good_answer` | 통과 |  |
-| `watcher/only_a_2xx_status_with_a_16_hex_instance_id_is_good` | 통과 |  |
-| `watcher/admin_kill_sends_hello_then_watcher_kill_and_reads_the_reply` | 통과 |  |
-| `watcher/the_stop_command_names_only_the_configured_unit` | 통과 |  |
-| `watcher/the_watcher_starts_one_program_only` | 통과 |  |
-| `watcher/a_child_that_keeps_stderr_open_does_not_block` | 통과 |  |
-| `watcher/a_start_refusal_ends_the_run_with_exit_code_2` | 통과 |  |
-| `watcher/the_marker_and_the_halt_come_before_the_first_cancel_all` | 통과 |  |
-| `watcher/a_marker_write_that_does_not_return_does_not_hold_the_halt` | 통과 |  |
-| `watcher/a_halt_without_an_outcome_goes_to_the_stop_at_its_deadline` | 통과 |  |
-| `watcher/a_marker_written_before_the_path_check_says_so` | 통과 |  |
-| `watcher/already_latched_and_the_rearm_reply_count_as_halted` | 통과 |  |
-| `watcher/a_halt_answered_with_an_error_goes_to_the_stop` | 통과 |  |
-| `watcher/a_stop_past_stop_wait_ms_is_unconfirmed_and_the_loop_starts` | 통과 |  |
-| `watcher/both_failed_says_oms_stop_failed_in_the_start_notice` | 통과 |  |
-| `watcher/a_kill_without_a_confirmed_stop_owes_the_halt` | 통과 |  |
-| `watcher/an_oms_that_answers_during_the_loop_is_latched_at_once` | 통과 |  |
-| `watcher/no_halt_is_retried_when_the_halt_is_not_owed` | 통과 |  |
-| `watcher/the_first_retry_after_a_halt_timeout_counts_from_its_deadline` | 통과 |  |
-| `watcher/a_retry_in_flight_at_the_loops_end_is_given_up` | 통과 |  |
-| `watcher/abort_before_the_loop_tells_the_steps_done` | 통과 |  |
-| `watcher/a_start_notice_with_the_longest_header_fits_one_part` | 통과 |  |
-| `watcher/the_marker_text_and_detail_are_cut_at_a_character_boundary` | 통과 |  |
-| `watcher/a_marker_file_is_what_a_marker_rule_reads` | 통과 |  |
-| `watcher/an_existing_marker_is_left_as_it_is` | 통과 |  |
-| `watcher/a_marker_that_cannot_be_written_does_not_stop_the_sequence` | 통과 |  |
-| `watcher/a_clock_step_back_does_not_hold_the_loop` | 통과 |  |
-| `watcher/the_oms_reads_the_watchers_marker_file` | 통과 |  |
-| `watcher/a_status_with_another_marker_path_refuses_the_start` | 통과 |  |
-| `watcher/oms_silence_writes_the_marker_and_halts_the_oms_before_the_first_cancel_all` | 통과 |  |
-| `watcher/when_watcher_kill_fails_the_oms_unit_is_stopped_before_the_first_cancel_all` | 통과 |  |
-| `watcher/a_watcher_started_with_the_oms_down_kills_after_the_silence` | 통과 |  |
-| `watcher/a_marker_written_by_the_watcher_is_read_by_a_marker_rule` | 통과 |  |
-| `watcher/the_engine_is_paused_during_a_kill_and_resumes_after` | 통과 |  |
-| `watcher/the_watchers_loop_repeats_until_zero_at_no_more_than_2_cancel_alls_per_second` | 통과 |  |
-| `watcher/an_oms_that_comes_back_during_the_loop_is_latched_before_the_loop_ends` | 통과 |  |
-| `watcher/a_clock_step_back_during_a_kill_does_not_hold_the_loop` | 통과 |  |
-| `watcher/a_halt_without_a_reply_is_aborted_at_its_deadline` | 통과 |  |
-| `watcher/a_round_in_flight_at_the_fire_sends_nothing_more_during_the_kill` | 통과 |  |
-| `watcher/a_stop_that_ended_before_the_k3_deadline_tick_is_reported_as_stopped` | 통과 |  |
-| `watcher/a_clock_step_back_does_not_hold_the_guard` | 통과 |  |
+| `watcher/kill_and_w5_are_validated_and_kill_is_required_on_mainnet` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/kill_loop_fields_are_validated` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_steady_clock_does_not_step_back` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/w5_is_not_armed_before_arm_and_off_without_kill` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/probes_are_one_per_probe_ms_and_never_two_in_flight` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_lost_probe_is_failed_at_its_deadline` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/ten_seconds_without_a_good_status_answer_fire_once` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/w5_fires_only_after_a_failed_probe` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/one_lost_probe_and_a_slow_answer_at_the_silence_bound_do_not_fire` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_stall_of_the_watcher_shorter_than_a_gap_does_not_fire_at_the_silence_bound` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_gap_in_the_watchers_own_ticks_is_not_oms_silence` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_clock_step_back_does_not_blind_w5` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/after_a_kill_w5_waits_for_a_good_answer_before_it_watches_again` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_owed_halt_is_sent_at_the_first_good_answer` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/only_a_2xx_status_with_a_16_hex_instance_id_is_good` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/admin_kill_sends_hello_then_watcher_kill_and_reads_the_reply` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_stop_command_names_only_the_configured_unit` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_watcher_starts_one_program_only` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_child_that_keeps_stderr_open_does_not_block` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_start_refusal_ends_the_run_with_exit_code_2` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_marker_and_the_halt_come_before_the_first_cancel_all` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_marker_write_that_does_not_return_does_not_hold_the_halt` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_halt_without_an_outcome_goes_to_the_stop_at_its_deadline` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_marker_written_before_the_path_check_says_so` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/already_latched_and_the_rearm_reply_count_as_halted` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_halt_answered_with_an_error_goes_to_the_stop` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_stop_past_stop_wait_ms_is_unconfirmed_and_the_loop_starts` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/both_failed_says_oms_stop_failed_in_the_start_notice` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_kill_without_a_confirmed_stop_owes_the_halt` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_oms_that_answers_during_the_loop_is_latched_at_once` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/no_halt_is_retried_when_the_halt_is_not_owed` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_first_retry_after_a_halt_timeout_counts_from_its_deadline` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_retry_in_flight_at_the_loops_end_is_given_up` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/abort_before_the_loop_tells_the_steps_done` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_start_notice_with_the_longest_header_fits_one_part` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_marker_text_and_detail_are_cut_at_a_character_boundary` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_marker_file_is_what_a_marker_rule_reads` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_existing_marker_is_left_as_it_is` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_marker_that_cannot_be_written_does_not_stop_the_sequence` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_clock_step_back_does_not_hold_the_loop` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_oms_reads_the_watchers_marker_file` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_status_with_another_marker_path_refuses_the_start` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/oms_silence_writes_the_marker_and_halts_the_oms_before_the_first_cancel_all` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/when_watcher_kill_fails_the_oms_unit_is_stopped_before_the_first_cancel_all` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_watcher_started_with_the_oms_down_kills_after_the_silence` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_marker_written_by_the_watcher_is_read_by_a_marker_rule` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_engine_is_paused_during_a_kill_and_resumes_after` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_watchers_loop_repeats_until_zero_at_no_more_than_2_cancel_alls_per_second` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_oms_that_comes_back_during_the_loop_is_latched_before_the_loop_ends` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_clock_step_back_during_a_kill_does_not_hold_the_loop` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_halt_without_a_reply_is_aborted_at_its_deadline` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_round_in_flight_at_the_fire_sends_nothing_more_during_the_kill` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_stop_that_ended_before_the_k3_deadline_tick_is_reported_as_stopped` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_clock_step_back_does_not_hold_the_guard` | 미실행 | result of another source, not counted (last result: passed) |
 | `watcher/a_full_notice_queue_drops_the_oldest_progress_notice_never_a_start_or_a_final` | 미실행 |  |
 | `watcher/during_a_kill_an_answer_keeps_the_mismatch_p1_and_drops_every_request` | 미실행 |  |
-| `watcher/an_oms_that_comes_back_after_an_unconfirmed_stop_is_latched` | 통과 |  |
-| `watcher/a_marker_path_change_after_the_boot_is_told` | 통과 |  |
-| `watcher/shutdown_during_a_kill_sends_one_abort_notice` | 통과 |  |
-| `watcher/a_start_refusal_during_a_kill_sends_the_abort_notice_first` | 통과 |  |
-| `watcher/a_marker_path_refusal_sends_the_owed_halt_first` | 통과 |  |
-| `watcher/a_marker_path_refusal_after_the_kill_waits_for_the_owed_halt_in_flight` | 통과 |  |
-| `watcher/a_marker_path_refusal_before_the_kill_loop_sends_the_halt_first` | 통과 |  |
-| `watcher/shutdown_right_after_the_kill_ended_sends_the_final_notice` | 통과 |  |
-| `watcher/a_marker_path_refusal_during_k2_waits_for_the_kills_own_watcher_kill` | 통과 |  |
-| `watcher/a_refusal_waiting_for_k2_ends_at_k2s_deadline` | 통과 |  |
-| `watcher/a_shutdown_while_a_refusal_waits_sends_the_abort_notice` | 통과 |  |
-| `watcher/a_loop_answer_during_a_refusals_wait_does_not_spin_the_runtime` | 통과 |  |
-| `watcher/ten_minutes_of_failing_queries_send_at_most_12_p1_messages` | 통과 |  |
-| `watcher/every_kill_notice_carries_the_position_block` | 통과 |  |
-| `watcher/a_slow_position_read_sends_the_notice_with_unknown_positions` | 통과 |  |
+| `watcher/an_oms_that_comes_back_after_an_unconfirmed_stop_is_latched` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_marker_path_change_after_the_boot_is_told` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/shutdown_during_a_kill_sends_one_abort_notice` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_start_refusal_during_a_kill_sends_the_abort_notice_first` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_marker_path_refusal_sends_the_owed_halt_first` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_marker_path_refusal_after_the_kill_waits_for_the_owed_halt_in_flight` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_marker_path_refusal_before_the_kill_loop_sends_the_halt_first` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/shutdown_right_after_the_kill_ended_sends_the_final_notice` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_marker_path_refusal_during_k2_waits_for_the_kills_own_watcher_kill` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_refusal_waiting_for_k2_ends_at_k2s_deadline` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_shutdown_while_a_refusal_waits_sends_the_abort_notice` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_loop_answer_during_a_refusals_wait_does_not_spin_the_runtime` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/ten_minutes_of_failing_queries_send_at_most_12_p1_messages` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/every_kill_notice_carries_the_position_block` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/a_slow_position_read_sends_the_notice_with_unknown_positions` | 미실행 | result of another source, not counted (last result: passed) |
 | `watcher/the_refusal_names_a_latch_only_for_a_reply_that_latched` | 미실행 |  |
 
 ## V-BYBIT-LIVE-1 — 실제 Bybit 테스트넷은 요청 시각이 recv_window(5초)보다 오래됐거나 거래소 시계보다 1초 넘게 앞선 주문 요청을 10002로 거절하고, 그 주문은 거래소에 없다. 4초 지났거나 0.5초 앞선 요청은 시각 검사를 통과한다. 게이트웨이는 거절을 Rejected로 읽고, 상태 조회(실시간, 이력 두 번)는 그 주문을 '없음'으로 답한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 요구 R06과 가정 A-01. 게이트웨이의 전송 규칙(지금 + recv_window + 1초 ≤ 만료)은 이 거절에 기댄다. 거절되지 않으면 만료된 주문이 거래소에 놓일 수 있다
 - 수준: 실제 거래소(테스트넷)
 - 전제와 범위: BTCUSDT, 지정가 PostOnly 매수, 마크 가격의 절반(체결 불가), 0.001개. 요청 시각을 −6.5초, −4초, +0.5초, +1.5초로 바꿔 보낸다. 최소 수량 미만(0.0001개)의 주문 하나. 하위 계정 하나. 받아진 주문은 바로 취소한다
@@ -3229,14 +3229,14 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `bybit-testnet/a_request_older_than_the_receive_window_is_refused_and_places_nothing` | 통과 |  |
-| `bybit-testnet/a_request_more_than_one_second_ahead_is_refused_and_places_nothing` | 통과 |  |
-| `bybit-testnet/a_request_inside_the_receive_window_passes_the_time_check` | 통과 |  |
-| `bybit-testnet/every_refused_create_leaves_no_order_at_the_venue` | 통과 |  |
+| `bybit-testnet/a_request_older_than_the_receive_window_is_refused_and_places_nothing` | 미실행 | result of another source, not counted (last result: passed) |
+| `bybit-testnet/a_request_more_than_one_second_ahead_is_refused_and_places_nothing` | 미실행 | result of another source, not counted (last result: passed) |
+| `bybit-testnet/a_request_inside_the_receive_window_passes_the_time_check` | 미실행 | result of another source, not counted (last result: passed) |
+| `bybit-testnet/every_refused_create_leaves_no_order_at_the_venue` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-BYBIT-LIVE-2 — 실제 Bybit 테스트넷은 같은 orderLinkId의 두 번째 주문 요청을 110072로 답하고 주문을 하나 더 만들지 않는다. 첫 주문이 취소된 뒤에도 같은 orderLinkId는 다시 받지 않는다(110072). 게이트웨이는 110072를 Unknown으로 읽는다(주문이 이미 있을 수 있으므로)
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 요구 R06. 결과 불명 주문을 다시 보내지 않는 규칙과 orderLinkId 상태 조회는 '한 orderLinkId에 주문은 많아야 하나'에 기댄다
 - 수준: 실제 거래소(테스트넷)
 - 전제와 범위: BTCUSDT, PostOnly 매수 하나(체결 불가), 걸려 있는 동안 한 번, 취소 뒤 한 번 다시 보냄
@@ -3250,11 +3250,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `bybit-testnet/a_second_create_with_the_same_link_id_never_makes_a_second_order` | 통과 |  |
+| `bybit-testnet/a_second_create_with_the_same_link_id_never_makes_a_second_order` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-BYBIT-LIVE-3 — 실제 Bybit 테스트넷에서 킬 루프의 두 요청이 읽힌다: 일괄 취소(linear, USDT)는 걸린 주문 셋을 모두 취소했다고 답하고(빈 계좌에서는 빈 목록과 success 1), 그 뒤 열린 주문 수가 10초 안에 0이 된다. 시계 검사(/v5/market/time)가 앞섬 한도 안으로 판정한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 요구 R07. 킬은 일괄 취소 뒤 열린 주문이 0인지 세어야 끝난다(C-KILL). 응답 모양이 다르면 킬이 끝나지 않거나 거짓으로 끝난다
 - 수준: 실제 거래소(테스트넷)
 - 전제와 범위: BTCUSDT PostOnly 매수 세 개(체결 불가)를 걸고 일괄 취소 하나. 빈 계좌의 일괄 취소 하나. 0.5초마다 세기
@@ -3268,13 +3268,13 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `bybit-testnet/cancel_all_answers_in_the_shape_the_kill_loop_reads` | 통과 |  |
-| `bybit-testnet/cancel_all_then_the_open_count_reaches_zero` | 통과 |  |
-| `bybit-testnet/the_clock_check_reads_the_venue_time` | 통과 |  |
+| `bybit-testnet/cancel_all_answers_in_the_shape_the_kill_loop_reads` | 미실행 | result of another source, not counted (last result: passed) |
+| `bybit-testnet/cancel_all_then_the_open_count_reaches_zero` | 미실행 | result of another source, not counted (last result: passed) |
+| `bybit-testnet/the_clock_check_reads_the_venue_time` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-BYBIT-LIVE-4 — 실제 Bybit 테스트넷의 실행 행(/v5/execution/list)이 게이트웨이의 분류(exec::classify)에서 우리 주문의 체결로 읽힌다: orderLinkId가 우리 인스턴스와 주문 번호로 풀리고, 방향과 수량의 합이 주문과 같고, 테이커 수수료는 비용(양수)이다. 감소 전용 IOC가 포지션을 0으로 닫는다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 요구 R05. Bybit 체결 행에서 코어 입력까지의 번역이 틀리면 장부가 거래소와 갈라진다. 지금까지는 손으로 쓴 행으로만 시험했다
 - 수준: 실제 거래소(테스트넷)
 - 전제와 범위: BTCUSDT 0.001개 IOC 매수(매도 호가 + 1 %), 감소 전용 IOC 매도(매수 호가 − 1 %). 실행 행은 조회로 읽는다(스트림 아님)
@@ -3288,11 +3288,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `bybit-testnet/a_real_execution_row_becomes_our_fill_and_the_position_closes` | 통과 |  |
+| `bybit-testnet/a_real_execution_row_becomes_our_fill_and_the_position_closes` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-BYBIT-LIVE-5 — 같은 계좌의 두 주문이 서로 반대로 만나면, 이 계좌의 기본 설정에서 Bybit 테스트넷은 자기 체결 방지로 걸려 있던 주문(메이커)을 취소하고(cancelType CancelBySmp) 체결은 일어나지 않는다. 남는 포지션은 없다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 요구 R10. OMS에는 전략 사이의 자기 체결 검사가 없다. 거래소가 무엇을 하는지 알아야 전략에 알릴 수 있다: 한 전략의 걸린 주문이 다른 전략의 주문 때문에 취소될 수 있다
 - 수준: 실제 거래소(테스트넷)
 - 전제와 범위: ARCUSDT(스프레드가 여러 틱으로 넓은 종목), 중간 가격에 PostOnly 매수 250개, 같은 가격에 IOC 매도 250개. 두 주문은 서로 다른 orderLinkId다
@@ -3306,11 +3306,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `bybit-testnet/two_of_our_crossing_orders_do_not_trade_with_each_other` | 통과 |  |
+| `bybit-testnet/two_of_our_crossing_orders_do_not_trade_with_each_other` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-BYBIT-LIVE-6 — 실제 Bybit 테스트넷의 조회 응답(열린 주문, 포지션, 체결, 증거금 보고, 계좌 모드, 종목 설정)을 게이트웨이의 조회(Queries)가 실패 없이 코어 입력으로 바꾼다. 거래소의 응답 모양(키와 값의 종류)이 crates/http-fake/recorded/bybit-testnet/에 녹화한 모양과 같다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 요구 R11. 가짜 Bybit는 녹화한 응답으로 답한다. 거래소가 모양을 바꾸면 이 시험이 실패하고, 녹화본과 게이트웨이를 고친다(Fowler, ContractTest)
 - 수준: 실제 거래소(테스트넷)
 - 전제와 범위: 녹화 17가지: 시각, 종목 정보, 시세, 키 정보, 계좌 정보, 지갑, 빈 포지션 목록, 빈 열린 주문 목록, 모르는 orderLinkId의 이력, 빈 실행 목록, 빈 일괄 취소, 모르는 주문의 취소(110001), 오래된 요청(10002), 최소 수량 미만(10001), 행이 하나인 열린 주문·실행·포지션 목록. 계좌·키를 가리키는 필드(사용자 번호, SMP 그룹, 키, IP 목록, 키 날짜)는 지운다
@@ -3324,12 +3324,12 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `bybit-testnet/the_account_and_margin_queries_read_the_real_answers` | 통과 |  |
-| `bybit-testnet/the_venue_answers_in_the_recorded_shapes` | 통과 |  |
+| `bybit-testnet/the_account_and_margin_queries_read_the_real_answers` | 미실행 | result of another source, not counted (last result: passed) |
+| `bybit-testnet/the_venue_answers_in_the_recorded_shapes` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-BYBIT-RECORDED-1 — 가짜 Bybit가 테스트넷에서 녹화한 실제 응답을 그대로 보낼 때, 게이트웨이가 그것을 읽는다: 오래된 요청(10002)·최소 수량 미만(10001)·모르는 주문의 취소(110001)는 Rejected, 빈 일괄 취소는 취소 0건, 열린 주문·포지션·실행 행은 코어 입력(우리 주문의 체결, 비용인 수수료), 증거금 보고·계좌 모드·종목 설정은 실패 없이 읽힌다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: 가짜 Bybit의 손으로 쓴 응답은 문서 모양을 본떴을 뿐이다. 녹화한 응답으로 시험해야 게이트웨이가 거래소가 실제로 보내는 것을 읽는다는 것을 PR마다 확인할 수 있다(Fowler, ContractTest)
 - 수준: 통합
 - 전제와 범위: crates/http-fake/recorded/bybit-testnet/의 녹화 17개 가운데 13개. 한 쪽짜리 결과와 그 다음의 빈 쪽(A-21)
@@ -3343,15 +3343,15 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/recorded_refusals_read_as_rejected` | 통과 |  |
-| `node-unit/a_recorded_empty_cancel_all_reads_as_nothing_cancelled` | 통과 |  |
-| `node-unit/recorded_open_orders_positions_and_fills_become_core_inputs` | 통과 |  |
-| `node-unit/recorded_execution_rows_classify_as_our_fills` | 통과 |  |
-| `node-unit/the_recorded_margin_report_and_account_mode_are_read` | 통과 |  |
+| `node-unit/recorded_refusals_read_as_rejected` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/a_recorded_empty_cancel_all_reads_as_nothing_cancelled` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/recorded_open_orders_positions_and_fills_become_core_inputs` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/recorded_execution_rows_classify_as_our_fills` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/the_recorded_margin_report_and_account_mode_are_read` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-WATCH-14 — 워처는 자격 파일의 RSA 키(rsa_private_key, PKCS#8 PEM 글)로도 서명한다: 같은 문자열(timestamp + api_key + recv_window + 질의 또는 본문)의 RSA-SHA256 PKCS#1 v1.5 서명을 표준 base64(패딩 있음)로 X-BAPI-SIGN에 싣고 X-BAPI-SIGN-TYPE은 보내지 않는다. GET과 일괄 취소 POST가 모두 Credentials::sign을 지난다. 자격 파일은 api_key와 api_secret 또는 rsa_private_key 중 정확히 하나만 받고, 둘 다·둘 다 없음·PKCS#1·암호화된 PEM·PEM이 아닌 글·키가 아닌 본문·잘린 본문·빈 키·1024비트 키는 키의 바이트를 담지 않는 한 줄로 시작을 거부하며(PKCS#1과 암호화된 PEM은 openssl 변환 명령을 적는다), Debug는 키를 찍지 않는다. HMAC 키의 서명은 전과 바이트까지 같다. api_secret에 PEM 개인 키가 있으면 HMAC 비밀로 쓰지 않고 rsa_private_key 자리를 말하는 한 줄로 시작을 거부한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: Bybit testnet의 AI 하위 계정은 RSA 키만 준다(소유자 결정 2026-11-25). 잘못된 모양(hex)의 RSA 서명은 키 거절로 재시작까지 래치되고, 오류 줄이나 Debug의 키 조각은 로그와 메시지로 샌다
 - 수준: 단위, 통합(loopback)
 - 전제와 범위: 시험 전용 RSA 키(openssl 3.5.5로 만든 2048·1024비트, 소스에는 base64 본문만), 서명기, 자격 파일 읽기, loopback 가짜 Bybit에 붙인 클라이언트의 GET과 일괄 취소, 수동 시계
@@ -3365,16 +3365,16 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `watcher/an_rsa_signature_is_openssls_base64_and_verifies_with_the_public_key` | 통과 |  |
-| `watcher/an_rsa_credentials_file_is_read_and_its_refusals_quote_no_key` | 통과 |  |
-| `watcher/an_rsa_key_signs_the_get_and_the_cancel_all_in_base64` | 통과 |  |
-| `watcher/the_strings_to_sign_and_signatures_match_independent_values` | 통과 |  |
-| `watcher/every_request_carries_the_five_headers_and_the_signed_query` | 통과 |  |
-| `watcher/the_only_post_is_cancel_all_with_the_fixed_body` | 통과 |  |
+| `watcher/an_rsa_signature_is_openssls_base64_and_verifies_with_the_public_key` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_rsa_credentials_file_is_read_and_its_refusals_quote_no_key` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/an_rsa_key_signs_the_get_and_the_cancel_all_in_base64` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_strings_to_sign_and_signatures_match_independent_values` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/every_request_carries_the_five_headers_and_the_signed_query` | 미실행 | result of another source, not counted (last result: passed) |
+| `watcher/the_only_post_is_cancel_all_with_the_fixed_body` | 미실행 | result of another source, not counted (last result: passed) |
 
 ## V-BYBIT-RSA-1 — OMS의 Bybit 게이트웨이는 자격 파일의 RSA 키(rsa_private_key, PKCS#8 PEM 글)로도 서명한다: REST(GET의 질의, POST의 본문)는 같은 문자열의 RSA-SHA256 PKCS#1 v1.5 서명을 표준 base64로 X-BAPI-SIGN에 싣고 X-BAPI-SIGN-TYPE은 보내지 않으며, 비공개 스트림과 WS Trade의 auth는 GET/realtime + expires의 같은 서명을 base64로 싣는다. 모든 서명이 Credentials::sign을 지나고 서명을 만들지 못한 요청은 보내지 않는다(NotSent, auth not sent). 자격 파일은 api_key와 api_secret 또는 rsa_private_key 중 정확히 하나만 받고 워처와 같은 거부를 키의 바이트 없이 한 줄로 내며, Debug는 키를 찍지 않는다. HMAC 키의 서명은 전과 바이트까지 같다. api_secret에 PEM 개인 키가 있으면 HMAC 비밀로 쓰지 않고 rsa_private_key 자리를 말하는 한 줄로 거부한다
 
-- 상태: **통과**
+- 상태: **미실행**
 - 왜 중요한가: Bybit testnet의 AI 하위 계정은 RSA 키만 준다(소유자 결정 2026-11-25). hex로 보낸 RSA 서명은 'Invalid sign'으로 거절되고(F2) 키 거절은 재시작까지 게이트웨이를 막는다. 주문 POST의 서명이 보낸 본문과 다르면 주문이 나가지 않는다
 - 수준: 단위, 통합(loopback)
 - 전제와 범위: 시험 전용 RSA 키(openssl 3.5.5로 만든 2048·1024비트, 소스에는 base64 본문만), Signer, Credentials::load, loopback 가짜 Bybit에 붙인 Rest의 GET과 주문 생성 POST(Orders::create), 두 스트림의 auth 메시지, 고정 시계
@@ -3388,11 +3388,11 @@
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
-| `node-unit/venue::bybit::sign::tests::rsa_signatures_are_openssls_base64_and_verify_with_the_public_key` | 통과 |  |
-| `node-unit/venue::bybit::rest::tests::an_rsa_credentials_file_is_read_and_its_refusals_quote_no_key` | 통과 |  |
-| `node-unit/venue::bybit::rest::tests::an_rsa_key_signs_a_get_in_base64_over_the_query_sent` | 통과 |  |
-| `node-unit/venue::bybit::orders::tests::a_create_with_an_rsa_key_is_signed_in_base64_over_the_body_sent` | 통과 |  |
-| `node-unit/venue::bybit::stream::tests::the_auth_message_with_an_rsa_key_carries_the_base64_signature` | 통과 |  |
-| `node-unit/venue::bybit::trade::tests::the_auth_message_with_an_rsa_key_carries_the_base64_signature` | 통과 |  |
-| `node-unit/venue::bybit::sign::tests::signatures_match_independent_hmac_values` | 통과 |  |
+| `node-unit/venue::bybit::sign::tests::rsa_signatures_are_openssls_base64_and_verify_with_the_public_key` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::rest::tests::an_rsa_credentials_file_is_read_and_its_refusals_quote_no_key` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::rest::tests::an_rsa_key_signs_a_get_in_base64_over_the_query_sent` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::orders::tests::a_create_with_an_rsa_key_is_signed_in_base64_over_the_body_sent` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::stream::tests::the_auth_message_with_an_rsa_key_carries_the_base64_signature` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::trade::tests::the_auth_message_with_an_rsa_key_carries_the_base64_signature` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/venue::bybit::sign::tests::signatures_match_independent_hmac_values` | 미실행 | result of another source, not counted (last result: passed) |
 

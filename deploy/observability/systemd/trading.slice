@@ -1,0 +1,9 @@
+# Not installed by this repository: docs/operations/observability.md.
+[Unit]
+Description=Trading services: weighted CPU and reserved memory
+
+[Slice]
+CPUWeight=1000
+# At least the sum of MemoryMin of every unit in the slice: cgroup v2 limits
+# a child's effective memory.min by its ancestors' (ADR-035).
+MemoryMin=512M

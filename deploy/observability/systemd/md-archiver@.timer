@@ -1,9 +1,9 @@
-# Template only: not installed or enabled by this repository (U7).
+# Not installed or enabled by this repository: docs/operations/observability.md.
 [Unit]
 Description=Build the L1 tables of %i once a day, after the day seal
 
 [Timer]
-# The hour-23 seal runs at 00:02 UTC and day-seals the date; 01:10 leaves
+# The hour-23 seal runs at 00:05 UTC and day-seals the date; 01:10 leaves
 # room for a late seal (judgement). A later run catches up any date it missed.
 OnCalendar=*-*-* 01:10:00 UTC
 Persistent=true

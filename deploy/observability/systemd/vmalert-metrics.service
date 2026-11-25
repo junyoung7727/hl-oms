@@ -1,0 +1,20 @@
+# Not installed or enabled by this repository: docs/operations/observability.md.
+[Unit]
+Description=vmalert for the metric rules (VictoriaMetrics, every 10 s)
+After=victoriametrics.service victorialogs.service alertmanager.service
+
+[Service]
+Type=simple
+User=hlobs
+Group=hlobs
+ExecStart=/usr/local/bin/vmalert-prod -rule=/etc/hl-oms-obs/vmalert/metrics/*.json -datasource.url=http://127.0.0.1:8428 -remoteWrite.url=http://127.0.0.1:8428 -remoteRead.url=http://127.0.0.1:8428 -notifier.url=http://127.0.0.1:9093 -evaluationInterval=10s -httpListenAddr=127.0.0.1:8880
+Restart=on-failure
+RestartSec=5
+MemoryMax=200M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

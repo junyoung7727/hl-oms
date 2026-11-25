@@ -1,0 +1,23 @@
+# Not installed or enabled by this repository: docs/operations/observability.md.
+# Instance = venue. Builds every day-sealed date without L1, oldest first.
+[Unit]
+Description=md-archiver L0 to L1 build for %i
+After=md-lake-seal@%i.service
+
+[Service]
+Type=oneshot
+Environment=LAKE=/mnt/nvme/lake
+# The archiver only reads L0 and the audit results.
+ReadOnlyPaths=/mnt/nvme/lake/crypto/l0 /mnt/nvme/lake/crypto/audit
+# One topic-day in memory per thread: measured 2.57 GB peak for a 3.2 M-row
+# book day with one thread (docs/operations/md-archiver.md §5).
+Environment=THREADS=1
+# Unset = keep L1 forever. Two conditions come first
+# (docs/operations/observability.md §4), e.g. --retain-l1-days 14.
+Environment=RETAIN_ARGS=
+# The daily-job cap; the daily-job lock below keeps two daily jobs from
+# running (and adding their caps) at once (ADR-035).
+MemoryMax=4G
+TimeoutStartSec=6h
+Nice=10
+ExecStart=/usr/bin/flock /run/lock/hl-oms-daily.lock /usr/local/bin/md-archiver run --venue %i --lake ${LAKE} --threads ${THREADS} $RETAIN_ARGS
