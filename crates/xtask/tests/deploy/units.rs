@@ -172,6 +172,28 @@ const OMS_NO_RESTART: &[&str] = &[
 /// U20: units that start the service of their own name without naming it.
 const OMS_ACTIVATORS: &[&str] = &["oms-node.timer", "oms-node.socket", "oms-node.path"];
 
+/// The watcher unit (U21): back after a crash, never stopped with the OMS.
+const WATCHER: &str = "watcher.service";
+const WATCHER_SETTINGS: &[(&str, &str, Want)] = &[
+    ("Service", "Restart", Is("on-failure")),
+    ("Service", "RestartSec", Is("5")),
+    ("Service", "RestartPreventExitStatus", Is("2")),
+    ("Install", "WantedBy", Is("multi-user.target")),
+];
+/// U21: keys that would stop, or keep from starting, the watcher with
+/// another unit, in any section.
+const NO_FOLLOW: &[&str] = &[
+    "Requires",
+    "Requisite",
+    "BindsTo",
+    "PartOf",
+    "Upholds",
+    "Conflicts",
+    "PropagatesStopTo",
+    "StopPropagatedFrom",
+    "JoinsNamespaceOf",
+];
+
 /// Files under `deploy/observability/` that are not installed (U14).
 const NOT_INSTALLED: &[&str] = &["README.md", "install.toml", "venues.toml", "metrics.toml"];
 const NOT_INSTALLED_DIRS: &[&str] = &["vmalert/tests/"];
@@ -233,6 +255,7 @@ pub fn check(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
     u18_stack_settings(p, out);
     u19_bounded_runs(p, out);
     u20_oms_started_by_a_person(t, p, out);
+    u21_watcher_restart(p, out);
 }
 
 /// A systemd size: bytes, or a number with `K`, `M` or `G` (base 1024).
@@ -1218,6 +1241,38 @@ fn u20_oms_started_by_a_person(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
                 path,
                 "U20",
                 format!("a unit of this name starts {OMS} without naming it"),
+            );
+        }
+    }
+}
+
+fn u21_watcher_restart(p: &Parsed, out: &mut Vec<Finding>) {
+    for u in required(p, WATCHER, "U21", out) {
+        for &row in WATCHER_SETTINGS {
+            expect(u, "U21", row, out);
+        }
+        for key in NO_FOLLOW {
+            if !u.ini.any(key).is_empty() {
+                finding(
+                    out,
+                    &u.path,
+                    "U21",
+                    format!("no {key}=: the watcher must outlive a stop of the OMS"),
+                );
+            }
+        }
+        let after: Vec<String> = u
+            .ini
+            .values("Unit", "After")
+            .into_iter()
+            .flat_map(words)
+            .collect();
+        if !after.iter().any(|w| w == OMS) {
+            finding(
+                out,
+                &u.path,
+                "U21",
+                format!("[Unit] After= must hold {OMS}: at shutdown the watcher stops first"),
             );
         }
     }
@@ -2845,5 +2900,50 @@ fn no_unit_can_start_the_oms_node() {
         let mut t = Tree::real();
         t.set(&unit(name), "[Socket]\nListenStream=/run/x.sock\n");
         assert_rules(&crate::check(&t), &["P1", "U14", "U20"]);
+    }
+}
+
+#[test]
+fn the_watcher_restarts_but_never_follows_the_oms() {
+    let w = "watcher.service";
+    let wants = "Wants=network-online.target\n";
+    // A stop of the OMS must not stop the watcher: its kill loop runs after.
+    for key in [
+        "Requires",
+        "Requisite",
+        "BindsTo",
+        "PartOf",
+        "Upholds",
+        "Conflicts",
+        "PropagatesStopTo",
+        "StopPropagatedFrom",
+        "JoinsNamespaceOf",
+    ] {
+        plant(w, wants, &format!("{wants}{key}=x.service\n"), &["U21"]);
+    }
+    plant(
+        w,
+        wants,
+        &format!("{wants}BindsTo=oms-node.service\n"),
+        &["U20", "U21"],
+    );
+    for (from, to) in [
+        ("Restart=on-failure\n", "Restart=always\n"),
+        ("Restart=on-failure\n", ""),
+        ("Restart=on-failure\n", "Restart=on-failure\nRestart=no\n"),
+        ("RestartSec=5\n", "RestartSec=0\n"),
+        // A refused start would repeat its P1 at every restart.
+        ("RestartPreventExitStatus=2\n", ""),
+        ("RestartPreventExitStatus=2\n", "RestartPreventExitStatus=3\n"),
+        // Not ordered after the OMS: at shutdown it would not stop first.
+        (
+            "After=network-online.target oms-node.service\n",
+            "After=network-online.target\n",
+        ),
+        // Not started at boot: no boot kill of the orders a dead OMS left.
+        ("WantedBy=multi-user.target\n", ""),
+        ("WantedBy=multi-user.target\n", "WantedBy=default.target\n"),
+    ] {
+        plant(w, from, to, &["U21"]);
     }
 }
