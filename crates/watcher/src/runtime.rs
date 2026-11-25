@@ -98,9 +98,11 @@ impl Endpoints {
     /// its `main.rs` calls this): every field from `wiring`, the value of
     /// [`TEST_ENDPOINTS`], never from the config or [`Endpoints::of`].
     /// Refused: mainnet, no wiring, unknown or missing fields, a `rest`,
-    /// `ip_echo_url` or `telegram` that is not `http://127.0.0.1:<port>`,
-    /// a `systemctl` that is not an absolute path without `..` to an
-    /// executable regular file. Each refusal is one line.
+    /// `ip_echo_url` or `telegram` that is not `http://127.0.0.1:<port>`
+    /// (or has a user part, a query or a fragment), a `systemctl` that is
+    /// not an absolute path without `..` to an executable regular file, is
+    /// a link, or whose real path is under `/usr`, `/bin` or `/sbin`. Each
+    /// refusal is one line.
     pub fn for_test_build(wiring: Option<&str>, cfg: &Config) -> Result<Endpoints, String> {
         #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -127,7 +129,15 @@ impl Endpoints {
             let loopback = parsed.as_ref().is_some_and(|u| {
                 u.scheme() == "http" && u.host_str() == Some("127.0.0.1") && u.port().is_some()
             });
-            if !loopback {
+            // No user part (the warn line prints the wiring), no query, no
+            // fragment.
+            let bare = parsed.as_ref().is_some_and(|u| {
+                u.username().is_empty()
+                    && u.password().is_none()
+                    && u.query().is_none()
+                    && u.fragment().is_none()
+            });
+            if !loopback || !bare {
                 return Err(format!(
                     "{TEST_ENDPOINTS}: {name} must be http://127.0.0.1:<port>, not {url:?}"
                 ));
@@ -140,9 +150,15 @@ impl Endpoints {
             use std::os::unix::fs::PermissionsExt;
             m.is_file() && m.permissions().mode() & 0o111 != 0
         });
-        if !plain || !executable {
+        // Never the real stopper (review 1, M1): not a link (to it or to
+        // anything), and no file whose real path is in a system directory
+        // (`/usr/bin/systemctl`, a link to `/usr/bin`, merged `/bin`).
+        let link = std::fs::symlink_metadata(sc).is_ok_and(|m| m.file_type().is_symlink());
+        let system = std::fs::canonicalize(sc)
+            .map_or(true, |real| SYSTEM_DIRS.iter().any(|d| real.starts_with(d)));
+        if !plain || !executable || link || system {
             return Err(format!(
-                "{TEST_ENDPOINTS}: systemctl must be an absolute path without `..` to an executable file, not {:?}",
+                "{TEST_ENDPOINTS}: systemctl must be an absolute path without `..` to an executable file, not a link and not under /usr, /bin or /sbin, not {:?}",
                 sc.display().to_string()
             ));
         }
@@ -158,6 +174,10 @@ impl Endpoints {
 /// The variable a test build (the feature `test-endpoints`) takes its
 /// endpoints from ([`Endpoints::for_test_build`]).
 pub const TEST_ENDPOINTS: &str = "WATCHER_TEST_ENDPOINTS";
+
+/// A test build's `systemctl` may not lie under these (the real one is
+/// [`stop::SYSTEMCTL`]).
+const SYSTEM_DIRS: [&str; 3] = ["/usr", "/bin", "/sbin"];
 
 /// `text` with every control character replaced by a space (a serde
 /// error may quote a field name as it is).

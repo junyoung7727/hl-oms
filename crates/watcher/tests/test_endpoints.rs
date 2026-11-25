@@ -1,7 +1,8 @@
 //! The test build's endpoints (`Endpoints::for_test_build`, the feature
 //! `test-endpoints`): every endpoint from `WATCHER_TEST_ENDPOINTS` alone,
 //! each REST and Telegram URL `http://127.0.0.1:<port>`, `systemctl` an
-//! absolute executable file; refused on mainnet and without the variable.
+//! absolute executable file that is not a link and not in a system
+//! directory; refused on mainnet and without the variable.
 //! Nothing here starts a binary or sends a request.
 
 #![allow(clippy::unwrap_used)]
@@ -104,6 +105,10 @@ fn a_wiring_off_127_0_0_1_is_refused() {
             "http://127.0.0.1@api.bybit.com/",
             "http://127.0.0.1.example:41001",
             "http://127.0.0.1",
+            "http://u:p@127.0.0.1:41001",
+            "http://u@127.0.0.1:41001",
+            "http://127.0.0.1:41001/?x=1",
+            "http://127.0.0.1:41001/#x",
             "ws://127.0.0.1:41001",
             "not a url",
             "",
@@ -168,7 +173,20 @@ fn the_systemctl_must_be_an_absolute_executable_file() {
     let sc = script(&dir, "systemctl", 0o700);
     let plain = script(&dir, "plain", 0o600);
     std::fs::create_dir_all(dir.join("sub")).unwrap();
+    // The real stopper, by its path, a link to it, a link to its
+    // directory, and even a link to the test's own script (review 1, M1).
+    let real = "/usr/bin/systemctl";
+    std::os::unix::fs::symlink(real, dir.join("real-link")).unwrap();
+    std::os::unix::fs::symlink("/usr/bin", dir.join("usr-bin")).unwrap();
+    std::os::unix::fs::symlink(&sc, dir.join("own-link")).unwrap();
     for bad in [
+        real.to_string(),
+        "/bin/systemctl".to_string(),
+        "/usr/local/bin/systemctl".to_string(),
+        dir.join("real-link").display().to_string(),
+        dir.join("usr-bin/systemctl").display().to_string(),
+        dir.join("own-link").display().to_string(),
+        "/bin/sh".to_string(),
         "systemctl".to_string(),
         "bin/systemctl".to_string(),
         dir.join("sub/../systemctl").display().to_string(),
