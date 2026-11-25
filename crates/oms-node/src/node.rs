@@ -528,6 +528,15 @@ fn start_alerts(cfg: &NodeConfig, published: &Arc<Published>, fatal: &Arc<Fatal>
         return Err("[alert] telegram was not loaded".into());
     };
     let mut ac = alert_direct::AlertConfig::new(tg, alerts::PREFIX, &cfg.venue_label());
+    // A failpoints build (the node tests) sends only to its loopback fake
+    // and refuses `[alert]` without one, before any sender exists.
+    #[cfg(feature = "failpoints")]
+    {
+        let base = alerts::test_build_route(a.test_api.as_deref())?;
+        warn!("the direct alerts use the test endpoint", "url": base.to_string());
+        ac.routes = vec![alert_direct::Route::direct(base)?];
+    }
+    #[cfg(not(feature = "failpoints"))]
     if let Some(base) = &a.test_api {
         warn!("the direct alerts use the test endpoint", "url": base.clone());
         ac.routes = vec![alert_direct::Route::direct(base)?];
