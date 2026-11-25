@@ -67,7 +67,10 @@ const TELEGRAM: &[(&str, &str, bool, bool)] = &[
 /// P2 and P3 alerts derived from its own pushes (`md_*`,
 /// `lake_seal_lag_hours`, `lake_disk_free_bytes`, its error log lines); the
 /// qdp audit alerts stay visible. A dead projector holds back the journal
-/// gauge alert, whose only writer it is. Market-data alerts are not held
+/// gauge alert, whose only writer it is. A dead OMS holds back the watcher
+/// alerts that follow from it (design §8.3 B3 "oms_down이면 파생 알림
+/// 억제"): W1 rounds need its status API, there is no OMS to beat to, and
+/// W5 rearms only on an answer (ADR-038). Market-data alerts are not held
 /// back while the OMS is down: the collector does not need the OMS
 /// (ADR-037).
 const INHIBITS: &[(&[&str], &[&str])] = &[
@@ -83,6 +86,13 @@ const INHIBITS: &[(&[&str], &[&str])] = &[
         &[
             "severity=~\"P2|P3\"",
             "alertname=~\"JournalDiskGaugeMissing\"",
+        ],
+    ),
+    (
+        &["alertname=\"OmsDown\""],
+        &[
+            "severity=~\"P2|P3\"",
+            "alertname=~\"WatcherCheckStale|WatcherHeartbeatStale|WatcherW5Unarmed\"",
         ],
     ),
 ];
@@ -902,6 +912,11 @@ fn projector(v: &mut Value) -> &mut Value {
     &mut v["inhibit_rules"][1]
 }
 
+/// The OMS's inhibit rule.
+fn oms_down(v: &mut Value) -> &mut Value {
+    &mut v["inhibit_rules"][2]
+}
+
 #[test]
 fn the_inhibit_rule_holds_back_only_collector_alerts() {
     // Widened to every alert: the audit alerts would go quiet with the
@@ -1018,12 +1033,16 @@ fn the_oms_inhibit_rules_hold_back_only_derived_alerts() {
         &["R10"],
     );
     plant(|v| projector(v)["equal"] = json!([]), &["R10"]);
-    // A third rule; the two in the other order; the projector's rule gone.
+    // A fourth rule; two in the other order; the OMS's rule gone.
     plant(
         |v| {
             let r = projector(v).clone();
             v["inhibit_rules"].as_array_mut().unwrap().push(r);
         },
+        &["R10"],
+    );
+    plant(
+        |v| v["inhibit_rules"].as_array_mut().unwrap().swap(1, 2),
         &["R10"],
     );
     plant(
@@ -1036,6 +1055,34 @@ fn the_oms_inhibit_rules_hold_back_only_derived_alerts() {
         },
         &["R10"],
     );
+    // A dead OMS holds back only the watcher alerts that follow from it:
+    // not every P2 (a key about to expire, a failing Telegram path), not
+    // the watcher's P1 (a kill, a mismatch), not another venue's.
+    for target in [
+        json!(["severity=~\"P2|P3\"", "alertname=~\".*\""]),
+        json!(["severity=~\"P2|P3\"", "alertname=~\"Watcher.*\""]),
+        json!(["severity=~\"P1|P2|P3\"", "alertname=~\"WatcherCheckStale|WatcherHeartbeatStale|WatcherW5Unarmed\""]),
+        json!(["severity=~\"P2|P3\"", "alertname=~\"WatcherCheckStale|WatcherHeartbeatStale|WatcherW5Unarmed|WatcherApiKeyExpiring\""]),
+        json!(["alertname=~\"WatcherCheckStale|WatcherHeartbeatStale|WatcherW5Unarmed\""]),
+    ] {
+        plant(|v| oms_down(v)["target_matchers"] = target, &["R10"]);
+    }
+    plant(
+        |v| oms_down(v)["source_matchers"] = json!(["alertname=\"ProjectorDown\""]),
+        &["R10"],
+    );
+    plant(|v| oms_down(v)["equal"] = json!([]), &["R10"]);
+    // The watcher's alert renamed: the OMS's rule names a stale target.
+    let watcher = "deploy/observability/vmalert/metrics/watcher.rules.json";
+    let mut t = Tree::real();
+    t.replace(
+        watcher,
+        "\"alert\": \"WatcherW5Unarmed\"",
+        "\"alert\": \"WatcherW5NotArmed\"",
+    );
+    let f = crate::check(&t);
+    assert_rules(&f, &["R10"]);
+    assert!(f.iter().any(|x| x.text.contains("WatcherW5Unarmed")), "{f:?}");
     // A stale name: the rule file's alert renamed (R6 sees the venue's
     // rule gone).
     let oms = "deploy/observability/vmalert/metrics/oms.rules.json";
