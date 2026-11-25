@@ -1058,14 +1058,25 @@ fn the_oms_inhibit_rules_hold_back_only_derived_alerts() {
         |v| inhibit_mut(v)["target_matchers"] = json!(["severity=~\"P2|P3\"", "alertname=~\".*\""]),
         &["R10"],
     );
-    // An Md* alert that reads an OMS series, or every service's drops.
+    // An Md* alert that reads an OMS, projector, journal or watcher series
+    // (each prefix of the list), or every service's drops. The watcher's
+    // series join the catalogue in a later part: one row is planted here.
     let md = "deploy/observability/vmalert/metrics/market-data.rules.json";
     for e in [
+        "max by (venue) (oms_holds) > 0",
         "max by (venue) (projector_lag_records) > 100",
+        "min by (venue) (journal_disk_free_bytes) < 1",
+        "max by (venue) (watcher_up) == 0",
         "sum by (venue, endpoint) (increase(obs_push_dropped_total[10m])) > 0",
         "sum by (venue, endpoint) (increase(obs_push_dropped_total{service=\"oms-projector\"}[10m])) > 0",
     ] {
         let mut t = Tree::real();
+        let catalogue = "deploy/observability/metrics.toml";
+        let mut rows = t.files[catalogue].clone();
+        rows.push_str(
+            "\n[[metric]]\nname = \"watcher_up\"\nlabels = [\"venue\"]\nsource = \"crates/watcher/src/metrics.rs\"\n",
+        );
+        t.set(catalogue, &rows);
         edit_rules(&mut t, md, |v| {
             let r = v["groups"][0]["rules"]
                 .as_array_mut()

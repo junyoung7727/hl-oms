@@ -1507,6 +1507,20 @@ fn every_hold_reason_has_an_alert_class() {
     two[1].1 = &[];
     let f = partition(&reasons, &two);
     assert!(f.len() == 1 && f[0].contains("unmonitored is in 0"), "{f:?}");
+    // A strategy-only reason in a class: the projector never pushes it, so
+    // that alert term can never fire.
+    let mut strategy = HOLD_ALERTS.to_vec();
+    strategy[2].1 = &[
+        "link_down",
+        "resync",
+        "in_doubt",
+        "no_config",
+        "venue_setting",
+        "account_mode",
+        "strategy_link",
+    ];
+    let f = partition(&reasons, &strategy);
+    assert!(f.len() == 1 && f[0].starts_with("strategy_link is in a hold"), "{f:?}");
 }
 
 #[test]
