@@ -875,7 +875,7 @@ fn install_target(src: &str) -> (String, &'static str) {
 
 /// `(src, dst, mode)` of every entry of the install map; a malformed entry
 /// is a finding and is left out.
-fn install_entries(p: &Parsed, out: &mut Vec<Finding>) -> Vec<(String, String, String)> {
+pub fn install_entries(p: &Parsed, out: &mut Vec<Finding>) -> Vec<(String, String, String)> {
     let path = format!("{OBS}install.toml");
     let Some(files) = p
         .toml

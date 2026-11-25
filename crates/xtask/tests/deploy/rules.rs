@@ -127,7 +127,7 @@ const GROUP_INTERVALS: &[(&str, &str, Option<&str>)] = &[
 const DEFAULT_INTERVAL: &str = "10s";
 
 /// R9: the scrape jobs. Each reads the listener of its unit `<job>.service`.
-const SCRAPE_JOBS: &[&str] = &[
+pub const SCRAPE_JOBS: &[&str] = &[
     "victoriametrics",
     "victorialogs",
     "vmalert-metrics",
@@ -196,7 +196,7 @@ fn rule_file(path: &str) -> Option<bool> {
     None
 }
 
-fn norm(e: &str) -> String {
+pub fn norm(e: &str) -> String {
     e.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
