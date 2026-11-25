@@ -1,5 +1,8 @@
 # oms-projector 운영
 
+주인: 준영
+검토일: 2026-11-20
+
 설계: [ADR-026](../adr/ADR-026-observability-projector.md). 읽는 규칙: [C-TAIL](../contracts/tail.md). 이 문서는 실행 방법, 내보내는 것, 상황별 의미를 적는다. 서비스 설치와 알림 규칙은 U20에서 정한다(아직 없음).
 
 ## 실행

@@ -287,7 +287,7 @@ mod tests {
             "docs/adr/ADR-004-commit-gate.md",
             "crates/oms-core/src/decide.rs",
             "registry/claims.toml",
-            "docs/01-scope.md",
+            "docs/explanation.md",
         ] {
             assert!(source_path_allowed(ok), "{ok}");
         }

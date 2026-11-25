@@ -3,8 +3,8 @@
 //! A gateway implements [`VenueGateway`] and is started by [`start`], which
 //! owns the command and query loops. The two implementations (the simulated
 //! venue and Hyperliquid) are chosen once at startup (ADR-021). What they
-//! must honour is this message contract, documented in
-//! docs/contracts/gateway.md:
+//! must honour is this message contract (C-GW in registry/contracts.toml,
+//! checked by its claims):
 //!
 //! - For every `SendOrder` it receives, a gateway delivers exactly one
 //!   `SendResult`, and it classifies the outcome conservatively: `NotSent`

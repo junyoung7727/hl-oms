@@ -1,6 +1,6 @@
 # ADR-014 거래소 상태 대조
 
-상태: 채택. 동작 계약은 [reconciliation](../contracts/reconciliation.md).
+상태: 채택.
 
 대조(reconciliation)는 OMS가 아는 것과 거래소의 실제가 같은지 확인하고, 모르는 것을 채우는 일이다.
 

@@ -2,7 +2,7 @@
 //!
 //! String identifiers are validated on construction and on deserialisation, so
 //! an invalid identifier cannot exist inside the core. Lifetimes and scopes of
-//! each identifier are described in docs/contracts/identifiers.md.
+//! each identifier are decided in ADR-006 and ADR-022.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn base32_pair_gives_a_million_distinct_ids() {
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = std::collections::BTreeSet::new();
         for instance_id in [7, 8] {
             for order in 1..=500_000u64 {
                 let id = VenueClientId { instance_id, order_id: OrderId(order) };

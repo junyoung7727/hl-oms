@@ -34,7 +34,7 @@ mkdir -p "$repo/tools/ci" "$repo/tests/common"
 cd "$repo"
 git init -q .
 g() { git -c user.name=selftest -c user.email=selftest@invalid -c commit.gpgsign=false "$@"; }
-cp "$src/secret_scan.sh" "$src/rustfmt_added.sh" "$src/watcher_independent.sh" tools/ci/
+cp "$src/secret_scan.sh" "$src/rustfmt_added.sh" "$src/watcher_independent.sh" "$src/adr_immutable.sh" "$src/doc_freshness.sh" "$src/doc_links.sh" tools/ci/
 printf '# empty\n' > tools/ci/secret_scan_allow.txt
 # An existing, unformatted file that the format check must leave alone.
 printf 'pub fn  helper( ){}\n' > tests/common/mod.rs
@@ -260,6 +260,7 @@ fmt() { g add -A && g commit -q -m probe && tools/ci/rustfmt_added.sh "$base"; }
 undo() { git reset -q --hard "$base" && git clean -fdxq; }
 
 expect ok "no Rust file added" tools/ci/rustfmt_added.sh "$base"
+expect fail "an unknown base is not a pass" tools/ci/rustfmt_added.sh "$(hex 0e 20)"
 
 printf 'mod common;\n\n#[test]\nfn probe() {\n    assert_eq!(1, 1);\n}\n' > tests/probe_slice.rs
 expect ok "formatted new file whose child module is an unformatted old file" fmt
@@ -286,6 +287,56 @@ undo
 printf 'pub fn  more( ){}\n' >> tests/common/mod.rs
 expect ok "unformatted code added to an existing file (exempt by design)" fmt
 undo
+
+# ---- ADRs are immutable ----------------------------------------------------
+mkdir -p docs/adr
+printf '# ADR-001\n\n상태: 채택.\n\n결정 본문.\n' > docs/adr/ADR-001-x.md
+g add -A && g commit -q -m adr-base
+adr_base="$(git rev-parse HEAD)"
+adr() { g add -A && g commit -q -m probe && tools/ci/adr_immutable.sh "$adr_base"; }
+adr_undo() { git reset -q --hard "$adr_base" && git clean -fdxq; }
+expect ok "adr: no change" tools/ci/adr_immutable.sh "$adr_base"
+sed -i 's/^상태: 채택\.$/상태: 대체됨 → ADR-002./' docs/adr/ADR-001-x.md
+printf '# ADR-002\n\n상태: 채택.\n' > docs/adr/ADR-002-y.md
+expect ok "adr: status line changed and a new ADR added" adr
+adr_undo
+sed -i 's/결정 본문/고친 본문/' docs/adr/ADR-001-x.md
+expect fail "adr: body edited" adr
+adr_undo
+git rm -q docs/adr/ADR-001-x.md
+expect fail "adr: deleted" adr
+adr_undo
+expect fail "adr: an unknown base is not a pass" tools/ci/adr_immutable.sh "$(hex 0f 20)"
+git mv docs/adr/ADR-001-x.md docs/adr/ADR-001-z.md
+expect fail "adr: renamed" adr
+adr_undo
+
+# ---- links in living documents ----------------------------------------------
+mkdir -p docs/adr
+links() { g add -A && tools/ci/doc_links.sh; }
+printf '# a\n\n[b](b.md) [web](https://example.invalid/x) [here](#top) [b again](b.md#part)\n' > docs/a.md
+printf '# b\n' > docs/b.md
+expect ok "links: every target exists" links
+printf '# a\n\n[gone](gone.md)\n' > docs/a.md
+expect fail "links: a target that does not exist" links
+printf '# a\n\n[spaced](<b.md>)\n' > docs/a.md
+expect fail "links: a target in <...> is refused" links
+printf '# a\n' > docs/a.md
+printf '# ADR-009\n\n상태: 채택.\n\n[old](../gone.md)\n' > docs/adr/ADR-009-x.md
+expect ok "links: an old ADR may name a removed document" links
+git reset -q --hard "$adr_base" && git clean -fdxq
+
+# ---- runbook owner and review date ----------------------------------------
+mkdir -p docs/operations
+fresh() { tools/ci/doc_freshness.sh 2026-11-25; }
+printf '# 절차\n\n주인: 준영\n검토일: 2026-11-20\n' > docs/operations/a.md
+expect ok "freshness: owner and recent date" fresh
+expect ok "freshness: old date only warns" bash -c 'out="$(tools/ci/doc_freshness.sh 2027-06-01)" && grep -q "::warning file=docs/operations/a.md" <<< "$out"'
+printf '# 절차\n\n검토일: 2026-11-20\n' > docs/operations/b.md
+expect fail "freshness: no owner" fresh
+printf '# 절차\n\n주인: 준영\n검토일: 어제\n' > docs/operations/b.md
+expect fail "freshness: date not YYYY-MM-DD" fresh
+rm -rf docs
 
 # ---- watcher independence --------------------------------------------------
 # A synthetic workspace in ws/ (the fake Cargo.lock at the root of this

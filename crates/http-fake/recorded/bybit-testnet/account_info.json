@@ -1,0 +1,21 @@
+{
+  "body": null,
+  "http_status": 200,
+  "method": "GET",
+  "path": "/v5/account/info",
+  "query": "",
+  "response": {
+    "result": {
+      "dcpStatus": "OFF",
+      "isMasterTrader": false,
+      "marginMode": "REGULAR_MARGIN",
+      "smpGroup": "scrubbed",
+      "spotHedgingStatus": "OFF",
+      "timeWindow": 0,
+      "unifiedMarginStatus": 5,
+      "updatedTime": "1795509791000"
+    },
+    "retCode": 0,
+    "retMsg": "OK"
+  }
+}

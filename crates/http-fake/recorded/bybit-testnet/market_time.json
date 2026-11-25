@@ -1,0 +1,17 @@
+{
+  "body": null,
+  "http_status": 200,
+  "method": "GET",
+  "path": "/v5/market/time",
+  "query": "",
+  "response": {
+    "result": {
+      "timeNano": "1795535957898392153",
+      "timeSecond": "1795535957"
+    },
+    "retCode": 0,
+    "retExtInfo": {},
+    "retMsg": "OK",
+    "time": 1795535957898
+  }
+}

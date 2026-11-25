@@ -1,6 +1,9 @@
 # 워처 운영
 
-설계: [ADR-031](../adr/ADR-031-watcher.md). 계약: [C-WATCH](../contracts/watcher.md). 이 문서는 워처의 설정과 자격 파일(U19a4), 시작 확인과 그 거부, 시작 확인이 내보내는 지표(U19a4b), 실행과 상황별 의미(U19a7), 직접 알림의 토큰 파일(U19b1a, [ADR-032](../adr/ADR-032-watcher-kill-and-alerts.md))을 적는다. U19a7부터 `watcher --config`가 돈다: W1(열린 주문)과 W2(포지션), U19a8부터 W4(체결), U19a9부터 W3(지갑과 증거금)을 검사하고, 확정된 차이를 `admin.sock`에 보내고, `monitor.sock`에 하트비트를 보낸다. loopback 가짜로만 시험했고 실제 거래소에서 돌려 본 적이 없다. 서비스 설치와 알림 규칙은 U20b다.
+주인: 준영
+검토일: 2026-11-24
+
+설계: [ADR-031](../adr/ADR-031-watcher.md). 계약: C-WATCH. 이 문서는 워처의 설정과 자격 파일(U19a4), 시작 확인과 그 거부, 시작 확인이 내보내는 지표(U19a4b), 실행과 상황별 의미(U19a7), 직접 알림의 토큰 파일(U19b1a, [ADR-032](../adr/ADR-032-watcher-kill-and-alerts.md))을 적는다. U19a7부터 `watcher --config`가 돈다: W1(열린 주문)과 W2(포지션), U19a8부터 W4(체결), U19a9부터 W3(지갑과 증거금)을 검사하고, 확정된 차이를 `admin.sock`에 보내고, `monitor.sock`에 하트비트를 보낸다. loopback 가짜로만 시험했고 실제 거래소에서 돌려 본 적이 없다. 서비스 설치와 알림 규칙은 U20b다.
 
 ## 설정 파일
 
@@ -77,7 +80,7 @@ oms_unit = "hl-oms.service"                       # 워처가 멈출 수 있는 
 | `[w5] probe_ms` | 1000(설계 §7.5) | 500~5000. `[kill]`이 있을 때만 쓴다 |
 | `[w5] silence_ms` | 10,000(설계 §7.5) | 3000~60,000, 그리고 `[kill]`이 있으면 `3 × probe_ms + 3 × request_timeout_ms + 1000` 이상(판단(모델 아님): 탐침 하나를 잃거나 워처가 틈 한계보다 짧게 멈춰도 쏘지 않게; 기본값이 한계에 맞으므로 `probe_ms`나 `request_timeout_ms`를 올리면 `silence_ms`도 올려야 한다; 거부 줄 `[w5] silence_ms must be at least …`) |
 
-기본값의 근거(설계 §7.5, 스코프, OMS의 값)와 거부의 이유는 [C-WATCH 4부](../contracts/watcher.md)에 있다.
+기본값의 근거(설계 §7.5, 스코프, OMS의 값)와 거부의 이유는 C-WATCH 4부에 있다.
 
 `[w3]`의 두 한도는 OMS 설정의 `account_mm_rate_max_bps`·`daily_loss_bps`(C-MARGIN)와 **같은 값으로 둔다**. 워처는 OMS 설정을 읽지 않는다(독립). 값이 다르면 W3과 OMS의 감소 전용 판단이 어긋난다(U19a9, C-WATCH 9부).
 

@@ -1,0 +1,18 @@
+{
+  "body": {
+    "category": "linear",
+    "orderLinkId": "00001k874gqnt-0000000000009",
+    "symbol": "BTCUSDT"
+  },
+  "http_status": 200,
+  "method": "POST",
+  "path": "/v5/order/cancel",
+  "query": "",
+  "response": {
+    "result": {},
+    "retCode": 110001,
+    "retExtInfo": {},
+    "retMsg": "order not exists or too late to cancel",
+    "time": 1795535963095
+  }
+}

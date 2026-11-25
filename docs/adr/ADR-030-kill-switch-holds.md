@@ -1,6 +1,6 @@
 # ADR-030 킬 스위치, 운영자가 푸는 보류, 전략 연결 감시, 모니터링 게이트
 
-상태: 채택. 구현은 네 PR로 나눈다: U18b1(보류 셋, 킬 마커, `clear_hold`, 워처 입력, 킬 명령 — 구현됨, 2026-11-21), U18b2(Bybit 킬 루프, C-KILL — 구현됨, 2026-11-22), U18b3(전략 연결 감시, C-LIVE 1부 — 구현됨, 2026-11-22), U18b4(모니터링 게이트, C-LIVE 2부 — 구현됨, 2026-11-22). 계약: [C-HOLD](../contracts/holds.md)(U18b1), [C-KILL](../contracts/kill.md)(U18b2), [C-LIVE](../contracts/liveness.md)(U18b3 1부, U18b4 2부). [ADR-008](ADR-008-risk-reservation.md) §7의 차단 표와 [ADR-028](ADR-028-bybit-gateway.md)(킬 트리거, `kill_scope`의 사용, U18b2)을 고친다.
+상태: 채택 (2026-11-21).
 
 ## 1. 문제와 발생 가능한 실패
 

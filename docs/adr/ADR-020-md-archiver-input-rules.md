@@ -1,6 +1,6 @@
 # ADR-020 아카이버가 계약에 없는 다섯 곳을 정하는 방법
 
-상태: 채택, 구현됨(2026-11-19, U7 `.scratch/md-archiver/`). 계약(quant-data-platform `docs/crypto/lake-contract.md`)은 바꾸지 않았다. 아래 1번과 5번은 계약에 넣자고 qdp에 제안할 질문이다.
+상태: 채택 (2026-11-19).
 
 ## 1. 문제
 

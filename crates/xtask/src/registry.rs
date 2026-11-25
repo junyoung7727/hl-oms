@@ -10,8 +10,8 @@
 //!
 //! - passed: every test it names ran and passed, for the current source digest
 //! - failed: at least one of them failed
-//! - not run: at least one of them has no result
-//! - stale: the results belong to a different source digest
+//! - not run: at least one of them has no result, or only a result of a
+//!   different source digest (an old result never counts)
 
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -100,7 +100,7 @@ fn suite_dirs(suite: &str) -> Option<&'static [&'static str]> {
         "watcher" => &["crates/watcher/src", "crates/watcher/tests", "crates/watcher-conformance/tests"],
         "pipeline" => &["crates/oms-node/tests"],
         "e2e" | "kills-extended" => &["crates/oms-node/tests"],
-        "hl-live" => &["crates/oms-node/tests"],
+        "hl-live" | "bybit-testnet" => &["crates/oms-node/tests"],
         _ => return None,
     })
 }
@@ -244,7 +244,7 @@ fn judge_perf(claim_id: &str, test: &str, ev: &Evidence, digest: &str) -> (Strin
 
 fn claim_status(claim: &Value, ev: &Evidence, digest: &str) -> (String, Vec<Value>) {
     let mut per_test = Vec::new();
-    let (mut failed, mut missing, mut stale) = (false, false, false);
+    let (mut failed, mut missing) = (false, false);
     for t in list(claim, "tests") {
         let (result, detail) = if t.starts_with("perf/") {
             judge_perf(s(claim, "id"), &t, ev, digest)
@@ -272,21 +272,22 @@ fn claim_status(claim: &Value, ev: &Evidence, digest: &str) -> (String, Vec<Valu
                 None => ("not_run".to_string(), String::new()),
             }
         };
+        // Only a result of the current source counts.
+        let (result, detail) = if result == "stale" {
+            ("not_run".to_string(), format!("result of another source, not counted ({detail})"))
+        } else {
+            (result, detail)
+        };
         match result.as_str() {
             "failed" => failed = true,
             "not_run" | "ignored" => missing = true,
-            "stale" => stale = true,
             _ => {}
         }
         per_test.push(json!({ "test": t, "result": result, "detail": detail }));
     }
     let status = if failed {
         "failed"
-    } else if missing {
-        "not_run"
-    } else if stale {
-        "stale"
-    } else if per_test.is_empty() {
+    } else if missing || per_test.is_empty() {
         "not_run"
     } else {
         "passed"
@@ -328,13 +329,15 @@ pub fn run(root: &Path) -> i32 {
     let user_decisions = get("user-decisions.toml", "decision");
     let paths = get("paths.toml", "path");
     let coverage = get("coverage.toml", "row");
+    let requirements = get("requirements.toml", "requirement");
 
     let source_ids = ids(&sources, "sources", &mut errors);
     ids(&considerations, "considerations", &mut errors);
     let adr_ids = ids(&decisions, "decisions", &mut errors);
     let contract_ids = ids(&contracts, "contracts", &mut errors);
     let claim_ids = ids(&claims, "claims", &mut errors);
-    ids(&assumptions, "assumptions", &mut errors);
+    let assumption_ids = ids(&assumptions, "assumptions", &mut errors);
+    ids(&requirements, "requirements", &mut errors);
     ids(&user_decisions, "user decisions", &mut errors);
 
     let exists = |p: &str| root.join(p).exists();
@@ -436,7 +439,8 @@ pub fn run(root: &Path) -> i32 {
     for c in &contracts {
         let id = s(c, "id");
         check_refs(id, c, &mut errors);
-        if !exists(s(c, "file")) {
+        // A contract names a document only when it has one (C-TAIL).
+        if !s(c, "file").is_empty() && !exists(s(c, "file")) {
             errors.push(format!("{id}: no such file {}", s(c, "file")));
         }
         for e in list(c, "events") {
@@ -485,6 +489,11 @@ pub fn run(root: &Path) -> i32 {
             }
         }
     }
+    check_requirements(&requirements, &claims, &claim_ids, &mut errors);
+    for d in &decisions {
+        check_adr_status(root, d, &adr_ids, &mut errors);
+    }
+    check_explanation(root, &claim_ids, &assumption_ids, &mut errors);
     if !errors.is_empty() {
         eprintln!("registry has {} problems:", errors.len());
         for e in &errors {
@@ -555,6 +564,7 @@ pub fn run(root: &Path) -> i32 {
         "user_decisions": user_decisions,
         "paths": paths,
         "coverage": coverage,
+        "requirements": requirements,
         "event_index": event_index,
     });
     let write = |name: &str, v: &Value| {
@@ -614,7 +624,13 @@ pub fn run(root: &Path) -> i32 {
 
     let mut md = format!("# 검증 주장과 결과\n\n{header}");
     let st = &summary["claims_by_status"];
-    md += &format!("주장 {}건: 통과 {}, 실패 {}, 미실행 {}, 이전 버전 결과 {}.\n\n", claims.len(), st["passed"], st["failed"], st["not_run"], st["stale"]);
+    md += &format!(
+        "주장 {}건: 통과 {}, 실패 {}, 미실행 {}. 결과는 현재 소스(다이제스트 `{digest}`)에서 돌린 것만 센다. 다른 소스의 결과는 미실행으로 센다.\n\n",
+        claims.len(),
+        st["passed"],
+        st["failed"],
+        st["not_run"]
+    );
     md += "| ID | 주장 | 수준 | 상태 | 재현 |\n|---|---|---|---|---|\n";
     for c in &claims_out {
         md += &format!("| {} | {} | {} | {} | `{}` |\n", s(c, "id"), cell(s(c, "statement")), s(c, "level"), ko_status(s(c, "status")), cell(s(c, "repro")));
@@ -640,8 +656,9 @@ pub fn run(root: &Path) -> i32 {
             .map(|id| format!("{id}({})", ko_status(claim_state.get(id).map(String::as_str).unwrap_or(""))))
             .collect();
         md += &format!(
-            "| [{}](../../{}) | {} | {} | {} | {} | {} |\n",
-            s(c, "id"), s(c, "file"), cell(s(c, "title")),
+            "| {} | {} | {} | {} | {} | {} |\n",
+            if s(c, "file").is_empty() { s(c, "id").to_string() } else { format!("[{}](../../{})", s(c, "id"), s(c, "file")) },
+            cell(s(c, "title")),
             list(c, "events").iter().map(|e| format!("`{e}`")).collect::<Vec<_>>().join(" "),
             list(c, "adr").join(", "),
             list(c, "code").iter().map(|e| format!("`{e}`")).collect::<Vec<_>>().join("<br>"),
@@ -699,6 +716,218 @@ pub fn run(root: &Path) -> i32 {
     }
     let _ = std::fs::write(gen_dir.join("coverage.md"), md);
 
+    let _ = std::fs::write(gen_dir.join("requirements.md"), requirements_view(&requirements, &claims_out, &claim_state, &digest));
+
     println!("{}", serde_json::to_string_pretty(&summary).unwrap_or_default());
     0
+}
+
+/// The suite whose tests run against the real Bybit testnet. Only claims whose
+/// tests are all in it may stand in a requirement's `bybit` column.
+const BYBIT_SUITE: &str = "bybit-testnet";
+
+fn check_requirements(requirements: &[Value], claims: &[Value], claim_ids: &BTreeSet<String>, errors: &mut Vec<String>) {
+    let tests_of = |id: &str| claims.iter().find(|c| s(c, "id") == id).map(|c| list(c, "tests")).unwrap_or_default();
+    for r in requirements {
+        let id = s(r, "id");
+        for f in ["text", "source", "boundary", "gap"] {
+            if s(r, f).is_empty() {
+                errors.push(format!("{id}: field {f} is empty"));
+            }
+        }
+        for col in ["logic", "bybit"] {
+            for c in list(r, col) {
+                if !claim_ids.contains(&c) {
+                    errors.push(format!("{id}: {col} names unknown claim {c}"));
+                }
+            }
+        }
+        for c in list(r, "logic") {
+            let tests = tests_of(&c);
+            if !tests.is_empty() && tests.iter().all(|t| t.starts_with(&format!("{BYBIT_SUITE}/"))) {
+                errors.push(format!("{id}: logic column names {c}, whose tests all run on the real venue"));
+            }
+        }
+        for c in list(r, "bybit") {
+            let tests = tests_of(&c);
+            if tests.is_empty() || !tests.iter().all(|t| t.starts_with(&format!("{BYBIT_SUITE}/"))) {
+                errors.push(format!("{id}: bybit column names {c}, whose tests are not all in suite {BYBIT_SUITE}"));
+            }
+        }
+        if r.get("untested").and_then(|x| x.as_array()).is_none() {
+            errors.push(format!("{id}: no `untested` list"));
+        }
+    }
+}
+
+/// An ADR is never edited after it is accepted. Its status line is the one
+/// line that changes, and it holds one of two values.
+fn check_adr_status(root: &Path, d: &Value, adr_ids: &BTreeSet<String>, errors: &mut Vec<String>) {
+    let id = s(d, "id");
+    let text = std::fs::read_to_string(root.join(s(d, "file"))).unwrap_or_default();
+    let Some(line) = text.lines().find(|l| l.starts_with("상태:")) else {
+        errors.push(format!("{id}: no `상태:` line"));
+        return;
+    };
+    let value = line.trim_start_matches("상태:").trim().trim_end_matches('.');
+    // The date the decision was accepted may follow: `채택 (2026-11-24)`.
+    let value = match value.rsplit_once(" (") {
+        Some((v, date))
+            if date.len() == 11
+                && date.ends_with(')')
+                && date[..10].chars().enumerate().all(|(i, c)| if i == 4 || i == 7 { c == '-' } else { c.is_ascii_digit() }) =>
+        {
+            v
+        }
+        _ => value,
+    };
+    let ok = value == "채택"
+        || value.strip_prefix("대체됨 → ").is_some_and(|by| adr_ids.contains(by) && by != id);
+    if !ok {
+        errors.push(format!("{id}: status {value:?} is not `채택` or `대체됨 → ADR-0xx` (a date `(YYYY-MM-DD)` may follow)"));
+    }
+}
+
+fn git(root: &Path, args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new("git").arg("-C").arg(root).args(args).output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// IDs of one kind (`V-` claims, `A-` assumptions) found in a line of text.
+fn ids_in(line: &str, prefix: &str) -> Vec<String> {
+    line.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+        .filter(|w| w.starts_with(prefix) && w.len() > prefix.len())
+        .map(|w| w.trim_end_matches('-').to_string())
+        .collect()
+}
+
+/// docs/explanation.md: the first line names the commit it describes, and
+/// every situation names the claims that check it and the assumptions it
+/// rests on. All of them must exist.
+fn check_explanation(root: &Path, claim_ids: &BTreeSet<String>, assumption_ids: &BTreeSet<String>, errors: &mut Vec<String>) {
+    const FILE: &str = "docs/explanation.md";
+    let Ok(text) = std::fs::read_to_string(root.join(FILE)) else {
+        errors.push(format!("{FILE}: missing"));
+        return;
+    };
+    let first = text.lines().next().unwrap_or("");
+    let commit = first
+        .strip_prefix("> 이 설명은 커밋 `")
+        .and_then(|r| r.split_once("` 기준이다."))
+        .map(|(c, _)| c.to_string())
+        .unwrap_or_default();
+    if commit.is_empty() {
+        errors.push(format!("{FILE}: the first line must be \"> 이 설명은 커밋 `<sha>` 기준이다.\""));
+    } else if git(root, &["rev-parse", "--verify", "--quiet", &format!("{commit}^{{commit}}")]).is_none() {
+        errors.push(format!("{FILE}: commit {commit} is not in this repository's history"));
+    } else if let Some(n) = git(root, &["rev-list", "--count", &format!("{commit}..HEAD"), "--", "crates", ":!crates/xtask"]) {
+        if n != "0" {
+            // A warning, not a failure: the code moved since the text was checked.
+            // xtask is left out: it builds documents, it does not trade.
+            eprintln!("::warning file={FILE}::crates/ changed in {n} commits after {commit}, the commit this explanation describes");
+        }
+    }
+    let mut sections = 0;
+    let mut section = String::new();
+    let mut has_tests = true;
+    for line in text.lines() {
+        if let Some(h) = line.strip_prefix("## ") {
+            if !has_tests {
+                errors.push(format!("{FILE}: section {section:?} has no `- 시험:` line"));
+            }
+            section = h.to_string();
+            sections += 1;
+            has_tests = false;
+        }
+        if let Some(rest) = line.strip_prefix("- 시험:") {
+            let found = ids_in(rest, "V-");
+            if found.is_empty() {
+                errors.push(format!("{FILE}: section {section:?} names no claim"));
+            }
+            for c in found {
+                if !claim_ids.contains(&c) {
+                    errors.push(format!("{FILE}: section {section:?} names unknown claim {c}"));
+                }
+            }
+            has_tests = true;
+        }
+        if let Some(rest) = line.strip_prefix("- 가정과 상태:") {
+            for a in ids_in(rest, "A-") {
+                if !assumption_ids.contains(&a) {
+                    errors.push(format!("{FILE}: section {section:?} names unknown assumption {a}"));
+                }
+            }
+        }
+    }
+    if !has_tests {
+        errors.push(format!("{FILE}: section {section:?} has no `- 시험:` line"));
+    }
+    if sections == 0 {
+        errors.push(format!("{FILE}: no situation (`## `) found"));
+    }
+}
+
+/// One view per requirement: what checks it on the logic (core and doubles)
+/// and on the real Bybit testnet, with results of the current source only.
+fn requirements_view(requirements: &[Value], claims_out: &[Value], claim_state: &BTreeMap<String, String>, digest: &str) -> String {
+    let column = |ids: &[String]| -> String {
+        if ids.is_empty() {
+            return "**■ 시험 없음**".to_string();
+        }
+        let n = |st: &str| ids.iter().filter(|c| claim_state.get(*c).map(String::as_str) == Some(st)).count();
+        let (passed, failed, not_run) = (n("passed"), n("failed"), n("not_run"));
+        let mut parts = vec![format!("주장 {}: 통과 {passed}", ids.len())];
+        if failed > 0 {
+            parts.push(format!("**실패 {failed}**"));
+        }
+        if not_run > 0 {
+            parts.push(format!("**■ 미실행 {not_run}**"));
+        }
+        parts.join(" · ")
+    };
+    let mut md = format!(
+        "# 요구사항별 확인 현황(R01~R15)\n\n\
+         > 자동 생성 문서다. 고치려면 `registry/requirements.toml`이나 `registry/claims.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.\n\
+         > 결과는 현재 소스(다이제스트 `{digest}`)에서 돌린 것만 센다. 다른 소스에서 돌린 결과는 **미실행**으로 센다.\n\n\
+         - 로직(코어+가짜): 코어와 가짜 거래소·시뮬레이션·loopback 가짜 Bybit로 확인한다. 장애 주입과 강제 종료는 여기서만 원할 때 재현할 수 있다.\n\
+         - 실제 Bybit: 테스트넷에 실제로 보낸 시험(`{BYBIT_SUITE}` 묶음)만 센다. 어떤 가짜도 이 칸에 들어가지 않는다.\n\
+         - **■ 미실행**: 시험은 있는데 현재 소스에서 돌린 결과가 없다. **■ 시험 없음**: 이 칸을 확인하는 주장이 없다.\n\n\
+         | R | 요구 | 로직(코어+가짜) | 실제 Bybit |\n|---|---|---|---|\n"
+    );
+    for r in requirements {
+        md += &format!("| {} | {} | {} | {} |\n", s(r, "id"), cell(s(r, "text")), column(&list(r, "logic")), column(&list(r, "bybit")));
+    }
+    md += "\n";
+    for r in requirements {
+        md += &format!(
+            "## {} — {}\n\n- 출처: {}\n- 판정 경계: {}\n- 로직(코어+가짜): {}\n- 실제 Bybit: {}\n- 확인하지 않은 범위: {}\n",
+            s(r, "id"),
+            s(r, "text"),
+            s(r, "source"),
+            s(r, "boundary"),
+            column(&list(r, "logic")),
+            column(&list(r, "bybit")),
+            s(r, "gap"),
+        );
+        let untested = list(r, "untested");
+        if !untested.is_empty() {
+            md += "- 시험이 없는 규칙:\n";
+            for u in &untested {
+                md += &format!("  - {u}\n");
+            }
+        }
+        let ids: Vec<String> = list(r, "logic").into_iter().chain(list(r, "bybit")).collect();
+        if !ids.is_empty() {
+            md += "\n| 주장 | 칸 | 상태 | 주장 내용 |\n|---|---|---|---|\n";
+            for c in &ids {
+                let col = if list(r, "bybit").contains(c) { "실제 Bybit" } else { "로직" };
+                let statement = claims_out.iter().find(|x| s(x, "id") == c).map(|x| s(x, "statement")).unwrap_or("");
+                let st = ko_status(claim_state.get(c).map(String::as_str).unwrap_or(""));
+                let st = if st == "미실행" { "**■ 미실행**".to_string() } else { st.to_string() };
+                md += &format!("| [{c}](claims.md) | {col} | {st} | {} |\n", cell(statement));
+            }
+        }
+        md += "\n";
+    }
+    md
 }

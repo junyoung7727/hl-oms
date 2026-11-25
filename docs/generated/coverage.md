@@ -1,7 +1,7 @@
 # 출처 요소별 대응표
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `651379a8c11a07b4`, 검증 결과의 다이제스트 `762a4acf55af90fb`.
+> 소스 다이제스트 `7177e990dc137b5e`, 검증 결과의 다이제스트 `7f76e9bbc5ac8483`.
 
 검토 기준의 모수다. 출처가 나누어 둔 요소마다 이 프로젝트가 어디에서 다뤘는지, 다루지 않았다면 왜인지를 적는다.
 요소 목록은 [조사 기록](../research/standards-sources.md) §3과 [Hyperliquid 조사](../research/hyperliquid-protocol.md) §2에서 왔다. 표준의 본문을 읽지 못한 요소는 제목만으로 판단했고 그렇게 적었다.
@@ -56,7 +56,7 @@
 | SSDF | PO.3 도구 체인과 그 산출물 | 다룸 | G-SEC-04, G-QUAL-05, G-CHG-02 | 의존성 점검 도구는 설치돼 있지 않다 |
 | SSDF | PO.4 릴리스 전 보안 점검 기준 | 다룸 | G-SEC-11 |  |
 | SSDF | PO.5 개발·시험·운영 환경 분리 | 다룸 | P-VEN-09, G-SEC-12 |  |
-| SSDF | PS.1 소스와 설정의 접근 통제 | 다룸 | G-SEC-08 | 저장소가 아직 없다(U-10) |
+| SSDF | PS.1 소스와 설정의 접근 통제 | 다룸 | G-SEC-08 | git 저장소는 있고 릴리스 태그가 없다(U-10) |
 | SSDF | PS.2 릴리스 무결성 검증 정보 | 다룸 | G-SEC-08 |  |
 | SSDF | PS.3 릴리스 보관, provenance, SBOM | 다룸 | G-SEC-08, G-OPS-02 | SBOM은 만들지 않았다 |
 | SSDF | PW.1.1, PW.1.2 위협 모델, 보안 요구·위험·결정의 추적 | 다룸 | G-SEC-11 |  |

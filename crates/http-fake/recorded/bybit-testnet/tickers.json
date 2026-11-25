@@ -1,0 +1,52 @@
+{
+  "body": null,
+  "http_status": 200,
+  "method": "GET",
+  "path": "/v5/market/tickers",
+  "query": "category=linear&symbol=BTCUSDT",
+  "response": {
+    "result": {
+      "category": "linear",
+      "list": [
+        {
+          "ask1Price": "60377.30",
+          "ask1Size": "0.017",
+          "basis": "",
+          "basisRate": "",
+          "basisRateYear": "",
+          "bid1Price": "60377.10",
+          "bid1Size": "0.004",
+          "curPreListingPhase": "",
+          "deliveryFeeRate": "",
+          "deliveryTime": "0",
+          "fundingCap": "0.00333",
+          "fundingIntervalHour": "8",
+          "fundingRate": "0.00111856",
+          "highPrice24h": "62340.90",
+          "indexPrice": "59745.84",
+          "lastPrice": "60377.20",
+          "lowPrice24h": "59666.70",
+          "markPrice": "60289.78",
+          "nextFundingTime": "1795536000000",
+          "openInterest": "254536.053",
+          "openInterestValue": "15345922637.44",
+          "preOpenPrice": "",
+          "preQty": "",
+          "predictedDeliveryPrice": "",
+          "prevPrice1h": "60400.40",
+          "prevPrice24h": "62289.00",
+          "price24hPcnt": "-0.030692",
+          "singleOpenInterest": "127268.027",
+          "singleOpenInterestValue": "7672961348.86",
+          "symbol": "BTCUSDT",
+          "turnover24h": "9020385.5125",
+          "volume24h": "147.5800"
+        }
+      ]
+    },
+    "retCode": 0,
+    "retExtInfo": {},
+    "retMsg": "OK",
+    "time": 1795535958387
+  }
+}

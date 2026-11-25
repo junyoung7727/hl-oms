@@ -136,7 +136,7 @@ version = "2026-10-02"
 role = "프로젝트 요구"
 accessed = "전문."
 caution = ""
-detail = "docs/00-brief.md"
+detail = "docs/00-brief.md(2026-11-25 삭제; 규칙은 CONTRIBUTING.md와 registry로 옮김, git 이력에 남음)"
 
 [[source]]
 id = "PRACTICE"

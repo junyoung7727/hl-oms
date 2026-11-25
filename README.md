@@ -1,46 +1,17 @@
 # OrderManagementSystem
 
-단일 계좌·다중 전략용 주문 관리 시스템(OMS). Rust. 첫 대상 거래소는 Hyperliquid perpetual(testnet 먼저)이고 코어는 거래소 중립이다.
+단일 계좌·다중 전략용 주문 관리 시스템(OMS). Rust. 거래소는 Bybit USDT 무기한(먼저 테스트넷)이고, 코어는 거래소 중립이다. Hyperliquid 게이트웨이와 가상 거래소도 있다.
 LMAX의 원칙 가운데 **단일 writer의 결정적 코어 + 입력 저널**을 따르고, 복제 노드·Disruptor·busy-spin은 채택하지 않았다([ADR-001](docs/adr/ADR-001-lmax-scope.md)).
 
-## 지금 상태를 한 문단으로
+## 무엇을 읽나
 
-가상 거래소에 대해서는 접수·위험 예약·전송·체결·취소·종결·재시작 복구·대조·과부하 처리가 구현돼 있다. 무엇이 어떤 시험으로 확인됐는지는 주장별로 [generated/claims.md](docs/generated/claims.md)에 있고, 그 통과 여부는 보관된 결과 파일에서 계산한다.
-**증거금 규칙이 구현돼 있다**(2026-11-16, [ADR-018](docs/adr/ADR-018-margin-rules.md), [계약 C-MARGIN](docs/contracts/margin.md)). 증거금 정책(`policy.margin`)을 설정하면: 일반 주문이 계좌 노출(포지션과 모든 미체결 주문)을 계좌 가치의 2배 위로 올리면 거절한다. 일 손실이 5 %를 넘거나 격리 포지션이 청산에 가까워지면 계좌가 감소 전용 상태가 되어 일반 주문을 거절하고 걸린 일반 주문을 취소하며, 이 상태는 운영자만 푼다. 증거금 보고가 끊기면 일반 주문을 거절하고(30초), 걸린 일반 주문을 취소한다(60초). 정책이 없으면 전과 같고, mainnet은 정책 없이 시작하지 않는다. OMS는 포지션을 스스로 닫지 않고, 손실이 5 %에서 멈춘다고 보장하지 않는다.
-**증거금 규칙은 실제 거래소에서 한 번도 실행하지 않았다.** 가상 거래소와 시뮬레이션으로만 시험했다. 규칙이 읽는 거래소 숫자의 뜻은 문서에서 읽은 가정 열한 가지(T1~T11)이고 하나도 확인하지 않았다. testnet 예행(실주문으로 감소 전용 상태·보고 끊김 취소·강제 종료 훈련)과 T1~T11의 확인이 mainnet 전에 필요하고, 사용자의 승인이 필요하다(U-01, U-09). 스펙과 다르게 한 것과 보장하지 않는 것은 [검증 문서 §11](docs/verification/README.md)에 있다. 코드 검토(2026-11-16)에서 나온 것은 고쳤고(대조기가 모르는 거래소 설정을 1초마다 되묻던 것 포함), 미해결 사항은 지금 없다.
-구현과 분리된 검토에서 결함 20건이 나와 고쳤다([gap-review](docs/verification/gap-review.md)). 사람의 검토는 받지 않았다.
-**실제 거래소에는 주문을 한 번도 보내지 않았다.** Hyperliquid 게이트웨이는 서명을 SDK 시험 벡터와 대조했고, 2026-10-02에 testnet에 읽기 전용 조회만 했다(증거금 조회는 그때 없었고 그 뒤로도 보내지 않았다).
-**운영자만 푸는 보류가 구현돼 있다**(U18b1, 2026-11-21, [ADR-030](docs/adr/ADR-030-kill-switch-holds.md), [계약 C-HOLD](docs/contracts/holds.md)). 킬 래치는 감소 전용을 포함한 모든 주문을 거절하고, 워처가 확정한 불일치와 거래소가 스스로 바꾼 포지션은 일반 주문을 거절한다. 셋 다 `omsctl clear-hold`로만 풀린다. 킬은 그 프로세스의 게이트웨이가 킬에 답한 뒤에만, 그리고 OMS 장부에 미체결 주문이 없을 때만 풀린다(`kill_orders_open`이면 먼저 `omsctl cancel-all`). 가상 거래소와 Hyperliquid는 "일괄 취소 없음"(`unsupported`)으로 답한다. 킬 마커(`[kill] marker`)가 있으면 시작이 래치를 걸고, 해제가 내구화된 뒤 노드가 마커를 지운다. mainnet은 `[kill]` 없이 시작하지 않는다. **Bybit 킬 스위치가 구현돼 있다**(U18b2, 2026-11-22, [계약 C-KILL](docs/contracts/kill.md)): 개인 스트림을 마지막 생존 증거 뒤 10초 잃으면 래치를 걸고, 래치가 디스크에 있은 뒤 1초마다 일괄 취소하며 거래소의 미체결을 세어 0건을 확인하고 30초 지켜본다(일괄 취소는 어느 1초에도 둘 이하, 루프 중 새 주문은 나가지 않음, P1은 10분에 12개 이하이고 포지션 묶음이 붙음). 확인 뒤 새 계기가 오면 다시 무장한다. loopback 가짜 Bybit와 수동 시계로만 시험했고 실제 거래소에서는 돌려 본 적이 없다. **전략 연결 감시가 구현돼 있다**(U18b3, 2026-11-22, [계약 C-LIVE](docs/contracts/liveness.md)): `[liveness]`에 적힌 전략의 마지막 거래 연결이 닫히거나 정한 시간(예 5초) 동안 요청(`ping` 포함)이 없으면, 그 전략의 걸린 일반 주문 취소를 요청하고 그 전략의 일반 주문만 거절한다(감소 전용 주문과 다른 전략은 그대로). 그 전략이 다시 `hello`하면 풀리고, 그 답은 복구가 내구화된 뒤에 간다. mainnet은 사용 중인 전략이 모두 적혀야 시작한다. 가상 거래소에 붙인 노드 프로세스로만 시험했다. **모니터링 게이트가 구현돼 있다**(U18b4, 2026-11-22, [계약 C-LIVE](docs/contracts/liveness.md) 2부): `[core.policy.monitor]`가 있으면 워처의 하트비트(`monitor.sock`)를 저널에 남기고 코어가 판단한다. 하트비트가 30초 없거나 워처의 W1·W2가 10초 넘게 성공하지 못했으면 일반 주문을 거절하고, 60초 더 가면 걸린 일반 주문 취소를 요청한다. 모든 시작은 워처의 첫 하트비트까지 이 상태다. mainnet은 게이트 없이 시작하지 않는다. 워처(U19a)는 아직 없어 시험의 클라이언트가 하트비트를 보냈고, 실제 거래소에서는 돌려 본 적이 없다. **독립 워처를 만드는 중이다**(U19a1, 2026-11-23, [ADR-031](docs/adr/ADR-031-watcher.md), [계약 C-WATCH](docs/contracts/watcher.md)): 별도 crate `watcher`가 OMS 코드 없이 문서(ADR-011, C-TAIL)만으로 쓴 저널 읽기를 갖췄고(잠금 없음, 내구화 번호까지, 손상과 모르는 이벤트에서 멈춤), `tools/ci/watcher_independent.sh`가 CI에서 워처가 OMS·시세 crate에 의존하지 않음을 매번 확인한다. U19a2(2026-11-23)에서 같은 방식으로 저널 상태(열린 주문, 체결, 포지션, 보류, 체결 바닥)를 세우고, 그것이 이벤트 51개를 모두 쓰는 코어 시나리오에서 기록마다 코어의 집합과 같음을 적합성 시험이 확인한다. 시작마다 저널을 처음부터 다시 읽는데, 기록 100만 건에 약 1.3초다. U19a3(2026-11-23)에서 OMS 코드 없이 자기 Bybit 서명과 클라이언트를 갖췄다: 키가 거절되면(10010 등) 재시작까지 Bybit에 아무것도 보내지 않고, HTTP 403이면 600초 멈추며, 어느 10초에도 요청을 60개 넘게 보내지 않는다. 자기 지표 내보내기도 있다. loopback 가짜로만 시험했고 실제 Bybit에는 보낸 적이 없다. U19a4(2026-11-23)에서 설정 파일(모르는 키는 거부, mainnet은 `mainnet_confirmed = true`가 있어야)과 키 파일(워처를 돌리는 사용자의 권한 0600·0400 일반 파일, 링크 아님, OMS 데이터 디렉터리 밖)을 읽는다([운영 문서](docs/operations/watcher.md)). U19a4b(2026-11-23)에서 시작 확인을 갖췄다: 마스터 키, 다른 하위 계정의 키, IP에 묶이지 않은 키, USDT로 정산되지 않는 기호면 시작하지 않고, 키가 거절되면 요청 없이 떠 있으며, 키 만료까지 남은 날과 공인 IP가 키의 IP 목록에 있는지를 내보내고 60초마다 다시 본다. U19a5(2026-11-23)에서 검사 엔진과 W1(열린 주문)을 갖췄다: 라운드마다 거래소를 먼저 읽고 그 뒤의 저널과 비교하며, 차이는 두 라운드 연속으로 보이고 저널 항목이 2초 넘게 지났을 때만 확정한다(한 번 본 차이나 막 기록된 항목은 울리지 않는다). 프로세스 안의 모델 거래소와 수동 시계로만 시험했다. U19a6(2026-11-23)에서 W2(포지션)를 갖췄다: 기호마다 거래소 크기와 저널의 체결·변경·조정 합을 비교하고, 그 종목의 저널 변경이나 거래소 변경이 2초보다 어리면 미룬다(초당 5번의 체결이 60초 이어져도 울리지 않고, 체결이 멈춘 뒤의 차이는 3초 안에 확정한다). U19a7(2026-11-23)에서 워처가 돈다(`watcher --config`): OMS의 `/api/status`를 기다려 저널을 처음부터 읽은 뒤 W1과 W2를 돌리고, 확정된 차이를 `admin.sock`에 보내 일반 주문을 보류시키며(OMS가 `"held"`로 답할 때까지 빚으로 들고, 운영자가 풀었는데 차이가 남아 있으면 다시 보낸다), 5초마다 `monitor.sock`에 검사별 마지막 성공 시각을 보낸다. loopback 가짜로만 시험했고 실제 OMS 프로세스나 실제 Bybit에 붙여 돌려 본 적이 없다. U19a8(2026-11-23)에서 W4(체결)를 갖췄다: 5초마다 마지막으로 맞춘 체결 시각 10초 전부터 거래소 체결 목록을 읽어(라운드마다 10쪽까지, 더 길면 다음 라운드가 이어 읽음) 체결은 저널의 체결과, ADL·청산 인수·인도·정산은 저널의 거래소 변경과 키로 비교하고, 펀딩은 비교하지 않으며, 모르는 체결 형은 바로 확정한다. 보류 메모가 이름한 W4 차이는 운영자가 푼 뒤 다시 보내지 않는다. 모델 거래소와 수동 시계로만 시험했다. U19a9(2026-11-23)에서 W3(지갑과 증거금)을 갖춰 네 검사가 모두 돈다: 2초마다 통합 계좌의 유지증거금률과 오늘의 일 손실을 OMS와 같은 공식으로 보고, 두 라운드 연속 한도를 넘으면 확정한다. W2는 W4가 맞춘 가장 새 체결 시각도 거래소의 변경 시각으로 쓴다. 대조 요청은 5초에 체결 30개면 초당 2.7이지만 100개면 약 3.2~3.3으로 완료 기준을 넘는다(체결을 놓치지 않는 W4 규칙을 지켰다, 소유자 질문). 열린 주문 500개에서도 W1·W2는 10초 안에 성공한다. 모델 거래소와 수동 시계로만 쟀다. U19b1a(2026-11-24, [ADR-032](docs/adr/ADR-032-watcher-kill-and-alerts.md))에서 워처 자신의 텔레그램 알림 `[WATCH P1]`의 규칙을 갖췄다: `[telegram]`의 토큰 파일(권한 0600·0400, 링크 아님, git 저장소 밖)을 시작 확인 전에 읽고, mainnet은 그것 없이 시작하지 않는다. 메시지 분할(3,500 UTF-16), 보관 50개, 응답의 결과(400·413은 버림, 나머지는 다시 보냄), 5분 반복 규칙은 단위 시험으로만 확인했고 아직 아무것도 보내지 않는다. U19b1b(2026-11-24)에서 송신 태스크를 갖췄다: DNS로 닿지 않으면 텔레그램의 고정 주소(149.154.167.220)로 가고, 남은 부분은 5초 뒤 다시 보내며, 종료 때 5초 안에 마지막으로 보낸다. U19b1c(2026-11-24)에서 워처가 `[WATCH P1]`을 보낸다: 차이를 확정하면 하나(검사마다 60초에 하나, 그 사이 것은 모아서; 운영자가 푼 뒤의 다시 보내기는 보내지 않음), 키가 거절되거나(10010 등) 공인 IP가 키의 목록 밖이면 시작과 5분마다, 시작 확인이 시작을 거부하면 종료 전에 하나. loopback 가짜 텔레그램으로만 시험했다. U19b2a(2026-11-24)에서 워처가 자기 키로 일괄 취소를 서명해 보낼 수 있다(서명된 POST는 이것 하나, 주문을 만드는 길은 없음). `[kill]`이 있으면 읽기 전용 키, 주문 권한이 없는 키, 출금 권한이 있는 키로는 시작하지 않는다. 킬 알림의 문구와 거래소 포지션 묶음(수량, 손익, 마크, 강제청산가까지의 거리)도 갖췄지만 아직 아무것도 일괄 취소를 보내지 않는다. loopback 가짜로만 시험했다. U19b2b(2026-11-24)에서 워처 자신의 일괄 취소 확인 루프를 sans-IO로 갖췄다: 보낸 일괄 취소마다(실패해도) 미체결을 세고, 0이 될 때까지 1초마다 되풀이하며, 0 뒤 30초 지켜본다. 일괄 취소는 어느 1초에도 둘 이하이고, 알림은 시작에 묶인 60초마다 하나라 10분 동안 조회가 실패해도 12개 이하다. 손으로 몬 시험뿐이고 아직 아무것도 루프를 돌리지 않는다. U19b3c(2026-11-24)에서 워처가 OMS를 지킨다(`[kill]`이 있을 때): `/api/status`가 10초 동안 정상으로 답하지 않으면 킬 마커를 쓰고, `admin.sock`으로 OMS를 래치하며(안 되면 그 OMS 단위 하나를 `systemctl stop`), 그 뒤에야 자기 키로 일괄 취소를 시작해 미체결 0건을 확인할 때까지 되풀이한다(어느 1초에도 둘 이하, 알림마다 포지션 묶음). 킬 동안 검사는 멈추고, OMS가 다른 마커 경로를 읽으면 시작하지 않는다. U19b3d(2026-11-25)에서 U19b가 끝났다: 래치도 확인된 멈춤도 없이 끝난 킬 뒤 OMS가 다시 답하면 `watcher_kill`을 보내 래치하고(`늦은 정지` P1), 시작 뒤에도 OMS가 읽는 마커 경로를 보며(다르면 `[WATCH P1]`), 킬 중에 워처가 멈추거나 시작을 거부하면 중단 알림 하나로 킬을 끝낸다. 10분 동안 조회가 실패해도 킬 알림은 12개 이하이고 모든 킬 알림에 포지션이 보인다. loopback 가짜와 가짜 `systemctl`로만 시험했고 진짜 OMS나 Bybit에 킬을 보낸 적이 없다. **Bybit RSA 키**(2026-11-25, [ADR-034](docs/adr/ADR-034-bybit-rsa-keys.md)): 워처와 OMS의 Bybit 게이트웨이가 자격 파일의 `rsa_private_key`(PKCS#8 PEM 글, `api_secret`과 정확히 하나)로도 서명한다(REST는 RSA-SHA256의 base64, 비공개 스트림과 WS Trade의 `auth`도). 기대값은 openssl에서 왔고 loopback 가짜로만 시험했다.
-**전원 장애는 시험하지 않았다.** 누적 체결량 한도는 없다. 거래 안전 알림(차단, 감소 전용, 불일치, 치명 종료)은 노드가 내구화된 상태에서 텔레그램으로 직접 보낸다([ADR-029](docs/adr/ADR-029-oms-direct-alerts.md), [계약 C-ALERT](docs/contracts/alerts.md)). mainnet은 `[alert]` 없이 시작하지 않는다. 실제 텔레그램에는 보낸 적이 없다(시험은 loopback 가짜만).
-현재 소스(`762a4acf55af90fb`)의 수용 시험은 testnet 조회 묶음(`hl-live`)을 빼고 실행했고, 실행한 326건은 모두 통과했다. 같은 소스에서 변이 점검 122건을 시험이 모두 잡았고, 성능을 다시 쟀다. 주장 68건 가운데 통과 67건, 미실행 1건이다([검증 문서](docs/verification/README.md)).
-주장 V-HL-3(testnet 읽기 전용 조회)은 "미실행"이다: 증거금 규칙의 작업은 실제 거래소에 어떤 요청도 보내지 않기로 했기 때문이다. 실패도 통과도 아니다.
-지연 수용 기준은 저널 장치에 달려 있다: 970 EVO Plus 2TB에서 만족했고(초당 200건 p99 8.7 ms, 2026-11-16), 거의 찬 500GB SSD에서는 넘었다([성능 문서](docs/performance/README.md)). 이 부하 측정의 설정에는 증거금 정책이 없다. 정책을 켠 신규 주문 한 건의 판단 시간은 열린 주문 약 500건에서 중앙값 66 µs, p99 90 µs다(정책 없음 27 µs, 33 µs).
+- 상황별로 어떻게 동작하나(응답이 안 오는 주문, 프로세스가 죽음, 연결이 끊김, 킬 …): [docs/explanation.md](docs/explanation.md)
+- 요구 R01~R15가 무엇으로 확인됐고 무엇이 미실행인가: [docs/generated/requirements.md](docs/generated/requirements.md)
+- 왜 이렇게 만들었나: [docs/adr/](docs/adr/README.md)
+- 운영 절차: [docs/operations/runbook.md](docs/operations/runbook.md)
+- 어디에 무엇이 있나: [AGENTS.md](AGENTS.md). 작업 규칙: [CONTRIBUTING.md](CONTRIBUTING.md)
 
-## 어디서부터 읽나
-
-| 알고 싶은 것 | 문서 |
-|---|---|
-| 무엇을 만들고 무엇을 만들지 않았나, 수용 기준 | [docs/01-scope.md](docs/01-scope.md) |
-| 무엇을 검토했나(질문 103개와 각각의 답·미해결, 출처 요소별 대응) | [docs/02-review-criteria.md](docs/02-review-criteria.md) → [generated/considerations.md](docs/generated/considerations.md), [generated/coverage.md](docs/generated/coverage.md) |
-| 구조: 스레드, 데이터 흐름, crate 경계 | [docs/03-architecture.md](docs/03-architecture.md) |
-| 항상 성립해야 하는 것 | [docs/04-invariants.md](docs/04-invariants.md) |
-| 왜 이렇게 만들었나(대안 비교 포함) | [docs/adr/](docs/adr/README.md) |
-| 정확히 어떻게 동작하나(중단·중복·순서 역전·복구에서) | [docs/contracts/](docs/contracts/README.md) |
-| 정상·장애 시나리오를 따라가며 | [docs/scenarios.md](docs/scenarios.md) |
-| 무엇으로 확인했고 무엇을 확인하지 않았나 | [docs/verification/](docs/verification/README.md) → [generated/claims.md](docs/generated/claims.md) |
-| 성능 측정 조건과 결과 | [docs/performance/](docs/performance/README.md) |
-| 배포, 복구, 버전 올리기, 상황별 절차 | [docs/operations/runbook.md](docs/operations/runbook.md) |
-| 관측 스택(VictoriaMetrics·VictoriaLogs·vmalert·Alertmanager·Grafana)과 시세 단위(수집기·봉인·아카이버)의 배치 파일, 메모리 상한, 타이머, 설치 순서 | [docs/operations/observability.md](docs/operations/observability.md) |
-| 저널을 VictoriaMetrics·VictoriaLogs로 내보내는 프로젝터 | [docs/operations/oms-projector.md](docs/operations/oms-projector.md) |
-| 저널을 레이크 거래 테이블(Parquet)로 내보내기 | [docs/operations/oms-export.md](docs/operations/oms-export.md) |
-| 독립 워처의 설정, 키 파일, 시작 확인, 실행과 로그 줄 | [docs/operations/watcher.md](docs/operations/watcher.md) |
-| 외부에 기대는 가정 | [generated/assumptions.md](docs/generated/assumptions.md) |
-| 사용자가 정해야 하는 것 | [generated/user-decisions.md](docs/generated/user-decisions.md) |
-| 질문 → 결정 → 계약 → 코드 → 시험의 연결표 | [generated/traceability.md](docs/generated/traceability.md) |
-| 단계별 진행 기록, 구현과 분리된 검토 | [docs/progress/](docs/progress/README.md), [verification/gap-review.md](docs/verification/gap-review.md) |
-| 원래의 지시문 | [docs/00-brief.md](docs/00-brief.md) |
-
-같은 내용을 눌러 가며 보려면 대시보드를 쓴다(아래).
+진행 상황은 PR에만 적는다.
 
 ## 빌드와 실행
 
@@ -61,7 +32,6 @@ $T/release/omsctl --socket data/sim/oms.sock --strategy demo new --key k1 --inst
 $T/release/omsctl --socket data/sim/admin.sock status
 ```
 
-Hyperliquid testnet 설정 예: [config/hyperliquid-testnet.example.toml](config/hyperliquid-testnet.example.toml). 처음 쓸 때의 순서는 [운영 절차 §10](docs/operations/runbook.md)에 있다.
 비밀 키는 환경 변수로만 받는다. 자금을 가진 마스터 지갑의 키는 이 시스템에 넣지 않는다.
 
 ## 수용 시험
@@ -83,31 +53,12 @@ cargo run --release -p xtask -- docs        # 결과를 주장과 묶어 docs/ge
 
 | 화면 | 내용 |
 |---|---|
-| 고려사항·결정 | 질문 103개, 설계 결정 17건, 외부 가정, 사용자 결정, 출처. 서로 연결돼 있다 |
+| 고려사항·결정 | 검토 항목, 설계 결정, 외부 가정, 사용자 결정, 출처. 서로 연결돼 있다 |
 | 동작 탐색 | 정상·오류 경로의 이벤트 순서. 이벤트 → 계약 → 설계 결정 → 코드 → 시험 |
 | 주문 추적 | 실행 중인 노드의 주문별 저널 기록: 입력, 이벤트, 응답, 게이트웨이 명령, 단계별 지연 |
-| 검증 현황 | 주장별 통과·실패·미실행·이전 버전 결과, 변이 점검, 성능 측정 |
+| 검증 현황 | 주장별 통과·실패·미실행(현재 소스의 결과만), 변이 점검, 성능 측정 |
 | 운영 상태 | 차단 사유, 결과 불명 주문, 불일치, 저널, 큐, 장부 |
 
 값마다 관측·추론·기대·미확인을 구분해 표시하고, 실행 종류(노드 없음 / 가상 거래소 / 실제 거래소)를 상단에 고정 표시한다.
-
-## 저장소 구조
-
-| 경로 | 내용 | 줄 수(시험 포함) |
-|---|---|---|
-| `crates/oms-core` | 결정적 코어. I/O·시계·스레드 없음. 의존성은 `serde`, `serde_json`뿐 | 7,200 |
-| `crates/oms-journal` | 저널 세그먼트와 스냅샷 파일 | 1,600 |
-| `crates/oms-sim` | 결정적 시뮬레이션과 가상 거래소 모델 | 1,700 |
-| `crates/oms-api` | 로컬 프로토콜 타입, 클라이언트, `omsctl` | 500 |
-| `crates/oms-node` | 실행 계층: 큐, 커밋 단계, 복구, 소켓 서버, HTTP, 게이트웨이(가상, Hyperliquid), `simvenue` | 7,300 |
-| `crates/watcher` | 독립 워처(U19a): OMS 코드 없이 문서로만 쓴 저널 읽기와 저널 상태, 자기 Bybit 서명·클라이언트와 지표 내보내기, 설정과 키 파일 읽기, 시작 확인과 IP 재확인, 검사 엔진과 W1(열린 주문), W2(포지션), W3(지갑과 증거금), W4(체결), OMS 연결(`/api/status`, `admin.sock` 다시 보내기, `monitor.sock` 하트비트)과 실행, 바이너리 `watcher --config`, 예산 측정, 직접 알림의 토큰 파일과 전달 규칙(U19b1a), 송신 태스크와 P1 조건(U19b1b·c), 서명된 일괄 취소와 킬 알림 문구(U19b2a, 아직 보내지 않음), RSA 서명 키(ADR-034), sans-IO 킬 루프(U19b2b), 그 세기와 요청 태스크 `Inflight`(U19b2c, 시험 장치만 가짜 거래소에 대해 돌리고 실행은 아직 돌리지 않음), sans-IO W5와 뒤로 가지 않는 시계, `watcher_kill` 클라이언트, OMS 단위 하나의 멈춤(U19b3a, 아직 돌리지 않음; mainnet은 `[kill]` 필수), sans-IO 킬 순서(K1 마커 → K2 `watcher_kill` → K3 멈춤 → 루프)와 킬 마커 쓰기(U19b3b), 실행의 W5와 킬(U19b3c: 마커 경로 규칙, 킬 중 엔진 멈춤, 루프 중 정지 재시도, 킬 지표), 킬의 끝(U19b3d: 루프 뒤의 빚진 정지, 탐침 답의 마커 경로, 킬 중의 종료·시작 거부). 의존성은 레지스트리 crate뿐 | 30,874 |
-| `crates/watcher-conformance` | 워처와 OMS 코드를 함께 링크하는 유일한 곳: 적합성 시험(U19b3b부터 OMS의 킬 마커 독자도) | 900 |
-| `crates/xtask` | 수용 시험 실행기, 변이 점검, 부하 생성기, 문서 생성기, 배치 검사(`tests/deploy`) | 8,319 |
-| `deploy/` | 배치 파일만(설치하지 않음): `deploy/observability/`의 systemd 단위·타이머·슬라이스, 설치 지도, 거래소 목록. 검사는 `crates/xtask/tests/deploy` | |
-| `registry/` | 검토 항목, 결정, 계약, 주장, 가정, 사용자 결정의 원본(TOML) | |
-| `docs/` | 문서. `docs/generated/`는 registry와 결과 파일에서 만든다 | |
-| `dashboard/` | 화면(정적 파일)과 생성된 자료 | |
-| `evidence/` | 시험·변이·성능 결과 | |
-| `config/` | 설정 예 | |
 
 작업 공간 전체에 `unsafe_code = "forbid"`가 걸려 있다.

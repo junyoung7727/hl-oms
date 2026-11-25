@@ -1,5 +1,8 @@
 # oms-export 운영
 
+주인: 준영
+검토일: 2026-11-20
+
 설계: [ADR-027](../adr/ADR-027-trading-export.md). 행의 모양: 레이크 계약 4절(`contracts/lake/trading/*.table.json`). 읽는 규칙: [C-TAIL](../contracts/tail.md). 주기 실행(systemd 타이머)은 U20에서 정한다(아직 없음).
 
 ## 실행

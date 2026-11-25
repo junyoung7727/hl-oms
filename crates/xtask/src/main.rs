@@ -4,7 +4,7 @@
 //! fsync-probe --dir <dir> [--count N] [--bytes N]   flush latency of a directory's device
 //! core-bench [--orders N]                           decide+apply and record encoding cost
 //! digest                                            source digest, as embedded in oms-node
-//! verify [--quick] [--live-testnet]                 run the acceptance suite, write evidence/latest
+//! verify [--quick] [--live-testnet] [--bybit-testnet] run the acceptance suite, write evidence/latest
 //! docs                                              validate the registry, generate tables and dashboard data
 //! mutants [--only M03]                              selective mutation check, write evidence/mutants.json
 //! recovery-time [--dir D] [--orders N]              journal replay time after a kill, write evidence/perf/recovery.json
@@ -60,6 +60,7 @@ fn main() {
             &root(),
             args.iter().any(|a| a == "--quick"),
             args.iter().any(|a| a == "--live-testnet"),
+            args.iter().any(|a| a == "--bybit-testnet"),
             opt(&args, "--extended"),
         ),
         Some("perf") => {
@@ -88,7 +89,7 @@ fn main() {
         _ => {
             eprintln!(
                 "usage: xtask <command>\n\
-                 \x20 verify [--quick] [--live-testnet] [--extended <dir on a real disk>]   acceptance suite -> evidence/latest/\n\
+                 \x20 verify [--quick] [--live-testnet] [--bybit-testnet] [--extended <dir on a real disk>]   acceptance suite -> evidence/latest/\n\
                  \x20 mutants [--only <id>]                 do the tests notice deliberately broken code -> evidence/mutants.json\n\
                  \x20 perf --label L [--dir D] [--seconds N] [--rates a,b,c] [--connections N] [--inline] [--default-limits]\n\
                  \x20 recovery-time [--dir D] [--orders N]\n\

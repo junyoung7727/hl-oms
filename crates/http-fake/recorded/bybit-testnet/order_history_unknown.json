@@ -1,0 +1,18 @@
+{
+  "body": null,
+  "http_status": 200,
+  "method": "GET",
+  "path": "/v5/order/history",
+  "query": "category=linear&orderLinkId=00001k874gqnt-0000000000009&settleCoin=USDT",
+  "response": {
+    "result": {
+      "category": "linear",
+      "list": [],
+      "nextPageCursor": ""
+    },
+    "retCode": 0,
+    "retExtInfo": {},
+    "retMsg": "OK",
+    "time": 1795535962746
+  }
+}

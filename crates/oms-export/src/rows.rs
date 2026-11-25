@@ -134,7 +134,7 @@ fn str_at<'a>(fields: &'a Map<String, Value>, path: &str) -> Result<&'a str, Str
 }
 
 /// The venue's execution id in a fill key (C-GW G-8). The Bybit gateway's
-/// key is `<symbol>:<execId>` (`docs/contracts/gateway.md`); the contract
+/// key is `<symbol>:<execId>` (ADR-028, claim V-BYBIT-READ-1); the contract
 /// column is the `execId`. Other venues' keys are the column as they are.
 pub fn exec_id(venue: &str, symbol: &str, key: &str) -> Result<String, String> {
     if venue != "bybit" {

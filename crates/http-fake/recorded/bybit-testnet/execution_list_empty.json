@@ -1,0 +1,18 @@
+{
+  "body": null,
+  "http_status": 200,
+  "method": "GET",
+  "path": "/v5/execution/list",
+  "query": "category=linear&endTime=1795017558685&limit=100&settleCoin=USDT&startTime=1795017557685",
+  "response": {
+    "result": {
+      "category": "linear",
+      "list": [],
+      "nextPageCursor": ""
+    },
+    "retCode": 0,
+    "retExtInfo": {},
+    "retMsg": "OK",
+    "time": 1795535962880
+  }
+}

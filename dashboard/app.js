@@ -608,12 +608,12 @@ function screenBehaviour() {
     table(['경로', '종류', '이벤트 순서', '설명'],
       R.paths.map((p) => [p.title, badge(kindCls[p.kind] || 'none', p.kind), stepChips(p.steps), inlineText(p.note)])),
     h('h2', null, '동작 계약'),
-    h('p', { class: 'small muted' }, '각 계약 문서는 같은 질문에 답한다: 중간에 멈추면 무엇이 남는가, 같은 입력이 다시 오면, 순서가 바뀌면, 누가 언제 변화를 보는가, 외부 결과를 정말 아는가, 복구 뒤 무엇이 다시 실행되는가.'),
+    h('p', { class: 'small muted' }, '계약은 저널 이벤트를 설계 결정·코드·주장으로 잇는 색인이다. 규칙 자체는 주장(registry/claims.toml)과 상황별 설명(docs/explanation.md)에 있다.'),
     table(['ID', '제목', '요약', '이벤트', '주장'],
       R.contracts.map((c) => ({ href: '#/contract/' + c.id, cells: [idLink(c.id), c.title, c.summary, h('span', { class: 'chips' }, c.events.map(eventChip)), h('span', { class: 'chips' }, c.claims.map((id) => { const cl = R.claims.find((x) => x.id === id); return cl ? claimBadge(cl.status) : null; }))] })), { nowrap: [0] }),
     h('h2', null, '이벤트 색인'),
     table(['이벤트', '정의한 계약'], Object.keys(R.event_index).sort().map((e) => [eventChip(e), idLinks(R.event_index[e])])),
-    h('p', { class: 'small' }, '상태 불변식: ', fileLink('docs/04-invariants.md'), ' · 구조: ', fileLink('docs/03-architecture.md'), ' · 계약 목록: ', fileLink('docs/contracts/README.md')));
+    h('p', { class: 'small' }, '상황별 동작: ', fileLink('docs/explanation.md'), ' · 요구별 확인 현황: ', fileLink('docs/generated/requirements.md')));
 }
 
 function contractSummary(c) {
@@ -622,7 +622,7 @@ function contractSummary(c) {
   field(dl, '설계 결정 (왜 이렇게)', idLinks(c.adr));
   field(dl, '이벤트', c.events.length ? h('span', { class: 'chips' }, c.events.map(eventChip)) : h('span', { class: 'muted' }, '없음'));
   field(dl, '코드', fileLinks(c.code));
-  field(dl, '문서', fileLink(c.file));
+  field(dl, '문서', c.file ? fileLink(c.file) : h('span', { class: 'muted' }, '없음(규칙은 주장과 docs/explanation.md에 있다)'));
   return dl;
 }
 
