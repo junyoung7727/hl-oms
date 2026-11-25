@@ -3300,6 +3300,7 @@ fn the_watcher_restarts_but_never_follows_the_oms() {
             "RestartSec=5\nStartLimitIntervalSec=600\nStartLimitBurst=1\n",
         ),
         ("RestartSec=5\n", "RestartSec=5\nStartLimitBurst=1\n"),
+        (wants, "Wants=network-online.target\nStartLimitIntervalSec=600\n"),
         ("RestartSec=5\n", "RestartSec=5\nStartLimitInterval=600\n"),
         // A panic or an OOM kill counted as a clean exit: no restart.
         (
