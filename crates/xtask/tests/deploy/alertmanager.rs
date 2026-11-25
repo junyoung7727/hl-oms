@@ -586,8 +586,18 @@ fn routes_mut(v: &mut Value) -> &mut Vec<Value> {
 
 #[test]
 fn the_routes_send_watchdog_p1_p2_where_they_belong() {
-    // The Watchdog route after the P1 route.
+    // The Watchdog route after the P1 route, with or without its timings.
     plant(|v| routes_mut(v).swap(0, 1), &["R10"]);
+    plant(
+        |v| {
+            let r = routes_mut(v);
+            for key in ["matchers", "receiver"] {
+                let x = r[0][key].take();
+                r[0][key] = std::mem::replace(&mut r[1][key], x);
+            }
+        },
+        &["R10"],
+    );
     // The Watchdog to Telegram.
     plant(
         |v| routes_mut(v)[0]["receiver"] = json!("telegram-p1"),
