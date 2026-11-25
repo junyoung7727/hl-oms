@@ -1,0 +1,12 @@
+# Not installed or enabled by this repository: docs/operations/observability.md §13.
+[Unit]
+Description=Export the journal's finished dates once a day, after the audit
+
+[Timer]
+# After the audit's 02:30 (judgement); the daily-job lock orders them anyway.
+# A missed run fires at the next boot.
+OnCalendar=*-*-* 03:30:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,47 @@
+# Not installed or enabled by this repository: docs/operations/observability.md §13.
+# Enabled at boot (ADR-036): after a reboot with the journal mounted it finds
+# the OMS down and kills (marker, stop, cancel-all with its own key).
+[Unit]
+Description=hl-oms watcher (independent reconciliation, W5, kill)
+# Ordering only: stopping the OMS must not stop the watcher (its kill loop
+# runs after the stop), and at shutdown the watcher stops first.
+After=network-online.target oms-node.service
+Wants=network-online.target
+RequiresMountsFor=/mnt/nvme/hl-oms-journal
+AssertPathIsMountPoint=/mnt/nvme/hl-oms-journal
+
+[Service]
+Type=simple
+# The OMS's user: admin.sock and monitor.sock accept no other uid.
+User=hloms
+Group=hloms
+UMask=0077
+ExecStart=/usr/local/bin/watcher --config /etc/hl-oms/watcher.toml
+Restart=on-failure
+RestartSec=5
+# Exit 2 = usage, configuration, key file or start rules refused: a restart
+# cannot help and would repeat the refusal's P1.
+RestartPreventExitStatus=2
+# It writes only the kill marker in /var/lib/hl-oms.
+StateDirectory=hl-oms
+StateDirectoryMode=0700
+# Reads the journal and connects to the sockets there (a socket on a
+# read-only bind mount still connects).
+ReadOnlyPaths=/mnt/nvme/hl-oms-journal/data
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# The process holds the watcher's Bybit API secret: no core dump.
+LimitCORE=0
+MemoryMax=100M
+Slice=trading.slice
+OOMScoreAdjust=-900
+MemorySwapMax=0
+MemoryMin=50M
+IOWeight=1000
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

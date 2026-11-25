@@ -868,6 +868,8 @@ fn install_target(src: &str) -> (String, &'static str) {
         (format!("/etc/systemd/system/{name}"), "0644")
     } else if src.starts_with("bin/") {
         (format!("/usr/local/lib/hl-oms-obs/{name}"), "0755")
+    } else if src.starts_with("polkit/") {
+        (format!("/etc/polkit-1/rules.d/{name}"), "0644")
     } else {
         (format!("/etc/hl-oms-obs/{src}"), "0644")
     }
@@ -1364,7 +1366,7 @@ fn a_collector_unit_with_wrong_memory_min_or_io_weight_fails() {
 
 #[test]
 fn the_trading_slice_reserves_its_units_memory() {
-    // A second unit in the slice: 512M + 100M > 512M.
+    // One more unit in the slice: 818M + 100M > 818M.
     plant(
         "vmalert-metrics.service",
         "MemoryMax=200M\n",
@@ -1373,18 +1375,31 @@ fn the_trading_slice_reserves_its_units_memory() {
     );
     plant(
         "trading.slice",
+        "MemoryMin=818M\n",
         "MemoryMin=512M\n",
-        "MemoryMin=256M\n",
         &["U4"],
     );
-    plant("trading.slice", "MemoryMin=512M\n", "", &["U4"]);
+    // 512M (collector) + 256M (OMS) + 50M (watcher), one byte short.
+    plant(
+        "trading.slice",
+        "MemoryMin=818M\n",
+        "MemoryMin=857735167\n",
+        &["U4"],
+    );
+    plant(
+        "trading.slice",
+        "MemoryMin=818M\n",
+        "MemoryMin=857735168\n",
+        &[],
+    );
+    plant("trading.slice", "MemoryMin=818M\n", "", &["U4"]);
     plant(
         "trading.slice",
         "CPUWeight=1000\n",
         "CPUWeight=100\n",
         &["U4"],
     );
-    plant("trading.slice", "MemoryMin=512M\n", "MemoryMin=1G\n", &[]);
+    plant("trading.slice", "MemoryMin=818M\n", "MemoryMin=1G\n", &[]);
     let mut t = Tree::real();
     t.remove(&unit("trading.slice"));
     assert_rules(&crate::check(&t), &["U4", "U14"]);
@@ -1987,6 +2002,22 @@ fn the_install_map_covers_every_file_and_path() {
     ] {
         let mut t = Tree::real();
         add_installed(&mut t, "bin/x.sh", "#!/bin/sh\n", dst, mode);
+        assert_rules(&crate::check(&t), rules);
+    }
+    // The polkit rule goes to polkitd's directory, nowhere else.
+    let polkit = "dst = \"/etc/polkit-1/rules.d/50-hl-oms-watcher-stop.rules\"";
+    for (to, rules) in [
+        (
+            "dst = \"/etc/hl-oms-obs/polkit/50-hl-oms-watcher-stop.rules\"",
+            &["U14"][..],
+        ),
+        (
+            "dst = \"/etc/polkit-1/rules.d/90-other.rules\"",
+            &["U14"][..],
+        ),
+    ] {
+        let mut t = Tree::real();
+        t.replace(INSTALL, polkit, to);
         assert_rules(&crate::check(&t), rules);
     }
     let mut t = Tree::real();

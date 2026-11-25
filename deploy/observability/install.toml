@@ -38,6 +38,11 @@ dst = "/etc/hl-oms-obs/grafana/provisioning/datasources/hl-oms.yaml"
 mode = "0644"
 
 [[file]]
+src = "polkit/50-hl-oms-watcher-stop.rules"
+dst = "/etc/polkit-1/rules.d/50-hl-oms-watcher-stop.rules"
+mode = "0644"
+
+[[file]]
 src = "systemd/alertmanager.service"
 dst = "/etc/systemd/system/alertmanager.service"
 mode = "0644"
@@ -83,6 +88,26 @@ dst = "/etc/systemd/system/md-lake-seal@.timer"
 mode = "0644"
 
 [[file]]
+src = "systemd/oms-export.service"
+dst = "/etc/systemd/system/oms-export.service"
+mode = "0644"
+
+[[file]]
+src = "systemd/oms-export.timer"
+dst = "/etc/systemd/system/oms-export.timer"
+mode = "0644"
+
+[[file]]
+src = "systemd/oms-node.service"
+dst = "/etc/systemd/system/oms-node.service"
+mode = "0644"
+
+[[file]]
+src = "systemd/oms-projector.service"
+dst = "/etc/systemd/system/oms-projector.service"
+mode = "0644"
+
+[[file]]
 src = "systemd/trading.slice"
 dst = "/etc/systemd/system/trading.slice"
 mode = "0644"
@@ -105,6 +130,11 @@ mode = "0644"
 [[file]]
 src = "systemd/vmalert-metrics.service"
 dst = "/etc/systemd/system/vmalert-metrics.service"
+mode = "0644"
+
+[[file]]
+src = "systemd/watcher.service"
+dst = "/etc/systemd/system/watcher.service"
 mode = "0644"
 
 [[file]]
