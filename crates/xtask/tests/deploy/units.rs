@@ -1,7 +1,8 @@
 //! Unit rules: memory caps, timers, the collector's restart and protection
 //! settings, the trading slice, schedules, the daily-job lock, listeners,
-//! storage paths, store and vmalert flags, venues, the install map and
-//! service identity (ADR-035).
+//! storage paths, store and vmalert flags, venues, the install map, service
+//! identity, the stack units' restart and sandbox settings, and the bounds of
+//! the seal and archiver runs (ADR-035).
 
 use std::collections::BTreeSet;
 
@@ -13,15 +14,55 @@ const OBS: &str = "deploy/observability/";
 /// protected group).
 pub const PROTECTED: &[&str] = &["md-collector@.service"];
 
-/// The observability stack's own services (U15: they run as `hlobs`).
-const STACK: &[&str] = &[
-    "victoriametrics.service",
-    "victorialogs.service",
-    "vmalert-metrics.service",
-    "vmalert-logs.service",
-    "alertmanager.service",
-    "grafana.service",
+/// The observability stack's own services (U15: they run as `hlobs`) and
+/// the one directory each may write (U18).
+const STACK: &[(&str, Want)] = &[
+    (
+        "victoriametrics.service",
+        Is("/mnt/nvme/observability/victoria-metrics"),
+    ),
+    (
+        "victorialogs.service",
+        Is("/mnt/nvme/observability/victoria-logs"),
+    ),
+    ("vmalert-metrics.service", Absent),
+    ("vmalert-logs.service", Absent),
+    (
+        "alertmanager.service",
+        Is("/mnt/nvme/observability/alertmanager"),
+    ),
+    ("grafana.service", Is("/mnt/nvme/observability/grafana")),
 ];
+
+/// U18: restarted after a failure, sandboxed, and stopped by no other unit
+/// (a restart of a store must not stop vmalert).
+const STACK_SETTINGS: &[(&str, &str, Want)] = &[
+    ("Service", "Restart", Is("on-failure")),
+    ("Service", "RestartSec", Is("5")),
+    ("Service", "NoNewPrivileges", Is("yes")),
+    ("Service", "ProtectSystem", Is("strict")),
+    ("Service", "ProtectHome", Is("yes")),
+    ("Service", "PrivateTmp", Is("yes")),
+    ("Unit", "Requires", Absent),
+    ("Unit", "Requisite", Absent),
+    ("Unit", "BindsTo", Absent),
+    ("Unit", "PartOf", Absent),
+];
+
+/// Store path flags (U9) and the units that must give theirs once.
+const STORE_FLAGS: &[&str] = &["storageDataPath", "storage.path", "lake"];
+const STORES: &[(&str, &str)] = &[
+    ("victoriametrics.service", "storageDataPath"),
+    ("victorialogs.service", "storageDataPath"),
+    ("alertmanager.service", "storage.path"),
+    ("md-lake-seal@.service", "lake"),
+    ("md-archiver@.service", "lake"),
+];
+
+/// Oneshot runs that hold the daily lock or the next hour's seal while they
+/// run: each ends after at most this time (U19).
+const BOUNDED: &[&str] = &["md-lake-seal@.service", "md-archiver@.service"];
+const RUN_TIMEOUT: &str = "6h";
 
 /// The `MemoryMax` of each unit (U6, design §8.5).
 const MEMORY_MAX: &[(&str, &str)] = &[
@@ -78,6 +119,11 @@ const COLLECTOR: &[(&str, &str, Want)] = &[
     ("Service", "NotifyAccess", Is("main")),
     ("Service", "RestartPreventExitStatus", Is("2")),
     ("Unit", "StartLimitIntervalSec", Is("0")),
+    // The older name, and the keys in [Service] (still read there), would
+    // set a limit again.
+    ("Unit", "StartLimitInterval", Absent),
+    ("Service", "StartLimitIntervalSec", Absent),
+    ("Service", "StartLimitInterval", Absent),
     ("Service", "RestartSteps", Absent),
     ("Service", "RestartMaxDelaySec", Absent),
 ];
@@ -89,6 +135,7 @@ const PROTECTION: &[(&str, &str, Want)] = &[
     ("Service", "MemorySwapMax", Is("0")),
     ("Service", "MemoryMin", Set),
     ("Service", "IOWeight", Is("1000")),
+    ("Service", "MemoryHigh", Absent),
 ];
 
 pub fn check(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
@@ -105,6 +152,8 @@ pub fn check(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
     u13_venues(t, p, out);
     u14_install_map(t, p, out);
     u15_identity(p, out);
+    u18_stack_settings(p, out);
+    u19_bounded_runs(p, out);
 }
 
 /// A systemd size: bytes, or a number with `K`, `M` or `G` (base 1024).
@@ -176,29 +225,98 @@ fn exec_lines(u: &Unit) -> Vec<&str> {
         .collect()
 }
 
-fn exec_tokens(u: &Unit) -> Vec<&str> {
-    exec_lines(u)
-        .into_iter()
-        .flat_map(str::split_whitespace)
+/// The words of a command or `Environment=` line as systemd splits them: at
+/// whitespace, with `"…"` and `'…'` quoting.
+fn words(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut word = String::new();
+    let mut quote = None;
+    let mut started = false;
+    for c in line.chars() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => word.push(c),
+            None if c == '"' || c == '\'' => {
+                quote = Some(c);
+                started = true;
+            }
+            None if c.is_whitespace() => {
+                if started {
+                    out.push(std::mem::take(&mut word));
+                    started = false;
+                }
+            }
+            None => {
+                word.push(c);
+                started = true;
+            }
+        }
+    }
+    if started {
+        out.push(word);
+    }
+    out
+}
+
+/// Every value of the command-line flag `name` (written without dashes), as
+/// the Go, kingpin and clap parsers read it: one or two dashes, the value
+/// after `=` or in the next word. A flag at the end with no value reads as
+/// empty.
+fn flag_values(u: &Unit, name: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    for line in exec_lines(u) {
+        let w = words(line);
+        for (i, word) in w.iter().enumerate() {
+            let Some(flag) = word.strip_prefix("--").or_else(|| word.strip_prefix('-')) else {
+                continue;
+            };
+            match flag.split_once('=') {
+                Some((n, v)) if n == name => found.push(v.to_string()),
+                None if flag == name => {
+                    found.push(w.get(i + 1).cloned().unwrap_or_default());
+                }
+                _ => {}
+            }
+        }
+    }
+    found
+}
+
+/// `NAME=value` pairs of the unit's `Environment=` lines, in order; an empty
+/// `Environment=` clears the ones before it, as in systemd.
+fn environment(u: &Unit) -> Vec<(String, String)> {
+    let mut env = Vec::new();
+    for line in u.ini.values("Service", "Environment") {
+        if line.trim().is_empty() {
+            env.clear();
+        }
+        env.extend(words(line).into_iter().filter_map(|kv| {
+            kv.split_once('=')
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+        }));
+    }
+    env
+}
+
+/// Every value the unit's environment gives `name`.
+fn env_values<'a>(env: &'a [(String, String)], name: &str) -> Vec<&'a str> {
+    env.iter()
+        .filter(|(k, _)| k == name)
+        .map(|(_, v)| v.as_str())
         .collect()
 }
 
-/// The values of every command-line token `flag=value` of a unit.
-fn flag_values<'a>(u: &'a Unit, flag: &str) -> Vec<&'a str> {
-    exec_tokens(u)
-        .into_iter()
-        .filter_map(|t| t.strip_prefix(flag))
-        .collect()
-}
-
-/// `NAME=value` pairs of the unit's `Environment=` lines.
-fn environment(u: &Unit) -> Vec<(&str, &str)> {
-    u.ini
-        .values("Service", "Environment")
-        .into_iter()
-        .flat_map(str::split_whitespace)
-        .filter_map(|kv| kv.split_once('='))
-        .collect()
+/// `v` with a leading `${NAME}` or `$NAME` replaced by the last value the
+/// unit sets for it; `Err(NAME)` when the unit does not set it.
+fn resolve<'a>(env: &'a [(String, String)], v: &'a str) -> Result<&'a str, &'a str> {
+    match v
+        .strip_prefix("${")
+        .and_then(|r| r.strip_suffix('}'))
+        .or_else(|| v.strip_prefix('$'))
+    {
+        Some(name) => env_values(env, name).last().copied().ok_or(name),
+        None => Ok(v),
+    }
 }
 
 fn u1_memory_max(p: &Parsed, out: &mut Vec<Finding>) {
@@ -355,38 +473,50 @@ fn loopback_port(v: &str) -> bool {
 }
 
 fn u8_listeners(p: &Parsed, out: &mut Vec<Finding>) {
-    const FLAGS: &[&str] = &["-httpListenAddr=", "--web.listen-address="];
+    // Every spelling of a listener flag counts: the tools accept a repeated
+    // one as a second listener (VictoriaMetrics, Alertmanager) or let the
+    // last value win.
     for u in &p.units {
-        for flag in FLAGS {
+        for flag in ["httpListenAddr", "web.listen-address"] {
             for v in flag_values(u, flag) {
-                if !loopback_port(v) {
+                if !loopback_port(&v) {
                     finding(
                         out,
                         &u.path,
                         "U8",
-                        format!("{flag}{v} must be 127.0.0.1:<port>"),
+                        format!("-{flag} {v} must be 127.0.0.1:<port>"),
                     );
                 }
+            }
+        }
+        for v in flag_values(u, "cluster.listen-address") {
+            if !v.is_empty() {
+                finding(
+                    out,
+                    &u.path,
+                    "U8",
+                    format!("--cluster.listen-address {v} opens a gossip port"),
+                );
             }
         }
     }
     // A listener without the flag binds every interface: each stack
     // listener names its address once.
     for &(name, flag) in &[
-        ("victoriametrics.service", "-httpListenAddr="),
-        ("victorialogs.service", "-httpListenAddr="),
-        ("vmalert-metrics.service", "-httpListenAddr="),
-        ("vmalert-logs.service", "-httpListenAddr="),
-        ("alertmanager.service", "--web.listen-address="),
+        ("victoriametrics.service", "httpListenAddr"),
+        ("victorialogs.service", "httpListenAddr"),
+        ("vmalert-metrics.service", "httpListenAddr"),
+        ("vmalert-logs.service", "httpListenAddr"),
+        ("alertmanager.service", "web.listen-address"),
     ] {
         for u in named(p, name) {
             if flag_values(u, flag).len() != 1 {
-                finding(out, &u.path, "U8", format!("{flag} must be given once"));
+                finding(out, &u.path, "U8", format!("-{flag} must be given once"));
             }
         }
     }
     for u in named(p, "alertmanager.service") {
-        if flag_values(u, "--cluster.listen-address=") != [""] {
+        if flag_values(u, "cluster.listen-address") != [""] {
             finding(
                 out,
                 &u.path,
@@ -400,58 +530,49 @@ fn u8_listeners(p: &Parsed, out: &mut Vec<Finding>) {
 fn u9_stores(p: &Parsed, out: &mut Vec<Finding>) {
     for u in &p.units {
         let env = environment(u);
-        let mut values: Vec<(String, &str)> = Vec::new();
-        for flag in ["-storageDataPath=", "--storage.path=", "--lake="] {
+        let mut values: Vec<(String, String)> = Vec::new();
+        for flag in STORE_FLAGS {
             values.extend(
                 flag_values(u, flag)
                     .into_iter()
-                    .map(|v| (flag.to_string(), v)),
+                    .map(|v| (format!("-{flag} "), v)),
             );
         }
-        let tokens = exec_tokens(u);
-        for w in tokens.windows(2) {
-            if w[0] == "--lake" {
-                values.push(("--lake ".to_string(), w[1]));
-            }
-        }
         values.extend(
-            env.iter()
-                .filter(|(k, _)| *k == "LAKE")
-                .map(|(_, v)| ("LAKE=".to_string(), *v)),
+            env_values(&env, "LAKE")
+                .into_iter()
+                .map(|v| ("LAKE=".to_string(), v.to_string())),
         );
-        for (what, v) in values {
-            let resolved = match v
-                .strip_prefix("${")
-                .and_then(|r| r.strip_suffix('}'))
-                .or_else(|| v.strip_prefix('$'))
-            {
-                Some(name) => match env.iter().rev().find(|(k, _)| *k == name) {
-                    Some((_, val)) => *val,
-                    None => {
-                        finding(
-                            out,
-                            &u.path,
-                            "U9",
-                            format!("{what}{v}: the unit does not set {name}"),
-                        );
-                        continue;
-                    }
-                },
-                None => v,
-            };
-            if !resolved.starts_with("/mnt/nvme/") {
-                finding(
+        for (what, v) in &values {
+            match resolve(&env, v) {
+                Err(name) => finding(
+                    out,
+                    &u.path,
+                    "U9",
+                    format!("{what}{v}: the unit does not set {name}"),
+                ),
+                Ok(resolved) if !resolved.starts_with("/mnt/nvme/") => finding(
                     out,
                     &u.path,
                     "U9",
                     format!("{what}{v} = {resolved} must be under /mnt/nvme/"),
-                );
+                ),
+                Ok(_) => {}
+            }
+        }
+    }
+    // Without the flag the tool writes to a relative default.
+    for &(name, flag) in STORES {
+        for u in named(p, name) {
+            if flag_values(u, flag).len() != 1 {
+                finding(out, &u.path, "U9", format!("-{flag} must be given once"));
             }
         }
     }
 }
 
-/// (unit, rule, flags with an exact value, flags that need some value).
+/// (unit, rule, flags (without dashes) with an exact value, flags that need
+/// some value).
 type FlagRule = (
     &'static str,
     &'static str,
@@ -464,33 +585,33 @@ fn u10_u11_flags(p: &Parsed, out: &mut Vec<Finding>) {
         (
             "victoriametrics.service",
             "U10",
-            &[("-retentionPeriod=", "1y")],
-            &["-memory.allowedBytes="],
+            &[("retentionPeriod", "1y")],
+            &["memory.allowedBytes"],
         ),
         (
             "victorialogs.service",
             "U10",
-            &[("-retentionPeriod=", "1y")],
+            &[("retentionPeriod", "1y")],
             &[],
         ),
         (
             "vmalert-metrics.service",
             "U11",
             &[
-                ("-datasource.url=", "http://127.0.0.1:8428"),
-                ("-evaluationInterval=", "10s"),
+                ("datasource.url", "http://127.0.0.1:8428"),
+                ("evaluationInterval", "10s"),
             ],
-            &["-notifier.url=", "-remoteWrite.url="],
+            &["notifier.url", "remoteWrite.url"],
         ),
         (
             "vmalert-logs.service",
             "U11",
             &[
-                ("-datasource.url=", "http://127.0.0.1:9428"),
-                ("-rule.defaultRuleType=", "vlogs"),
-                ("-evaluationInterval=", "30s"),
+                ("datasource.url", "http://127.0.0.1:9428"),
+                ("rule.defaultRuleType", "vlogs"),
+                ("evaluationInterval", "30s"),
             ],
-            &["-notifier.url="],
+            &["notifier.url"],
         ),
     ];
     for &(name, rule, exact, any) in FLAGS {
@@ -501,7 +622,7 @@ fn u10_u11_flags(p: &Parsed, out: &mut Vec<Finding>) {
                         out,
                         &u.path,
                         rule,
-                        format!("{flag}{want} must be given once"),
+                        format!("-{flag}={want} must be given once"),
                     );
                 }
             }
@@ -511,7 +632,7 @@ fn u10_u11_flags(p: &Parsed, out: &mut Vec<Finding>) {
                         out,
                         &u.path,
                         rule,
-                        format!("{flag} must be given once with a value"),
+                        format!("-{flag} must be given once with a value"),
                     );
                 }
             }
@@ -695,9 +816,64 @@ fn u15_identity(p: &Parsed, out: &mut Vec<Finding>) {
             );
         }
     }
-    for name in STACK {
+    for (name, _) in STACK {
         for u in named(p, name) {
             expect(u, "U15", ("Service", "User", Is("hlobs")), out);
+        }
+    }
+}
+
+fn u18_stack_settings(p: &Parsed, out: &mut Vec<Finding>) {
+    for &(name, writes) in STACK {
+        for u in required(p, name, "U18", out) {
+            for &row in STACK_SETTINGS {
+                expect(u, "U18", row, out);
+            }
+            expect(u, "U18", ("Service", "ReadWritePaths", writes), out);
+        }
+    }
+}
+
+fn u19_bounded_runs(p: &Parsed, out: &mut Vec<Finding>) {
+    for name in BOUNDED {
+        for u in required(p, name, "U19", out) {
+            expect(
+                u,
+                "U19",
+                ("Service", "TimeoutStartSec", Is(RUN_TIMEOUT)),
+                out,
+            );
+            expect(u, "U19", ("Service", "TimeoutSec", Absent), out);
+        }
+    }
+    for u in named(p, "md-archiver@.service") {
+        // One topic-day in memory per thread; L1 is never deleted.
+        let env = environment(u);
+        if env_values(&env, "THREADS") != ["1"] || env_values(&env, "RETAIN_ARGS") != [""] {
+            finding(
+                out,
+                &u.path,
+                "U19",
+                "Environment= must set THREADS=1 and an empty RETAIN_ARGS=, each once",
+            );
+        }
+        let threads = flag_values(u, "threads");
+        if !matches!(threads.as_slice(), [v] if resolve(&env, v) == Ok("1")) {
+            finding(out, &u.path, "U19", "--threads must be given once as 1");
+        }
+        if !flag_values(u, "retain-l1-days").is_empty() {
+            finding(out, &u.path, "U19", "--retain-l1-days must not be given");
+        }
+    }
+    // Every value the check reads comes from the unit file itself.
+    for u in &p.units {
+        if !u.ini.any("EnvironmentFile").is_empty() {
+            finding(
+                out,
+                &u.path,
+                "U19",
+                "no EnvironmentFile=: the check cannot read its values",
+            );
         }
     }
 }
@@ -815,6 +991,19 @@ fn a_collector_unit_with_a_start_limit_fails() {
         "\n[Service]\nStartLimitIntervalSec=0\n",
         &["U3"],
     );
+    // The older name, or the key again in [Service], brings a limit back.
+    for to in [
+        "StartLimitIntervalSec=0\nStartLimitInterval=10s\n",
+        "StartLimitIntervalSec=0\n\n[Service]\nStartLimitIntervalSec=10s\n[Unit]\n",
+        "StartLimitIntervalSec=0\n\n[Service]\nStartLimitInterval=10s\n[Unit]\n",
+    ] {
+        plant(
+            "md-collector@.service",
+            "StartLimitIntervalSec=0\n",
+            to,
+            &["U3"],
+        );
+    }
 }
 
 #[test]
@@ -890,6 +1079,13 @@ fn a_collector_unit_with_wrong_memory_min_or_io_weight_fails() {
         &["U3"],
     );
     plant("md-collector@.service", "IOWeight=1000\n", "", &["U3"]);
+    // A throttle below the cap would stall it before the kernel protects it.
+    plant(
+        "md-collector@.service",
+        "IOWeight=1000\n",
+        "IOWeight=1000\nMemoryHigh=64M\n",
+        &["U3"],
+    );
     // Outside the slice its reservation is not counted there.
     plant(
         "md-collector@.service",
@@ -1047,8 +1243,8 @@ fn a_timer_without_its_service_fails() {
     let mut t = Tree::real();
     t.remove(&unit("md-lake-seal@.service"));
     // The seal service gone: its timer is an orphan, and its design row
-    // is missing.
-    assert_rules(&crate::check(&t), &["U2", "U6", "U14"]);
+    // and its run bound are missing.
+    assert_rules(&crate::check(&t), &["U2", "U6", "U14", "U19"]);
 }
 
 #[test]
@@ -1109,7 +1305,8 @@ fn a_daily_job_without_the_lock_fails() {
         .map(|l| format!("{l}\n"))
         .collect();
     t.set(&path, &text);
-    assert_rules(&crate::check(&t), &["U7"]);
+    // With the command go its --lake (U9) and --threads (U19).
+    assert_rules(&crate::check(&t), &["U7", "U9", "U19"]);
 }
 
 #[test]
@@ -1161,6 +1358,39 @@ fn a_listener_off_loopback_fails() {
         "--cluster.listen-address=",
         "--cluster.listen-address=0.0.0.0:9094",
         &["U8"],
+    );
+    // The tools read a flag with one or two dashes, `name=value` or
+    // `name value`, and quoted: a second listener in another spelling.
+    plant(
+        "victoriametrics.service",
+        "-httpListenAddr=127.0.0.1:8428",
+        "-httpListenAddr=127.0.0.1:8428 --httpListenAddr=0.0.0.0:8429",
+        &["U8"],
+    );
+    plant(
+        "victoriametrics.service",
+        "-httpListenAddr=127.0.0.1:8428",
+        "-httpListenAddr=127.0.0.1:8428 \"-httpListenAddr=0.0.0.0:8429\"",
+        &["U8"],
+    );
+    plant(
+        "alertmanager.service",
+        "--web.listen-address=127.0.0.1:9093",
+        "--web.listen-address=127.0.0.1:9093 --web.listen-address 0.0.0.0:9094",
+        &["U8"],
+    );
+    plant(
+        "alertmanager.service",
+        "--cluster.listen-address=",
+        "--cluster.listen-address= --cluster.listen-address 0.0.0.0:9094",
+        &["U8"],
+    );
+    // The same loopback address in another spelling passes.
+    plant(
+        "victoriametrics.service",
+        "-httpListenAddr=127.0.0.1:8428",
+        "--httpListenAddr 127.0.0.1:8428",
+        &[],
     );
 }
 
@@ -1216,6 +1446,49 @@ fn a_store_off_the_lake_disk_fails() {
         "--lake $OTHER",
         &["U9"],
     );
+    // Every store names its path once, in any spelling; without it the
+    // tool writes to a relative default.
+    for (name, from, to) in [
+        (
+            "victoriametrics.service",
+            " -storageDataPath=/mnt/nvme/observability/victoria-metrics",
+            "",
+        ),
+        (
+            "victoriametrics.service",
+            "-storageDataPath=/mnt/nvme/observability/victoria-metrics",
+            "--storageDataPath=/var/lib/vm",
+        ),
+        (
+            "victoriametrics.service",
+            "-storageDataPath=/mnt/nvme/observability/victoria-metrics",
+            "-storageDataPath /var/lib/vm",
+        ),
+        (
+            "victorialogs.service",
+            "-storageDataPath=/mnt/nvme/observability/victoria-logs",
+            "-storageDataPath=/mnt/nvme/observability/victoria-logs -storageDataPath=/mnt/nvme/x",
+        ),
+        (
+            "alertmanager.service",
+            " --storage.path=/mnt/nvme/observability/alertmanager",
+            "",
+        ),
+        (
+            "alertmanager.service",
+            "--storage.path=/mnt/nvme/observability/alertmanager",
+            "--storage.path /var/lib/am",
+        ),
+        ("md-lake-seal@.service", " --lake ${LAKE}", ""),
+        // An empty Environment= clears the variables before it.
+        (
+            "md-archiver@.service",
+            "Environment=LAKE=/mnt/nvme/lake\n",
+            "Environment=LAKE=/mnt/nvme/lake\nEnvironment=\n",
+        ),
+    ] {
+        plant(name, from, to, &["U9"]);
+    }
     let f = crate::check(&with(
         "md-lake-seal@.service",
         "Environment=LAKE=/mnt/nvme/lake\n",
@@ -1494,6 +1767,132 @@ fn pending_install_paths_are_still_missing() {
             named.contains(pending),
             "{pending} is named by no unit: remove it from PENDING_DST"
         );
+    }
+}
+
+#[test]
+fn stack_units_keep_their_restart_and_sandbox_settings() {
+    for (name, from, to) in [
+        ("victoriametrics.service", "Restart=on-failure\n", ""),
+        (
+            "victorialogs.service",
+            "Restart=on-failure\n",
+            "Restart=on-failure\nRestart=no\n",
+        ),
+        ("alertmanager.service", "RestartSec=5\n", "RestartSec=60\n"),
+        ("grafana.service", "ProtectSystem=strict\n", ""),
+        (
+            "grafana.service",
+            "ProtectSystem=strict\n",
+            "ProtectSystem=full\n",
+        ),
+        ("vmalert-logs.service", "NoNewPrivileges=yes\n", ""),
+        (
+            "vmalert-metrics.service",
+            "ProtectHome=yes\n",
+            "ProtectHome=no\n",
+        ),
+        ("victorialogs.service", "PrivateTmp=yes\n", ""),
+        // Each store writes its own directory only; vmalert writes none.
+        (
+            "victoriametrics.service",
+            "ReadWritePaths=/mnt/nvme/observability/victoria-metrics\n",
+            "ReadWritePaths=/mnt/nvme\n",
+        ),
+        (
+            "alertmanager.service",
+            "ReadWritePaths=/mnt/nvme/observability/alertmanager\n",
+            "",
+        ),
+        (
+            "vmalert-metrics.service",
+            "PrivateTmp=yes\n",
+            "PrivateTmp=yes\nReadWritePaths=/mnt/nvme/lake\n",
+        ),
+        // A restart of a store must not stop vmalert.
+        (
+            "vmalert-metrics.service",
+            "After=victoriametrics.service",
+            "Requires=victoriametrics.service\nAfter=victoriametrics.service",
+        ),
+        (
+            "vmalert-logs.service",
+            "After=victoriametrics.service",
+            "BindsTo=victorialogs.service\nAfter=victoriametrics.service",
+        ),
+        (
+            "vmalert-logs.service",
+            "After=victoriametrics.service",
+            "PartOf=victorialogs.service\nAfter=victoriametrics.service",
+        ),
+    ] {
+        plant(name, from, to, &["U18"]);
+    }
+}
+
+#[test]
+fn the_seal_and_archiver_runs_are_bounded() {
+    for (name, from, to) in [
+        // A oneshot has no start timeout by default: a hung run holds the
+        // daily lock, or stops sealing, for good.
+        ("md-archiver@.service", "TimeoutStartSec=6h\n", ""),
+        ("md-lake-seal@.service", "TimeoutStartSec=6h\n", ""),
+        (
+            "md-lake-seal@.service",
+            "TimeoutStartSec=6h\n",
+            "TimeoutStartSec=6h\nTimeoutSec=infinity\n",
+        ),
+        (
+            "md-archiver@.service",
+            "TimeoutStartSec=6h\n",
+            "TimeoutStartSec=24h\n",
+        ),
+        // One topic-day per thread: four threads pass the 4G cap.
+        (
+            "md-archiver@.service",
+            "Environment=THREADS=1\n",
+            "Environment=THREADS=4\n",
+        ),
+        (
+            "md-archiver@.service",
+            "Environment=THREADS=1\n",
+            "Environment=THREADS=1 THREADS=2\n",
+        ),
+        (
+            "md-archiver@.service",
+            "--threads ${THREADS}",
+            "--threads 4",
+        ),
+        ("md-archiver@.service", " --threads ${THREADS}", ""),
+        // L1 deletion stays off.
+        (
+            "md-archiver@.service",
+            "Environment=RETAIN_ARGS=\n",
+            "Environment=RETAIN_ARGS=--retain-l1-days 14\n",
+        ),
+        (
+            "md-archiver@.service",
+            "Environment=RETAIN_ARGS=\n",
+            "Environment=\"RETAIN_ARGS=--retain-l1-days 14\"\n",
+        ),
+        (
+            "md-archiver@.service",
+            "$RETAIN_ARGS",
+            "--retain-l1-days=14 $RETAIN_ARGS",
+        ),
+        // Values from a file the check cannot read.
+        (
+            "md-archiver@.service",
+            "Nice=10\n",
+            "Nice=10\nEnvironmentFile=-/etc/default/md-archiver\n",
+        ),
+        (
+            "md-collector@.service",
+            "TimeoutStopSec=30\n",
+            "TimeoutStopSec=30\nEnvironmentFile=/etc/default/md-collector\n",
+        ),
+    ] {
+        plant(name, from, to, &["U19"]);
     }
 }
 
