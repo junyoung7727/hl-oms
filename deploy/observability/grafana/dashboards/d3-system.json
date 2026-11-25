@@ -646,7 +646,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "이 PC에서 매일 한 번 돌린다:\n\n```\nsystemctl --failed 'md-*' 'crypto-lake-audit*'\n```\n\n알림이 없는 실패(이 화면의 어느 값에도 나타나지 않음):\n\n- 감사의 날짜 하나 쓰기 오류(종료 코드 3, 감사기는 값을 넣은 뒤)\n- verify 실패(종료 코드 5)\n- 아카이버 실행 실패나 강제 종료(예: 4 GB 상한). 가장 오래된 날짜부터 만들므로 그 뒤 날짜가 모두 밀린다\n\n단위 상태를 내보내는 것이 없으므로 이 명령만 이것들을 보여 준다. 절차: docs/operations/observability.md §4."
+        "content": "이 PC에서 매일 한 번 돌린다:\n\n```\nsystemctl --failed 'md-*' 'crypto-lake-audit*' 'oms-export*'\n```\n\n알림이 없는 실패(이 화면의 어느 값에도 나타나지 않음):\n\n- 감사의 날짜 하나 쓰기 오류(종료 코드 3, 감사기는 값을 넣은 뒤)\n- verify 실패(종료 코드 5)\n- 아카이버 실행 실패나 강제 종료(예: 4 GB 상한). 가장 오래된 날짜부터 만들므로 그 뒤 날짜가 모두 밀린다\n- 저널 내보내기(oms-export)의 레이크 쓰기·스키마 오류(종료 코드 1, OMS가 살아 있을 때). 저널은 남으므로 다음 성공한 실행이 밀린 날짜를 쓴다\n\n단위 상태를 내보내는 것이 없으므로 이 명령만 이것들을 보여 준다. 절차: docs/operations/observability.md §4, §13.7."
       }
     }
   ]

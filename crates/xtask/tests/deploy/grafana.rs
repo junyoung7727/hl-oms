@@ -116,10 +116,11 @@ const DATASOURCE_UIDS: &[&str] = &["vm", "vl"];
 const METRICS_UID: &str = "vm";
 /// G6: D3's one text panel: the daily command for the failures that no
 /// metric shows (an audit date's write error after the push, a failed
-/// verify, a killed archiver run; no exporter of unit state exists).
+/// verify, a killed archiver run, an export's lake or schema error; no
+/// exporter of unit state exists).
 const SYSTEM_UID: &str = "d3-system";
 const FAILED_JOBS_TITLE: &str = "매일 확인: 실패한 일일 작업";
-const FAILED_JOBS_COMMAND: &str = "systemctl --failed 'md-*' 'crypto-lake-audit*'";
+const FAILED_JOBS_COMMAND: &str = "systemctl --failed 'md-*' 'crypto-lake-audit*' 'oms-export*'";
 /// G8: the dashboards of design §8.4 (uid, title: the one question each
 /// answers).
 const BOARDS: &[(&str, &str)] = &[
@@ -1191,6 +1192,24 @@ fn the_system_dashboard_has_the_failed_jobs_text_panel() {
         v["panels"].as_array_mut().unwrap().push(panel)
     });
     assert_rules(&crate::check(&t), &[]);
+}
+
+#[test]
+fn the_daily_check_names_the_export() {
+    // An export exit 1 (a lake write or schema error while the OMS is up)
+    // has no metric and no alert: the daily command is its only signal.
+    assert!(FAILED_JOBS_COMMAND.ends_with(" 'oms-export*'"));
+    plant_json(
+        D3,
+        |v| {
+            let c = panel_mut(v, TEXT_TITLE)["options"]["content"]
+                .as_str()
+                .unwrap()
+                .replace(" 'oms-export*'", "");
+            panel_mut(v, TEXT_TITLE)["options"]["content"] = json!(c);
+        },
+        &["G6"],
+    );
 }
 
 #[test]
