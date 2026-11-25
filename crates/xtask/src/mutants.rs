@@ -3506,6 +3506,24 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "xtask", "--test", "deploy", "grafana::the_event_dashboard_names_only_journal_event_kinds"],
         guards: "ADR-038",
     },
+    Mutant {
+        id: "M387-deploy-watcher-w5-unarmed-no-kill-gate",
+        what: "WatcherW5Unarmed loses its kill gate: it pages during every kill, when W5 is disarmed on purpose, and the documented rule is gone (ADR-038, U20b3 review 1 S2)",
+        file: "deploy/observability/vmalert/metrics/watcher.rules.json",
+        find: "\"expr\": \"max by (venue) (watcher_w5_armed) == 0 and on(venue) max by (venue) (watcher_kill_active) == 0\",",
+        replace: "\"expr\": \"max by (venue) (watcher_w5_armed) == 0\",",
+        test: &["-p", "xtask", "--test", "deploy", "the_deploy_tree_passes"],
+        guards: "ADR-038",
+    },
+    Mutant {
+        id: "M388-deploy-check-limit-table-transforms-unread",
+        what: "rule G8 does not read the transformations of D1's limit table: a merge that keys on __name__ leaves each limit and its distance on two rows, and the table no longer answers D1's question (ADR-038, U20b3 review 1 S1)",
+        file: "crates/xtask/tests/deploy/grafana.rs",
+        find: "            && x.get(\"transformations\") == Some(&transforms));\n",
+        replace: "            && !transforms.is_null());\n",
+        test: &["-p", "xtask", "--test", "deploy", "grafana::the_trading_dashboard_shows_limits_and_distances"],
+        guards: "ADR-038",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {

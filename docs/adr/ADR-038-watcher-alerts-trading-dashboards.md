@@ -79,7 +79,7 @@ B, E, G, I. 돈과 데이터에 안전한 쪽이다.
 ## 9. 근거
 
 - 시험: `crates/xtask/tests/deploy/`의 `the_deploy_tree_passes`, `catalogue::every_projector_and_watcher_series_is_catalogued`, `rules::a_rule_with_an_unknown_oms_metric_fails`, `rules::every_trading_venue_has_its_liveness_rules`, `rules::the_design_journal_and_key_rules_are_present`, `alertmanager::the_oms_inhibit_rules_hold_back_only_derived_alerts`, `grafana::a_dashboard_with_an_unknown_metric_fails`, `grafana::the_daily_check_names_the_export`, `grafana::the_trading_and_event_dashboards_exist`, `grafana::the_trading_dashboard_shows_limits_and_distances`, `grafana::the_event_dashboard_names_only_journal_event_kinds`.
-- 변이: M383~M386(`cargo run -p xtask -- mutants --only M38`).
+- 변이: M383~M388(`cargo run -p xtask -- mutants --only M38`). M387·M388은 검토 1(S2, S1)에서 더했다.
 - 도구(CI 밖, 이 PC, 2026-11-26): `vmalert -dryRun`(v1.157.0)이 `watcher.rules.json`을 받아들였다. `vmalert-tool unittest`가 `watcher.test.json`(30개 경우: 알림마다 울리는 경우와 울리지 않는 경우, 다른 거래소의 워처, 재부팅 킬의 빚진 정지, `[kill]` 없는 워처의 W5)과 기존 넷을 통과했다. `amtool check-config`(0.35.1)가 억제 규칙 셋을 받아들였다. loopback의 임시 Alertmanager에 `OmsDown`(bybit)과 `WatcherCheckStale`(bybit, okx)과 `WatcherApiKeyExpiring`(bybit)을 넣자 bybit의 `WatcherCheckStale`만 억제됐다. loopback의 임시 VictoriaLogs v1.54.0에 프로젝터 모양의 줄(같은 `seq` 둘, 다른 거래소 하나, 뺀 종류 하나, 프로젝터 info·error 줄)을 넣고 D4의 질의를 돌리자 bybit의 사건만, 같은 `seq` 둘 다, 프로젝터 error 줄만 나왔다. 임시 Grafana 13.3.2가 D1·D4를 프로비저닝으로 읽었다.
 
 ## 10. 재검토 조건
