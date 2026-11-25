@@ -15,7 +15,7 @@
 | 설정 버전 변경 | 자동 시험으로 확인 |
 | 운영 명령(중지, 재개, 전체 취소, 불일치 확인, 수동 종결, 포지션 조정) | 코어 시험으로 전부 확인. 실제 프로세스에서 실행한 것은 중지, 전체 취소, 불일치 확인, 상태 조회다. `omsctl` 자체의 자동 시험은 없다(§3의 명령을 손으로 실행했다) |
 | 커밋 경계마다의 프로세스 중단과 재시작 | 자동 시험으로 확인(`crash_points`) |
-| systemd 단위 | 적어만 둠. 이 호스트에서 설치해 보지 않았다. 관측 스택과 시세 단위(수집기·봉인·아카이버)의 단위 파일은 `deploy/observability/`, 절차는 [observability.md](observability.md)(배치 검사 `cargo test -p xtask --test deploy`와 `systemd-analyze verify`로만 확인) |
+| systemd 단위 | 적어만 둠. 이 호스트에서 설치해 보지 않았다. 관측 스택과 시세 단위(수집기·봉인·아카이버·레이크 감사)의 단위 파일은 `deploy/observability/`, 절차는 [observability.md](observability.md)(배치 검사 `cargo test -p xtask --test deploy`와 `systemd-analyze verify`로만 확인) |
 | 서버 유실 뒤 복구 | 적어만 둠. 연습하지 않았다 |
 | 증거금 규칙의 절차(7.8 감소 전용 상태의 해제, 7.9 입출금 뒤의 기준 재설정) | 명령은 자동 시험으로 확인(코어 시험, 가상 거래소에 붙인 노드 프로세스에서 `clear-reduce`, `rebase-day`, 강제 종료 뒤의 상태). `omsctl` 실행 파일 자체는 시험하지 않았다(그 본문 함수를 부른다). **실제 거래소에서는 한 번도 해 보지 않았다** |
 | testnet 실주문 | 실행하지 않았다(U-01). 증거금 규칙의 testnet 예행과 가정 T1~T11의 확인도 하지 않았다. mainnet 전에 필요하고 사용자의 승인이 필요하다(§10) |
