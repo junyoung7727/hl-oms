@@ -21,9 +21,16 @@
 | `systemd/crypto-lake-audit@.service`, `.timer` | 매일 02:30 레이크 감사: 최근 9일 중 바뀐 날짜의 verify, 그다음 qdp 감사기(§4.1) |
 | `bin/crypto-lake-audit.sh` | 감사 단위가 돌리는 스크립트(POSIX `sh`, GNU `find`·`date` 필요) |
 | `install.toml` | 저장소 파일 → 설치 경로와 권한(§8) |
-| `venues.toml` | 이 PC가 수집하는 거래소(`bybit`) |
+| `venues.toml` | 이 PC가 수집하는 거래소(`bybit`). 거래소마다 생존 규칙이 있어야 한다(§9) |
+| `vmalert/metrics/market-data.rules.json`, `lake.rules.json`, `system.rules.json` | 지표 알림 규칙(vmalert-metrics). 알림마다 등급과 할 일(§9) |
+| `vmalert/logs/market-data-logs.rules.json` | 로그 알림 규칙(vmalert-logs, `type: vlogs`) |
+| `vmalert/tests/*.test.json` | 지표 규칙 파일마다 하나인 `vmalert-tool unittest` 파일(설치하지 않음, §11) |
+| `victoriametrics/scrape.json` | VictoriaMetrics가 15초마다 스택 다섯(VM, VL, vmalert 둘, Alertmanager)의 `/metrics`를 긁는 설정 |
+| `metrics.toml` | 지표 목록: 규칙이 쓰는 지표 이름과 라벨, 그 이름을 내보내는 소스 파일(설치하지 않음, §7) |
 
-아직 없는 파일: vmalert 규칙 파일, VictoriaMetrics 수집 설정(`scrape.json`), Alertmanager 설정, Grafana 설정과 대시보드. 단위의 명령줄은 그 설치 경로를 이미 가리킨다. 그 파일이 없는 동안 이 단위들은 시작하지 못한다(그래서 지금은 켜지 않는다).
+모든 JSON 파일은 도구가 읽는 YAML이기도 하다(JSON은 YAML이다). 주석을 쓸 수 없으므로 알림마다 `annotations.summary`에 뜻과 할 일을 적었다.
+
+아직 없는 파일: Alertmanager 설정, Grafana 설정과 대시보드. 단위의 명령줄은 그 설치 경로를 이미 가리킨다. 그 파일이 없는 동안 이 단위들은 시작하지 못한다(그래서 지금은 켜지 않는다).
 
 배치 검사(`cargo test --locked -p xtask --test deploy`)가 이 파일들을 읽고 규칙을 확인한다(§7). CI의 `cargo test --workspace`에도 들어간다.
 
@@ -128,7 +135,7 @@ md-lake verify --venue <v> --lake /mnt/nvme/lake --date <YYYY-MM-DD> --json
 
 다음 감사가 그 결과를 읽는다. verify가 계속 실패하는 날짜(예: 읽을 수 없는 봉인 파일)도 같다: 스크립트는 그 날짜가 창 안에 있는 9일 동안만 매일 다시 verify하고 종료 코드 5를 낸다. 9일이 지나면 어떤 실행도 다시 시도하지 않고 단위는 다시 초록이 된다. 그 전에 원인을 고치고 손으로 verify한다.
 
-**종료 코드와 어디서 보이나** (아래의 `Lake*` 알림 규칙 파일은 아직 없다, §1)
+**종료 코드와 어디서 보이나** (알림은 §9)
 
 | 코드 | 뜻 | 어디서 보이나 |
 |---|---|---|
@@ -185,7 +192,7 @@ chrony가 시작한 뒤 첫 세 번의 갱신에서만 1초가 넘는 차이를 
 
 ## 7. 설치 전 확인
 
-1. `cargo test --locked -p xtask --test deploy`. 실패하면 줄마다 `deploy: <파일>: <규칙>: <내용>`이 나온다. 규칙: P1(파일이 종류대로 읽힘), U1(서비스마다 `MemoryMax` 하나, 크기, `infinity` 아님), U2(oneshot 서비스 ↔ 같은 이름의 타이머, 타이머에 `Unit=` 없음), U3(수집기의 재시작·감시 설정과 보호 설정, 시작 제한의 옛 이름과 `[Service]` 쪽 키, `MemoryHigh` 없음), U4(슬라이스의 가중치와 예약), U5(세 타이머의 시각과 `Persistent`), U6(설계 상한), U7(아카이버와 감사의 일일 작업 잠금), U8(`127.0.0.1`에서만 듣고 Alertmanager 클러스터 포트 없음. 리스너 플래그는 어떤 철자로 써도 모두 셈), U9(저장소가 `/mnt/nvme/` 아래, 저장소마다 경로 플래그 한 번), U10(보관 1년, VM 메모리 한도), U11(vmalert 둘의 원본·알림·간격), U12(어느 배치 파일도 KR qdp 체크아웃을 이름하지 않음, 감사 스크립트의 `venue=$1`과 `--state "$STATE_DIRECTORY/audit-$venue.json"`, 감사 단위의 `StateDirectory=qdp-crypto-audit`. 스크립트는 CI에서 돌지 않으므로 다시 verify할 날짜와 종료 코드를 정하는 줄도 글자 그대로 고정: 9일 창, `-cnewer "$stamp"`, 지금보다 뒤인 도장 검사, 도장 → `sleep 1` → verify → `mv` 순서, 실패 시 옛 도장 유지, `exit 5`, `--vm-url http://127.0.0.1:8428`), U13(`venues.toml`의 거래소가 수집기와 아카이버 모두에 등록됨), U14(설치 지도), U15(스택은 `hlobs`, 어느 단위에도 `User=root`를 쓰지 않음), U16(`md-lake verify`나 감사 스크립트를 돌리는 단위가 읽기 전용 `l0` 아래의 `_verify`에, 감사는 `crypto/audit`에도 쓸 수 있음. 감사 스크립트를 돌리는 다른 단위도 `crypto/audit`에 쓸 수 있어야 함. 감사 단위의 두 경로 줄은 정확히 §4.1의 값이고 `LAKE=/mnt/nvme/lake` 한 번), U17(`Exec*` 줄에 `$(`, 백틱, `%i`·`%I`·`%n`·`%%`가 아닌 `%` 없음: systemd는 셸을 돌리지 않음), U18(스택 단위의 재시작·격리 설정, 쓰는 디렉터리, 다른 단위에 묶이지 않음), U19(봉인·아카이버·감사 실행의 시간 제한, 아카이버의 스레드 1개와 L1 삭제 꺼짐, `EnvironmentFile=` 없음).
+1. `cargo test --locked -p xtask --test deploy`. 실패하면 줄마다 `deploy: <파일>: <규칙>: <내용>`이 나온다. 규칙: P1(파일이 종류대로 읽힘), U1(서비스마다 `MemoryMax` 하나, 크기, `infinity` 아님), U2(oneshot 서비스 ↔ 같은 이름의 타이머, 타이머에 `Unit=` 없음), U3(수집기의 재시작·감시 설정과 보호 설정, 시작 제한의 옛 이름과 `[Service]` 쪽 키, `MemoryHigh` 없음), U4(슬라이스의 가중치와 예약), U5(세 타이머의 시각과 `Persistent`), U6(설계 상한), U7(아카이버와 감사의 일일 작업 잠금), U8(`127.0.0.1`에서만 듣고 Alertmanager 클러스터 포트 없음. 리스너 플래그는 어떤 철자로 써도 모두 셈), U9(저장소가 `/mnt/nvme/` 아래, 저장소마다 경로 플래그 한 번), U10(보관 1년, VM 메모리 한도), U11(vmalert 둘의 원본·알림·간격), U12(어느 배치 파일도 KR qdp 체크아웃을 이름하지 않음, 감사 스크립트의 `venue=$1`과 `--state "$STATE_DIRECTORY/audit-$venue.json"`, 감사 단위의 `StateDirectory=qdp-crypto-audit`. 스크립트는 CI에서 돌지 않으므로 다시 verify할 날짜와 종료 코드를 정하는 줄도 글자 그대로 고정: 9일 창, `-cnewer "$stamp"`, 지금보다 뒤인 도장 검사, 도장 → `sleep 1` → verify → `mv` 순서, 실패 시 옛 도장 유지, `exit 5`, `--vm-url http://127.0.0.1:8428`), U13(`venues.toml`의 거래소가 수집기와 아카이버 모두에 등록됨), U14(설치 지도), U15(스택은 `hlobs`, 어느 단위에도 `User=root`를 쓰지 않음), U16(`md-lake verify`나 감사 스크립트를 돌리는 단위가 읽기 전용 `l0` 아래의 `_verify`에, 감사는 `crypto/audit`에도 쓸 수 있음. 감사 스크립트를 돌리는 다른 단위도 `crypto/audit`에 쓸 수 있어야 함. 감사 단위의 두 경로 줄은 정확히 §4.1의 값이고 `LAKE=/mnt/nvme/lake` 한 번), U17(`Exec*` 줄에 `$(`, 백틱, `%i`·`%I`·`%n`·`%%`가 아닌 `%` 없음: systemd는 셸을 돌리지 않음), U18(스택 단위의 재시작·격리 설정, 쓰는 디렉터리, 다른 단위에 묶이지 않음), U19(봉인·아카이버·감사 실행의 시간 제한, 아카이버의 스레드 1개와 L1 삭제 꺼짐, `EnvironmentFile=` 없음). 규칙 파일과 지표 목록: R1(규칙의 모든 지표 이름이 목록에 있음: `metrics.toml`, 고정된 qdp `contracts/lake/xrepo/metrics.json`, 규칙 파일의 기록 규칙 이름), R2(`metrics.toml`의 `[[metric]]` 행마다 `source` 파일에 그 이름이 문자열 그대로 있음, `[[stack]]` 행은 구성 요소와 판이 있음), R2b(qdp가 hl-oms 몫으로 남긴 이름(`reserved`)마다 쓰는 쪽이 있음, 한 이름에 쓰는 쪽은 하나), R3(라벨이 목록의 어떤 지표의 라벨이거나 `job`·`instance`), R4(허용된 함수만, 검사기가 읽지 못하는 모양 없음), R5(알림마다 `severity` P1·P2·P3와 `summary`, `Watchdog`은 하나이고 `vector(1)`·`watchdog`), R6(`venues.toml`의 거래소마다 `MdCollectorDown`(P1)과 `MdLakeGaugesMissing`(P2)이 정확히 하나씩, 정해진 식, `for` 없음, 목록에 없는 거래소의 것은 없음), R7(설계의 레이크·디스크 규칙: 남은 일수 기록 규칙, `LakeDiskDaysLeftLow`·`Critical`, `LakeL0WriteError`, `LakeSealLag`, `LakeAuditFailed`의 식·`for`·등급·그룹, 두 그룹의 간격 1분), R8(`vmalert/logs/`의 그룹은 `type: vlogs`, `vmalert/metrics/`의 그룹은 `type` 없음), R9(`scrape.json`의 작업 다섯과 간격 15초, 작업마다 대상이 그 단위의 리스너, 규칙이 쓰는 `job` 값은 긁는 작업, `ObsMemoryNearCap`의 상한이 U6의 설계 상한), U8은 긁는 대상에도(`127.0.0.1`만). 검사기는 MetricsQL의 부분 집합만 읽는다(파서가 아님). 문법은 §11의 `vmalert -dryRun`이 본다. LogsQL 식은 읽지 않는다.
 2. `systemd-analyze verify`: 단위 사본의 실행 파일 경로(`/usr/local/bin/`, `/usr/local/lib/hl-oms-obs/`, `/opt/grafana/bin/`)를 내려받은 공식 바이너리와 `/bin/true` 링크가 있는 임시 디렉터리로 바꾸고, 템플릿은 인스턴스 링크(`md-collector@bybit.service` 등)로 검사한다. 모르는 키는 `Unknown key`로 나온다. 감사 스크립트는 `sh -n bin/crypto-lake-audit.sh`로 문법만 본다.
 
 ## 8. 설치 순서 (소유자, 운영 항목 X1)
@@ -211,6 +218,11 @@ chrony가 시작한 뒤 첫 세 번의 갱신에서만 1초가 넘는 차이를 
    install -D -m 0644 systemd/crypto-lake-audit@.service /etc/systemd/system/crypto-lake-audit@.service
    install -D -m 0644 systemd/crypto-lake-audit@.timer   /etc/systemd/system/crypto-lake-audit@.timer
    install -D -m 0755 bin/crypto-lake-audit.sh        /usr/local/lib/hl-oms-obs/crypto-lake-audit.sh
+   install -D -m 0644 victoriametrics/scrape.json     /etc/hl-oms-obs/victoriametrics/scrape.json
+   install -D -m 0644 vmalert/metrics/market-data.rules.json /etc/hl-oms-obs/vmalert/metrics/market-data.rules.json
+   install -D -m 0644 vmalert/metrics/lake.rules.json        /etc/hl-oms-obs/vmalert/metrics/lake.rules.json
+   install -D -m 0644 vmalert/metrics/system.rules.json      /etc/hl-oms-obs/vmalert/metrics/system.rules.json
+   install -D -m 0644 vmalert/logs/market-data-logs.rules.json /etc/hl-oms-obs/vmalert/logs/market-data-logs.rules.json
    ```
 5. 비밀 파일(토큰, 채팅 ID, Grafana 관리자 암호)은 `/etc/hl-oms/` 아래 권한 0640, 그룹 `hlobs`로 둔다. 저장소에는 경로만 있다. `md-lake seal`의 `/etc/hl-oms/telegram.json`은 그대로(0600).
 6. `systemctl daemon-reload` 뒤 `systemctl enable --now`는 소유자가 X1에서 한다. **수집기를 vmalert보다 먼저 켠다.** 그러면 수집기 생존 알림 `MdCollectorDown`(P1)을 막을 필요가 없다. vmalert를 먼저 켰을 때만 이 한 줄로 10분(판단(모델 아님)) 막는다:
@@ -227,3 +239,75 @@ chrony가 시작한 뒤 첫 세 번의 갱신에서만 1초가 넘는 차이를 
    amtool silence add alertname=LakeAuditStale --duration=36h --comment=first-install
    ```
 7. 수집기가 12시간 넘게 멈췄다 돌아오면 디스크 남은 일수 알림은 최대 12시간 꺼져 있다(준비 시간). 그동안 디스크가 차는 것은 L0 쓰기 오류 알림과 수집기의 `[MD P1]` 디스크 하한이 알린다.
+
+## 9. 알림 (vmalert 규칙)
+
+등급(설계 §8.3): P1 = 원본 데이터를 잃거나 관측을 잃는 중(즉시, 소리). P2 = 저하(소리 없음). P3 = 추세(대시보드와 주간 검토만). `Watchdog`은 등급이 아니라 늘 울리는 신호다. Alertmanager의 경로와 억제는 §10에 둔다(그 설정 파일은 아직 없다). 문턱값은 설계가 정한 것(60초·2분 생존, 7일·2일, 2시간 봉인 지연, 5 ms 시각 오프셋) 말고는 판단(모델 아님)이고 주간 검토에서 고친다(소유자 질문 Q5).
+
+수집기 쪽 알림은 수집기가 VictoriaMetrics에 직접 넣는 값(`/api/v1/import`)으로 판단하고, 감사 알림은 qdp 감사기가 넣는 값으로, 스택 알림은 VictoriaMetrics가 긁는 값으로 판단한다. vmalert는 30초 전의 저장소를 보므로(`-rule.evalDelay` 기본값) 모든 알림은 조건이 생긴 뒤 30초 넘게 지나서 울린다. 수집기 생존 알림이 Alertmanager의 P1 수신자에 닿는 시간은 마지막 심박 뒤 약 90~170초다(판단(모델 아님), 설치 뒤 X1에서 잰다).
+
+**시세 수집** (`market-data.rules.json`, 그룹 `market-data`, 10초)
+
+| 이름 | 등급 | 조건 | 뜻 | 할 일 |
+|---|---|---|---|---|
+| `MdCollectorDown` | P1 | 거래소마다 하나. 심박(`md_collector_heartbeat_ts`)이 60초 넘게 낡았거나 2분 동안 값이 없음 | 수집기가 죽었거나 멈췄다. 원본 시세를 잃는 중이다. 죽은 수집기는 자기 `[MD P1]`을 보낼 수 없어서 이 규칙이 있다 | `systemctl status md-collector@<v>`, `journalctl -u md-collector@<v>`로 원인을 찾고 다시 띄운다 |
+| `MdLakeGaugesMissing` | P2 | 거래소마다 하나. `lake_disk_free_bytes`나 `lake_seal_lag_hours`가 10분 동안 없음 | 수집기는 살아 있는데 디스크 여유(`statvfs` 실패)나 봉인 지연(`_open` 목록 실패) 값이 안 온다. 그동안 남은 일수와 봉인 지연 알림은 울릴 수 없다 | 수집기 로그에서 그 오류를 찾는다 |
+| `MdCollectorRestarting` | P2 | 10분 안에 `lake_l0_bytes_total`이 한 번이라도 줄었음(재시작마다 0부터 다시 셈) | 수집기가 심박은 보내지만 몇 분마다 죽었다 다시 뜬다(예: 메모리 상한에서 강제 종료, panic). 재시작마다 그 사이의 원본 데이터와 호가창 상태를 잃는다. 운영자가 직접 재시작해도 한 번 울린다. 옛 프로세스가 마지막으로 보낸 값이 새 프로세스의 첫 값보다 클 때만 재시작을 본다(값을 보내기 전에 죽는 프로세스는 보지 못함) | `systemctl status md-collector@<v>`와 `journalctl -u md-collector@<v>`로 종료 원인(`oom-kill`, panic)을 찾는다 |
+| `MdConnectionSilent` | P2 | 돌고 있는 연결 하나가 2분 동안 메시지 0개, 1분 지속 | 거래소 쪽 구독이 멈췄을 수 있다. 멈춘 연결은 값이 없으므로 여기 없고 `MdTopicsStale`·`MdReconnectsHigh`가 본다 | 그 연결의 재연결·구독 기록을 본다 |
+| `MdTopicsStale` | P2 | 호가창 토픽의 10% 넘게가 60초 넘게 메시지 없음, 5분 지속 | 일부 종목이 비었다 | D2 대시보드에서 어느 종목인지 본다 |
+| `MdRecvLagHigh` | P2 | 수신 지연 p99 > 1,000 ms, 5분 지속 | 이 PC가 느리거나 네트워크가 막혔다 | 연구 작업·디스크·시계 오프셋을 본다. 그 구간은 거래소 간 선후 분석에서 뺀다 |
+| `MdReconnectsHigh` | P2 | 10분에 재연결 > 10 | 재연결마다 공백이 생긴다 | 거래소 장애 공지와 이 PC의 네트워크를 본다 |
+| `MdGapsHigh` | P2 | 10분에 호가창 공백 > 20 | 공백 구간은 L1 gap 행으로 남는다 | 수신 지연·재연결 알림과 함께 본다 |
+| `MdQueueHigh` | P2 | L0 쓰기 대기열 > 8 MiB(칸 상한 16 MiB의 절반), 1분 지속 | 디스크가 느리거나 막혔다. 상한에 닿으면 그 연결이 끊긴다 | 디스크 I/O와 연구 작업을 본다 |
+| `MdObsPushDropping` | P2 | 10분에 `obs_push_dropped_total`이 늘었음 | 수집기가 VM·VL로 보내지 못한 줄을 버리고 있다(설계 §8.3 "VM/VL 쓰기 실패") | 두 저장소가 살아 있는지 본다 |
+| `ClockOffsetHigh` | P2 | 시계 오프셋 절댓값 > 5 ms, 5분 지속 | 그 구간의 수신 지연과 선후 분석을 믿을 수 없다 | `chronyc tracking`(§6) |
+
+**레이크** (`lake.rules.json`)
+
+| 이름 | 등급 | 조건 | 뜻 | 할 일 |
+|---|---|---|---|---|
+| 기록 `lake_disk_days_left` | — | `lake_disk_free_bytes / clamp_min(-deriv(lake_disk_free_bytes[24h]) * 86400, 1)`, 1분마다(그룹 `lake-recording`) | 지난 24시간의 속도로 디스크가 차기까지 남은 일수. 저장된 값으로 계산하므로 수집기를 다시 시작해도 0부터 다시 세지 않는다. 디스크가 줄지 않으면 매우 큰 값 | — |
+| `LakeDiskDaysLeftLow` | P2 | 남은 일수 < 7, 10분 지속. 지난 24시간의 가장 오래된 값이 12시간보다 오래됐을 때만 | 7일 안에 찬다 | 옮기거나 지울 계획을 세운다(L0는 지우지 않는다) |
+| `LakeDiskDaysLeftCritical` | P1 | 남은 일수 < 2, 같은 조건 | 2일 안에 찬다. 차면 L0 쓰기가 멈춘다 | 지금 공간을 만든다 |
+| `LakeL0WriteError` | P1 | `lake_l0_write_errors_total` > 0, 또는 10분 안에 늘었음(새 프로세스는 0부터) | L0 쓰기가 실패했다. 쓰기는 첫 오류에서 멈추므로 원본 시세를 잃는 중이다 | 오류를 보고 디스크를 확인한 뒤 수집기를 다시 띄운다 |
+| `LakeSealLag` | P2 | 봉인 지연 > 2시간 | 봉인이 멈췄거나, 6시간 제한에 걸려 매시 다시 시작되고 있다 | `journalctl -u md-lake-seal@<v>`로 둘을 구분한다 |
+| `LakeAuditFailed` | P2 | 감사 실패 카운터의 지금 값 − 26시간 전 값(그때 값이 없으면 0) > 0(그룹 `lake-audit`, 1분) | 감사가 새 실패 파일을 찾았다(설계 §8.3 "감사 실패") | `crypto/audit/venue=<v>/date=<d>.json`을 읽는다 |
+| `LakeAuditStale` | P2 | 거래소마다 하나. 마지막 감사의 끝난 시각이 36시간보다 오래됐거나 36시간 동안 값이 없음 | 감사가 돌지 않았거나 보내기 전에 실패했다(종료 코드 1의 Python 예외, 2, 3, 4, §4.1) | `systemctl status crypto-lake-audit@<v>`, `journalctl -u crypto-lake-audit@<v>` |
+| `LakeNotAudited` | P3 | verify 결과가 없는 봉인 L0 파일 > 0, 1시간 지속 | 9일 창 밖의 날짜일 수 있다 | §4.1의 손 verify |
+
+- 남은 일수 알림의 준비 시간(12시간)은 처음 켠 날 아카이버의 첫 폭주가 페이지를 내지 않게 한다(판단(모델 아님)). 수집기가 12시간 넘게 멈췄다 돌아와도 같다(§8). 그동안 디스크가 차는 것은 `LakeL0WriteError`와 수집기의 `[MD P1]` 디스크 하한이 알린다. 수집기의 `telemetry.slow_ms`는 20 000 이하로 둔다(§3.1).
+- 설계 §8.3의 "디스크 80%"는 9.4의 남은 일수로 대체됐고 규칙이 없다. 저널 디스크 규칙은 OMS 배치에서 더한다.
+- `LakeAuditFailed`는 26시간 뒤 저절로 끝난다. 그것은 파일이 고쳐졌다는 뜻이 아니다. 아무도 고치지 않은 실패 파일은 감사기가 7일마다 다시 감사하므로(qdp `audit.py`의 `MAX_AGE_DAYS`) 이 알림이 7일마다 다시 온다. 감사 상태 파일을 지우거나 바꾼 뒤에는 카운터가 옛 값보다 작게 다시 시작해 26시간 동안 옛 값을 빼므로, 그 첫 전체 실행이 찾은 실패는 알림이 오지 않는다: 그 실행의 `crypto/audit/venue=<v>/date=<d>.json`을 손으로 읽는다.
+
+**시스템** (`system.rules.json`)
+
+| 이름 | 등급 | 조건 | 뜻 | 할 일 |
+|---|---|---|---|---|
+| `Watchdog` | watchdog | `vector(1)`, 늘 울림(그룹 `watchdog`) | 바깥 dead-man 수신자가 이것이 끊긴 것을 보고 스택이 죽었음을 안다. 바깥 서비스는 소유자가 정한다(Q1). 그때까지 이 층은 바깥으로 아무것도 알리지 않는다 | — |
+| `ObsComponentDown` | P2 | `up{job=~"victorialogs|vmalert-logs|alertmanager"} == 0`, 2분 지속 | 그 구성 요소가 응답하지 않는다. 죽은 VictoriaMetrics나 vmalert-metrics는 자기 알림을 낼 수 없다: 그것은 `Watchdog`의 몫이다 | `systemctl status <job 이름>` |
+| `VmalertIterationMissed` | P2 | 10분에 평가 주기를 놓쳤음 | 그동안 알림이 늦다 | 저장소 응답 시간과 vmalert 메모리를 본다 |
+| `AlertmanagerTelegramFailing` | P2 | 10분에 Telegram 보내기 실패 | 알림이 Telegram으로 오지 않을 수 있다(이 알림 자신도) | 대시보드에서 보고 `journalctl -u alertmanager` |
+| `ObsMemoryNearCap` | P3 | 구성 요소의 상주 메모리 > 단위 `MemoryMax`의 90%, 10분 지속(VM·VL 1G, vmalert 200M, Alertmanager 100M; Grafana는 긁지 않음) | 상한에 닿으면 강제 종료된다 | 주간 검토에서 상한이나 설정을 고친다 |
+
+**로그** (`market-data-logs.rules.json`, 그룹 `md-logs`, `type: vlogs`, 30초)
+
+| 이름 | 등급 | 조건 | 뜻 | 할 일 |
+|---|---|---|---|---|
+| `MdErrorLogs` | P2 | 지난 5분에 `service:="md-collector" level:=error` 줄이 거래소별로 1개 이상 | 수집기가 error 줄을 남겼다. 5분 창이라 줄 하나나 한 번의 폭주가 발생 하나·해소 하나가 된다(30초마다 한 쌍이 아님) | VictoriaLogs에서 그 줄을 읽는다 |
+
+## 11. 규칙 확인과 주간 소음 검토
+
+규칙 파일을 고친 뒤, 바이너리가 있는 곳에서(CI에는 바이너리가 없다):
+
+```sh
+cd deploy/observability/vmalert
+for f in metrics/*.json; do vmalert-prod -dryRun -rule="$f"; done
+vmalert-prod -dryRun -rule.defaultRuleType=vlogs -rule=logs/market-data-logs.rules.json
+vmalert-tool-prod unittest --files tests/market-data.test.json --files tests/lake.test.json --files tests/system.test.json
+```
+
+- `-dryRun`은 MetricsQL·LogsQL 문법을 본다. 나쁜 식이면 `fatal` 줄이 나온다.
+- `vmalert-tool unittest`는 알림마다 울리는 경우와 울리지 않는 경우를 시계 없이 재생한다. 테스트 파일의 `exp_annotations`는 규칙의 `summary`와 글자까지 같아야 하므로 `summary`를 고치면 테스트 파일도 고친다. 로그 규칙에는 테스트가 없다(`-dryRun`만).
+- `cargo test --locked -p xtask --test deploy`(§7)는 CI에서도 돈다. 규칙이 없는 지표를 쓰거나 등급이 없거나 설계의 식이 바뀌면 실패한다.
+
+주간 소음 검토(설계 §8.3): 매주 알림마다 울린 횟수와 조치 여부를 보고, 조치가 없던 알림은 문턱값을 고치거나 지운다. 고친 문턱값은 규칙 파일과 이 표에 함께 적는다.

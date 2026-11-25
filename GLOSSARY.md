@@ -402,3 +402,23 @@ _Avoid_: manifest (that is the lake's), package
 **Verify stamp** (확인 도장):
 An empty file `/var/lib/qdp-crypto-audit/verify-<venue>-<date>.stamp` that the audit script touches (as `….stamp.new`) before it runs `md-lake verify` on a date, and moves over the old stamp only when verify succeeds. A sealed file of the date whose status changed (ctime) after the stamp makes the next run verify the date again, also a file sealed while verify ran (ADR-035). A stamp later than the run's start (the clock was set back) counts as missing.
 _Avoid_: verify result (that is `crypto/l0/_verify/venue=<v>/date=<d>.json`, written by verify), seal log
+
+**Metric catalogue** (지표 목록):
+The metric names a vmalert rule may use: the rows of `deploy/observability/metrics.toml` (a metric hl-oms pushes, each with the source file that has the name as a literal; or a metric of the stack itself), the metrics of the pinned qdp list `contracts/lake/xrepo/metrics.json`, and the `record` names of the rule files. One name has one writer. The deployment check fails on a rule name outside it (ADR-035).
+_Avoid_: registry (that is `registry/`), metric list (ambiguous with the qdp file)
+
+**Alert rule** (알림 규칙):
+A vmalert rule with `alert:` in `deploy/observability/vmalert/`, evaluated from the stored metrics or logs and sent through Alertmanager with a severity label `P1`, `P2` or `P3` (or `watchdog`).
+_Avoid_: direct alert (that is sent by the process itself, `[MD P1]`, `[OMS P1]`), alert condition (that is a row of C-ALERT)
+
+**Collector liveness rule** (수집기 생존 규칙):
+The P1 alert rule `MdCollectorDown`, one per venue of `deploy/observability/venues.toml`: the collector's heartbeat is more than 60 s old, or absent for 2 min. It exists because a dead collector cannot send its own `[MD P1]` while raw market data is being lost (ADR-035).
+_Avoid_: watchdog (the systemd `WatchdogSec` restarts a stuck collector; the Watchdog alert is the stack's own signal), heartbeat (that is the metric)
+
+**Days left** (남은 일수):
+The recording rule `lake_disk_days_left`: the lake disk's free bytes divided by the bytes lost per day over the last 24 h (at least 1 byte a day), computed by vmalert from the stored series, so a collector restart does not reset it. Below 7 is P2, below 2 is P1, after a 12 h warm-up (ADR-035).
+_Avoid_: disk floor (that is the collector's own `[MD P1]` threshold), disk usage percent
+
+**Watchdog alert** (Watchdog 알림):
+The alert rule `Watchdog` with expression `vector(1)` and severity `watchdog`: it fires all the time, so an outside dead-man service that stops receiving it knows the stack is dead. Exactly one exists. Until the outside service is chosen it goes to a receiver with no integration (ADR-035).
+_Avoid_: watchdog (systemd `WatchdogSec`), heartbeat, liveness rule
