@@ -857,6 +857,23 @@
    "interval": "10s",
    "input_series": [
     {
+     "series": "obs_push_dropped_total{service=\"oms-projector\",venue=\"bybit\",endpoint=\"vl\"}",
+     "values": "0 0 0 5 5 5"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "50s",
+     "groupname": "market-data",
+     "alertname": "MdObsPushDropping",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
      "series": "node_clock_offset_ms{host=\"h\"}",
      "values": "-7+0x60"
     }
