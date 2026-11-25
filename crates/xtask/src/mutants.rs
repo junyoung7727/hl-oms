@@ -3470,6 +3470,42 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "xtask", "--test", "deploy", "alertmanager::the_oms_inhibit_rules_hold_back_only_derived_alerts"],
         guards: "ADR-037",
     },
+    Mutant {
+        id: "M383-deploy-watcher-key-days-left-7",
+        what: "WatcherApiKeyExpiring fires under 7 days left instead of 14: a week less to replace the watcher's key before Bybit rejects it and reconciliation and cancel-all stop (ADR-038, spec mutant 14)",
+        file: "deploy/observability/vmalert/metrics/watcher.rules.json",
+        find: "\"expr\": \"min by (venue) (watcher_api_key_days_left) < 14\",",
+        replace: "\"expr\": \"min by (venue) (watcher_api_key_days_left) < 7\",",
+        test: &["-p", "xtask", "--test", "deploy", "the_deploy_tree_passes"],
+        guards: "ADR-038",
+    },
+    Mutant {
+        id: "M384-deploy-check-oms-down-inhibit-target-free",
+        what: "rule R10 accepts any target on the OmsDown inhibit rule: alertname=~\".*\" hides every P2 and P3 alert of the venue (a key about to expire, a failing Telegram path) while the OMS is down (ADR-038, spec mutant 15)",
+        file: "crates/xtask/tests/deploy/alertmanager.rs",
+        find: "            && sorted(matchers(r.get(\"target_matchers\"))) == want(target)\n",
+        replace: "            && (sorted(matchers(r.get(\"target_matchers\"))) == want(target)\n                || source[0].contains(\"OmsDown\"))\n",
+        test: &["-p", "xtask", "--test", "deploy", "alertmanager::the_oms_inhibit_rules_hold_back_only_derived_alerts"],
+        guards: "ADR-038",
+    },
+    Mutant {
+        id: "M385-deploy-check-trading-limit-panel-unread",
+        what: "rule G8 does not read D1's limit table: a D1 without the distance to each limit, the one question the trading screen answers, passes (ADR-038, spec mutant 16)",
+        file: "crates/xtask/tests/deploy/grafana.rs",
+        find: "    if let Some((path, d)) = board(TRADING_UID) {\n",
+        replace: "    if let Some((path, d)) = board(TRADING_UID).filter(|_| false) {\n",
+        test: &["-p", "xtask", "--test", "deploy", "grafana::the_trading_dashboard_shows_limits_and_distances"],
+        guards: "ADR-038",
+    },
+    Mutant {
+        id: "M386-deploy-check-event-kinds-no-partition",
+        what: "rule G10 checks only that each listed kind is an event kind: a new journal event in no list, or one kind in both panels, passes, and the event timeline silently misses or repeats it (ADR-038, spec mutant 17)",
+        file: "crates/xtask/tests/deploy/grafana.rs",
+        find: "        if n != 1 {\n            out.push(format!(\n                \"{e} is in {n} of D4",
+        replace: "        if false {\n            out.push(format!(\n                \"{e} is in {n} of D4",
+        test: &["-p", "xtask", "--test", "deploy", "grafana::the_event_dashboard_names_only_journal_event_kinds"],
+        guards: "ADR-038",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
