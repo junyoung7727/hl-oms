@@ -1,0 +1,61 @@
+name: bybit-testnet
+
+# The contract tests of the Bybit gateway against the real Bybit testnet
+# (crates/oms-node/tests/bybit_testnet.rs, U-01). They place minimum-size
+# post-only orders far from the market on the testnet sub-account.
+#
+# Why not on a GitHub-hosted runner: Bybit answers 403 to US cloud addresses
+# (checked 2026-11-25 from ubuntu-24.04, AWS us-west-2, testnet and mainnet).
+# The job runs on the owner's Linux PC (label bybit-testnet), inside a bwrap
+# sandbox that sees the repository checkout, the Rust toolchain and the
+# testnet key file only. The key is never a GitHub secret.
+#
+# Why not on pull requests: this repository is public, and a pull request's
+# workflow file decides what runs. This file runs only code already on main.
+# A failure does not block a merge: it means the gateway or the recorded
+# answers (crates/http-fake/recorded/bybit-testnet/) no longer match Bybit.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 0 * * 1" # Monday 09:17 KST
+  push:
+    branches: [main]
+    paths:
+      - crates/oms-node/src/venue/bybit/**
+      - crates/oms-node/tests/bybit_testnet.rs
+      - crates/oms-node/tests/bybit_recorded.rs
+      - crates/http-fake/recorded/bybit-testnet/**
+      - .github/workflows/bybit-testnet.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bybit-testnet
+  cancel-in-progress: false
+
+jobs:
+  testnet:
+    if: github.repository == 'junyoung7727/hl-oms' && github.ref == 'refs/heads/main'
+    runs-on: [bybit-testnet]
+    timeout-minutes: 40
+    env:
+      CARGO_TARGET_DIR: /mnt/nvme/gitproject/.gh-runner/hl-oms/target
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: The key file is there (its content is never printed)
+        run: test -r "$OMS_BYBIT_TESTNET_CREDS"
+
+      # /locks/bybit-testnet.lock is shared with local runs of the suite:
+      # the tests cancel every order of the account, so two runs must not
+      # overlap.
+      - name: Contract tests against the Bybit testnet
+        run: |
+          flock -w 1800 /locks/bybit-testnet.lock \
+            cargo test -p oms-node --test bybit_testnet -- --ignored --test-threads=1
+

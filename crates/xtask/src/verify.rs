@@ -25,7 +25,7 @@ fn env(pairs: &[(&'static str, &str)]) -> Vec<(&'static str, String)> {
 }
 
 /// The suites, in the order they run. `quick` leaves out the long ones.
-pub fn suites(quick: bool, live: bool, extended: Option<&str>) -> Vec<Suite> {
+pub fn suites(quick: bool, live: bool, bybit: bool, extended: Option<&str>) -> Vec<Suite> {
     let mut v = vec![
         Suite {
             name: "core",
@@ -53,10 +53,10 @@ pub fn suites(quick: bool, live: bool, extended: Option<&str>) -> Vec<Suite> {
         },
         Suite {
             name: "node-unit",
-            what: "queues, histogram, Hyperliquid signing vectors and message translation; the reconciler task at its ports (pace of the margin, venue-setting and account-mode queries); the record schema (old journals replay, recovery from disk); the direct alerts in-process (conditions, grace, repeat, fatal, durable only; loopback fake Telegram); the holds of C-HOLD through oms-node and simvenue processes (kill marker, clear-hold, the watcher's inputs); strategy liveness through oms-node and simvenue processes (C-LIVE: the last close, silence, a second connection, hello after a loss); the monitoring gate through oms-node and simvenue processes (C-LIVE part 2: monitor.sock, heartbeats, stage 2 at the venue, a restart)",
+            what: "queues, histogram, Hyperliquid signing vectors and message translation; the reconciler task at its ports (pace of the margin, venue-setting and account-mode queries); the record schema (old journals replay, recovery from disk); the direct alerts in-process (conditions, grace, repeat, fatal, durable only; loopback fake Telegram); the holds of C-HOLD through oms-node and simvenue processes (kill marker, clear-hold, the watcher's inputs); strategy liveness through oms-node and simvenue processes (C-LIVE: the last close, silence, a second connection, hello after a loss); the monitoring gate through oms-node and simvenue processes (C-LIVE part 2: monitor.sock, heartbeats, stage 2 at the venue, a restart); the Bybit gateway on answers recorded from the real testnet (loopback fake serving the recorded bodies)",
             args: &[
                 "test", "-p", "oms-node", "--lib", "--test", "reconciler", "--test", "record_schema", "--test", "alerts", "--test", "holds_node", "--test", "liveness", "--test",
-                "monitor_node",
+                "monitor_node", "--test", "bybit_recorded",
             ],
             env: env(&[]),
         },
@@ -94,6 +94,19 @@ pub fn suites(quick: bool, live: bool, extended: Option<&str>) -> Vec<Suite> {
             what: "read-only queries and streams against the real Hyperliquid testnet",
             args: &["test", "-p", "oms-node", "--test", "hl_live", "--", "--nocapture"],
             env: env(&[("OMS_LIVE_TESTNET", "1")]),
+        });
+    }
+    if bybit {
+        // The contract tests against the real Bybit testnet (U-01). They
+        // need OMS_BYBIT_TESTNET_CREDS; without it they fail, never pass.
+        // Not part of the CI of a pull request: it runs on demand and on a
+        // schedule, and a failure means the gateway or the recorded answers
+        // of the fake Bybit are wrong.
+        v.push(Suite {
+            name: "bybit-testnet",
+            what: "the Bybit gateway against the real Bybit testnet: the receive-window rule, refusals that place nothing, cancel-all and the open count, the clock check, the account and margin queries",
+            args: &["test", "-p", "oms-node", "--test", "bybit_testnet", "--", "--ignored", "--test-threads=1"],
+            env: env(&[]),
         });
     }
     if let Some(dir) = extended {
@@ -149,7 +162,7 @@ fn notes(output: &str) -> Vec<String> {
         .collect()
 }
 
-pub fn run(root: &Path, quick: bool, live: bool, extended: Option<String>) -> i32 {
+pub fn run(root: &Path, quick: bool, live: bool, bybit: bool, extended: Option<String>) -> i32 {
     let out_dir = root.join("evidence/latest");
     let _ = std::fs::create_dir_all(&out_dir);
     let digest = crate::digest::source_digest(root);
@@ -185,7 +198,7 @@ pub fn run(root: &Path, quick: bool, live: bool, extended: Option<String>) -> i3
         let _ = std::fs::create_dir_all(&dir);
         std::fs::canonicalize(&dir).map(|p| p.display().to_string()).unwrap_or(dir)
     });
-    for s in suites(quick, live, extended.as_deref()) {
+    for s in suites(quick, live, bybit, extended.as_deref()) {
         eprintln!("== {} : {}", s.name, s.what);
         let t = Instant::now();
         let mut cmd = Command::new("cargo");

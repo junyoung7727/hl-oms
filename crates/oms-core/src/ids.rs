@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn base32_pair_gives_a_million_distinct_ids() {
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = std::collections::BTreeSet::new();
         for instance_id in [7, 8] {
             for order in 1..=500_000u64 {
                 let id = VenueClientId { instance_id, order_id: OrderId(order) };

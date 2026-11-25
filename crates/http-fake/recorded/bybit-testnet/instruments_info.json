@@ -1,0 +1,68 @@
+{
+  "body": null,
+  "http_status": 200,
+  "method": "GET",
+  "path": "/v5/market/instruments-info",
+  "query": "category=linear&symbol=BTCUSDT",
+  "response": {
+    "result": {
+      "category": "linear",
+      "list": [
+        {
+          "baseCoin": "BTC",
+          "contractType": "LinearPerpetual",
+          "copyTrading": "both",
+          "deliveryFeeRate": "",
+          "deliveryTime": "0",
+          "displayName": "BTCUSDT",
+          "forbidUplWithdrawal": false,
+          "fullName": "Bitcoin",
+          "fundingInterval": 480,
+          "isPreListing": false,
+          "launchTime": "1585526400000",
+          "leverageFilter": {
+            "leverageStep": "0.01",
+            "maxLeverage": "150.00",
+            "minLeverage": "1"
+          },
+          "lotSizeFilter": {
+            "maxMktOrderQty": "500.000",
+            "maxOrderQty": "1190.000",
+            "minNotionalValue": "5",
+            "minOrderQty": "0.001",
+            "postOnlyMaxOrderQty": "1190.000",
+            "qtyStep": "0.001"
+          },
+          "lowerFundingRate": "-0.00333",
+          "marketRegion": "",
+          "preListingInfo": null,
+          "priceFilter": {
+            "maxPrice": "1999999.80",
+            "minPrice": "0.10",
+            "tickSize": "0.10"
+          },
+          "priceScale": "2",
+          "quoteCoin": "USDT",
+          "riskParameters": {
+            "priceLimitRatioX": "0.01",
+            "priceLimitRatioY": "0.02"
+          },
+          "settleCoin": "USDT",
+          "status": "Trading",
+          "symbol": "BTCUSDT",
+          "symbolId": 5,
+          "symbolType": "",
+          "tags": [],
+          "underlyingTicker": "",
+          "unifiedMarginTrade": true,
+          "upperFundingRate": "0.00333"
+        }
+      ],
+      "nextPageCursor": ""
+    },
+    "retCode": 0,
+    "retExtInfo": {},
+    "retMsg": "OK",
+    "time": 1795535958277
+  }
+}

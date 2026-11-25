@@ -1,0 +1,25 @@
+{
+  "body": {
+    "category": "linear",
+    "orderLinkId": "00001k874grl8-000000000000b",
+    "orderType": "Limit",
+    "positionIdx": 0,
+    "price": "30146",
+    "qty": "0.0001",
+    "reduceOnly": false,
+    "side": "Buy",
+    "symbol": "BTCUSDT",
+    "timeInForce": "PostOnly"
+  },
+  "http_status": 200,
+  "method": "POST",
+  "path": "/v5/order/create",
+  "query": "",
+  "response": {
+    "result": {},
+    "retCode": 10001,
+    "retExtInfo": {},
+    "retMsg": "The number of contracts exceeds minimum limit allowed",
+    "time": 1795535963282
+  }
+}

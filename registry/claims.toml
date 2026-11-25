@@ -1823,6 +1823,111 @@ supports = "C-WATCH 12부, ADR-032"
 not_covered = "멈춤은 셸 스크립트로만, 마커 쓰기는 시험 디렉터리에서만 돌았다. 16개를 넘게 기다리는 알림의 버리기는 단위 시험(runtime::tests)만 보고 실행 시험은 보지 못한다(설정 범위에서 큐가 16에 닿지 않음). 기다리던 메시지를 틱 전에 다루기는 실행 시험이 보지 못한다(경쟁의 창을 좁힐 뿐). 킬 중 엔진 멈춤 때문에 래치된 OMS가 30초 뒤 hold:unmonitored를 내는 것은 진짜 OMS로 보지 않았다. 마커 쓰기를 거는 진짜 디스크와 정전 뒤 마커가 남는지(sync_all)는 시험하지 않았다(정전을 흉내 내지 않음). 코어가 걸리고 HTTP 태스크가 답하는 OMS는 W5가 보지 못한다(소유자 질문 11). 진짜 systemctl과 그 권한(U20b가 주는 그 단위 하나의 stop), systemd가 클라이언트를 죽인 뒤에도 멈춤 작업을 끝내는지, 워처가 진짜 OMS 프로세스를 멈춘 적은 없다(U20b와 testnet). 실제 OMS의 admin.sock에 watcher_kill을 보낸 적이 없다(시험의 UnixListener; OMS 쪽 규칙은 U18b1의 시험). 시계가 뒤로 간 걸음과 다음 읽기 사이의 진행은 Steady가 걸음에 묻는다(최대 한 틱). 틈 규칙의 한계 4,000 ms는 판단이고 실제 부하에서 재지 않았다. 종료 때 K1의 결과를 기다리는 것과 main.rs의 shutdown_timeout(1,000 ms)은 시험하지 않았다(K1은 시험 디렉터리에서 곧 끝나고, 걸린 디스크를 흉내 내지 않음). 거부 전의 watcher_kill을 기다리는 동안 킬을 멈추는 것(그동안 킬의 재시도가 둘째 연결을 열지 않음)은 실행 시험이 보지 못한다(그 몇 초 안에 킬이 무언가를 내는 경우를 만들지 않음); 거부가 킬 자신의 K2를 기다리는 것(둘째 연결 없음)과 그 기한은 본다. W5의 빚진 정지의 답을 그 id로 가리는 것은 시험이 가리지 못한다(기한에 끊긴 빚진 정지의 답이 채널에 남은 채 다음 것이 시작될 때만 뜻이 있음). OMS를 기다리는 동안의 탐침 답을 마커 경로로 보지 않는 것은 실행 시험이 가리지 못한다(그 시험에서 킬 중 W5는 탐침을 보내지 않음). 600초 시험은 메시지 수만 보고 포지션 묶음의 문구는 보지 않는다(빠른 시계에서 읽기가 시간 초과일 수 있음)"
 
 [[claim]]
+id = "V-BYBIT-LIVE-1"
+statement = "실제 Bybit 테스트넷은 요청 시각이 recv_window(5초)보다 오래됐거나 거래소 시계보다 1초 넘게 앞선 주문 요청을 10002로 거절하고, 그 주문은 거래소에 없다. 4초 지났거나 0.5초 앞선 요청은 시각 검사를 통과한다. 게이트웨이는 거절을 Rejected로 읽고, 상태 조회(실시간, 이력 두 번)는 그 주문을 '없음'으로 답한다"
+why = "요구 R06과 가정 A-01. 게이트웨이의 전송 규칙(지금 + recv_window + 1초 ≤ 만료)은 이 거절에 기댄다. 거절되지 않으면 만료된 주문이 거래소에 놓일 수 있다"
+level = "실제 거래소(테스트넷)"
+scope = "BTCUSDT, 지정가 PostOnly 매수, 마크 가격의 절반(체결 불가), 0.001개. 요청 시각을 −6.5초, −4초, +0.5초, +1.5초로 바꿔 보낸다. 최소 수량 미만(0.0001개)의 주문 하나. 하위 계정 하나. 받아진 주문은 바로 취소한다"
+real = "Bybit 테스트넷 REST, 게이트웨이의 서명·요청 본문(orders::create_body)·응답 분류(answer::classify)·상태 조회(Queries)"
+simulated = "없음"
+faults = "오래된 요청 시각, 앞선 요청 시각, 최소 수량 미만의 주문(10001)"
+criterion = "거래소의 retCode와, 같은 orderLinkId의 조회 결과. 기대값은 Bybit 문서(F20)와 게이트웨이 규칙에서 왔다"
+tests = ["bybit-testnet/a_request_older_than_the_receive_window_is_refused_and_places_nothing", "bybit-testnet/a_request_more_than_one_second_ahead_is_refused_and_places_nothing", "bybit-testnet/a_request_inside_the_receive_window_passes_the_time_check", "bybit-testnet/every_refused_create_leaves_no_order_at_the_venue"]
+repro = "OMS_BYBIT_TESTNET_CREDS=<파일> cargo run --release -p xtask -- verify --bybit-testnet"
+supports = "A-01(Bybit), ADR-028 R4, ADR-005"
+not_covered = "mainnet. 경계(정확히 5초, 정확히 1초)는 재지 않았다: 왕복 시간 때문에 경계 근처는 판정이 흔들린다. WS Trade 경로의 같은 규칙. 거래소가 부하 중일 때의 동작"
+
+[[claim]]
+id = "V-BYBIT-LIVE-2"
+statement = "실제 Bybit 테스트넷은 같은 orderLinkId의 두 번째 주문 요청을 110072로 답하고 주문을 하나 더 만들지 않는다. 첫 주문이 취소된 뒤에도 같은 orderLinkId는 다시 받지 않는다(110072). 게이트웨이는 110072를 Unknown으로 읽는다(주문이 이미 있을 수 있으므로)"
+why = "요구 R06. 결과 불명 주문을 다시 보내지 않는 규칙과 orderLinkId 상태 조회는 '한 orderLinkId에 주문은 많아야 하나'에 기댄다"
+level = "실제 거래소(테스트넷)"
+scope = "BTCUSDT, PostOnly 매수 하나(체결 불가), 걸려 있는 동안 한 번, 취소 뒤 한 번 다시 보냄"
+real = "Bybit 테스트넷 REST, 게이트웨이의 요청 본문과 응답 분류"
+simulated = "없음"
+faults = "같은 orderLinkId의 중복 요청(걸려 있을 때, 끝난 뒤)"
+criterion = "retCode, 그리고 그 orderLinkId의 New 상태 주문이 하나뿐인지(실시간·이력 조회)"
+tests = ["bybit-testnet/a_second_create_with_the_same_link_id_never_makes_a_second_order"]
+repro = "OMS_BYBIT_TESTNET_CREDS=<파일> cargo run --release -p xtask -- verify --bybit-testnet"
+supports = "ADR-005, ADR-006, ADR-022"
+not_covered = "취소 뒤 몇 초까지만 봤다. orderLinkId가 며칠 뒤에도 묶여 있는지는 모른다. 체결로 끝난 주문의 orderLinkId. 두 요청이 거의 동시에 닿는 경우"
+
+[[claim]]
+id = "V-BYBIT-LIVE-3"
+statement = "실제 Bybit 테스트넷에서 킬 루프의 두 요청이 읽힌다: 일괄 취소(linear, USDT)는 걸린 주문 셋을 모두 취소했다고 답하고(빈 계좌에서는 빈 목록과 success 1), 그 뒤 열린 주문 수가 10초 안에 0이 된다. 시계 검사(/v5/market/time)가 앞섬 한도 안으로 판정한다"
+why = "요구 R07. 킬은 일괄 취소 뒤 열린 주문이 0인지 세어야 끝난다(C-KILL). 응답 모양이 다르면 킬이 끝나지 않거나 거짓으로 끝난다"
+level = "실제 거래소(테스트넷)"
+scope = "BTCUSDT PostOnly 매수 세 개(체결 불가)를 걸고 일괄 취소 하나. 빈 계좌의 일괄 취소 하나. 0.5초마다 세기"
+real = "Bybit 테스트넷 REST, 게이트웨이의 cancel_all과 checks::check_clock"
+simulated = "없음"
+faults = "없음(정상 경로)"
+criterion = "cancel_all의 cancelled 수와 maybe_more, /v5/order/realtime의 열린 주문 수"
+tests = ["bybit-testnet/cancel_all_answers_in_the_shape_the_kill_loop_reads", "bybit-testnet/cancel_all_then_the_open_count_reaches_zero", "bybit-testnet/the_clock_check_reads_the_venue_time"]
+repro = "OMS_BYBIT_TESTNET_CREDS=<파일> cargo run --release -p xtask -- verify --bybit-testnet"
+supports = "C-KILL, ADR-030, ADR-028 R0"
+not_covered = "킬 루프 전체(래치, 1초 회차, 30초 지켜보기, 알림)를 테스트넷에 붙여 돌리지 않았다: 노드는 IP에 묶이지 않은 키로 시작하지 않는다. 500개 넘는 주문(CANCEL_ALL_CAP). 스트림이 끊긴 동안의 일괄 취소. 일괄 취소의 초당 한도"
+
+[[claim]]
+id = "V-BYBIT-LIVE-4"
+statement = "실제 Bybit 테스트넷의 실행 행(/v5/execution/list)이 게이트웨이의 분류(exec::classify)에서 우리 주문의 체결로 읽힌다: orderLinkId가 우리 인스턴스와 주문 번호로 풀리고, 방향과 수량의 합이 주문과 같고, 테이커 수수료는 비용(양수)이다. 감소 전용 IOC가 포지션을 0으로 닫는다"
+why = "요구 R05. Bybit 체결 행에서 코어 입력까지의 번역이 틀리면 장부가 거래소와 갈라진다. 지금까지는 손으로 쓴 행으로만 시험했다"
+level = "실제 거래소(테스트넷)"
+scope = "BTCUSDT 0.001개 IOC 매수(매도 호가 + 1 %), 감소 전용 IOC 매도(매수 호가 − 1 %). 실행 행은 조회로 읽는다(스트림 아님)"
+real = "Bybit 테스트넷 REST, 게이트웨이의 요청 본문과 실행 행 분류"
+simulated = "없음"
+faults = "없음(정상 체결)"
+criterion = "FillIn의 order_id, side, qty 합, fee 부호. 포지션 크기 0"
+tests = ["bybit-testnet/a_real_execution_row_becomes_our_fill_and_the_position_closes"]
+repro = "OMS_BYBIT_TESTNET_CREDS=<파일> cargo run --release -p xtask -- verify --bybit-testnet"
+supports = "V-VENUE-EXEC-1, ADR-023"
+not_covered = "코어와 노드 프로세스를 거친 끝에서 끝까지(노드를 테스트넷에 붙여 돌리지 않았다). 비공개 스트림의 실행 통보. 메이커 체결(리베이트 부호). 펀딩, ADL, 청산 인수 행"
+
+[[claim]]
+id = "V-BYBIT-LIVE-5"
+statement = "같은 계좌의 두 주문이 서로 반대로 만나면, 이 계좌의 기본 설정에서 Bybit 테스트넷은 자기 체결 방지로 걸려 있던 주문(메이커)을 취소하고(cancelType CancelBySmp) 체결은 일어나지 않는다. 남는 포지션은 없다"
+why = "요구 R10. OMS에는 전략 사이의 자기 체결 검사가 없다. 거래소가 무엇을 하는지 알아야 전략에 알릴 수 있다: 한 전략의 걸린 주문이 다른 전략의 주문 때문에 취소될 수 있다"
+level = "실제 거래소(테스트넷)"
+scope = "ARCUSDT(스프레드가 여러 틱으로 넓은 종목), 중간 가격에 PostOnly 매수 250개, 같은 가격에 IOC 매도 250개. 두 주문은 서로 다른 orderLinkId다"
+real = "Bybit 테스트넷 REST"
+simulated = "없음"
+faults = "같은 계좌의 반대 주문"
+criterion = "두 주문의 orderStatus와 cancelType, 매수 주문의 실행 행 수, 포지션 크기"
+tests = ["bybit-testnet/two_of_our_crossing_orders_do_not_trade_with_each_other"]
+repro = "OMS_BYBIT_TESTNET_CREDS=<파일> cargo run --release -p xtask -- verify --bybit-testnet"
+supports = "R10의 정책 결정(아직 없음), D-RISK-06"
+not_covered = "mainnet의 기본 설정과 계좌의 SMP 그룹. 메이커가 아니라 테이커를 취소하는 설정. 게이트웨이가 CancelBySmp 취소를 전략에 어떻게 알리는지(일반 취소와 같은 길로 간다고 추론, 시험 안 함)"
+
+[[claim]]
+id = "V-BYBIT-LIVE-6"
+statement = "실제 Bybit 테스트넷의 조회 응답(열린 주문, 포지션, 체결, 증거금 보고, 계좌 모드, 종목 설정)을 게이트웨이의 조회(Queries)가 실패 없이 코어 입력으로 바꾼다. 거래소의 응답 모양(키와 값의 종류)이 crates/http-fake/recorded/bybit-testnet/에 녹화한 모양과 같다"
+why = "요구 R11. 가짜 Bybit는 녹화한 응답으로 답한다. 거래소가 모양을 바꾸면 이 시험이 실패하고, 녹화본과 게이트웨이를 고친다(Fowler, ContractTest)"
+level = "실제 거래소(테스트넷)"
+scope = "녹화 17가지: 시각, 종목 정보, 시세, 키 정보, 계좌 정보, 지갑, 빈 포지션 목록, 빈 열린 주문 목록, 모르는 orderLinkId의 이력, 빈 실행 목록, 빈 일괄 취소, 모르는 주문의 취소(110001), 오래된 요청(10002), 최소 수량 미만(10001), 행이 하나인 열린 주문·실행·포지션 목록. 계좌·키를 가리키는 필드(사용자 번호, SMP 그룹, 키, IP 목록, 키 날짜)는 지운다"
+real = "Bybit 테스트넷 REST, 게이트웨이의 서명과 조회"
+simulated = "없음"
+faults = "없음"
+criterion = "조회의 failed가 없고 입력이 하나 이상. 응답의 모양이 녹화와 같다"
+tests = ["bybit-testnet/the_account_and_margin_queries_read_the_real_answers", "bybit-testnet/the_venue_answers_in_the_recorded_shapes"]
+repro = "OMS_BYBIT_TESTNET_CREDS=<파일> cargo run --release -p xtask -- verify --bybit-testnet. 다시 녹화: OMS_BYBIT_TESTNET_RECORD=1 cargo test -p oms-node --test bybit_testnet -- --ignored the_venue_answers"
+supports = "V-BYBIT-READ-1, V-BYBIT-RECORDED-1"
+not_covered = "여러 쪽짜리 목록과 행이 많은 목록. 비공개 스트림과 WS Trade의 응답. 펀딩·ADL·청산 인수 행. mainnet"
+
+[[claim]]
+id = "V-BYBIT-RECORDED-1"
+statement = "가짜 Bybit가 테스트넷에서 녹화한 실제 응답을 그대로 보낼 때, 게이트웨이가 그것을 읽는다: 오래된 요청(10002)·최소 수량 미만(10001)·모르는 주문의 취소(110001)는 Rejected, 빈 일괄 취소는 취소 0건, 열린 주문·포지션·실행 행은 코어 입력(우리 주문의 체결, 비용인 수수료), 증거금 보고·계좌 모드·종목 설정은 실패 없이 읽힌다"
+why = "가짜 Bybit의 손으로 쓴 응답은 문서 모양을 본떴을 뿐이다. 녹화한 응답으로 시험해야 게이트웨이가 거래소가 실제로 보내는 것을 읽는다는 것을 PR마다 확인할 수 있다(Fowler, ContractTest)"
+level = "통합"
+scope = "crates/http-fake/recorded/bybit-testnet/의 녹화 17개 가운데 13개. 한 쪽짜리 결과와 그 다음의 빈 쪽(A-21)"
+real = "게이트웨이의 REST 클라이언트, 응답 분류, 조회(Queries), 실행 행 분류, cancel_all"
+simulated = "거래소는 녹화한 본문을 보내는 loopback 가짜다"
+faults = "거래소의 거절 세 가지"
+criterion = "녹화는 bybit-testnet 묶음이 만든다(V-BYBIT-LIVE-6). 기대값은 녹화한 그때의 거래소 답이다"
+tests = ["node-unit/recorded_refusals_read_as_rejected", "node-unit/a_recorded_empty_cancel_all_reads_as_nothing_cancelled", "node-unit/recorded_open_orders_positions_and_fills_become_core_inputs", "node-unit/recorded_execution_rows_classify_as_our_fills", "node-unit/the_recorded_margin_report_and_account_mode_are_read"]
+repro = "cargo test -p oms-node --test bybit_recorded"
+supports = "V-BYBIT-READ-1, V-BYBIT-ORDERS-1, V-KILL-2"
+not_covered = "다른 시험들(crates 아래 34개 파일)의 손으로 쓴 응답은 그대로다: 그 시험들은 고장 난 응답(잘린 본문, 모르는 값, 오류)을 일부러 만든다. 녹화가 없는 모양: 비공개 스트림과 WS Trade의 프레임, 펀딩·ADL·청산 인수 행, 주문 접수 응답 외의 주문 상태 변화"
+
+[[claim]]
 id = "V-WATCH-14"
 statement = "워처는 자격 파일의 RSA 키(rsa_private_key, PKCS#8 PEM 글)로도 서명한다: 같은 문자열(timestamp + api_key + recv_window + 질의 또는 본문)의 RSA-SHA256 PKCS#1 v1.5 서명을 표준 base64(패딩 있음)로 X-BAPI-SIGN에 싣고 X-BAPI-SIGN-TYPE은 보내지 않는다. GET과 일괄 취소 POST가 모두 Credentials::sign을 지난다. 자격 파일은 api_key와 api_secret 또는 rsa_private_key 중 정확히 하나만 받고, 둘 다·둘 다 없음·PKCS#1·암호화된 PEM·PEM이 아닌 글·키가 아닌 본문·잘린 본문·빈 키·1024비트 키는 키의 바이트를 담지 않는 한 줄로 시작을 거부하며(PKCS#1과 암호화된 PEM은 openssl 변환 명령을 적는다), Debug는 키를 찍지 않는다. HMAC 키의 서명은 전과 바이트까지 같다"
 why = "Bybit testnet의 AI 하위 계정은 RSA 키만 준다(소유자 결정 2026-11-25). 잘못된 모양(hex)의 RSA 서명은 키 거절로 재시작까지 래치되고, 오류 줄이나 Debug의 키 조각은 로그와 메시지로 샌다"

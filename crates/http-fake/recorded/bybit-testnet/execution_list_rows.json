@@ -1,0 +1,52 @@
+{
+  "body": null,
+  "http_status": 200,
+  "method": "GET",
+  "path": "/v5/execution/list",
+  "query": "category=linear&orderLinkId=00001k874h15j-000000000000d&symbol=BTCUSDT",
+  "response": {
+    "result": {
+      "category": "linear",
+      "list": [
+        {
+          "blockTradeId": "",
+          "closedSize": "0",
+          "createType": "CreateByUser",
+          "execFee": "0.03320741",
+          "execFeeV2": "0.03320741",
+          "execId": "d5e3aaf7-3075-54fd-9cd0-c32bf4d014ef",
+          "execPrice": "60377.1",
+          "execQty": "0.001",
+          "execTime": "1795535963863",
+          "execType": "Trade",
+          "execValue": "60.3771",
+          "extraFees": "",
+          "feeCurrency": "USDT",
+          "feeRate": "0.00055",
+          "indexPrice": "",
+          "isMaker": false,
+          "leavesQty": "0",
+          "markIv": "",
+          "markPrice": "60289.54",
+          "marketUnit": "",
+          "orderId": "23e810b0-cc09-4f93-ba35-9153147664d0",
+          "orderLinkId": "00001k874h15j-000000000000d",
+          "orderPrice": "60892.4",
+          "orderQty": "0.001",
+          "orderType": "Limit",
+          "seq": 9697202994,
+          "side": "Buy",
+          "stopOrderType": "UNKNOWN",
+          "symbol": "BTCUSDT",
+          "tradeIv": "",
+          "underlyingPrice": ""
+        }
+      ],
+      "nextPageCursor": "1795535963863%3A590911%2C1795535963863%3A590911"
+    },
+    "retCode": 0,
+    "retExtInfo": {},
+    "retMsg": "OK",
+    "time": 1795535964659
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "body": null,
+  "http_status": 200,
+  "method": "GET",
+  "path": "/v5/user/query-api",
+  "query": "",
+  "response": {
+    "result": {
+      "affiliateID": 0,
+      "affiliateIDInt64": "0",
+      "apiKey": "scrubbed",
+      "createdAt": "scrubbed",
+      "deadlineDay": "scrubbed",
+      "expiredAt": "scrubbed",
+      "id": "scrubbed",
+      "inviterID": 0,
+      "inviterIDInt64": "0",
+      "ips": "scrubbed",
+      "isFixApi": false,
+      "isMaster": false,
+      "kycLevel": "LEVEL_DEFAULT",
+      "kycRegion": "",
+      "mktMakerLevel": "0",
+      "note": "scrubbed",
+      "parentUid": "scrubbed",
+      "permissions": {
+        "Affiliate": [],
+        "BitCard": [],
+        "BlockTrade": [],
+        "ByXPost": [],
+        "Compliance": [],
+        "ContractTrade": [
+          "Order",
+          "Position"
+        ],
+        "CopyTrading": [],
+        "Derivatives": [
+          "DerivativesTrade"
+        ],
+        "Earn": [
+          "Earn"
+        ],
+        "Exchange": [
+          "ExchangeHistory"
+        ],
+        "FiatBitPay": [],
+        "FiatConvertBroker": [],
+        "FiatP2P": [],
+        "NFT": [],
+        "Options": [
+          "OptionsTrade"
+        ],
+        "Spot": [
+          "SpotTrade"
+        ],
+        "Stocks": [],
+        "Wallet": [
+          "AccountTransfer",
+          "SubMemberTransferList"
+        ]
+      },
+      "readOnly": 0,
+      "rsaPublicKey": "scrubbed",
+      "secret": "",
+      "type": 1,
+      "unified": 0,
+      "userID": "scrubbed",
+      "userIDInt64": "scrubbed",
+      "uta": 1,
+      "vipLevel": "No VIP"
+    },
+    "retCode": 0,
+    "retExtInfo": {},
+    "retMsg": "",
+    "time": 1795535958542
+  }
+}

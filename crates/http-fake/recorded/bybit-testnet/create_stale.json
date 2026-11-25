@@ -1,0 +1,25 @@
+{
+  "body": {
+    "category": "linear",
+    "orderLinkId": "00001k874grl8-000000000000a",
+    "orderType": "Limit",
+    "positionIdx": 0,
+    "price": "30146",
+    "qty": "0.001",
+    "reduceOnly": false,
+    "side": "Buy",
+    "symbol": "BTCUSDT",
+    "timeInForce": "PostOnly"
+  },
+  "http_status": 200,
+  "method": "POST",
+  "path": "/v5/order/create",
+  "query": "",
+  "response": {
+    "result": {},
+    "retCode": 10002,
+    "retExtInfo": {},
+    "retMsg": "invalid request, please check your server timestamp or recv_window param: req_timestamp[1795535956631],server_timestamp[1795535963188],recv_window[5000]",
+    "time": 1795535963188
+  }
+}
