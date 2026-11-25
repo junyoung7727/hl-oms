@@ -485,7 +485,9 @@ fn r7_design(p: &Parsed, rules: &[Rule], out: &mut Vec<Finding>) {
     }
     for &(file, group, interval) in GROUP_INTERVALS {
         let path = format!("{METRICS_DIR}{file}");
-        let Some(g) = p
+        // A missing group leaves its pinned rules in another group: their
+        // R5, R6 or R7 finding.
+        let got = p
             .json
             .get(&path)
             .and_then(|d| d.get("groups"))
@@ -493,11 +495,7 @@ fn r7_design(p: &Parsed, rules: &[Rule], out: &mut Vec<Finding>) {
             .into_iter()
             .flatten()
             .find(|g| g.get("name").and_then(Value::as_str) == Some(group))
-        else {
-            finding(out, &path, "R7", format!("group {group} must exist"));
-            continue;
-        };
-        let got = g.get("interval");
+            .and_then(|g| g.get("interval"));
         let ok = match interval {
             Some(i) => got.and_then(Value::as_str) == Some(i),
             None => got.is_none_or(|x| x.as_str() == Some(DEFAULT_INTERVAL)),
