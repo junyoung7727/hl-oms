@@ -1,0 +1,107 @@
+{
+  "route": {
+    "receiver": "null",
+    "group_by": [
+      "alertname",
+      "venue"
+    ],
+    "routes": [
+      {
+        "matchers": [
+          "alertname=\"Watchdog\""
+        ],
+        "receiver": "deadman",
+        "group_wait": "0s",
+        "group_interval": "1m",
+        "repeat_interval": "1m"
+      },
+      {
+        "matchers": [
+          "severity=\"P1\""
+        ],
+        "receiver": "telegram-p1",
+        "group_wait": "10s",
+        "group_interval": "1m",
+        "repeat_interval": "30m"
+      },
+      {
+        "matchers": [
+          "alertname=\"LakeAuditFailed\""
+        ],
+        "receiver": "telegram-p2-noresolve",
+        "group_wait": "30s",
+        "group_interval": "5m",
+        "repeat_interval": "4h"
+      },
+      {
+        "matchers": [
+          "severity=\"P2\""
+        ],
+        "receiver": "telegram-p2",
+        "group_wait": "30s",
+        "group_interval": "5m",
+        "repeat_interval": "4h"
+      }
+    ]
+  },
+  "inhibit_rules": [
+    {
+      "source_matchers": [
+        "alertname=\"MdCollectorDown\""
+      ],
+      "target_matchers": [
+        "severity=~\"P2|P3\"",
+        "alertname=~\"Md.*|LakeSealLag|LakeDiskDaysLeft.*\""
+      ],
+      "equal": [
+        "venue"
+      ]
+    }
+  ],
+  "receivers": [
+    {
+      "name": "null"
+    },
+    {
+      "name": "deadman"
+    },
+    {
+      "name": "telegram-p1",
+      "telegram_configs": [
+        {
+          "bot_token_file": "/etc/hl-oms/alertmanager-telegram-token",
+          "chat_id_file": "/etc/hl-oms/alertmanager-telegram-chat-id",
+          "parse_mode": "",
+          "send_resolved": true,
+          "message": "[MON P1] {{ .GroupLabels.alertname }}{{ with .GroupLabels.venue }} {{ . }}{{ end }} {{ if eq .Status \"firing\" }}발생 {{ len .Alerts.Firing }}건{{ else }}해소{{ end }}\n{{ range .Alerts }}- {{ if eq .Status \"resolved\" }}(해소) {{ end }}{{ .Annotations.summary }} ({{ .StartsAt.UTC.Format \"01-02 15:04:05\" }} UTC)\n{{ end }}"
+        }
+      ]
+    },
+    {
+      "name": "telegram-p2",
+      "telegram_configs": [
+        {
+          "bot_token_file": "/etc/hl-oms/alertmanager-telegram-token",
+          "chat_id_file": "/etc/hl-oms/alertmanager-telegram-chat-id",
+          "parse_mode": "",
+          "send_resolved": true,
+          "disable_notifications": true,
+          "message": "[MON P2] {{ .GroupLabels.alertname }}{{ with .GroupLabels.venue }} {{ . }}{{ end }} {{ if eq .Status \"firing\" }}발생 {{ len .Alerts.Firing }}건{{ else }}해소{{ end }}\n{{ range .Alerts }}- {{ if eq .Status \"resolved\" }}(해소) {{ end }}{{ .Annotations.summary }} ({{ .StartsAt.UTC.Format \"01-02 15:04:05\" }} UTC)\n{{ end }}"
+        }
+      ]
+    },
+    {
+      "name": "telegram-p2-noresolve",
+      "telegram_configs": [
+        {
+          "bot_token_file": "/etc/hl-oms/alertmanager-telegram-token",
+          "chat_id_file": "/etc/hl-oms/alertmanager-telegram-chat-id",
+          "parse_mode": "",
+          "send_resolved": false,
+          "disable_notifications": true,
+          "message": "[MON P2] {{ .GroupLabels.alertname }}{{ with .GroupLabels.venue }} {{ . }}{{ end }} {{ if eq .Status \"firing\" }}발생 {{ len .Alerts.Firing }}건{{ else }}해소{{ end }}\n{{ range .Alerts }}- {{ if eq .Status \"resolved\" }}(해소) {{ end }}{{ .Annotations.summary }} ({{ .StartsAt.UTC.Format \"01-02 15:04:05\" }} UTC)\n{{ end }}"
+        }
+      ]
+    }
+  ]
+}

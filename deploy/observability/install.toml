@@ -3,6 +3,11 @@
 # (docs/operations/observability.md §8); this repository installs nothing.
 
 [[file]]
+src = "alertmanager/alertmanager.json"
+dst = "/etc/hl-oms-obs/alertmanager/alertmanager.json"
+mode = "0644"
+
+[[file]]
 src = "bin/crypto-lake-audit.sh"
 dst = "/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh"
 mode = "0755"
