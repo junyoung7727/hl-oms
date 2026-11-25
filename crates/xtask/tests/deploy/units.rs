@@ -194,6 +194,25 @@ const NO_FOLLOW: &[&str] = &[
     "JoinsNamespaceOf",
 ];
 
+/// U22: the OMS's user and group; the watcher must have the same ones.
+const OMS_USER: &str = "hloms";
+const PROJECTOR: &str = "oms-projector.service";
+const EXPORT: &str = "oms-export.service";
+/// U22: the one polkit rule and its text, compared without whitespace: the
+/// watcher's user may stop the OMS unit and nothing else (ADR-036).
+const POLKIT_DIR: &str = "deploy/observability/polkit/";
+const POLKIT_DST: &str = "/etc/polkit-1/rules.d/";
+const POLKIT_RULE: &str = r#"// The watcher (user hloms) may stop the OMS unit and nothing else (ADR-036).
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        subject.user == "hloms" &&
+        action.lookup("unit") == "oms-node.service" &&
+        action.lookup("verb") == "stop") {
+        return polkit.Result.YES;
+    }
+});
+"#;
+
 /// Files under `deploy/observability/` that are not installed (U14).
 const NOT_INSTALLED: &[&str] = &["README.md", "install.toml", "venues.toml", "metrics.toml"];
 const NOT_INSTALLED_DIRS: &[&str] = &["vmalert/tests/"];
@@ -256,6 +275,7 @@ pub fn check(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
     u19_bounded_runs(p, out);
     u20_oms_started_by_a_person(t, p, out);
     u21_watcher_restart(p, out);
+    u22_identities(t, p, out);
 }
 
 /// A systemd size: bytes, or a number with `K`, `M` or `G` (base 1024).
@@ -1278,6 +1298,83 @@ fn u21_watcher_restart(p: &Parsed, out: &mut Vec<Finding>) {
     }
 }
 
+fn normalised(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn u22_identities(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
+    let oms: Vec<&Unit> = required(p, OMS, "U22", out);
+    for u in &oms {
+        expect(u, "U22", ("Service", "User", Is(OMS_USER)), out);
+        expect(u, "U22", ("Service", "Group", Is(OMS_USER)), out);
+        expect(u, "U22", ("Service", "UMask", Is("0027")), out);
+    }
+    for u in required(p, WATCHER, "U22", out) {
+        for key in ["User", "Group"] {
+            let want = oms.first().map(|o| o.ini.values("Service", key));
+            if want.is_none_or(|w| u.ini.values("Service", key) != w) {
+                finding(
+                    out,
+                    &u.path,
+                    "U22",
+                    format!(
+                        "[Service] {key} must be the OMS's: admin.sock and monitor.sock accept its uid only"
+                    ),
+                );
+            }
+        }
+    }
+    for u in required(p, PROJECTOR, "U22", out) {
+        expect(u, "U22", ("Service", "User", Is("hlobs")), out);
+        expect(
+            u,
+            "U22",
+            ("Service", "SupplementaryGroups", Is(OMS_USER)),
+            out,
+        );
+    }
+    for u in required(p, EXPORT, "U22", out) {
+        expect(u, "U22", ("Service", "User", Absent), out);
+    }
+    let rules: Vec<(&String, &String)> = t
+        .files
+        .iter()
+        .filter(|(k, _)| k.starts_with(POLKIT_DIR))
+        .collect();
+    match rules.as_slice() {
+        [(path, text)] => {
+            if normalised(text) != normalised(POLKIT_RULE) {
+                finding(
+                    out,
+                    path,
+                    "U22",
+                    "the polkit rule must be the pinned one: StopUnit of oms-node.service by hloms only",
+                );
+            }
+        }
+        _ => finding(
+            out,
+            POLKIT_DIR,
+            "U22",
+            format!(
+                "exactly one polkit rule, the stop permission (found {})",
+                rules.len()
+            ),
+        ),
+    }
+    // The install map's own findings are U14's.
+    for (src, dst, _) in install_entries(p, &mut Vec::new()) {
+        if src.starts_with("polkit/") && !dst.starts_with(POLKIT_DST) {
+            finding(
+                out,
+                &format!("{OBS}install.toml"),
+                "U22",
+                format!("{src} must install under {POLKIT_DST}, where polkitd reads it"),
+            );
+        }
+    }
+}
+
 // Tests.
 
 use crate::assert_rules;
@@ -2226,7 +2323,7 @@ fn the_install_map_covers_every_file_and_path() {
     for (to, rules) in [
         (
             "dst = \"/etc/hl-oms-obs/polkit/50-hl-oms-watcher-stop.rules\"",
-            &["U14"][..],
+            &["U14", "U22"][..],
         ),
         (
             "dst = \"/etc/polkit-1/rules.d/90-other.rules\"",
@@ -2946,4 +3043,75 @@ fn the_watcher_restarts_but_never_follows_the_oms() {
     ] {
         plant(w, from, to, &["U21"]);
     }
+}
+
+#[test]
+fn the_oms_and_watcher_share_one_user() {
+    // admin.sock and monitor.sock accept the OMS's own uid only.
+    plant("watcher.service", "User=hloms\n", "User=hlwatch\n", &["U22"]);
+    plant("watcher.service", "Group=hloms\n", "Group=hlwatch\n", &["U22"]);
+    plant("watcher.service", "User=hloms\n", "", &["U22"]);
+    plant("oms-node.service", "User=hloms\n", "User=oms\n", &["U22"]);
+    // Both moved to another user together: the polkit rule names hloms.
+    let mut t = with("oms-node.service", "User=hloms\n", "User=oms\n");
+    t.replace(&unit("watcher.service"), "User=hloms\n", "User=oms\n");
+    assert_rules(&crate::check(&t), &["U22"]);
+    // New journal files must stay readable by the projector's group.
+    plant("oms-node.service", "UMask=0027\n", "UMask=0077\n", &["U22"]);
+    plant("oms-node.service", "UMask=0027\n", "", &["U22"]);
+    plant(
+        "oms-projector.service",
+        "User=hlobs\n",
+        "User=hloms\n",
+        &["U22"],
+    );
+    plant(
+        "oms-projector.service",
+        "SupplementaryGroups=hloms\n",
+        "",
+        &["U22"],
+    );
+    // The export runs as root, as every user of the daily-job lock.
+    plant(
+        "oms-export.service",
+        "Type=oneshot\n",
+        "Type=oneshot\nUser=hloms\n",
+        &["U22"],
+    );
+}
+
+#[test]
+fn the_stop_permission_names_only_the_oms_unit_and_stop() {
+    let rule = format!("{OBS}polkit/50-hl-oms-watcher-stop.rules");
+    for (from, to) in [
+        ("== \"stop\"", "== \"start\""),
+        ("== \"oms-node.service\"", "== \"grafana.service\""),
+        ("        subject.user == \"hloms\" &&\n", ""),
+        ("        action.lookup(\"verb\") == \"stop\") {", "        true) {"),
+        ("polkit.Result.YES", "polkit.Result.AUTH_ADMIN"),
+        ("== \"hloms\"", "!= \"root\""),
+    ] {
+        let mut t = Tree::real();
+        t.replace(&rule, from, to);
+        assert_rules(&crate::check(&t), &["U22"]);
+    }
+    // Only whitespace differs: the same rule.
+    let mut t = Tree::real();
+    t.replace(&rule, "    if (action.id", "\tif  (action.id");
+    assert_rules(&crate::check(&t), &[]);
+    // A second rule file, with its install entry.
+    let mut t = Tree::real();
+    let text = t.files[&rule].clone();
+    add_installed(
+        &mut t,
+        "polkit/60-other.rules",
+        &text,
+        "/etc/polkit-1/rules.d/60-other.rules",
+        "0644",
+    );
+    assert_rules(&crate::check(&t), &["U22"]);
+    // None at all: U14 misses its src, U22 the rule.
+    let mut t = Tree::real();
+    t.remove(&rule);
+    assert_rules(&crate::check(&t), &["U14", "U22"]);
 }
