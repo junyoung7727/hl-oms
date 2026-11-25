@@ -1070,8 +1070,35 @@ fn a_dashboard_panel_with_an_unknown_datasource_fails() {
         |v| panel_mut(v, TEXT_TITLE)["targets"] = json!([{"refId": "A", "expr": "up"}]),
         &["G6"],
     );
+    // A row holds no query either.
+    plant_json(
+        D2,
+        |v| {
+            v["panels"].as_array_mut().unwrap().push(json!({
+                "type": "row", "title": "행", "collapsed": false, "panels": [],
+                "targets": [{"refId": "A", "expr": "up"}]
+            }))
+        },
+        &["G6"],
+    );
     // Two dashboards with one uid: Grafana loads one of them.
     plant_json(D2, |v| v["uid"] = json!("d3-system"), &["G6", "G8"]);
+    // A third dashboard, installed, without a uid: Grafana would invent one.
+    let mut t = Tree::real();
+    let mut d4: Value = serde_json::from_str(&t.files[D2]).unwrap();
+    d4.as_object_mut().unwrap().remove("uid");
+    d4["title"] = json!("D4");
+    t.set(
+        "deploy/observability/grafana/dashboards/d4.json",
+        &serde_json::to_string_pretty(&d4).unwrap(),
+    );
+    let install = "deploy/observability/install.toml";
+    let entries = format!(
+        "{}\n[[file]]\nsrc = \"grafana/dashboards/d4.json\"\ndst = \"/etc/hl-oms-obs/grafana/dashboards/d4.json\"\nmode = \"0644\"\n",
+        t.files[install]
+    );
+    t.set(install, &entries);
+    assert_rules(&crate::check(&t), &["G6"]);
 }
 
 #[test]
