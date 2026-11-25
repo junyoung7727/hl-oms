@@ -71,7 +71,9 @@ pub const ENDING: &str = "워처 종료 중";
 /// Where the watcher sends: the binary takes them from the config (the
 /// REST base from `network` only), the two Telegram routes from
 /// [`Route::telegram`] and the stopper's program [`stop::SYSTEMCTL`], with
-/// no override; tests give loopback fakes and a script. The sender uses
+/// no override; tests give loopback fakes and a script. A test build (the
+/// feature `test-endpoints`) takes all four from [`TEST_ENDPOINTS`] only
+/// ([`Endpoints::for_test_build`]) and has no call of `of`. The sender uses
 /// `telegram` when the config has `[telegram]` (U19b1c); a kill runs
 /// `systemctl` (U19b3c).
 #[derive(Debug, Clone)]
@@ -91,6 +93,76 @@ impl Endpoints {
             systemctl: PathBuf::from(stop::SYSTEMCTL),
         }
     }
+
+    /// The endpoints of a test build (the feature `test-endpoints`; only
+    /// its `main.rs` calls this): every field from `wiring`, the value of
+    /// [`TEST_ENDPOINTS`], never from the config or [`Endpoints::of`].
+    /// Refused: mainnet, no wiring, unknown or missing fields, a `rest`,
+    /// `ip_echo_url` or `telegram` that is not `http://127.0.0.1:<port>`,
+    /// a `systemctl` that is not an absolute path without `..` to an
+    /// executable regular file. Each refusal is one line.
+    pub fn for_test_build(wiring: Option<&str>, cfg: &Config) -> Result<Endpoints, String> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct W {
+            rest: String,
+            ip_echo_url: String,
+            telegram: String,
+            systemctl: PathBuf,
+        }
+        if cfg.network == crate::config::Network::Mainnet {
+            return Err("a test build never runs on mainnet".into());
+        }
+        let Some(text) = wiring else {
+            return Err(format!("this build is for tests: {TEST_ENDPOINTS} is required"));
+        };
+        let w: W = serde_json::from_str(text)
+            .map_err(|e| one_line(&format!("{TEST_ENDPOINTS}: {e}")))?;
+        for (name, url) in [
+            ("rest", &w.rest),
+            ("ip_echo_url", &w.ip_echo_url),
+            ("telegram", &w.telegram),
+        ] {
+            let parsed = reqwest::Url::parse(url).ok();
+            let loopback = parsed.as_ref().is_some_and(|u| {
+                u.scheme() == "http" && u.host_str() == Some("127.0.0.1") && u.port().is_some()
+            });
+            if !loopback {
+                return Err(format!(
+                    "{TEST_ENDPOINTS}: {name} must be http://127.0.0.1:<port>, not {url:?}"
+                ));
+            }
+        }
+        let sc = &w.systemctl;
+        let plain = sc.is_absolute()
+            && !sc.components().any(|c| c == std::path::Component::ParentDir);
+        let executable = std::fs::metadata(sc).is_ok_and(|m| {
+            use std::os::unix::fs::PermissionsExt;
+            m.is_file() && m.permissions().mode() & 0o111 != 0
+        });
+        if !plain || !executable {
+            return Err(format!(
+                "{TEST_ENDPOINTS}: systemctl must be an absolute path without `..` to an executable file, not {:?}",
+                sc.display().to_string()
+            ));
+        }
+        Ok(Endpoints {
+            rest_base: w.rest,
+            ip_echo_url: w.ip_echo_url,
+            telegram: vec![Route::direct(&w.telegram)],
+            systemctl: w.systemctl,
+        })
+    }
+}
+
+/// The variable a test build (the feature `test-endpoints`) takes its
+/// endpoints from ([`Endpoints::for_test_build`]).
+pub const TEST_ENDPOINTS: &str = "WATCHER_TEST_ENDPOINTS";
+
+/// `text` with every control character replaced by a space (a serde
+/// error may quote a field name as it is).
+fn one_line(text: &str) -> String {
+    text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect()
 }
 
 /// An answer coming back to the loop.
