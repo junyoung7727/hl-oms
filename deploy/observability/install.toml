@@ -13,6 +13,31 @@ dst = "/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh"
 mode = "0755"
 
 [[file]]
+src = "grafana/dashboards/d2-market-data.json"
+dst = "/etc/hl-oms-obs/grafana/dashboards/d2-market-data.json"
+mode = "0644"
+
+[[file]]
+src = "grafana/dashboards/d3-system.json"
+dst = "/etc/hl-oms-obs/grafana/dashboards/d3-system.json"
+mode = "0644"
+
+[[file]]
+src = "grafana/grafana.ini"
+dst = "/etc/hl-oms-obs/grafana/grafana.ini"
+mode = "0644"
+
+[[file]]
+src = "grafana/provisioning/dashboards/hl-oms.yaml"
+dst = "/etc/hl-oms-obs/grafana/provisioning/dashboards/hl-oms.yaml"
+mode = "0644"
+
+[[file]]
+src = "grafana/provisioning/datasources/hl-oms.yaml"
+dst = "/etc/hl-oms-obs/grafana/provisioning/datasources/hl-oms.yaml"
+mode = "0644"
+
+[[file]]
 src = "systemd/alertmanager.service"
 dst = "/etc/systemd/system/alertmanager.service"
 mode = "0644"

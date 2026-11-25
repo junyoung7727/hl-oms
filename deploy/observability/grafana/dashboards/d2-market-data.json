@@ -1,0 +1,454 @@
+{
+  "uid": "d2-market-data",
+  "title": "D2 시세 수집: 어느 거래소·종목이 비거나 늦나",
+  "description": "거래소별 메시지율, 공백, 지연 p99, 마지막 메시지 경과(설계 §8.4). 알림은 vmalert가 낸다.",
+  "tags": [
+    "hl-oms"
+  ],
+  "editable": false,
+  "timezone": "utc",
+  "refresh": "30s",
+  "schemaVersion": 41,
+  "version": 1,
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "venue",
+        "label": "거래소",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "vm"
+        },
+        "query": {
+          "query": "label_values(md_collector_heartbeat_ts, venue)",
+          "refId": "venue-query"
+        },
+        "definition": "label_values(md_collector_heartbeat_ts, venue)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "sort": 1
+      },
+      {
+        "name": "symbol",
+        "label": "종목",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "vm"
+        },
+        "query": {
+          "query": "label_values(md_spread_bp{venue=~\"$venue\"}, symbol)",
+          "refId": "symbol-query"
+        },
+        "definition": "label_values(md_spread_bp{venue=~\"$venue\"}, symbol)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "초당 메시지 (시장별)",
+      "description": "1분 동안 받은 메시지 수 / 60. 0이 되면 그 시장의 연결이 아무것도 받지 못한다(MdConnectionSilent).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "sum by (market) (sum_over_time(md_msgs{venue=~\"$venue\"}[1m])) / 60",
+          "legendFormat": "{{market}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "초당 바이트 (시장별)",
+      "description": "1분 동안 받은 바이트 / 60.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "sum by (market) (sum_over_time(md_bytes{venue=~\"$venue\"}[1m])) / 60",
+          "legendFormat": "{{market}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "10분 공백 (시장·채널별)",
+      "description": "순번이 건너뛴 횟수. 시장마다 10분에 20번을 넘으면 MdGapsHigh(P2).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "sum by (market, channel) (increase(md_gaps_total{venue=~\"$venue\"}[10m]))",
+          "legendFormat": "{{market}} {{channel}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "10분 재연결 (시장·채널별)",
+      "description": "다시 연결한 횟수. 시장마다 10분에 10번을 넘으면 MdReconnectsHigh(P2).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "sum by (market, channel) (increase(md_reconnects_total{venue=~\"$venue\"}[10m]))",
+          "legendFormat": "{{market}} {{channel}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "수신 지연 p99 (시장별)",
+      "description": "거래소 시각에서 받은 시각까지의 99번째 백분위. 1000 ms를 5분 넘으면 MdRecvLagHigh(P2).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "max by (market) (md_recv_lag_ms{venue=~\"$venue\", quantile=\"0.99\"})",
+          "legendFormat": "{{market}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "멈춘 호가 주제 비율 (시장·채널별)",
+      "description": "호가 채널(orderbook.*)마다 마지막 메시지가 60초보다 오래된 주제의 비율. MdTopicsStale의 식에서 > 0.1을 뺀 값(G8이 같음을 확인). 10%를 5분 넘으면 MdTopicsStale(P2).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "count by (venue, market, channel) (md_last_msg_age_s{venue=~\"$venue\", channel=~\"orderbook.*\"} > 60) / count by (venue, market, channel) (md_last_msg_age_s{venue=~\"$venue\", channel=~\"orderbook.*\"})",
+          "legendFormat": "{{venue}} {{market}} {{channel}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.1
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "마지막 메시지 경과 상위 20",
+      "description": "가장 오래 조용한 주제 20개(초).",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "topk(20, max by (market, symbol, channel) (md_last_msg_age_s{venue=~\"$venue\"}))",
+          "legendFormat": "{{market}} {{symbol}} {{channel}}",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "스프레드 (bp, 종목별)",
+      "description": "거래 종목의 매수·매도 호가 차이.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "md_spread_bp{venue=~\"$venue\", symbol=~\"$symbol\"}",
+          "legendFormat": "{{market}} {{symbol}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "호가 수량 (종목·방향별)",
+      "description": "거래 종목의 호가 깊이.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "md_depth_qty{venue=~\"$venue\", symbol=~\"$symbol\"}",
+          "legendFormat": "{{market}} {{symbol}} {{side}} {{levels}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "연결별 큐 바이트",
+      "description": "연결의 기록 큐. 8 MiB(칸 상한 16 MiB의 절반)를 1분 넘으면 MdQueueHigh(P2).",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "max by (conn) (md_queue_bytes{venue=~\"$venue\"})",
+          "legendFormat": "{{conn}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 8388608
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

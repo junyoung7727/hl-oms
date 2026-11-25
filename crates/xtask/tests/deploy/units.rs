@@ -94,10 +94,6 @@ const TIMERS: &[(&str, &str)] = &[
 const DAILY: &[&str] = &["md-archiver@.service", "crypto-lake-audit@.service"];
 const LOCK: &str = "/usr/bin/flock /run/lock/hl-oms-daily.lock ";
 
-/// Install paths that a unit's command line names before their files exist
-/// (U14). `pending_install_paths_are_still_missing` fails once one exists.
-pub const PENDING_DST: &[&str] = &["/etc/hl-oms-obs/grafana/grafana.ini"];
-
 /// The audit unit, its script, and the directories that verify and the
 /// auditor write inside the read-only lake (U12, U16).
 const AUDIT: &str = "crypto-lake-audit@.service";
@@ -879,7 +875,7 @@ fn install_target(src: &str) -> (String, &'static str) {
 
 /// `(src, dst, mode)` of every entry of the install map; a malformed entry
 /// is a finding and is left out.
-fn install_entries(p: &Parsed, out: &mut Vec<Finding>) -> Vec<(String, String, String)> {
+pub fn install_entries(p: &Parsed, out: &mut Vec<Finding>) -> Vec<(String, String, String)> {
     let path = format!("{OBS}install.toml");
     let Some(files) = p
         .toml
@@ -940,7 +936,7 @@ fn u14_install_map(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
     }
     for u in &p.units {
         for want in install_paths(u) {
-            if !dsts.iter().any(|d| glob(want, d)) && !PENDING_DST.contains(&want) {
+            if !dsts.iter().any(|d| glob(want, d)) {
                 finding(
                     out,
                     &u.path,
@@ -2017,6 +2013,28 @@ fn a_unit_path_without_an_install_dst_fails() {
         "Nice=10\nEnvironment=HOOK=/usr/local/lib/hl-oms-obs/hook.sh\n",
         &["U14"],
     );
+    // Grafana would read another file than the one the check reads (G1
+    // pins Grafana's command line too).
+    plant(
+        "grafana.service",
+        "--config /etc/hl-oms-obs/grafana/grafana.ini",
+        "--config /etc/hl-oms-obs/grafana/custom.ini",
+        &["U14", "G1"],
+    );
+    // No path is pending: an install entry dropped leaves the unit's path
+    // without a dst.
+    let mut t = Tree::real();
+    t.replace(
+        INSTALL,
+        "[[file]]\nsrc = \"grafana/grafana.ini\"\ndst = \"/etc/hl-oms-obs/grafana/grafana.ini\"\nmode = \"0644\"\n",
+        "",
+    );
+    let f = crate::check(&t);
+    assert!(
+        f.iter()
+            .any(|x| x.rule == "U14" && x.file == unit("grafana.service")),
+        "{f:?}"
+    );
     // With a file that the glob matches, the path is covered.
     let mut t = with(
         "vmalert-metrics.service",
@@ -2046,28 +2064,6 @@ fn a_unit_path_without_an_install_dst_fails() {
         "0644",
     );
     assert!(crate::check(&t).iter().any(|x| x.rule == "U14"));
-}
-
-#[test]
-fn pending_install_paths_are_still_missing() {
-    let t = Tree::real();
-    let mut out = Vec::new();
-    let p = crate::tree::parse(&t, &mut out);
-    let dsts: Vec<String> = install_entries(&p, &mut out)
-        .into_iter()
-        .map(|(_, d, _)| d)
-        .collect();
-    let named: BTreeSet<&str> = p.units.iter().flat_map(install_paths).collect();
-    for pending in PENDING_DST {
-        assert!(
-            !dsts.iter().any(|d| glob(pending, d)),
-            "{pending} has an install entry now: remove it from PENDING_DST"
-        );
-        assert!(
-            named.contains(pending),
-            "{pending} is named by no unit: remove it from PENDING_DST"
-        );
-    }
 }
 
 #[test]

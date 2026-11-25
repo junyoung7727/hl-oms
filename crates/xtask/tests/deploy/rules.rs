@@ -127,7 +127,7 @@ const GROUP_INTERVALS: &[(&str, &str, Option<&str>)] = &[
 const DEFAULT_INTERVAL: &str = "10s";
 
 /// R9: the scrape jobs. Each reads the listener of its unit `<job>.service`.
-const SCRAPE_JOBS: &[&str] = &[
+pub const SCRAPE_JOBS: &[&str] = &[
     "victoriametrics",
     "victorialogs",
     "vmalert-metrics",
@@ -196,7 +196,7 @@ fn rule_file(path: &str) -> Option<bool> {
     None
 }
 
-fn norm(e: &str) -> String {
+pub fn norm(e: &str) -> String {
     e.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
@@ -1050,12 +1050,13 @@ fn every_configured_venue_has_an_audit_stale_rule() {
 
 #[test]
 fn the_design_lake_and_disk_rules_are_present() {
-    // LakeAuditFailed back to the increase of the first rounds.
+    // LakeAuditFailed back to the increase of the first rounds (the D3
+    // panel that shows its value no longer matches it either).
     set_expr(
         LAKE,
         "LakeAuditFailed",
         "max by (venue) (increase(lake_audit_fail_total[26h])) > 0",
-        &["R7"],
+        &["R7", "G8"],
     );
     set_expr(
         LAKE,

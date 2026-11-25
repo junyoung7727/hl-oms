@@ -426,3 +426,7 @@ _Avoid_: watchdog (systemd `WatchdogSec`), heartbeat, liveness rule
 **Dead-man receiver** (dead-man 수신자):
 The Alertmanager receiver `deadman` in `deploy/observability/alertmanager/alertmanager.json`, the only receiver of the Watchdog alert (every minute). It is a placeholder with no integration until the owner chooses the outside dead-man service; then it gets a webhook whose address is a file under `/etc/hl-oms/`. Until then nothing outside the PC notices a dead stack (ADR-035).
 _Avoid_: dead-man switch (the outside service that raises the alarm when the Watchdog stops arriving), null receiver (`null` takes P3 and the rest and never sends), stream-outage trigger, monitoring gate
+
+**Placeholder address** (자리 표시 주소):
+The value `192.0.2.1` (RFC 5737 TEST-NET-1) of `http_addr` in `deploy/observability/grafana/grafana.ini`. No interface of this PC has it, so Grafana refuses to start until the operator writes this PC's Tailscale address into the installed copy; an empty or missing `http_addr` would listen on every interface instead (ADR-035).
+_Avoid_: default address (Grafana's default is every interface), Tailscale address (that is what replaces it)
