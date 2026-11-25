@@ -1,0 +1,810 @@
+{
+ "rule_files": [
+  "../metrics/watcher.rules.json"
+ ],
+ "evaluation_interval": "10s",
+ "tests": [
+  {
+   "name": "watcher_up stops: no WatcherDown while it comes, P1 a minute after the last export",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_up{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "1x12"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "1m30s",
+     "groupname": "watcher",
+     "alertname": "WatcherDown",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "4m",
+     "groupname": "watcher",
+     "alertname": "WatcherDown",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P1",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "bybit 워처가 1분 동안 값을 보내지 않았다(watcher_up 없음). 워처가 죽었거나 VictoriaMetrics에 쓰지 못한다. 그동안 대사(W1~W4)도 OMS가 조용할 때의 킬(W5)도 없다. systemctl status watcher와 journalctl -u watcher로 원인을 찾고 다시 띄운다. 재부팅 뒤라면 먼저 findmnt /mnt/nvme/hl-oms-journal(관측 문서 §9, §13.4)."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "an exporting watcher: no WatcherDown; another venue's watcher does not stand in for bybit's",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_up{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "1x60"
+    },
+    {
+     "series": "watcher_up{venue=\"okx\",host=\"pc\",watcher=\"okx\"}",
+     "values": "1x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "5m",
+     "groupname": "watcher",
+     "alertname": "WatcherDown",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "name": "only another venue's watcher exports: bybit's WatcherDown fires",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_up{venue=\"okx\",host=\"pc\",watcher=\"okx\"}",
+     "values": "1x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "2m",
+     "groupname": "watcher",
+     "alertname": "WatcherDown",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P1",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "bybit 워처가 1분 동안 값을 보내지 않았다(watcher_up 없음). 워처가 죽었거나 VictoriaMetrics에 쓰지 못한다. 그동안 대사(W1~W4)도 OMS가 조용할 때의 킬(W5)도 없다. systemctl status watcher와 journalctl -u watcher로 원인을 찾고 다시 띄운다. 재부팅 뒤라면 먼저 findmnt /mnt/nvme/hl-oms-journal(관측 문서 §9, §13.4)."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "watcher_kill_active 0 then 1: WatcherKillActive at once, not before",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_kill_active{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "0x3 1x20"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "20s",
+     "groupname": "watcher",
+     "alertname": "WatcherKillActive",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "1m",
+     "groupname": "watcher",
+     "alertname": "WatcherKillActive",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P1",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "워처가 킬을 실행 중이다: 킬 마커, watcher_kill, OMS 단위 정지, 워처 자신의 키로 일괄 취소. 워처의 [WATCH P1] 알림으로 단계를 보고, 끝난 뒤 사람이 OMS를 띄워 clear-hold --reason kill(관측 문서 §13.6)."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "watcher_kill_active 0 throughout: no WatcherKillActive",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_kill_active{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "0x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "5m",
+     "groupname": "watcher",
+     "alertname": "WatcherKillActive",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "name": "watcher_kill_halt_owed 0 then 1: WatcherKillHaltOwed at once, not before",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_kill_halt_owed{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "0x3 1x20"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "20s",
+     "groupname": "watcher",
+     "alertname": "WatcherKillHaltOwed",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "1m",
+     "groupname": "watcher",
+     "alertname": "WatcherKillHaltOwed",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P1",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "워처의 킬이 OMS에 정지를 빚졌다: OMS가 래치 없이 거래할 수 있다. 재부팅 뒤 OMS가 꺼져 있으면 정상: OMS를 띄우고 '늦은 정지 … 래치함'을 본 뒤 해제한다. OMS가 돌고 있는데 이 알림이 남거나 '늦은 정지 실패'가 오면 손으로 멈춘다(런북 7.18, 관측 문서 §13.4)."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "watcher_kill_halt_owed 0 throughout: no WatcherKillHaltOwed",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_kill_halt_owed{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "0x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "5m",
+     "groupname": "watcher",
+     "alertname": "WatcherKillHaltOwed",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "name": "watcher_auth_rejected 0 then 1: WatcherAuthRejected at once, not before",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_auth_rejected{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "0x3 1x20"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "20s",
+     "groupname": "watcher",
+     "alertname": "WatcherAuthRejected",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "1m",
+     "groupname": "watcher",
+     "alertname": "WatcherAuthRejected",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P1",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "Bybit가 워처의 키를 거절했거나 키가 시작 규칙에 더는 맞지 않는다. 워처가 재시작까지 Bybit에 아무것도 보내지 않는다: 대사도 킬의 일괄 취소도 없다. 오류 줄로 원인(키, IP)을 보고 고친 뒤 워처를 다시 띄운다(관측 문서 §9)."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "watcher_auth_rejected 0 throughout: no WatcherAuthRejected",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_auth_rejected{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "0x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "5m",
+     "groupname": "watcher",
+     "alertname": "WatcherAuthRejected",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "name": "watcher_journal_error 0 then 1: WatcherJournalError at once, not before",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_journal_error{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "0x3 1x20"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "20s",
+     "groupname": "watcher",
+     "alertname": "WatcherJournalError",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "1m",
+     "groupname": "watcher",
+     "alertname": "WatcherJournalError",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "워처가 OMS 저널을 읽지 못한다. 저널을 쓰는 대사(W2, W4)가 멈췄다. journalctl -u watcher와 데이터 디렉터리의 권한·마운트를 본다(런북 7.17, 관측 문서 §9)."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "watcher_journal_error 0 throughout: no WatcherJournalError",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_journal_error{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "0x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "5m",
+     "groupname": "watcher",
+     "alertname": "WatcherJournalError",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "name": "a boot kill: the halt is owed while the OMS is not running (no oms_up), and it pages",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_kill_halt_owed{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "1x30"
+    },
+    {
+     "series": "watcher_kill_active{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "0x30"
+    },
+    {
+     "series": "watcher_w5_armed{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "0x30"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "1m",
+     "groupname": "watcher",
+     "alertname": "WatcherKillHaltOwed",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P1",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "워처의 킬이 OMS에 정지를 빚졌다: OMS가 래치 없이 거래할 수 있다. 재부팅 뒤 OMS가 꺼져 있으면 정상: OMS를 띄우고 '늦은 정지 … 래치함'을 본 뒤 해제한다. OMS가 돌고 있는데 이 알림이 남거나 '늦은 정지 실패'가 오면 손으로 멈춘다(런북 7.18, 관측 문서 §13.4)."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "an open W2 mismatch: WatcherMismatchActive with its check, not before",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_mismatch_active{venue=\"bybit\",host=\"pc\",watcher=\"main\",check=\"W2\"}",
+     "values": "0x3 1x20"
+    },
+    {
+     "series": "watcher_mismatch_active{venue=\"bybit\",host=\"pc\",watcher=\"main\",check=\"W1\"}",
+     "values": "0x23"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "20s",
+     "groupname": "watcher",
+     "alertname": "WatcherMismatchActive",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "1m",
+     "groupname": "watcher",
+     "alertname": "WatcherMismatchActive",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P1",
+        "venue": "bybit",
+        "check": "W2"
+       },
+       "exp_annotations": {
+        "summary": "워처의 W2 검사가 OMS 저널과 거래소의 차이를 확정했다. OMS는 watcher_mismatch로 보류한다. 차이의 원인을 고친 뒤 clear-hold --reason watcher_mismatch(관측 문서 §13.6)."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "no mismatch: no WatcherMismatchActive",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_mismatch_active{venue=\"bybit\",host=\"pc\",watcher=\"main\",check=\"W1\"}",
+     "values": "0x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "5m",
+     "groupname": "watcher",
+     "alertname": "WatcherMismatchActive",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "name": "key days left 30 then 13: P2 only after 13",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_api_key_days_left{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "30x30 13x30"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "4m",
+     "groupname": "watcher",
+     "alertname": "WatcherApiKeyExpiring",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "8m",
+     "groupname": "watcher",
+     "alertname": "WatcherApiKeyExpiring",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "워처의 Bybit API 키가 14일 안에 만료된다. 만료되면 워처의 모든 Bybit 요청이 거절된다. 새 키를 만들어 /etc/hl-oms/watcher-bybit.toml을 바꾸고 워처를 다시 띄운다(관측 문서 §9)."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "key days left exactly 14: no WatcherApiKeyExpiring",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_api_key_days_left{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "14x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "5m",
+     "groupname": "watcher",
+     "alertname": "WatcherApiKeyExpiring",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "name": "public IP not ok from 1 min: no alert at 2 min, P2 after 2 min",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_public_ip_ok{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "1x5 0x30"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "2m",
+     "groupname": "watcher",
+     "alertname": "WatcherPublicIpNotOk",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "4m",
+     "groupname": "watcher",
+     "alertname": "WatcherPublicIpNotOk",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "이 PC의 공인 IP가 워처 키의 IP 목록에 없거나 확인하지 못했다. IP가 정말 바뀌었으면 곧 Bybit가 키를 거절한다. journalctl -u watcher의 public IP 경고를 보고 키의 IP 목록을 고친다(관측 문서 §9)."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "public IP ok: no WatcherPublicIpNotOk",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_public_ip_ok{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "1x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "5m",
+     "groupname": "watcher",
+     "alertname": "WatcherPublicIpNotOk",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "name": "W1 not refreshed: age over 30 s from 1 min, P2 a minute later",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_check_age_s{venue=\"bybit\",host=\"pc\",watcher=\"main\",check=\"W1\"}",
+     "values": "5x5 40x30"
+    },
+    {
+     "series": "watcher_check_age_s{venue=\"bybit\",host=\"pc\",watcher=\"main\",check=\"W2\"}",
+     "values": "5x35"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "1m30s",
+     "groupname": "watcher",
+     "alertname": "WatcherCheckStale",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "3m",
+     "groupname": "watcher",
+     "alertname": "WatcherCheckStale",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit",
+        "check": "W1"
+       },
+       "exp_annotations": {
+        "summary": "워처의 W1 검사가 30초 넘게 성공하지 못했다. W1이나 W2가 10초를 넘으면 OMS는 이미 unmonitored로 새 일반 주문을 거절한다. journalctl -u watcher에서 요청 오류를 본다(관측 문서 §9)."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "check ages at 30 s or below: no WatcherCheckStale",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_check_age_s{venue=\"bybit\",host=\"pc\",watcher=\"main\",check=\"W3\"}",
+     "values": "30x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "5m",
+     "groupname": "watcher",
+     "alertname": "WatcherCheckStale",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "name": "heartbeat timestamp stops at 60 s: no alert at 1m40s, P2 at 4 min",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_heartbeat_ok_ts{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "946684800+10x6 946684860x30"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "1m40s",
+     "groupname": "watcher",
+     "alertname": "WatcherHeartbeatStale",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "4m",
+     "groupname": "watcher",
+     "alertname": "WatcherHeartbeatStale",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "워처가 30초 넘게 OMS에 하트비트를 넣지 못했다(monitor.sock). OMS는 unmonitored로 새 일반 주문을 거절하고 60초 뒤 걸린 일반 주문을 취소한다. OMS가 꺼졌으면 OmsDown이 이 알림을 막는다(관측 문서 §9)."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a fresh heartbeat: no WatcherHeartbeatStale",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_heartbeat_ok_ts{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "946684800+10x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "5m",
+     "groupname": "watcher",
+     "alertname": "WatcherHeartbeatStale",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "name": "W5 unarmed, no kill: no alert at 4 min, P2 after 5 min",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_w5_armed{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "0x60"
+    },
+    {
+     "series": "watcher_kill_active{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "0x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "4m",
+     "groupname": "watcher",
+     "alertname": "WatcherW5Unarmed",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "6m",
+     "groupname": "watcher",
+     "alertname": "WatcherW5Unarmed",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "워처의 W5(OMS가 조용하면 킬)가 5분 넘게 무장되지 않았다. 그동안 OMS가 멈춰도 워처가 킬하지 않는다. 시작 확인이 다시 묻는 중인지 journalctl -u watcher로 본다. 킬 뒤 OMS가 꺼진 동안은 OmsDown이 이 알림을 막는다(관측 문서 §9)."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "W5 unarmed during a kill: no WatcherW5Unarmed",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_w5_armed{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "0x80"
+    },
+    {
+     "series": "watcher_kill_active{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "1x80"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "10m",
+     "groupname": "watcher",
+     "alertname": "WatcherW5Unarmed",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "name": "a watcher without [kill] (no kill series): no WatcherW5Unarmed",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_w5_armed{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "0x80"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "10m",
+     "groupname": "watcher",
+     "alertname": "WatcherW5Unarmed",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "name": "W5 armed: no WatcherW5Unarmed",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_w5_armed{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "1x80"
+    },
+    {
+     "series": "watcher_kill_active{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "0x80"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "10m",
+     "groupname": "watcher",
+     "alertname": "WatcherW5Unarmed",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "name": "watcher_alert_failures_total rises at 1 min: WatcherAlertsFailing at once",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_alert_failures_total{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "0x5 1x30"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "30s",
+     "groupname": "watcher",
+     "alertname": "WatcherAlertsFailing",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "3m",
+     "groupname": "watcher",
+     "alertname": "WatcherAlertsFailing",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "워처가 10분 안에 Telegram 직접 알림을 보내다 실패했다. [WATCH P1]이 오지 않을 수 있다. 토큰 파일, 채팅의 봇, 이 PC의 Telegram 도달성을 본다(관측 문서 §9, §10)."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "watcher_alert_failures_total flat for 20 min: no WatcherAlertsFailing at 15 min",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_alert_failures_total{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "5x120"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "15m",
+     "groupname": "watcher",
+     "alertname": "WatcherAlertsFailing",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "name": "watcher_alerts_dropped_total rises at 1 min: WatcherAlertsDropped at once",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_alerts_dropped_total{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "0x5 1x30"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "30s",
+     "groupname": "watcher",
+     "alertname": "WatcherAlertsDropped",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "3m",
+     "groupname": "watcher",
+     "alertname": "WatcherAlertsDropped",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "워처가 10분 안에 보내지 못한 직접 알림을 버렸다(대기열이 가득 참). 버린 알림은 다시 오지 않는다. journalctl -u watcher에서 그 알림을 본다(관측 문서 §9)."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "watcher_alerts_dropped_total flat for 20 min: no WatcherAlertsDropped at 15 min",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "watcher_alerts_dropped_total{venue=\"bybit\",host=\"pc\",watcher=\"main\"}",
+     "values": "5x120"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "15m",
+     "groupname": "watcher",
+     "alertname": "WatcherAlertsDropped",
+     "exp_alerts": []
+    }
+   ]
+  }
+ ]
+}
