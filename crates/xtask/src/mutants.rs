@@ -3236,6 +3236,33 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "xtask", "--test", "deploy", "alertmanager::the_routes_send_watchdog_p1_p2_where_they_belong"],
         guards: "ADR-035",
     },
+    Mutant {
+        id: "M357-deploy-check-grafana-accepts-all-interfaces",
+        what: "rule G1 accepts http_addr = 0.0.0.0: Grafana listens on every interface of the PC (ADR-035, spec mutant 19)",
+        file: "crates/xtask/tests/deploy/grafana.rs",
+        find: "a == PLACEHOLDER || tailscale(a)",
+        replace: "a == PLACEHOLDER || a == \"0.0.0.0\" || tailscale(a)",
+        test: &["-p", "xtask", "--test", "deploy", "grafana::grafana_listens_on_the_tailscale_placeholder_only"],
+        guards: "ADR-035",
+    },
+    Mutant {
+        id: "M358-deploy-check-dashboard-targets-unscanned",
+        what: "the dashboard check does not scan target expressions: a panel on a metric nobody exports stays empty without a finding (ADR-035, spec mutant 20)",
+        file: "crates/xtask/tests/deploy/grafana.rs",
+        find: "let s = expr::scan(target_expr);",
+        replace: "let s = expr::scan(\"\");",
+        test: &["-p", "xtask", "--test", "deploy", "grafana::a_dashboard_with_an_unknown_metric_fails"],
+        guards: "ADR-035",
+    },
+    Mutant {
+        id: "M359-deploy-check-grafana-alerting-unread",
+        what: "rule G2 does not read [unified_alerting]: Grafana's own alerting can be turned on beside vmalert (ADR-035, spec mutant 21)",
+        file: "crates/xtask/tests/deploy/grafana.rs",
+        find: "const OFF: &[&str] = &[\"unified_alerting\", \"auth.anonymous\"];",
+        replace: "const OFF: &[&str] = &[\"auth.anonymous\"];",
+        test: &["-p", "xtask", "--test", "deploy", "grafana::grafana_alerting_and_anonymous_access_are_off"],
+        guards: "ADR-035",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
