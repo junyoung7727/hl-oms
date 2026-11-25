@@ -384,3 +384,17 @@ _Avoid_: warm-up, backfill
 The JSON lines of one hour's seal: begin entries (sources and target offsets) and the done entry (offsets, counts, SHA-256, session runs).
 _Avoid_: journal (that is the OMS's), WAL
 
+
+### Deployment
+
+**Trading slice** (거래 슬라이스):
+The systemd slice `trading.slice` that holds the trading services (now the market-data collector): `CPUWeight=1000`, and a `MemoryMin` at least the sum of its units' `MemoryMin`, because cgroup v2 limits a child's reservation by its ancestors' (ADR-035).
+_Avoid_: research slice (that is where research jobs go, with `MemoryHigh=8G`), cgroup
+
+**Daily-job lock** (일일 작업 잠금):
+The file `/run/lock/hl-oms-daily.lock` that every daily job (archiver and audit runs of every venue) takes with `flock` before it starts, so only one runs at a time and their memory caps never add up. Every user of it runs as root (ADR-035).
+_Avoid_: seal lock (that is `md-lake seal`'s own lock, exit 3)
+
+**Install map** (설치 지도):
+`deploy/observability/install.toml`: each repository file under `deploy/observability/` with the absolute path and mode it is installed to. The operator installs from it; this repository installs nothing (ADR-035).
+_Avoid_: manifest (that is the lake's), package

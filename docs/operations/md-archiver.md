@@ -2,7 +2,7 @@
 
 `md-archiver`는 일별 봉인이 끝난 L0 날짜에서 L1 Parquet 표(`book_msg`, `trade`, `ticker`, `gap`, `instrument`)를 만든다. 계약은 quant-data-platform `docs/crypto/lake-contract.md` §3, 설계는 `.scratch/md-archiver/spec.md`(U7, 검토 R1–R11), 계약에 없는 곳의 결정은 [ADR-020](../adr/ADR-020-md-archiver-input-rules.md)이다.
 
-이 저장소는 서비스를 설치하거나 켜지 않는다. `deploy/systemd/md-archiver@.service`와 `.timer`는 틀이다.
+이 저장소는 서비스를 설치하거나 켜지 않는다. `deploy/observability/systemd/md-archiver@.service`와 `.timer`는 틀이다([observability.md](observability.md) §4). 단위는 매일 01:10 UTC에 `--threads 1`로 돌고, `MemoryMax=4G`(5절의 실측 2.57 GB, 토픽 하루 약 500만 행까지, 판단(모델 아님)), 시작 제한 6시간이며, 일일 작업 잠금(`/usr/bin/flock /run/lock/hl-oms-daily.lock`) 아래서 다른 일일 작업과 한 번에 하나만 돈다.
 
 ## 1. 명령
 

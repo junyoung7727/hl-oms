@@ -30,6 +30,7 @@ LMAX의 원칙 가운데 **단일 writer의 결정적 코어 + 입력 저널**�
 | 무엇으로 확인했고 무엇을 확인하지 않았나 | [docs/verification/](docs/verification/README.md) → [generated/claims.md](docs/generated/claims.md) |
 | 성능 측정 조건과 결과 | [docs/performance/](docs/performance/README.md) |
 | 배포, 복구, 버전 올리기, 상황별 절차 | [docs/operations/runbook.md](docs/operations/runbook.md) |
+| 관측 스택(VictoriaMetrics·VictoriaLogs·vmalert·Alertmanager·Grafana)과 시세 단위(수집기·봉인·아카이버)의 배치 파일, 메모리 상한, 타이머, 설치 순서 | [docs/operations/observability.md](docs/operations/observability.md) |
 | 저널을 VictoriaMetrics·VictoriaLogs로 내보내는 프로젝터 | [docs/operations/oms-projector.md](docs/operations/oms-projector.md) |
 | 저널을 레이크 거래 테이블(Parquet)로 내보내기 | [docs/operations/oms-export.md](docs/operations/oms-export.md) |
 | 독립 워처의 설정, 키 파일, 시작 확인, 실행과 로그 줄 | [docs/operations/watcher.md](docs/operations/watcher.md) |
@@ -101,7 +102,8 @@ cargo run --release -p xtask -- docs        # 결과를 주장과 묶어 docs/ge
 | `crates/oms-node` | 실행 계층: 큐, 커밋 단계, 복구, 소켓 서버, HTTP, 게이트웨이(가상, Hyperliquid), `simvenue` | 7,300 |
 | `crates/watcher` | 독립 워처(U19a): OMS 코드 없이 문서로만 쓴 저널 읽기와 저널 상태, 자기 Bybit 서명·클라이언트와 지표 내보내기, 설정과 키 파일 읽기, 시작 확인과 IP 재확인, 검사 엔진과 W1(열린 주문), W2(포지션), W3(지갑과 증거금), W4(체결), OMS 연결(`/api/status`, `admin.sock` 다시 보내기, `monitor.sock` 하트비트)과 실행, 바이너리 `watcher --config`, 예산 측정, 직접 알림의 토큰 파일과 전달 규칙(U19b1a), 송신 태스크와 P1 조건(U19b1b·c), 서명된 일괄 취소와 킬 알림 문구(U19b2a, 아직 보내지 않음), RSA 서명 키(ADR-034), sans-IO 킬 루프(U19b2b), 그 세기와 요청 태스크 `Inflight`(U19b2c, 시험 장치만 가짜 거래소에 대해 돌리고 실행은 아직 돌리지 않음), sans-IO W5와 뒤로 가지 않는 시계, `watcher_kill` 클라이언트, OMS 단위 하나의 멈춤(U19b3a, 아직 돌리지 않음; mainnet은 `[kill]` 필수), sans-IO 킬 순서(K1 마커 → K2 `watcher_kill` → K3 멈춤 → 루프)와 킬 마커 쓰기(U19b3b), 실행의 W5와 킬(U19b3c: 마커 경로 규칙, 킬 중 엔진 멈춤, 루프 중 정지 재시도, 킬 지표), 킬의 끝(U19b3d: 루프 뒤의 빚진 정지, 탐침 답의 마커 경로, 킬 중의 종료·시작 거부). 의존성은 레지스트리 crate뿐 | 30,874 |
 | `crates/watcher-conformance` | 워처와 OMS 코드를 함께 링크하는 유일한 곳: 적합성 시험(U19b3b부터 OMS의 킬 마커 독자도) | 900 |
-| `crates/xtask` | 수용 시험 실행기, 변이 점검, 부하 생성기, 문서 생성기 | 2,100 |
+| `crates/xtask` | 수용 시험 실행기, 변이 점검, 부하 생성기, 문서 생성기, 배치 검사(`tests/deploy`) | 7,865 |
+| `deploy/` | 배치 파일만(설치하지 않음): `deploy/observability/`의 systemd 단위·타이머·슬라이스, 설치 지도, 거래소 목록. 검사는 `crates/xtask/tests/deploy` | |
 | `registry/` | 검토 항목, 결정, 계약, 주장, 가정, 사용자 결정의 원본(TOML) | |
 | `docs/` | 문서. `docs/generated/`는 registry와 결과 파일에서 만든다 | |
 | `dashboard/` | 화면(정적 파일)과 생성된 자료 | |
