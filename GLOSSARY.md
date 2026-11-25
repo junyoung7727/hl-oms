@@ -422,3 +422,7 @@ _Avoid_: disk floor (that is the collector's own `[MD P1]` threshold), disk usag
 **Watchdog alert** (Watchdog 알림):
 The alert rule `Watchdog` with expression `vector(1)` and severity `watchdog`: it fires all the time, so an outside dead-man service that stops receiving it knows the stack is dead. Exactly one exists. Until the outside service is chosen it goes to a receiver with no integration (ADR-035).
 _Avoid_: watchdog (systemd `WatchdogSec`), heartbeat, liveness rule
+
+**Dead-man receiver** (dead-man 수신자):
+The Alertmanager receiver `deadman` in `deploy/observability/alertmanager/alertmanager.json`, the only receiver of the Watchdog alert (every minute). It is a placeholder with no integration until the owner chooses the outside dead-man service; then it gets a webhook whose address is a file under `/etc/hl-oms/`. Until then nothing outside the PC notices a dead stack (ADR-035).
+_Avoid_: dead-man switch (the outside service that raises the alarm when the Watchdog stops arriving), null receiver (`null` takes P3 and the rest and never sends), stream-outage trigger, monitoring gate

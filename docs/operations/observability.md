@@ -27,10 +27,11 @@
 | `vmalert/tests/*.test.json` | 지표 규칙 파일마다 하나인 `vmalert-tool unittest` 파일(설치하지 않음, §11) |
 | `victoriametrics/scrape.json` | VictoriaMetrics가 15초마다 스택 다섯(VM, VL, vmalert 둘, Alertmanager)의 `/metrics`를 긁는 설정 |
 | `metrics.toml` | 지표 목록: 규칙이 쓰는 지표 이름과 라벨, 그 이름을 내보내는 소스 파일(설치하지 않음, §7) |
+| `alertmanager/alertmanager.json` | 알림 전달: 등급별 경로, 묶음, 억제 규칙, Telegram 수신자와 문자 모양(§10) |
 
 모든 JSON 파일은 도구가 읽는 YAML이기도 하다(JSON은 YAML이다). 주석을 쓸 수 없으므로 알림마다 `annotations.summary`에 뜻과 할 일을 적었다.
 
-아직 없는 파일: Alertmanager 설정, Grafana 설정과 대시보드. 단위의 명령줄은 그 설치 경로를 이미 가리킨다. 그 파일이 없는 동안 이 단위들은 시작하지 못한다(그래서 지금은 켜지 않는다).
+아직 없는 파일: Grafana 설정과 대시보드. 단위의 명령줄은 그 설치 경로를 이미 가리킨다. 그 파일이 없는 동안 이 단위들은 시작하지 못한다(그래서 지금은 켜지 않는다).
 
 배치 검사(`cargo test --locked -p xtask --test deploy`)가 이 파일들을 읽고 규칙을 확인한다(§7). CI의 `cargo test --workspace`에도 들어간다.
 
@@ -192,7 +193,7 @@ chrony가 시작한 뒤 첫 세 번의 갱신에서만 1초가 넘는 차이를 
 
 ## 7. 설치 전 확인
 
-1. `cargo test --locked -p xtask --test deploy`. 실패하면 줄마다 `deploy: <파일>: <규칙>: <내용>`이 나온다. 규칙: P1(파일이 종류대로 읽힘), U1(서비스마다 `MemoryMax` 하나, 크기, `infinity` 아님), U2(oneshot 서비스 ↔ 같은 이름의 타이머, 타이머에 `Unit=` 없음), U3(수집기의 재시작·감시 설정과 보호 설정, 시작 제한의 옛 이름과 `[Service]` 쪽 키, `MemoryHigh` 없음), U4(슬라이스의 가중치와 예약), U5(세 타이머의 시각과 `Persistent`), U6(설계 상한), U7(아카이버와 감사의 일일 작업 잠금), U8(`127.0.0.1`에서만 듣고 Alertmanager 클러스터 포트 없음. 리스너 플래그는 어떤 철자로 써도 모두 셈), U9(저장소가 `/mnt/nvme/` 아래, 저장소마다 경로 플래그 한 번), U10(보관 1년, VM 메모리 한도), U11(vmalert 둘의 원본·알림·간격), U12(어느 배치 파일도 KR qdp 체크아웃을 이름하지 않음, 감사 스크립트의 `venue=$1`과 `--state "$STATE_DIRECTORY/audit-$venue.json"`, 감사 단위의 `StateDirectory=qdp-crypto-audit`. 스크립트는 CI에서 돌지 않으므로 다시 verify할 날짜와 종료 코드를 정하는 줄도 글자 그대로 고정: 9일 창, `-cnewer "$stamp"`, 지금보다 뒤인 도장 검사, 도장 → `sleep 1` → verify → `mv` 순서, 실패 시 옛 도장 유지, `exit 5`, `--vm-url http://127.0.0.1:8428`), U13(`venues.toml`의 거래소가 수집기와 아카이버 모두에 등록됨), U14(설치 지도), U15(스택은 `hlobs`, 어느 단위에도 `User=root`를 쓰지 않음), U16(`md-lake verify`나 감사 스크립트를 돌리는 단위가 읽기 전용 `l0` 아래의 `_verify`에, 감사는 `crypto/audit`에도 쓸 수 있음. 감사 스크립트를 돌리는 다른 단위도 `crypto/audit`에 쓸 수 있어야 함. 감사 단위의 두 경로 줄은 정확히 §4.1의 값이고 `LAKE=/mnt/nvme/lake` 한 번), U17(`Exec*` 줄에 `$(`, 백틱, `%i`·`%I`·`%n`·`%%`가 아닌 `%` 없음: systemd는 셸을 돌리지 않음), U18(스택 단위의 재시작·격리 설정, 쓰는 디렉터리, 다른 단위에 묶이지 않음), U19(봉인·아카이버·감사 실행의 시간 제한, 아카이버의 스레드 1개와 L1 삭제 꺼짐, `EnvironmentFile=` 없음). 규칙 파일과 지표 목록: R1(규칙의 모든 지표 이름이 목록에 있음: `metrics.toml`, 고정된 qdp `contracts/lake/xrepo/metrics.json`, 규칙 파일의 기록 규칙 이름), R2(`metrics.toml`의 `[[metric]]` 행마다 `source` 파일에 그 이름이 문자열 그대로 있음, `[[stack]]` 행은 구성 요소와 판이 있음), R2b(qdp가 hl-oms 몫으로 남긴 이름(`reserved`)마다 쓰는 쪽이 있음, 한 이름에 쓰는 쪽은 하나), R3(라벨이 목록의 어떤 지표의 라벨이거나 `job`·`instance`), R4(허용된 함수만, 검사기가 읽지 못하는 모양 없음), R5(알림마다 `severity` P1·P2·P3와 `summary`, `Watchdog`은 하나이고 `vector(1)`·`watchdog`, `for` 없음, `system.rules.json`의 그룹 `watchdog`), R6(`venues.toml`의 거래소마다 `MdCollectorDown`(P1)과 `MdLakeGaugesMissing`(P2)(그룹 `market-data`), `LakeAuditStale`(P2)(그룹 `lake-audit`)이 정확히 하나씩, 정해진 식과 그룹, `for` 없음, 목록에 없는 거래소의 것은 없음), R7(설계의 레이크·디스크 규칙: 남은 일수 기록 규칙, `LakeDiskDaysLeftLow`·`Critical`, `LakeL0WriteError`, `LakeSealLag`, `LakeAuditFailed`의 식·`for`·등급·그룹. R6·R7 규칙과 `Watchdog`이 든 그룹의 간격: `market-data` 10초, `lake-recording`·`lake-audit` 1분, `lake`·`watchdog`은 간격 없음(vmalert-metrics의 기본 10초, U11) 또는 `10s`), R8(`vmalert/logs/`의 그룹은 `type: vlogs`, `vmalert/metrics/`의 그룹은 `type` 없음), R9(`scrape.json`의 작업 다섯과 간격 15초, 작업마다 대상이 그 단위의 리스너, 규칙이 쓰는 `job` 값은 긁는 작업, `ObsMemoryNearCap`은 작업마다 `process_resident_memory_bytes{job="<작업>"} > 0.9 * <U6의 설계 상한>` 항 하나씩이고 다른 항은 없음. 항을 통째로 비교하므로 자릿수가 더 붙은 상한도 걸림), U8은 긁는 대상에도(`127.0.0.1`만). 검사기는 MetricsQL의 부분 집합만 읽는다(파서가 아님). 문법은 §11의 `vmalert -dryRun`이 본다. LogsQL 식은 읽지 않는다.
+1. `cargo test --locked -p xtask --test deploy`. 실패하면 줄마다 `deploy: <파일>: <규칙>: <내용>`이 나온다. 규칙: P1(파일이 종류대로 읽힘), U1(서비스마다 `MemoryMax` 하나, 크기, `infinity` 아님), U2(oneshot 서비스 ↔ 같은 이름의 타이머, 타이머에 `Unit=` 없음), U3(수집기의 재시작·감시 설정과 보호 설정, 시작 제한의 옛 이름과 `[Service]` 쪽 키, `MemoryHigh` 없음), U4(슬라이스의 가중치와 예약), U5(세 타이머의 시각과 `Persistent`), U6(설계 상한), U7(아카이버와 감사의 일일 작업 잠금), U8(`127.0.0.1`에서만 듣고 Alertmanager 클러스터 포트 없음. 리스너 플래그는 어떤 철자로 써도 모두 셈), U9(저장소가 `/mnt/nvme/` 아래, 저장소마다 경로 플래그 한 번), U10(보관 1년, VM 메모리 한도), U11(vmalert 둘의 원본·알림·간격), U12(어느 배치 파일도 KR qdp 체크아웃을 이름하지 않음, 감사 스크립트의 `venue=$1`과 `--state "$STATE_DIRECTORY/audit-$venue.json"`, 감사 단위의 `StateDirectory=qdp-crypto-audit`. 스크립트는 CI에서 돌지 않으므로 다시 verify할 날짜와 종료 코드를 정하는 줄도 글자 그대로 고정: 9일 창, `-cnewer "$stamp"`, 지금보다 뒤인 도장 검사, 도장 → `sleep 1` → verify → `mv` 순서, 실패 시 옛 도장 유지, `exit 5`, `--vm-url http://127.0.0.1:8428`), U13(`venues.toml`의 거래소가 수집기와 아카이버 모두에 등록됨), U14(설치 지도), U15(스택은 `hlobs`, 어느 단위에도 `User=root`를 쓰지 않음), U16(`md-lake verify`나 감사 스크립트를 돌리는 단위가 읽기 전용 `l0` 아래의 `_verify`에, 감사는 `crypto/audit`에도 쓸 수 있음. 감사 스크립트를 돌리는 다른 단위도 `crypto/audit`에 쓸 수 있어야 함. 감사 단위의 두 경로 줄은 정확히 §4.1의 값이고 `LAKE=/mnt/nvme/lake` 한 번), U17(`Exec*` 줄에 `$(`, 백틱, `%i`·`%I`·`%n`·`%%`가 아닌 `%` 없음: systemd는 셸을 돌리지 않음), U18(스택 단위의 재시작·격리 설정, 쓰는 디렉터리, 다른 단위에 묶이지 않음), U19(봉인·아카이버·감사 실행의 시간 제한, 아카이버의 스레드 1개와 L1 삭제 꺼짐, `EnvironmentFile=` 없음). 규칙 파일과 지표 목록: R1(규칙의 모든 지표 이름이 목록에 있음: `metrics.toml`, 고정된 qdp `contracts/lake/xrepo/metrics.json`, 규칙 파일의 기록 규칙 이름), R2(`metrics.toml`의 `[[metric]]` 행마다 `source` 파일에 그 이름이 문자열 그대로 있음, `[[stack]]` 행은 구성 요소와 판이 있음), R2b(qdp가 hl-oms 몫으로 남긴 이름(`reserved`)마다 쓰는 쪽이 있음, 한 이름에 쓰는 쪽은 하나), R3(라벨이 목록의 어떤 지표의 라벨이거나 `job`·`instance`), R4(허용된 함수만, 검사기가 읽지 못하는 모양 없음), R5(알림마다 `severity` P1·P2·P3와 `summary`, `Watchdog`은 하나이고 `vector(1)`·`watchdog`, `for` 없음, `system.rules.json`의 그룹 `watchdog`), R6(`venues.toml`의 거래소마다 `MdCollectorDown`(P1)과 `MdLakeGaugesMissing`(P2)(그룹 `market-data`), `LakeAuditStale`(P2)(그룹 `lake-audit`)이 정확히 하나씩, 정해진 식과 그룹, `for` 없음, 목록에 없는 거래소의 것은 없음), R7(설계의 레이크·디스크 규칙: 남은 일수 기록 규칙, `LakeDiskDaysLeftLow`·`Critical`, `LakeL0WriteError`, `LakeSealLag`, `LakeAuditFailed`의 식·`for`·등급·그룹. R6·R7 규칙과 `Watchdog`이 든 그룹의 간격: `market-data` 10초, `lake-recording`·`lake-audit` 1분, `lake`·`watchdog`은 간격 없음(vmalert-metrics의 기본 10초, U11) 또는 `10s`), R8(`vmalert/logs/`의 그룹은 `type: vlogs`, `vmalert/metrics/`의 그룹은 `type` 없음), R9(`scrape.json`의 작업 다섯과 간격 15초, 작업마다 대상이 그 단위의 리스너, 규칙이 쓰는 `job` 값은 긁는 작업, `ObsMemoryNearCap`은 작업마다 `process_resident_memory_bytes{job="<작업>"} > 0.9 * <U6의 설계 상한>` 항 하나씩이고 다른 항은 없음. 항을 통째로 비교하므로 자릿수가 더 붙은 상한도 걸림), U8은 긁는 대상에도(`127.0.0.1`만). Alertmanager 설정: R10(경로 나무가 §10의 표 그대로: 기본 수신자 `null`은 아무 데도 보내지 않음, `group_by`에 `alertname`과 `venue`, 자식 경로 넷이 이 순서로 각각 맞춤 조건 하나: `Watchdog` → `deadman`, P1 → `telegram-p1`, `LakeAuditFailed` → `telegram-p2-noresolve`, P2 → `telegram-p2`. 자식 경로에 `continue`·묶음·음소거·하위 경로 없음. 경로가 이름한 수신자는 모두 있고 이름은 한 번씩. Telegram 수신자 셋은 설정 하나씩, 문자가 `[MON P1] `·`[MON P2] `로 시작, P2 둘은 소리 없음, P1은 소리 있음, `parse_mode` 빈 값, `LakeAuditFailed`의 수신자만 해소 문자 없음(키가 없으면 Alertmanager는 해소 문자를 보낸다). 억제 규칙은 정확히 하나: `MdCollectorDown`이 같은 거래소의 P2·P3 `Md.*|LakeSealLag|LakeDiskDaysLeft.*`를 막음. 이 이름 패턴에 걸리는 알림이 qdp 지표(`lake_audit_*`)를 읽으면 실패), R11(설정에 `bot_token`, `chat_id`, `api_url`, `http_config`, `telegram_api_url` 키 없음: 비밀은 파일 경로로만, API는 기본값만. Telegram 설정마다 `bot_token_file`과 `chat_id_file`이 `/etc/` 아래 파일 경로. 어느 배치 파일에도 Telegram 토큰 모양(숫자 6개 이상`:`문자 30개 이상)이나 `chat` 키 옆의 6자리 이상 숫자가 없음. 찾아도 그 값을 출력하지 않는다). 검사기는 MetricsQL의 부분 집합만 읽는다(파서가 아님). 문법은 §11의 `vmalert -dryRun`이 본다. LogsQL 식은 읽지 않는다.
 2. `systemd-analyze verify`: 단위 사본의 실행 파일 경로(`/usr/local/bin/`, `/usr/local/lib/hl-oms-obs/`, `/opt/grafana/bin/`)를 내려받은 공식 바이너리와 `/bin/true` 링크가 있는 임시 디렉터리로 바꾸고, 템플릿은 인스턴스 링크(`md-collector@bybit.service` 등)로 검사한다. 모르는 키는 `Unknown key`로 나온다. 감사 스크립트는 `sh -n bin/crypto-lake-audit.sh`로 문법만 본다.
 
 ## 8. 설치 순서 (소유자, 운영 항목 X1)
@@ -223,8 +224,9 @@ chrony가 시작한 뒤 첫 세 번의 갱신에서만 1초가 넘는 차이를 
    install -D -m 0644 vmalert/metrics/lake.rules.json        /etc/hl-oms-obs/vmalert/metrics/lake.rules.json
    install -D -m 0644 vmalert/metrics/system.rules.json      /etc/hl-oms-obs/vmalert/metrics/system.rules.json
    install -D -m 0644 vmalert/logs/market-data-logs.rules.json /etc/hl-oms-obs/vmalert/logs/market-data-logs.rules.json
+   install -D -m 0644 alertmanager/alertmanager.json  /etc/hl-oms-obs/alertmanager/alertmanager.json
    ```
-5. 비밀 파일(토큰, 채팅 ID, Grafana 관리자 암호)은 `/etc/hl-oms/` 아래 권한 0640, 그룹 `hlobs`로 둔다. 저장소에는 경로만 있다. `md-lake seal`의 `/etc/hl-oms/telegram.json`은 그대로(0600).
+5. 비밀 파일(토큰, 채팅 ID, Grafana 관리자 암호)은 `/etc/hl-oms/` 아래 권한 0640, 그룹 `hlobs`로 둔다. Alertmanager의 것은 `/etc/hl-oms/alertmanager-telegram-token`(봇 토큰 한 줄)과 `/etc/hl-oms/alertmanager-telegram-chat-id`(채팅 ID 한 줄)다(§10). 저장소에는 경로만 있다. `md-lake seal`의 `/etc/hl-oms/telegram.json`은 그대로(0600).
 6. `systemctl daemon-reload` 뒤 `systemctl enable --now`는 소유자가 X1에서 한다. **수집기를 vmalert보다 먼저 켠다.** 그러면 수집기 생존 알림 `MdCollectorDown`(P1)을 막을 필요가 없다. vmalert를 먼저 켰을 때만 이 한 줄로 10분(판단(모델 아님)) 막는다:
 
    ```sh
@@ -242,7 +244,7 @@ chrony가 시작한 뒤 첫 세 번의 갱신에서만 1초가 넘는 차이를 
 
 ## 9. 알림 (vmalert 규칙)
 
-등급(설계 §8.3): P1 = 원본 데이터를 잃거나 관측을 잃는 중(즉시, 소리). P2 = 저하(소리 없음). P3 = 추세(대시보드와 주간 검토만). `Watchdog`은 등급이 아니라 늘 울리는 신호다. Alertmanager의 경로와 억제는 §10에 둔다(그 설정 파일은 아직 없다). 문턱값은 설계가 정한 것(60초·2분 생존, 7일·2일, 2시간 봉인 지연, 5 ms 시각 오프셋) 말고는 판단(모델 아님)이고 주간 검토에서 고친다(소유자 질문 Q5).
+등급(설계 §8.3): P1 = 원본 데이터를 잃거나 관측을 잃는 중(즉시, 소리). P2 = 저하(소리 없음). P3 = 추세(대시보드와 주간 검토만). `Watchdog`은 등급이 아니라 늘 울리는 신호다. Alertmanager의 경로와 억제는 §10에 둔다. 문턱값은 설계가 정한 것(60초·2분 생존, 7일·2일, 2시간 봉인 지연, 5 ms 시각 오프셋) 말고는 판단(모델 아님)이고 주간 검토에서 고친다(소유자 질문 Q5).
 
 수집기 쪽 알림은 수집기가 VictoriaMetrics에 직접 넣는 값(`/api/v1/import`)으로 판단하고, 감사 알림은 qdp 감사기가 넣는 값으로, 스택 알림은 VictoriaMetrics가 긁는 값으로 판단한다. vmalert는 30초 전의 저장소를 보므로(`-rule.evalDelay` 기본값) 모든 알림은 조건이 생긴 뒤 30초 넘게 지나서 울린다. 수집기 생존 알림이 Alertmanager의 P1 수신자에 닿는 시간은 마지막 심박 뒤 약 90~170초다(판단(모델 아님), 설치 뒤 X1에서 잰다).
 
@@ -295,6 +297,26 @@ chrony가 시작한 뒤 첫 세 번의 갱신에서만 1초가 넘는 차이를 
 |---|---|---|---|---|
 | `MdErrorLogs` | P2 | 지난 5분에 `service:="md-collector" level:=error` 줄이 거래소별로 1개 이상 | 수집기가 error 줄을 남겼다. 5분 창이라 줄 하나나 한 번의 폭주가 발생 하나·해소 하나가 된다(30초마다 한 쌍이 아님) | VictoriaLogs에서 그 줄을 읽는다 |
 
+## 10. 알림 전달 (Alertmanager와 Telegram)
+
+`alertmanager/alertmanager.json`(설치 경로 `/etc/hl-oms-obs/alertmanager/alertmanager.json`)이 vmalert 둘이 보낸 알림을 등급에 따라 보낸다. 묶음 대기·간격·반복 시간은 판단(모델 아님)이고 주간 검토에서 고친다.
+
+| 순서 | 맞춤 조건 | 수신자 | 묶음 대기 / 간격 / 반복 | 보내는 곳 |
+|---|---|---|---|---|
+| 1 | `alertname="Watchdog"` | `deadman` | 0초 / 1분 / 1분 | 아무 데도(자리 표시, 아래) |
+| 2 | `severity="P1"` | `telegram-p1` | 10초 / 1분 / 30분 | Telegram, 소리 있음, 해소 문자 보냄 |
+| 3 | `alertname="LakeAuditFailed"` | `telegram-p2-noresolve` | 30초 / 5분 / 4시간 | Telegram, 소리 없음, 해소 문자 없음 |
+| 4 | `severity="P2"` | `telegram-p2` | 30초 / 5분 / 4시간 | Telegram, 소리 없음, 해소 문자 보냄 |
+| 그 밖 | P3와 나머지 | `null` | — | 아무 데도: 대시보드와 주간 검토만(설계 §8.3) |
+
+- 알림은 `alertname`과 `venue`로 묶는다. 문자 하나는 한 알림 이름, 한 거래소다.
+- 문자 모양(일반 글자, HTML 아님: 라벨 값이 서식으로 읽히지 않음). 첫 줄 `[MON P1] <알림 이름> <거래소> 발생 <N>건` 또는 `… 해소`, 그다음 알림마다 한 줄 `- <summary> (<MM-DD HH:MM:SS> UTC)`. 해소된 알림의 줄은 `(해소)`로 시작한다. 거래소 라벨이 없는 알림(예: `ObsComponentDown`)은 거래소 자리를 비운다. P2는 `[MON P2] `로 시작한다.
+- 직접 알림(`[MD P1]`, `[WATCH P1]`)과 같은 봇이다(설계 Q18: 같은 봇, 머리말로 구분). Alertmanager는 `telegram.json`을 읽지 못하므로 토큰과 채팅 ID는 각각 한 줄짜리 파일이다: `/etc/hl-oms/alertmanager-telegram-token`, `/etc/hl-oms/alertmanager-telegram-chat-id`(0640, 그룹 `hlobs`, §8). 저장소에는 경로만 있다. 배치 검사(R11)는 설정 안의 토큰·채팅 ID 값과 다른 API 주소를 거부한다.
+- **Telegram 도달성(운영 항목 X4).** 직접 알림은 `api.telegram.org`가 막히면 `149.154.167.220`으로 바로 간다. Alertmanager에는 그 우회가 없다: 설정한 이름으로만 보낸다. 이 PC에서 `api.telegram.org`가 막히면 `[MON …]` 문자는 오지 않는다. 그때 `AlertmanagerTelegramFailing`(P2)이 울리지만 그것도 Telegram으로는 오지 않으므로 대시보드에서만 보인다. 설치(X1) 때 경로마다 시험 알림을 하나씩 보내 확인하고, 막히면 로컬 중계나 차단 해소를 소유자가 정한다(추론, 측정 안 함).
+- **dead-man(소유자 결정 D3, 질문 Q1).** `Watchdog`은 늘 울리고 1분마다 `deadman` 수신자로 간다. 지금 이 수신자에는 연동이 없다(자리 표시). 그래서 스택 전체가 죽어도 바깥에서 알려 주는 것이 없다. 바깥 서비스를 정하면 `deadman`에 `webhook_configs`의 `url_file`(주소는 `/etc/hl-oms/` 아래 파일)을 더한다. `url`이나 `http_config`를 쓰지 않는다(R11).
+- **억제 규칙.** 거래소의 `MdCollectorDown`(P1)이 울리는 동안 같은 거래소의 P2·P3 알림 중 이름이 `Md.*`, `LakeSealLag`, `LakeDiskDaysLeft.*`인 것은 보내지 않는다(설계 §8.3 B3 "파생 알림 억제"). 이것들은 수집기 자신이 넣는 값(`md_*`, `lake_seal_lag_hours`, `lake_disk_free_bytes`)과 그 로그 줄로 판단하므로 수집기가 죽으면 함께 울릴 뿐이다. 막지 않는 것: P1 알림 모두(`LakeL0WriteError`, `LakeDiskDaysLeftCritical`), qdp 감사기가 넣는 값의 알림(`LakeAuditFailed`, `LakeAuditStale`, `LakeNotAudited`), 스택 알림. 거래소 라벨이 없는 알림은 막지 않는다.
+- **`LakeAuditFailed`는 해소 문자를 보내지 않는다.** 이 알림은 26시간 뒤 저절로 끝나지만 그것은 파일이 고쳐졌다는 뜻이 아니다(§9). 그래서 3번 경로가 P2 경로보다 먼저 이 알림을 받아 해소 문자가 없는 수신자로 보낸다. 끝난 뒤에도 `crypto/audit/venue=<v>/date=<d>.json`을 확인한다. 고쳐질 때만 끝나는 지표(현재 실패 수)는 qdp가 지표 이름을 정하므로 qdp 후속 작업이다.
+
 ## 11. 규칙 확인과 주간 소음 검토
 
 규칙 파일을 고친 뒤, 바이너리가 있는 곳에서(CI에는 바이너리가 없다):
@@ -308,6 +330,19 @@ vmalert-tool-prod unittest --files tests/market-data.test.json --files tests/lak
 
 - `-dryRun`은 MetricsQL·LogsQL 문법을 본다. 나쁜 식이면 `fatal` 줄이 나온다.
 - `vmalert-tool unittest`는 알림마다 울리는 경우와 울리지 않는 경우를 시계 없이 재생한다. 테스트 파일의 `exp_annotations`는 규칙의 `summary`와 글자까지 같아야 하므로 `summary`를 고치면 테스트 파일도 고친다. 로그 규칙에는 테스트가 없다(`-dryRun`만).
+Alertmanager 설정을 고친 뒤(같은 디렉터리의 `amtool`, 네트워크 없음):
+
+```sh
+cd deploy/observability/alertmanager
+amtool check-config alertmanager.json
+amtool config routes test --config.file=alertmanager.json alertname=Watchdog severity=watchdog   # deadman
+amtool config routes test --config.file=alertmanager.json alertname=MdCollectorDown severity=P1 venue=bybit   # telegram-p1
+amtool config routes test --config.file=alertmanager.json alertname=LakeAuditFailed severity=P2 venue=bybit   # telegram-p2-noresolve
+amtool config routes test --config.file=alertmanager.json alertname=MdGapsHigh severity=P2 venue=bybit   # telegram-p2
+amtool config routes test --config.file=alertmanager.json alertname=LakeNotAudited severity=P3 venue=bybit   # null
+```
+
+- `check-config`는 토큰·채팅 ID 파일이 없어도 통과한다(파일은 보낼 때 읽는다). 문자 틀은 `amtool template render --template.glob=<빈 파일> --template.text="<message 값>"`으로 그려 본다(amtool의 예시 데이터라 알림 이름은 비어 나온다).
 - `cargo test --locked -p xtask --test deploy`(§7)는 CI에서도 돈다. 규칙이 없는 지표를 쓰거나 등급이 없거나 설계의 식이 바뀌면 실패한다.
 
 주간 소음 검토(설계 §8.3): 매주 알림마다 울린 횟수와 조치 여부를 보고, 조치가 없던 알림은 문턱값을 고치거나 지운다. 고친 문턱값은 규칙 파일과 이 표에 함께 적는다.
