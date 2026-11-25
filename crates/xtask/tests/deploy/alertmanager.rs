@@ -1,5 +1,5 @@
 //! Alertmanager rules (ADR-035 D8): R10 the route tree, the receivers and
-//! the inhibit rule; R11 secrets only as file paths under `/etc/`, and no
+//! the inhibit rules; R11 secrets only as file paths under `/etc/`, and no
 //! token-shaped string or chat id in any deploy file.
 
 use std::collections::BTreeSet;
@@ -62,16 +62,34 @@ const TELEGRAM: &[(&str, &str, bool, bool)] = &[
     ("telegram-p2", "[MON P2] ", true, true),
     ("telegram-p2-noresolve", "[MON P2] ", true, false),
 ];
-/// R10: the one inhibit rule (design §8.3 B3): a dead collector holds back
-/// the P2 and P3 alerts derived from its own pushes (`md_*`,
-/// `lake_seal_lag_hours`, `lake_disk_free_bytes`, its error log lines) for
-/// the same venue. The qdp audit alerts stay visible.
-const INHIBIT_SOURCE: &[&str] = &["alertname=\"MdCollectorDown\""];
-const INHIBIT_TARGET: &[&str] = &[
-    "severity=~\"P2|P3\"",
-    "alertname=~\"Md.*|LakeSealLag|LakeDiskDaysLeft.*\"",
+/// R10: the inhibit rules, in this order (design §8.3 B3), each with
+/// `equal: ["venue"]`: (source, targets). A dead collector holds back the
+/// P2 and P3 alerts derived from its own pushes (`md_*`,
+/// `lake_seal_lag_hours`, `lake_disk_free_bytes`, its error log lines); the
+/// qdp audit alerts stay visible. A dead projector holds back the journal
+/// gauge alert, whose only writer it is. Market-data alerts are not held
+/// back while the OMS is down: the collector does not need the OMS
+/// (ADR-037).
+const INHIBITS: &[(&[&str], &[&str])] = &[
+    (
+        &["alertname=\"MdCollectorDown\""],
+        &[
+            "severity=~\"P2|P3\"",
+            "alertname=~\"Md.*|LakeSealLag|LakeDiskDaysLeft.*\"",
+        ],
+    ),
+    (
+        &["alertname=\"ProjectorDown\""],
+        &[
+            "severity=~\"P2|P3\"",
+            "alertname=~\"JournalDiskGaugeMissing\"",
+        ],
+    ),
 ];
 const INHIBIT_NAMES: &str = "Md.*|LakeSealLag|LakeDiskDaysLeft.*";
+/// Metrics the collector does not push: an alert on one of them is no
+/// collector alert (`obs_push_*` only with `service="md-collector"`).
+const NOT_COLLECTOR: &[&str] = &["lake_audit_", "oms_", "projector_", "watcher_", "journal_"];
 const INHIBIT_EQUAL: &[&str] = &["venue"];
 const INHIBIT_KEYS: &[&str] = &["source_matchers", "target_matchers", "equal"];
 /// R11: keys that would hold a secret in the file, or send it elsewhere
@@ -88,9 +106,6 @@ const FORBIDDEN_KEYS: &[&str] = &[
 /// R11: the keys of every Telegram config that name its secret files.
 const SECRET_FILES: &[&str] = &["bot_token_file", "chat_id_file"];
 
-/// The metrics qdp's auditor pushes: an alert on one of them is no
-/// collector alert.
-const QDP_PREFIX: &str = "lake_audit_";
 
 /// A matcher `name op "value"` of a route or an inhibit rule, read as
 /// Alertmanager reads it (spaces around the operator, value quoted or not).
@@ -319,41 +334,77 @@ fn r10_inhibit(p: &Parsed, doc: &Value, out: &mut Vec<Finding>) {
         .flatten()
         .collect();
     let want = |l: &[&str]| sorted(l.iter().map(|m| matcher(m)).collect());
-    let ok = match rules[..] {
-        [r] => {
-            sorted(matchers(r.get("source_matchers"))) == want(INHIBIT_SOURCE)
-                && sorted(matchers(r.get("target_matchers"))) == want(INHIBIT_TARGET)
-                && strs(r.get("equal")).as_deref() == Some(INHIBIT_EQUAL)
-                && r.as_object()
-                    .into_iter()
-                    .flatten()
-                    .all(|(k, _)| INHIBIT_KEYS.contains(&k.as_str()))
-        }
-        _ => false,
+    let one = |r: &Value, (source, target): (&[&str], &[&str])| {
+        sorted(matchers(r.get("source_matchers"))) == want(source)
+            && sorted(matchers(r.get("target_matchers"))) == want(target)
+            && strs(r.get("equal")).as_deref() == Some(INHIBIT_EQUAL)
+            && r.as_object()
+                .into_iter()
+                .flatten()
+                .all(|(k, _)| INHIBIT_KEYS.contains(&k.as_str()))
     };
+    let ok = rules.len() == INHIBITS.len() && rules.iter().zip(INHIBITS).all(|(r, &w)| one(r, w));
     if !ok {
         finding(
             out,
             AM,
             "R10",
             format!(
-                "inhibit_rules must be exactly one rule: source {INHIBIT_SOURCE:?}, target {INHIBIT_TARGET:?}, equal {INHIBIT_EQUAL:?}"
+                "inhibit_rules must be exactly these rules, in this order, each with equal {INHIBIT_EQUAL:?}: {INHIBITS:?}"
             ),
         );
     }
-    // An alert on a qdp metric whose name the pattern matches would go
-    // quiet while the collector is down.
     let (rules, _) = crate::rules::collect(p);
+    let alerts: Vec<&str> = rules.iter().filter_map(|r| r.alert()).collect();
+    // Every name of a pinned target pattern is an alert of the rule files.
+    for (_, target) in INHIBITS {
+        for m in target.iter().filter_map(|m| matcher(m)) {
+            if m.name != "alertname" {
+                continue;
+            }
+            for alt in m.value.split('|') {
+                if !alerts.iter().any(|a| regex_matches(alt, a)) {
+                    finding(
+                        out,
+                        AM,
+                        "R10",
+                        format!("inhibit target {alt} names no alert of the rule files"),
+                    );
+                }
+            }
+        }
+    }
+    // An alert on a metric the collector does not push, whose name the
+    // collector's pattern matches, would go quiet while the collector is
+    // down.
     for r in &rules {
         let Some(name) = r.alert() else { continue };
-        if regex_matches(INHIBIT_NAMES, name) && r.expr().unwrap_or("").contains(QDP_PREFIX) {
+        if !regex_matches(INHIBIT_NAMES, name) || r.vlogs {
+            continue;
+        }
+        let s = crate::expr::scan(r.expr().unwrap_or(""));
+        let other = s
+            .names
+            .iter()
+            .find(|n| NOT_COLLECTOR.iter().any(|p| n.starts_with(p)));
+        let all_services = s.names.iter().any(|n| n.starts_with("obs_push_"))
+            && !s
+                .matchers
+                .iter()
+                .any(|(l, op, v)| l == "service" && op == "=" && v == "md-collector");
+        if let Some(n) = other {
             finding(
                 out,
                 r.file,
                 "R10",
-                format!(
-                    "{name} reads a {QDP_PREFIX}* metric but the inhibit rule holds it back with the collector"
-                ),
+                format!("{name} reads {n}, which the collector does not push, but the inhibit rule holds it back with the collector"),
+            );
+        } else if all_services {
+            finding(
+                out,
+                r.file,
+                "R10",
+                format!("{name} reads obs_push_* without service=\"md-collector\": another service's drops would be held back with the collector"),
             );
         }
     }
@@ -846,6 +897,11 @@ fn inhibit_mut(v: &mut Value) -> &mut Value {
     &mut v["inhibit_rules"][0]
 }
 
+/// The projector's inhibit rule.
+fn projector(v: &mut Value) -> &mut Value {
+    &mut v["inhibit_rules"][1]
+}
+
 #[test]
 fn the_inhibit_rule_holds_back_only_collector_alerts() {
     // Widened to every alert: the audit alerts would go quiet with the
@@ -931,6 +987,95 @@ fn the_inhibit_rule_holds_back_only_collector_alerts() {
         ("XMd", false),
     ] {
         assert_eq!(regex_matches(re, name), held, "{name}");
+    }
+}
+
+/// The real tree with one rule file changed through its JSON value.
+fn edit_rules(t: &mut Tree, file: &str, f: impl FnOnce(&mut Value)) {
+    let mut v: Value = serde_json::from_str(&t.files[file]).unwrap();
+    f(&mut v);
+    t.set(file, &serde_json::to_string_pretty(&v).unwrap());
+}
+
+#[test]
+fn the_oms_inhibit_rules_hold_back_only_derived_alerts() {
+    // Widened to every P2 and P3 alert: a dead projector would hide the
+    // collector's and the audit's alerts too.
+    plant(
+        |v| projector(v)["target_matchers"] = json!(["severity=~\"P2|P3\"", "alertname=~\".*\""]),
+        &["R10"],
+    );
+    // P1 too; another source; no venue match.
+    plant(
+        |v| {
+            projector(v)["target_matchers"] =
+                json!(["severity=~\"P1|P2|P3\"", "alertname=~\"JournalDiskGaugeMissing\""])
+        },
+        &["R10"],
+    );
+    plant(
+        |v| projector(v)["source_matchers"] = json!(["alertname=\"OmsDown\""]),
+        &["R10"],
+    );
+    plant(|v| projector(v)["equal"] = json!([]), &["R10"]);
+    // A third rule; the two in the other order; the projector's rule gone.
+    plant(
+        |v| {
+            let r = projector(v).clone();
+            v["inhibit_rules"].as_array_mut().unwrap().push(r);
+        },
+        &["R10"],
+    );
+    plant(
+        |v| v["inhibit_rules"].as_array_mut().unwrap().swap(0, 1),
+        &["R10"],
+    );
+    plant(
+        |v| {
+            v["inhibit_rules"].as_array_mut().unwrap().pop();
+        },
+        &["R10"],
+    );
+    // A stale name: the rule file's alert renamed (R6 sees the venue's
+    // rule gone).
+    let oms = "deploy/observability/vmalert/metrics/oms.rules.json";
+    let mut t = Tree::real();
+    t.replace(
+        oms,
+        "\"alert\": \"JournalDiskGaugeMissing\"",
+        "\"alert\": \"JournalDiskGaugeGone\"",
+    );
+    let f = crate::check(&t);
+    assert_rules(&f, &["R6", "R10"]);
+    assert!(
+        f.iter()
+            .any(|x| x.rule == "R10" && x.text.contains("JournalDiskGaugeMissing")),
+        "{f:?}"
+    );
+    // The collector's pattern widened: OMS alerts go quiet with the
+    // collector.
+    plant(
+        |v| inhibit_mut(v)["target_matchers"] = json!(["severity=~\"P2|P3\"", "alertname=~\".*\""]),
+        &["R10"],
+    );
+    // An Md* alert that reads an OMS series, or every service's drops.
+    let md = "deploy/observability/vmalert/metrics/market-data.rules.json";
+    for e in [
+        "max by (venue) (projector_lag_records) > 100",
+        "sum by (venue, endpoint) (increase(obs_push_dropped_total[10m])) > 0",
+        "sum by (venue, endpoint) (increase(obs_push_dropped_total{service=\"oms-projector\"}[10m])) > 0",
+    ] {
+        let mut t = Tree::real();
+        edit_rules(&mut t, md, |v| {
+            let r = v["groups"][0]["rules"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|r| r["alert"] == "MdObsPushDropping")
+                .unwrap();
+            r["expr"] = json!(e);
+        });
+        assert_rules(&crate::check(&t), &["R10"]);
     }
 }
 

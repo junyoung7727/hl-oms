@@ -1529,13 +1529,14 @@ fn the_design_lake_and_disk_rules_are_present() {
             &["R7"],
         );
     }
-    // Removed, moved to another group, a group's interval changed.
+    // Removed (the collector's inhibit rule then names a stale alert),
+    // moved to another group, a group's interval changed.
     let mut t = Tree::real();
     edit(&mut t, LAKE, |v| {
         let rules = v["groups"][1]["rules"].as_array_mut().unwrap();
         rules.retain(|r| r["alert"] != "LakeSealLag");
     });
-    assert_rules(&crate::check(&t), &["R7"]);
+    assert_rules(&crate::check(&t), &["R7", "R10"]);
     let mut t = Tree::real();
     edit(&mut t, LAKE, |v| {
         let r = v["groups"][1]["rules"].as_array_mut().unwrap().remove(0);

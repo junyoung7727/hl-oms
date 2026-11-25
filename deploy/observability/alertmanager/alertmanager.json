@@ -56,6 +56,18 @@
       "equal": [
         "venue"
       ]
+    },
+    {
+      "source_matchers": [
+        "alertname=\"ProjectorDown\""
+      ],
+      "target_matchers": [
+        "severity=~\"P2|P3\"",
+        "alertname=~\"JournalDiskGaugeMissing\""
+      ],
+      "equal": [
+        "venue"
+      ]
     }
   ],
   "receivers": [
