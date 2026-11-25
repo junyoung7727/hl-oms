@@ -3,7 +3,10 @@
 //! storage paths, store and vmalert flags, venues, the install map, service
 //! identity, the audit's checkout, state and lake writes, the text of command
 //! lines, the stack units' restart and sandbox settings, and the bounds of
-//! the seal, archiver and audit runs (ADR-035).
+//! the seal, archiver and audit runs (ADR-035); the OMS units: the OMS
+//! started by a person only, the watcher's restart, their identities and the
+//! stop permission, the journal mount and state directories, their sandbox
+//! (ADR-036).
 
 use std::collections::BTreeSet;
 
@@ -228,6 +231,14 @@ const EXPORT_WRITES: &[&str] = &["/mnt/nvme/lake/crypto/trading", RUN_LOCK];
 /// the OMS and the watcher).
 const MARKER_DIR: &str = "hl-oms";
 
+/// U24: the sandbox of the four OMS units.
+const OMS_SANDBOX: &[(&str, &str, Want)] = &[
+    ("Service", "NoNewPrivileges", Is("yes")),
+    ("Service", "ProtectSystem", Is("strict")),
+    ("Service", "ProtectHome", Is("yes")),
+    ("Service", "PrivateTmp", Is("yes")),
+];
+
 /// Files under `deploy/observability/` that are not installed (U14).
 const NOT_INSTALLED: &[&str] = &["README.md", "install.toml", "venues.toml", "metrics.toml"];
 const NOT_INSTALLED_DIRS: &[&str] = &["vmalert/tests/"];
@@ -292,6 +303,7 @@ pub fn check(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
     u21_watcher_restart(p, out);
     u22_identities(t, p, out);
     u23_journal_and_state(p, out);
+    u24_sandbox(p, out);
 }
 
 /// A systemd size: bytes, or a number with `K`, `M` or `G` (base 1024).
@@ -1503,6 +1515,37 @@ fn u23_journal_and_state(p: &Parsed, out: &mut Vec<Finding>) {
         );
         // The projector reads /proc/locks for the journal's LOCK.
         expect(u, "U23", ("Service", "ProcSubset", Absent), out);
+    }
+}
+
+fn u24_sandbox(p: &Parsed, out: &mut Vec<Finding>) {
+    for name in std::iter::once(&OMS).chain(JOURNAL_READERS) {
+        for u in named(p, name) {
+            for &row in OMS_SANDBOX {
+                expect(u, "U24", row, out);
+            }
+        }
+    }
+    // The OMS's stop covers its drain, final snapshot and up to 30 s of alert
+    // flush; the two hold a Bybit API secret, which a core dump would write.
+    for (name, stop) in [(OMS, "60"), (WATCHER, "30")] {
+        for u in named(p, name) {
+            expect(u, "U24", ("Service", "LimitCORE", Is("0")), out);
+            expect(u, "U24", ("Service", "TimeoutStopSec", Is(stop)), out);
+        }
+    }
+    for u in named(p, PROJECTOR) {
+        expect(u, "U24", ("Service", "Slice", Is("trading.slice")), out);
+    }
+    for u in named(p, EXPORT) {
+        if u.ini.values("Service", "Slice").contains(&"trading.slice") {
+            finding(
+                out,
+                &u.path,
+                "U24",
+                "the export is a daily job: not in trading.slice",
+            );
+        }
     }
 }
 
@@ -3393,4 +3436,43 @@ fn the_export_can_take_the_daily_lock() {
         );
         assert_rules(&crate::check(&t), rules);
     }
+}
+
+#[test]
+fn the_oms_units_are_sandboxed() {
+    for &name in JOURNAL_UNITS {
+        for (from, to) in [
+            ("NoNewPrivileges=yes\n", ""),
+            ("ProtectSystem=strict\n", "ProtectSystem=full\n"),
+            ("ProtectHome=yes\n", "ProtectHome=read-only\n"),
+            ("PrivateTmp=yes\n", ""),
+        ] {
+            plant(name, from, to, &["U24"]);
+        }
+    }
+    // Both hold a Bybit API secret: no core dump of an abort.
+    for name in ["oms-node.service", "watcher.service"] {
+        plant(name, "LimitCORE=0\n", "", &["U24"]);
+        plant(name, "LimitCORE=0\n", "LimitCORE=infinity\n", &["U24"]);
+    }
+    plant(
+        "oms-node.service",
+        "TimeoutStopSec=60\n",
+        "TimeoutStopSec=10\n",
+        &["U24"],
+    );
+    plant(
+        "watcher.service",
+        "TimeoutStopSec=30\n",
+        "TimeoutStopSec=90\n",
+        &["U24"],
+    );
+    plant("oms-projector.service", "Slice=trading.slice\n", "", &["U24"]);
+    // The export's 4G is the daily-job cap, not a trading reservation.
+    plant(
+        "oms-export.service",
+        "Nice=10\n",
+        "Nice=10\nSlice=trading.slice\n",
+        &["U24"],
+    );
 }
