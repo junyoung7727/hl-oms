@@ -440,11 +440,17 @@ absence_not_found_needed = 2
             .append(true)
             .open(self.dir.join("node.log"))
             .unwrap();
-        let child = Command::new(env!("CARGO_BIN_EXE_oms-node"))
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_oms-node"));
+        // An empty wiring starts the node without the variable.
+        if self.wiring.is_empty() {
+            cmd.env_remove("OMS_TEST_BYBIT_WIRING");
+        } else {
+            cmd.env("OMS_TEST_BYBIT_WIRING", &self.wiring);
+        }
+        let child = cmd
             .arg("run")
             .arg("--config")
             .arg(self.dir.join("oms.toml"))
-            .env("OMS_TEST_BYBIT_WIRING", &self.wiring)
             .envs(env.iter().copied())
             .stderr(log)
             .stdout(Stdio::null())
@@ -573,6 +579,30 @@ fn order_op(key: &str, ttl_ms: u64) -> Op {
 /// reaches the file faster than the round trip, so a send before the
 /// write would pass it too. Test 2 proves that nothing leaves before the
 /// record is durable.
+/// A failpoints node never falls back to the network's endpoints: without
+/// `OMS_TEST_BYBIT_WIRING` its gateway refuses to start (exit 3), before it
+/// reads the credentials. The credentials file is removed first, so a node
+/// whose refusal were gone would also stop at the credentials, before any
+/// socket: the test cannot reach a real host whatever the gateway does.
+#[test]
+fn a_failpoints_node_without_test_wiring_refuses_its_gateway() {
+    let venue = Venue::start(Arc::new(|v: &Value| Some(placed(v))));
+    let mut node = Node::new("nowiring", &venue);
+    std::fs::remove_file(node.dir.join("bybit.toml")).unwrap();
+    node.wiring = String::new();
+    node.start(&[]);
+    let code = node.wait_exit(Duration::from_secs(20));
+    let log = node.log_tail(50);
+    assert_eq!(code, Some(3), "{log}");
+    assert!(
+        log.contains("a failpoints build talks only to loopback fakes: OMS_TEST_BYBIT_WIRING is required"),
+        "{log}"
+    );
+    assert!(!log.contains("credentials"), "the credentials were read: {log}");
+    assert!(!log.contains("uses the test endpoints"), "{log}");
+    assert!(venue.api.requests().is_empty());
+}
+
 #[test]
 fn an_order_waits_for_the_reference_price_and_goes_out_once() {
     let seen: Arc<Mutex<Vec<(String, bool)>>> = Arc::default();

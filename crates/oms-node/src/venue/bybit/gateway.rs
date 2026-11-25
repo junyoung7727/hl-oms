@@ -158,10 +158,27 @@ impl Wiring {
             ip_echo_url: w.ip_echo_url,
         })
     }
+
+    /// Test-only: the wiring a build with the `failpoints` feature uses,
+    /// from `var`, the value of [`TEST_WIRING`]. Such a build talks only to
+    /// loopback fakes: without the variable it refuses to start the
+    /// gateway (no fall back to the network's endpoints), and it refuses
+    /// mainnet even with a loopback wiring.
+    #[cfg(any(test, feature = "failpoints"))]
+    pub fn test_build(var: Option<&str>, network: &str) -> Result<Wiring, String> {
+        if network == "mainnet" {
+            return Err("a failpoints build never runs on mainnet".into());
+        }
+        let Some(text) = var else {
+            return Err(format!("a failpoints build talks only to loopback fakes: {TEST_WIRING} is required"));
+        };
+        Wiring::of_test(text)
+    }
 }
 
 /// The environment variable that replaces the network's endpoints, read
-/// only by a build with the `failpoints` feature (the node tests).
+/// only by a build with the `failpoints` feature (the node tests), which
+/// refuses to start a Bybit gateway without it.
 #[cfg(any(test, feature = "failpoints"))]
 pub const TEST_WIRING: &str = "OMS_TEST_BYBIT_WIRING";
 
@@ -1137,17 +1154,16 @@ pub fn spawn(
     max_concurrent: usize,
     notice: NoticeSink,
 ) -> Result<Started, String> {
+    #[cfg(not(feature = "failpoints"))]
     let wiring = Wiring::of(&cfg)?;
-    // Only a build with the failpoints feature (the node tests) reads it;
-    // the shipped binary has no such code.
+    // Only a build with the failpoints feature (the node tests) reads it,
+    // and such a build never uses the network's endpoints; the shipped
+    // binary has no such code. Before the credentials are read.
     #[cfg(feature = "failpoints")]
-    let wiring = match std::env::var(TEST_WIRING) {
-        Ok(text) => {
-            let w = Wiring::of_test(&text)?;
-            warn!("the Bybit gateway uses the test endpoints", "wiring": format!("{w:?}"));
-            w
-        }
-        Err(_) => wiring,
+    let wiring = {
+        let w = Wiring::test_build(std::env::var(TEST_WIRING).ok().as_deref(), &cfg.network)?;
+        warn!("the Bybit gateway uses the test endpoints", "wiring": format!("{w:?}"));
+        w
     };
     let creds = Arc::new(Credentials::load(&cfg.credentials_file)?);
     spawn_with(cfg, creds, wiring, symbols, ports, max_concurrent, None, notice)
@@ -3113,6 +3129,42 @@ mod tests {
         v["extra"] = json!("http://127.0.0.1:6");
         assert!(Wiring::of_test(&v.to_string()).is_err(), "an unknown key");
         assert_eq!(TEST_WIRING, "OMS_TEST_BYBIT_WIRING");
+    }
+
+    fn loopback_wiring() -> String {
+        json!({
+            "rest": "http://127.0.0.1:1",
+            "private_ws": "ws://127.0.0.1:2/v5/private",
+            "trade_ws": "ws://127.0.0.1:3/v5/trade",
+            "public_ws": "ws://127.0.0.1:4/v5/public/linear",
+            "ip_echo_url": "http://127.0.0.1:5/ip",
+        })
+        .to_string()
+    }
+
+    /// A failpoints build takes the wiring on testnet only: mainnet is
+    /// refused even with a loopback wiring.
+    #[test]
+    fn a_test_wiring_on_mainnet_is_refused() {
+        let w = loopback_wiring();
+        let e = Wiring::test_build(Some(&w), "mainnet").expect_err("mainnet taken");
+        assert_eq!(e, "a failpoints build never runs on mainnet");
+        let e = Wiring::test_build(None, "mainnet").expect_err("mainnet taken");
+        assert_eq!(e, "a failpoints build never runs on mainnet");
+        let ok = Wiring::test_build(Some(&w), "testnet").unwrap();
+        assert_eq!(ok.rest, "http://127.0.0.1:1");
+        assert_eq!(ok.ip_echo_url, "http://127.0.0.1:5/ip");
+        // The wiring's own rules still hold.
+        let e = Wiring::test_build(Some(&w.replace("127.0.0.1:1", "api.bybit.com")), "testnet").unwrap_err();
+        assert!(e.starts_with(TEST_WIRING), "{e}");
+    }
+
+    /// Without `OMS_TEST_BYBIT_WIRING` a failpoints build does not fall
+    /// back to the network's endpoints: it refuses to start the gateway.
+    #[test]
+    fn a_failpoints_build_without_wiring_is_refused() {
+        let e = Wiring::test_build(None, "testnet").expect_err("no wiring taken");
+        assert_eq!(e, "a failpoints build talks only to loopback fakes: OMS_TEST_BYBIT_WIRING is required");
     }
 
     // ---- the reference price (U17c) ----------------------------------------------
