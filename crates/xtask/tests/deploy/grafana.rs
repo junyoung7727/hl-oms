@@ -36,6 +36,29 @@ const PLACEHOLDER: &str = "192.0.2.1";
 /// (alerts are vmalert's and Alertmanager's, design table 8-5) and access
 /// without a login.
 const OFF: &[&str] = &["unified_alerting", "auth.anonymous"];
+/// G2: the only keys `grafana.ini` may set. Grafana has more login paths
+/// than `[auth.anonymous]` (`[auth.proxy]` logs in anyone who sends a
+/// header, OAuth sections, embedding) and the check reads only what it
+/// names, so any other key is a finding (U20a3 review 1 N1).
+const INI_KEYS: &[(&str, &str)] = &[
+    ("server", "http_addr"),
+    ("server", "http_port"),
+    ("paths", "data"),
+    ("paths", "plugins"),
+    ("paths", "provisioning"),
+    ("security", "admin_password"),
+    ("security", "disable_gravatar"),
+    ("auth.anonymous", "enabled"),
+    ("unified_alerting", "enabled"),
+    ("alerting", "enabled"),
+    ("analytics", "reporting_enabled"),
+    ("analytics", "check_for_updates"),
+    ("analytics", "check_for_plugin_updates"),
+    ("news", "news_feed_enabled"),
+    ("plugins", "preinstall_disabled"),
+    ("plugins", "public_key_retrieval_disabled"),
+    ("log", "mode"),
+];
 
 /// G3: the admin password is read from a file under `/etc/` (mode 0640,
 /// group `hlobs`, created by the operator); the repository holds the path
@@ -216,6 +239,17 @@ fn g1_listener(p: &Parsed, ini: &Ini, out: &mut Vec<Finding>) {
 }
 
 fn g2_off(ini: &Ini, out: &mut Vec<Finding>) {
+    for (section, key, _) in &ini.entries {
+        if !INI_KEYS.contains(&(section.as_str(), key.as_str())) {
+            // Not the value: it may be a secret.
+            finding(
+                out,
+                INI,
+                "G2",
+                format!("[{section}] {key}: not one of the keys grafana.ini may set"),
+            );
+        }
+    }
     for section in OFF {
         let v = ini.values(section, "enabled");
         if v != ["false"] {
@@ -844,6 +878,24 @@ fn grafana_alerting_and_anonymous_access_are_off() {
         (anonymous, "[auth.anonymous]\nenabled = true\n"),
         (anonymous, "[auth.anonymous]\nenabled = False\n"),
         (anonymous, ""),
+        // Another login path, or any key the file does not list: the
+        // check reads only the listed keys.
+        (
+            anonymous,
+            "[auth.anonymous]\nenabled = false\n[auth.proxy]\nenabled = true\n",
+        ),
+        (
+            anonymous,
+            "[auth.anonymous]\nenabled = false\n[auth.generic_oauth]\nenabled = true\n",
+        ),
+        (
+            anonymous,
+            "[auth.anonymous]\nenabled = false\norg_role = Admin\n",
+        ),
+        (
+            "disable_gravatar = true\n",
+            "disable_gravatar = true\nallow_embedding = true\n",
+        ),
     ] {
         plant(INI, from, to, &["G2"]);
     }
