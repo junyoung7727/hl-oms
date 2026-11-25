@@ -3596,6 +3596,33 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "oms-node", "--lib", "alerts::tests::a_failpoints_build_without_a_test_api_is_refused"],
         guards: "C-GW / V-TESTHOOK-1",
     },
+    Mutant {
+        id: "M397-watcher-test-systemctl-real",
+        what: "the watcher's test build takes /usr/bin/systemctl, a link to it or any file under /usr, /bin or /sbin as its systemctl: a joint test's W5 would stop the real unit on this host (V-TESTHOOK-1, U19c1 review 1 M1)",
+        file: "crates/watcher/src/runtime.rs",
+        find: "        if !plain || !executable || link || system {",
+        replace: "        if !plain || !executable {",
+        test: &["-p", "watcher", "--test", "test_endpoints", "the_systemctl_must_be_an_absolute_executable_file"],
+        guards: "C-WATCH / V-TESTHOOK-1",
+    },
+    Mutant {
+        id: "M398-oms-failpoints-spawn-ignores-network",
+        what: "a failpoints OMS's gateway spawn hands \"testnet\" to Wiring::test_build instead of the configured network: a mainnet config with a loopback wiring starts (V-TESTHOOK-1, U19c1 review 1 S1; every endpoint of the test stays 127.0.0.1)",
+        file: "crates/oms-node/src/venue/bybit/gateway.rs",
+        find: "Wiring::test_build(std::env::var(TEST_WIRING).ok().as_deref(), &cfg.network)?",
+        replace: "Wiring::test_build(std::env::var(TEST_WIRING).ok().as_deref(), \"testnet\")?",
+        test: &["-p", "oms-node", "--features", "failpoints", "--test", "bybit_node", "a_failpoints_node_refuses_mainnet_even_with_a_loopback_wiring"],
+        guards: "C-GW / V-TESTHOOK-1",
+    },
+    Mutant {
+        id: "M399-oms-failpoints-alerts-refusal-ignored",
+        what: "a failpoints OMS's start_alerts ignores the refusal of test_build_route: without OMS_TEST_TELEGRAM_API the sender keeps the real Bot API routes (V-TESTHOOK-1, U19c1 review 1 S1; a lib test, no alert is activated, nothing is sent)",
+        file: "crates/oms-node/src/node.rs",
+        find: "        let base = alerts::test_build_route(a.test_api.as_deref())?;\n        warn!(\"the direct alerts use the test endpoint\", \"url\": base.to_string());\n        ac.routes = vec![alert_direct::Route::direct(base)?];",
+        replace: "        if let Ok(base) = alerts::test_build_route(a.test_api.as_deref()) {\n            warn!(\"the direct alerts use the test endpoint\", \"url\": base.to_string());\n            ac.routes = vec![alert_direct::Route::direct(base)?];\n        }",
+        test: &["-p", "oms-node", "--features", "failpoints", "--lib", "node::tests::a_failpoints_start_alerts_without_a_test_api_starts_no_sender"],
+        guards: "C-GW / V-TESTHOOK-1",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
