@@ -1,9 +1,9 @@
 # 워처 운영
 
 주인: 준영
-검토일: 2026-11-24
+검토일: 2026-11-25
 
-설계: [ADR-031](../adr/ADR-031-watcher.md). 계약: C-WATCH. 이 문서는 워처의 설정과 자격 파일(U19a4), 시작 확인과 그 거부, 시작 확인이 내보내는 지표(U19a4b), 실행과 상황별 의미(U19a7), 직접 알림의 토큰 파일(U19b1a, [ADR-032](../adr/ADR-032-watcher-kill-and-alerts.md))을 적는다. U19a7부터 `watcher --config`가 돈다: W1(열린 주문)과 W2(포지션), U19a8부터 W4(체결), U19a9부터 W3(지갑과 증거금)을 검사하고, 확정된 차이를 `admin.sock`에 보내고, `monitor.sock`에 하트비트를 보낸다. loopback 가짜로만 시험했고 실제 거래소에서 돌려 본 적이 없다. 서비스 설치와 알림 규칙은 U20b다.
+설계: [ADR-031](../adr/ADR-031-watcher.md). 계약: C-WATCH. 이 문서는 워처의 설정과 자격 파일(U19a4), 시작 확인과 그 거부, 시작 확인이 내보내는 지표(U19a4b), 실행과 상황별 의미(U19a7), 직접 알림의 토큰 파일(U19b1a, [ADR-032](../adr/ADR-032-watcher-kill-and-alerts.md))을 적는다. U19a7부터 `watcher --config`가 돈다: W1(열린 주문)과 W2(포지션), U19a8부터 W4(체결), U19a9부터 W3(지갑과 증거금)을 검사하고, 확정된 차이를 `admin.sock`에 보내고, `monitor.sock`에 하트비트를 보낸다. loopback 가짜로만 시험했고 실제 거래소에서 돌려 본 적이 없다. 서비스 단위는 `deploy/observability/systemd/watcher.service`, 설치 절차는 [observability.md](observability.md) §13이다.
 
 ## 설정 파일
 
@@ -17,10 +17,10 @@ credentials_file = "/etc/hl-oms/watcher-bybit.toml"   # 데이터 디렉터리 �
 sub_account_uid = 4242                            # OMS와 같은 하위 계정의 UID
 symbols = ["BTCUSDT", "ETHUSDT"]                  # OMS가 거래하는 기호, linear/USDT
 ip_echo_url = "https://ip.example/"               # https만, 본문 = 공인 IP
-data_dir = "/var/lib/hl-oms/data"                 # OMS 데이터 디렉터리(읽기만 함)
+data_dir = "/mnt/nvme/hl-oms-journal/data"        # OMS 데이터 디렉터리(읽기만 함, observability.md §13.2)
 status_url = "http://127.0.0.1:8188/api/status"   # loopback, 포트 필수, 80은 안 됨
-# admin_socket = "/var/lib/hl-oms/data/admin.sock"      # 기본: <data_dir>/admin.sock
-# monitor_socket = "/var/lib/hl-oms/data/monitor.sock"  # 기본: <data_dir>/monitor.sock
+# admin_socket = "/mnt/nvme/hl-oms-journal/data/admin.sock"      # 기본: <data_dir>/admin.sock
+# monitor_socket = "/mnt/nvme/hl-oms-journal/data/monitor.sock"  # 기본: <data_dir>/monitor.sock
 # host = "tokyo-1"                                # 기본: /etc/hostname
 
 # [intervals]  w1_ms = 1000  w2_ms = 1000  w3_ms = 2000  w4_ms = 5000
@@ -38,7 +38,7 @@ token_file = "/etc/hl-oms/watcher-telegram.json"  # 데이터 디렉터리 밖, 
 
 [kill]                                            # mainnet은 필수(U19b3a), testnet은 없으면 warn 한 줄(W5 꺼짐)
 marker = "/var/lib/hl-oms/kill.marker"            # OMS 설정의 [kill] marker와 같은 파일(data_dir 밖, 디렉터리가 있어야 함)
-oms_unit = "hl-oms.service"                       # 워처가 멈출 수 있는 단위 하나
+oms_unit = "oms-node.service"                     # 워처가 멈출 수 있는 단위 하나(polkit 규칙, observability.md §13.1)
 # systemd = "system"                              # system | user(systemctl --user)
 # stop_wait_ms = 10000
 # round_ms = 1000  watch_ms = 30000  watch_every_ms = 5000  notice_ms = 60000
@@ -219,12 +219,12 @@ watcher --config /etc/hl-oms/watcher.toml     # OMS와 같은 사용자로
 watcher --version
 ```
 
-- **같은 uid**: `admin.sock`과 `monitor.sock`은 노드 자신의 uid만 받는다(`oms-node/src/server.rs:188-191`). 그래서 워처는 OMS를 돌리는 사용자로 돌고, 두 프로세스는 서로의 자격 파일을 읽을 수 있다. 알려진 한계이고 U20b(서비스 배치)에 넘긴다.
+- **같은 uid**: `admin.sock`과 `monitor.sock`은 노드 자신의 uid만 받는다(`oms-node/src/server.rs:188-191`). 그래서 워처는 OMS를 돌리는 사용자로 돌고(두 단위 모두 `hloms`), 두 프로세스는 서로의 자격 파일을 읽을 수 있다. 알려진 한계다(ADR-036: 나누려면 소켓의 uid 규칙을 바꾸는 코드 변경이 필요).
 - OMS에 `[core.policy.monitor]`가 없으면 `monitor.sock`이 없다. 워처는 하트비트마다 한 번 연결을 시도하고, 상태가 바뀔 때만 `warn: monitor.sock … not connected …` 한 줄을 쓴다.
 - 시작 순서: 설정과 키 파일 → 지표 밀어 넣기(여기서부터) → 시작 확인(위) → `/api/status` 기다림(1초마다 다시, `warn: waiting for /api/status: …`는 10초에 하나) → 저널을 기록 1부터 재생(`the OMS answers /api/status: replaying the journal up to record N`, `boot replay done at record N; the checks start`) → 검사와 하트비트. IP 재확인은 시작 확인 뒤 내내 돈다(OMS가 내려가 있어도).
 - 재생 중과 OMS를 기다리는 동안에는 하트비트가 없다. 그동안 OMS의 게이트는 감시 안 됨이다(런북 7.16). 재생은 기록 100만 건에 약 1.3초다(C-WATCH 2부).
 - **시작 순서**: OMS를 먼저 띄우고 `/api/status`가 답할 때까지 기다린 뒤 워처를 띄운다. 워처가 먼저 뜨거나, 사람이 띄운 OMS가 아직 부팅 중일 때 워처를 다시 띄우거나, `status_url`이 틀리면 워처는 `[kill]`이 있을 때 `silence_ms` 뒤 건강하거나 부팅 중인 OMS를 킬한다(런북 7.18). OMS를 일부러 멈출 때는 워처를 먼저 멈춘다.
-- **systemd(U20b)**: 워처가 할 수 있어야 하는 것은 `[kill] oms_unit` 하나의 `stop`뿐이다(polkit이나 사용자 단위로 U20b가 준다; 그 전에는 K3가 실패하고 알림이 `OMS 정지 실패`·`OMS 정지 미확인`이라고 말한다). 워처 단위는 종료 코드 2에 다시 띄우지 않는다(`RestartPreventExitStatus=2`): 시작 거부의 P1이 재시작마다 오지 않게.
+- **systemd**: 워처가 할 수 있는 것은 `oms-node.service`의 `stop`뿐이다(polkit 규칙 `50-hl-oms-watcher-stop.rules`, [observability.md](observability.md) §13.1; 설치되지 않았거나 맞지 않으면 K3가 실패하고 알림이 `OMS 정지 실패`·`OMS 정지 미확인`이라고 말한다, A-22). 워처 단위는 실패하면 5초 뒤 다시 뜨지만 종료 코드 2에는 다시 띄우지 않는다(`RestartPreventExitStatus=2`): 시작 거부의 P1이 재시작마다 오지 않게. 부팅 때 활성화되고 OMS는 그렇지 않으므로, 저널이 마운트된 재부팅 뒤에는 워처가 꺼진 OMS를 킬한다(ADR-036).
 - 킬 중의 종료(U19b3d): 도는 킬을 먼저 중단 알림 하나로 끝낸다(K1 중이면 그 결과나 기한까지, 최대 2초). `systemctl` 클라이언트는 죽이지 않고 마커는 남긴다. 포지션을 읽던 알림과 기다리던 알림은 `포지션 조회 안 함(워처 종료 중)`과 함께 바로 간다(킬이 막 끝나 마지막 알림이 읽기를 기다릴 때도). 그 뒤 아래와 같고, 송신기를 5초까지 비우고, 실행기를 `shutdown_timeout(1초)`로 끝낸다(디스크에 걸린 마커 쓰기가 종료를 잡지 않게).
 - 종료: SIGTERM이나 SIGINT. 새 라운드 없이 진행 중 요청을 `request_timeout_ms`까지 기다리고, 지표를 한 번 더 밀어 넣고, 모니터 연결을 닫고 코드 0으로 끝난다. 아무것도 저장하지 않는다(다음 시작이 처음부터 다시 읽는다).
 - 종료 코드 2: 사용법, 설정 파일, 키 파일, 시작 규칙(위의 표). 이유는 stderr 한 줄(`watcher: …` 또는 `watcher: error: …`).

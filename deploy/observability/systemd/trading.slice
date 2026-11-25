@@ -6,4 +6,5 @@ Description=Trading services: weighted CPU and reserved memory
 CPUWeight=1000
 # At least the sum of MemoryMin of every unit in the slice: cgroup v2 limits
 # a child's effective memory.min by its ancestors' (ADR-035).
-MemoryMin=512M
+# 512M (collector) + 256M (OMS) + 50M (watcher).
+MemoryMin=818M

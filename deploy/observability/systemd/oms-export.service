@@ -1,0 +1,27 @@
+# Not installed or enabled by this repository: docs/operations/observability.md §13.
+# Writes the finished UTC dates of the journal to <lake>/crypto/trading/.
+# Needs a running OMS: exit 3 (no answer, nothing written) leaves the unit
+# failed, and the next good run writes every missed date.
+[Unit]
+Description=oms-export: the journal's finished dates to the lake
+After=oms-node.service
+RequiresMountsFor=/mnt/nvme/hl-oms-journal /mnt/nvme/lake
+AssertPathIsMountPoint=/mnt/nvme/hl-oms-journal
+
+[Service]
+# Root, as every user of the daily-job lock (ADR-035).
+Type=oneshot
+ExecStart=/usr/bin/flock /run/lock/hl-oms-daily.lock /usr/local/bin/oms-export --config /etc/hl-oms/oms-export.toml
+ReadOnlyPaths=/mnt/nvme/hl-oms-journal/data
+# /run/lock: ProtectSystem=strict makes /run read-only, and flock creates the
+# lock file, which is gone after every boot (tmpfs).
+ReadWritePaths=/mnt/nvme/lake/crypto/trading /run/lock
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# The daily-job cap, under the daily-job lock (ADR-035).
+MemoryMax=4G
+TimeoutStartSec=6h
+Nice=10
+KillSignal=SIGTERM

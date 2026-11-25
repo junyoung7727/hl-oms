@@ -1,0 +1,9 @@
+// The watcher (user hloms) may stop the OMS unit and nothing else (ADR-036).
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        subject.user == "hloms" &&
+        action.lookup("unit") == "oms-node.service" &&
+        action.lookup("verb") == "stop") {
+        return polkit.Result.YES;
+    }
+});

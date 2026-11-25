@@ -1,21 +1,21 @@
 # oms-projector 운영
 
 주인: 준영
-검토일: 2026-11-20
+검토일: 2026-11-25
 
-설계: [ADR-026](../adr/ADR-026-observability-projector.md). 읽는 규칙: [C-TAIL](../contracts/tail.md). 이 문서는 실행 방법, 내보내는 것, 상황별 의미를 적는다. 서비스 설치와 알림 규칙은 U20에서 정한다(아직 없음).
+설계: [ADR-026](../adr/ADR-026-observability-projector.md). 읽는 규칙: [C-TAIL](../contracts/tail.md). 이 문서는 실행 방법, 내보내는 것, 상황별 의미를 적는다. 서비스 단위는 `deploy/observability/systemd/oms-projector.service`(사용자 `hlobs`, 보조 그룹 `hloms`)이고 설치 절차는 [observability.md](observability.md) §13이다.
 
 ## 실행
 
 ```sh
-oms-projector --config /etc/hl-oms/projector.toml
+oms-projector --config /etc/hl-oms/oms-projector.toml
 ```
 
 ```toml
-data_dir = "/var/lib/hl-oms/data"              # OMS 데이터 디렉터리(읽기만 함)
+data_dir = "/mnt/nvme/hl-oms-journal/data"     # OMS 데이터 디렉터리(읽기만 함, observability.md §13.2)
 status_url = "http://127.0.0.1:8080/api/status" # loopback만 받음
 venue = "bybit"                                # 모든 계열과 줄의 venue 라벨
-cursor_file = "/var/lib/hl-oms/projector.cursor"
+cursor_file = "/var/lib/oms-projector/projector.cursor"   # 단위의 StateDirectory
 # host = "tokyo-1"                             # 기본: /etc/hostname
 # poll_ms = 1000          dead_after_ms = 10000   disk_every_ms = 10000
 # max_records = 1000      max_pending_lines = 20000

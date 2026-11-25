@@ -388,12 +388,20 @@ _Avoid_: journal (that is the OMS's), WAL
 ### Deployment
 
 **Trading slice** (거래 슬라이스):
-The systemd slice `trading.slice` that holds the trading services (now the market-data collector): `CPUWeight=1000`, and a `MemoryMin` at least the sum of its units' `MemoryMin`, because cgroup v2 limits a child's reservation by its ancestors' (ADR-035).
+The systemd slice `trading.slice` that holds the trading services (the market-data collector, the OMS, the watcher and the projector): `CPUWeight=1000`, and a `MemoryMin` at least the sum of its units' `MemoryMin`, because cgroup v2 limits a child's reservation by its ancestors' (ADR-035).
 _Avoid_: research slice (that is where research jobs go, with `MemoryHigh=8G`), cgroup
 
 **Daily-job lock** (일일 작업 잠금):
 The file `/run/lock/hl-oms-daily.lock` that every daily job (archiver and audit runs of every venue) takes with `flock` before it starts, so only one runs at a time and their memory caps never add up. Every user of it runs as root (ADR-035).
 _Avoid_: seal lock (that is `md-lake seal`'s own lock, exit 3)
+
+**Stop permission** (정지 권한):
+The polkit rule `deploy/observability/polkit/50-hl-oms-watcher-stop.rules`: processes of the user `hloms` (the watcher) may run `StopUnit` on `oms-node.service`, nothing else; start, restart, kill and every other unit stay refused. It is what lets the watcher's kill step K3 (`systemctl stop`) work; whether systemd passes the unit and verb to polkit is assumption A-22 (ADR-036).
+_Avoid_: kill permission (the kill itself is the marker, `watcher_kill` and the cancel-all; this is one step of it), sudo rule
+
+**Journal mount assert** (저널 마운트 확인):
+`AssertPathIsMountPoint=/mnt/nvme/hl-oms-journal` in the OMS, watcher, projector and export units: without the journal's own file system the start fails loudly, because the path would be a plain directory where an OMS begins a new, empty journal without its kill latch (ADR-036).
+_Avoid_: `RequiresMountsFor=` (only orders and pulls in a mount unit that may not exist), condition (a `Condition…` skips the unit silently)
 
 **Install map** (설치 지도):
 `deploy/observability/install.toml`: each repository file under `deploy/observability/` with the absolute path and mode it is installed to. The operator installs from it; this repository installs nothing (ADR-035).

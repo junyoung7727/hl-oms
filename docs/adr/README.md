@@ -43,3 +43,4 @@
 | [ADR-033](ADR-033-repository-standards.md) | 저장소 표준: main 잠금(ruleset), 검사를 바꾸는 변경은 소유자 확인(`tools/ci/owner_review.sh`, 1부 구현), 구조 규칙·lint·리뷰 규칙 문서(2~4부) | 개발 과정 |
 | [ADR-034](ADR-034-bybit-rsa-keys.md) | Bybit RSA 서명 키: 자격 파일의 `rsa_private_key`(PKCS#8 PEM 글, `api_secret`과 정확히 하나), crate마다 서명기 하나(HMAC은 hex, RSA는 base64), PKCS#1·암호화된 PEM은 변환 명령을 적어 거부, 서명 실패는 보내지 않음(워처와 OMS, 2026-11-25 구현) | 거래소 |
 | [ADR-035](ADR-035-observability-deployment-files.md) | 관측 스택과 시세 단위의 배치 파일: `deploy/observability/`의 파일만(설치 없음), 수집기의 재시작·보호 설정과 `trading.slice`, 거래소마다 템플릿과 일일 작업 잠금, 매시 5분 봉인·4G 아카이버, xtask 통합 시험 `tests/deploy`의 배치 검사 | 운영 |
+| [ADR-036](ADR-036-oms-deployment-files.md) | OMS·워처·프로젝터·내보내기의 배치 파일: OMS는 `Restart=no`에 `[Install]` 없음(모든 시작은 사람), 워처는 부팅 때 활성화하고 OMS와 같은 사용자, polkit 규칙으로 `oms-node.service`의 `stop`만, 저널 마운트 확인, `/var/lib/hl-oms`의 킬 마커, 배치 검사 U20~U24 | 운영 |

@@ -1,0 +1,46 @@
+# Not installed or enabled by this repository: docs/operations/observability.md §13.
+# Started by a person only (ADR-036): no restart, no [Install] section, and no
+# other unit may pull it in. After a crash, a fatal exit or a watcher kill the
+# OMS stays down until the operator starts it.
+[Unit]
+Description=hl-oms OMS node (started by a person only: ADR-036)
+After=network-online.target
+Wants=network-online.target
+# Without the journal's own file system the path is a plain directory: an OMS
+# started there would begin a new, empty journal beside the real one.
+RequiresMountsFor=/mnt/nvme/hl-oms-journal
+AssertPathIsMountPoint=/mnt/nvme/hl-oms-journal
+
+[Service]
+# The OMS sends no sd_notify.
+Type=simple
+# The watcher runs as the same user: admin.sock and monitor.sock accept the
+# OMS's own uid only.
+User=hloms
+Group=hloms
+# New journal files group-readable for the projector (group hloms).
+UMask=0027
+ExecStart=/usr/local/bin/oms-node run --config /etc/hl-oms/oms-node.toml
+Restart=no
+# The kill marker's home, /var/lib/hl-oms/kill.marker: persistent across
+# reboots, shared with the watcher, writable under ProtectSystem=strict.
+StateDirectory=hl-oms
+StateDirectoryMode=0700
+ReadWritePaths=/mnt/nvme/hl-oms-journal/data
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# The process holds the Bybit API secret: no core dump on an abort.
+LimitCORE=0
+MemoryMax=512M
+# Kept in memory and ahead of other work (TN table 8-6a).
+Slice=trading.slice
+OOMScoreAdjust=-900
+MemorySwapMax=0
+MemoryMin=256M
+IOWeight=1000
+# SIGTERM: drain, final snapshot, up to 30 s of alert flush (exit_flush_ms);
+# then SIGKILL. The journal is durable up to its last commit.
+KillSignal=SIGTERM
+TimeoutStopSec=60

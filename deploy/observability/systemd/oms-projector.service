@@ -1,0 +1,32 @@
+# Not installed or enabled by this repository: docs/operations/observability.md §13.
+[Unit]
+Description=oms-projector: the OMS journal to VictoriaMetrics and VictoriaLogs
+After=network-online.target oms-node.service victoriametrics.service victorialogs.service
+RequiresMountsFor=/mnt/nvme/hl-oms-journal
+AssertPathIsMountPoint=/mnt/nvme/hl-oms-journal
+
+[Service]
+Type=simple
+# An observability component: reads the journal through the group hloms,
+# cannot open admin.sock (0600, uid check) or the 0600 credentials.
+User=hlobs
+Group=hlobs
+SupplementaryGroups=hloms
+ExecStart=/usr/local/bin/oms-projector --config /etc/hl-oms/oms-projector.toml
+Restart=on-failure
+RestartSec=10
+# The cursor: /var/lib/oms-projector/projector.cursor.
+StateDirectory=oms-projector
+ReadOnlyPaths=/mnt/nvme/hl-oms-journal/data
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# No ProcSubset=: the projector reads /proc/locks for the journal's LOCK.
+MemoryMax=100M
+# CPU weight of the slice; no memory protection (TN table 8-6a).
+Slice=trading.slice
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

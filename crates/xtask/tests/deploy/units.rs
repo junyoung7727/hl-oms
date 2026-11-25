@@ -3,7 +3,10 @@
 //! storage paths, store and vmalert flags, venues, the install map, service
 //! identity, the audit's checkout, state and lake writes, the text of command
 //! lines, the stack units' restart and sandbox settings, and the bounds of
-//! the seal, archiver and audit runs (ADR-035).
+//! the seal, archiver and audit runs (ADR-035); the OMS units: the OMS
+//! started by a person only, the watcher's restart, their identities and the
+//! stop permission, the journal mount and state directories, their sandbox
+//! (ADR-036).
 
 use std::collections::BTreeSet;
 
@@ -13,7 +16,11 @@ const OBS: &str = "deploy/observability/";
 
 /// Units that the kernel must keep alive under memory pressure (U3,
 /// protected group).
-pub const PROTECTED: &[&str] = &["md-collector@.service"];
+pub const PROTECTED: &[&str] = &[
+    "md-collector@.service",
+    "oms-node.service",
+    "watcher.service",
+];
 
 /// The observability stack's own services (U15: they run as `hlobs`) and
 /// the one directory each may write (U18).
@@ -66,6 +73,7 @@ const BOUNDED: &[&str] = &[
     "md-lake-seal@.service",
     "md-archiver@.service",
     "crypto-lake-audit@.service",
+    "oms-export.service",
 ];
 const RUN_TIMEOUT: &str = "6h";
 
@@ -81,6 +89,10 @@ pub const MEMORY_MAX: &[(&str, &str)] = &[
     ("md-lake-seal@.service", "1G"),
     ("md-archiver@.service", "4G"),
     ("crypto-lake-audit@.service", "4G"),
+    ("oms-node.service", "512M"),
+    ("watcher.service", "100M"),
+    ("oms-projector.service", "100M"),
+    ("oms-export.service", "4G"),
 ];
 
 /// Timers and their `OnCalendar` (U5).
@@ -88,10 +100,15 @@ const TIMERS: &[(&str, &str)] = &[
     ("md-lake-seal@.timer", "*-*-* *:05:00 UTC"),
     ("md-archiver@.timer", "*-*-* 01:10:00 UTC"),
     ("crypto-lake-audit@.timer", "*-*-* 02:30:00 UTC"),
+    ("oms-export.timer", "*-*-* 03:30:00 UTC"),
 ];
 
 /// Daily jobs, which run one at a time under one lock (U7).
-const DAILY: &[&str] = &["md-archiver@.service", "crypto-lake-audit@.service"];
+const DAILY: &[&str] = &[
+    "md-archiver@.service",
+    "crypto-lake-audit@.service",
+    "oms-export.service",
+];
 const LOCK: &str = "/usr/bin/flock /run/lock/hl-oms-daily.lock ";
 
 /// The audit unit, its script, and the directories that verify and the
@@ -139,6 +156,102 @@ const AUDIT_PATHS: &[(&str, &str, Want)] = &[
         "ReadWritePaths",
         Is("/mnt/nvme/lake/crypto/l0/_verify /mnt/nvme/lake/crypto/audit"),
     ),
+];
+
+/// The OMS unit (U20): started by a person only.
+const OMS: &str = "oms-node.service";
+/// U20: keys that would bring a stopped OMS back, in any section.
+const OMS_NO_RESTART: &[&str] = &[
+    "RestartSec",
+    "RestartPreventExitStatus",
+    "RestartForceExitStatus",
+    "RestartSteps",
+    "RestartMaxDelaySec",
+    "OnFailure",
+    "OnSuccess",
+    "Upholds",
+    "WatchdogSec",
+];
+/// U20: units that start the service of their own name without naming it.
+const OMS_ACTIVATORS: &[&str] = &["oms-node.timer", "oms-node.socket", "oms-node.path"];
+/// U20, U21: the one command of each unit. A shell loop around the binary,
+/// or an `ExecStopPost=` that starts it, brings a stopped process back.
+const OMS_EXEC: &str = "/usr/local/bin/oms-node run --config /etc/hl-oms/oms-node.toml";
+const WATCHER_EXEC: &str = "/usr/local/bin/watcher --config /etc/hl-oms/watcher.toml";
+
+/// The watcher unit (U21): back after a crash, never stopped with the OMS.
+const WATCHER: &str = "watcher.service";
+const WATCHER_SETTINGS: &[(&str, &str, Want)] = &[
+    ("Service", "Restart", Is("on-failure")),
+    ("Service", "RestartSec", Is("5")),
+    ("Service", "RestartPreventExitStatus", Is("2")),
+    ("Install", "WantedBy", Is("multi-user.target")),
+];
+/// U21: keys that would stop, or keep from starting, the watcher with
+/// another unit, in any section.
+const NO_FOLLOW: &[&str] = &[
+    "Requires",
+    "Requisite",
+    "BindsTo",
+    "PartOf",
+    "Upholds",
+    "Conflicts",
+    "PropagatesStopTo",
+    "StopPropagatedFrom",
+    "JoinsNamespaceOf",
+];
+/// U21: keys that change the pinned restart policy, in any section: a start
+/// limit the watcher can reach, or a crash counted as a clean exit, leaves it
+/// down for good.
+const WATCHER_NO_GIVE_UP: &[&str] = &[
+    "StartLimitIntervalSec",
+    "StartLimitInterval",
+    "StartLimitBurst",
+    "SuccessExitStatus",
+    "RestartForceExitStatus",
+];
+
+/// U22: the OMS's user and group; the watcher must have the same ones.
+const OMS_USER: &str = "hloms";
+const PROJECTOR: &str = "oms-projector.service";
+const EXPORT: &str = "oms-export.service";
+/// U22: the one polkit rule and its text, compared line by line without the
+/// whitespace inside lines: the watcher's user may stop the OMS unit and
+/// nothing else (ADR-036).
+const POLKIT_DIR: &str = "deploy/observability/polkit/";
+const POLKIT_DST: &str = "/etc/polkit-1/rules.d/";
+const POLKIT_RULE: &str = r#"// The watcher (user hloms) may stop the OMS unit and nothing else (ADR-036).
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        subject.user == "hloms" &&
+        action.lookup("unit") == "oms-node.service" &&
+        action.lookup("verb") == "stop") {
+        return polkit.Result.YES;
+    }
+});
+"#;
+
+/// U23: the journal's own file system and its data directory. Without the
+/// mount the path is a plain directory on the lake's file system: an OMS
+/// started there would begin a new, empty journal.
+const JOURNAL_FS: &str = "/mnt/nvme/hl-oms-journal";
+const JOURNAL_DATA: &str = "/mnt/nvme/hl-oms-journal/data";
+const JOURNAL_READERS: &[&str] = &[WATCHER, PROJECTOR, EXPORT];
+/// U23: the export writes the trading subtree of the lake and the daily
+/// lock file (flock creates it; `/run` is read-only under
+/// `ProtectSystem=strict`).
+const RUN_LOCK: &str = "/run/lock";
+const EXPORT_WRITES: &[&str] = &["/mnt/nvme/lake/crypto/trading", RUN_LOCK];
+/// U23: the kill marker's directory, `/var/lib/hl-oms` (persistent, shared by
+/// the OMS and the watcher).
+const MARKER_DIR: &str = "hl-oms";
+
+/// U24: the sandbox of the four OMS units.
+const OMS_SANDBOX: &[(&str, &str, Want)] = &[
+    ("Service", "NoNewPrivileges", Is("yes")),
+    ("Service", "ProtectSystem", Is("strict")),
+    ("Service", "ProtectHome", Is("yes")),
+    ("Service", "PrivateTmp", Is("yes")),
 ];
 
 /// Files under `deploy/observability/` that are not installed (U14).
@@ -201,6 +314,11 @@ pub fn check(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
     u17_exec_text(p, out);
     u18_stack_settings(p, out);
     u19_bounded_runs(p, out);
+    u20_oms_started_by_a_person(t, p, out);
+    u21_watcher_restart(p, out);
+    u22_identities(t, p, out);
+    u23_journal_and_state(p, out);
+    u24_sandbox(p, out);
 }
 
 /// A systemd size: bytes, or a number with `K`, `M` or `G` (base 1024).
@@ -868,6 +986,8 @@ fn install_target(src: &str) -> (String, &'static str) {
         (format!("/etc/systemd/system/{name}"), "0644")
     } else if src.starts_with("bin/") {
         (format!("/usr/local/lib/hl-oms-obs/{name}"), "0755")
+    } else if src.starts_with("polkit/") {
+        (format!("/etc/polkit-1/rules.d/{name}"), "0644")
     } else {
         (format!("/etc/hl-oms-obs/{src}"), "0644")
     }
@@ -1138,6 +1258,348 @@ fn u19_bounded_runs(p: &Parsed, out: &mut Vec<Finding>) {
     }
 }
 
+/// The unit's one pinned `ExecStart=` and no other `Exec*` line.
+fn one_command(u: &Unit, rule: &'static str, command: &'static str, out: &mut Vec<Finding>) {
+    expect(u, rule, ("Service", "ExecStart", Is(command)), out);
+    for (section, key, _) in &u.ini.entries {
+        if key.starts_with("Exec") && !(section == "Service" && key == "ExecStart") {
+            finding(
+                out,
+                &u.path,
+                rule,
+                format!("no [{section}] {key}=: the unit runs its one command only"),
+            );
+        }
+    }
+}
+
+fn u20_oms_started_by_a_person(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
+    for u in required(p, OMS, "U20", out) {
+        expect(u, "U20", ("Service", "Restart", Is("no")), out);
+        expect(u, "U20", ("Service", "Type", Is("simple")), out);
+        one_command(u, "U20", OMS_EXEC, out);
+        for key in OMS_NO_RESTART {
+            if !u.ini.any(key).is_empty() {
+                finding(
+                    out,
+                    &u.path,
+                    "U20",
+                    format!("no {key}=: it could bring a stopped OMS back"),
+                );
+            }
+        }
+        if u.ini.entries.iter().any(|(s, _, _)| s == "Install") {
+            finding(
+                out,
+                &u.path,
+                "U20",
+                "no [Install] section: the OMS is never enabled",
+            );
+        }
+    }
+    // Another unit may order itself against the OMS or the watcher, nothing
+    // more: a dependency, a command or an [Install] line could start the OMS
+    // or stop the watcher. Without the suffix systemctl still finds the
+    // unit, so the bare name counts.
+    for name in [OMS, WATCHER] {
+        for u in p.units.iter().filter(|u| u.name != name) {
+            for (section, key, value) in &u.ini.entries {
+                let ordering = section == "Unit" && (key == "After" || key == "Before");
+                if !ordering && value.contains(name.trim_end_matches(".service")) {
+                    finding(
+                        out,
+                        &u.path,
+                        "U20",
+                        format!("[{section}] {key} names {name}: only After= and Before= may"),
+                    );
+                }
+            }
+        }
+    }
+    for path in t.files.keys().filter(|k| k.starts_with("deploy/")) {
+        if OMS_ACTIVATORS.contains(&file_name(path)) {
+            finding(
+                out,
+                path,
+                "U20",
+                format!("a unit of this name starts {OMS} without naming it"),
+            );
+        }
+    }
+}
+
+fn u21_watcher_restart(p: &Parsed, out: &mut Vec<Finding>) {
+    for u in required(p, WATCHER, "U21", out) {
+        for &row in WATCHER_SETTINGS {
+            expect(u, "U21", row, out);
+        }
+        one_command(u, "U21", WATCHER_EXEC, out);
+        for key in WATCHER_NO_GIVE_UP {
+            if !u.ini.any(key).is_empty() {
+                finding(
+                    out,
+                    &u.path,
+                    "U21",
+                    format!("no {key}=: a crashed watcher must come back"),
+                );
+            }
+        }
+        for key in NO_FOLLOW {
+            if !u.ini.any(key).is_empty() {
+                finding(
+                    out,
+                    &u.path,
+                    "U21",
+                    format!("no {key}=: the watcher must outlive a stop of the OMS"),
+                );
+            }
+        }
+        let after: Vec<String> = u
+            .ini
+            .values("Unit", "After")
+            .into_iter()
+            .flat_map(words)
+            .collect();
+        if !after.iter().any(|w| w == OMS) {
+            finding(
+                out,
+                &u.path,
+                "U21",
+                format!("[Unit] After= must hold {OMS}: at shutdown the watcher stops first"),
+            );
+        }
+    }
+}
+
+/// The text line by line, the whitespace inside each line collapsed and
+/// blank lines dropped. Lines are kept: a `//` comment ends at its line, so
+/// a rule joined into one line is all comment and grants nothing.
+fn normalised(text: &str) -> Vec<String> {
+    text.lines()
+        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|l| !l.is_empty())
+        .collect()
+}
+
+fn u22_identities(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
+    let oms: Vec<&Unit> = required(p, OMS, "U22", out);
+    for u in &oms {
+        expect(u, "U22", ("Service", "User", Is(OMS_USER)), out);
+        expect(u, "U22", ("Service", "Group", Is(OMS_USER)), out);
+        expect(u, "U22", ("Service", "UMask", Is("0027")), out);
+    }
+    for u in required(p, WATCHER, "U22", out) {
+        for key in ["User", "Group"] {
+            let want = oms.first().map(|o| o.ini.values("Service", key));
+            if want.is_none_or(|w| u.ini.values("Service", key) != w) {
+                finding(
+                    out,
+                    &u.path,
+                    "U22",
+                    format!(
+                        "[Service] {key} must be the OMS's: admin.sock and monitor.sock accept its uid only"
+                    ),
+                );
+            }
+        }
+    }
+    for u in required(p, PROJECTOR, "U22", out) {
+        expect(u, "U22", ("Service", "User", Is("hlobs")), out);
+        expect(
+            u,
+            "U22",
+            ("Service", "SupplementaryGroups", Is(OMS_USER)),
+            out,
+        );
+    }
+    for u in required(p, EXPORT, "U22", out) {
+        expect(u, "U22", ("Service", "User", Absent), out);
+    }
+    let rules: Vec<(&String, &String)> = t
+        .files
+        .iter()
+        .filter(|(k, _)| k.starts_with(POLKIT_DIR))
+        .collect();
+    match rules.as_slice() {
+        [(path, text)] => {
+            if normalised(text) != normalised(POLKIT_RULE) {
+                finding(
+                    out,
+                    path,
+                    "U22",
+                    "the polkit rule must be the pinned one: StopUnit of oms-node.service by hloms only",
+                );
+            }
+        }
+        _ => finding(
+            out,
+            POLKIT_DIR,
+            "U22",
+            format!(
+                "exactly one polkit rule, the stop permission (found {})",
+                rules.len()
+            ),
+        ),
+    }
+    // The install map's own findings are U14's.
+    for (src, dst, _) in install_entries(p, &mut Vec::new()) {
+        if src.starts_with("polkit/") && !dst.starts_with(POLKIT_DST) {
+            finding(
+                out,
+                &format!("{OBS}install.toml"),
+                "U22",
+                format!("{src} must install under {POLKIT_DST}, where polkitd reads it"),
+            );
+        }
+    }
+}
+
+/// Whether a command line of the unit takes a lock under `/run/lock/`.
+fn locks_under_run_lock(u: &Unit) -> bool {
+    exec_lines(u).into_iter().any(|line| {
+        let w = words(line);
+        w.first().is_some_and(|c| c == "/usr/bin/flock")
+            && w.get(1).is_some_and(|l| l.starts_with("/run/lock/"))
+    })
+}
+
+fn u23_journal_and_state(p: &Parsed, out: &mut Vec<Finding>) {
+    for name in std::iter::once(&OMS).chain(JOURNAL_READERS) {
+        for u in required(p, name, "U23", out) {
+            expect(
+                u,
+                "U23",
+                ("Unit", "AssertPathIsMountPoint", Is(JOURNAL_FS)),
+                out,
+            );
+            let mounts: Vec<String> = u
+                .ini
+                .values("Unit", "RequiresMountsFor")
+                .into_iter()
+                .flat_map(words)
+                .collect();
+            if !mounts.iter().any(|m| m == JOURNAL_FS) {
+                finding(
+                    out,
+                    &u.path,
+                    "U23",
+                    format!("[Unit] RequiresMountsFor= must hold {JOURNAL_FS}"),
+                );
+            }
+        }
+    }
+    for u in named(p, OMS) {
+        expect(u, "U23", ("Service", "ReadWritePaths", Is(JOURNAL_DATA)), out);
+    }
+    for name in JOURNAL_READERS {
+        for u in named(p, name) {
+            expect(u, "U23", ("Service", "ReadOnlyPaths", Is(JOURNAL_DATA)), out);
+            let writes = path_list(u, "ReadWritePaths");
+            if writes
+                .iter()
+                .any(|w| covers(w, JOURNAL_DATA) || covers(JOURNAL_DATA, w))
+            {
+                finding(
+                    out,
+                    &u.path,
+                    "U23",
+                    format!("only the OMS writes {JOURNAL_DATA}: no ReadWritePaths= in it"),
+                );
+            }
+        }
+    }
+    for u in named(p, EXPORT) {
+        let mut writes = path_list(u, "ReadWritePaths");
+        writes.sort();
+        if u.ini.values("Service", "ReadWritePaths").len() != 1 || writes != EXPORT_WRITES {
+            finding(
+                out,
+                &u.path,
+                "U23",
+                format!("[Service] ReadWritePaths must be exactly {EXPORT_WRITES:?}, on one line"),
+            );
+        }
+    }
+    for u in &p.units {
+        if locks_under_run_lock(u)
+            && u.ini.values("Service", "ProtectSystem").contains(&"strict")
+            && !path_list(u, "ReadWritePaths")
+                .iter()
+                .any(|w| covers(w, RUN_LOCK))
+        {
+            finding(
+                out,
+                &u.path,
+                "U23",
+                format!(
+                    "flock creates its lock file under a read-only {RUN_LOCK}: list it in ReadWritePaths="
+                ),
+            );
+        }
+        let runtime: Vec<String> = u
+            .ini
+            .any("RuntimeDirectory")
+            .into_iter()
+            .flat_map(words)
+            .collect();
+        if runtime.iter().any(|d| d == MARKER_DIR) {
+            finding(
+                out,
+                &u.path,
+                "U23",
+                "no RuntimeDirectory=hl-oms: a kill marker on tmpfs is gone after a reboot",
+            );
+        }
+    }
+    for name in [OMS, WATCHER] {
+        for u in named(p, name) {
+            expect(u, "U23", ("Service", "StateDirectory", Is(MARKER_DIR)), out);
+            expect(u, "U23", ("Service", "StateDirectoryMode", Is("0700")), out);
+        }
+    }
+    for u in named(p, PROJECTOR) {
+        expect(
+            u,
+            "U23",
+            ("Service", "StateDirectory", Is("oms-projector")),
+            out,
+        );
+        // The projector reads /proc/locks for the journal's LOCK.
+        expect(u, "U23", ("Service", "ProcSubset", Absent), out);
+    }
+}
+
+fn u24_sandbox(p: &Parsed, out: &mut Vec<Finding>) {
+    for name in std::iter::once(&OMS).chain(JOURNAL_READERS) {
+        for u in named(p, name) {
+            for &row in OMS_SANDBOX {
+                expect(u, "U24", row, out);
+            }
+        }
+    }
+    // The OMS's stop covers its drain, final snapshot and up to 30 s of alert
+    // flush; the two hold a Bybit API secret, which a core dump would write.
+    for (name, stop) in [(OMS, "60"), (WATCHER, "30")] {
+        for u in named(p, name) {
+            expect(u, "U24", ("Service", "LimitCORE", Is("0")), out);
+            expect(u, "U24", ("Service", "TimeoutStopSec", Is(stop)), out);
+        }
+    }
+    for u in named(p, PROJECTOR) {
+        expect(u, "U24", ("Service", "Slice", Is("trading.slice")), out);
+    }
+    for u in named(p, EXPORT) {
+        if u.ini.values("Service", "Slice").contains(&"trading.slice") {
+            finding(
+                out,
+                &u.path,
+                "U24",
+                "the export is a daily job: not in trading.slice",
+            );
+        }
+    }
+}
+
 // Tests.
 
 use crate::assert_rules;
@@ -1305,6 +1767,44 @@ fn a_collector_unit_without_oom_score_adjust_fails() {
 }
 
 #[test]
+fn an_oms_or_watcher_unit_without_oom_score_adjust_fails() {
+    for name in ["oms-node.service", "watcher.service"] {
+        plant(name, "OOMScoreAdjust=-900\n", "", &["U3"]);
+        plant(name, "OOMScoreAdjust=-900\n", "OOMScoreAdjust=0\n", &["U3"]);
+        plant(
+            name,
+            "OOMScoreAdjust=-900\n",
+            "OOMScoreAdjust=-900\nOOMScoreAdjust=-1000\n",
+            &["U3"],
+        );
+    }
+    // The rest of the protected group: the slice, the reservation (half the
+    // cap) and the I/O weight.
+    plant("oms-node.service", "MemoryMin=256M\n", "MemoryMin=128M\n", &["U3"]);
+    plant("watcher.service", "IOWeight=1000\n", "", &["U3"]);
+    plant(
+        "watcher.service",
+        "Slice=trading.slice\n",
+        "Slice=system.slice\n",
+        &["U3"],
+    );
+    plant(
+        "oms-node.service",
+        "IOWeight=1000\n",
+        "IOWeight=1000\nMemoryHigh=256M\n",
+        &["U3"],
+    );
+}
+
+#[test]
+fn an_oms_or_watcher_unit_without_memory_swap_max_zero_fails() {
+    for name in ["oms-node.service", "watcher.service"] {
+        plant(name, "MemorySwapMax=0\n", "", &["U3"]);
+        plant(name, "MemorySwapMax=0\n", "MemorySwapMax=1G\n", &["U3"]);
+    }
+}
+
+#[test]
 fn a_collector_unit_without_memory_swap_max_zero_fails() {
     plant("md-collector@.service", "MemorySwapMax=0\n", "", &["U3"]);
     plant(
@@ -1364,7 +1864,7 @@ fn a_collector_unit_with_wrong_memory_min_or_io_weight_fails() {
 
 #[test]
 fn the_trading_slice_reserves_its_units_memory() {
-    // A second unit in the slice: 512M + 100M > 512M.
+    // One more unit in the slice: 818M + 100M > 818M.
     plant(
         "vmalert-metrics.service",
         "MemoryMax=200M\n",
@@ -1373,18 +1873,31 @@ fn the_trading_slice_reserves_its_units_memory() {
     );
     plant(
         "trading.slice",
+        "MemoryMin=818M\n",
         "MemoryMin=512M\n",
-        "MemoryMin=256M\n",
         &["U4"],
     );
-    plant("trading.slice", "MemoryMin=512M\n", "", &["U4"]);
+    // 512M (collector) + 256M (OMS) + 50M (watcher), one byte short.
+    plant(
+        "trading.slice",
+        "MemoryMin=818M\n",
+        "MemoryMin=857735167\n",
+        &["U4"],
+    );
+    plant(
+        "trading.slice",
+        "MemoryMin=818M\n",
+        "MemoryMin=857735168\n",
+        &[],
+    );
+    plant("trading.slice", "MemoryMin=818M\n", "", &["U4"]);
     plant(
         "trading.slice",
         "CPUWeight=1000\n",
         "CPUWeight=100\n",
         &["U4"],
     );
-    plant("trading.slice", "MemoryMin=512M\n", "MemoryMin=1G\n", &[]);
+    plant("trading.slice", "MemoryMin=818M\n", "MemoryMin=1G\n", &[]);
     let mut t = Tree::real();
     t.remove(&unit("trading.slice"));
     assert_rules(&crate::check(&t), &["U4", "U14"]);
@@ -1463,6 +1976,33 @@ fn memory_max_follows_the_design_table() {
         "MemoryMax=8G\n",
         &["U6"],
     );
+    // The OMS, the watcher and the projector (design §8.5), and the export
+    // under the daily-job cap.
+    plant(
+        "oms-projector.service",
+        "MemoryMax=100M\n",
+        "MemoryMax=200M\n",
+        &["U6"],
+    );
+    plant(
+        "oms-export.service",
+        "MemoryMax=4G\n",
+        "MemoryMax=8G\n",
+        &["U6"],
+    );
+    // A protected unit's reservation follows its cap: U3 sees it too.
+    plant(
+        "oms-node.service",
+        "MemoryMax=512M\n",
+        "MemoryMax=1G\n",
+        &["U3", "U6"],
+    );
+    plant(
+        "watcher.service",
+        "MemoryMax=100M\n",
+        "MemoryMax=50M\n",
+        &["U3", "U6"],
+    );
     for &(name, _) in MEMORY_MAX {
         let mut t = Tree::real();
         t.remove(&unit(name));
@@ -1538,6 +2078,7 @@ fn the_seal_archiver_and_audit_timers_keep_their_schedule() {
     // The audit runs after the archiver's 01:10.
     plant("crypto-lake-audit@.timer", "02:30:00", "01:00:00", &["U5"]);
     plant("crypto-lake-audit@.timer", "Persistent=true\n", "", &["U5"]);
+    plant("oms-export.timer", "03:30:00", "00:30:00", &["U5"]);
 }
 
 #[test]
@@ -1577,6 +2118,19 @@ fn a_daily_job_without_the_lock_fails() {
         "crypto-lake-audit@.service",
         "Nice=10\n",
         "Nice=10\nExecStartPre=/usr/local/bin/md-lake verify --venue %i\n",
+        &["U7"],
+    );
+    // The export takes the same lock.
+    plant(
+        "oms-export.service",
+        "ExecStart=/usr/bin/flock /run/lock/hl-oms-daily.lock ",
+        "ExecStart=",
+        &["U7"],
+    );
+    plant(
+        "oms-export.service",
+        "Nice=10\n",
+        "Nice=10\nExecStartPost=/bin/true\n",
         &["U7"],
     );
     let mut t = Tree::real();
@@ -1989,6 +2543,22 @@ fn the_install_map_covers_every_file_and_path() {
         add_installed(&mut t, "bin/x.sh", "#!/bin/sh\n", dst, mode);
         assert_rules(&crate::check(&t), rules);
     }
+    // The polkit rule goes to polkitd's directory, nowhere else.
+    let polkit = "dst = \"/etc/polkit-1/rules.d/50-hl-oms-watcher-stop.rules\"";
+    for (to, rules) in [
+        (
+            "dst = \"/etc/hl-oms-obs/polkit/50-hl-oms-watcher-stop.rules\"",
+            &["U14", "U22"][..],
+        ),
+        (
+            "dst = \"/etc/polkit-1/rules.d/90-other.rules\"",
+            &["U14"][..],
+        ),
+    ] {
+        let mut t = Tree::real();
+        t.replace(INSTALL, polkit, to);
+        assert_rules(&crate::check(&t), rules);
+    }
     let mut t = Tree::real();
     t.set(INSTALL, "[[file]]\nsrc = \"x\"\n");
     assert!(
@@ -2134,6 +2704,12 @@ fn the_seal_and_archiver_runs_are_bounded() {
         ("md-archiver@.service", "TimeoutStartSec=6h\n", ""),
         ("md-lake-seal@.service", "TimeoutStartSec=6h\n", ""),
         ("crypto-lake-audit@.service", "TimeoutStartSec=6h\n", ""),
+        ("oms-export.service", "TimeoutStartSec=6h\n", ""),
+        (
+            "oms-export.service",
+            "TimeoutStartSec=6h\n",
+            "TimeoutStartSec=6h\nTimeoutSec=infinity\n",
+        ),
         (
             "crypto-lake-audit@.service",
             "TimeoutStartSec=6h\n",
@@ -2517,4 +3093,520 @@ fn the_audit_script_is_installed_executable() {
         t.replace(&script, "#!/bin/sh\n", first);
         assert_rules(&crate::check(&t), &["P1"]);
     }
+}
+
+#[test]
+fn an_oms_node_unit_that_restarts_fails() {
+    let oms = "oms-node.service";
+    for v in [
+        "on-failure",
+        "always",
+        "on-abnormal",
+        "on-abort",
+        "on-watchdog",
+        "on-success",
+        "yes",
+    ] {
+        plant(oms, "Restart=no\n", &format!("Restart={v}\n"), &["U20"]);
+    }
+    // Missing, or given twice: systemd's default is no, but the check reads
+    // one line.
+    plant(oms, "Restart=no\n", "", &["U20"]);
+    plant(oms, "Restart=no\n", "Restart=no\nRestart=no\n", &["U20"]);
+    // Each key that could bring a stopped OMS back, in any section.
+    for extra in [
+        "RestartSec=5\n",
+        "RestartPreventExitStatus=2\n",
+        "RestartForceExitStatus=1\n",
+        "RestartSteps=3\n",
+        "RestartMaxDelaySec=60\n",
+        "WatchdogSec=30s\n",
+    ] {
+        plant(oms, "Restart=no\n", &format!("Restart=no\n{extra}"), &["U20"]);
+    }
+    for extra in [
+        "OnFailure=x.service\n",
+        "OnSuccess=x.service\n",
+        "Upholds=x.service\n",
+    ] {
+        plant(
+            oms,
+            "Wants=network-online.target\n",
+            &format!("Wants=network-online.target\n{extra}"),
+            &["U20"],
+        );
+    }
+    // An [Install] section: the unit could be enabled and start at boot.
+    plant(
+        oms,
+        "TimeoutStopSec=60\n",
+        "TimeoutStopSec=60\n\n[Install]\nWantedBy=multi-user.target\n",
+        &["U20"],
+    );
+    plant(oms, "Type=simple\n", "Type=notify\n", &["U20"]);
+    // A command line that brings it back: after a stop, or a shell loop
+    // around the binary under Restart=no.
+    let exec = "ExecStart=/usr/local/bin/oms-node run --config /etc/hl-oms/oms-node.toml\n";
+    for extra in [
+        "ExecStopPost=+/usr/bin/systemctl --no-block start oms-node.service\n",
+        "ExecStartPre=/bin/true\n",
+        "ExecStart=/usr/local/bin/oms-node run --config /etc/hl-oms/oms-node.toml\n",
+    ] {
+        plant(oms, exec, &format!("{exec}{extra}"), &["U20"]);
+    }
+    plant(
+        oms,
+        exec,
+        "ExecStart=/bin/sh -c 'while true; do /usr/local/bin/oms-node run --config /etc/hl-oms/oms-node.toml; sleep 5; done'\n",
+        &["U20"],
+    );
+    plant(
+        oms,
+        exec,
+        "ExecStart=/usr/local/bin/oms-node run --config /etc/hl-oms/other.toml\n",
+        &["U20"],
+    );
+    // The unit itself gone.
+    let mut t = Tree::real();
+    t.remove(&unit(oms));
+    let f = crate::check(&t);
+    assert!(
+        f.iter()
+            .any(|x| x.rule == "U20" && x.file == unit(oms) && x.text == "missing"),
+        "{f:?}"
+    );
+}
+
+#[test]
+fn no_unit_can_start_the_oms_node() {
+    let projector = "oms-projector.service";
+    let after = "After=network-online.target oms-node.service victoriametrics.service victorialogs.service\n";
+    for extra in [
+        "Wants=oms-node.service\n",
+        "Requires=oms-node.service\n",
+        "Requisite=oms-node.service\n",
+        "BindsTo=oms-node.service\n",
+        "Upholds=oms-node.service\n",
+        "PropagatesReloadTo=oms-node.service\n",
+        // Without the suffix systemctl still finds it.
+        "Wants=oms-node\n",
+    ] {
+        plant(projector, after, &format!("{after}{extra}"), &["U20"]);
+    }
+    // A command that starts it, and an [Install] line that pulls it in.
+    plant(
+        projector,
+        "RestartSec=10\n",
+        "RestartSec=10\nExecStartPost=/usr/bin/systemctl start oms-node.service\n",
+        &["U20"],
+    );
+    plant(
+        projector,
+        "WantedBy=multi-user.target\n",
+        "WantedBy=multi-user.target\nAlso=oms-node.service\n",
+        &["U20"],
+    );
+    // The watcher too: ordering only.
+    plant(
+        "watcher.service",
+        "Wants=network-online.target\n",
+        "Wants=network-online.target oms-node.service\n",
+        &["U20"],
+    );
+    // A timer that names it (U2 also refuses Unit= in any timer).
+    plant(
+        "oms-export.timer",
+        "Persistent=true\n",
+        "Persistent=true\nUnit=oms-node.service\n",
+        &["U2", "U20"],
+    );
+    // Ordering is allowed, before as after.
+    plant(
+        projector,
+        after,
+        &format!("{after}Before=oms-node.service\n"),
+        &[],
+    );
+    // A timer of its own name starts it without naming it: U2 and U5 accept
+    // it, U20 does not.
+    let mut t = Tree::real();
+    add_installed(
+        &mut t,
+        "systemd/oms-node.timer",
+        "[Unit]\nDescription=x\n\n[Timer]\nOnBootSec=1min\n\n[Install]\nWantedBy=timers.target\n",
+        "/etc/systemd/system/oms-node.timer",
+        "0644",
+    );
+    assert_rules(&crate::check(&t), &["U20"]);
+    // A socket or path unit of that name is no kind P1 reads (and has no
+    // install entry).
+    for name in ["oms-node.socket", "oms-node.path"] {
+        let mut t = Tree::real();
+        t.set(&unit(name), "[Socket]\nListenStream=/run/x.sock\n");
+        assert_rules(&crate::check(&t), &["P1", "U14", "U20"]);
+    }
+}
+
+#[test]
+fn the_watcher_restarts_but_never_follows_the_oms() {
+    let w = "watcher.service";
+    let wants = "Wants=network-online.target\n";
+    // A stop of the OMS must not stop the watcher: its kill loop runs after.
+    for key in [
+        "Requires",
+        "Requisite",
+        "BindsTo",
+        "PartOf",
+        "Upholds",
+        "Conflicts",
+        "PropagatesStopTo",
+        "StopPropagatedFrom",
+        "JoinsNamespaceOf",
+    ] {
+        plant(w, wants, &format!("{wants}{key}=x.service\n"), &["U21"]);
+    }
+    plant(
+        w,
+        wants,
+        &format!("{wants}BindsTo=oms-node.service\n"),
+        &["U20", "U21"],
+    );
+    for (from, to) in [
+        ("Restart=on-failure\n", "Restart=always\n"),
+        ("Restart=on-failure\n", ""),
+        ("Restart=on-failure\n", "Restart=on-failure\nRestart=no\n"),
+        ("RestartSec=5\n", "RestartSec=0\n"),
+        // A refused start would repeat its P1 at every restart.
+        ("RestartPreventExitStatus=2\n", ""),
+        ("RestartPreventExitStatus=2\n", "RestartPreventExitStatus=3\n"),
+        // Not ordered after the OMS: at shutdown it would not stop first.
+        (
+            "After=network-online.target oms-node.service\n",
+            "After=network-online.target\n",
+        ),
+        // Not started at boot: no boot kill of the orders a dead OMS left.
+        ("WantedBy=multi-user.target\n", ""),
+        ("WantedBy=multi-user.target\n", "WantedBy=default.target\n"),
+        // Another configuration, or a second command line.
+        (
+            "ExecStart=/usr/local/bin/watcher --config /etc/hl-oms/watcher.toml\n",
+            "ExecStart=/usr/local/bin/watcher --config /etc/hl-oms/other.toml\n",
+        ),
+        ("RestartSec=5\n", "RestartSec=5\nExecStartPre=/bin/false\n"),
+        // A start limit it can reach: the second crash in 10 min leaves it
+        // down for good.
+        (
+            "RestartSec=5\n",
+            "RestartSec=5\nStartLimitIntervalSec=600\nStartLimitBurst=1\n",
+        ),
+        ("RestartSec=5\n", "RestartSec=5\nStartLimitBurst=1\n"),
+        (wants, "Wants=network-online.target\nStartLimitIntervalSec=600\n"),
+        ("RestartSec=5\n", "RestartSec=5\nStartLimitInterval=600\n"),
+        // A panic or an OOM kill counted as a clean exit: no restart.
+        (
+            "RestartSec=5\n",
+            "RestartSec=5\nSuccessExitStatus=1 101 SIGABRT SIGKILL\n",
+        ),
+        ("RestartSec=5\n", "RestartSec=5\nRestartForceExitStatus=2\n"),
+    ] {
+        plant(w, from, to, &["U21"]);
+    }
+    // Another unit that stops the watcher: no W1-W5 and no boot kill.
+    let projector = "oms-projector.service";
+    let after = "After=network-online.target oms-node.service victoriametrics.service victorialogs.service\n";
+    for extra in [
+        "Conflicts=watcher.service\n",
+        "Conflicts=watcher\n",
+        "PropagatesStopTo=watcher.service\n",
+    ] {
+        plant(projector, after, &format!("{after}{extra}"), &["U20"]);
+    }
+    plant(
+        projector,
+        "RestartSec=10\n",
+        "RestartSec=10\nExecStartPost=/usr/bin/systemctl stop watcher.service\n",
+        &["U20"],
+    );
+    plant(
+        "oms-node.service",
+        "Wants=network-online.target\n",
+        "Wants=network-online.target\nConflicts=watcher.service\n",
+        &["U20"],
+    );
+    // Ordering is allowed.
+    plant(
+        projector,
+        after,
+        &format!("{after}Before=watcher.service\n"),
+        &[],
+    );
+}
+
+#[test]
+fn the_oms_and_watcher_share_one_user() {
+    // admin.sock and monitor.sock accept the OMS's own uid only.
+    plant("watcher.service", "User=hloms\n", "User=hlwatch\n", &["U22"]);
+    plant("watcher.service", "Group=hloms\n", "Group=hlwatch\n", &["U22"]);
+    plant("watcher.service", "User=hloms\n", "", &["U22"]);
+    plant("oms-node.service", "User=hloms\n", "User=oms\n", &["U22"]);
+    // Both moved to another user together: the polkit rule names hloms.
+    let mut t = with("oms-node.service", "User=hloms\n", "User=oms\n");
+    t.replace(&unit("watcher.service"), "User=hloms\n", "User=oms\n");
+    assert_rules(&crate::check(&t), &["U22"]);
+    // New journal files must stay readable by the projector's group.
+    plant("oms-node.service", "UMask=0027\n", "UMask=0077\n", &["U22"]);
+    plant("oms-node.service", "UMask=0027\n", "", &["U22"]);
+    plant(
+        "oms-projector.service",
+        "User=hlobs\n",
+        "User=hloms\n",
+        &["U22"],
+    );
+    plant(
+        "oms-projector.service",
+        "SupplementaryGroups=hloms\n",
+        "",
+        &["U22"],
+    );
+    // The export runs as root, as every user of the daily-job lock.
+    plant(
+        "oms-export.service",
+        "Type=oneshot\n",
+        "Type=oneshot\nUser=hloms\n",
+        &["U22"],
+    );
+}
+
+#[test]
+fn the_stop_permission_names_only_the_oms_unit_and_stop() {
+    let rule = format!("{OBS}polkit/50-hl-oms-watcher-stop.rules");
+    for (from, to) in [
+        ("== \"stop\"", "== \"start\""),
+        ("== \"oms-node.service\"", "== \"grafana.service\""),
+        ("        subject.user == \"hloms\" &&\n", ""),
+        ("        action.lookup(\"verb\") == \"stop\") {", "        true) {"),
+        ("polkit.Result.YES", "polkit.Result.AUTH_ADMIN"),
+        ("== \"hloms\"", "!= \"root\""),
+    ] {
+        let mut t = Tree::real();
+        t.replace(&rule, from, to);
+        assert_rules(&crate::check(&t), &["U22"]);
+    }
+    // Only whitespace inside lines, or blank lines, differ: the same rule.
+    let mut t = Tree::real();
+    t.replace(&rule, "    if (action.id", "\tif  (action.id");
+    t.replace(&rule, "polkit.addRule", "\npolkit.addRule");
+    assert_rules(&crate::check(&t), &[]);
+    // One line: the first line's `//` comment then holds the whole rule, and
+    // polkitd loads a file that grants nothing.
+    let mut t = Tree::real();
+    let one = t.files[&rule].replace('\n', " ");
+    t.set(&rule, &one);
+    assert_rules(&crate::check(&t), &["U22"]);
+    // A line split after `return`: the rule returns nothing.
+    let mut t = Tree::real();
+    t.replace(&rule, "return polkit", "return\n        polkit");
+    assert_rules(&crate::check(&t), &["U22"]);
+    // A second rule file, with its install entry.
+    let mut t = Tree::real();
+    let text = t.files[&rule].clone();
+    add_installed(
+        &mut t,
+        "polkit/60-other.rules",
+        &text,
+        "/etc/polkit-1/rules.d/60-other.rules",
+        "0644",
+    );
+    assert_rules(&crate::check(&t), &["U22"]);
+    // None at all: U14 misses its src, U22 the rule.
+    let mut t = Tree::real();
+    t.remove(&rule);
+    assert_rules(&crate::check(&t), &["U14", "U22"]);
+}
+
+const JOURNAL_UNITS: &[&str] = &[
+    "oms-node.service",
+    "watcher.service",
+    "oms-projector.service",
+    "oms-export.service",
+];
+
+#[test]
+fn the_oms_units_refuse_an_unmounted_journal() {
+    let assert = "AssertPathIsMountPoint=/mnt/nvme/hl-oms-journal\n";
+    for &name in JOURNAL_UNITS {
+        // Without the assert a missing mount leaves a plain directory: a new,
+        // empty journal beside the real one.
+        plant(name, assert, "", &["U23"]);
+        plant(
+            name,
+            assert,
+            "ConditionPathIsMountPoint=/mnt/nvme/hl-oms-journal\n",
+            &["U23"],
+        );
+        plant(
+            name,
+            assert,
+            "AssertPathIsMountPoint=/mnt/nvme\n",
+            &["U23"],
+        );
+    }
+    for name in ["oms-node.service", "watcher.service", "oms-projector.service"] {
+        plant(name, "RequiresMountsFor=/mnt/nvme/hl-oms-journal\n", "", &["U23"]);
+    }
+    plant(
+        "oms-export.service",
+        "RequiresMountsFor=/mnt/nvme/hl-oms-journal /mnt/nvme/lake\n",
+        "RequiresMountsFor=/mnt/nvme/lake\n",
+        &["U23"],
+    );
+    // Only the OMS writes the data directory.
+    let rw = "ReadWritePaths=/mnt/nvme/hl-oms-journal/data\n";
+    plant("oms-node.service", rw, "", &["U23"]);
+    plant(
+        "oms-node.service",
+        rw,
+        "ReadWritePaths=/mnt/nvme/hl-oms-journal\n",
+        &["U23"],
+    );
+    let ro = "ReadOnlyPaths=/mnt/nvme/hl-oms-journal/data\n";
+    for name in ["watcher.service", "oms-projector.service", "oms-export.service"] {
+        plant(name, ro, "", &["U23"]);
+    }
+    for extra in [
+        "ReadWritePaths=/mnt/nvme/hl-oms-journal/data\n",
+        "ReadWritePaths=/mnt/nvme/hl-oms-journal\n",
+        "ReadWritePaths=-/mnt/nvme/hl-oms-journal/data/snapshots/\n",
+    ] {
+        plant("watcher.service", ro, &format!("{ro}{extra}"), &["U23"]);
+        plant("oms-projector.service", ro, &format!("{ro}{extra}"), &["U23"]);
+    }
+}
+
+#[test]
+fn the_kill_marker_directory_is_persistent() {
+    for name in ["oms-node.service", "watcher.service"] {
+        plant(name, "StateDirectory=hl-oms\n", "", &["U23"]);
+        plant(
+            name,
+            "StateDirectoryMode=0700\n",
+            "StateDirectoryMode=0755\n",
+            &["U23"],
+        );
+        // A runtime directory is tmpfs: a kill would vanish at the next boot.
+        plant(
+            name,
+            "StateDirectory=hl-oms\n",
+            "RuntimeDirectory=hl-oms\n",
+            &["U23"],
+        );
+    }
+    plant(
+        "oms-projector.service",
+        "StateDirectory=oms-projector\n",
+        "StateDirectory=oms-projector\nRuntimeDirectory=x hl-oms\n",
+        &["U23"],
+    );
+}
+
+#[test]
+fn the_projector_can_read_proc_locks() {
+    let p = "oms-projector.service";
+    plant(
+        p,
+        "StateDirectory=oms-projector\n",
+        "StateDirectory=oms-projector\nProcSubset=pid\n",
+        &["U23"],
+    );
+    plant(p, "StateDirectory=oms-projector\n", "", &["U23"]);
+    plant(
+        p,
+        "StateDirectory=oms-projector\n",
+        "StateDirectory=hl-oms\n",
+        &["U23"],
+    );
+}
+
+#[test]
+fn the_export_can_take_the_daily_lock() {
+    let e = "oms-export.service";
+    let rw = "ReadWritePaths=/mnt/nvme/lake/crypto/trading /run/lock\n";
+    for to in [
+        // flock cannot create the lock file on a read-only /run.
+        "ReadWritePaths=/mnt/nvme/lake/crypto/trading\n",
+        // The export writes the trading subtree of the lake only.
+        "ReadWritePaths=/mnt/nvme/lake /run/lock\n",
+        "ReadWritePaths=/run/lock\n",
+        "ReadWritePaths=/mnt/nvme/lake/crypto/trading\nReadWritePaths=/run/lock\n",
+        "ReadWritePaths=/mnt/nvme/lake/crypto/trading /run/lock /mnt/nvme/lake/crypto/l1\n",
+    ] {
+        plant(e, rw, to, &["U23"]);
+    }
+    plant(
+        e,
+        rw,
+        "ReadWritePaths=/run/lock /mnt/nvme/lake/crypto/trading\n",
+        &[],
+    );
+    // The general rule: any unit that takes a lock under /run/lock with a
+    // read-only file system.
+    let lock = |extra: &str| {
+        format!(
+            "[Unit]\nDescription=x\n\n[Service]\nType=simple\nMemoryMax=1G\nProtectSystem=strict\n{extra}ExecStart=/usr/bin/flock /run/lock/x.lock /bin/true\n"
+        )
+    };
+    for (extra, rules) in [
+        ("", &["U23"][..]),
+        ("ReadWritePaths=/var/lib/x\n", &["U23"][..]),
+        ("ReadWritePaths=/run/lock\n", &[][..]),
+    ] {
+        let mut t = Tree::real();
+        add_installed(
+            &mut t,
+            "systemd/x.service",
+            &lock(extra),
+            "/etc/systemd/system/x.service",
+            "0644",
+        );
+        assert_rules(&crate::check(&t), rules);
+    }
+}
+
+#[test]
+fn the_oms_units_are_sandboxed() {
+    for &name in JOURNAL_UNITS {
+        for (from, to) in [
+            ("NoNewPrivileges=yes\n", ""),
+            ("ProtectSystem=strict\n", "ProtectSystem=full\n"),
+            ("ProtectHome=yes\n", "ProtectHome=read-only\n"),
+            ("PrivateTmp=yes\n", ""),
+        ] {
+            plant(name, from, to, &["U24"]);
+        }
+    }
+    // Both hold a Bybit API secret: no core dump of an abort.
+    for name in ["oms-node.service", "watcher.service"] {
+        plant(name, "LimitCORE=0\n", "", &["U24"]);
+        plant(name, "LimitCORE=0\n", "LimitCORE=infinity\n", &["U24"]);
+    }
+    plant(
+        "oms-node.service",
+        "TimeoutStopSec=60\n",
+        "TimeoutStopSec=10\n",
+        &["U24"],
+    );
+    plant(
+        "watcher.service",
+        "TimeoutStopSec=30\n",
+        "TimeoutStopSec=90\n",
+        &["U24"],
+    );
+    plant("oms-projector.service", "Slice=trading.slice\n", "", &["U24"]);
+    // The export's 4G is the daily-job cap, not a trading reservation.
+    plant(
+        "oms-export.service",
+        "Nice=10\n",
+        "Nice=10\nSlice=trading.slice\n",
+        &["U24"],
+    );
 }

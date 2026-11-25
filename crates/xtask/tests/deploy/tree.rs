@@ -169,6 +169,8 @@ pub fn parse(t: &Tree, out: &mut Vec<Finding>) -> Parsed {
                 Err(e) => finding(out, path, "P1", format!("not TOML: {}", e.message())),
             },
             "md" => {}
+            // polkit JavaScript: not parsed; rule U22 pins its text.
+            "rules" if path.starts_with("deploy/observability/polkit/") => {}
             "sh" => {
                 if text.lines().next() != Some("#!/bin/sh") {
                     finding(
@@ -197,6 +199,12 @@ fn every_file_parses_by_its_kind() {
         ("deploy/observability/notes.txt", "text\n"),
         ("deploy/observability/noext", "text\n"),
         ("deploy/observability/bin/x.sh", "#!/bin/bash\necho\n"),
+        // A polkit rule is JavaScript, read by polkitd only from polkit/.
+        ("deploy/observability/x.rules", "polkit.addRule(function () {});\n"),
+        (
+            "deploy/observability/systemd/x.rules",
+            "polkit.addRule(function () {});\n",
+        ),
     ] {
         let mut t = Tree::real();
         t.set(path, text);

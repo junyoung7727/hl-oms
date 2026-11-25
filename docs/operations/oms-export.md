@@ -1,18 +1,18 @@
 # oms-export 운영
 
 주인: 준영
-검토일: 2026-11-20
+검토일: 2026-11-25
 
-설계: [ADR-027](../adr/ADR-027-trading-export.md). 행의 모양: 레이크 계약 4절(`contracts/lake/trading/*.table.json`). 읽는 규칙: [C-TAIL](../contracts/tail.md). 주기 실행(systemd 타이머)은 U20에서 정한다(아직 없음).
+설계: [ADR-027](../adr/ADR-027-trading-export.md). 행의 모양: 레이크 계약 4절(`contracts/lake/trading/*.table.json`). 읽는 규칙: [C-TAIL](../contracts/tail.md). 주기 실행은 `deploy/observability/systemd/oms-export.service`와 `oms-export.timer`(매일 03:30 UTC, 일일 작업 잠금 아래)이고 절차는 [observability.md](observability.md) §13.7이다.
 
 ## 실행
 
 ```sh
-oms-export --config /etc/hl-oms/export.toml
+oms-export --config /etc/hl-oms/oms-export.toml
 ```
 
 ```toml
-data_dir = "/var/lib/hl-oms/data"              # OMS 데이터 디렉터리(읽기만 함)
+data_dir = "/mnt/nvme/hl-oms-journal/data"     # OMS 데이터 디렉터리(읽기만 함, observability.md §13.2)
 lake_root = "/mnt/nvme/lake"                   # crypto/trading/ 아래에 씀
 status_url = "http://127.0.0.1:8080/api/status" # loopback만 받음
 venue = "bybit"                                # 모든 행의 venue
