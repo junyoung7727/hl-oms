@@ -1,6 +1,7 @@
 //! A loopback fake HTTP/1.1 server for tests (unit U6). It runs on its own
 //! thread, records every request and answers from a script: a status and a
-//! body, or no answer at all (`Answer::Hang`). Requests need a
+//! body, or no answer at all (`Answer::Hang`), or from a handler that
+//! computes it from the request (`FakeHttp::respond`). Requests need a
 //! `Content-Length` body (reqwest sends one); keep-alive is supported.
 
 use std::collections::VecDeque;
@@ -61,9 +62,12 @@ struct State {
     requests: Vec<Request>,
     /// Called with each request when it arrives, before it is answered.
     hook: Option<Hook>,
+    /// Asked first for the answer to each request (`FakeHttp::respond`).
+    handler: Option<Handler>,
 }
 
 type Hook = Arc<dyn Fn(&Request) + Send + Sync>;
+type Handler = Arc<dyn Fn(&Request) -> Option<Answer> + Send + Sync>;
 
 /// A running fake. Dropping it stops the server thread.
 pub struct FakeHttp {
@@ -152,6 +156,16 @@ impl FakeHttp {
         }
     }
 
+    /// Gives each request first to `f`: `Some(answer)` is the answer,
+    /// `None` falls through to the routes, the script and the default. The
+    /// request is in `requests()` before `f` runs, and `f` runs without the
+    /// fake's lock, so it may read `requests()`.
+    pub fn respond(&self, f: impl Fn(&Request) -> Option<Answer> + Send + Sync + 'static) {
+        if let Ok(mut s) = self.state.lock() {
+            s.handler = Some(Arc::new(f));
+        }
+    }
+
     pub fn set_default(&self, a: Answer) {
         if let Ok(mut s) = self.state.lock() {
             s.default = Some(a);
@@ -205,11 +219,20 @@ async fn accept_loop(l: TcpListener, st: Arc<Mutex<State>>) {
 }
 
 fn next_answer(st: &Mutex<State>, req: Request) -> Answer {
+    let handler = {
+        let Ok(mut s) = st.lock() else {
+            return Answer::Close;
+        };
+        s.requests.push(req.clone());
+        s.handler.clone()
+    };
+    if let Some(a) = handler.and_then(|f| f(&req)) {
+        return a;
+    }
     let Ok(mut s) = st.lock() else {
         return Answer::Close;
     };
     let path = req.path().to_string();
-    s.requests.push(req);
     if let Some((_, answers)) = s.routes.iter_mut().find(|(p, _)| *p == path) {
         return match answers.len() {
             0 => Answer::Close,
