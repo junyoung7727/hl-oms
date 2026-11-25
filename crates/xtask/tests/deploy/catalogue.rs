@@ -370,6 +370,38 @@ const PROJECTOR: &[(&str, &[&str])] = &[
     ("journal_disk_free_bytes", &["venue"]),
 ];
 
+/// The series the watcher exports and the labels it gives them, besides
+/// `venue`, `host` and `watcher` on every series
+/// (`crates/watcher/src/metrics.rs`), with the file that holds the name.
+const WATCHER: &[(&str, &[&str], &str)] = &[
+    ("watcher_up", &[], "metrics.rs"),
+    ("watcher_differences", &["check"], "engine.rs"),
+    ("watcher_mismatch_active", &["check"], "engine.rs"),
+    ("watcher_check_age_s", &["check"], "engine.rs"),
+    ("watcher_request_errors_total", &["endpoint", "class"], "rest.rs"),
+    ("watcher_journal_error", &[], "engine.rs"),
+    ("watcher_journal_seq", &[], "engine.rs"),
+    ("watcher_mismatches_total", &["check"], "engine.rs"),
+    ("watcher_heartbeat_ok_ts", &[], "oms.rs"),
+    ("watcher_auth_rejected", &[], "rest.rs"),
+    ("watcher_requests_total", &["endpoint"], "rest.rs"),
+    ("watcher_alerts_queued", &[], "alert.rs"),
+    ("watcher_alerts_delivered_total", &[], "alert.rs"),
+    ("watcher_alerts_dropped_total", &[], "alert.rs"),
+    ("watcher_alert_failures_total", &[], "alert.rs"),
+    ("watcher_api_key_days_left", &[], "start.rs"),
+    ("watcher_public_ip_ok", &[], "start.rs"),
+    ("watcher_w5_armed", &[], "runtime.rs"),
+    ("watcher_kill_active", &[], "runtime.rs"),
+    ("watcher_kills_total", &[], "runtime.rs"),
+    ("watcher_kill_cancel_all_total", &[], "runtime.rs"),
+    ("watcher_kill_halt_owed", &[], "runtime.rs"),
+    ("watcher_kill_step", &["step"], "runtime.rs"),
+    ("watcher_kill_round", &[], "runtime.rs"),
+    ("watcher_kill_remaining", &[], "runtime.rs"),
+    ("watcher_oms_silence_s", &[], "runtime.rs"),
+];
+
 #[test]
 fn every_projector_and_watcher_series_is_catalogued() {
     let t = Tree::real();
@@ -381,6 +413,26 @@ fn every_projector_and_watcher_series_is_catalogued() {
         let want: BTreeSet<String> = labels.iter().map(|l| l.to_string()).collect();
         assert_eq!(c.metrics.get(*name), Some(&(Writer::Hl, want)), "{name}");
     }
+    let doc = &p.toml[CATALOGUE];
+    for (name, labels, file) in WATCHER {
+        let mut want: BTreeSet<String> = labels.iter().map(|l| l.to_string()).collect();
+        want.extend(["venue", "host", "watcher"].map(String::from));
+        assert_eq!(c.metrics.get(*name), Some(&(Writer::Hl, want)), "{name}");
+        let row = doc["metric"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["name"].as_str() == Some(name))
+            .unwrap();
+        let source = format!("crates/watcher/src/{file}");
+        assert_eq!(row["source"].as_str(), Some(source.as_str()), "{name}");
+    }
+    let hl = c
+        .metrics
+        .iter()
+        .filter(|(n, (w, _))| *w == Writer::Hl && n.starts_with("watcher_"))
+        .count();
+    assert_eq!(hl, WATCHER.len());
     // A row removed: the rule that reads it names an unknown metric.
     let mut t = Tree::real();
     t.replace(
@@ -389,14 +441,32 @@ fn every_projector_and_watcher_series_is_catalogued() {
         "",
     );
     let f = check(&t);
-    assert_rules(&f, &["R1"]);
+    assert_rules(&f, &["R1", "G7"]);
     assert!(f[0].text.starts_with("OmsParkedFills: oms_parked_fills"), "{f:?}");
+    // A watcher row removed: the rule that reads it names an unknown metric.
+    let mut t = Tree::real();
+    t.replace(
+        CATALOGUE,
+        "[[metric]]\nname = \"watcher_kill_halt_owed\"\nlabels = [\"venue\", \"host\", \"watcher\"]\nsource = \"crates/watcher/src/runtime.rs\"\n",
+        "",
+    );
+    let f = check(&t);
+    assert_rules(&f, &["R1"]);
+    assert!(f[0].text.starts_with("WatcherKillHaltOwed: watcher_kill_halt_owed"), "{f:?}");
     // The projector's file no longer has the name.
     let mut t = Tree::real();
     t.replace(
         "crates/oms-projector/src/metrics.rs",
         "o.push(\"oms_halt\",",
         "o.push(\"oms_halted\",",
+    );
+    assert_rules(&check(&t), &["R2"]);
+    // Nor the watcher's.
+    let mut t = Tree::real();
+    t.replace(
+        "crates/watcher/src/start.rs",
+        "pub const DAYS_LEFT: &str = \"watcher_api_key_days_left\";",
+        "pub const DAYS_LEFT: &str = \"watcher_key_days_left\";",
     );
     assert_rules(&check(&t), &["R2"]);
 }

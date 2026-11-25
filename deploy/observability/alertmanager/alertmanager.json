@@ -68,6 +68,18 @@
       "equal": [
         "venue"
       ]
+    },
+    {
+      "source_matchers": [
+        "alertname=\"OmsDown\""
+      ],
+      "target_matchers": [
+        "severity=~\"P2|P3\"",
+        "alertname=~\"WatcherCheckStale|WatcherHeartbeatStale|WatcherW5Unarmed\""
+      ],
+      "equal": [
+        "venue"
+      ]
     }
   ],
   "receivers": [

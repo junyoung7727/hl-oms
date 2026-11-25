@@ -204,7 +204,7 @@ $EDITOR /etc/hl-oms/watcher-telegram.json
 
 ## 시작 확인의 지표(U19a4b)
 
-모두 `venue="bybit"`, `host`, `watcher` 이름표가 붙는다. 알림 규칙(예: `watcher_api_key_days_left < 14`)은 U20b다.
+모두 `venue="bybit"`, `host`, `watcher` 이름표가 붙는다. 알림 규칙(예: `watcher_api_key_days_left < 14` P2)은 `deploy/observability/vmalert/metrics/watcher.rules.json`에 있다([observability.md](observability.md) §9).
 
 | 이름 | 뜻 | 볼 것 |
 |---|---|---|

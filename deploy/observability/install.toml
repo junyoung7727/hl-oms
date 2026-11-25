@@ -13,6 +13,11 @@ dst = "/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh"
 mode = "0755"
 
 [[file]]
+src = "grafana/dashboards/d1-trading.json"
+dst = "/etc/hl-oms-obs/grafana/dashboards/d1-trading.json"
+mode = "0644"
+
+[[file]]
 src = "grafana/dashboards/d2-market-data.json"
 dst = "/etc/hl-oms-obs/grafana/dashboards/d2-market-data.json"
 mode = "0644"
@@ -20,6 +25,11 @@ mode = "0644"
 [[file]]
 src = "grafana/dashboards/d3-system.json"
 dst = "/etc/hl-oms-obs/grafana/dashboards/d3-system.json"
+mode = "0644"
+
+[[file]]
+src = "grafana/dashboards/d4-events.json"
+dst = "/etc/hl-oms-obs/grafana/dashboards/d4-events.json"
 mode = "0644"
 
 [[file]]
@@ -165,4 +175,9 @@ mode = "0644"
 [[file]]
 src = "vmalert/metrics/system.rules.json"
 dst = "/etc/hl-oms-obs/vmalert/metrics/system.rules.json"
+mode = "0644"
+
+[[file]]
+src = "vmalert/metrics/watcher.rules.json"
+dst = "/etc/hl-oms-obs/vmalert/metrics/watcher.rules.json"
 mode = "0644"

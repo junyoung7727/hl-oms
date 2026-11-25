@@ -226,6 +226,136 @@ name = "journal_disk_free_bytes"
 labels = ["venue"]
 source = "crates/oms-projector/src/projector.rs"
 
+[[metric]]
+name = "watcher_up"
+labels = ["venue", "host", "watcher"]
+source = "crates/watcher/src/metrics.rs"
+
+[[metric]]
+name = "watcher_differences"
+labels = ["venue", "host", "watcher", "check"]
+source = "crates/watcher/src/engine.rs"
+
+[[metric]]
+name = "watcher_mismatch_active"
+labels = ["venue", "host", "watcher", "check"]
+source = "crates/watcher/src/engine.rs"
+
+[[metric]]
+name = "watcher_check_age_s"
+labels = ["venue", "host", "watcher", "check"]
+source = "crates/watcher/src/engine.rs"
+
+[[metric]]
+name = "watcher_request_errors_total"
+labels = ["venue", "host", "watcher", "endpoint", "class"]
+source = "crates/watcher/src/rest.rs"
+
+[[metric]]
+name = "watcher_journal_error"
+labels = ["venue", "host", "watcher"]
+source = "crates/watcher/src/engine.rs"
+
+[[metric]]
+name = "watcher_journal_seq"
+labels = ["venue", "host", "watcher"]
+source = "crates/watcher/src/engine.rs"
+
+[[metric]]
+name = "watcher_mismatches_total"
+labels = ["venue", "host", "watcher", "check"]
+source = "crates/watcher/src/engine.rs"
+
+[[metric]]
+name = "watcher_heartbeat_ok_ts"
+labels = ["venue", "host", "watcher"]
+source = "crates/watcher/src/oms.rs"
+
+[[metric]]
+name = "watcher_auth_rejected"
+labels = ["venue", "host", "watcher"]
+source = "crates/watcher/src/rest.rs"
+
+[[metric]]
+name = "watcher_requests_total"
+labels = ["venue", "host", "watcher", "endpoint"]
+source = "crates/watcher/src/rest.rs"
+
+[[metric]]
+name = "watcher_alerts_queued"
+labels = ["venue", "host", "watcher"]
+source = "crates/watcher/src/alert.rs"
+
+[[metric]]
+name = "watcher_alerts_delivered_total"
+labels = ["venue", "host", "watcher"]
+source = "crates/watcher/src/alert.rs"
+
+[[metric]]
+name = "watcher_alerts_dropped_total"
+labels = ["venue", "host", "watcher"]
+source = "crates/watcher/src/alert.rs"
+
+[[metric]]
+name = "watcher_alert_failures_total"
+labels = ["venue", "host", "watcher"]
+source = "crates/watcher/src/alert.rs"
+
+[[metric]]
+name = "watcher_api_key_days_left"
+labels = ["venue", "host", "watcher"]
+source = "crates/watcher/src/start.rs"
+
+[[metric]]
+name = "watcher_public_ip_ok"
+labels = ["venue", "host", "watcher"]
+source = "crates/watcher/src/start.rs"
+
+[[metric]]
+name = "watcher_w5_armed"
+labels = ["venue", "host", "watcher"]
+source = "crates/watcher/src/runtime.rs"
+
+[[metric]]
+name = "watcher_kill_active"
+labels = ["venue", "host", "watcher"]
+source = "crates/watcher/src/runtime.rs"
+
+[[metric]]
+name = "watcher_kills_total"
+labels = ["venue", "host", "watcher"]
+source = "crates/watcher/src/runtime.rs"
+
+[[metric]]
+name = "watcher_kill_cancel_all_total"
+labels = ["venue", "host", "watcher"]
+source = "crates/watcher/src/runtime.rs"
+
+[[metric]]
+name = "watcher_kill_halt_owed"
+labels = ["venue", "host", "watcher"]
+source = "crates/watcher/src/runtime.rs"
+
+[[metric]]
+name = "watcher_kill_step"
+labels = ["venue", "host", "watcher", "step"]
+source = "crates/watcher/src/runtime.rs"
+
+[[metric]]
+name = "watcher_kill_round"
+labels = ["venue", "host", "watcher"]
+source = "crates/watcher/src/runtime.rs"
+
+[[metric]]
+name = "watcher_kill_remaining"
+labels = ["venue", "host", "watcher"]
+source = "crates/watcher/src/runtime.rs"
+
+[[metric]]
+name = "watcher_oms_silence_s"
+labels = ["venue", "host", "watcher"]
+source = "crates/watcher/src/runtime.rs"
+
 [[stack]]
 name = "up"
 labels = ["job", "instance"]

@@ -1,0 +1,145 @@
+{
+  "groups": [
+    {
+      "name": "watcher",
+      "interval": "10s",
+      "rules": [
+        {
+          "alert": "WatcherDown",
+          "expr": "absent_over_time(watcher_up{venue=\"bybit\"}[1m])",
+          "labels": {
+            "severity": "P1",
+            "venue": "bybit"
+          },
+          "annotations": {
+            "summary": "bybit 워처가 1분 동안 값을 보내지 않았다(watcher_up 없음). 워처가 죽었거나 VictoriaMetrics에 쓰지 못한다. 그동안 대사(W1~W4)도 OMS가 조용할 때의 킬(W5)도 없다. systemctl status watcher와 journalctl -u watcher로 원인을 찾고 다시 띄운다. 재부팅 뒤라면 먼저 findmnt /mnt/nvme/hl-oms-journal(관측 문서 §9, §13.4)."
+          }
+        },
+        {
+          "alert": "WatcherMismatchActive",
+          "expr": "max by (venue, check) (watcher_mismatch_active) > 0",
+          "labels": {
+            "severity": "P1"
+          },
+          "annotations": {
+            "summary": "워처의 {{ $labels.check }} 검사가 OMS 저널과 거래소의 차이를 확정했다. OMS는 watcher_mismatch로 보류한다. 차이의 원인을 고친 뒤 clear-hold --reason watcher_mismatch(관측 문서 §13.6)."
+          }
+        },
+        {
+          "alert": "WatcherKillActive",
+          "expr": "max by (venue) (watcher_kill_active) > 0",
+          "labels": {
+            "severity": "P1"
+          },
+          "annotations": {
+            "summary": "워처가 킬을 실행 중이다: 킬 마커, watcher_kill, OMS 단위 정지, 워처 자신의 키로 일괄 취소. 워처의 [WATCH P1] 알림으로 단계를 보고, 끝난 뒤 사람이 OMS를 띄워 clear-hold --reason kill(관측 문서 §13.6)."
+          }
+        },
+        {
+          "alert": "WatcherKillHaltOwed",
+          "expr": "max by (venue) (watcher_kill_halt_owed) > 0",
+          "labels": {
+            "severity": "P1"
+          },
+          "annotations": {
+            "summary": "워처의 킬이 OMS에 정지를 빚졌다: OMS가 래치 없이 거래할 수 있다. 재부팅 뒤 OMS가 꺼져 있으면 정상: OMS를 띄우고 '늦은 정지 … 래치함'을 본 뒤 해제한다. OMS가 돌고 있는데 이 알림이 남거나 '늦은 정지 실패'가 오면 손으로 멈춘다(런북 7.18, 관측 문서 §13.4)."
+          }
+        },
+        {
+          "alert": "WatcherAuthRejected",
+          "expr": "max by (venue) (watcher_auth_rejected) > 0",
+          "labels": {
+            "severity": "P1"
+          },
+          "annotations": {
+            "summary": "Bybit가 워처의 키를 거절했거나 키가 시작 규칙에 더는 맞지 않는다. 워처가 재시작까지 Bybit에 아무것도 보내지 않는다: 대사도 킬의 일괄 취소도 없다. 오류 줄로 원인(키, IP)을 보고 고친 뒤 워처를 다시 띄운다(관측 문서 §9)."
+          }
+        },
+        {
+          "alert": "WatcherApiKeyExpiring",
+          "expr": "min by (venue) (watcher_api_key_days_left) < 14",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "워처의 Bybit API 키가 14일 안에 만료된다. 만료되면 워처의 모든 Bybit 요청이 거절된다. 새 키를 만들어 /etc/hl-oms/watcher-bybit.toml을 바꾸고 워처를 다시 띄운다(관측 문서 §9)."
+          }
+        },
+        {
+          "alert": "WatcherPublicIpNotOk",
+          "expr": "min by (venue) (watcher_public_ip_ok) == 0",
+          "for": "2m",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "이 PC의 공인 IP가 워처 키의 IP 목록에 없거나 확인하지 못했다. IP가 정말 바뀌었으면 곧 Bybit가 키를 거절한다. journalctl -u watcher의 public IP 경고를 보고 키의 IP 목록을 고친다(관측 문서 §9)."
+          }
+        },
+        {
+          "alert": "WatcherCheckStale",
+          "expr": "max by (venue, check) (watcher_check_age_s) > 30",
+          "for": "1m",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "워처의 {{ $labels.check }} 검사가 30초 넘게 성공하지 못했다. W1이나 W2가 10초를 넘으면 OMS는 이미 unmonitored로 새 일반 주문을 거절한다. journalctl -u watcher에서 요청 오류를 본다(관측 문서 §9)."
+          }
+        },
+        {
+          "alert": "WatcherHeartbeatStale",
+          "expr": "time() - max by (venue) (watcher_heartbeat_ok_ts) > 30",
+          "for": "1m",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "워처가 30초 넘게 OMS에 하트비트를 넣지 못했다(monitor.sock). OMS는 unmonitored로 새 일반 주문을 거절하고 60초 뒤 걸린 일반 주문을 취소한다. OMS가 꺼졌으면 OmsDown이 이 알림을 막는다(관측 문서 §9)."
+          }
+        },
+        {
+          "alert": "WatcherW5Unarmed",
+          "expr": "max by (venue) (watcher_w5_armed) == 0 and on(venue) max by (venue) (watcher_kill_active) == 0",
+          "for": "5m",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "워처의 W5(OMS가 조용하면 킬)가 5분 넘게 무장되지 않았다. 그동안 OMS가 멈춰도 워처가 킬하지 않는다. 시작 확인이 다시 묻는 중인지 journalctl -u watcher로 본다. 킬 뒤 OMS가 꺼진 동안은 OmsDown이 이 알림을 막는다(관측 문서 §9)."
+          }
+        },
+        {
+          "alert": "WatcherJournalError",
+          "expr": "max by (venue) (watcher_journal_error) > 0",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "워처가 OMS 저널을 읽지 못한다. 저널을 쓰는 대사(W2, W4)가 멈췄다. journalctl -u watcher와 데이터 디렉터리의 권한·마운트를 본다(런북 7.17, 관측 문서 §9)."
+          }
+        },
+        {
+          "alert": "WatcherAlertsFailing",
+          "expr": "max by (venue) (increase(watcher_alert_failures_total[10m])) > 0",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "워처가 10분 안에 Telegram 직접 알림을 보내다 실패했다. [WATCH P1]이 오지 않을 수 있다. 토큰 파일, 채팅의 봇, 이 PC의 Telegram 도달성을 본다(관측 문서 §9, §10)."
+          }
+        },
+        {
+          "alert": "WatcherAlertsDropped",
+          "expr": "max by (venue) (increase(watcher_alerts_dropped_total[10m])) > 0",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "워처가 10분 안에 보내지 못한 직접 알림을 버렸다(대기열이 가득 참). 버린 알림은 다시 오지 않는다. journalctl -u watcher에서 그 알림을 본다(관측 문서 §9)."
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -411,6 +411,10 @@ _Avoid_: venue list (that is the collector's `venues`)
 One of the four groups a hold reason of `Core::holds(None)` belongs to for alerting: latched (P1 at once, also while the OMS is down; a person clears it with a command, except `storage_low`, which clears by itself once space is made), gate (`unmonitored`, on at every start until the watcher's first heartbeat; P1 after 2 min with the OMS up, that is not `OmsDown` in the same 30 s window), passing (clears by itself; P1 after 5 min with the OMS up) and operator (`operator_account`; P3). Rule R12 keeps every reason in exactly one class (ADR-037).
 _Avoid_: hold severity (a class decides the delay and the OMS-up gate as well as the severity)
 
+**Event kind partition** (사건 종류 분할):
+The rule (G10) that every journal event name of `Event::name` is in exactly one of three lists: the order and fill panel of the event timeline D4, its hold, kill and mismatch panel, or the deploy check's left-out list (frequent, periodic or bookkeeping kinds). A new event kind without a place, a kind in two panels and a misspelt kind fail the check (ADR-038).
+_Avoid_: event filter (the lists are a partition, not a choice of what to show)
+
 **Install map** (설치 지도):
 `deploy/observability/install.toml`: each repository file under `deploy/observability/` with the absolute path and mode it is installed to. The operator installs from it; this repository installs nothing (ADR-035).
 _Avoid_: manifest (that is the lake's), package

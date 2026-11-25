@@ -1,0 +1,163 @@
+{
+  "uid": "d4-events",
+  "title": "D4 사건 타임라인: 무슨 일이 어떤 순서로 있었나",
+  "description": "OMS 저널의 주문·체결·정지 사건, 프로젝터의 경고, 알림을 시간 순서로(설계 §8.4). 사건 줄은 VictoriaLogs, 알림은 VictoriaMetrics에서 온다.",
+  "tags": [
+    "hl-oms"
+  ],
+  "editable": false,
+  "timezone": "utc",
+  "refresh": "30s",
+  "schemaVersion": 41,
+  "version": 1,
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "venue",
+        "label": "거래소",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "vm"
+        },
+        "query": {
+          "query": "label_values(oms_up, venue)",
+          "refId": "venue-query"
+        },
+        "definition": "label_values(oms_up, venue)",
+        "refresh": 2,
+        "multi": false,
+        "includeAll": false,
+        "current": {},
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "주문·체결",
+      "description": "주문 접수·거절·확인, 결과 불명과 재확인, 체결(붙임·보류·외부), 취소, 거래소 종료, 펀딩과 조정. 프로젝터가 저널 이벤트마다 한 줄씩 넣는다(service=oms). 프로젝터를 다시 시작하면 같은 줄이 다시 올 수 있다(적어도 한 번): seq와 event_index가 같은 줄은 한 사건으로 읽는다. unconfirmed가 true인 줄은 아직 내구화되지 않은 기록이다. 최근 1000줄, 새것이 위.",
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "victoriametrics-logs-datasource",
+        "uid": "vl"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "vl"
+          },
+          "expr": "_stream:{service=\"oms\"} venue:=\"$venue\" kind:in(order_accepted, request_rejected, order_acked, order_in_doubt, order_recheck, absence_noted, fill_booked, fill_parked, fill_unparked, external_fill_booked, missing_fills_flagged, fills_synced, cancel_requested, cancel_sent, cancel_outcome_noted, venue_terminal, order_closed, funding_booked, position_adjusted) | fields _time, seq, event_index, kind, order_id, wire_id, symbol, side, qty, px, phase, reason, unconfirmed | sort by (_time desc) | limit 1000"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "정지·킬·불일치",
+      "description": "시작과 설정, 연결, 불일치와 확인, 운영자 정지·재개, 저장 공간, 축소 모드, 거래소 설정·계좌 모드·포지션 변경, 보류 걸림·풀림, 킬 루프, 전략 연결, 감시 상태. 프로젝터가 저널 이벤트마다 한 줄씩 넣는다(service=oms). 프로젝터를 다시 시작하면 같은 줄이 다시 올 수 있다(적어도 한 번): seq와 event_index가 같은 줄은 한 사건으로 읽는다. unconfirmed가 true인 줄은 아직 내구화되지 않은 기록이다. 최근 1000줄, 새것이 위.",
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 12
+      },
+      "datasource": {
+        "type": "victoriametrics-logs-datasource",
+        "uid": "vl"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "vl"
+          },
+          "expr": "_stream:{service=\"oms\"} venue:=\"$venue\" kind:in(config_activated, booted, link_changed, mismatch_raised, mismatch_acked, operator_halted, operator_resumed, storage_low_changed, reducing_entered, reducing_cleared, venue_setting_noted, account_mode_noted, venue_position_changed, unclassified_execution_noted, venue_change_settled, margin_report_rejected, hold_set, hold_cleared, kill_loop_ended, kill_rearmed, strategy_link_lost, strategy_link_restored, monitor_changed) | fields _time, seq, event_index, kind, order_id, wire_id, symbol, side, qty, px, phase, reason, unconfirmed | sort by (_time desc) | limit 1000"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "logs",
+      "title": "프로젝터 로그",
+      "description": "프로젝터 자신의 warn·error 줄(service=oms-projector): 커서가 저널보다 앞섬, 저널 꼬리 손상, 다시 재생할 수 없는 기록. 워처의 로그는 VictoriaLogs에 없다: journalctl -u watcher.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "victoriametrics-logs-datasource",
+        "uid": "vl"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "vl"
+          },
+          "expr": "_stream:{service=\"oms-projector\"} venue:=\"$venue\" level:in(warn, error)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "state-timeline",
+      "title": "알림",
+      "description": "vmalert가 울린 알림(ALERTS)의 시간 순서. 침묵되거나 억제된 알림도 나온다(관측 문서 §10).",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "ALERTS{alertstate=\"firing\"}",
+          "legendFormat": "{{alertname}} {{venue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    }
+  ]
+}
