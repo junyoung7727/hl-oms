@@ -3074,6 +3074,15 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "xtask", "--test", "deploy", "units::the_seal_and_archiver_runs_are_bounded"],
         guards: "ADR-035",
     },
+    Mutant {
+        id: "M339-deploy-check-skips-verify-dir",
+        what: "rule U16 skips the _verify check: a unit that runs md-lake verify under a read-only l0 passes without the _verify directory in ReadWritePaths (ADR-035, spec mutant 10)",
+        file: "crates/xtask/tests/deploy/units.rs",
+        find: "if read_only.iter().any(|d| covers(d, L0)) && !writes.iter().any(|w| w == VERIFY_DIR) {",
+        replace: "if false {",
+        test: &["-p", "xtask", "--test", "deploy", "units::the_audit_unit_can_write_its_verify_results"],
+        guards: "ADR-035",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
