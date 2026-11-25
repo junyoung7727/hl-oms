@@ -1,5 +1,5 @@
 //! Bybit `orderLinkId` of the OMS, the `Base32Pair` form
-//! (`docs/contracts/identifiers.md`, ADR-022 §7): the instance id in 13
+//! (ADR-022 §7): the instance id in 13
 //! digits, `-`, the order id in 13 digits; lower-case base32hex `0-9a-v`,
 //! 27 characters. Decoding is strict: another case, length or separator,
 //! or a 13-digit value above `u64::MAX` (first digit above `f`) is not ours.

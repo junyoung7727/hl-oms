@@ -107,7 +107,7 @@ necessity = "거래소별 분기가 코어에 퍼지면 두 번째 거래소부�
 sources = ["ISO25010", "REQ"]
 applicability = "적용"
 reason = "기존 저장소에 키움 프로토타입이 있고 다중 거래소가 장기 방향이다"
-handling = "코어는 거래소 중립 타입만 안다. 게이트웨이 계약 C-GW를 구현 둘(가상 거래소, Hyperliquid)이 지킨다"
+handling = "코어는 거래소 중립 타입만 안다. 게이트웨이 계약 C-GW를 구현 셋(가상 거래소, Hyperliquid, Bybit)이 지킨다"
 design = "결정"
 impl = "구현"
 verify = "부분"
@@ -416,7 +416,7 @@ adr = []
 contracts = []
 code = ["crates/oms-node/build.rs", "crates/xtask/src/digest.rs"]
 claims = []
-open = "git 저장소가 아니다. 다이제스트는 변경 탐지용이지 무결성 보호가 아니다(FNV). 릴리스 서명과 보관이 없다. 영향: 운영 바이너리가 검토한 소스와 같은지 강하게 증명하지 못한다. 해소: 저장소 초기화와 태그. 단계: U-10 결정 뒤."
+open = "git 저장소지만 릴리스 태그가 없다. 다이제스트는 변경 탐지용이지 무결성 보호가 아니다(FNV). 릴리스 서명과 보관이 없다. 영향: 운영 바이너리가 검토한 소스와 같은지 강하게 증명하지 못한다. 해소: 릴리스 태그와 서명. 단계: U-10 결정 뒤."
 
 [[item]]
 id = "G-SEC-09"
@@ -540,15 +540,15 @@ necessity = "차단이 걸린 채 몇 시간 방치될 수 있다"
 sources = ["FIA15"]
 applicability = "적용"
 reason = "24시간 시장이고 운영자는 한 명이다"
-handling = "남은 결정"
-design = "미결"
-impl = "미구현"
-verify = "해당없음"
-adr = []
-contracts = []
-code = []
-claims = []
-open = "영향: 불일치·결과 불명·정지가 화면을 볼 때만 보인다. 해소: status를 주기적으로 읽어 알림을 보내는 외부 스크립트 또는 내장 알림. 단계: 무인 운용 전. 사용자 결정 U-11."
+handling = "노드가 거래 안전 알림(차단 사유, 불일치, 치명 정지, 시작 실패, 킬 루프)을 텔레그램으로 직접 보낸다(U-11 결정). 워처는 자기 경로로 따로 알린다(ADR-032)"
+design = "결정"
+impl = "구현"
+verify = "부분"
+adr = ["ADR-029", "ADR-032"]
+contracts = ["C-ALERT"]
+code = ["crates/oms-node/src/alerts.rs", "crates/alert-direct/src/lib.rs"]
+claims = ["V-ALERT-1", "V-ALERT-2", "V-ALERT-3", "V-ALERT-4", "V-ALERT-5", "V-ALERT-DIRECT-1"]
+open = "영향: 실제 텔레그램에는 보낸 적이 없다(시험은 loopback 가짜 텔레그램). 둘째 채널이 없다. 해소: 테스트넷 운용에서 실제 채널로 보낸다. 단계: 무인 운용 전. 사용자 결정 U-11."
 
 [[item]]
 id = "G-OPS-06"

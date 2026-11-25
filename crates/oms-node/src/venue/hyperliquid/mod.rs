@@ -2,7 +2,7 @@
 //!
 //! Orders, cancels and queries go over HTTPS (`/exchange`, `/info`); order
 //! updates and fills arrive on a WebSocket. The gateway implements the
-//! contract in docs/contracts/gateway.md; the reasons for each conservative
+//! contract stated in `venue/mod.rs` (C-GW); the reasons for each conservative
 //! choice are in docs/adr/ADR-017-hyperliquid-gateway.md.
 //!
 //! What has been checked, and how, is listed in docs/verification. In short:

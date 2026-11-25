@@ -93,7 +93,7 @@ checked = "문서의 침묵에 근거한다"
 
 [[assumption]]
 id = "A-11"
-statement = "std와 tokio의 잠금·채널은 문서대로 동작한다(상한, 순서, 닫힘 통지)"
+statement = "std와 tokio의 잠금·채널은 문서대로 동작한다(상한, 순서, 닫힘 통지). std의 BTreeMap은 키 순서로 순회하고 VecDeque는 넣은 순서를 지킨다"
 depends_on = "Rust 1.96 표준 라이브러리, tokio 1.53"
 basis = "라이브러리 문서"
 if_broken = "큐 상한이나 출력 순서가 깨진다"
@@ -117,6 +117,7 @@ basis = "문서: API 서버는 노드를 따라가며 상태를 로컬에 유지
 if_broken = "뒤처진 응답이 이미 닫은 주문을 열린 것으로, 이미 기장한 체결 이전의 포지션을 현재 것으로 보여 준다. 거짓 불일치(OpenAfterClose, PositionOutOfRange)가 떠 신규 주문이 막힌다. 틀린 장부로 거래하는 쪽은 아니다"
 detection = "거짓 불일치 자체가 신호다. 운영자가 거래소 화면과 대조한다"
 checked = "확인하지 않았다. 체결 조회에만 2초의 여유를 두었고 다른 조회에는 여유가 없다. 간격 검토에서 나온 미증명 가설이다"
+
 [[assumption]]
 id = "A-14"
 statement = "저널의 종목 이름은 Bybit의 symbol과 같다(워처의 W1과 W2는 두 이름을 글자 그대로 맞춘다)"
