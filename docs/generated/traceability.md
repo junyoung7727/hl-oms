@@ -1,7 +1,7 @@
 # 계약 추적표
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `25182f3862f64a45`, 검증 결과의 다이제스트 `25182f3862f64a45`.
+> 소스 다이제스트 `2a17b3e8710f6f45`, 검증 결과의 다이제스트 `2a17b3e8710f6f45`.
 
 | 계약 | 제목 | 상태 전이(이벤트) | 설계 결정 | 코드 | 주장 |
 |---|---|---|---|---|---|
@@ -14,12 +14,12 @@
 | [C-CANCEL](../../docs/contracts/order-lifecycle.md) | 취소 | `cancel_requested` `cancel_sent` `cancel_outcome_noted` | ADR-005, ADR-007 | `crates/oms-core/src/decide.rs` | V-CANCEL-1(통과) |
 | [C-TERM](../../docs/contracts/order-lifecycle.md) | 종결 | `venue_terminal` `order_closed` `missing_fills_flagged` `status_noted` `order_recheck` | ADR-007 | `crates/oms-core/src/decide.rs` | V-TERM-1(통과) |
 | [C-JOURNAL](../../docs/contracts/recovery.md) | 저널에서 상태 복원 |  | ADR-003, ADR-011, ADR-013 | `crates/oms-node/src/recovery.rs`<br>`crates/oms-journal/src/segment.rs` | V-JRN-1(통과), V-JRN-2(통과), V-JRN-3(통과), V-JRN-5(통과), V-REPLAY-1(통과), V-BOOT-2(통과), V-SCHEMA-2-1(통과) |
-| [C-SNAP](../../docs/contracts/recovery.md) | 스냅샷 |  | ADR-011 | `crates/oms-journal/src/snapshot.rs`<br>`crates/oms-node/src/pipeline.rs` | V-JRN-4(통과), V-PERF-3(이전 버전 결과) |
+| [C-SNAP](../../docs/contracts/recovery.md) | 스냅샷 |  | ADR-011 | `crates/oms-journal/src/snapshot.rs`<br>`crates/oms-node/src/pipeline.rs` | V-JRN-4(통과), V-PERF-3(미실행) |
 | [C-BOOT](../../docs/contracts/recovery.md) | 재시작 | `booted` `config_activated` | ADR-005, ADR-002 | `crates/oms-core/src/decide.rs`<br>`crates/oms-node/src/node.rs` | V-BOOT-1(통과), V-CFG-1(통과), V-BOOT-2(통과), V-COMMIT-4(통과) |
 | [C-LINK](../../docs/contracts/reconciliation.md) | 링크 상태 | `link_changed` | ADR-014 | `crates/oms-core/src/decide.rs` | V-RECON-1(통과), V-LINK-1(통과) |
 | [C-RECON](../../docs/contracts/reconciliation.md) | 재확인과 대조 | `fills_synced` `open_orders_swept` `positions_verified` `status_noted` `order_recheck` | ADR-014 | `crates/oms-core/src/decide.rs`<br>`crates/oms-core/src/needs.rs`<br>`crates/oms-node/src/venue/reconciler.rs` | V-RECON-1(통과), V-RECON-2(통과) |
 | [C-MISMATCH](../../docs/contracts/reconciliation.md) | 불일치와 조정 | `mismatch_raised` `mismatch_acked` `position_adjusted` `venue_change_settled` | ADR-014 | `crates/oms-core/src/decide.rs` | V-RECON-1(통과), V-EXT-1(통과), V-MIS-1(통과), V-VENUE-EXEC-1(통과) |
-| [C-OVERLOAD](../../docs/contracts/overload.md) | 과부하와 저장 공간 | `storage_low_changed` | ADR-010 | `crates/oms-node/src/queues.rs`<br>`crates/oms-node/src/server.rs` | V-OVL-1(통과), V-OVL-2(통과), V-OVL-3(통과), V-API-3(통과), V-PERF-2(이전 버전 결과) |
+| [C-OVERLOAD](../../docs/contracts/overload.md) | 과부하와 저장 공간 | `storage_low_changed` | ADR-010 | `crates/oms-node/src/queues.rs`<br>`crates/oms-node/src/server.rs` | V-OVL-1(통과), V-OVL-2(통과), V-OVL-3(통과), V-API-3(통과), V-PERF-2(미실행) |
 | [C-OPS](../../docs/contracts/api.md) | 운영 명령 | `operator_halted` `operator_resumed` `ref_price_updated` | ADR-008, ADR-015 | `crates/oms-core/src/decide.rs` | V-API-1(통과), V-CANCEL-1(통과) |
 | [C-API](../../docs/contracts/api.md) | 로컬 API |  | ADR-015 | `crates/oms-api/src/lib.rs`<br>`crates/oms-node/src/server.rs` | V-API-1(통과), V-API-2(통과), V-API-3(통과), V-DASH-1(통과) |
 | [C-GW](../../docs/contracts/gateway.md) | 게이트웨이 계약 |  | ADR-005, ADR-014, ADR-017, ADR-021 | `crates/oms-node/src/venue/mod.rs`<br>`crates/oms-node/src/venue/simnet.rs`<br>`crates/oms-node/src/venue/hyperliquid/mod.rs` | V-HL-1(통과), V-HL-2(통과), V-HL-3(미실행), V-SLICE-1(통과), V-GW-SEAM-1(통과) |

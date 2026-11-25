@@ -1,5 +1,8 @@
 # L1 아카이버 운영 (md-archiver)
 
+주인: 준영
+검토일: 2026-11-19
+
 `md-archiver`는 일별 봉인이 끝난 L0 날짜에서 L1 Parquet 표(`book_msg`, `trade`, `ticker`, `gap`, `instrument`)를 만든다. 계약은 quant-data-platform `docs/crypto/lake-contract.md` §3, 설계는 `.scratch/md-archiver/spec.md`(U7, 검토 R1–R11), 계약에 없는 곳의 결정은 [ADR-020](../adr/ADR-020-md-archiver-input-rules.md)이다.
 
 이 저장소는 서비스를 설치하거나 켜지 않는다. `deploy/systemd/md-archiver@.service`와 `.timer`는 틀이다.

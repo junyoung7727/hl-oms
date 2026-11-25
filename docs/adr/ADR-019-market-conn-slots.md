@@ -1,6 +1,6 @@
 # ADR-019 시세 레코드의 시장은 conn_id 구간으로 정한다
 
-상태: 채택, 구현됨(2026-11-19, U5b `.scratch/md-collector/`). 계약(quant-data-platform `docs/crypto/lake-contract.md`)은 바꾸지 않았다. 나중에 계약이 이 규칙을 받아들일 수 있다(U8).
+상태: 채택 (2026-11-19).
 
 ## 1. 문제
 

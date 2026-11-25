@@ -1,6 +1,6 @@
 # ADR-007 주문 상태 모델과 체결 식별
 
-상태: 채택. 동작 계약은 [order-lifecycle](../contracts/order-lifecycle.md).
+상태: 채택.
 
 ## 1. 문제와 발생 가능한 실패
 

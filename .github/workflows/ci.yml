@@ -43,6 +43,12 @@ jobs:
       - name: Gate scripts go red on planted cases
         run: tools/ci/selftest.sh
 
+      - name: Runbooks name an owner and a review date
+        run: tools/ci/doc_freshness.sh
+
+      - name: Links in living documents resolve
+        run: tools/ci/doc_links.sh
+
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
@@ -88,3 +94,7 @@ jobs:
       - name: Format of added Rust files
         if: github.event_name == 'pull_request'
         run: tools/ci/rustfmt_added.sh "${{ github.event.pull_request.base.sha }}"
+
+      - name: ADRs are not edited (only their status line)
+        if: github.event_name == 'pull_request'
+        run: tools/ci/adr_immutable.sh "${{ github.event.pull_request.base.sha }}"

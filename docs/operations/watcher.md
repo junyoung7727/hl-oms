@@ -1,5 +1,8 @@
 # 워처 운영
 
+주인: 준영
+검토일: 2026-11-24
+
 설계: [ADR-031](../adr/ADR-031-watcher.md). 계약: [C-WATCH](../contracts/watcher.md). 이 문서는 워처의 설정과 자격 파일(U19a4), 시작 확인과 그 거부, 시작 확인이 내보내는 지표(U19a4b), 실행과 상황별 의미(U19a7), 직접 알림의 토큰 파일(U19b1a, [ADR-032](../adr/ADR-032-watcher-kill-and-alerts.md))을 적는다. U19a7부터 `watcher --config`가 돈다: W1(열린 주문)과 W2(포지션), U19a8부터 W4(체결), U19a9부터 W3(지갑과 증거금)을 검사하고, 확정된 차이를 `admin.sock`에 보내고, `monitor.sock`에 하트비트를 보낸다. loopback 가짜로만 시험했고 실제 거래소에서 돌려 본 적이 없다. 서비스 설치와 알림 규칙은 U20b다.
 
 ## 설정 파일

@@ -1,6 +1,6 @@
 # ADR-017 Hyperliquid 게이트웨이
 
-상태: 채택(구현). 실주문 검증은 하지 않았다(U-01).
+상태: 채택.
 
 근거 자료는 [research/hyperliquid-protocol.md](../research/hyperliquid-protocol.md)다. 아래의 "문서"는 Hyperliquid 공식 문서를 뜻한다.
 
