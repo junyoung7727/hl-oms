@@ -1,0 +1,619 @@
+{
+ "rule_files": [
+  "../metrics/lake.rules.json"
+ ],
+ "evaluation_interval": "1m",
+ "tests": [
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "lake_disk_free_bytes{venue=\"bybit\"}",
+     "values": "100000000000-2777778x5040"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "11h",
+     "groupname": "lake",
+     "alertname": "LakeDiskDaysLeftLow",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "12h5m",
+     "groupname": "lake",
+     "alertname": "LakeDiskDaysLeftLow",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "12h20m",
+     "groupname": "lake",
+     "alertname": "LakeDiskDaysLeftLow",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "지난 24시간의 속도로 레이크 디스크가 7일 안에 찬다. 연구 결과·오래된 파일을 옮기거나 지울 계획을 세운다(L0는 지우지 않는다)."
+       }
+      }
+     ]
+    },
+    {
+     "eval_time": "12h20m",
+     "groupname": "lake",
+     "alertname": "LakeDiskDaysLeftCritical",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "30s",
+   "input_series": [
+    {
+     "series": "lake_disk_free_bytes{venue=\"bybit\"}",
+     "values": "100000000000-8333333x1680"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "11h",
+     "groupname": "lake",
+     "alertname": "LakeDiskDaysLeftLow",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "12h20m",
+     "groupname": "lake",
+     "alertname": "LakeDiskDaysLeftLow",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "지난 24시간의 속도로 레이크 디스크가 7일 안에 찬다. 연구 결과·오래된 파일을 옮기거나 지울 계획을 세운다(L0는 지우지 않는다)."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "lake_disk_free_bytes{venue=\"bybit\"}",
+     "values": "30000000000-2777778x5040"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "11h",
+     "groupname": "lake",
+     "alertname": "LakeDiskDaysLeftCritical",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "12h20m",
+     "groupname": "lake",
+     "alertname": "LakeDiskDaysLeftCritical",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P1",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "지난 24시간의 속도로 레이크 디스크가 2일 안에 찬다. 지금 공간을 만든다. 차면 L0 쓰기가 멈추고 원본 시세를 잃는다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "30s",
+   "input_series": [
+    {
+     "series": "lake_disk_free_bytes{venue=\"bybit\"}",
+     "values": "100000000000+0x1680"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "13h",
+     "groupname": "lake",
+     "alertname": "LakeDiskDaysLeftLow",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "1m",
+   "input_series": [
+    {
+     "series": "lake_l0_write_errors_total{venue=\"bybit\"}",
+     "values": "0 0 1 1 0 0 0"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "1m",
+     "groupname": "lake",
+     "alertname": "LakeL0WriteError",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "2m",
+     "groupname": "lake",
+     "alertname": "LakeL0WriteError",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P1",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "수집기의 L0 쓰기가 실패했다. 쓰기는 첫 오류에서 멈추므로 원본 시세를 잃는 중이다. journalctl -u md-collector@<거래소>에서 오류를 보고 디스크를 확인한 뒤 수집기를 다시 띄운다."
+       }
+      }
+     ]
+    },
+    {
+     "eval_time": "5m",
+     "groupname": "lake",
+     "alertname": "LakeL0WriteError",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P1",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "수집기의 L0 쓰기가 실패했다. 쓰기는 첫 오류에서 멈추므로 원본 시세를 잃는 중이다. journalctl -u md-collector@<거래소>에서 오류를 보고 디스크를 확인한 뒤 수집기를 다시 띄운다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "1m",
+   "input_series": [
+    {
+     "series": "lake_l0_write_errors_total{venue=\"bybit\"}",
+     "values": "0+0x20"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "15m",
+     "groupname": "lake",
+     "alertname": "LakeL0WriteError",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "1m",
+   "input_series": [
+    {
+     "series": "lake_seal_lag_hours{venue=\"bybit\"}",
+     "values": "3+0x5"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "2m",
+     "groupname": "lake",
+     "alertname": "LakeSealLag",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "봉인되지 않은 시간이 2시간을 넘었다. 봉인이 멈췄거나, 6시간 제한에 걸려 매시 다시 시작되고 있다. journalctl -u md-lake-seal@<거래소>로 둘을 구분한다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "1m",
+   "input_series": [
+    {
+     "series": "lake_seal_lag_hours{venue=\"bybit\"}",
+     "values": "2+0x5"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "2m",
+     "groupname": "lake",
+     "alertname": "LakeSealLag",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "24h",
+   "input_series": [
+    {
+     "series": "lake_audit_fail_total{venue=\"bybit\"}",
+     "values": "3000 3000"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "1h",
+     "groupname": "lake-audit",
+     "alertname": "LakeAuditFailed",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "레이크 감사가 새 실패 파일을 찾았다. crypto/audit/venue=<거래소>/date=<날짜>.json을 읽는다. 이 알림은 26시간 뒤 저절로 끝나지만 파일이 고쳐졌다는 뜻이 아니다. 고치지 않은 파일은 감사기가 7일마다 다시 감사하므로 이 알림이 7일마다 다시 온다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "24h",
+   "input_series": [
+    {
+     "series": "lake_audit_fail_total{venue=\"bybit\"}",
+     "values": "0 _ 3000 3000"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "49h",
+     "groupname": "lake-audit",
+     "alertname": "LakeAuditFailed",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "레이크 감사가 새 실패 파일을 찾았다. crypto/audit/venue=<거래소>/date=<날짜>.json을 읽는다. 이 알림은 26시간 뒤 저절로 끝나지만 파일이 고쳐졌다는 뜻이 아니다. 고치지 않은 파일은 감사기가 7일마다 다시 감사하므로 이 알림이 7일마다 다시 온다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "24h",
+   "input_series": [
+    {
+     "series": "lake_audit_fail_total{venue=\"bybit\"}",
+     "values": "0 3000 3000"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "25h",
+     "groupname": "lake-audit",
+     "alertname": "LakeAuditFailed",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "레이크 감사가 새 실패 파일을 찾았다. crypto/audit/venue=<거래소>/date=<날짜>.json을 읽는다. 이 알림은 26시간 뒤 저절로 끝나지만 파일이 고쳐졌다는 뜻이 아니다. 고치지 않은 파일은 감사기가 7일마다 다시 감사하므로 이 알림이 7일마다 다시 온다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "24h",
+   "input_series": [
+    {
+     "series": "lake_audit_fail_total{venue=\"bybit\"}",
+     "values": "3000 3000 3000"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "49h",
+     "groupname": "lake-audit",
+     "alertname": "LakeAuditFailed",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "24h",
+   "input_series": [
+    {
+     "series": "lake_audit_fail_total{venue=\"bybit\"}",
+     "values": "0 0"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "1h",
+     "groupname": "lake-audit",
+     "alertname": "LakeAuditFailed",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "24h",
+   "input_series": [
+    {
+     "series": "lake_audit_fail_total{venue=\"bybit\"}",
+     "values": "3000 3000 0 0"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "73h",
+     "groupname": "lake-audit",
+     "alertname": "LakeAuditFailed",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "24h",
+   "input_series": [
+    {
+     "series": "lake_audit_fail_total{venue=\"bybit\"}",
+     "values": "7 7 9"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "49h",
+     "groupname": "lake-audit",
+     "alertname": "LakeAuditFailed",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "레이크 감사가 새 실패 파일을 찾았다. crypto/audit/venue=<거래소>/date=<날짜>.json을 읽는다. 이 알림은 26시간 뒤 저절로 끝나지만 파일이 고쳐졌다는 뜻이 아니다. 고치지 않은 파일은 감사기가 7일마다 다시 감사하므로 이 알림이 7일마다 다시 온다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "24h",
+   "input_series": [
+    {
+     "series": "lake_audit_fail_total{venue=\"bybit\"}",
+     "values": "0 3000 3000 3000"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "51h",
+     "groupname": "lake-audit",
+     "alertname": "LakeAuditFailed",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "24h",
+   "input_series": [
+    {
+     "series": "lake_audit_fail_total{venue=\"bybit\"}",
+     "values": "109"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "1h",
+     "groupname": "lake-audit",
+     "alertname": "LakeAuditFailed",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "레이크 감사가 새 실패 파일을 찾았다. crypto/audit/venue=<거래소>/date=<날짜>.json을 읽는다. 이 알림은 26시간 뒤 저절로 끝나지만 파일이 고쳐졌다는 뜻이 아니다. 고치지 않은 파일은 감사기가 7일마다 다시 감사하므로 이 알림이 7일마다 다시 온다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "27h",
+   "input_series": [
+    {
+     "series": "lake_audit_fail_total{venue=\"bybit\"}",
+     "values": "0 3000"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "28h",
+     "groupname": "lake-audit",
+     "alertname": "LakeAuditFailed",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "레이크 감사가 새 실패 파일을 찾았다. crypto/audit/venue=<거래소>/date=<날짜>.json을 읽는다. 이 알림은 26시간 뒤 저절로 끝나지만 파일이 고쳐졌다는 뜻이 아니다. 고치지 않은 파일은 감사기가 7일마다 다시 감사하므로 이 알림이 7일마다 다시 온다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "24h",
+   "input_series": [
+    {
+     "series": "lake_audit_last_run_ts{venue=\"bybit\"}",
+     "values": "946684800+86400x2"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "50h",
+     "groupname": "lake-audit",
+     "alertname": "LakeAuditStale",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "90h",
+     "groupname": "lake-audit",
+     "alertname": "LakeAuditStale",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "bybit 레이크 감사가 36시간 넘게 끝나지 않았다(또는 결과를 보내지 못했다). systemctl status crypto-lake-audit@bybit와 journalctl -u crypto-lake-audit@bybit로 종료 코드와 traceback을 본다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "24h",
+   "input_series": [
+    {
+     "series": "lake_audit_last_run_ts{venue=\"other\"}",
+     "values": "946684800+86400x2"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "1h",
+     "groupname": "lake-audit",
+     "alertname": "LakeAuditStale",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "bybit 레이크 감사가 36시간 넘게 끝나지 않았다(또는 결과를 보내지 못했다). systemctl status crypto-lake-audit@bybit와 journalctl -u crypto-lake-audit@bybit로 종료 코드와 traceback을 본다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "24h",
+   "input_series": [
+    {
+     "series": "lake_audit_last_run_ts{venue=\"bybit\"}",
+     "values": "946684800+0x2"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "30h",
+     "groupname": "lake-audit",
+     "alertname": "LakeAuditStale",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "50h",
+     "groupname": "lake-audit",
+     "alertname": "LakeAuditStale",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "bybit 레이크 감사가 36시간 넘게 끝나지 않았다(또는 결과를 보내지 못했다). systemctl status crypto-lake-audit@bybit와 journalctl -u crypto-lake-audit@bybit로 종료 코드와 traceback을 본다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "24h",
+   "input_series": [
+    {
+     "series": "lake_audit_not_audited_files{venue=\"bybit\"}",
+     "values": "3 3"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "30m",
+     "groupname": "lake-audit",
+     "alertname": "LakeNotAudited",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "2h",
+     "groupname": "lake-audit",
+     "alertname": "LakeNotAudited",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P3",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "verify 결과가 없는 봉인 L0 파일이 있다. 9일 창 밖의 날짜면 md-lake verify를 손으로 돌린다(운영 문서 §4.1)."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "24h",
+   "input_series": [
+    {
+     "series": "lake_audit_not_audited_files{venue=\"bybit\"}",
+     "values": "0 0"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "2h",
+     "groupname": "lake-audit",
+     "alertname": "LakeNotAudited",
+     "exp_alerts": []
+    }
+   ]
+  }
+ ]
+}

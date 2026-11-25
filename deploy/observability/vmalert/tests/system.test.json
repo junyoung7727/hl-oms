@@ -1,0 +1,225 @@
+{
+ "rule_files": [
+  "../metrics/system.rules.json"
+ ],
+ "evaluation_interval": "10s",
+ "tests": [
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "up{job=\"victoriametrics\",instance=\"127.0.0.1:8428\"}",
+     "values": "1+0x30"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "1m",
+     "groupname": "watchdog",
+     "alertname": "Watchdog",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "watchdog"
+       },
+       "exp_annotations": {
+        "summary": "늘 울리는 알림. dead-man 수신자가 이것이 끊긴 것을 보고 관측 스택이 죽었음을 안다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "up{job=\"alertmanager\",instance=\"127.0.0.1:9093\"}",
+     "values": "0+0x30"
+    },
+    {
+     "series": "up{job=\"victoriametrics\",instance=\"127.0.0.1:8428\"}",
+     "values": "0+0x30"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "1m",
+     "groupname": "system",
+     "alertname": "ObsComponentDown",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "3m",
+     "groupname": "system",
+     "alertname": "ObsComponentDown",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "job": "alertmanager",
+        "instance": "127.0.0.1:9093"
+       },
+       "exp_annotations": {
+        "summary": "관측 구성 요소 하나가 2분 넘게 응답하지 않는다. systemctl status <job 이름>으로 본다. VictoriaMetrics와 vmalert-metrics가 죽으면 이 알림 자체가 없으므로 Watchdog이 대신한다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "up{job=\"alertmanager\",instance=\"127.0.0.1:9093\"}",
+     "values": "1+0x30"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "4m",
+     "groupname": "system",
+     "alertname": "ObsComponentDown",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "vmalert_iteration_missed_total{job=\"vmalert-metrics\",instance=\"127.0.0.1:8880\",group=\"lake\",file=\"x\"}",
+     "values": "0 0 1 1 1"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "40s",
+     "groupname": "system",
+     "alertname": "VmalertIterationMissed",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "job": "vmalert-metrics",
+        "instance": "127.0.0.1:8880",
+        "group": "lake",
+        "file": "x"
+       },
+       "exp_annotations": {
+        "summary": "vmalert가 규칙 평가 주기를 놓쳤다. 그동안 알림이 늦다. 저장소 응답 시간과 vmalert 메모리를 본다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "vmalert_iteration_missed_total{job=\"vmalert-metrics\",instance=\"127.0.0.1:8880\",group=\"lake\",file=\"x\"}",
+     "values": "0+0x30"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "4m",
+     "groupname": "system",
+     "alertname": "VmalertIterationMissed",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "alertmanager_notifications_failed_total{job=\"alertmanager\",instance=\"127.0.0.1:9093\",integration=\"telegram\",reason=\"other\"}",
+     "values": "0 0 1 1"
+    },
+    {
+     "series": "alertmanager_notifications_failed_total{job=\"alertmanager\",instance=\"127.0.0.1:9093\",integration=\"webhook\",reason=\"other\"}",
+     "values": "0 0 1 1"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "30s",
+     "groupname": "system",
+     "alertname": "AlertmanagerTelegramFailing",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "job": "alertmanager",
+        "instance": "127.0.0.1:9093",
+        "integration": "telegram",
+        "reason": "other"
+       },
+       "exp_annotations": {
+        "summary": "Alertmanager가 Telegram으로 보내지 못했다. 이 알림도 Telegram으로는 오지 않을 수 있으니 대시보드에서 본다. journalctl -u alertmanager로 오류를 본다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "process_resident_memory_bytes{job=\"vmalert-metrics\",instance=\"127.0.0.1:8880\"}",
+     "values": "200000000+0x90"
+    },
+    {
+     "series": "process_resident_memory_bytes{job=\"victoriametrics\",instance=\"127.0.0.1:8428\"}",
+     "values": "900000000+0x90"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "9m",
+     "groupname": "system",
+     "alertname": "ObsMemoryNearCap",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "11m",
+     "groupname": "system",
+     "alertname": "ObsMemoryNearCap",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P3",
+        "job": "vmalert-metrics",
+        "instance": "127.0.0.1:8880"
+       },
+       "exp_annotations": {
+        "summary": "관측 구성 요소의 메모리가 단위의 MemoryMax 90%를 넘었다. 상한에 닿으면 강제 종료된다. 주간 검토에서 상한이나 설정을 고친다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "process_resident_memory_bytes{job=\"alertmanager\",instance=\"127.0.0.1:9093\"}",
+     "values": "90000000+0x90"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "14m",
+     "groupname": "system",
+     "alertname": "ObsMemoryNearCap",
+     "exp_alerts": []
+    }
+   ]
+  }
+ ]
+}
