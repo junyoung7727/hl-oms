@@ -213,6 +213,21 @@ polkit.addRule(function(action, subject) {
 });
 "#;
 
+/// U23: the journal's own file system and its data directory. Without the
+/// mount the path is a plain directory on the lake's file system: an OMS
+/// started there would begin a new, empty journal.
+const JOURNAL_FS: &str = "/mnt/nvme/hl-oms-journal";
+const JOURNAL_DATA: &str = "/mnt/nvme/hl-oms-journal/data";
+const JOURNAL_READERS: &[&str] = &[WATCHER, PROJECTOR, EXPORT];
+/// U23: the export writes the trading subtree of the lake and the daily
+/// lock file (flock creates it; `/run` is read-only under
+/// `ProtectSystem=strict`).
+const RUN_LOCK: &str = "/run/lock";
+const EXPORT_WRITES: &[&str] = &["/mnt/nvme/lake/crypto/trading", RUN_LOCK];
+/// U23: the kill marker's directory, `/var/lib/hl-oms` (persistent, shared by
+/// the OMS and the watcher).
+const MARKER_DIR: &str = "hl-oms";
+
 /// Files under `deploy/observability/` that are not installed (U14).
 const NOT_INSTALLED: &[&str] = &["README.md", "install.toml", "venues.toml", "metrics.toml"];
 const NOT_INSTALLED_DIRS: &[&str] = &["vmalert/tests/"];
@@ -276,6 +291,7 @@ pub fn check(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
     u20_oms_started_by_a_person(t, p, out);
     u21_watcher_restart(p, out);
     u22_identities(t, p, out);
+    u23_journal_and_state(p, out);
 }
 
 /// A systemd size: bytes, or a number with `K`, `M` or `G` (base 1024).
@@ -1372,6 +1388,121 @@ fn u22_identities(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
                 format!("{src} must install under {POLKIT_DST}, where polkitd reads it"),
             );
         }
+    }
+}
+
+/// Whether a command line of the unit takes a lock under `/run/lock/`.
+fn locks_under_run_lock(u: &Unit) -> bool {
+    exec_lines(u).into_iter().any(|line| {
+        let w = words(line);
+        w.first().is_some_and(|c| c == "/usr/bin/flock")
+            && w.get(1).is_some_and(|l| l.starts_with("/run/lock/"))
+    })
+}
+
+fn u23_journal_and_state(p: &Parsed, out: &mut Vec<Finding>) {
+    for name in std::iter::once(&OMS).chain(JOURNAL_READERS) {
+        for u in required(p, name, "U23", out) {
+            expect(
+                u,
+                "U23",
+                ("Unit", "AssertPathIsMountPoint", Is(JOURNAL_FS)),
+                out,
+            );
+            let mounts: Vec<String> = u
+                .ini
+                .values("Unit", "RequiresMountsFor")
+                .into_iter()
+                .flat_map(words)
+                .collect();
+            if !mounts.iter().any(|m| m == JOURNAL_FS) {
+                finding(
+                    out,
+                    &u.path,
+                    "U23",
+                    format!("[Unit] RequiresMountsFor= must hold {JOURNAL_FS}"),
+                );
+            }
+        }
+    }
+    for u in named(p, OMS) {
+        expect(u, "U23", ("Service", "ReadWritePaths", Is(JOURNAL_DATA)), out);
+    }
+    for name in JOURNAL_READERS {
+        for u in named(p, name) {
+            expect(u, "U23", ("Service", "ReadOnlyPaths", Is(JOURNAL_DATA)), out);
+            let writes = path_list(u, "ReadWritePaths");
+            if writes
+                .iter()
+                .any(|w| covers(w, JOURNAL_DATA) || covers(JOURNAL_DATA, w))
+            {
+                finding(
+                    out,
+                    &u.path,
+                    "U23",
+                    format!("only the OMS writes {JOURNAL_DATA}: no ReadWritePaths= in it"),
+                );
+            }
+        }
+    }
+    for u in named(p, EXPORT) {
+        let mut writes = path_list(u, "ReadWritePaths");
+        writes.sort();
+        if u.ini.values("Service", "ReadWritePaths").len() != 1 || writes != EXPORT_WRITES {
+            finding(
+                out,
+                &u.path,
+                "U23",
+                format!("[Service] ReadWritePaths must be exactly {EXPORT_WRITES:?}, on one line"),
+            );
+        }
+    }
+    for u in &p.units {
+        if locks_under_run_lock(u)
+            && u.ini.values("Service", "ProtectSystem").contains(&"strict")
+            && !path_list(u, "ReadWritePaths")
+                .iter()
+                .any(|w| covers(w, RUN_LOCK))
+        {
+            finding(
+                out,
+                &u.path,
+                "U23",
+                format!(
+                    "flock creates its lock file under a read-only {RUN_LOCK}: list it in ReadWritePaths="
+                ),
+            );
+        }
+        let runtime: Vec<String> = u
+            .ini
+            .any("RuntimeDirectory")
+            .into_iter()
+            .flat_map(words)
+            .collect();
+        if runtime.iter().any(|d| d == MARKER_DIR) {
+            finding(
+                out,
+                &u.path,
+                "U23",
+                "no RuntimeDirectory=hl-oms: a kill marker on tmpfs is gone after a reboot",
+            );
+        }
+    }
+    for name in [OMS, WATCHER] {
+        for u in named(p, name) {
+            expect(u, "U23", ("Service", "StateDirectory", Is(MARKER_DIR)), out);
+            expect(u, "U23", ("Service", "StateDirectoryMode", Is("0700")), out);
+        }
+    }
+    for u in named(p, PROJECTOR) {
+        expect(
+            u,
+            "U23",
+            ("Service", "StateDirectory", Is("oms-projector")),
+            out,
+        );
+        // The projector reads /proc/locks for the journal's LOCK.
+        expect(u, "U23", ("Service", "ProcSubset", Absent), out);
     }
 }
 
@@ -3114,4 +3245,152 @@ fn the_stop_permission_names_only_the_oms_unit_and_stop() {
     let mut t = Tree::real();
     t.remove(&rule);
     assert_rules(&crate::check(&t), &["U14", "U22"]);
+}
+
+const JOURNAL_UNITS: &[&str] = &[
+    "oms-node.service",
+    "watcher.service",
+    "oms-projector.service",
+    "oms-export.service",
+];
+
+#[test]
+fn the_oms_units_refuse_an_unmounted_journal() {
+    let assert = "AssertPathIsMountPoint=/mnt/nvme/hl-oms-journal\n";
+    for &name in JOURNAL_UNITS {
+        // Without the assert a missing mount leaves a plain directory: a new,
+        // empty journal beside the real one.
+        plant(name, assert, "", &["U23"]);
+        plant(
+            name,
+            assert,
+            "ConditionPathIsMountPoint=/mnt/nvme/hl-oms-journal\n",
+            &["U23"],
+        );
+        plant(
+            name,
+            assert,
+            "AssertPathIsMountPoint=/mnt/nvme\n",
+            &["U23"],
+        );
+    }
+    for name in ["oms-node.service", "watcher.service", "oms-projector.service"] {
+        plant(name, "RequiresMountsFor=/mnt/nvme/hl-oms-journal\n", "", &["U23"]);
+    }
+    plant(
+        "oms-export.service",
+        "RequiresMountsFor=/mnt/nvme/hl-oms-journal /mnt/nvme/lake\n",
+        "RequiresMountsFor=/mnt/nvme/lake\n",
+        &["U23"],
+    );
+    // Only the OMS writes the data directory.
+    let rw = "ReadWritePaths=/mnt/nvme/hl-oms-journal/data\n";
+    plant("oms-node.service", rw, "", &["U23"]);
+    plant(
+        "oms-node.service",
+        rw,
+        "ReadWritePaths=/mnt/nvme/hl-oms-journal\n",
+        &["U23"],
+    );
+    let ro = "ReadOnlyPaths=/mnt/nvme/hl-oms-journal/data\n";
+    for name in ["watcher.service", "oms-projector.service", "oms-export.service"] {
+        plant(name, ro, "", &["U23"]);
+    }
+    for extra in [
+        "ReadWritePaths=/mnt/nvme/hl-oms-journal/data\n",
+        "ReadWritePaths=/mnt/nvme/hl-oms-journal\n",
+        "ReadWritePaths=-/mnt/nvme/hl-oms-journal/data/snapshots/\n",
+    ] {
+        plant("watcher.service", ro, &format!("{ro}{extra}"), &["U23"]);
+        plant("oms-projector.service", ro, &format!("{ro}{extra}"), &["U23"]);
+    }
+}
+
+#[test]
+fn the_kill_marker_directory_is_persistent() {
+    for name in ["oms-node.service", "watcher.service"] {
+        plant(name, "StateDirectory=hl-oms\n", "", &["U23"]);
+        plant(
+            name,
+            "StateDirectoryMode=0700\n",
+            "StateDirectoryMode=0755\n",
+            &["U23"],
+        );
+        // A runtime directory is tmpfs: a kill would vanish at the next boot.
+        plant(
+            name,
+            "StateDirectory=hl-oms\n",
+            "RuntimeDirectory=hl-oms\n",
+            &["U23"],
+        );
+    }
+    plant(
+        "oms-projector.service",
+        "StateDirectory=oms-projector\n",
+        "StateDirectory=oms-projector\nRuntimeDirectory=x hl-oms\n",
+        &["U23"],
+    );
+}
+
+#[test]
+fn the_projector_can_read_proc_locks() {
+    let p = "oms-projector.service";
+    plant(
+        p,
+        "StateDirectory=oms-projector\n",
+        "StateDirectory=oms-projector\nProcSubset=pid\n",
+        &["U23"],
+    );
+    plant(p, "StateDirectory=oms-projector\n", "", &["U23"]);
+    plant(
+        p,
+        "StateDirectory=oms-projector\n",
+        "StateDirectory=hl-oms\n",
+        &["U23"],
+    );
+}
+
+#[test]
+fn the_export_can_take_the_daily_lock() {
+    let e = "oms-export.service";
+    let rw = "ReadWritePaths=/mnt/nvme/lake/crypto/trading /run/lock\n";
+    for to in [
+        // flock cannot create the lock file on a read-only /run.
+        "ReadWritePaths=/mnt/nvme/lake/crypto/trading\n",
+        // The export writes the trading subtree of the lake only.
+        "ReadWritePaths=/mnt/nvme/lake /run/lock\n",
+        "ReadWritePaths=/run/lock\n",
+        "ReadWritePaths=/mnt/nvme/lake/crypto/trading\nReadWritePaths=/run/lock\n",
+        "ReadWritePaths=/mnt/nvme/lake/crypto/trading /run/lock /mnt/nvme/lake/crypto/l1\n",
+    ] {
+        plant(e, rw, to, &["U23"]);
+    }
+    plant(
+        e,
+        rw,
+        "ReadWritePaths=/run/lock /mnt/nvme/lake/crypto/trading\n",
+        &[],
+    );
+    // The general rule: any unit that takes a lock under /run/lock with a
+    // read-only file system.
+    let lock = |extra: &str| {
+        format!(
+            "[Unit]\nDescription=x\n\n[Service]\nType=simple\nMemoryMax=1G\nProtectSystem=strict\n{extra}ExecStart=/usr/bin/flock /run/lock/x.lock /bin/true\n"
+        )
+    };
+    for (extra, rules) in [
+        ("", &["U23"][..]),
+        ("ReadWritePaths=/var/lib/x\n", &["U23"][..]),
+        ("ReadWritePaths=/run/lock\n", &[][..]),
+    ] {
+        let mut t = Tree::real();
+        add_installed(
+            &mut t,
+            "systemd/x.service",
+            &lock(extra),
+            "/etc/systemd/system/x.service",
+            "0644",
+        );
+        assert_rules(&crate::check(&t), rules);
+    }
 }
