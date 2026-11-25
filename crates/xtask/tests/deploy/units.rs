@@ -155,6 +155,23 @@ const AUDIT_PATHS: &[(&str, &str, Want)] = &[
     ),
 ];
 
+/// The OMS unit (U20): started by a person only.
+const OMS: &str = "oms-node.service";
+/// U20: keys that would bring a stopped OMS back, in any section.
+const OMS_NO_RESTART: &[&str] = &[
+    "RestartSec",
+    "RestartPreventExitStatus",
+    "RestartForceExitStatus",
+    "RestartSteps",
+    "RestartMaxDelaySec",
+    "OnFailure",
+    "OnSuccess",
+    "Upholds",
+    "WatchdogSec",
+];
+/// U20: units that start the service of their own name without naming it.
+const OMS_ACTIVATORS: &[&str] = &["oms-node.timer", "oms-node.socket", "oms-node.path"];
+
 /// Files under `deploy/observability/` that are not installed (U14).
 const NOT_INSTALLED: &[&str] = &["README.md", "install.toml", "venues.toml", "metrics.toml"];
 const NOT_INSTALLED_DIRS: &[&str] = &["vmalert/tests/"];
@@ -215,6 +232,7 @@ pub fn check(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
     u17_exec_text(p, out);
     u18_stack_settings(p, out);
     u19_bounded_runs(p, out);
+    u20_oms_started_by_a_person(t, p, out);
 }
 
 /// A systemd size: bytes, or a number with `K`, `M` or `G` (base 1024).
@@ -1149,6 +1167,57 @@ fn u19_bounded_runs(p: &Parsed, out: &mut Vec<Finding>) {
                 &u.path,
                 "U19",
                 "no EnvironmentFile=: the check cannot read its values",
+            );
+        }
+    }
+}
+
+fn u20_oms_started_by_a_person(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
+    for u in required(p, OMS, "U20", out) {
+        expect(u, "U20", ("Service", "Restart", Is("no")), out);
+        expect(u, "U20", ("Service", "Type", Is("simple")), out);
+        for key in OMS_NO_RESTART {
+            if !u.ini.any(key).is_empty() {
+                finding(
+                    out,
+                    &u.path,
+                    "U20",
+                    format!("no {key}=: it could bring a stopped OMS back"),
+                );
+            }
+        }
+        if u.ini.entries.iter().any(|(s, _, _)| s == "Install") {
+            finding(
+                out,
+                &u.path,
+                "U20",
+                "no [Install] section: the OMS is never enabled",
+            );
+        }
+    }
+    // Another unit may order itself against the OMS, nothing more: a
+    // dependency, a command or an [Install] line could start it. Without the
+    // suffix systemctl still finds it, so the bare name counts.
+    for u in p.units.iter().filter(|u| u.name != OMS) {
+        for (section, key, value) in &u.ini.entries {
+            let ordering = section == "Unit" && (key == "After" || key == "Before");
+            if !ordering && value.contains(OMS.trim_end_matches(".service")) {
+                finding(
+                    out,
+                    &u.path,
+                    "U20",
+                    format!("[{section}] {key} names {OMS}: only After= and Before= may"),
+                );
+            }
+        }
+    }
+    for path in t.files.keys().filter(|k| k.starts_with("deploy/")) {
+        if OMS_ACTIVATORS.contains(&file_name(path)) {
+            finding(
+                out,
+                path,
+                "U20",
+                format!("a unit of this name starts {OMS} without naming it"),
             );
         }
     }
@@ -2646,5 +2715,135 @@ fn the_audit_script_is_installed_executable() {
         let mut t = Tree::real();
         t.replace(&script, "#!/bin/sh\n", first);
         assert_rules(&crate::check(&t), &["P1"]);
+    }
+}
+
+#[test]
+fn an_oms_node_unit_that_restarts_fails() {
+    let oms = "oms-node.service";
+    for v in [
+        "on-failure",
+        "always",
+        "on-abnormal",
+        "on-abort",
+        "on-watchdog",
+        "on-success",
+        "yes",
+    ] {
+        plant(oms, "Restart=no\n", &format!("Restart={v}\n"), &["U20"]);
+    }
+    // Missing, or given twice: systemd's default is no, but the check reads
+    // one line.
+    plant(oms, "Restart=no\n", "", &["U20"]);
+    plant(oms, "Restart=no\n", "Restart=no\nRestart=no\n", &["U20"]);
+    // Each key that could bring a stopped OMS back, in any section.
+    for extra in [
+        "RestartSec=5\n",
+        "RestartPreventExitStatus=2\n",
+        "RestartForceExitStatus=1\n",
+        "RestartSteps=3\n",
+        "RestartMaxDelaySec=60\n",
+        "WatchdogSec=30s\n",
+    ] {
+        plant(oms, "Restart=no\n", &format!("Restart=no\n{extra}"), &["U20"]);
+    }
+    for extra in [
+        "OnFailure=x.service\n",
+        "OnSuccess=x.service\n",
+        "Upholds=x.service\n",
+    ] {
+        plant(
+            oms,
+            "Wants=network-online.target\n",
+            &format!("Wants=network-online.target\n{extra}"),
+            &["U20"],
+        );
+    }
+    // An [Install] section: the unit could be enabled and start at boot.
+    plant(
+        oms,
+        "TimeoutStopSec=60\n",
+        "TimeoutStopSec=60\n\n[Install]\nWantedBy=multi-user.target\n",
+        &["U20"],
+    );
+    plant(oms, "Type=simple\n", "Type=notify\n", &["U20"]);
+    // The unit itself gone.
+    let mut t = Tree::real();
+    t.remove(&unit(oms));
+    let f = crate::check(&t);
+    assert!(
+        f.iter()
+            .any(|x| x.rule == "U20" && x.file == unit(oms) && x.text == "missing"),
+        "{f:?}"
+    );
+}
+
+#[test]
+fn no_unit_can_start_the_oms_node() {
+    let projector = "oms-projector.service";
+    let after = "After=network-online.target oms-node.service victoriametrics.service victorialogs.service\n";
+    for extra in [
+        "Wants=oms-node.service\n",
+        "Requires=oms-node.service\n",
+        "Requisite=oms-node.service\n",
+        "BindsTo=oms-node.service\n",
+        "Upholds=oms-node.service\n",
+        "PropagatesReloadTo=oms-node.service\n",
+        // Without the suffix systemctl still finds it.
+        "Wants=oms-node\n",
+    ] {
+        plant(projector, after, &format!("{after}{extra}"), &["U20"]);
+    }
+    // A command that starts it, and an [Install] line that pulls it in.
+    plant(
+        projector,
+        "RestartSec=10\n",
+        "RestartSec=10\nExecStartPost=/usr/bin/systemctl start oms-node.service\n",
+        &["U20"],
+    );
+    plant(
+        projector,
+        "WantedBy=multi-user.target\n",
+        "WantedBy=multi-user.target\nAlso=oms-node.service\n",
+        &["U20"],
+    );
+    // The watcher too: ordering only.
+    plant(
+        "watcher.service",
+        "Wants=network-online.target\n",
+        "Wants=network-online.target oms-node.service\n",
+        &["U20"],
+    );
+    // A timer that names it (U2 also refuses Unit= in any timer).
+    plant(
+        "oms-export.timer",
+        "Persistent=true\n",
+        "Persistent=true\nUnit=oms-node.service\n",
+        &["U2", "U20"],
+    );
+    // Ordering is allowed, before as after.
+    plant(
+        projector,
+        after,
+        &format!("{after}Before=oms-node.service\n"),
+        &[],
+    );
+    // A timer of its own name starts it without naming it: U2 and U5 accept
+    // it, U20 does not.
+    let mut t = Tree::real();
+    add_installed(
+        &mut t,
+        "systemd/oms-node.timer",
+        "[Unit]\nDescription=x\n\n[Timer]\nOnBootSec=1min\n\n[Install]\nWantedBy=timers.target\n",
+        "/etc/systemd/system/oms-node.timer",
+        "0644",
+    );
+    assert_rules(&crate::check(&t), &["U20"]);
+    // A socket or path unit of that name is no kind P1 reads (and has no
+    // install entry).
+    for name in ["oms-node.socket", "oms-node.path"] {
+        let mut t = Tree::real();
+        t.set(&unit(name), "[Socket]\nListenStream=/run/x.sock\n");
+        assert_rules(&crate::check(&t), &["P1", "U14", "U20"]);
     }
 }
