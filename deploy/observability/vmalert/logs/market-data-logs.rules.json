@@ -1,0 +1,21 @@
+{
+  "groups": [
+    {
+      "name": "md-logs",
+      "type": "vlogs",
+      "interval": "30s",
+      "rules": [
+        {
+          "alert": "MdErrorLogs",
+          "expr": "_time:5m service:=\"md-collector\" level:=error | stats by (venue) count() as errors | filter errors:>0",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "지난 5분에 수집기가 error 줄을 남겼다. VictoriaLogs에서 service:=\"md-collector\" level:=error로 그 줄을 읽는다."
+          }
+        }
+      ]
+    }
+  ]
+}

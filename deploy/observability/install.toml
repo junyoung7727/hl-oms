@@ -76,3 +76,28 @@ mode = "0644"
 src = "systemd/vmalert-metrics.service"
 dst = "/etc/systemd/system/vmalert-metrics.service"
 mode = "0644"
+
+[[file]]
+src = "victoriametrics/scrape.json"
+dst = "/etc/hl-oms-obs/victoriametrics/scrape.json"
+mode = "0644"
+
+[[file]]
+src = "vmalert/logs/market-data-logs.rules.json"
+dst = "/etc/hl-oms-obs/vmalert/logs/market-data-logs.rules.json"
+mode = "0644"
+
+[[file]]
+src = "vmalert/metrics/lake.rules.json"
+dst = "/etc/hl-oms-obs/vmalert/metrics/lake.rules.json"
+mode = "0644"
+
+[[file]]
+src = "vmalert/metrics/market-data.rules.json"
+dst = "/etc/hl-oms-obs/vmalert/metrics/market-data.rules.json"
+mode = "0644"
+
+[[file]]
+src = "vmalert/metrics/system.rules.json"
+dst = "/etc/hl-oms-obs/vmalert/metrics/system.rules.json"
+mode = "0644"
