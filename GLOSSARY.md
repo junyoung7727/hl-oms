@@ -408,7 +408,7 @@ _Avoid_: `RequiresMountsFor=` (only orders and pulls in a mount unit that may no
 _Avoid_: venue list (that is the collector's `venues`)
 
 **Hold alert class** (보류 알림 등급):
-One of the four groups a hold reason of `Core::holds(None)` belongs to for alerting: latched (only a person clears it; P1 at once, also while the OMS is down), gate (`unmonitored`, on at every start until the watcher's first heartbeat; P1 after 2 min with the OMS up), passing (clears by itself; P1 after 5 min with the OMS up) and operator (`operator_account`; P3). Rule R12 keeps every reason in exactly one class (ADR-037).
+One of the four groups a hold reason of `Core::holds(None)` belongs to for alerting: latched (P1 at once, also while the OMS is down; a person clears it with a command, except `storage_low`, which clears by itself once space is made), gate (`unmonitored`, on at every start until the watcher's first heartbeat; P1 after 2 min with the OMS up, that is not `OmsDown` in the same 30 s window), passing (clears by itself; P1 after 5 min with the OMS up) and operator (`operator_account`; P3). Rule R12 keeps every reason in exactly one class (ADR-037).
 _Avoid_: hold severity (a class decides the delay and the OMS-up gate as well as the severity)
 
 **Install map** (설치 지도):
