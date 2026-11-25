@@ -1662,4 +1662,13 @@ fn the_event_dashboard_names_only_journal_event_kinds() {
         assert_rules(&crate::check(&t), &["G8"]);
     }
     plant_json(D4, order(|p| p["title"] = json!("주문")), &["G8"]);
+    // On VictoriaMetrics the LogsQL is also read as MetricsQL (G7).
+    plant_json(
+        D4,
+        order(|p| {
+            p["datasource"] = json!({"type": "prometheus", "uid": "vm"});
+            p["targets"][0]["datasource"] = json!({"type": "prometheus", "uid": "vm"});
+        }),
+        &["G7", "G8"],
+    );
 }
