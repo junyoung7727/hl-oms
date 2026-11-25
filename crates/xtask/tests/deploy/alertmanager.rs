@@ -15,16 +15,26 @@ pub const AM: &str = "deploy/observability/alertmanager/alertmanager.json";
 const DEFAULT_RECEIVER: &str = "null";
 /// R10: the labels every message is grouped by (inherited by every child).
 const GROUP_BY: &[&str] = &["alertname", "venue"];
-/// R10: the child routes, in this order: the one matcher, the receiver.
-/// The `LakeAuditFailed` route comes before the P2 route: that alert ends
-/// by itself after 26 h while its file may still fail, so its receiver
-/// sends no resolved message.
-const ROUTES: &[(&str, &str)] = &[
-    ("alertname=\"Watchdog\"", "deadman"),
-    ("severity=\"P1\"", "telegram-p1"),
-    ("alertname=\"LakeAuditFailed\"", "telegram-p2-noresolve"),
-    ("severity=\"P2\"", "telegram-p2"),
+/// R10: the child routes, in this order: the one matcher, the receiver,
+/// `group_wait` / `group_interval` / `repeat_interval` (spec D8; the
+/// timings are 판단(모델 아님), each one written out: a missing one would
+/// take Alertmanager's default). The `LakeAuditFailed` route comes before
+/// the P2 route: that alert ends by itself after 26 h while its file may
+/// still fail, so its receiver sends no resolved message.
+const ROUTES: &[(&str, &str, [&str; 3])] = &[
+    ("alertname=\"Watchdog\"", "deadman", ["0s", "1m", "1m"]),
+    ("severity=\"P1\"", "telegram-p1", ["10s", "1m", "30m"]),
+    (
+        "alertname=\"LakeAuditFailed\"",
+        "telegram-p2-noresolve",
+        ["30s", "5m", "4h"],
+    ),
+    ("severity=\"P2\"", "telegram-p2", ["30s", "5m", "4h"]),
 ];
+const TIMINGS: [&str; 3] = ["group_wait", "group_interval", "repeat_interval"];
+/// R10: the Watchdog's receiver. It sends nowhere until the owner chooses
+/// the outside dead-man service (Q1); that change replaces this rule.
+const DEADMAN: &str = "deadman";
 /// R10: keys a route may have. The root alone groups and has children;
 /// a child has one matcher and no `continue` (the `LakeAuditFailed` alert
 /// would go on to the P2 route and its resolved message), no muting and
@@ -65,13 +75,15 @@ const INHIBIT_NAMES: &str = "Md.*|LakeSealLag|LakeDiskDaysLeft.*";
 const INHIBIT_EQUAL: &[&str] = &["venue"];
 const INHIBIT_KEYS: &[&str] = &["source_matchers", "target_matchers", "equal"];
 /// R11: keys that would hold a secret in the file, or send it elsewhere
-/// (another API host, a proxy).
+/// (another API host, a proxy). A webhook address is a secret too (a
+/// dead-man ping address keeps the dead-man quiet): only `url_file`.
 const FORBIDDEN_KEYS: &[&str] = &[
     "bot_token",
     "chat_id",
     "api_url",
     "http_config",
     "telegram_api_url",
+    "url",
 ];
 /// R11: the keys of every Telegram config that name its secret files.
 const SECRET_FILES: &[&str] = &["bot_token_file", "chat_id_file"];
@@ -399,14 +411,15 @@ fn r10_routes(doc: &Value, out: &mut Vec<Finding>) {
             format!("route.receiver must be {DEFAULT_RECEIVER} (found {root_receiver:?})"),
         );
     }
-    if let Some(r) = receiver(DEFAULT_RECEIVER) {
+    for name in [DEFAULT_RECEIVER, DEADMAN] {
+        let Some(r) = receiver(name) else { continue };
         let i = integrations(r);
         if !i.is_empty() {
             finding(
                 out,
                 AM,
                 "R10",
-                format!("the default receiver {DEFAULT_RECEIVER} must send nowhere (found {i:?})"),
+                format!("receiver {name} must send nowhere (found {i:?})"),
             );
         }
     }
@@ -442,7 +455,7 @@ fn r10_routes(doc: &Value, out: &mut Vec<Finding>) {
             ),
         );
     }
-    for (i, (c, &(want, to))) in children.iter().zip(ROUTES).enumerate() {
+    for (i, (c, &(want, to, timings))) in children.iter().zip(ROUTES).enumerate() {
         let got = matchers(c.get("matchers"));
         let want_m = matcher(want).map(|m| vec![m]);
         let got_to = c.get("receiver").and_then(Value::as_str);
@@ -457,6 +470,17 @@ fn r10_routes(doc: &Value, out: &mut Vec<Finding>) {
                     c.get("matchers")
                 ),
             );
+        }
+        for (key, value) in TIMINGS.iter().zip(timings) {
+            let got = c.get(*key).and_then(Value::as_str);
+            if got != Some(value) {
+                finding(
+                    out,
+                    AM,
+                    "R10",
+                    format!("route {}: {key} must be {value} (found {got:?})", i + 1),
+                );
+            }
         }
         for (k, _) in c.as_object().into_iter().flatten() {
             if !CHILD_KEYS.contains(&k.as_str()) {
@@ -474,6 +498,15 @@ fn r10_routes(doc: &Value, out: &mut Vec<Finding>) {
             finding(out, AM, "R10", format!("receiver {name} is missing"));
             continue;
         };
+        let i = integrations(r);
+        if i != ["telegram_configs"] {
+            finding(
+                out,
+                AM,
+                "R10",
+                format!("{name} must have telegram_configs only (found {i:?})"),
+            );
+        }
         let configs: Vec<&Value> = r
             .get("telegram_configs")
             .and_then(Value::as_array)
@@ -703,6 +736,59 @@ fn the_routes_send_watchdog_p1_p2_where_they_belong() {
     let mut t = Tree::real();
     t.remove(AM);
     assert_rules(&crate::check(&t), &["R10", "U14"]);
+    // A route's timings differ from the design (spec D8): a dead
+    // collector's P1 message 10 hours late, repeated every 1000 hours; a
+    // missing timing takes Alertmanager's default (30s / 5m / 4h).
+    plant(|v| routes_mut(v)[1]["group_wait"] = json!("10h"), &["R10"]);
+    plant(
+        |v| routes_mut(v)[1]["repeat_interval"] = json!("1000h"),
+        &["R10"],
+    );
+    plant(
+        |v| {
+            routes_mut(v)[1]
+                .as_object_mut()
+                .unwrap()
+                .remove("group_wait");
+        },
+        &["R10"],
+    );
+    plant(
+        |v| routes_mut(v)[0]["repeat_interval"] = json!("1h"),
+        &["R10"],
+    );
+    plant(
+        |v| routes_mut(v)[2]["group_interval"] = json!("1m"),
+        &["R10"],
+    );
+    plant(|v| routes_mut(v)[3]["group_wait"] = json!("30m"), &["R10"]);
+    // A key on the root route; `...` next to the two labels (one group for
+    // every label set).
+    plant(
+        |v| v["route"]["mute_time_intervals"] = json!(["night"]),
+        &["R10"],
+    );
+    plant(
+        |v| v["route"]["group_by"] = json!(["alertname", "venue", "..."]),
+        &["R10"],
+    );
+    // The dead-man receiver sends somewhere before the owner chooses the
+    // outside service (Q1): the Watchdog to Telegram every minute.
+    plant(
+        |v| {
+            let tg = telegram_mut(v, "telegram-p2").clone();
+            receiver_mut(v, "deadman")["telegram_configs"] = json!([tg]);
+        },
+        &["R10"],
+    );
+    // A Telegram receiver with a second kind of integration.
+    plant(
+        |v| {
+            receiver_mut(v, "telegram-p1")["webhook_configs"] =
+                json!([{"url_file": "/etc/hl-oms/other-url"}])
+        },
+        &["R10"],
+    );
     // Spaces around a matcher's operator are the same matcher.
     plant(
         |v| routes_mut(v)[1]["matchers"] = json!(["severity = \"P1\""]),
@@ -855,6 +941,7 @@ fn an_inline_token_or_chat_id_fails() {
         ("chat_id", json!(12345)),
         ("api_url", json!("http://127.0.0.1:1/")),
         ("http_config", json!({"proxy_url": "http://127.0.0.1:1/"})),
+        ("url", json!("https://127.0.0.1:1/ping/x")),
     ] {
         plant(|v| telegram_mut(v, "telegram-p1")[key] = value, &["R11"]);
     }
@@ -862,15 +949,17 @@ fn an_inline_token_or_chat_id_fails() {
         |v| v["global"] = json!({"telegram_api_url": "http://127.0.0.1:1/"}),
         &["R11"],
     );
-    plant(
-        |v| {
-            receiver_mut(v, "deadman")["webhook_configs"] = json!([{
-                "url_file": "/etc/hl-oms/deadman-url",
-                "http_config": {"bearer_token": "x"}
-            }])
-        },
-        &["R11"],
-    );
+    // A dead-man ping address is a secret: whoever has it can keep the
+    // dead-man quiet. Any integration on `deadman` is R10 until Q1.
+    for webhook in [
+        json!({"url_file": "/etc/hl-oms/deadman-url", "http_config": {"bearer_token": "x"}}),
+        json!({"url": "https://127.0.0.1:1/ping/x"}),
+    ] {
+        plant(
+            |v| receiver_mut(v, "deadman")["webhook_configs"] = json!([webhook]),
+            &["R10", "R11"],
+        );
+    }
     // A token shape or a chat id in any deploy file, text or comment. Built
     // here so this file holds no such string.
     let token = format!("{}:{}", "7".repeat(10), "a".repeat(35));
@@ -934,7 +1023,9 @@ fn secret_files_are_absolute_paths_under_etc() {
     let chat = format!("-{}", "1".repeat(13));
     for (key, secret) in [("bot_token_file", &token), ("chat_id_file", &chat)] {
         let mut t = Tree::real();
-        edit(&mut t, |v| telegram_mut(v, "telegram-p1")[key] = json!(secret));
+        edit(&mut t, |v| {
+            telegram_mut(v, "telegram-p1")[key] = json!(secret)
+        });
         let f = crate::check(&t);
         assert_rules(&f, &["R11"]);
         assert!(
