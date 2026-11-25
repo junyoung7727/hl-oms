@@ -209,8 +209,8 @@ pub fn check(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
     r11_files(doc, out);
 }
 
-/// No deploy file holds a token or a chat id. The finding does not repeat
-/// the value.
+/// No deploy file holds a token or a chat id. No R11 finding repeats the
+/// value it found.
 fn r11_text(t: &Tree, out: &mut Vec<Finding>) {
     for (path, text) in t.files.iter().filter(|(k, _)| k.starts_with("deploy/")) {
         if token_shape(text) {
@@ -282,8 +282,9 @@ fn r11_files(doc: &Value, out: &mut Vec<Finding>) {
                     out,
                     AM,
                     "R11",
+                    // Not the value: it may be the secret itself.
                     format!(
-                        "every telegram config needs {key}, a file path under /etc/ (found {path:?})"
+                        "every telegram config needs {key}, a file path under /etc/ (the value is missing or is no such path)"
                     ),
                 );
             }
@@ -926,6 +927,21 @@ fn secret_files_are_absolute_paths_under_etc() {
             },
             &["R11"],
         );
+    }
+    // A secret pasted as the value of its file key: R11 says so without
+    // repeating the value (the check's findings reach the CI log).
+    let token = format!("{}:{}", "7".repeat(10), "a".repeat(35));
+    let chat = format!("-{}", "1".repeat(13));
+    for (key, secret) in [("bot_token_file", &token), ("chat_id_file", &chat)] {
+        let mut t = Tree::real();
+        edit(&mut t, |v| telegram_mut(v, "telegram-p1")[key] = json!(secret));
+        let f = crate::check(&t);
+        assert_rules(&f, &["R11"]);
+        assert!(
+            f.iter().any(|x| x.rule == "R11" && x.text.contains(key)),
+            "{f:?}"
+        );
+        assert!(f.iter().all(|x| !x.text.contains(secret.as_str())), "{key}");
     }
     // Another file under /etc/ is the operator's choice.
     plant(
