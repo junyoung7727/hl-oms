@@ -5,6 +5,7 @@
 
 #![allow(clippy::unwrap_used)]
 
+mod expr;
 mod ini;
 mod tree;
 mod units;
