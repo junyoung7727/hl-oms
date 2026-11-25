@@ -1,11 +1,14 @@
-//! Rule rules (ADR-035 D7): the vmalert rule files and the scrape config.
-//! R1 every metric name is in the catalogue, R3 every label is known, R4
-//! every function is allowed, R5 every alert has a severity and a summary
-//! and one Watchdog exists, R6 the liveness, lake-gauge and audit-age rules
-//! of every configured venue, R7 the design's lake, disk and journal rules and the
-//! intervals of the groups that hold the pinned rules, R8 log groups are
-//! `vlogs` and metric groups are not, R9 the scrape jobs, the job names the
-//! rules use and the memory alert's caps; U8 also covers scrape targets.
+//! Rule rules (ADR-035 D7, ADR-037): the vmalert rule files and the scrape
+//! config. R1 every metric name is in the catalogue, R3 every label is
+//! known, R4 every function is allowed, R5 every alert has a severity and a
+//! summary and one Watchdog exists, R6 the liveness, lake-gauge and
+//! audit-age rules of every configured venue and the OMS, projector and
+//! journal-gauge rules of every trading venue, R7 the design's lake, disk
+//! and journal rules and the intervals of the groups that hold the pinned
+//! rules, R8 log groups are `vlogs` and metric groups are not, R9 the scrape
+//! jobs, the job names the rules use and the memory alert's caps, R12 the
+//! hold alert classes, R13 the trading venues are the watcher's; U8 also
+//! covers scrape targets.
 
 use std::collections::BTreeSet;
 
