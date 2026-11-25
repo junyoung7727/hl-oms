@@ -1,8 +1,9 @@
 //! Rule rules (ADR-035 D7): the vmalert rule files and the scrape config.
 //! R1 every metric name is in the catalogue, R3 every label is known, R4
 //! every function is allowed, R5 every alert has a severity and a summary
-//! and one Watchdog exists, R6 the liveness and lake-gauge rules of every
-//! configured venue, R7 the design's lake and disk rules, R8 log groups are
+//! and one Watchdog exists, R6 the liveness, lake-gauge and audit-age rules
+//! of every configured venue, R7 the design's lake and disk rules and the
+//! intervals of the groups that hold the pinned rules, R8 log groups are
 //! `vlogs` and metric groups are not, R9 the scrape jobs, the job names the
 //! rules use and the memory alert's caps; U8 also covers scrape targets.
 
@@ -22,19 +23,33 @@ const VENUES: &str = "deploy/observability/venues.toml";
 
 const SEVERITIES: &[&str] = &["P1", "P2", "P3"];
 const WATCHDOG: &str = "Watchdog";
+/// R5: the Watchdog's file and group (R7 pins the group's interval).
+const WATCHDOG_AT: (&str, &str) = ("system.rules.json", "watchdog");
 
 /// R6: per configured venue, one alert of each name, with this severity,
-/// no `for`, and this expression with `<V>` replaced by the venue.
-const PER_VENUE: &[(&str, &str, &str)] = &[
+/// in this file and group, no `for`, and this expression with `<V>`
+/// replaced by the venue.
+const PER_VENUE: &[(&str, &str, &str, &str, &str)] = &[
     (
         "MdCollectorDown",
         "P1",
+        "market-data.rules.json",
+        "market-data",
         "time() - max by (venue) (md_collector_heartbeat_ts{venue=\"<V>\"}) > 60 or absent_over_time(md_collector_heartbeat_ts{venue=\"<V>\"}[2m])",
     ),
     (
         "MdLakeGaugesMissing",
         "P2",
+        "market-data.rules.json",
+        "market-data",
         "absent_over_time(lake_disk_free_bytes{venue=\"<V>\"}[10m]) or absent_over_time(lake_seal_lag_hours{venue=\"<V>\"}[10m])",
+    ),
+    (
+        "LakeAuditStale",
+        "P2",
+        "lake.rules.json",
+        "lake-audit",
+        "time() - last_over_time(lake_audit_last_run_ts{venue=\"<V>\"}[3d]) > 129600 or absent_over_time(lake_audit_last_run_ts{venue=\"<V>\"}[36h])",
     ),
 ];
 
@@ -98,11 +113,18 @@ const DESIGN: &[DesignRule] = &[
         Some("P2"),
     ),
 ];
-/// R7: groups whose interval the design fixes.
-const DESIGN_INTERVALS: &[(&str, &str, &str)] = &[
-    ("lake.rules.json", "lake-recording", "1m"),
-    ("lake.rules.json", "lake-audit", "1m"),
+/// R7: the groups that hold an R6, R7 or Watchdog rule, and their
+/// interval. `None`: no interval, or the default it stands for.
+const GROUP_INTERVALS: &[(&str, &str, Option<&str>)] = &[
+    ("market-data.rules.json", "market-data", Some("10s")),
+    ("lake.rules.json", "lake-recording", Some("1m")),
+    ("lake.rules.json", "lake", None),
+    ("lake.rules.json", "lake-audit", Some("1m")),
+    ("system.rules.json", "watchdog", None),
 ];
+/// vmalert-metrics' `-evaluationInterval` (U11 pins it): what a group
+/// without an interval is evaluated at.
+const DEFAULT_INTERVAL: &str = "10s";
 
 /// R9: the scrape jobs. Each reads the listener of its unit `<job>.service`.
 const SCRAPE_JOBS: &[&str] = &[
@@ -307,14 +329,20 @@ fn r5_alerts(rules: &[Rule], out: &mut Vec<Finding>) {
         let Some(name) = r.alert() else { continue };
         if name == WATCHDOG {
             watchdogs += 1;
+            let (file, group) = WATCHDOG_AT;
             if norm(r.expr().unwrap_or("")) != "vector(1)"
                 || r.label("severity") != Some("watchdog")
+                || r.v.get("for").is_some()
+                || r.file != format!("{METRICS_DIR}{file}")
+                || r.group != group
             {
                 finding(
                     out,
                     r.file,
                     "R5",
-                    "Watchdog must have expr vector(1) and severity watchdog",
+                    format!(
+                        "Watchdog must have expr vector(1), severity watchdog and no for, in {file} group {group}"
+                    ),
                 );
             }
             continue;
@@ -363,7 +391,8 @@ fn r6_per_venue(p: &Parsed, rules: &[Rule], out: &mut Vec<Finding>) {
     let Some(venues) = venues(p).filter(|v| !v.is_empty()) else {
         return;
     };
-    for &(name, severity, template) in PER_VENUE {
+    for &(name, severity, file, group, template) in PER_VENUE {
+        let path = format!("{METRICS_DIR}{file}");
         let found: Vec<&Rule> = rules
             .iter()
             .filter(|r| !r.vlogs && r.alert() == Some(name))
@@ -389,12 +418,16 @@ fn r6_per_venue(p: &Parsed, rules: &[Rule], out: &mut Vec<Finding>) {
             if norm(r.expr().unwrap_or("")) != want
                 || r.label("severity") != Some(severity)
                 || r.v.get("for").is_some()
+                || r.file != path
+                || r.group != group
             {
                 finding(
                     out,
                     r.file,
                     "R6",
-                    format!("{name} of {v} must have severity {severity}, no for, and expr {want}"),
+                    format!(
+                        "{name} of {v} must be in {path} group {group} with severity {severity}, no for, and expr {want}"
+                    ),
                 );
             }
         }
@@ -450,9 +483,9 @@ fn r7_design(p: &Parsed, rules: &[Rule], out: &mut Vec<Finding>) {
             );
         }
     }
-    for &(file, group, interval) in DESIGN_INTERVALS {
+    for &(file, group, interval) in GROUP_INTERVALS {
         let path = format!("{METRICS_DIR}{file}");
-        let got = p
+        let Some(g) = p
             .json
             .get(&path)
             .and_then(|d| d.get("groups"))
@@ -460,14 +493,22 @@ fn r7_design(p: &Parsed, rules: &[Rule], out: &mut Vec<Finding>) {
             .into_iter()
             .flatten()
             .find(|g| g.get("name").and_then(Value::as_str) == Some(group))
-            .and_then(|g| g.get("interval"))
-            .and_then(Value::as_str);
-        if got != Some(interval) {
+        else {
+            finding(out, &path, "R7", format!("group {group} must exist"));
+            continue;
+        };
+        let got = g.get("interval");
+        let ok = match interval {
+            Some(i) => got.and_then(Value::as_str) == Some(i),
+            None => got.is_none_or(|x| x.as_str() == Some(DEFAULT_INTERVAL)),
+        };
+        if !ok {
+            let want = interval.unwrap_or("absent (the default 10s)");
             finding(
                 out,
                 &path,
                 "R7",
-                format!("group {group} must have interval {interval} (found {got:?})"),
+                format!("group {group} must have interval {want} (found {got:?})"),
             );
         }
     }
@@ -587,8 +628,10 @@ fn r9_scrape(p: &Parsed, rules: &[Rule], out: &mut Vec<Finding>) {
         );
         return;
     };
-    // The caps are the design table's (rule U6 ties each unit to it).
+    // The caps are the design table's (rule U6 ties each unit to it). Whole
+    // terms: a cap with more digits holds the right one as a prefix.
     let e = norm(r.expr().unwrap_or(""));
+    let mut terms: BTreeSet<&str> = e.split(" or ").collect();
     for job in SCRAPE_JOBS {
         let unit = format!("{job}.service");
         let Some(cap) = MEMORY_MAX
@@ -599,7 +642,7 @@ fn r9_scrape(p: &Parsed, rules: &[Rule], out: &mut Vec<Finding>) {
             continue;
         };
         let want = format!("process_resident_memory_bytes{{job=\"{job}\"}} > 0.9 * {cap}");
-        if !e.contains(&want) {
+        if !terms.remove(want.as_str()) {
             finding(
                 out,
                 r.file,
@@ -607,6 +650,14 @@ fn r9_scrape(p: &Parsed, rules: &[Rule], out: &mut Vec<Finding>) {
                 format!("{MEMORY_ALERT} must hold {want} (the MemoryMax of {unit})"),
             );
         }
+    }
+    for t in terms {
+        finding(
+            out,
+            r.file,
+            "R9",
+            format!("{MEMORY_ALERT}: term {t} is not a cap of the design table"),
+        );
     }
 }
 
@@ -776,9 +827,10 @@ fn exactly_one_watchdog_exists() {
             .unwrap()
             .push(watchdog);
     });
+    // The copy is also outside the Watchdog's group.
     let f = crate::check(&t);
     assert_rules(&f, &["R5"]);
-    assert!(f[0].text.contains("found 2"), "{f:?}");
+    assert!(f.iter().any(|x| x.text.contains("found 2")), "{f:?}");
     plant_rule(
         SYSTEM,
         WATCHDOG,
@@ -833,17 +885,26 @@ fn with_okx() -> Tree {
     t
 }
 
-/// Copies the bybit rule `name` as a rule for venue `v`.
+/// Copies the bybit rule `name` as a rule for venue `v`, into the group
+/// that holds it.
 fn copy_for(t: &mut Tree, name: &str, v: &str) {
-    edit(t, MD, |doc| {
-        let mut r = rule_mut(doc, name).clone();
+    let file = if name.starts_with("Lake") { LAKE } else { MD };
+    edit(t, file, |doc| {
+        let rules = doc["groups"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .map(|g| g["rules"].as_array_mut().unwrap())
+            .find(|rs| rs.iter().any(|r| r["alert"] == name))
+            .unwrap_or_else(|| panic!("no rule {name}"));
+        let mut r = rules.iter().find(|r| r["alert"] == name).unwrap().clone();
         let e = r["expr"]
             .as_str()
             .unwrap()
             .replace("\"bybit\"", &format!("\"{v}\""));
         r["expr"] = Value::String(e);
         r["labels"]["venue"] = Value::String(v.into());
-        doc["groups"][0]["rules"].as_array_mut().unwrap().push(r);
+        rules.push(r);
     });
 }
 
@@ -858,10 +919,11 @@ fn every_configured_venue_has_a_collector_liveness_rule() {
             .contains("venue okx needs exactly one MdCollectorDown")),
         "{f:?}"
     );
-    // With both rules the venue passes.
+    // With its three rules the venue passes.
     let mut t = with_okx();
     copy_for(&mut t, "MdCollectorDown", "okx");
     copy_for(&mut t, "MdLakeGaugesMissing", "okx");
+    copy_for(&mut t, "LakeAuditStale", "okx");
     assert_rules(&crate::check(&t), &[]);
     // The absent branch dropped (the dead collector that pushes nothing).
     set_expr(
@@ -911,6 +973,7 @@ fn every_configured_venue_has_a_collector_liveness_rule() {
 fn every_configured_venue_has_a_lake_gauges_missing_rule() {
     let mut t = with_okx();
     copy_for(&mut t, "MdCollectorDown", "okx");
+    copy_for(&mut t, "LakeAuditStale", "okx");
     let f = crate::check(&t);
     assert_rules(&f, &["R6"]);
     assert!(
@@ -933,6 +996,58 @@ fn every_configured_venue_has_a_lake_gauges_missing_rule() {
         |r| r["labels"]["severity"] = Value::String("P3".into()),
         &["R6"],
     );
+}
+
+#[test]
+fn every_configured_venue_has_an_audit_stale_rule() {
+    let mut t = with_okx();
+    copy_for(&mut t, "MdCollectorDown", "okx");
+    copy_for(&mut t, "MdLakeGaugesMissing", "okx");
+    let f = crate::check(&t);
+    assert_rules(&f, &["R6"]);
+    assert!(
+        f.len() == 1
+            && f[0]
+                .text
+                .contains("venue okx needs exactly one LakeAuditStale"),
+        "{f:?}"
+    );
+    plant_rule(
+        LAKE,
+        "LakeAuditStale",
+        |r| r["alert"] = Value::String("LakeAuditStaleX".into()),
+        &["R6"],
+    );
+    for e in [
+        "time() - last_over_time(lake_audit_last_run_ts{venue=\"bybit\"}[3d]) > 129600",
+        "time() - last_over_time(lake_audit_last_run_ts{venue=\"bybit\"}[3d]) > 1296000 or absent_over_time(lake_audit_last_run_ts{venue=\"bybit\"}[36h])",
+    ] {
+        set_expr(LAKE, "LakeAuditStale", e, &["R6"]);
+    }
+    plant_rule(
+        LAKE,
+        "LakeAuditStale",
+        |r| r["for"] = Value::String("1h".into()),
+        &["R6"],
+    );
+    plant_rule(
+        LAKE,
+        "LakeAuditStale",
+        |r| r["labels"]["severity"] = Value::String("P3".into()),
+        &["R6"],
+    );
+    // Moved to the lake group.
+    let mut t = Tree::real();
+    edit(&mut t, LAKE, |v| {
+        let rules = v["groups"][2]["rules"].as_array_mut().unwrap();
+        let i = rules
+            .iter()
+            .position(|r| r["alert"] == "LakeAuditStale")
+            .unwrap();
+        let r = rules.remove(i);
+        v["groups"][1]["rules"].as_array_mut().unwrap().push(r);
+    });
+    assert_rules(&crate::check(&t), &["R6"]);
 }
 
 #[test]
@@ -1064,4 +1179,82 @@ fn memory_alerts_follow_the_unit_caps() {
         "process_resident_memory_bytes{job=\"victoriametrics\"} > 0.9 * 1073741824",
         &["R9"],
     );
+    // A cap ten times too large: the right number is a prefix of it.
+    for (from, to) in [
+        ("0.9 * 104857600\"", "0.9 * 1048576000\""),
+        (
+            "{job=\\\"victoriametrics\\\"} > 0.9 * 1073741824",
+            "{job=\\\"victoriametrics\\\"} > 0.9 * 10737418240",
+        ),
+        ("0.9 * 104857600\"", "0.9 * 104857600.5\""),
+    ] {
+        let mut t = Tree::real();
+        t.replace(SYSTEM, from, to);
+        assert_rules(&crate::check(&t), &["R9"]);
+    }
+    // A sixth term is not one of the caps.
+    let mut t = Tree::real();
+    t.replace(
+        SYSTEM,
+        "0.9 * 104857600\"",
+        "0.9 * 104857600 or process_resident_memory_bytes{job=\\\"alertmanager\\\"} > 0.99 * 104857600\"",
+    );
+    assert_rules(&crate::check(&t), &["R9"]);
+}
+
+#[test]
+fn the_pinned_rules_are_evaluated_at_the_design_interval() {
+    // A group's interval changed: the P1 rules of market-data and lake, the
+    // Watchdog's group.
+    for (file, group, interval) in [
+        (MD, "market-data", "1h"),
+        (MD, "market-data", "1m"),
+        (LAKE, "lake", "6h"),
+        (SYSTEM, "watchdog", "1h"),
+    ] {
+        let mut t = Tree::real();
+        edit(&mut t, file, |v| {
+            let g = v["groups"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|g| g["name"] == group)
+                .unwrap();
+            g["interval"] = Value::String(interval.into());
+        });
+        assert_rules(&crate::check(&t), &["R7"]);
+    }
+    // A group evaluated at the default may also name it.
+    let mut t = Tree::real();
+    edit(&mut t, LAKE, |v| {
+        v["groups"][1]["interval"] = Value::String("10s".into());
+    });
+    assert_rules(&crate::check(&t), &[]);
+    // The Watchdog with a for, or in a group of its own.
+    plant_rule(
+        SYSTEM,
+        WATCHDOG,
+        |r| r["for"] = Value::String("1h".into()),
+        &["R5"],
+    );
+    let mut t = Tree::real();
+    edit(&mut t, SYSTEM, |v| {
+        let r = v["groups"][0]["rules"].as_array_mut().unwrap().remove(0);
+        v["groups"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({"name": "late", "interval": "1h", "rules": [r]}));
+    });
+    assert_rules(&crate::check(&t), &["R5"]);
+    // A per-venue rule in a group of its own.
+    let mut t = Tree::real();
+    edit(&mut t, MD, |v| {
+        let r = v["groups"][0]["rules"].as_array_mut().unwrap().remove(0);
+        assert_eq!(r["alert"], "MdCollectorDown");
+        v["groups"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({"name": "late", "interval": "1h", "rules": [r]}));
+    });
+    assert_rules(&crate::check(&t), &["R6"]);
 }
