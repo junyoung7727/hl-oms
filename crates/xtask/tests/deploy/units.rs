@@ -2,7 +2,7 @@
 //! settings, the trading slice, schedules, the daily-job lock, listeners,
 //! storage paths, store and vmalert flags, venues, the install map, service
 //! identity, the stack units' restart and sandbox settings, and the bounds of
-//! the seal and archiver runs (ADR-035).
+//! the seal, archiver and audit runs (ADR-035).
 
 use std::collections::BTreeSet;
 
@@ -61,7 +61,11 @@ const STORES: &[(&str, &str)] = &[
 
 /// Oneshot runs that hold the daily lock or the next hour's seal while they
 /// run: each ends after at most this time (U19).
-const BOUNDED: &[&str] = &["md-lake-seal@.service", "md-archiver@.service"];
+const BOUNDED: &[&str] = &[
+    "md-lake-seal@.service",
+    "md-archiver@.service",
+    "crypto-lake-audit@.service",
+];
 const RUN_TIMEOUT: &str = "6h";
 
 /// The `MemoryMax` of each unit (U6, design §8.5).
@@ -75,16 +79,18 @@ const MEMORY_MAX: &[(&str, &str)] = &[
     ("md-collector@.service", "1G"),
     ("md-lake-seal@.service", "1G"),
     ("md-archiver@.service", "4G"),
+    ("crypto-lake-audit@.service", "4G"),
 ];
 
 /// Timers and their `OnCalendar` (U5).
 const TIMERS: &[(&str, &str)] = &[
     ("md-lake-seal@.timer", "*-*-* *:05:00 UTC"),
     ("md-archiver@.timer", "*-*-* 01:10:00 UTC"),
+    ("crypto-lake-audit@.timer", "*-*-* 02:30:00 UTC"),
 ];
 
 /// Daily jobs, which run one at a time under one lock (U7).
-const DAILY: &[&str] = &["md-archiver@.service"];
+const DAILY: &[&str] = &["md-archiver@.service", "crypto-lake-audit@.service"];
 const LOCK: &str = "/usr/bin/flock /run/lock/hl-oms-daily.lock ";
 
 /// Install paths that a unit's command line names before their files exist
@@ -1187,6 +1193,12 @@ fn memory_max_follows_the_design_table() {
         "MemoryMax=4096M\n",
         &[],
     );
+    plant(
+        "crypto-lake-audit@.service",
+        "MemoryMax=4G\n",
+        "MemoryMax=8G\n",
+        &["U6"],
+    );
     for &(name, _) in MEMORY_MAX {
         let mut t = Tree::real();
         t.remove(&unit(name));
@@ -1259,6 +1271,9 @@ fn the_seal_archiver_and_audit_timers_keep_their_schedule() {
         plant(name, "Persistent=true\n", "Persistent=false\n", &["U5"]);
     }
     plant("md-lake-seal@.timer", "*:05:00", "*:02:00", &["U5"]);
+    // The audit runs after the archiver's 01:10.
+    plant("crypto-lake-audit@.timer", "02:30:00", "01:00:00", &["U5"]);
+    plant("crypto-lake-audit@.timer", "Persistent=true\n", "", &["U5"]);
 }
 
 #[test]
@@ -1285,6 +1300,19 @@ fn a_daily_job_without_the_lock_fails() {
         "md-archiver@.service",
         "Nice=10\n",
         "Nice=10\nExecStartPost=/bin/true\n",
+        &["U7"],
+    );
+    // The audit takes the same lock, before the script.
+    plant(
+        "crypto-lake-audit@.service",
+        "ExecStart=/usr/bin/flock /run/lock/hl-oms-daily.lock ",
+        "ExecStart=",
+        &["U7"],
+    );
+    plant(
+        "crypto-lake-audit@.service",
+        "Nice=10\n",
+        "Nice=10\nExecStartPre=/usr/local/bin/md-lake verify --venue %i\n",
         &["U7"],
     );
     let mut t = Tree::real();
@@ -1838,6 +1866,12 @@ fn the_seal_and_archiver_runs_are_bounded() {
         // daily lock, or stops sealing, for good.
         ("md-archiver@.service", "TimeoutStartSec=6h\n", ""),
         ("md-lake-seal@.service", "TimeoutStartSec=6h\n", ""),
+        ("crypto-lake-audit@.service", "TimeoutStartSec=6h\n", ""),
+        (
+            "crypto-lake-audit@.service",
+            "TimeoutStartSec=6h\n",
+            "TimeoutStartSec=6h\nTimeoutSec=0\n",
+        ),
         (
             "md-lake-seal@.service",
             "TimeoutStartSec=6h\n",

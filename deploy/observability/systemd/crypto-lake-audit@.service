@@ -1,0 +1,34 @@
+# Not installed or enabled by this repository: docs/operations/observability.md.
+# Instance = venue. Runs md-lake verify on the changed dates of the last 9
+# days, then the qdp auditor (bin/crypto-lake-audit.sh; exit statuses in §4).
+[Unit]
+Description=Lake verify and qdp audit for %i
+# After downtime all daily timers fire at boot: the archiver goes first.
+After=md-archiver@%i.service
+
+[Service]
+Type=oneshot
+# A dedicated checkout of qdp main with its own .venv (uv sync --frozen once),
+# never a checkout of the KR pipeline.
+Environment=QDP_CHECKOUT=/opt/qdp-crypto
+Environment=UV=/usr/local/bin/uv
+Environment=MD_LAKE=/usr/local/bin/md-lake
+Environment=LAKE=/mnt/nvme/lake
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=UV_CACHE_DIR=/var/cache/qdp-crypto-audit
+# A system unit without User= gets no HOME.
+Environment=HOME=/var/lib/qdp-crypto-audit
+# The auditor's state file and the verify stamps live here, outside the lake
+# as the auditor requires.
+StateDirectory=qdp-crypto-audit
+CacheDirectory=qdp-crypto-audit
+# verify writes only crypto/l0/_verify, the auditor only crypto/audit; the
+# more specific path wins. A path here that does not exist makes the unit
+# fail at set-up: create all four before the first run (§8).
+ReadOnlyPaths=/mnt/nvme/lake/crypto/l0 /mnt/nvme/lake/crypto/l1
+ReadWritePaths=/mnt/nvme/lake/crypto/l0/_verify /mnt/nvme/lake/crypto/audit
+# The daily-job cap, under the daily-job lock below (ADR-035).
+MemoryMax=4G
+TimeoutStartSec=6h
+Nice=10
+ExecStart=/usr/bin/flock /run/lock/hl-oms-daily.lock /usr/local/lib/hl-oms-obs/crypto-lake-audit.sh %i

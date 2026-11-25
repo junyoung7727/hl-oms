@@ -1,0 +1,11 @@
+# Not installed or enabled by this repository: docs/operations/observability.md.
+[Unit]
+Description=Verify and audit the lake of %i once a day, after the archiver
+
+[Timer]
+# After the archiver's 01:10 (judgement). A missed run fires at the next boot.
+OnCalendar=*-*-* 02:30:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

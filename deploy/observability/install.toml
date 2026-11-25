@@ -3,8 +3,23 @@
 # (docs/operations/observability.md §8); this repository installs nothing.
 
 [[file]]
+src = "bin/crypto-lake-audit.sh"
+dst = "/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh"
+mode = "0755"
+
+[[file]]
 src = "systemd/alertmanager.service"
 dst = "/etc/systemd/system/alertmanager.service"
+mode = "0644"
+
+[[file]]
+src = "systemd/crypto-lake-audit@.service"
+dst = "/etc/systemd/system/crypto-lake-audit@.service"
+mode = "0644"
+
+[[file]]
+src = "systemd/crypto-lake-audit@.timer"
+dst = "/etc/systemd/system/crypto-lake-audit@.timer"
 mode = "0644"
 
 [[file]]
