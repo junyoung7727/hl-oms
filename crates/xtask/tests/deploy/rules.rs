@@ -180,6 +180,46 @@ const GROUP_INTERVALS: &[(&str, &str, Option<&str>)] = &[
     ("oms.rules.json", "oms", None),
     ("oms.rules.json", "projector", None),
 ];
+/// R12: the hold alert classes (design §8.3). Every reason of `HoldReason`
+/// that `Core::holds(None)` returns is in exactly one class, and each class
+/// is the reason list of one pinned alert. Latched: only a person clears
+/// it. The gate (`unmonitored`): on at every start until the watcher's
+/// first heartbeat. Passing: clears by itself. Operator: a person did it.
+const LATCHED: &[&str] = &[
+    "kill_latched",
+    "watcher_mismatch",
+    "venue_change",
+    "reducing",
+    "mismatch",
+    "storage_low",
+];
+const GATE: &[&str] = &["unmonitored"];
+const PASSING: &[&str] = &[
+    "link_down",
+    "resync",
+    "in_doubt",
+    "no_config",
+    "venue_setting",
+    "account_mode",
+];
+const OPERATOR: &[&str] = &["operator_account"];
+/// Reasons only a strategy's holds carry (`core.rs` adds them for a given
+/// strategy): the projector, which asks for the account, never pushes them.
+const STRATEGY_ONLY: &[&str] = &["operator_strategy", "strategy_link"];
+/// (alert, class, for, severity, gated on `oms_up` = 1). The passing
+/// classes alert only for a running OMS: `oms_holds` keeps the journal's
+/// last state while the OMS is down, and a planned stop leaves
+/// `unmonitored` in it.
+type HoldAlert = (&'static str, &'static [&'static str], Option<&'static str>, &'static str, bool);
+const HOLD_ALERTS: &[HoldAlert] = &[
+    ("OmsHoldLatched", LATCHED, None, "P1", false),
+    ("OmsUnmonitored", GATE, Some("2m"), "P1", true),
+    ("OmsHoldLasting", PASSING, Some("5m"), "P1", true),
+    ("OmsOperatorHalt", OPERATOR, None, "P3", false),
+];
+const OMS_UP_GATE: &str = " and on(venue) max by (venue) (oms_up) == 1";
+const MODEL: &str = "crates/oms-core/src/model.rs";
+
 /// vmalert-metrics' `-evaluationInterval` (U11 pins it): what a group
 /// without an interval is evaluated at.
 const DEFAULT_INTERVAL: &str = "10s";
@@ -339,12 +379,13 @@ pub fn check(t: &Tree, p: &Parsed, cat: &Catalogue, out: &mut Vec<Finding>) {
     // A missing, empty or malformed venue list is U13's finding, a trading
     // list R13's.
     if let Some(v) = venues(p, "venues").filter(|v| !v.is_empty()) {
-        r6_per_venue(PER_VENUE, &v, &rules, out);
+        r6_per_venue(PER_VENUE, v, &rules, out);
     }
     if let Some(v) = r13_trading(t, p, out) {
-        r6_per_venue(TRADING_PER_VENUE, &v, &rules, out);
+        r6_per_venue(TRADING_PER_VENUE, v, &rules, out);
     }
     r7_design(p, &rules, out);
+    r12_holds(t, &rules, out);
     r9_scrape(p, &rules, out);
 }
 
@@ -480,14 +521,14 @@ fn r13_trading(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) -> Option<Vec<Strin
 
 type PerVenue = (&'static str, &'static str, &'static str, &'static str, &'static str);
 
-fn r6_per_venue(table: &[PerVenue], venues: &[String], rules: &[Rule], out: &mut Vec<Finding>) {
+fn r6_per_venue(table: &[PerVenue], venues: Vec<String>, rules: &[Rule], out: &mut Vec<Finding>) {
     for &(name, severity, file, group, template) in table {
         let path = format!("{METRICS_DIR}{file}");
         let found: Vec<&Rule> = rules
             .iter()
             .filter(|r| !r.vlogs && r.alert() == Some(name))
             .collect();
-        for v in venues {
+        for v in &venues {
             let mine: Vec<&&Rule> = found
                 .iter()
                 .filter(|r| r.label("venue") == Some(v.as_str()))
@@ -540,38 +581,45 @@ fn r6_per_venue(table: &[PerVenue], venues: &[String], rules: &[Rule], out: &mut
     }
 }
 
+/// The rule `name` exists once, in this file and group, with exactly this
+/// expression, `for` and severity.
+fn pin(rules: &[Rule], rule: &'static str, d: DesignRule, want: &str, out: &mut Vec<Finding>) {
+    let (file, group, name, _, want_for, severity) = d;
+    let path = format!("{METRICS_DIR}{file}");
+    let found: Vec<&Rule> = rules.iter().filter(|r| r.name() == name).collect();
+    let [r] = found[..] else {
+        finding(
+            out,
+            &path,
+            rule,
+            format!(
+                "the design rule {name} must exist once (found {})",
+                found.len()
+            ),
+        );
+        return;
+    };
+    let got_for = r.v.get("for").and_then(Value::as_str);
+    if r.file != path
+        || r.group != group
+        || norm(r.expr().unwrap_or("")) != want
+        || got_for != want_for
+        || r.label("severity") != severity
+    {
+        finding(
+            out,
+            r.file,
+            rule,
+            format!(
+                "{name} must be in {path} group {group} with expr {want}, for {want_for:?}, severity {severity:?}"
+            ),
+        );
+    }
+}
+
 fn r7_design(p: &Parsed, rules: &[Rule], out: &mut Vec<Finding>) {
-    for &(file, group, name, want, want_for, severity) in DESIGN {
-        let path = format!("{METRICS_DIR}{file}");
-        let found: Vec<&Rule> = rules.iter().filter(|r| r.name() == name).collect();
-        let [r] = found[..] else {
-            finding(
-                out,
-                &path,
-                "R7",
-                format!(
-                    "the design rule {name} must exist once (found {})",
-                    found.len()
-                ),
-            );
-            continue;
-        };
-        let got_for = r.v.get("for").and_then(Value::as_str);
-        if r.file != path
-            || r.group != group
-            || norm(r.expr().unwrap_or("")) != want
-            || got_for != want_for
-            || r.label("severity") != severity
-        {
-            finding(
-                out,
-                r.file,
-                "R7",
-                format!(
-                    "{name} must be in {path} group {group} with expr {want}, for {want_for:?}, severity {severity:?}"
-                ),
-            );
-        }
+    for &d in DESIGN {
+        pin(rules, "R7", d, d.3, out);
     }
     for &(file, group, interval) in GROUP_INTERVALS {
         let path = format!("{METRICS_DIR}{file}");
@@ -599,6 +647,89 @@ fn r7_design(p: &Parsed, rules: &[Rule], out: &mut Vec<Finding>) {
                 format!("group {group} must have interval {want} (found {got:?})"),
             );
         }
+    }
+}
+
+/// The variants of `pub enum HoldReason { … }` in snake_case: the
+/// identifiers that begin a line of its body and are followed by `,` or `(`
+/// (`rename_all = "snake_case"`).
+fn hold_reasons(text: &str) -> Option<Vec<String>> {
+    let body = &text[text.find("pub enum HoldReason {")?..];
+    let body = &body[..body.find("\n}")?];
+    let mut out = Vec::new();
+    for line in body.lines().skip(1) {
+        let l = line.trim_start();
+        let end = l
+            .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .unwrap_or(l.len());
+        let (id, rest) = l.split_at(end);
+        if id.starts_with(|c: char| c.is_ascii_uppercase())
+            && (rest.starts_with(',') || rest.starts_with('('))
+        {
+            let mut snake = String::new();
+            for (i, c) in id.chars().enumerate() {
+                if c.is_ascii_uppercase() && i > 0 {
+                    snake.push('_');
+                }
+                snake.push(c.to_ascii_lowercase());
+            }
+            out.push(snake);
+        }
+    }
+    Some(out)
+}
+
+fn r12_holds(t: &Tree, rules: &[Rule], out: &mut Vec<Finding>) {
+    let classed: Vec<&str> = HOLD_ALERTS.iter().flat_map(|a| a.1.iter().copied()).collect();
+    match t.files.get(MODEL).and_then(|s| hold_reasons(s)) {
+        None => finding(
+            out,
+            MODEL,
+            "R12",
+            "no `pub enum HoldReason { … }` to read the hold reasons from",
+        ),
+        Some(reasons) => {
+            for r in reasons.iter().filter(|r| !STRATEGY_ONLY.contains(&r.as_str())) {
+                let n = classed.iter().filter(|c| **c == r.as_str()).count();
+                if n != 1 {
+                    finding(
+                        out,
+                        MODEL,
+                        "R12",
+                        format!("hold reason {r} is in {n} hold alert classes (exactly one)"),
+                    );
+                }
+            }
+            for c in &classed {
+                if !reasons.iter().any(|r| r == c) || STRATEGY_ONLY.contains(c) {
+                    finding(
+                        out,
+                        MODEL,
+                        "R12",
+                        format!("{c} is in a hold alert class but Core::holds(None) has no such reason"),
+                    );
+                }
+            }
+        }
+    }
+    if GATE != ["unmonitored"] {
+        finding(
+            out,
+            METRICS_DIR,
+            "R12",
+            "the gate class must be exactly unmonitored (on at every start)",
+        );
+    }
+    for &(name, class, want_for, severity, gated) in HOLD_ALERTS {
+        let mut want = format!(
+            "max by (venue, reason) (oms_holds{{reason=~\"{}\"}}) > 0",
+            class.join("|")
+        );
+        if gated {
+            want.push_str(OMS_UP_GATE);
+        }
+        let d = ("oms.rules.json", "oms", name, "", want_for, Some(severity));
+        pin(rules, "R12", d, &want, out);
     }
 }
 
@@ -1249,6 +1380,102 @@ fn every_trading_venue_has_its_liveness_rules() {
     let f = crate::check(&t);
     assert_rules(&f, &["R6"]);
     assert!(f[0].text.contains("does not list"), "{f:?}");
+}
+
+const LATCHED_EXPR: &str = "max by (venue, reason) (oms_holds{reason=~\"kill_latched|watcher_mismatch|venue_change|reducing|mismatch|storage_low\"}) > 0";
+
+#[test]
+fn every_hold_reason_has_an_alert_class() {
+    let model = "crates/oms-core/src/model.rs";
+    // A new hold variant without a class.
+    let mut t = Tree::real();
+    t.replace(
+        model,
+        "orders are cancelled.\n    Unmonitored,\n}",
+        "orders are cancelled.\n    Unmonitored,\n    /// A new hold.\n    MarginCall(InstrumentId),\n}",
+    );
+    let f = crate::check(&t);
+    assert_rules(&f, &["R12"]);
+    assert!(f[0].text.contains("margin_call is in 0"), "{f:?}");
+    // A variant renamed: the new name has no class, the old one is no reason.
+    let mut t = Tree::real();
+    t.replace(model, "    KillLatched,\n", "    KillSwitch,\n");
+    let f = crate::check(&t);
+    assert_rules(&f, &["R12"]);
+    assert_eq!(f.len(), 2, "{f:?}");
+    // The enum is not found.
+    let mut t = Tree::real();
+    t.replace(model, "pub enum HoldReason {", "pub enum HoldCause {");
+    assert_rules(&crate::check(&t), &["R12"]);
+    // A reason in two classes: a passing hold that pages at once.
+    set_expr(
+        OMS,
+        "OmsHoldLatched",
+        &LATCHED_EXPR.replace("storage_low", "storage_low|link_down"),
+        &["R12"],
+    );
+    // A latched reason left out: a kill latch that pages nobody.
+    set_expr(
+        OMS,
+        "OmsHoldLatched",
+        &LATCHED_EXPR.replace("kill_latched|", ""),
+        &["R12"],
+    );
+    // unmonitored back in the latched class: P1 at every normal start.
+    let mut t = Tree::real();
+    edit(&mut t, OMS, |v| {
+        rule_mut(v, "OmsHoldLatched")["expr"] =
+            Value::String(LATCHED_EXPR.replace("storage_low", "storage_low|unmonitored"));
+        let rules = v["groups"][1]["rules"].as_array_mut().unwrap();
+        rules.retain(|r| r["alert"] != "OmsUnmonitored");
+    });
+    let f = crate::check(&t);
+    assert_rules(&f, &["R12"]);
+    assert_eq!(f.len(), 2, "{f:?}");
+    // The oms_up gate dropped: a stopped OMS's last state pages every 30 min.
+    for name in ["OmsUnmonitored", "OmsHoldLasting"] {
+        plant_rule(
+            OMS,
+            name,
+            |r| {
+                let e = r["expr"].as_str().unwrap();
+                let e = e.replace(" and on(venue) max by (venue) (oms_up) == 1", "");
+                r["expr"] = Value::String(e);
+            },
+            &["R12"],
+        );
+    }
+    // The gate on a latched class: a latch of a stopped OMS goes quiet.
+    set_expr(
+        OMS,
+        "OmsHoldLatched",
+        &format!("{LATCHED_EXPR} and on(venue) max by (venue) (oms_up) == 1"),
+        &["R12"],
+    );
+    // The for, the severity, another group.
+    plant_rule(
+        OMS,
+        "OmsUnmonitored",
+        |r| r["for"] = Value::String("30s".into()),
+        &["R12"],
+    );
+    plant_rule(
+        OMS,
+        "OmsOperatorHalt",
+        |r| r["labels"]["severity"] = Value::String("P1".into()),
+        &["R12"],
+    );
+    let mut t = Tree::real();
+    edit(&mut t, OMS, |v| {
+        let rules = v["groups"][1]["rules"].as_array_mut().unwrap();
+        let i = rules
+            .iter()
+            .position(|r| r["alert"] == "OmsHoldLasting")
+            .unwrap();
+        let r = rules.remove(i);
+        v["groups"][2]["rules"].as_array_mut().unwrap().push(r);
+    });
+    assert_rules(&crate::check(&t), &["R12"]);
 }
 
 #[test]
