@@ -388,7 +388,7 @@ _Avoid_: journal (that is the OMS's), WAL
 ### Deployment
 
 **Test wiring** (시험 배선):
-The environment variable a test build takes its endpoints from, and only from: `WATCHER_TEST_ENDPOINTS` for a watcher built with the feature `test-endpoints`; `OMS_TEST_BYBIT_WIRING`, and with `[alert]` also `OMS_TEST_TELEGRAM_API`, for an `oms-node` built with `failpoints`. Every Bybit and watcher endpoint is on `127.0.0.1` (the OMS's Telegram API on a loopback address). Without it, or with `network = "mainnet"`, the test build does not start. A test build is never installed; the watcher's says so on `--version` (` test-endpoints` at the end; V-TESTHOOK-1).
+The environment variable a test build takes its endpoints from, and only from: `WATCHER_TEST_ENDPOINTS` for a watcher built with the feature `test-endpoints`; `OMS_TEST_BYBIT_WIRING`, and with `[alert]` also `OMS_TEST_TELEGRAM_API`, for an `oms-node` built with `failpoints`. Every Bybit and watcher endpoint is on `127.0.0.1` (the OMS's Telegram API on a loopback address). Without it, or with `network = "mainnet"`, the test build does not start: the watcher's at all, the OMS's Bybit gateway and its `[alert]` sender (a failpoints node on the simulated venue without `[alert]` needs neither variable; the Hyperliquid gateway has no such guard). A test build is never installed; the watcher's says so on `--version` (` test-endpoints` at the end; V-TESTHOOK-1).
 _Avoid_: endpoint override (the installed build has none), failpoint (that is the journal-failure hook of the same OMS feature)
 
 **Trading slice** (거래 슬라이스):
