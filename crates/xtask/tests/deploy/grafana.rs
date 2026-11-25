@@ -106,10 +106,20 @@ const BOARDS: &[(&str, &str)] = &[
     ),
     ("d3-system", "D3 시스템: 서비스가 살아 있고 자원이 남았나"),
 ];
-/// G8: D3 shows the value `LakeAuditFailed` compares with 0 (new failures
-/// in 26 h), so the panel and the alert cannot drift apart.
-const AUDIT_ALERT: &str = "LakeAuditFailed";
-const AUDIT_THRESHOLD: &str = " > 0";
+/// G8: panels that show the value an alert compares with its threshold,
+/// so the panel and the alert cannot drift apart: (dashboard uid, alert,
+/// threshold, the dashboard's variable filter put first in each selector).
+/// D3: `LakeAuditFailed`, new failures in 26 h. D2: `MdTopicsStale`, the
+/// share of stale order-book topics per market and channel.
+const PINNED: &[(&str, &str, &str, &str)] = &[
+    (SYSTEM_UID, "LakeAuditFailed", " > 0", ""),
+    (
+        "d2-market-data",
+        "MdTopicsStale",
+        " > 0.1",
+        "venue=~\"$venue\", ",
+    ),
+];
 /// G8: D3's memory panel divides each scraped component's memory by its
 /// unit's `MemoryMax` (rule U6), one term per scrape job.
 const MEMORY_METRIC: &str = "process_resident_memory_bytes";
@@ -622,37 +632,49 @@ fn g8_boards(p: &Parsed, boards: &[(&str, &Value)], out: &mut Vec<Finding>) {
             );
         }
     }
-    let Some(&(path, d3)) = boards
-        .iter()
-        .find(|(_, d)| uid(d).as_deref() == Some(SYSTEM_UID))
-    else {
-        return;
+    let board_exprs = |want_uid: &str| -> Option<(&str, Vec<String>)> {
+        let &(path, d) = boards
+            .iter()
+            .find(|(_, d)| uid(d).as_deref() == Some(want_uid))?;
+        let exprs = panels(d)
+            .into_iter()
+            .flat_map(targets)
+            .filter_map(|t| t.get("expr").and_then(Value::as_str))
+            .map(crate::rules::norm)
+            .collect();
+        Some((path, exprs))
     };
-    let exprs: Vec<String> = panels(d3)
-        .into_iter()
-        .flat_map(targets)
-        .filter_map(|t| t.get("expr").and_then(Value::as_str))
-        .map(crate::rules::norm)
-        .collect();
-    // A missing or changed alert is rule R7's finding; the panel follows
-    // the alert's current expression.
+    // The panel follows the alert's current expression. A changed
+    // `LakeAuditFailed` is also rule R7's finding; a missing alert is no
+    // finding here (R7 pins `LakeAuditFailed`, nothing pins `MdTopicsStale`).
     let (rules, _) = crate::rules::collect(p);
-    let alert = rules
-        .iter()
-        .find(|r| r.alert() == Some(AUDIT_ALERT))
-        .and_then(|r| r.expr())
-        .map(crate::rules::norm);
-    if let Some(a) = alert {
-        let want = a.strip_suffix(AUDIT_THRESHOLD).unwrap_or(&a);
-        if !exprs.iter().any(|e| e == want) {
-            finding(
-                out,
-                path,
-                "G8",
-                format!("a panel must show {want} ({AUDIT_ALERT} without{AUDIT_THRESHOLD})"),
-            );
+    for &(board, name, threshold, filter) in PINNED {
+        let Some((path, exprs)) = board_exprs(board) else {
+            continue;
+        };
+        let alert = rules
+            .iter()
+            .find(|r| r.alert() == Some(name))
+            .and_then(|r| r.expr())
+            .map(crate::rules::norm);
+        if let Some(a) = alert {
+            let want = a
+                .strip_suffix(threshold)
+                .unwrap_or(&a)
+                .replace('{', &format!("{{{filter}"));
+            if !exprs.iter().any(|e| *e == want) {
+                finding(
+                    out,
+                    path,
+                    "G8",
+                    format!("a panel must show {want} ({name} without{threshold})"),
+                );
+            }
         }
     }
+    let Some((path, exprs)) = board_exprs(SYSTEM_UID) else {
+        return;
+    };
     let want: BTreeSet<String> = crate::rules::SCRAPE_JOBS
         .iter()
         .filter_map(|job| {
@@ -985,6 +1007,7 @@ const QUEUE: &str = "연결별 큐 바이트";
 const TEXT_TITLE: &str = "매일 확인: 실패한 일일 작업";
 const AUDIT_PANEL: &str = "26시간 안의 새 감사 실패";
 const MEMORY_PANEL: &str = "메모리 / 단위 상한 (구성 요소별)";
+const STALE_PANEL: &str = "멈춘 호가 주제 비율 (시장·채널별)";
 
 #[test]
 fn a_dashboard_panel_with_an_unknown_datasource_fails() {
@@ -1157,6 +1180,32 @@ fn the_market_data_and_system_dashboards_exist() {
             panel_mut(v, AUDIT_PANEL)["targets"][0]["expr"] =
                 json!("max by (venue) (increase(lake_audit_fail_total[26h]))")
         },
+        &["G8"],
+    );
+    // The stale-topic panel shows `MdTopicsStale`'s value: not every
+    // channel (quiet trade channels are always stale), not summed over
+    // markets (one market's stale book hides under the other's).
+    let stale = |e: &'static str| -> Edit {
+        Box::new(move |v| panel_mut(v, STALE_PANEL)["targets"][0]["expr"] = json!(e))
+    };
+    for f in [
+        stale(
+            "count by (channel) (md_last_msg_age_s{venue=~\"$venue\"} > 60) / count by (channel) (md_last_msg_age_s{venue=~\"$venue\"})",
+        ),
+        stale(
+            "count by (channel) (md_last_msg_age_s{venue=~\"$venue\", channel=~\"orderbook.*\"} > 60) / count by (channel) (md_last_msg_age_s{venue=~\"$venue\", channel=~\"orderbook.*\"})",
+        ),
+        stale(
+            "count by (venue, market, channel) (md_last_msg_age_s{venue=~\"$venue\", channel=~\"orderbook.*\"} > 30) / count by (venue, market, channel) (md_last_msg_age_s{venue=~\"$venue\", channel=~\"orderbook.*\"})",
+        ),
+    ] {
+        plant_json(D2, f, &["G8"]);
+    }
+    // `MdTopicsStale` changed without its panel.
+    plant(
+        "deploy/observability/vmalert/metrics/market-data.rules.json",
+        "(md_last_msg_age_s{channel=~\\\"orderbook.*\\\"} > 60)",
+        "(md_last_msg_age_s{channel=~\\\"orderbook.*\\\"} > 90)",
         &["G8"],
     );
     // An alert changed without its panel (R7 pins the alert).
