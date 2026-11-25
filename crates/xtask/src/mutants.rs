@@ -3200,6 +3200,42 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "xtask", "--test", "deploy", "the_deploy_tree_passes"],
         guards: "ADR-035",
     },
+    Mutant {
+        id: "M353-deploy-secret-file-finding-shows-value",
+        what: "rule R11 prints the value of a bad secret-file key: a bot token pasted as bot_token_file reaches the CI log (ADR-035, U20a2b review 1 M1)",
+        file: "crates/xtask/tests/deploy/alertmanager.rs",
+        find: "\"every telegram config needs {key}, a file path under /etc/ (the value is missing or is no such path)\"",
+        replace: "\"every telegram config needs {key}, a file path under /etc/ (found {path:?})\"",
+        test: &["-p", "xtask", "--test", "deploy", "alertmanager::secret_files_are_absolute_paths_under_etc"],
+        guards: "ADR-035",
+    },
+    Mutant {
+        id: "M354-deploy-check-route-timings-unread",
+        what: "rule R10 does not read the route timings: a P1 route that waits 10 hours before sending passes (ADR-035, U20a2b review 1 S1)",
+        file: "crates/xtask/tests/deploy/alertmanager.rs",
+        find: "            if got != Some(value) {\n",
+        replace: "            if false && got != Some(value) {\n",
+        test: &["-p", "xtask", "--test", "deploy", "alertmanager::the_routes_send_watchdog_p1_p2_where_they_belong"],
+        guards: "ADR-035",
+    },
+    Mutant {
+        id: "M355-deploy-check-accepts-inline-url",
+        what: "rule R11 accepts an inline url: a dead-man ping address committed in the config passes (ADR-035, U20a2b review 1 S2)",
+        file: "crates/xtask/tests/deploy/alertmanager.rs",
+        find: "    \"telegram_api_url\",\n    \"url\",\n",
+        replace: "    \"telegram_api_url\",\n",
+        test: &["-p", "xtask", "--test", "deploy", "alertmanager::an_inline_token_or_chat_id_fails"],
+        guards: "ADR-035",
+    },
+    Mutant {
+        id: "M356-deploy-check-root-route-keys-unread",
+        what: "rule R10 does not read the root route's keys: a muting key on the root route passes (ADR-035, U20a2b review 1 S3)",
+        file: "crates/xtask/tests/deploy/alertmanager.rs",
+        find: "        if !ROOT_KEYS.contains(&k.as_str()) {\n",
+        replace: "        if false && !ROOT_KEYS.contains(&k.as_str()) {\n",
+        test: &["-p", "xtask", "--test", "deploy", "alertmanager::the_routes_send_watchdog_p1_p2_where_they_belong"],
+        guards: "ADR-035",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
