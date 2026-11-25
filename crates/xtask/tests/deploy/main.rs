@@ -1,11 +1,13 @@
 //! The deployment check: the files under `deploy/` (systemd units, timers,
 //! the slice, the install map, the venue list, the metric catalogue, the
-//! vmalert rule files, the scrape config) against the rules of ADR-035.
+//! vmalert rule files, the scrape config, the Alertmanager config) against
+//! the rules of ADR-035.
 //! Pure over an in-memory tree: no network, no clock, no temp file.
 //! Run before an install with `cargo test --locked -p xtask --test deploy`.
 
 #![allow(clippy::unwrap_used)]
 
+mod alertmanager;
 mod catalogue;
 mod expr;
 mod ini;
@@ -23,6 +25,7 @@ pub fn check(t: &Tree) -> Vec<Finding> {
     units::check(t, &p, &mut out);
     let cat = catalogue::build(t, &p, &mut out);
     rules::check(t, &p, &cat, &mut out);
+    alertmanager::check(t, &p, &mut out);
     out
 }
 
