@@ -489,16 +489,6 @@ fn u8_listeners(p: &Parsed, out: &mut Vec<Finding>) {
                 }
             }
         }
-        for v in flag_values(u, "cluster.listen-address") {
-            if !v.is_empty() {
-                finding(
-                    out,
-                    &u.path,
-                    "U8",
-                    format!("--cluster.listen-address {v} opens a gossip port"),
-                );
-            }
-        }
     }
     // A listener without the flag binds every interface: each stack
     // listener names its address once.
