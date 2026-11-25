@@ -1,28 +1,41 @@
-# Template only: not installed or enabled by this repository (U5b, U6).
+# Not installed or enabled by this repository: docs/operations/observability.md.
 # Instance = venue: md-collector@bybit.service reads /etc/md-collector/bybit.toml.
 [Unit]
 Description=md-collector for %i (market data to the lake's stage-1 files)
 After=network-online.target
 Wants=network-online.target
+# No start limit: with RestartSec=2 the default limit (5 starts in 10 s)
+# could stop the collector for good (ADR-035).
+StartLimitIntervalSec=0
 
 [Service]
-# U6: READY=1 after the start, WATCHDOG=1 on every writer beat (once a
-# second, also when the venue is quiet; none while a write is stuck or after
-# a write error). 30 s > the 20 s exit flush of the [MD P1] alert (R2).
+# READY=1 after the start, WATCHDOG=1 on every writer beat (once a second,
+# also when the venue is quiet; none while a write is stuck or after a write
+# error). 30 s > the 20 s exit flush of the [MD P1] alert.
 Type=notify
 WatchdogSec=30s
 NotifyAccess=main
 # The alert repeat state survives restarts here, off the lake's file
-# system (U6 R3): $RUNTIME_DIRECTORY/alert-state.json.
+# system: $RUNTIME_DIRECTORY/alert-state.json.
 RuntimeDirectory=md-collector-%i
 RuntimeDirectoryPreserve=restart
 ExecStart=/usr/local/bin/md-collector run --config /etc/md-collector/%i.toml
 Restart=always
-RestartSec=5
+# Back within about 2 s, with no back-off: each restart loses the raw data
+# of the gap (ADR-035).
+RestartSec=2
 # Exit 2 = configuration or plan refused: a restart cannot help.
 RestartPreventExitStatus=2
-# Receive queues are capped at 512 MiB in total (spec R1).
+# Bybit's cap; receive queues are capped at 512 MiB in total. Another venue
+# sets its own MemoryMax and MemoryMin (half of it) in a drop-in.
 MemoryMax=1G
+# Kept in memory and ahead of other work (ADR-035): the kernel kills it last,
+# never swaps it, reclaims its first half last.
+Slice=trading.slice
+OOMScoreAdjust=-900
+MemorySwapMax=0
+MemoryMin=512M
+IOWeight=1000
 # SIGTERM: stop the feeds, close every file (frame end, fsync, unlock).
 KillSignal=SIGTERM
 TimeoutStopSec=30

@@ -1,0 +1,21 @@
+# Not installed or enabled by this repository: docs/operations/observability.md.
+[Unit]
+Description=Alertmanager on 127.0.0.1:9093 (no cluster port)
+After=network.target
+
+[Service]
+Type=simple
+User=hlobs
+Group=hlobs
+ExecStart=/usr/local/bin/alertmanager --config.file=/etc/hl-oms-obs/alertmanager/alertmanager.json --storage.path=/mnt/nvme/observability/alertmanager --web.listen-address=127.0.0.1:9093 --cluster.listen-address=
+Restart=on-failure
+RestartSec=5
+MemoryMax=100M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/mnt/nvme/observability/alertmanager
+
+[Install]
+WantedBy=multi-user.target

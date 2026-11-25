@@ -1,0 +1,21 @@
+# Not installed or enabled by this repository: docs/operations/observability.md.
+[Unit]
+Description=VictoriaLogs: log store on 127.0.0.1:9428
+After=network.target
+
+[Service]
+Type=simple
+User=hlobs
+Group=hlobs
+ExecStart=/usr/local/bin/victoria-logs-prod -storageDataPath=/mnt/nvme/observability/victoria-logs -retentionPeriod=1y -memory.allowedBytes=600MiB -httpListenAddr=127.0.0.1:9428
+Restart=on-failure
+RestartSec=5
+MemoryMax=1G
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/mnt/nvme/observability/victoria-logs
+
+[Install]
+WantedBy=multi-user.target

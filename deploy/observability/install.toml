@@ -1,0 +1,63 @@
+# Repository file (under deploy/observability/) -> install path and mode.
+# The operator installs with `install -D -m <mode> <src> <dst>`
+# (docs/operations/observability.md §8); this repository installs nothing.
+
+[[file]]
+src = "systemd/alertmanager.service"
+dst = "/etc/systemd/system/alertmanager.service"
+mode = "0644"
+
+[[file]]
+src = "systemd/grafana.service"
+dst = "/etc/systemd/system/grafana.service"
+mode = "0644"
+
+[[file]]
+src = "systemd/md-archiver@.service"
+dst = "/etc/systemd/system/md-archiver@.service"
+mode = "0644"
+
+[[file]]
+src = "systemd/md-archiver@.timer"
+dst = "/etc/systemd/system/md-archiver@.timer"
+mode = "0644"
+
+[[file]]
+src = "systemd/md-collector@.service"
+dst = "/etc/systemd/system/md-collector@.service"
+mode = "0644"
+
+[[file]]
+src = "systemd/md-lake-seal@.service"
+dst = "/etc/systemd/system/md-lake-seal@.service"
+mode = "0644"
+
+[[file]]
+src = "systemd/md-lake-seal@.timer"
+dst = "/etc/systemd/system/md-lake-seal@.timer"
+mode = "0644"
+
+[[file]]
+src = "systemd/trading.slice"
+dst = "/etc/systemd/system/trading.slice"
+mode = "0644"
+
+[[file]]
+src = "systemd/victorialogs.service"
+dst = "/etc/systemd/system/victorialogs.service"
+mode = "0644"
+
+[[file]]
+src = "systemd/victoriametrics.service"
+dst = "/etc/systemd/system/victoriametrics.service"
+mode = "0644"
+
+[[file]]
+src = "systemd/vmalert-logs.service"
+dst = "/etc/systemd/system/vmalert-logs.service"
+mode = "0644"
+
+[[file]]
+src = "systemd/vmalert-metrics.service"
+dst = "/etc/systemd/system/vmalert-metrics.service"
+mode = "0644"
