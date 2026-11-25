@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `89518689f8ccb171`, 검증 결과의 다이제스트 `7f76e9bbc5ac8483`.
+> 소스 다이제스트 `05622e741ee9866e`, 검증 결과의 다이제스트 `7f76e9bbc5ac8483`.
 
-주장 130건: 통과 0, 실패 0, 미실행 130. 결과는 현재 소스(다이제스트 `89518689f8ccb171`)에서 돌린 것만 센다. 다른 소스의 결과는 미실행으로 센다.
+주장 131건: 통과 0, 실패 0, 미실행 131. 결과는 현재 소스(다이제스트 `05622e741ee9866e`)에서 돌린 것만 센다. 다른 소스의 결과는 미실행으로 센다.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -137,6 +137,7 @@
 | V-BYBIT-RECORDED-1 | 가짜 Bybit가 테스트넷에서 녹화한 실제 응답을 그대로 보낼 때, 게이트웨이가 그것을 읽는다: 오래된 요청(10002)·최소 수량 미만(10001)·모르는 주문의 취소(110001)는 Rejected, 빈 일괄 취소는 취소 0건, 열린 주문·포지션·실행 행은 코어 입력(우리 주문의 체결, 비용인 수수료), 증거금 보고·계좌 모드·종목 설정은 실패 없이 읽힌다 | 통합 | 미실행 | `cargo test -p oms-node --test bybit_recorded` |
 | V-WATCH-14 | 워처는 자격 파일의 RSA 키(rsa_private_key, PKCS#8 PEM 글)로도 서명한다: 같은 문자열(timestamp + api_key + recv_window + 질의 또는 본문)의 RSA-SHA256 PKCS#1 v1.5 서명을 표준 base64(패딩 있음)로 X-BAPI-SIGN에 싣고 X-BAPI-SIGN-TYPE은 보내지 않는다. GET과 일괄 취소 POST가 모두 Credentials::sign을 지난다. 자격 파일은 api_key와 api_secret 또는 rsa_private_key 중 정확히 하나만 받고, 둘 다·둘 다 없음·PKCS#1·암호화된 PEM·PEM이 아닌 글·키가 아닌 본문·잘린 본문·빈 키·1024비트 키는 키의 바이트를 담지 않는 한 줄로 시작을 거부하며(PKCS#1과 암호화된 PEM은 openssl 변환 명령을 적는다), Debug는 키를 찍지 않는다. HMAC 키의 서명은 전과 바이트까지 같다. api_secret에 PEM 개인 키가 있으면 HMAC 비밀로 쓰지 않고 rsa_private_key 자리를 말하는 한 줄로 시작을 거부한다 | 단위, 통합(loopback) | 미실행 | `cargo test -p watcher --test sign --test creds --test client` |
 | V-BYBIT-RSA-1 | OMS의 Bybit 게이트웨이는 자격 파일의 RSA 키(rsa_private_key, PKCS#8 PEM 글)로도 서명한다: REST(GET의 질의, POST의 본문)는 같은 문자열의 RSA-SHA256 PKCS#1 v1.5 서명을 표준 base64로 X-BAPI-SIGN에 싣고 X-BAPI-SIGN-TYPE은 보내지 않으며, 비공개 스트림과 WS Trade의 auth는 GET/realtime + expires의 같은 서명을 base64로 싣는다. 모든 서명이 Credentials::sign을 지나고 서명을 만들지 못한 요청은 보내지 않는다(NotSent, auth not sent). 자격 파일은 api_key와 api_secret 또는 rsa_private_key 중 정확히 하나만 받고 워처와 같은 거부를 키의 바이트 없이 한 줄로 내며, Debug는 키를 찍지 않는다. HMAC 키의 서명은 전과 바이트까지 같다. api_secret에 PEM 개인 키가 있으면 HMAC 비밀로 쓰지 않고 rsa_private_key 자리를 말하는 한 줄로 거부한다 | 단위, 통합(loopback) | 미실행 | `cargo test -p oms-node --lib venue::bybit` |
+| V-TESTHOOK-1 | 두 프로그램의 시험 빌드는 loopback 가짜에만 붙는다. 워처의 시험 빌드(기능 test-endpoints)는 모든 끝점을 WATCHER_TEST_ENDPOINTS 하나에서만 받고(rest, ip_echo_url, telegram, systemctl; 모르는 필드와 빠진 필드는 거부) Endpoints::of를 부르지 않으며, rest·ip_echo_url·telegram은 http://127.0.0.1:<포트>, systemctl은 ..이 없는 절대 경로의 실행 가능한 일반 파일이어야 한다. network = "mainnet"이면 변수가 있어도, 변수가 없으면 testnet에서도 시작을 거부한다(종료 코드 2, 한 줄). OMS의 failpoints 빌드는 Bybit 게이트웨이를 OMS_TEST_BYBIT_WIRING(다섯 끝점 모두 127.0.0.1) 없이는 시작하지 않고(네트워크의 끝점으로 돌아가지 않음, 자격 파일을 읽기 전), mainnet이면 배선이 있어도 거부하며(종료 코드 3), [alert]가 있으면 OMS_TEST_TELEGRAM_API(loopback http) 없이는 직접 알림을 시작하지 않는다(송신기가 생기기 전, 종료 코드 3). 기본 빌드의 watcher --version은 정확히 'watcher <버전>'이고 시험 빌드는 뒤에 ' test-endpoints'를 붙인다 | 단위, 프로세스(loopback) | 미실행 | `cargo test -p watcher --test test_endpoints --test test_endpoints_default; cargo test -p oms-node --lib venue::bybit::gateway::tests alerts::tests; cargo test -p oms-node --features failpoints --test bybit_node a_failpoints_node_without_test_wiring` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다. 전략 이름은 [A-Za-z0-9_.:-]의 1~32자만 받는다. 문자열 식별자는 만들 때와 역직렬화할 때 같은 검사로 거부한다
 
@@ -3395,4 +3396,33 @@
 | `node-unit/venue::bybit::stream::tests::the_auth_message_with_an_rsa_key_carries_the_base64_signature` | 미실행 | result of another source, not counted (last result: passed) |
 | `node-unit/venue::bybit::trade::tests::the_auth_message_with_an_rsa_key_carries_the_base64_signature` | 미실행 | result of another source, not counted (last result: passed) |
 | `node-unit/venue::bybit::sign::tests::signatures_match_independent_hmac_values` | 미실행 | result of another source, not counted (last result: passed) |
+
+## V-TESTHOOK-1 — 두 프로그램의 시험 빌드는 loopback 가짜에만 붙는다. 워처의 시험 빌드(기능 test-endpoints)는 모든 끝점을 WATCHER_TEST_ENDPOINTS 하나에서만 받고(rest, ip_echo_url, telegram, systemctl; 모르는 필드와 빠진 필드는 거부) Endpoints::of를 부르지 않으며, rest·ip_echo_url·telegram은 http://127.0.0.1:<포트>, systemctl은 ..이 없는 절대 경로의 실행 가능한 일반 파일이어야 한다. network = "mainnet"이면 변수가 있어도, 변수가 없으면 testnet에서도 시작을 거부한다(종료 코드 2, 한 줄). OMS의 failpoints 빌드는 Bybit 게이트웨이를 OMS_TEST_BYBIT_WIRING(다섯 끝점 모두 127.0.0.1) 없이는 시작하지 않고(네트워크의 끝점으로 돌아가지 않음, 자격 파일을 읽기 전), mainnet이면 배선이 있어도 거부하며(종료 코드 3), [alert]가 있으면 OMS_TEST_TELEGRAM_API(loopback http) 없이는 직접 알림을 시작하지 않는다(송신기가 생기기 전, 종료 코드 3). 기본 빌드의 watcher --version은 정확히 'watcher <버전>'이고 시험 빌드는 뒤에 ' test-endpoints'를 붙인다
+
+- 상태: **미실행**
+- 왜 중요한가: 합동 시험은 두 실제 바이너리를 띄운다. 시험 빌드가 배선 없이 뜨거나 mainnet 설정으로 뜨면 실제 Bybit·Telegram·systemctl에 닿는다. failpoints OMS는 전에는 변수가 없으면 네트워크의 끝점과 실제 Bot API를 썼다. 설치된 바이너리가 시험 빌드인지 --version으로 가려야 한다
+- 수준: 단위, 프로세스(loopback)
+- 전제와 범위: Endpoints::for_test_build, Wiring::test_build·of_test, alerts::test_build_route의 순수 판단; 기본 빌드 워처 바이너리의 --version; failpoints 노드 프로세스 하나(배선 없음, 자격 파일 없음)
+- 실제 구성요소: 워처의 Endpoints·Config, oms-node의 Wiring·게이트웨이 spawn과 노드 시작(failpoints 빌드), reqwest::Url 파싱, 파일 시스템의 모드 비트
+- 모의·시뮬레이션: Bybit(시작만 한 loopback 가짜, 요청 없음)
+- 주입한 장애: 127.0.0.1 밖의 호스트(이름, localhost, 127.0.0.2, ::1, 0.0.0.0, 사용자 부분에 숨긴 호스트), https·ws 체계, 포트 없음, 모르는·빠진 필드, JSON이 아닌 값, 상대·.. 경로·없는·디렉터리·실행 비트 없는 systemctl, mainnet, 변수 없음, 자격 파일 없음. 변이 M389~M396과 저장소 밖 mut.py의 W1~W8, O1~O3, H1·H2
+- 판정 기준과 근거: 거부마다 기대한 한 줄(변수 없음: 'this build is for tests: WATCHER_TEST_ENDPOINTS is required', 'a failpoints build talks only to loopback fakes: OMS_TEST_BYBIT_WIRING is required', 'a failpoints build sends alerts only to a loopback fake: OMS_TEST_TELEGRAM_API is required'; mainnet: 'a test build never runs on mainnet', 'a failpoints build never runs on mainnet'); 받은 배선의 끝점이 배선의 값과 같고 Endpoints::of의 값과 다르다. 배선 없는 failpoints 노드는 종료 코드 3과 그 줄로 끝나고 로그에 자격 파일이 없으며 가짜 Bybit는 요청을 받지 않는다. 기본 빌드 --version의 stdout이 정확히 'watcher <버전>\n'
+- 재현: `cargo test -p watcher --test test_endpoints --test test_endpoints_default; cargo test -p oms-node --lib venue::bybit::gateway::tests alerts::tests; cargo test -p oms-node --features failpoints --test bybit_node a_failpoints_node_without_test_wiring`
+- 뒷받침하는 것: C-WATCH, C-GW, ADR-031, ADR-028
+- 확인하지 않은 범위: 배포하는 빌드에 이 고리가 없다는 것은 cfg에 기댄다(워처 main.rs의 #[cfg(feature = "test-endpoints")] 호출, OMS gateway.rs spawn과 node.rs start_alerts의 cfg(feature = "failpoints"))이고 검토로 읽는다. 기본 oms-node를 OMS_TEST_BYBIT_WIRING과 함께 띄우는 시험은 없다(실제 호스트가 필요하거나 게이트웨이 전에 실패하는 설정이라 아무것도 보이지 않는다). 시험 빌드 워처 바이너리를 띄우는 시험은 이 단계에 없다: main.rs의 거부(종료 코드 2와 그 줄)와 --version의 ' test-endpoints'는 손으로 돌려 본 것뿐이고 합동 시험 J0이 맡는다. failpoints 노드의 start_alerts 호출 자리는 프로세스 시험이 없다(거부가 빠진 노드는 실제 Bot API로 보낼 수 있어 띄우지 않는다): 순수 판단만 시험한다. OMS_TEST_TELEGRAM_API의 규칙은 127.0.0.1이 아니라 loopback 주소 전체다(기존 규칙 그대로)
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `watcher/a_wiring_off_127_0_0_1_is_refused` | 미실행 |  |
+| `watcher/a_test_build_refuses_mainnet` | 미실행 |  |
+| `watcher/a_test_build_without_wiring_is_refused` | 미실행 |  |
+| `watcher/a_good_wiring_gives_every_endpoint_from_the_wiring` | 미실행 |  |
+| `watcher/unknown_and_missing_fields_are_refused` | 미실행 |  |
+| `watcher/the_systemctl_must_be_an_absolute_executable_file` | 미실행 |  |
+| `watcher/the_default_build_prints_no_test_endpoints` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::a_test_wiring_on_mainnet_is_refused` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::a_failpoints_build_without_wiring_is_refused` | 미실행 |  |
+| `node-unit/venue::bybit::gateway::tests::the_test_wiring_takes_only_hosts_on_127_0_0_1` | 미실행 | result of another source, not counted (last result: passed) |
+| `node-unit/alerts::tests::a_failpoints_build_without_a_test_api_is_refused` | 미실행 |  |
+| `pipeline/a_failpoints_node_without_test_wiring_refuses_its_gateway` | 미실행 |  |
 

@@ -163,7 +163,7 @@ summary = "게이트웨이가 지켜야 하는 의무 13가지와 중단 지점"
 events = []
 adr = ["ADR-005", "ADR-014", "ADR-017", "ADR-021"]
 code = ["crates/oms-node/src/venue/mod.rs", "crates/oms-node/src/venue/simnet.rs", "crates/oms-node/src/venue/hyperliquid/mod.rs"]
-claims = ["V-HL-1", "V-HL-2", "V-HL-3", "V-SLICE-1", "V-GW-SEAM-1"]
+claims = ["V-HL-1", "V-HL-2", "V-HL-3", "V-SLICE-1", "V-GW-SEAM-1", "V-TESTHOOK-1"]
 
 [[contract]]
 id = "C-TAIL"
@@ -233,4 +233,4 @@ summary = "1부: crate watcher는 oms-*·md-* crate도 다른 작업 공간 crat
 events = []
 adr = ["ADR-031", "ADR-032", "ADR-025", "ADR-011"]
 code = ["crates/watcher/src", "tools/ci/watcher_independent.sh"]
-claims = ["V-WATCH-1", "V-WATCH-2", "V-WATCH-3", "V-WATCH-4", "V-WATCH-5", "V-WATCH-6", "V-WATCH-7", "V-WATCH-8", "V-WATCH-9", "V-WATCH-10", "V-WATCH-11", "V-WATCH-12", "V-WATCH-13"]
+claims = ["V-WATCH-1", "V-WATCH-2", "V-WATCH-3", "V-WATCH-4", "V-WATCH-5", "V-WATCH-6", "V-WATCH-7", "V-WATCH-8", "V-WATCH-9", "V-WATCH-10", "V-WATCH-11", "V-WATCH-12", "V-WATCH-13", "V-TESTHOOK-1"]
