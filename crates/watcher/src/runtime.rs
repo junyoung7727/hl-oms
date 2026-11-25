@@ -31,7 +31,7 @@ use crate::clock::{Clock, Steady};
 use crate::config::{Config, resolved};
 use crate::engine::{Action, Check, Engine, Logic};
 use crate::journal::{MAX_RECORDS, Tail};
-use crate::kill::{self, Inflight, Kill, MarkerOutcome, Notice, Positions, Setup};
+use crate::kill::{self, AbortWhy, Inflight, Kill, MarkerOutcome, Notice, Positions, Setup, Stage};
 use crate::log::Log;
 use crate::metrics::{Exporter, Metrics};
 use crate::oms::{Monitor, Status, admin_kill, admin_send};
@@ -59,6 +59,14 @@ pub const QUEUED_MAX: usize = 1000;
 /// At most this many kill notices wait for their position read; beyond
 /// it the oldest waiting progress notice is dropped (판단(모델 아님)).
 pub const NOTICES_MAX: usize = 16;
+/// `main.rs` ends the tokio runtime with this `shutdown_timeout`
+/// (판단(모델 아님), U19b3d): a dropped runtime would wait for every
+/// `spawn_blocking` task, and a marker write hung on the disk must not hold
+/// the exit.
+pub const SHUTDOWN_MS: u64 = 1000;
+/// Why the kill notices still waiting at the end are sent without their
+/// position read (U19b3d).
+pub const ENDING: &str = "워처 종료 중";
 
 /// Where the watcher sends: the binary takes them from the config (the
 /// REST base from `network` only), the two Telegram routes from
@@ -102,6 +110,9 @@ enum Msg {
     Halt(u64, u64, Result<String, String>),
     /// The position read of notice `seq`.
     Positions(u64, Positions),
+    /// The reply to owed halt `id` (W5's after a kill, or the one before
+    /// a marker-path refusal; U19b3d).
+    Owed(u64, Result<String, String>),
 }
 
 enum Phase {
@@ -173,12 +184,7 @@ fn paused(actions: Vec<Action>) -> (Vec<Action>, Vec<&'static str>) {
 /// the OMS never reads would not keep a killed OMS halted at its next
 /// start. The OMS config is not read (independence).
 fn marker_rule(v: &Value, ours: &Path) -> Result<(), String> {
-    let m = v.pointer("/node/kill_marker");
-    let configured = m.and_then(|m| m.get("configured")).and_then(Value::as_bool) == Some(true);
-    let path = m
-        .and_then(|m| m.get("path"))
-        .and_then(Value::as_str)
-        .filter(|_| configured);
+    let path = oms_marker(v);
     match path {
         Some(p) if resolved(Path::new(p)) == resolved(ours) => Ok(()),
         _ => Err(format!(
@@ -186,6 +192,26 @@ fn marker_rule(v: &Value, ours: &Path) -> Result<(), String> {
             path.map_or("none".to_string(), |p| kill::cut(p, kill::TEXT_MAX)),
             ours.display()
         )),
+    }
+}
+
+/// The path where the OMS of a status answer reads its kill marker
+/// (`node.kill_marker`), `None` when it reads none.
+fn oms_marker(v: &Value) -> Option<&str> {
+    let m = v.pointer("/node/kill_marker");
+    let configured = m.and_then(|m| m.get("configured")).and_then(Value::as_bool) == Some(true);
+    m.and_then(|m| m.get("path"))
+        .and_then(Value::as_str)
+        .filter(|_| configured)
+}
+
+/// How the refusal P1 names the outcome of the `watcher_kill` it sent
+/// first (U19b3d): the reply that latched, or `실패(<why>)` for any other
+/// reply or error.
+fn halt_outcome(r: &Result<String, String>) -> String {
+    match r {
+        Ok(reply) if crate::oms::latched(reply) => kill::cut(reply, kill::TEXT_MAX),
+        Ok(why) | Err(why) => format!("실패({})", kill::cut(why, kill::TEXT_MAX)),
     }
 }
 
@@ -204,6 +230,29 @@ struct KillRun {
     /// Late outcomes and stray answers already logged.
     ignored: u64,
     stray: u64,
+}
+
+/// A `watcher_kill` sent outside a kill's own attempts (U19b3d): W5's
+/// owed halt at the OMS's first good answer after a kill, or the one before
+/// a marker-path refusal. Its task is aborted at the K2 deadline.
+struct Owed {
+    id: u64,
+    deadline: u64,
+    task: AbortHandle,
+}
+
+/// A marker-path refusal that waits for one `watcher_kill` first
+/// (U19b3d): the halt is owed and the OMS answers.
+struct Refusing {
+    reason: String,
+    wait: RefusalWait,
+}
+
+enum RefusalWait {
+    /// The running kill's own attempt (K2 or a retry) that was in flight.
+    Kill { kill_no: u64, id: u64, deadline: u64 },
+    /// The runtime's owed halt ([`Owed`]).
+    Owed,
 }
 
 /// A kill notice waiting for its position block, with the header of its
@@ -292,6 +341,12 @@ struct Runtime {
     /// after their kill ended), each with its kill's `kill_no`.
     stoppers: Vec<(u64, Stopper)>,
     notices: Notices,
+    /// The owed halt in flight, and the ids given so far.
+    owed: Option<Owed>,
+    owed_ids: u64,
+    /// A marker-path refusal waiting for its `watcher_kill`; the kill is
+    /// held meanwhile.
+    refusing: Option<Refusing>,
 }
 
 /// Runs the watcher until `shutdown` resolves; the exit code (0, or 2 for
@@ -437,6 +492,9 @@ pub async fn run(
         kills: 0,
         stoppers: Vec::new(),
         notices: Notices::default(),
+        owed: None,
+        owed_ids: 0,
+        refusing: None,
         cfg,
     };
     let mut shutdown = std::pin::pin!(shutdown);
@@ -466,6 +524,8 @@ pub async fn run(
             return 2;
         }
     }
+    // A running kill is aborted first, with one notice (U19b3d).
+    rt.shutdown_kill(&mut rx).await;
     // What the 60 s mismatch pace still holds is queued before the flush.
     rt.alerts.drain();
     let task = rt.alert_task.take();
@@ -496,10 +556,12 @@ async fn heartbeats(
 
 impl Runtime {
     /// The boot replay reads on without waiting for a tick, and so does a
-    /// kill whose loop got an answer.
+    /// kill whose loop got an answer, unless a refusal holds the kill (its
+    /// answers wait until the refusal ends; review 2 N1).
     fn busy(&self) -> bool {
         matches!(self.phase, Phase::Replay { not_before, .. } if self.clock.now_ms() >= not_before)
-            || self.kill.as_ref().is_some_and(|k| k.inflight.queued() > 0)
+            || (self.refusing.is_none()
+                && self.kill.as_ref().is_some_and(|k| k.inflight.queued() > 0))
     }
 
     fn spawn(&mut self, f: impl Future<Output = Msg> + Send + 'static) -> AbortHandle {
@@ -549,11 +611,15 @@ impl Runtime {
             Msg::Probe(id, a) => {
                 let good = w5::good_answer(&a);
                 self.answered |= good;
-                if self.w5.on_answer(self.steady.now_ms(), id, good).is_some() {
-                    // U19b3d acts on it; until then W5 stays in Rearming.
+                if let (true, Ok(v)) = (good, &a) {
+                    self.probe_marker(v);
+                }
+                let now = self.steady.now_ms();
+                if self.w5.on_answer(now, id, good).is_some() {
                     (self.log)(
-                        "warn: W5: the OMS answers again and the last kill owes the halt; this watcher does not send the owed watcher_kill after a kill (U19b3d): the OMS may trade unlatched, latch it by hand; W5 starts no new kill",
+                        "warn: W5: the OMS answers again and the last kill owes the halt: watcher_kill",
                     );
+                    self.start_owed(now);
                 }
             }
             Msg::Marker(kill_no, o) => {
@@ -571,6 +637,14 @@ impl Runtime {
             }
             Msg::Halt(kill_no, id, r) => {
                 let now = self.steady.now_ms();
+                if self.refusing.as_ref().is_some_and(|rf| {
+                    matches!(rf.wait, RefusalWait::Kill { kill_no: k, id: i, .. } if (k, i) == (kill_no, id))
+                }) {
+                    if let Some(k) = self.kill.as_mut() {
+                        k.halt = None;
+                    }
+                    return self.refusal_halt_done(r);
+                }
                 let steps = match self.kill.as_mut() {
                     Some(k) if k.kill_no == kill_no => {
                         if k.halt.as_ref().is_some_and(|(open, _)| *open == id) {
@@ -588,6 +662,12 @@ impl Runtime {
                 self.kill_steps(now, steps);
             }
             Msg::Positions(seq, p) => self.positions_read(seq, p),
+            Msg::Owed(id, r) => {
+                if self.owed.as_ref().is_some_and(|o| o.id == id) {
+                    self.owed = None;
+                    self.owed_done(self.steady.now_ms(), r);
+                }
+            }
         }
     }
 
@@ -625,8 +705,7 @@ impl Runtime {
                 if let Some(k) = &self.cfg.kill {
                     if let Err(reason) = marker_rule(&v, &k.marker) {
                         (self.log)(&format!("error: start refused: {reason}"));
-                        self.alerts.once(&alert::refusal_text(&reason));
-                        self.refused = true;
+                        self.refuse(reason);
                         return;
                     }
                     self.marker_checked = true;
@@ -915,6 +994,27 @@ impl Runtime {
         if let Some(f) = self.w5.fire(now) {
             self.fire(now, f);
         }
+        if let Some(o) = self.owed.take_if(|o| now >= o.deadline) {
+            o.task.abort();
+            self.owed_done(now, Err(kill::HALT_TIMED_OUT.to_string()));
+        }
+        if let Some(Refusing {
+            wait: RefusalWait::Kill { deadline, .. },
+            ..
+        }) = &self.refusing
+            && now >= *deadline
+        {
+            if let Some((_, task)) = self.kill.as_mut().and_then(|k| k.halt.take()) {
+                task.abort();
+            }
+            self.refusal_halt_done(Err(kill::HALT_TIMED_OUT.to_string()));
+        }
+        if self.refusing.is_some() {
+            // The kill is held until the refusal's watcher_kill ended.
+            self.notices_tick(now);
+            self.kill_metrics(now);
+            return;
+        }
         // K3's exit before the kill judges its deadline: a stop that ended
         // between two ticks is reported as it ended (review 1 N1).
         self.poll_stopper(now);
@@ -1028,8 +1128,16 @@ impl Runtime {
         }
     }
 
-    /// Carries out the kill's steps, in order.
+    /// Carries out the kill's steps, in order. While a refusal waits for
+    /// its `watcher_kill` the kill is held: what it asks is not done (no
+    /// second `watcher_kill` connection; it is aborted next).
     fn kill_steps(&mut self, now: u64, steps: Vec<kill::Step>) {
+        if self.refusing.is_some() {
+            if !steps.is_empty() {
+                (self.log)("debug: a start refusal waits for its watcher_kill: the kill is held");
+            }
+            return;
+        }
         let mut steps: VecDeque<kill::Step> = steps.into();
         while let Some(step) = steps.pop_front() {
             let Some(kill_no) = self.kill.as_ref().map(|k| k.kill_no) else {
@@ -1121,6 +1229,143 @@ impl Runtime {
         ));
     }
 
+    /// The marker-path rule on a good probe answer after the boot (U19b3d,
+    /// review 3 N6): a failure is the lasting P1 `marker_path` and makes
+    /// `marker_checked` false while it lasts (a kill then owes the halt);
+    /// an answer that passes clears both. Not a start refusal (the boot
+    /// status answer passed the rule) and not a kill. In the boot wait the
+    /// boot rule judges.
+    fn probe_marker(&mut self, v: &Value) {
+        let Some(k) = &self.cfg.kill else {
+            return;
+        };
+        if matches!(self.phase, Phase::Start(_) | Phase::Wait { .. }) {
+            return;
+        }
+        let text = marker_rule(v, &k.marker)
+            .err()
+            .map(|_| alert::marker_path_text(oms_marker(v), &k.marker));
+        self.marker_checked = text.is_none();
+        self.alerts.set(alert::MARKER_PATH, text.as_deref());
+    }
+
+    /// Sends one owed `watcher_kill` (U19b3d), unless one is in flight:
+    /// W5's after a kill, or the one before a marker-path refusal. The K2
+    /// deadline; the engine runs meanwhile.
+    fn start_owed(&mut self, now: u64) {
+        if self.owed.is_some() {
+            return;
+        }
+        self.owed_ids += 1;
+        let id = self.owed_ids;
+        let (path, name) = (self.cfg.admin_socket.clone(), self.cfg.name.clone());
+        let timeout = self.cfg.http.request_timeout_ms;
+        let detail = kill::late_halt_detail(&name);
+        let task = self.spawn(async move {
+            Msg::Owed(id, admin_kill(&path, &name, &detail, timeout).await)
+        });
+        let deadline = now
+            .saturating_add(timeout.saturating_mul(2))
+            .saturating_add(kill::HALT_EXTRA_MS);
+        self.owed = Some(Owed { id, deadline, task });
+    }
+
+    /// The owed halt's outcome (its reply, or its deadline): one log line,
+    /// and W5's P1 (`늦은 정지` / `늦은 정지 실패` once), or the refusal
+    /// that waited for it.
+    fn owed_done(&mut self, now: u64, r: Result<String, String>) {
+        if matches!(
+            self.refusing,
+            Some(Refusing {
+                wait: RefusalWait::Owed,
+                ..
+            })
+        ) {
+            return self.refusal_halt_done(r);
+        }
+        self.log_owed(&r);
+        if let Some(text) = self.w5.owed_halt_done(now, r) {
+            self.alerts.once(&text);
+        }
+    }
+
+    fn log_owed(&self, r: &Result<String, String>) {
+        match r {
+            Ok(reply) if crate::oms::latched(reply) => (self.log)(&format!(
+                "W5: the owed watcher_kill latched the OMS: {}",
+                kill::cut(reply, kill::TEXT_MAX)
+            )),
+            Ok(why) | Err(why) => (self.log)(&format!(
+                "error: W5: the owed watcher_kill did not latch the OMS: {}",
+                kill::cut(why, kill::TEXT_MAX)
+            )),
+        }
+    }
+
+    /// The marker-path boot rule refused the start (U19b3d). While the halt
+    /// is owed (a running kill that owes it or has not reached its loop:
+    /// nothing confirmed a latch yet; or W5's owed halt), the answer shows
+    /// that the OMS answers, and a latch is the only thing that keeps an OMS
+    /// reading another marker path from trading after the watcher exits: one
+    /// `watcher_kill` first (the one in flight, the kill's or W5's, if there
+    /// is one), the kill held meanwhile. Then [`Runtime::finish_refusal`].
+    fn refuse(&mut self, reason: String) {
+        let kill_owes = self
+            .kill
+            .as_ref()
+            .is_some_and(|k| k.kill.halt_owed() || k.kill.stage() != Stage::Loop);
+        if !kill_owes && !self.w5.halt_owed() {
+            return self.finish_refusal(&reason, None);
+        }
+        let open = self.kill.as_ref().and_then(|k| {
+            let (id, _) = k.halt.as_ref()?;
+            let (open, deadline) = k.kill.halt_open()?;
+            (open == *id).then_some((k.kill_no, *id, deadline))
+        });
+        let wait = match open {
+            Some((kill_no, id, deadline)) => RefusalWait::Kill {
+                kill_no,
+                id,
+                deadline,
+            },
+            None => {
+                // A kill's halt task whose attempt already ended goes first:
+                // never two watcher_kill connections at once.
+                if let Some((_, task)) = self.kill.as_mut().and_then(|k| k.halt.take()) {
+                    task.abort();
+                }
+                self.start_owed(self.steady.now_ms());
+                RefusalWait::Owed
+            }
+        };
+        (self.log)("the start is refused while the halt is owed: watcher_kill first");
+        self.refusing = Some(Refusing { reason, wait });
+    }
+
+    /// The `watcher_kill` a refusal waited for ended (its reply or its
+    /// deadline): logged, then the refusal with its outcome.
+    fn refusal_halt_done(&mut self, r: Result<String, String>) {
+        self.log_owed(&r);
+        if let Some(rf) = self.refusing.take() {
+            self.finish_refusal(&rf.reason, Some(r));
+        }
+    }
+
+    /// The refusal path (U19b3d, review 1 S10): a running kill is aborted
+    /// with its notice first, then the start-refusal P1 (with the owed
+    /// halt's outcome, if one was sent); the loop then flushes the sender
+    /// and exits 2.
+    fn finish_refusal(&mut self, reason: &str, halt: Option<Result<String, String>>) {
+        self.abort_kill(AbortWhy::StartRefused(reason.to_string()));
+        let mut text = alert::refusal_text(reason);
+        if let Some(r) = &halt {
+            text.push_str(". 늦은 정지: ");
+            text.push_str(&halt_outcome(r));
+        }
+        self.alerts.once(&text);
+        self.refused = true;
+    }
+
     /// Queues a notice (see [`Notices::push`]); a drop is logged.
     fn queue_notice(&mut self, notice: Notice, header: String) {
         if self.notices.push(Waiting { notice, header }) {
@@ -1196,6 +1441,79 @@ impl Runtime {
             kill::position_block(p, &kst(self.clock.now_ms()))
         );
         self.alerts.once(&body);
+    }
+
+    /// Shutdown (SIGTERM, SIGINT) during a kill (U19b3d): during K1 the
+    /// marker's outcome is awaited up to K1's deadline (at most
+    /// [`kill::MARKER_WAIT_MS`] of real time) so the notice can tell it;
+    /// then `Kill::abort` in whatever step: the abort notice (no position
+    /// read) and `Ended`. A halt task is aborted; K3's client, if it runs,
+    /// is left to finish its job in systemd (a half-stopped OMS is worse
+    /// than a stopped one); the marker stays. Every notice still waiting
+    /// goes now, also when the kill had already ended (its final notice
+    /// may still wait for its position read; review 1 M1).
+    async fn shutdown_kill(&mut self, rx: &mut mpsc::UnboundedReceiver<Msg>) {
+        // A refusal still waiting for its watcher_kill gives way: the
+        // watcher ends (exit 0), its halt task is aborted with the rest.
+        self.refusing = None;
+        if let Some(k) = &self.kill
+            && k.kill.stage() == Stage::Marker
+        {
+            let kill_no = k.kill_no;
+            let left = k
+                .kill
+                .next_wake()
+                .unwrap_or(0)
+                .saturating_sub(self.steady.now_ms())
+                .min(kill::MARKER_WAIT_MS);
+            let end = tokio::time::Instant::now() + Duration::from_millis(left);
+            loop {
+                match tokio::time::timeout_at(end, rx.recv()).await {
+                    Ok(Some(Msg::Marker(no, o))) if no == kill_no => {
+                        let now = self.steady.now_ms();
+                        if let Some(k) = self.kill.as_mut() {
+                            // K2 is not started: the watcher ends.
+                            let _ = k.kill.marker_done(now, o);
+                        }
+                        break;
+                    }
+                    Ok(Some(_)) => {}
+                    _ => break,
+                }
+            }
+        }
+        self.abort_kill(AbortWhy::Shutdown);
+    }
+
+    /// Aborts a running kill, if one runs (shutdown or a start refusal,
+    /// U19b3d): the abort notice and `Ended`; then every kill notice still
+    /// waiting goes at once, in its order, the abort notice last.
+    fn abort_kill(&mut self, why: AbortWhy) {
+        let now = self.steady.now_ms();
+        if let Some(k) = self.kill.as_mut() {
+            let steps = k.kill.abort(now, why);
+            self.kill_steps(now, steps);
+        }
+        self.flush_notices();
+    }
+
+    /// The kill notices still waiting, before the watcher ends (U19b3d): the
+    /// one whose positions are being read (its read is aborted) and every
+    /// waiting one go now with `포지션 조회 안 함(워처 종료 중)`; the abort
+    /// notices as they are.
+    fn flush_notices(&mut self) {
+        let not_read = Positions::NotRead(ENDING.to_string());
+        if let Some(r) = self.notices.reading.take() {
+            r.task.abort();
+            self.send_notice(&r.w, &not_read);
+        }
+        while let Some(w) = self.notices.waiting.pop_front() {
+            if matches!(w.notice, Notice::Abort { .. } | Notice::AbortBefore { .. }) {
+                self.alerts.once(&kill::notice_text(&w.notice, &w.header));
+            } else {
+                self.send_notice(&w, &not_read);
+            }
+        }
     }
 
     /// The W5 and kill series (C-WATCH part 12) from their accessors.
@@ -1305,6 +1623,17 @@ mod tests {
             dropped,
             vec!["/v5/execution/list", "/api/status", "watcher_mismatch"]
         );
+    }
+
+    #[test]
+    fn the_refusal_names_a_latch_only_for_a_reply_that_latched() {
+        assert_eq!(halt_outcome(&Ok("latched".into())), "latched");
+        let rearm = "already latched; the earlier confirmation is void and a new kill loop starts";
+        assert_eq!(halt_outcome(&Ok(rearm.into())), rearm);
+        assert_eq!(halt_outcome(&Ok("held".into())), "실패(held)");
+        assert_eq!(halt_outcome(&Err("not sent: no socket".into())), "실패(not sent: no socket)");
+        let long = "x".repeat(500);
+        assert_eq!(halt_outcome(&Err(long)), format!("실패({})", "x".repeat(200)));
     }
 
     #[test]

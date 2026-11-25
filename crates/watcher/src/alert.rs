@@ -869,6 +869,10 @@ pub const AUTH: &str = "auth";
 /// The repeat-rule key of the public IP outside the key's list.
 pub const PUBLIC_IP: &str = "public_ip";
 
+/// The repeat-rule key of the marker path the OMS reads, when it is not the
+/// watcher's (U19b3d).
+pub const MARKER_PATH: &str = "marker_path";
+
 /// What the watcher can no longer do while its key is stopped (the tail
 /// of both `auth` texts).
 const KEY_TAIL: &str = "워처의 Bybit 요청이 모두 멈춤(재시작 전까지): W1~W4는 성공하지 않아 OMS가 일반 주문을 막고, 워처의 일괄 취소(W5)도 나갈 수 없음. 키·IP 목록을 확인하고 워처를 다시 시작";
@@ -894,6 +898,16 @@ pub fn auth_text(s: &AuthStop) -> String {
 pub fn public_ip_text(why: &str) -> String {
     format!(
         "워처의 공인 IP가 키의 IP 목록에 없음({why}). Bybit가 10010으로 거부할 수 있음(그러면 워처 키 거부 P1이 따름). 이 호스트의 공인 IP와 키 설정을 확인"
+    )
+}
+
+/// The body of the `marker_path` P1: the path the OMS reads (`None`: it
+/// reads none) and the watcher's.
+pub fn marker_path_text(oms: Option<&str>, ours: &std::path::Path) -> String {
+    format!(
+        "OMS가 읽는 킬 마커 경로가 워처의 경로와 다름(OMS: {}, 워처: {}). 킬 마커가 OMS를 래치하지 못함: OMS 설정의 [kill] marker를 맞출 것",
+        oms.map_or("없음".to_string(), |p| chars(p, 200)),
+        ours.display()
     )
 }
 

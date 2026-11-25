@@ -36,7 +36,7 @@
 
 ### 워처의 입력(운영 소켓, U19a/U19b가 보낸다)
 
-`watcher_mismatch`를 보내는 쪽은 U19a7부터 독립 워처다(`crates/watcher`, [C-WATCH](watcher.md) 7부): 확정된 차이를 `"held"` 답을 받을 때까지 빚으로 들고, 보류가 꺼진 것을 저널에서 본 뒤에만, 많아야 `mismatch_resend_ms`(기본 10초)마다 다시 보낸다. 첫 메모만 남으므로, 걸린 보류 아래에서 확정된 차이는 해제 뒤 한 번 보내져 보류가 그 메모와 함께 돌아온다. `watcher_kill`은 U19b다.
+`watcher_mismatch`를 보내는 쪽은 U19a7부터 독립 워처다(`crates/watcher`, [C-WATCH](watcher.md) 7부): 확정된 차이를 `"held"` 답을 받을 때까지 빚으로 들고, 보류가 꺼진 것을 저널에서 본 뒤에만, 많아야 `mismatch_resend_ms`(기본 10초)마다 다시 보낸다. 첫 메모만 남으므로, 걸린 보류 아래에서 확정된 차이는 해제 뒤 한 번 보내져 보류가 그 메모와 함께 돌아온다. `watcher_kill`을 보내는 쪽은 U19b3부터 같은 워처다([C-WATCH](watcher.md) 12부): W5가 `/api/status`의 10초 침묵을 보면 킬 마커를 쓴 뒤 한 번 보내고(K2, `detail` `W5: /api/status gave no good answer for <s> s; watcher <name>`), 래치를 확인하지 못한 채 루프에 들면 루프 동안 5초마다, 루프 뒤에는 OMS가 다시 답할 때 한 번, 다른 킬 마커 경로를 읽는 OMS로 시작을 거부하기 전에 한 번 보낸다(이 셋의 `detail`은 `W5: 늦은 정지: watcher <name>의 킬이 OMS 래치나 정지를 확인하지 못함`). `watcher_kill` 연결은 둘이 함께 열리지 않고, 답이 `"latched"`이거나 `"already latched"`로 시작하면 래치로 읽는다.
 
 새 입력 종류 `Input::Watcher`. 다른 입력처럼 기록된다.
 
