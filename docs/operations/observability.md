@@ -1,7 +1,7 @@
 # 관측 스택과 시세 단위 배치 (deploy/observability)
 
 주인: 준영
-검토일: 2026-11-25
+검토일: 2026-11-26
 
 이 PC(Linux, 단일 호스트)에서 VictoriaMetrics·VictoriaLogs·vmalert 둘·Alertmanager·Grafana와 시세 수집기·봉인·아카이버·레이크 감사를 systemd로 돌리는 방법이다. 결정과 대안은 [ADR-035](../adr/ADR-035-observability-deployment-files.md)에 있다. 판단(모델 아님)은 측정이나 모델 없이 정한 숫자다.
 
@@ -24,8 +24,8 @@
 | `polkit/50-hl-oms-watcher-stop.rules` | 워처의 사용자 `hloms`가 `oms-node.service`를 멈추는 것만 허락(§13.1, ADR-036) |
 | `bin/crypto-lake-audit.sh` | 감사 단위가 돌리는 스크립트(POSIX `sh`, GNU `find`·`date` 필요) |
 | `install.toml` | 저장소 파일 → 설치 경로와 권한(§8) |
-| `venues.toml` | 이 PC가 수집하는 거래소(`bybit`). 거래소마다 생존 규칙이 있어야 한다(§9) |
-| `vmalert/metrics/market-data.rules.json`, `lake.rules.json`, `system.rules.json` | 지표 알림 규칙(vmalert-metrics). 알림마다 등급과 할 일(§9) |
+| `venues.toml` | 이 PC가 수집하는 거래소 `venues`와 OMS가 거래하는 거래소 `trading`(둘 다 `bybit`). 거래소마다 생존 규칙이 있어야 한다(§9) |
+| `vmalert/metrics/market-data.rules.json`, `lake.rules.json`, `system.rules.json`, `oms.rules.json` | 지표 알림 규칙(vmalert-metrics). 알림마다 등급과 할 일(§9) |
 | `vmalert/logs/market-data-logs.rules.json` | 로그 알림 규칙(vmalert-logs, `type: vlogs`) |
 | `vmalert/tests/*.test.json` | 지표 규칙 파일마다 하나인 `vmalert-tool unittest` 파일(설치하지 않음, §11) |
 | `victoriametrics/scrape.json` | VictoriaMetrics가 15초마다 스택 다섯(VM, VL, vmalert 둘, Alertmanager)의 `/metrics`를 긁는 설정 |
@@ -205,7 +205,7 @@ chrony가 시작한 뒤 첫 세 번의 갱신에서만 1초가 넘는 차이를 
 
 ## 7. 설치 전 확인
 
-1. `cargo test --locked -p xtask --test deploy`. 실패하면 줄마다 `deploy: <파일>: <규칙>: <내용>`이 나온다. 규칙: P1(파일이 종류대로 읽힘), U1(서비스마다 `MemoryMax` 하나, 크기, `infinity` 아님), U2(oneshot 서비스 ↔ 같은 이름의 타이머, 타이머에 `Unit=` 없음), U3(수집기의 재시작·감시 설정, 시작 제한의 옛 이름과 `[Service]` 쪽 키. 수집기·OMS·워처의 보호 설정, `MemoryHigh` 없음), U4(슬라이스의 가중치와 예약), U5(네 타이머의 시각과 `Persistent`), U6(설계 상한), U7(아카이버·감사·내보내기의 일일 작업 잠금), U8(`127.0.0.1`에서만 듣고 Alertmanager 클러스터 포트 없음. 리스너 플래그는 어떤 철자로 써도 모두 셈), U9(저장소가 `/mnt/nvme/` 아래, 저장소마다 경로 플래그 한 번), U10(보관 1년, VM 메모리 한도), U11(vmalert 둘의 원본·알림·간격), U12(어느 배치 파일도 KR qdp 체크아웃을 이름하지 않음, 감사 스크립트의 `venue=$1`과 `--state "$STATE_DIRECTORY/audit-$venue.json"`, 감사 단위의 `StateDirectory=qdp-crypto-audit`. 스크립트는 CI에서 돌지 않으므로 다시 verify할 날짜와 종료 코드를 정하는 줄도 글자 그대로 고정: 9일 창, `-cnewer "$stamp"`, 지금보다 뒤인 도장 검사, 도장 → `sleep 1` → verify → `mv` 순서, 실패 시 옛 도장 유지, `exit 5`, `--vm-url http://127.0.0.1:8428`), U13(`venues.toml`의 거래소가 수집기와 아카이버 모두에 등록됨), U14(설치 지도), U15(스택은 `hlobs`, 어느 단위에도 `User=root`를 쓰지 않음), U16(`md-lake verify`나 감사 스크립트를 돌리는 단위가 읽기 전용 `l0` 아래의 `_verify`에, 감사는 `crypto/audit`에도 쓸 수 있음. 감사 스크립트를 돌리는 다른 단위도 `crypto/audit`에 쓸 수 있어야 함. 감사 단위의 두 경로 줄은 정확히 §4.1의 값이고 `LAKE=/mnt/nvme/lake` 한 번), U17(`Exec*` 줄에 `$(`, 백틱, `%i`·`%I`·`%n`·`%%`가 아닌 `%` 없음: systemd는 셸을 돌리지 않음), U18(스택 단위의 재시작·격리 설정, 쓰는 디렉터리, 다른 단위에 묶이지 않음), U19(봉인·아카이버·감사·내보내기 실행의 시간 제한, 아카이버의 스레드 1개와 L1 삭제 꺼짐, `EnvironmentFile=` 없음), U20(`oms-node.service`는 `Restart=no` 한 줄, `Type=simple`, 다시 띄우는 키(`RestartSec`, 종료 코드 목록, 지연 늘림, `OnFailure`·`OnSuccess`·`Upholds`, `WatchdogSec`) 없음, `[Install]` 없음, `ExecStart=`는 정해진 한 줄이고 다른 `Exec*` 줄 없음. 다른 단위는 `oms-node`와 `watcher`를 `After=`·`Before=`에만 쓸 수 있고, `oms-node.timer`·`.socket`·`.path`는 없음), U21(워처의 `Restart=on-failure`, `RestartSec=5`, `RestartPreventExitStatus=2`, `After=`에 `oms-node.service`, `WantedBy=multi-user.target`, `ExecStart=`는 정해진 한 줄이고 다른 `Exec*` 줄 없음, 다른 단위를 따라 멈추는 키 없음, 시작 제한(`StartLimit*`)과 `SuccessExitStatus`·`RestartForceExitStatus` 없음), U22(OMS는 `hloms:hloms`와 `UMask=0027`, 워처는 OMS와 같은 사용자·그룹, 프로젝터는 `hlobs`와 보조 그룹 `hloms`, 내보내기는 `User=` 없음. `polkit/`의 파일은 하나이고 줄마다 공백을 빼고 빈 줄을 빼면 §13.1의 규칙 글 그대로(줄 나눔은 그대로: 한 줄로 합치면 첫 줄의 `//` 주석이 규칙 전체를 덮는다), `/etc/polkit-1/rules.d/` 아래에 설치), U23(네 OMS 단위의 저널 마운트 확인과 `RequiresMountsFor=`, 데이터 디렉터리는 OMS만 씀, 내보내기의 쓰는 곳은 정확히 `crypto/trading`과 `/run/lock`, `/run/lock`에서 flock하는 `ProtectSystem=strict` 단위는 `/run/lock`을 씀, 킬 마커는 `StateDirectory=hl-oms`(0700)이고 `RuntimeDirectory=hl-oms`는 없음, 프로젝터의 `StateDirectory=oms-projector`와 `ProcSubset=` 없음), U24(네 OMS 단위의 격리, OMS·워처의 `LimitCORE=0`과 정지 시간 60초·30초, 프로젝터는 `trading.slice`, 내보내기는 아님). P1은 `.rules`를 `polkit/` 아래에서만 받는다(읽지 않고 U22가 글을 고정). 규칙 파일과 지표 목록: R1(규칙의 모든 지표 이름이 목록에 있음: `metrics.toml`, 고정된 qdp `contracts/lake/xrepo/metrics.json`, 규칙 파일의 기록 규칙 이름), R2(`metrics.toml`의 `[[metric]]` 행마다 `source` 파일에 그 이름이 문자열 그대로 있음, `[[stack]]` 행은 구성 요소와 판이 있음), R2b(qdp가 hl-oms 몫으로 남긴 이름(`reserved`)마다 쓰는 쪽이 있음, 한 이름에 쓰는 쪽은 하나), R3(라벨이 목록의 어떤 지표의 라벨이거나 `job`·`instance`), R4(허용된 함수만, 검사기가 읽지 못하는 모양 없음), R5(알림마다 `severity` P1·P2·P3와 `summary`, `Watchdog`은 하나이고 `vector(1)`·`watchdog`, `for` 없음, `system.rules.json`의 그룹 `watchdog`), R6(`venues.toml`의 거래소마다 `MdCollectorDown`(P1)과 `MdLakeGaugesMissing`(P2)(그룹 `market-data`), `LakeAuditStale`(P2)(그룹 `lake-audit`)이 정확히 하나씩, 정해진 식과 그룹, `for` 없음, 목록에 없는 거래소의 것은 없음), R7(설계의 레이크·디스크 규칙: 남은 일수 기록 규칙, `LakeDiskDaysLeftLow`·`Critical`, `LakeL0WriteError`, `LakeSealLag`, `LakeAuditFailed`의 식·`for`·등급·그룹. R6·R7 규칙과 `Watchdog`이 든 그룹의 간격: `market-data` 10초, `lake-recording`·`lake-audit` 1분, `lake`·`watchdog`은 간격 없음(vmalert-metrics의 기본 10초, U11) 또는 `10s`), R8(`vmalert/logs/`의 그룹은 `type: vlogs`, `vmalert/metrics/`의 그룹은 `type` 없음), R9(`scrape.json`의 작업 다섯과 간격 15초, 작업마다 대상이 그 단위의 리스너, 규칙이 쓰는 `job` 값은 긁는 작업, `ObsMemoryNearCap`은 작업마다 `process_resident_memory_bytes{job="<작업>"} > 0.9 * <U6의 설계 상한>` 항 하나씩이고 다른 항은 없음. 항을 통째로 비교하므로 자릿수가 더 붙은 상한도 걸림), U8은 긁는 대상에도(`127.0.0.1`만). Alertmanager 설정: R10(경로 나무가 §10의 표 그대로: 기본 수신자 `null`은 아무 데도 보내지 않음, `group_by`에 `alertname`과 `venue`, 자식 경로 넷이 이 순서로 각각 맞춤 조건 하나: `Watchdog` → `deadman`, P1 → `telegram-p1`, `LakeAuditFailed` → `telegram-p2-noresolve`, P2 → `telegram-p2`. 자식 경로마다 묶음 대기·간격·반복 시간이 §10의 표 값 그대로 적혀 있음(빠지면 Alertmanager 기본값을 쓰므로 실패). 자식 경로에 `continue`·묶음·음소거·하위 경로 없음. 최상위 경로에는 수신자·묶음·자식 경로·시간 말고 다른 키 없음, `group_by`에 `...` 없음. `deadman`은 연동 없음(Q1 전까지), Telegram 수신자 셋은 `telegram_configs` 말고 다른 연동 없음. 경로가 이름한 수신자는 모두 있고 이름은 한 번씩. Telegram 수신자 셋은 설정 하나씩, 문자가 `[MON P1] `·`[MON P2] `로 시작, P2 둘은 소리 없음, P1은 소리 있음, `parse_mode` 빈 값, `LakeAuditFailed`의 수신자만 해소 문자 없음(키가 없으면 Alertmanager는 해소 문자를 보낸다). 억제 규칙은 정확히 하나: `MdCollectorDown`이 같은 거래소의 P2·P3 `Md.*|LakeSealLag|LakeDiskDaysLeft.*`를 막음. 이 이름 패턴에 걸리는 알림이 qdp 지표(`lake_audit_*`)를 읽으면 실패), R11(설정에 `bot_token`, `chat_id`, `api_url`, `http_config`, `telegram_api_url`, `url` 키 없음: 비밀과 웹훅 주소는 파일 경로로만, API는 기본값만. Telegram 설정마다 `bot_token_file`과 `chat_id_file`이 `/etc/` 아래 파일 경로. 어느 배치 파일에도 Telegram 토큰 모양(숫자 6개 이상`:`문자 30개 이상)이나 `chat` 키 옆의 6자리 이상 숫자가 없음. 찾아도 그 값을 출력하지 않는다. `*_file` 키에 토큰이나 채팅 ID를 붙여 넣어도 값은 출력하지 않는다). Grafana: G1(`[server] http_addr`가 한 번, `192.0.2.1`이나 100.64.0.0/10의 Tailscale 주소. `grafana.service`에 `GF_*` 환경 변수가 없고 `Exec` 줄은 `ExecStart=/opt/grafana/bin/grafana server --homepath /opt/grafana --config /etc/hl-oms-obs/grafana/grafana.ini` 하나뿐: 환경 변수, `cfg:` 인자, `--configOverrides`는 파일을 덮고 `--profile-addr`는 리스너를 연다), G2(`[unified_alerting]`과 `[auth.anonymous]`의 `enabled = false`가 한 번씩. `grafana.ini`에는 §12의 키 목록에 있는 키만: `[auth.proxy]`나 OAuth 같은 다른 로그인 길, 다른 어떤 키도 실패. 값은 출력하지 않음), G3(`admin_password`가 `$__file{/etc/…}` 한 번. 값을 출력하지 않음), G4(데이터 소스 둘이 §12의 값 그대로: uid·형식·루프백 주소·`access: proxy`·VictoriaMetrics가 기본·화면에서 고칠 수 없음·다른 키 없음), G5(파일 제공자 하나가 대시보드가 설치되는 디렉터리를 읽고 화면에서 지우거나 저장하지 못함. `[paths] provisioning`이 프로비저닝 파일의 설치 위치), G6(대시보드 uid가 하나씩, 패널마다 제목, 패널과 식이 데이터 소스 `vm`이나 `vl`(식은 패널과 같은 것), 식이 비지 않음, 글 패널과 행에는 식이 없음, 변수는 `vm`의 질의 변수, D3에 글 패널 `매일 확인: 실패한 일일 작업`이 하나이고 `systemctl --failed 'md-*' 'crypto-lake-audit*'`를 담음), G7(VictoriaMetrics 식과 `label_values(<지표>, <라벨>)` 변수가 R1·R3·R4를 통과하고 라벨은 그 지표의 라벨. VictoriaLogs 식은 읽지 않음), G8(D2·D3가 그 uid와 제목으로 하나씩. D2는 `MdTopicsStale`의 식에서 ` > 0.1`을 빼고 선택자마다 맨 앞에 `venue=~"$venue", `를 둔 값을, D3는 `LakeAuditFailed`의 식에서 ` > 0`을 뺀 값과, 긁는 구성 요소마다 `process_resident_memory_bytes{job="<작업>"} / <U6의 설계 상한>` 항을 정확히 보여 줌), G9(`[paths] data`와 `plugins`가 `/mnt/nvme/` 아래). 검사기는 MetricsQL의 부분 집합만 읽는다(파서가 아님). 문법은 §11의 `vmalert -dryRun`이 본다. LogsQL 식은 읽지 않는다.
+1. `cargo test --locked -p xtask --test deploy`. 실패하면 줄마다 `deploy: <파일>: <규칙>: <내용>`이 나온다. 규칙: P1(파일이 종류대로 읽힘), U1(서비스마다 `MemoryMax` 하나, 크기, `infinity` 아님), U2(oneshot 서비스 ↔ 같은 이름의 타이머, 타이머에 `Unit=` 없음), U3(수집기의 재시작·감시 설정, 시작 제한의 옛 이름과 `[Service]` 쪽 키. 수집기·OMS·워처의 보호 설정, `MemoryHigh` 없음), U4(슬라이스의 가중치와 예약), U5(네 타이머의 시각과 `Persistent`), U6(설계 상한), U7(아카이버·감사·내보내기의 일일 작업 잠금), U8(`127.0.0.1`에서만 듣고 Alertmanager 클러스터 포트 없음. 리스너 플래그는 어떤 철자로 써도 모두 셈), U9(저장소가 `/mnt/nvme/` 아래, 저장소마다 경로 플래그 한 번), U10(보관 1년, VM 메모리 한도), U11(vmalert 둘의 원본·알림·간격), U12(어느 배치 파일도 KR qdp 체크아웃을 이름하지 않음, 감사 스크립트의 `venue=$1`과 `--state "$STATE_DIRECTORY/audit-$venue.json"`, 감사 단위의 `StateDirectory=qdp-crypto-audit`. 스크립트는 CI에서 돌지 않으므로 다시 verify할 날짜와 종료 코드를 정하는 줄도 글자 그대로 고정: 9일 창, `-cnewer "$stamp"`, 지금보다 뒤인 도장 검사, 도장 → `sleep 1` → verify → `mv` 순서, 실패 시 옛 도장 유지, `exit 5`, `--vm-url http://127.0.0.1:8428`), U13(`venues.toml`의 거래소가 수집기와 아카이버 모두에 등록됨), U14(설치 지도), U15(스택은 `hlobs`, 어느 단위에도 `User=root`를 쓰지 않음), U16(`md-lake verify`나 감사 스크립트를 돌리는 단위가 읽기 전용 `l0` 아래의 `_verify`에, 감사는 `crypto/audit`에도 쓸 수 있음. 감사 스크립트를 돌리는 다른 단위도 `crypto/audit`에 쓸 수 있어야 함. 감사 단위의 두 경로 줄은 정확히 §4.1의 값이고 `LAKE=/mnt/nvme/lake` 한 번), U17(`Exec*` 줄에 `$(`, 백틱, `%i`·`%I`·`%n`·`%%`가 아닌 `%` 없음: systemd는 셸을 돌리지 않음), U18(스택 단위의 재시작·격리 설정, 쓰는 디렉터리, 다른 단위에 묶이지 않음), U19(봉인·아카이버·감사·내보내기 실행의 시간 제한, 아카이버의 스레드 1개와 L1 삭제 꺼짐, `EnvironmentFile=` 없음), U20(`oms-node.service`는 `Restart=no` 한 줄, `Type=simple`, 다시 띄우는 키(`RestartSec`, 종료 코드 목록, 지연 늘림, `OnFailure`·`OnSuccess`·`Upholds`, `WatchdogSec`) 없음, `[Install]` 없음, `ExecStart=`는 정해진 한 줄이고 다른 `Exec*` 줄 없음. 다른 단위는 `oms-node`와 `watcher`를 `After=`·`Before=`에만 쓸 수 있고, `oms-node.timer`·`.socket`·`.path`는 없음), U21(워처의 `Restart=on-failure`, `RestartSec=5`, `RestartPreventExitStatus=2`, `After=`에 `oms-node.service`, `WantedBy=multi-user.target`, `ExecStart=`는 정해진 한 줄이고 다른 `Exec*` 줄 없음, 다른 단위를 따라 멈추는 키 없음, 시작 제한(`StartLimit*`)과 `SuccessExitStatus`·`RestartForceExitStatus` 없음), U22(OMS는 `hloms:hloms`와 `UMask=0027`, 워처는 OMS와 같은 사용자·그룹, 프로젝터는 `hlobs`와 보조 그룹 `hloms`, 내보내기는 `User=` 없음. `polkit/`의 파일은 하나이고 줄마다 공백을 빼고 빈 줄을 빼면 §13.1의 규칙 글 그대로(줄 나눔은 그대로: 한 줄로 합치면 첫 줄의 `//` 주석이 규칙 전체를 덮는다), `/etc/polkit-1/rules.d/` 아래에 설치), U23(네 OMS 단위의 저널 마운트 확인과 `RequiresMountsFor=`, 데이터 디렉터리는 OMS만 씀, 내보내기의 쓰는 곳은 정확히 `crypto/trading`과 `/run/lock`, `/run/lock`에서 flock하는 `ProtectSystem=strict` 단위는 `/run/lock`을 씀, 킬 마커는 `StateDirectory=hl-oms`(0700)이고 `RuntimeDirectory=hl-oms`는 없음, 프로젝터의 `StateDirectory=oms-projector`와 `ProcSubset=` 없음), U24(네 OMS 단위의 격리, OMS·워처의 `LimitCORE=0`과 정지 시간 60초·30초, 프로젝터는 `trading.slice`, 내보내기는 아님). P1은 `.rules`를 `polkit/` 아래에서만 받는다(읽지 않고 U22가 글을 고정). 규칙 파일과 지표 목록: R1(규칙의 모든 지표 이름이 목록에 있음: `metrics.toml`, 고정된 qdp `contracts/lake/xrepo/metrics.json`, 규칙 파일의 기록 규칙 이름), R2(`metrics.toml`의 `[[metric]]` 행마다 `source` 파일에 그 이름이 문자열 그대로 있음, `[[stack]]` 행은 구성 요소와 판이 있음), R2b(qdp가 hl-oms 몫으로 남긴 이름(`reserved`)마다 쓰는 쪽이 있음, 한 이름에 쓰는 쪽은 하나), R3(라벨이 목록의 어떤 지표의 라벨이거나 `job`·`instance`), R4(허용된 함수만, 검사기가 읽지 못하는 모양 없음), R5(알림마다 `severity` P1·P2·P3와 `summary`, `Watchdog`은 하나이고 `vector(1)`·`watchdog`, `for` 없음, `system.rules.json`의 그룹 `watchdog`), R6(`venues.toml`의 거래소마다 `MdCollectorDown`(P1)과 `MdLakeGaugesMissing`(P2)(그룹 `market-data`), `LakeAuditStale`(P2)(그룹 `lake-audit`)이 정확히 하나씩, 정해진 식과 그룹, `for` 없음, 목록에 없는 거래소의 것은 없음. `trading`의 거래소마다 같은 방식으로 `JournalDiskGaugeMissing`(P2), `OmsDown`(P1), `ProjectorDown`(P2)(`oms.rules.json` 그룹 `oms`)), R7(설계의 레이크·디스크·저널 규칙: 남은 일수 기록 규칙, `LakeDiskDaysLeftLow`·`Critical`, `LakeL0WriteError`, `LakeSealLag`, `LakeAuditFailed`, 저널의 `journal_disk_days_left`와 `JournalDiskDaysLeftLow`·`Critical`의 식·`for`·등급·그룹. R6·R7·R12 규칙과 `Watchdog`이 든 그룹의 간격: `market-data` 10초, `lake-recording`·`lake-audit`·`journal-recording` 1분, `lake`·`watchdog`·`oms`·`projector`는 간격 없음(vmalert-metrics의 기본 10초, U11) 또는 `10s`), R8(`vmalert/logs/`의 그룹은 `type: vlogs`, `vmalert/metrics/`의 그룹은 `type` 없음), R9(`scrape.json`의 작업 다섯과 간격 15초, 작업마다 대상이 그 단위의 리스너, 규칙이 쓰는 `job` 값은 긁는 작업, `ObsMemoryNearCap`은 작업마다 `process_resident_memory_bytes{job="<작업>"} > 0.9 * <U6의 설계 상한>` 항 하나씩이고 다른 항은 없음. 항을 통째로 비교하므로 자릿수가 더 붙은 상한도 걸림), U8은 긁는 대상에도(`127.0.0.1`만). Alertmanager 설정: R10(경로 나무가 §10의 표 그대로: 기본 수신자 `null`은 아무 데도 보내지 않음, `group_by`에 `alertname`과 `venue`, 자식 경로 넷이 이 순서로 각각 맞춤 조건 하나: `Watchdog` → `deadman`, P1 → `telegram-p1`, `LakeAuditFailed` → `telegram-p2-noresolve`, P2 → `telegram-p2`. 자식 경로마다 묶음 대기·간격·반복 시간이 §10의 표 값 그대로 적혀 있음(빠지면 Alertmanager 기본값을 쓰므로 실패). 자식 경로에 `continue`·묶음·음소거·하위 경로 없음. 최상위 경로에는 수신자·묶음·자식 경로·시간 말고 다른 키 없음, `group_by`에 `...` 없음. `deadman`은 연동 없음(Q1 전까지), Telegram 수신자 셋은 `telegram_configs` 말고 다른 연동 없음. 경로가 이름한 수신자는 모두 있고 이름은 한 번씩. Telegram 수신자 셋은 설정 하나씩, 문자가 `[MON P1] `·`[MON P2] `로 시작, P2 둘은 소리 없음, P1은 소리 있음, `parse_mode` 빈 값, `LakeAuditFailed`의 수신자만 해소 문자 없음(키가 없으면 Alertmanager는 해소 문자를 보낸다). 억제 규칙은 정확히 둘, 이 순서: `MdCollectorDown`이 같은 거래소의 P2·P3 `Md.*|LakeSealLag|LakeDiskDaysLeft.*`를 막고, `ProjectorDown`이 같은 거래소의 P2·P3 `JournalDiskGaugeMissing`을 막음. 대상 패턴의 이름마다 규칙 파일에 그 알림이 있음(낡은 이름 없음). 수집기의 이름 패턴에 걸리는 알림이 수집기가 넣지 않는 지표(`lake_audit_*`, `oms_*`, `projector_*`, `watcher_*`, `journal_*`)나 `service="md-collector"` 없는 `obs_push_*`를 읽으면 실패), R11(설정에 `bot_token`, `chat_id`, `api_url`, `http_config`, `telegram_api_url`, `url` 키 없음: 비밀과 웹훅 주소는 파일 경로로만, API는 기본값만. Telegram 설정마다 `bot_token_file`과 `chat_id_file`이 `/etc/` 아래 파일 경로. 어느 배치 파일에도 Telegram 토큰 모양(숫자 6개 이상`:`문자 30개 이상)이나 `chat` 키 옆의 6자리 이상 숫자가 없음. 찾아도 그 값을 출력하지 않는다. `*_file` 키에 토큰이나 채팅 ID를 붙여 넣어도 값은 출력하지 않는다), R12(보류 알림 등급: `crates/oms-core/src/model.rs`의 `HoldReason` 변형마다(전략 보류에만 나오는 `operator_strategy`·`strategy_link` 빼고) 래치·관문·지나감·운영자 등급 중 정확히 하나, 관문은 `unmonitored` 하나. 네 보류 알림 `OmsHoldLatched`·`OmsUnmonitored`·`OmsHoldLasting`·`OmsOperatorHalt`의 식은 그 등급의 사유 목록으로 정해진 그대로이고, 관문·지나감 둘은 `oms_up` = 1일 때만), R13(`venues.toml`의 `trading`이 빈 목록이 아니고, 그 거래소마다 `crates/watcher/src/metrics.rs`에 `("venue", "<거래소>")`가 있음: 워처가 대조하지 않는 거래소에서는 거래하지 않는다). Grafana: G1(`[server] http_addr`가 한 번, `192.0.2.1`이나 100.64.0.0/10의 Tailscale 주소. `grafana.service`에 `GF_*` 환경 변수가 없고 `Exec` 줄은 `ExecStart=/opt/grafana/bin/grafana server --homepath /opt/grafana --config /etc/hl-oms-obs/grafana/grafana.ini` 하나뿐: 환경 변수, `cfg:` 인자, `--configOverrides`는 파일을 덮고 `--profile-addr`는 리스너를 연다), G2(`[unified_alerting]`과 `[auth.anonymous]`의 `enabled = false`가 한 번씩. `grafana.ini`에는 §12의 키 목록에 있는 키만: `[auth.proxy]`나 OAuth 같은 다른 로그인 길, 다른 어떤 키도 실패. 값은 출력하지 않음), G3(`admin_password`가 `$__file{/etc/…}` 한 번. 값을 출력하지 않음), G4(데이터 소스 둘이 §12의 값 그대로: uid·형식·루프백 주소·`access: proxy`·VictoriaMetrics가 기본·화면에서 고칠 수 없음·다른 키 없음), G5(파일 제공자 하나가 대시보드가 설치되는 디렉터리를 읽고 화면에서 지우거나 저장하지 못함. `[paths] provisioning`이 프로비저닝 파일의 설치 위치), G6(대시보드 uid가 하나씩, 패널마다 제목, 패널과 식이 데이터 소스 `vm`이나 `vl`(식은 패널과 같은 것), 식이 비지 않음, 글 패널과 행에는 식이 없음, 변수는 `vm`의 질의 변수, D3에 글 패널 `매일 확인: 실패한 일일 작업`이 하나이고 `systemctl --failed 'md-*' 'crypto-lake-audit*'`를 담음), G7(VictoriaMetrics 식과 `label_values(<지표>, <라벨>)` 변수가 R1·R3·R4를 통과하고 라벨은 그 지표의 라벨. VictoriaLogs 식은 읽지 않음), G8(D2·D3가 그 uid와 제목으로 하나씩. D2는 `MdTopicsStale`의 식에서 ` > 0.1`을 빼고 선택자마다 맨 앞에 `venue=~"$venue", `를 둔 값을, D3는 `LakeAuditFailed`의 식에서 ` > 0`을 뺀 값과, 긁는 구성 요소마다 `process_resident_memory_bytes{job="<작업>"} / <U6의 설계 상한>` 항을 정확히 보여 줌), G9(`[paths] data`와 `plugins`가 `/mnt/nvme/` 아래). 검사기는 MetricsQL의 부분 집합만 읽는다(파서가 아님). 문법은 §11의 `vmalert -dryRun`이 본다. LogsQL 식은 읽지 않는다.
 2. `systemd-analyze verify`: 단위 사본의 실행 파일 경로(`/usr/local/bin/`, `/usr/local/lib/hl-oms-obs/`, `/opt/grafana/bin/`)를 내려받은 공식 바이너리와 `/bin/true` 링크가 있는 임시 디렉터리로 바꾸고, 템플릿은 인스턴스 링크(`md-collector@bybit.service` 등)로 검사한다. 모르는 키는 `Unknown key`로 나온다. 감사 스크립트는 `sh -n bin/crypto-lake-audit.sh`로 문법만 본다.
 
 ## 8. 설치 순서 (소유자, 운영 항목 X1)
@@ -235,6 +235,7 @@ chrony가 시작한 뒤 첫 세 번의 갱신에서만 1초가 넘는 차이를 
    install -D -m 0644 vmalert/metrics/market-data.rules.json /etc/hl-oms-obs/vmalert/metrics/market-data.rules.json
    install -D -m 0644 vmalert/metrics/lake.rules.json        /etc/hl-oms-obs/vmalert/metrics/lake.rules.json
    install -D -m 0644 vmalert/metrics/system.rules.json      /etc/hl-oms-obs/vmalert/metrics/system.rules.json
+   install -D -m 0644 vmalert/metrics/oms.rules.json         /etc/hl-oms-obs/vmalert/metrics/oms.rules.json
    install -D -m 0644 vmalert/logs/market-data-logs.rules.json /etc/hl-oms-obs/vmalert/logs/market-data-logs.rules.json
    install -D -m 0644 alertmanager/alertmanager.json  /etc/hl-oms-obs/alertmanager/alertmanager.json
    install -D -m 0644 grafana/grafana.ini             /etc/hl-oms-obs/grafana/grafana.ini
@@ -280,7 +281,7 @@ chrony가 시작한 뒤 첫 세 번의 갱신에서만 1초가 넘는 차이를 
 | `MdReconnectsHigh` | P2 | 10분에 재연결 > 10 | 재연결마다 공백이 생긴다 | 거래소 장애 공지와 이 PC의 네트워크를 본다 |
 | `MdGapsHigh` | P2 | 10분에 호가창 공백 > 20 | 공백 구간은 L1 gap 행으로 남는다 | 수신 지연·재연결 알림과 함께 본다 |
 | `MdQueueHigh` | P2 | L0 쓰기 대기열 > 8 MiB(칸 상한 16 MiB의 절반), 1분 지속 | 디스크가 느리거나 막혔다. 상한에 닿으면 그 연결이 끊긴다 | 디스크 I/O와 연구 작업을 본다 |
-| `MdObsPushDropping` | P2 | 10분에 `obs_push_dropped_total`이 늘었음 | 수집기가 VM·VL로 보내지 못한 줄을 버리고 있다(설계 §8.3 "VM/VL 쓰기 실패") | 두 저장소가 살아 있는지 본다 |
+| `MdObsPushDropping` | P2 | 10분에 수집기의 `obs_push_dropped_total{service="md-collector"}`이 늘었음(프로젝터의 것은 `ProjectorObsPushDropping`) | 수집기가 VM·VL로 보내지 못한 줄을 버리고 있다(설계 §8.3 "VM/VL 쓰기 실패") | 두 저장소가 살아 있는지 본다 |
 | `ClockOffsetHigh` | P2 | 시계 오프셋 절댓값 > 5 ms, 5분 지속 | 그 구간의 수신 지연과 선후 분석을 믿을 수 없다 | `chronyc tracking`(§6) |
 
 **레이크** (`lake.rules.json`)
@@ -297,8 +298,39 @@ chrony가 시작한 뒤 첫 세 번의 갱신에서만 1초가 넘는 차이를 
 | `LakeNotAudited` | P3 | verify 결과가 없는 봉인 L0 파일 > 0, 1시간 지속 | 9일 창 밖의 날짜일 수 있다 | §4.1의 손 verify |
 
 - 남은 일수 알림의 준비 시간(12시간)은 처음 켠 날 아카이버의 첫 폭주가 페이지를 내지 않게 한다(판단(모델 아님)). 수집기가 12시간 넘게 멈췄다 돌아와도 같다(§8). 그동안 디스크가 차는 것은 `LakeL0WriteError`와 수집기의 `[MD P1]` 디스크 하한이 알린다. 수집기의 `telemetry.slow_ms`는 20 000 이하로 둔다(§3.1).
-- 설계 §8.3의 "디스크 80%"는 9.4의 남은 일수로 대체됐고 규칙이 없다. 저널 디스크 규칙은 OMS 배치에서 더한다.
+- 설계 §8.3의 "디스크 80%"는 9.4의 남은 일수로 대체됐고 규칙이 없다. 저널 디스크 규칙은 아래 OMS 표에 있다.
 - `LakeAuditFailed`는 26시간 뒤 저절로 끝난다. 그것은 파일이 고쳐졌다는 뜻이 아니다. 아무도 고치지 않은 실패 파일은 감사기가 7일마다 다시 감사하므로(qdp `audit.py`의 `MAX_AGE_DAYS`) 이 알림이 7일마다 다시 온다. 감사 상태 파일을 지우거나 바꾼 뒤에는 카운터가 옛 값보다 작게 다시 시작해 26시간 동안 옛 값을 빼므로, 그 첫 전체 실행이 찾은 실패는 알림이 오지 않는다: 그 실행의 `crypto/audit/venue=<v>/date=<d>.json`을 손으로 읽는다.
+
+**OMS와 프로젝터** (`oms.rules.json`, 그룹 `journal-recording` 1분, `oms`·`projector` 10초)
+
+OMS의 값은 모두 프로젝터가 넣는다: 저널을 다시 읽은 상태(`oms_holds`, 포지션, 한도)와 OMS 상태 API의 답(`oms_up`). `oms-node` 자신은 아무 값도 넣지 않는다. 거래 거래소(`venues.toml`의 `trading`)마다 하나씩인 규칙은 R6이 고정한다.
+
+| 이름 | 등급 | 조건 | 뜻 | 할 일 |
+|---|---|---|---|---|
+| 기록 `journal_disk_days_left` | — | `journal_disk_free_bytes / clamp_min(-deriv(journal_disk_free_bytes[24h]) * 86400, 1)`, 1분마다 | 지난 24시간의 속도로 저널 파일 시스템(`/mnt/nvme/hl-oms-journal`)이 차기까지 남은 일수 | — |
+| `JournalDiskDaysLeftLow` | P2 | 남은 일수 < 7, 10분 지속, 지난 24시간의 가장 오래된 값이 12시간보다 오래됐을 때만(레이크 규칙과 같은 준비 시간) | 7일 안에 찬다 | 공간을 늘릴 계획을 세운다. 저널 파일은 지우지 않는다 |
+| `JournalDiskDaysLeftCritical` | P1 | 남은 일수 < 2, 같은 조건 | 2일 안에 찬다. 여유가 1 GiB보다 작으면 OMS가 새 주문을 모두 거절하고(`storage_low`), 차면 쓰기가 실패해 종료 코드 2로 멈춘다 | 지금 공간을 만든다 |
+| `JournalDiskGaugeMissing` | P2 | 거래 거래소마다 하나. `journal_disk_free_bytes`가 5분 동안 없음 | 프로젝터의 `statvfs`가 실패한다. 그동안 남은 일수 알림이 울릴 수 없다. 프로젝터가 죽은 것이면 `ProjectorDown`이 이것을 막는다(§10) | `journalctl -u oms-projector`에서 statvfs 경고를 본다 |
+| `OmsDown` | P1 | 거래 거래소마다 하나. 30초 동안 `oms_up`이 모두 0(상태 API가 답하지 않음) | OMS가 죽었거나 멈췄거나 아직 띄우지 않았다. 30초는 워처의 W5(10초 조용하면 킬)보다 길어 워처가 먼저 움직인다 | §13.6. 계획된 정지(§13.5)와 재부팅 뒤(§13.4)에는 울리는 것이 정상 |
+| `ProjectorDown` | P2 | 거래 거래소마다 하나. `projector_caught_up`이 2분 동안 없음 | 프로젝터가 죽었다. 그동안 스택에는 OMS 생존 정보가 없다: `oms_up`이 없어 `OmsDown`도 울릴 수 없고 `oms_*` P1이 모두 조용해진다. 그 경로는 OMS와 워처의 직접 알림(`[OMS P1]`, `[WATCH P1]`)이다(설계 §8.1) | `systemctl status oms-projector`, `journalctl -u oms-projector` |
+| `OmsHoldLatched` | P1 | 래치 보류(`kill_latched`, `watcher_mismatch`, `venue_change`, `reducing`, `mismatch`, `storage_low`)가 하나라도 1. OMS가 꺼져 있어도 | 사람이 풀어야 하는 보류다. 꺼진 OMS의 래치도 다음 시작에 남는다 | §13.6의 해제 명령 |
+| `OmsUnmonitored` | P1 | `unmonitored`가 1이고 OMS가 살아 있음(`oms_up` = 1), 2분 지속 | 워처의 하트비트가 오지 않는다. OMS는 새 일반 주문을 거절하고 60초 뒤 걸린 일반 주문을 스스로 취소한다. 시작마다 워처의 첫 하트비트까지 몇 초 켜지므로 2분을 둔다 | 워처를 본다(§13.3) |
+| `OmsHoldLasting` | P1 | 지나가는 보류(`link_down`, `resync`, `in_doubt`, `no_config`, `venue_setting`, `account_mode`)가 1이고 OMS가 살아 있음, 5분 지속 | 스스로 풀리는 보류가 5분 넘게 남아 거래가 멈췄다 | 런북 7장(연결, 결과 불명 주문, 설정) |
+| `OmsOperatorHalt` | P3 | `operator_account`가 1 | 운영자가 멈췄다. 대시보드와 주간 검토만 | 다시 거래하려면 `resume` |
+| `OmsLimitPassed` | P1 | `oms_limit_distance` < 0 | 한도를 이미 넘었다 | D1 화면에서 한도와 거리를 보고 포지션이나 주문을 줄인다 |
+| `OmsLimitNear` | P2 | 0 ≤ 거리 < 한도 절댓값의 10%, 1분 지속 | 한도에 가깝다. 전략이 한도에 붙어 있으면(거리 0) 계속 울린다: 결함이 아니다 | 주간 검토 |
+| `OmsParkedFills` | P2 | `oms_parked_fills` > 0, 5분 지속 | 주문에 붙이지 못한 체결이 남았다 | `omsctl status`로 그 체결을 본다 |
+| `ProjectorTailError` | P2 | `projector_tail_error` = 1 | 프로젝터가 저널을 읽다 오류(체크섬 등)를 만나 그 뒤를 읽지 않는다(설계 §8.2). 화면은 멈춘 값이다 | `journalctl -u oms-projector`, `oms-node verify` |
+| `ProjectorLagHigh` | P2 | 뒤처진 기록 > 10 000, 5분 지속 | 화면과 `oms_*` 알림이 늦다 | 프로젝터의 CPU·메모리와 VictoriaMetrics를 본다 |
+| `ProjectorNotCaughtUp` | P2 | `projector_caught_up` = 0, 10분 지속 | 그동안 `oms_*` 상태 값이 없어 보류·한도 알림이 울릴 수 없다 | 같음 |
+| `ProjectorLogsRejected` | P2 | 10분 안에 VictoriaLogs가 거절한 줄이 늘었음 | 사건 타임라인에 구멍이 난다(설계 §8.3 "VM/VL 쓰기 실패") | `journalctl -u victorialogs` |
+| `ProjectorObsPushDropping` | P2 | 10분에 `obs_push_dropped_total{service="oms-projector"}`이 늘었음 | 프로젝터가 VM·VL로 보내지 못한 줄을 버린다 | 두 저장소가 살아 있는지 본다 |
+
+- 보류 알림 등급(ADR-037). `HoldReason`의 사유마다 정확히 한 등급이다. 래치: 사람만 푼다. 관문(`unmonitored`): 시작마다 워처의 첫 하트비트까지 켜진다. 지나감: 스스로 풀린다. 운영자: 사람이 걸었다. `operator_strategy`와 `strategy_link`는 전략의 보류에만 나와 프로젝터가 넣지 않으므로 등급이 없다. 새 사유를 코어에 더하면 배치 검사 R12가 등급을 정하라고 실패한다.
+- `oms_holds`는 저널의 마지막 상태라 OMS가 꺼진 동안에도 남는다. 그래서 관문과 지나감은 `oms_up` = 1일 때만 울린다. 계획된 정지(§13.5)가 남긴 `unmonitored`나 충돌이 남긴 `link_down`이 30분마다 P1을 되풀이하지 않는다. 꺼진 OMS는 `OmsDown`이 알린다. 래치와 운영자 등급은 꺼진 OMS에서도 울린다: 다음 시작에 그대로 걸려 있다.
+- 많은 P1 상태는 OMS와 워처가 직접(`[OMS P1]`, `[WATCH P1]`)도 보낸다. `[MON P1]`은 두 번째의 독립된 길이다(직접 알림 길이 죽거나 보낼 곳이 가득 차도 보인다). 겹친 문자는 주간 검토에서 본다(소유자 질문 Q7).
+- 이 규칙은 운영자 설정의 세 값에 기댄다(§13.2): 프로젝터 `poll_ms` ≤ 10 000(넘으면 30초 창이 비어 `OmsDown`이 울리지 않을 수 있음), `disk_every_ms` ≤ 60 000(5분을 넘으면 `JournalDiskGaugeMissing`이 깜박임), 워처 `export_ms` ≤ 20 000. 이 값은 아무것도 검사하지 않는다.
+- 문턱값(30초, 2분, 5분, 10%, 10 000 기록, 10분)은 판단(모델 아님)이다. 남은 일수 7·2일과 5분 부재는 설계 값이다(소유자 질문 Q5).
 
 **시스템** (`system.rules.json`)
 
@@ -334,6 +366,8 @@ chrony가 시작한 뒤 첫 세 번의 갱신에서만 1초가 넘는 차이를 
 - **Telegram 도달성(운영 항목 X4).** 직접 알림은 `api.telegram.org`가 막히면 `149.154.167.220`으로 바로 간다. Alertmanager에는 그 우회가 없다: 설정한 이름으로만 보낸다. 이 PC에서 `api.telegram.org`가 막히면 `[MON …]` 문자는 오지 않는다. 그때 `AlertmanagerTelegramFailing`(P2)이 울리지만 그것도 Telegram으로는 오지 않으므로 대시보드에서만 보인다. 설치(X1) 때 경로마다 시험 알림을 하나씩 보내 확인하고, 막히면 로컬 중계나 차단 해소를 소유자가 정한다(추론, 측정 안 함).
 - **dead-man(소유자 결정 D3, 질문 Q1).** `Watchdog`은 늘 울리고 1분마다 `deadman` 수신자로 간다. 지금 이 수신자에는 연동이 없다(자리 표시). 그래서 스택 전체가 죽어도 바깥에서 알려 주는 것이 없다. 바깥 서비스를 정하면 `deadman`에 `webhook_configs`의 `url_file`(주소는 `/etc/hl-oms/` 아래 파일)을 더한다. `url`이나 `http_config`를 쓰지 않는다(R11). 그때까지 배치 검사 R10은 `deadman`에 어떤 연동이 있어도 실패한다. 바깥 서비스를 더하는 변경이 이 규칙을 바꾼다.
 - **억제 규칙.** 거래소의 `MdCollectorDown`(P1)이 울리는 동안 같은 거래소의 P2·P3 알림 중 이름이 `Md.*`, `LakeSealLag`, `LakeDiskDaysLeft.*`인 것은 보내지 않는다(설계 §8.3 B3 "파생 알림 억제"). 이것들은 수집기 자신이 넣는 값(`md_*`, `lake_seal_lag_hours`, `lake_disk_free_bytes`)과 그 로그 줄로 판단하므로 수집기가 죽으면 함께 울릴 뿐이다. 막지 않는 것: P1 알림 모두(`LakeL0WriteError`, `LakeDiskDaysLeftCritical`), qdp 감사기가 넣는 값의 알림(`LakeAuditFailed`, `LakeAuditStale`, `LakeNotAudited`), 스택 알림. 거래소 라벨이 없는 알림은 막지 않는다.
+- **프로젝터 억제 규칙.** 거래소의 `ProjectorDown`(P2)이 울리는 동안 같은 거래소의 P2·P3 `JournalDiskGaugeMissing`은 보내지 않는다: 그 계열을 넣는 것은 프로젝터뿐이다. 다른 OMS 알림은 막지 않는다(프로젝터가 죽으면 그것들은 값이 없어 어차피 울리지 않는다, §9).
+- **OMS가 꺼진 동안 시세 알림은 막지 않는다**(ADR-037, 소유자 질문 Q4). 수집기는 OMS 없이 혼자 레이크에 쓴다. OMS는 `Restart=no`라 꺼진 시간이 사람이 올 때까지 몇 시간일 수 있고, 그동안 `Md*` 알림을 막으면 원본 시세를 잃는 것이 숨는다. 원하면 억제 규칙 하나를 더하고 배치 검사의 표(`alertmanager.rs`의 `INHIBITS`)도 고친다.
 - **`LakeAuditFailed`는 해소 문자를 보내지 않는다.** 이 알림은 26시간 뒤 저절로 끝나지만 그것은 파일이 고쳐졌다는 뜻이 아니다(§9). 그래서 3번 경로가 P2 경로보다 먼저 이 알림을 받아 해소 문자가 없는 수신자로 보낸다. 끝난 뒤에도 `crypto/audit/venue=<v>/date=<d>.json`을 확인한다. 고쳐질 때만 끝나는 지표(현재 실패 수)는 qdp가 지표 이름을 정하므로 qdp 후속 작업이다.
 
 ## 11. 규칙 확인과 주간 소음 검토
@@ -344,7 +378,7 @@ chrony가 시작한 뒤 첫 세 번의 갱신에서만 1초가 넘는 차이를 
 cd deploy/observability/vmalert
 for f in metrics/*.json; do vmalert-prod -dryRun -rule="$f"; done
 vmalert-prod -dryRun -rule.defaultRuleType=vlogs -rule=logs/market-data-logs.rules.json
-vmalert-tool-prod unittest --files tests/market-data.test.json --files tests/lake.test.json --files tests/system.test.json
+vmalert-tool-prod unittest --files tests/market-data.test.json --files tests/lake.test.json --files tests/system.test.json --files tests/oms.test.json
 ```
 
 - `-dryRun`은 MetricsQL·LogsQL 문법을 본다. 나쁜 식이면 `fatal` 줄이 나온다.
@@ -359,6 +393,7 @@ amtool config routes test --config.file=alertmanager.json alertname=MdCollectorD
 amtool config routes test --config.file=alertmanager.json alertname=LakeAuditFailed severity=P2 venue=bybit   # telegram-p2-noresolve
 amtool config routes test --config.file=alertmanager.json alertname=MdGapsHigh severity=P2 venue=bybit   # telegram-p2
 amtool config routes test --config.file=alertmanager.json alertname=LakeNotAudited severity=P3 venue=bybit   # null
+amtool config routes test --config.file=alertmanager.json alertname=OmsDown severity=P1 venue=bybit   # telegram-p1
 ```
 
 - `check-config`는 토큰·채팅 ID 파일이 없어도 통과한다(파일은 보낼 때 읽는다). 문자 틀은 `amtool template render --template.glob=<빈 파일> --template.text="<message 값>"`으로 그려 본다(amtool의 예시 데이터라 알림 이름은 비어 나온다).
@@ -470,7 +505,6 @@ iPhone에서 Tailscale을 켜고 같은 tailnet에서 `http://<이 PC의 Tailsca
 
 네 단위 모두 저널 파일 시스템이 마운트돼 있지 않으면 시작하지 않고 실패한다(`AssertPathIsMountPoint=/mnt/nvme/hl-oms-journal`). 마운트가 없으면 그 경로는 레이크 쪽의 평범한 디렉터리이고, 거기서 뜬 OMS는 진짜 저널 옆에 빈 새 저널(킬 래치 없음)을 시작하기 때문이다.
 
-시작 순서(13.3), 재부팅 뒤(13.4), 계획된 정지(13.5)는 U20b2에서 더한다. 그때까지 재부팅 뒤의 첫 단계는 이것이다: `findmnt /mnt/nvme/hl-oms-journal`과 `systemctl is-active watcher`. 둘 중 하나라도 실패하면 저널을 마운트하고 워처를 띄우는 것이 먼저이고, 워처의 킬이 끝날 때까지 Bybit의 열린 주문을 손으로 확인한다(마운트가 없으면 워처가 뜨지 않아 킬도 일괄 취소도 없다). 둘 다 되면 워처가 꺼진 OMS를 킬한다. 사람이 OMS를 띄울 때까지 `OmsDown`과 `WatcherKillHaltOwed`(U20b2·U20b3에서 생기는 알림)가 울리는 것이 정상이고, OMS를 띄운 뒤 `늦은 정지 … 래치함` 줄을 본 다음에만 해제한다(§13.6).
 
 ### 13.1 사용자, 권한, 설치
 
@@ -517,6 +551,30 @@ iPhone에서 Tailscale을 켜고 같은 tailnet에서 `http://<이 PC의 Tailsca
 | `oms-projector.toml` | `disk_every_ms` | ≤ 60000(기본 10000) | 5분 창의 저널 디스크 계열 규칙이 깜박이지 않게(판단(모델 아님)). 코드에는 상한이 없다 |
 | `watcher.toml` | `[intervals] export_ms` | ≤ 20000(기본 1000) | 워처 생존 규칙의 1분 창에 표본이 셋 이상(판단(모델 아님)). 코드는 60000까지 받는다 |
 | `oms-node.toml` | `[api] socket`, `admin_socket`, `monitor_socket` | 기본값(데이터 디렉터리 아래 상대 경로) | 단위가 OMS에게 쓰기를 허락한 곳은 데이터 디렉터리와 `/var/lib/hl-oms`뿐이다. 다른 곳이면 시작이 종료 코드 3으로 실패한다 |
+
+### 13.3 시작 순서
+
+1. `findmnt /mnt/nvme/hl-oms-journal`: 저널 파일 시스템이 붙어 있다.
+2. `systemctl start oms-node`.
+3. OMS의 상태 API가 답하는지 본다: `curl -s http://127.0.0.1:<OMS [http] listen의 포트>/api/status`.
+4. `systemctl start watcher`(부팅 뒤에는 이미 떠 있다, §13.4). OMS가 답한 뒤 2분 안에 워처의 첫 하트비트가 없으면 `OmsUnmonitored`(P1)가 온다. 정상 시작에서 `unmonitored`는 몇 초만 켜진다.
+5. 프로젝터는 언제든 띄워도 된다(부팅 때 뜬다). OMS보다 먼저 뜨면 `oms_up` = 0을 넣는다: `OmsDown`이 온다.
+
+### 13.4 재부팅 뒤
+
+1. 첫 단계: `findmnt /mnt/nvme/hl-oms-journal`과 `systemctl is-active watcher`. 저널이 마운트되지 않았으면 워처는 뜨지 않았고(마운트 확인) 킬도 일괄 취소도 없었다. 저널을 마운트하고 워처를 띄운 뒤, 워처의 킬이 끝날 때까지 Bybit의 열린 주문을 손으로 확인한다.
+2. 마운트돼 있으면 워처가 먼저 떠 꺼진 OMS를 킬한다: 킬 마커를 쓰고, 자기 키로 걸린 주문을 일괄 취소한다. OMS는 다음 시작에 래치된 채 뜬다.
+3. 사람이 OMS를 띄울 때까지 `OmsDown`(P1)이 30분마다 되풀이되는 것이 정상이다. 워처의 정지 빚(`watcher_kill_halt_owed` = 1)도 남는다: OMS가 이 워처 프로세스에서 답한 적이 없어 마커 경로를 확인하지 못했기 때문이다(ADR-036).
+4. `systemctl start oms-node`(§13.3의 2~3). 워처가 OMS의 첫 답에 `watcher_kill`을 보내고 `늦은 정지: OMS가 다시 답해 watcher_kill로 래치함`을 알린다. 그때 정지 빚이 끝난다. `늦은 정지 실패`가 오면 해제하지 말고 런북 7.18을 따른다.
+5. 그 줄을 본 뒤에만 `sudo -u hloms omsctl --socket /mnt/nvme/hl-oms-journal/data/admin.sock clear-hold --reason kill --note …`(§13.6). `admin.sock`은 `hloms`의 uid만 받는다.
+
+### 13.5 계획된 정지
+
+1. `systemctl stop watcher`(워처를 먼저: 돌고 있는 워처에게 OMS의 정지는 W5 킬이다).
+2. `sudo -u hloms omsctl --socket /mnt/nvme/hl-oms-journal/data/admin.sock halt --note …`, 같은 소켓으로 `cancel-all --note …`, `status`에서 열린 주문이 0이 될 때까지 본다(런북 5장).
+3. `systemctl stop oms-node`.
+
+멈춘 동안 `OmsDown`(P1)이 오는 것이 정상이다. 미리 `amtool silence add alertname=OmsDown venue=bybit --duration=<정지 시간> --comment=planned-stop`으로 막을 수 있다. 저널의 마지막 상태에 남은 `unmonitored` 같은 지나가는 보류는 `oms_up` = 0이면 알리지 않는다(§9). 래치된 보류와 운영자 중지(`OmsOperatorHalt`, P3)는 계속 보인다.
 
 ### 13.6 킬 뒤 다시 띄우기와 해제, 설치 확인
 
