@@ -2939,6 +2939,87 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "oms-node", "--lib", "the_auth_message_with_an_rsa_key_carries_the_base64_signature"],
         guards: "ADR-034 / gateway signature",
     },
+    Mutant {
+        id: "M324-deploy-collector-without-restart-always",
+        what: "md-collector@.service loses Restart=always (ADR-035, spec mutant 1)",
+        file: "deploy/observability/systemd/md-collector@.service",
+        find: "Restart=always\n",
+        replace: "",
+        test: &["-p", "xtask", "--test", "deploy", "the_deploy_tree_passes"],
+        guards: "ADR-035",
+    },
+    Mutant {
+        id: "M325-deploy-check-skips-watchdog-sec",
+        what: "rule U3 no longer reads WatchdogSec of the collector unit (ADR-035, spec mutant 2)",
+        file: "crates/xtask/tests/deploy/units.rs",
+        find: "    (\"Service\", \"WatchdogSec\", Is(\"30s\")),\n",
+        replace: "",
+        test: &["-p", "xtask", "--test", "deploy", "units::a_collector_unit_without_watchdog_sec_fails"],
+        guards: "ADR-035",
+    },
+    Mutant {
+        id: "M326-deploy-check-timers-to-services-only",
+        what: "rule U2 checks only timers to services: a oneshot service without a timer passes (ADR-035, spec mutant 3)",
+        file: "crates/xtask/tests/deploy/units.rs",
+        find: "        if !names.contains(timer.as_str()) {\n",
+        replace: "        if false {\n",
+        test: &["-p", "xtask", "--test", "deploy", "units::a_oneshot_without_a_timer_fails"],
+        guards: "ADR-035",
+    },
+    Mutant {
+        id: "M327-deploy-check-memory-max-skips-templates",
+        what: "rule U1 skips template units (ADR-035, spec mutant 4)",
+        file: "crates/xtask/tests/deploy/units.rs",
+        find: "    for u in p.units.iter().filter(|u| u.name.ends_with(\".service\")) {\n",
+        replace: "    for u in p.units.iter().filter(|u| u.name.ends_with(\".service\") && !u.name.contains(\'@\')) {\n",
+        test: &["-p", "xtask", "--test", "deploy", "units::a_service_without_memory_max_fails"],
+        guards: "ADR-035",
+    },
+    Mutant {
+        id: "M328-deploy-check-any-oom-score-adjust",
+        what: "rule U3 accepts any OOMScoreAdjust value (ADR-035, spec mutant 5)",
+        file: "crates/xtask/tests/deploy/units.rs",
+        find: "    (\"Service\", \"OOMScoreAdjust\", Is(\"-900\")),\n",
+        replace: "    (\"Service\", \"OOMScoreAdjust\", Set),\n",
+        test: &["-p", "xtask", "--test", "deploy", "units::a_collector_unit_without_oom_score_adjust_fails"],
+        guards: "ADR-035",
+    },
+    Mutant {
+        id: "M329-deploy-check-ignores-memory-swap-max",
+        what: "rule U3 ignores MemorySwapMax (ADR-035, spec mutant 6)",
+        file: "crates/xtask/tests/deploy/units.rs",
+        find: "    (\"Service\", \"MemorySwapMax\", Is(\"0\")),\n",
+        replace: "",
+        test: &["-p", "xtask", "--test", "deploy", "units::a_collector_unit_without_memory_swap_max_zero_fails"],
+        guards: "ADR-035",
+    },
+    Mutant {
+        id: "M330-deploy-check-slice-against-largest-child",
+        what: "rule U4 compares the slice's MemoryMin with the largest unit's, not the sum (ADR-035, spec mutant 7)",
+        file: "crates/xtask/tests/deploy/units.rs",
+        find: "        .sum::<u64>();\n",
+        replace: "        .max()\n        .unwrap_or(0);\n",
+        test: &["-p", "xtask", "--test", "deploy", "units::the_trading_slice_reserves_its_units_memory"],
+        guards: "ADR-035",
+    },
+    Mutant {
+        id: "M331-deploy-seal-timer-at-minute-2",
+        what: "the seal timer goes back to minute 2 (ADR-035, spec mutant 8)",
+        file: "deploy/observability/systemd/md-lake-seal@.timer",
+        find: "OnCalendar=*-*-* *:05:00 UTC\n",
+        replace: "OnCalendar=*-*-* *:02:00 UTC\n",
+        test: &["-p", "xtask", "--test", "deploy", "the_deploy_tree_passes"],
+        guards: "ADR-035",
+    },
+    Mutant {
+        id: "M332-deploy-check-pending-matches-every-path",
+        what: "rule U14 accepts every unit path without an install dst: the PENDING_DST branch matches all (ADR-035, spec mutant 9)",
+        file: "crates/xtask/tests/deploy/units.rs",
+        find: "&& !PENDING_DST.contains(&want)",
+        replace: "&& !PENDING_DST.iter().any(|_| true)",
+        test: &["-p", "xtask", "--test", "deploy", "units::a_unit_path_without_an_install_dst_fails"],
+        guards: "ADR-035",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -2969,10 +3050,13 @@ pub fn run(root: &Path, only: Option<&str>) -> i32 {
         .and_then(|exe| exe.parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()))
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target"));
     let work = target.join("mutants-work");
-    let _ = std::fs::remove_dir_all(work.join("crates"));
+    for dir in ["crates", "deploy", "contracts"] {
+        let _ = std::fs::remove_dir_all(work.join(dir));
+    }
     // `config` holds the shipped example configurations, which unit tests
-    // of the node load.
-    for item in ["crates", "config", "Cargo.toml", "Cargo.lock"] {
+    // of the node load. `deploy` and `contracts` are read by the deployment
+    // check (`xtask/tests/deploy`), whose mutants change deploy files.
+    for item in ["crates", "config", "deploy", "contracts", "Cargo.toml", "Cargo.lock"] {
         let (src, dst) = (root.join(item), work.join(item));
         let r = if src.is_dir() { copy_tree(&src, &dst) } else { std::fs::create_dir_all(&work).and_then(|()| std::fs::copy(&src, &dst).map(|_| ())) };
         if let Err(e) = r {
