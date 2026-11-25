@@ -52,6 +52,21 @@ const TELEGRAM: &[(&str, &str, bool, bool)] = &[
     ("telegram-p2", "[MON P2] ", true, true),
     ("telegram-p2-noresolve", "[MON P2] ", true, false),
 ];
+/// R10: the one inhibit rule (design §8.3 B3): a dead collector holds back
+/// the P2 and P3 alerts derived from its own pushes (`md_*`,
+/// `lake_seal_lag_hours`, `lake_disk_free_bytes`, its error log lines) for
+/// the same venue. The qdp audit alerts stay visible.
+const INHIBIT_SOURCE: &[&str] = &["alertname=\"MdCollectorDown\""];
+const INHIBIT_TARGET: &[&str] = &[
+    "severity=~\"P2|P3\"",
+    "alertname=~\"Md.*|LakeSealLag|LakeDiskDaysLeft.*\"",
+];
+const INHIBIT_NAMES: &str = "Md.*|LakeSealLag|LakeDiskDaysLeft.*";
+const INHIBIT_EQUAL: &[&str] = &["venue"];
+const INHIBIT_KEYS: &[&str] = &["source_matchers", "target_matchers", "equal"];
+/// The metrics qdp's auditor pushes: an alert on one of them is no
+/// collector alert.
+const QDP_PREFIX: &str = "lake_audit_";
 
 /// A matcher `name op "value"` of a route or an inhibit rule, read as
 /// Alertmanager reads it (spaces around the operator, value quoted or not).
@@ -109,12 +124,78 @@ fn integrations(r: &Value) -> Vec<&str> {
         .collect()
 }
 
+/// Whether the anchored pattern `re` matches `name`, for the patterns the
+/// pinned inhibit rule uses: alternatives of a literal or a literal and
+/// `.*`.
+pub fn regex_matches(re: &str, name: &str) -> bool {
+    re.split('|').any(|alt| match alt.strip_suffix(".*") {
+        Some(prefix) => name.starts_with(prefix),
+        None => name == alt,
+    })
+}
+
 pub fn check(_t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
     let Some(doc) = p.json.get(AM) else {
         finding(out, AM, "R10", "missing");
         return;
     };
     r10_routes(doc, out);
+    r10_inhibit(p, doc, out);
+}
+
+fn sorted(v: Option<Vec<Matcher>>) -> Option<Vec<Matcher>> {
+    v.map(|mut v| {
+        v.sort();
+        v
+    })
+}
+
+fn r10_inhibit(p: &Parsed, doc: &Value, out: &mut Vec<Finding>) {
+    let rules: Vec<&Value> = doc
+        .get("inhibit_rules")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .collect();
+    let want = |l: &[&str]| sorted(l.iter().map(|m| matcher(m)).collect());
+    let ok = match rules[..] {
+        [r] => {
+            sorted(matchers(r.get("source_matchers"))) == want(INHIBIT_SOURCE)
+                && sorted(matchers(r.get("target_matchers"))) == want(INHIBIT_TARGET)
+                && strs(r.get("equal")).as_deref() == Some(INHIBIT_EQUAL)
+                && r.as_object()
+                    .into_iter()
+                    .flatten()
+                    .all(|(k, _)| INHIBIT_KEYS.contains(&k.as_str()))
+        }
+        _ => false,
+    };
+    if !ok {
+        finding(
+            out,
+            AM,
+            "R10",
+            format!(
+                "inhibit_rules must be exactly one rule: source {INHIBIT_SOURCE:?}, target {INHIBIT_TARGET:?}, equal {INHIBIT_EQUAL:?}"
+            ),
+        );
+    }
+    // An alert on a qdp metric whose name the pattern matches would go
+    // quiet while the collector is down.
+    let (rules, _) = crate::rules::collect(p);
+    for r in &rules {
+        let Some(name) = r.alert() else { continue };
+        if regex_matches(INHIBIT_NAMES, name) && r.expr().unwrap_or("").contains(QDP_PREFIX) {
+            finding(
+                out,
+                r.file,
+                "R10",
+                format!(
+                    "{name} reads a {QDP_PREFIX}* metric but the inhibit rule holds it back with the collector"
+                ),
+            );
+        }
+    }
 }
 
 fn r10_routes(doc: &Value, out: &mut Vec<Finding>) {
@@ -478,4 +559,132 @@ fn the_routes_send_watchdog_p1_p2_where_they_belong() {
         |v| routes_mut(v)[1]["matchers"] = json!(["severity = \"P1\""]),
         &[],
     );
+}
+
+#[test]
+fn the_audit_failure_route_sends_no_resolved_message() {
+    let noresolve = "telegram-p2-noresolve";
+    plant(
+        |v| telegram_mut(v, noresolve)["send_resolved"] = json!(true),
+        &["R10"],
+    );
+    // Without the key Alertmanager sends resolved messages.
+    plant(
+        |v| {
+            telegram_mut(v, noresolve)
+                .as_object_mut()
+                .unwrap()
+                .remove("send_resolved");
+        },
+        &["R10"],
+    );
+    // The P2 route first would take LakeAuditFailed (severity P2).
+    plant(|v| routes_mut(v).swap(2, 3), &["R10"]);
+    plant(
+        |v| routes_mut(v)[2]["receiver"] = json!("telegram-p2"),
+        &["R10"],
+    );
+    plant(
+        |v| {
+            routes_mut(v).remove(2);
+        },
+        &["R10"],
+    );
+    // Its receiver is silent like every P2 receiver.
+    plant(
+        |v| telegram_mut(v, noresolve)["disable_notifications"] = json!(false),
+        &["R10"],
+    );
+}
+
+fn inhibit_mut(v: &mut Value) -> &mut Value {
+    &mut v["inhibit_rules"][0]
+}
+
+#[test]
+fn the_inhibit_rule_holds_back_only_collector_alerts() {
+    // Widened to every alert: the audit alerts would go quiet with the
+    // collector.
+    plant(
+        |v| inhibit_mut(v)["target_matchers"] = json!(["severity=~\"P2|P3\"", "alertname=~\".*\""]),
+        &["R10"],
+    );
+    plant(
+        |v| {
+            inhibit_mut(v)["target_matchers"] =
+                json!(["severity=~\"P2|P3\"", "alertname=~\"Md.*|Lake.*\""])
+        },
+        &["R10"],
+    );
+    // Without the alertname matcher, or holding back P1 alerts too.
+    plant(
+        |v| inhibit_mut(v)["target_matchers"] = json!(["severity=~\"P2|P3\""]),
+        &["R10"],
+    );
+    plant(
+        |v| {
+            inhibit_mut(v)["target_matchers"] = json!([
+                "severity=~\"P1|P2|P3\"",
+                "alertname=~\"Md.*|LakeSealLag|LakeDiskDaysLeft.*\""
+            ])
+        },
+        &["R10"],
+    );
+    // Another source; another venue's collector; no venue match at all.
+    plant(
+        |v| inhibit_mut(v)["source_matchers"] = json!(["alertname=\"LakeSealLag\""]),
+        &["R10"],
+    );
+    plant(|v| inhibit_mut(v)["equal"] = json!([]), &["R10"]);
+    plant(
+        |v| {
+            inhibit_mut(v).as_object_mut().unwrap().remove("equal");
+        },
+        &["R10"],
+    );
+    // An old-style matcher key next to the pinned ones; a second rule; none.
+    plant(
+        |v| inhibit_mut(v)["target_match_re"] = json!({"alertname": ".*"}),
+        &["R10"],
+    );
+    plant(
+        |v| {
+            let r = inhibit_mut(v).clone();
+            v["inhibit_rules"].as_array_mut().unwrap().push(r);
+        },
+        &["R10"],
+    );
+    plant(
+        |v| {
+            v.as_object_mut().unwrap().remove("inhibit_rules");
+        },
+        &["R10"],
+    );
+    // An alert on a qdp metric whose name the rule matches would be held
+    // back during a collector outage.
+    let md = "deploy/observability/vmalert/metrics/market-data.rules.json";
+    let mut t = Tree::real();
+    let mut v: Value = serde_json::from_str(&t.files[md]).unwrap();
+    v["groups"][0]["rules"].as_array_mut().unwrap().push(json!({
+        "alert": "MdAuditLate",
+        "expr": "time() - max by (venue) (lake_audit_last_run_ts) > 129600",
+        "labels": {"severity": "P2"},
+        "annotations": {"summary": "x"}
+    }));
+    t.set(md, &serde_json::to_string_pretty(&v).unwrap());
+    assert_rules(&crate::check(&t), &["R10"]);
+    // The pinned pattern, read as Alertmanager reads it (anchored).
+    let re = "Md.*|LakeSealLag|LakeDiskDaysLeft.*";
+    for (name, held) in [
+        ("MdGapsHigh", true),
+        ("MdCollectorDown", true),
+        ("LakeSealLag", true),
+        ("LakeSealLagged", false),
+        ("LakeDiskDaysLeftLow", true),
+        ("LakeAuditFailed", false),
+        ("LakeNotAudited", false),
+        ("XMd", false),
+    ] {
+        assert_eq!(regex_matches(re, name), held, "{name}");
+    }
 }
