@@ -280,7 +280,7 @@ source = "SSDF"
 element = "PS.1 소스와 설정의 접근 통제"
 status = "다룸"
 items = ["G-SEC-08"]
-note = "저장소가 아직 없다(U-10)"
+note = "git 저장소는 있고 릴리스 태그가 없다(U-10)"
 
 [[row]]
 source = "SSDF"

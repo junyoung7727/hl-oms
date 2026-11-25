@@ -142,15 +142,15 @@ necessity = "포지션과 손익이 설명되지 않는다"
 sources = ["HL-DOCS", "REQ"]
 applicability = "적용"
 reason = "문서: 청산은 체결의 liquidation 필드로, ADL의 표현 방식은 문서에 없다"
-handling = "전용 처리는 없다. 청산 체결은 외부 체결로 기장되고 불일치가 제기된다. funding은 기장하지 않는다"
-design = "미결"
-impl = "미구현"
-verify = "해당없음"
-adr = []
+handling = "Bybit에서는 ADL과 청산 인수(AdlTrade, BustTrade)와 인도·정산을 거래소 포지션 변경으로 계좌와 미귀속 장부에 기장하고 VenuePositionChange 불일치로 일반 주문을 막으며(감소 전용은 통과), funding은 포지션을 바꾸지 않는 입력으로 한 번 기록한다. Hyperliquid에는 전용 처리가 없어 청산 체결은 외부 체결로 기장되고 불일치가 제기되며 funding은 기장하지 않는다"
+design = "결정"
+impl = "부분"
+verify = "부분"
+adr = ["ADR-023"]
 contracts = ["C-MISMATCH"]
-code = []
-claims = ["V-EXT-1"]
-open = "영향: 청산이 일어나면 운영자 개입 전까지 신규 주문이 차단된다(의도된 보수적 동작). funding 비용은 장부에 없다. 해소: U-07의 원장 결정과 함께. 단계: 실거래 전."
+code = ["crates/oms-node/src/venue/bybit/exec.rs"]
+claims = ["V-EXT-1", "V-VENUE-EXEC-1"]
+open = "영향: 청산이 일어나면 운영자 개입 전까지 신규 주문이 차단된다(의도된 보수적 동작). funding은 Bybit에서만 저널에 한 번 기록되고 계좌·전략 장부와 어떤 한도에도 들어가지 않는다. Hyperliquid에는 전용 처리가 없다. 해소: U-07의 원장 결정과 함께. 단계: 실거래 전."
 
 [[item]]
 id = "P-VEN-09"

@@ -23,7 +23,7 @@
 | 직접 알림(7.11: 토큰 파일, 시작·정지·치명 알림, 조건별 뜻) | 자동 시험으로 확인(loopback 가짜 텔레그램, 가상 거래소에 붙인 노드 프로세스). **실제 텔레그램에는 보낸 적이 없다** |
 | 모니터링 게이트(7.16) | 기록 시각을 넣은 코어 시험과 가상 거래소에 붙인 노드 프로세스(실제 시간)로 확인. 하트비트는 시험의 클라이언트가 보냈다. 워처(U19a7부터 하트비트와 불일치를 보낸다)는 loopback 가짜 소켓으로만 시험했다. **실제 거래소에서는 한 번도 해 보지 않았다** |
 | 전략 연결 감시(7.15) | 코어 시험, 시간을 입력으로 받는 노드 표 시험, 가상 거래소에 붙인 노드 프로세스(실제 시간)로 확인. **실제 거래소에서는 한 번도 해 보지 않았다** |
-| 보류(7.12 킬 래치와 킬 마커, 7.13 워처 불일치, 7.14 거래소 변경) | 코어 시험과 가상 거래소에 붙인 노드 프로세스로 확인(`clear-hold`는 `omsctl`의 본문 함수로). 가상 거래소와 Hyperliquid는 일괄 취소가 없어 킬 루프 대신 `unsupported`로 답한다. Bybit 킬 루프(U18b2, [C-KILL](../contracts/kill.md))는 loopback 가짜 Bybit와 수동 시계, 가짜 Bybit에 붙인 노드 프로세스로 확인. **실제 거래소에서는 한 번도 해 보지 않았다** |
+| 보류(7.12 킬 래치와 킬 마커, 7.13 워처 불일치, 7.14 거래소 변경) | 코어 시험과 가상 거래소에 붙인 노드 프로세스로 확인(`clear-hold`는 `omsctl`의 본문 함수로). 가상 거래소와 Hyperliquid는 일괄 취소가 없어 킬 루프 대신 `unsupported`로 답한다. Bybit 킬 루프(U18b2, C-KILL)는 loopback 가짜 Bybit와 수동 시계, 가짜 Bybit에 붙인 노드 프로세스로 확인. **실제 거래소에서는 한 번도 해 보지 않았다** |
 
 ## 1. 구성 요소
 
@@ -110,7 +110,7 @@ $A resume --note "연습 끝"
 ```
 
 같은 키로 `new`를 다시 실행하면 `conflict`가 나온다. `omsctl`이 실행할 때마다 만료 시각을 새로 계산하기 때문이다.
-전략 프로그램은 재시도할 때 **같은 만료 시각**을 보내야 `duplicate`를 받는다([C-IDEM](../contracts/idempotency.md)).
+전략 프로그램은 재시도할 때 **같은 만료 시각**을 보내야 `duplicate`를 받는다(C-IDEM).
 
 ## 4. systemd 단위 (예시, 설치해 보지 않았다)
 
@@ -339,7 +339,7 @@ OMS는 입출금을 모른다. 계좌 가치만 본다. 노드가 도는 동안�
 
 ### 7.11 알림(`[OMS P1]`)
 
-노드는 거래 안전 조건을 내구화된 상태에서 계산해 텔레그램으로 직접 보낸다([C-ALERT](../contracts/alerts.md), [ADR-029](../adr/ADR-029-oms-direct-alerts.md)). md-collector와 같은 봇을 쓰고 접두어로 구분한다(`[MD P1]`, `[OMS P1]`). mainnet은 `[alert]` 없이 시작하지 않는다.
+노드는 거래 안전 조건을 내구화된 상태에서 계산해 텔레그램으로 직접 보낸다(C-ALERT, [ADR-029](../adr/ADR-029-oms-direct-alerts.md)). md-collector와 같은 봇을 쓰고 접두어로 구분한다(`[MD P1]`, `[OMS P1]`). mainnet은 `[alert]` 없이 시작하지 않는다.
 
 토큰 파일(md-collector와 같은 형식):
 
@@ -384,7 +384,7 @@ telegram = "/etc/oms/telegram.json"   # 절대 경로
 
 ### 7.12 킬 래치가 걸렸다 (`holds`에 `kill_latched`)
 
-[C-HOLD](../contracts/holds.md). `status`의 `core.kill`이 출처(`source`: `watcher` = 워처의 `watcher_kill`, `marker` = 시작할 때 킬 마커가 있었음, `stream` = Bybit 개인 스트림을 `kill_after_ms`(기본 10초) 잃음, [C-KILL](../contracts/kill.md)), 걸린 시각(`since`), 메모(`note`), 확인(`confirmed_at`, `outcome`)을 보여 준다. `node.kill_marker`가 마커 경로와 시작할 때 있었는지를 보여 준다.
+C-HOLD. `status`의 `core.kill`이 출처(`source`: `watcher` = 워처의 `watcher_kill`, `marker` = 시작할 때 킬 마커가 있었음, `stream` = Bybit 개인 스트림을 `kill_after_ms`(기본 10초) 잃음, C-KILL), 걸린 시각(`since`), 메모(`note`), 확인(`confirmed_at`, `outcome`)을 보여 준다. `node.kill_marker`가 마커 경로와 시작할 때 있었는지를 보여 준다.
 이 상태에서 OMS는 **모든 주문을 거절한다(감소 전용 포함)**. 포지션은 닫지 않는다. 재시작은 이 상태를 풀지 않는다(U-06): 저널의 래치나 마커가 있으면 다시 시작한 노드도 걸린 채로 시작하고, 게이트웨이가 킬 루프를 다시 돌린다.
 
 1. 걸린 이유를 본다(`core.kill.note`, 워처 로그). 마커 출처면 마커 파일의 내용이 메모에 있다(`marker: …`). `marker unreadable: <종류>`면 노드가 마커 경로를 볼 수 없었다는 뜻이다(권한 등). 경로를 고친다.
@@ -427,7 +427,7 @@ telegram = "/etc/oms/telegram.json"   # 절대 경로
 
 ### 7.13 워처가 불일치를 확정했다 (`holds`에 `watcher_mismatch`)
 
-워처([C-WATCH](../contracts/watcher.md))의 검사 가운데 하나가 OMS와 거래소의 차이를 두 라운드 연속으로 보았고, 그 저널 항목이 `min_age_ms`(기본 2초)보다 오래됐다. `core.watcher_mismatch`가 검사 이름(`source`), 시각, 내용(`note` = 워처의 `detail`)을 보여 준다. 일반 주문을 거절하고 감소 전용 주문은 받는다(증거금 정책이 있을 때). 저절로 풀리지 않는다.
+워처(C-WATCH)의 검사 가운데 하나가 OMS와 거래소의 차이를 두 라운드 연속으로 보았고, 그 저널 항목이 `min_age_ms`(기본 2초)보다 오래됐다. `core.watcher_mismatch`가 검사 이름(`source`), 시각, 내용(`note` = 워처의 `detail`)을 보여 준다. 일반 주문을 거절하고 감소 전용 주문은 받는다(증거금 정책이 있을 때). 저절로 풀리지 않는다.
 
 `detail`의 모양: `<검사> <종류> <대상>: venue <거래소 쪽>, journal <저널 쪽>; seen 2 rounds, <나이>`(여럿이면 끝에 `; and N more`). `<나이>`는 `journal entry <a> s old`(저널 항목, W2에서는 저널과 거래소의 변경 시각 중 새 것; 거래소 쪽은 `updatedTime`, 처음 본 시각, U19a9부터 W4가 맞춘 `execTime`), `first seen <a> s ago`(저널이 모르는 주문), `change time unknown`(어느 시각도 모름). W4(U19a8)는 `seen 2 sweeps, execTime <a> s old`(거래소 체결 시각; 없으면 `execTime unknown`)이고, `unknown_exec_type`은 `seen 1 sweep`이다(바로 확정). W4의 대상은 체결 키 `<symbol>:<execId>`다.
 
@@ -466,7 +466,7 @@ ADL, 청산 포지션 인수, 인도, 정산, 또는 게이트웨이가 분류�
 
 ### 7.15 전략의 연결을 잃었다 (`strategies.<s>.holds`에 `strategy_link`)
 
-[C-LIVE](../contracts/liveness.md). `status`의 `strategies.<s>.link`가 이유(`why`: `last trading connection closed` 또는 `no request for {ms} ms`), 시각(`since`), 지금 열린 연결 수(`connections`), 마지막 요청 뒤의 시간(`last_request_age_ms`)을 보여 준다. OMS는 그 전략의 걸린 일반 주문 취소를 이미 요청했고(취소는 요청이지 확인이 아니다: `open_orders`로 본다), 그 전략의 감소 전용 주문과 다른 전략의 주문은 그대로다. 계좌 전체의 `core.holds`에는 나오지 않는다.
+C-LIVE. `status`의 `strategies.<s>.link`가 이유(`why`: `last trading connection closed` 또는 `no request for {ms} ms`), 시각(`since`), 지금 열린 연결 수(`connections`), 마지막 요청 뒤의 시간(`last_request_age_ms`)을 보여 준다. OMS는 그 전략의 걸린 일반 주문 취소를 이미 요청했고(취소는 요청이지 확인이 아니다: `open_orders`로 본다), 그 전략의 감소 전용 주문과 다른 전략의 주문은 그대로다. 계좌 전체의 `core.holds`에는 나오지 않는다.
 
 1. 전략 프로세스를 본다(죽었는지, 멈췄는지, 소켓에 닿는지).
 2. 전략을 다시 띄우거나 다시 연결한다. 전략의 `hello`가 보류를 풀고, 그 답이 온 뒤에는 일반 주문이 받아진다. 운영자 명령은 없다(`clear-hold`로는 풀지 않는다).
@@ -486,7 +486,7 @@ mainnet은 사용 중인 전략이 모두 적혀야 시작한다. testnet과 가
 
 ### 7.16 모니터링이 없다 (`holds`에 `unmonitored`)
 
-[C-LIVE](../contracts/liveness.md) 2부. `[core.policy.monitor]`가 있으면 노드는 `monitor.sock`에서 워처의 하트비트를 받고, 코어가 기록 시각으로 판단한다. `status`의 `core.monitor`가 이유(`reason`), 시각(`since`), 마지막 하트비트 뒤의 시간(`last_heartbeat_age_ms`), 검사마다 마지막 성공 뒤의 시간(`checks`), 단계(`cancel_stage`: `waiting`이면 `cancel_at`에 걸린 일반 주문 취소가 시작된다, `cancelling`이면 이미 요청 중)를 보여 준다.
+C-LIVE 2부. `[core.policy.monitor]`가 있으면 노드는 `monitor.sock`에서 워처의 하트비트를 받고, 코어가 기록 시각으로 판단한다. `status`의 `core.monitor`가 이유(`reason`), 시각(`since`), 마지막 하트비트 뒤의 시간(`last_heartbeat_age_ms`), 검사마다 마지막 성공 뒤의 시간(`checks`), 단계(`cancel_stage`: `waiting`이면 `cancel_at`에 걸린 일반 주문 취소가 시작된다, `cancelling`이면 이미 요청 중)를 보여 준다.
 
 1. 워처를 본다(떠 있는지, 노드와 같은 uid인지, `monitor.sock`에 닿는지). 시작 직후라면 워처의 첫 하트비트를 기다린다: 모든 시작은 감시 안 됨으로 시작한다.
 2. 이유가 `W1 …` 또는 `W2 …`이면 워처는 살아 있지만 그 검사가 성공하지 못한다(거래소 조회 실패 등). 워처의 로그를 본다. `reason`은 감시 안 됨이 **시작된** 이유다(감시 안 됨인 채 이유가 바뀌어도 그대로다). 지금의 사정은 `checks`(검사마다 마지막 성공 뒤의 ms)와 `last_heartbeat_age_ms`로 본다.
@@ -525,7 +525,7 @@ mainnet은 이 표 없이 시작하지 않는다. testnet과 가상 거래소에
 
 ### 7.18 워처가 OMS를 멈췄다 (W5)
 
-[C-WATCH](../contracts/watcher.md) 12부. `[kill]`이 있는 워처는 OMS의 `/api/status`가 `silence_ms`(기본 10초, 설계 값) 동안 정상으로 답하지 않으면 킬 마커를 쓰고(K1), `admin.sock`에 `watcher_kill`을 보내고(K2; 래치하지 못하면 `systemctl stop <oms_unit>`, K3), 그 뒤에야 자기 키로 1초마다 일괄 취소해 미체결 0건을 확인하고 30초 지켜본다(linear·USDT만, 포지션은 닫지 않음). 알림은 `[WATCH P1] … 워처 킬 …`이다(표는 7.12).
+C-WATCH 12부([설명 §6](../explanation.md)). `[kill]`이 있는 워처는 OMS의 `/api/status`가 `silence_ms`(기본 10초, 설계 값) 동안 정상으로 답하지 않으면 킬 마커를 쓰고(K1), `admin.sock`에 `watcher_kill`을 보내고(K2; 래치하지 못하면 `systemctl stop <oms_unit>`, K3), 그 뒤에야 자기 키로 1초마다 일괄 취소해 미체결 0건을 확인하고 30초 지켜본다(linear·USDT만, 포지션은 닫지 않음). 알림은 `[WATCH P1] … 워처 킬 …`이다(표는 7.12).
 
 1. 왜 OMS가 조용했는지 본다: OMS의 로그와 저널(마지막 기록), 프로세스가 살아 있는지. 워처 로그의 `error: W5: /api/status gave no good answer for <ms> ms …` 줄이 쏜 때다. 워처가 OMS보다 먼저 떴거나 `status_url`이 틀려도 쏜다(아래 시작 순서).
 2. 마커를 본다: 시작 알림의 `킬 마커: 씀 | 이미 있음 | 쓰지 못함(…)`, 그리고 `(OMS가 읽는 경로인지 확인 못 함)`이 붙었는지. 마커가 OMS가 읽는 경로에 있으면 OMS의 다음 시작은 래치된 채 시작하고(`core.kill.source: marker`) 자기 킬 루프를 다시 돌린다(7.12).

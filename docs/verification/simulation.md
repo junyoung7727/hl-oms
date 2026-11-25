@@ -59,7 +59,7 @@ OMS_SIM_DUMP=1 …                                                       # 위�
 | `bridge` | 거래소의 실제 포지션이 `[기장 포지션 − 매도 예약, 기장 포지션 + 매수 예약]` 안에 있다. OMS가 모르는 체결이 있어도 예약이 그것을 설명한다 |
 | `position-bounds` | 기장 포지션과 예약의 합이 계좌·전략 한도 안에 있다 |
 | `venue-position-limit` | 거래소의 실제 포지션이 계좌 한도 안에 있다 |
-| 구조 불변조건 | 모든 입력 뒤에 `Core::check_invariants`. 목록은 [04-invariants.md](../04-invariants.md) |
+| 구조 불변조건 | 모든 입력 뒤에 `Core::check_invariants`. 목록은 04-invariants.md |
 | 키당 주문 하나 | 전략이 받은 응답으로 볼 때 한 키에 주문 번호가 둘 이상 나오지 않는다 |
 
 외부 체결이 일어난 실행에서는 `bridge` 이하를 검사하지 않는다(그 실행의 목적은 탐지다).

@@ -1,5 +1,5 @@
 //! The watcher's own Bybit v5 request signing (C-WATCH part 3), written
-//! from the venue's documentation (`docs/contracts/gateway.md`, row "서명"),
+//! from the venue's documentation (ADR-028, row "서명"),
 //! not from the OMS's code. GETs, and from U19b2a the one signed POST,
 //! the cancel-all of the watcher's kill loop (`rest::Client::cancel_all`).
 //!

@@ -1,6 +1,6 @@
 //! The node is stopped at one named boundary of the commit sequence
-//! (docs/contracts/commit.md, "경계별 장애 결과") and restarted. Each test
-//! checks the row of that table: what the journal holds, what the strategy
+//! (claims V-COMMIT-2 and V-COMMIT-4, docs/explanation.md §2) and restarted.
+//! Each test checks that boundary: what the journal holds, what the strategy
 //! saw, what reached the venue, what the restarted node does, and what a
 //! repeated request gets.
 //!

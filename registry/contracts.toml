@@ -1,10 +1,11 @@
 # 동작 계약의 색인. events 는 이 계약이 정의하는 상태 전이(저널 이벤트 이름)다.
+# 규칙은 claims(주장과 그 시험)와 docs/explanation.md(상황별 동작)에 있다. 계약 문서는 C-TAIL(docs/contracts/tail.md)만 남았다: 시험이 그 필드 표를 읽는다.
+# file 은 그 문서가 있을 때만 적는다.
 # 대시보드는 이벤트 이름으로 계약·설계 결정·코드·시험을 찾아 연결한다.
 
 [[contract]]
 id = "C-COMMIT"
 title = "기록·내구화·적용·응답·전송의 순서"
-file = "docs/contracts/commit.md"
 summary = "응답·전송·공개는 그 기록이 내구화된 뒤에만 나간다. 경계별 장애 결과 표가 있다"
 events = []
 adr = ["ADR-003", "ADR-004", "ADR-012"]
@@ -14,8 +15,6 @@ claims = ["V-COMMIT-1", "V-COMMIT-2", "V-COMMIT-3", "V-COMMIT-4", "V-COMMIT-5"]
 [[contract]]
 id = "C-NEW"
 title = "신규 주문 수용과 예약"
-file = "docs/contracts/order-lifecycle.md"
-anchor = "c-new-신규-주문-수용"
 summary = "검사와 예약이 한 입력 안에서 일어난다. 거절은 사유 코드를 모두 돌려준다"
 events = ["order_accepted", "request_rejected"]
 adr = ["ADR-008", "ADR-009"]
@@ -25,7 +24,6 @@ claims = ["V-NEW-1", "V-NEW-2", "V-MARKET-REF-1"]
 [[contract]]
 id = "C-IDEM"
 title = "멱등성"
-file = "docs/contracts/idempotency.md"
 summary = "(전략, 키)마다 주문은 최대 하나. 삭제는 요청 만료 뒤에만"
 events = ["purged"]
 adr = ["ADR-006"]
@@ -35,8 +33,6 @@ claims = ["V-IDEM-1", "V-IDEM-2", "V-IDEM-3"]
 [[contract]]
 id = "C-SEND"
 title = "전송 결과"
-file = "docs/contracts/order-lifecycle.md"
-anchor = "c-send-전송-결과"
 summary = "게이트웨이의 네 가지 결과(놓임, 거부, 미전송, 불명)와 코어의 반응"
 events = ["order_acked", "venue_oid_learned", "order_in_doubt"]
 adr = ["ADR-005", "ADR-007"]
@@ -46,8 +42,6 @@ claims = ["V-DOUBT-1", "V-BOOT-1"]
 [[contract]]
 id = "C-DOUBT"
 title = "결과 불명의 해소"
-file = "docs/contracts/order-lifecycle.md"
-anchor = "c-doubt-결과-불명의-해소"
 summary = "불명 동안 예약 유지와 신규 주문 차단. 존재 증거, 만료 뒤 부재 확인, 운영자 종결 중 하나로 해소"
 events = ["order_in_doubt", "absence_noted"]
 adr = ["ADR-005"]
@@ -57,8 +51,6 @@ claims = ["V-DOUBT-1", "V-DOUBT-2", "V-DOUBT-3", "V-ABSENCE-N-1"]
 [[contract]]
 id = "C-FILL"
 title = "체결 기장"
-file = "docs/contracts/order-lifecycle.md"
-anchor = "c-fill-체결-기장"
 summary = "체결 키로 한 번만 기장한다. 주인을 모르는 체결은 대기시키고, 버리지 않는다"
 events = ["fill_booked", "fill_parked", "fill_unparked", "external_fill_booked", "funding_booked", "venue_position_changed", "unclassified_execution_noted"]
 adr = ["ADR-007"]
@@ -68,8 +60,6 @@ claims = ["V-FILL-1", "V-EXT-1", "V-MIS-1", "V-FUZZ-1", "V-VENUE-EXEC-1"]
 [[contract]]
 id = "C-CANCEL"
 title = "취소"
-file = "docs/contracts/order-lifecycle.md"
-anchor = "c-cancel-취소"
 summary = "취소 요청은 예약을 풀지 않는다. 취소는 재시도할 수 있고 상한이 있다"
 events = ["cancel_requested", "cancel_sent", "cancel_outcome_noted"]
 adr = ["ADR-005", "ADR-007"]
@@ -79,8 +69,6 @@ claims = ["V-CANCEL-1"]
 [[contract]]
 id = "C-TERM"
 title = "종결"
-file = "docs/contracts/order-lifecycle.md"
-anchor = "c-term-종결"
 summary = "거래소의 종결 통보는 Closing으로, 체결이 다 모였을 때 Closed로"
 events = ["venue_terminal", "order_closed", "missing_fills_flagged", "status_noted", "order_recheck"]
 adr = ["ADR-007"]
@@ -90,8 +78,6 @@ claims = ["V-TERM-1"]
 [[contract]]
 id = "C-JOURNAL"
 title = "저널에서 상태 복원"
-file = "docs/contracts/recovery.md"
-anchor = "c-journal-저널에서-상태-복원"
 summary = "스냅샷 + 이후 기록의 이벤트 적용. 외부 효과 없음. 손상은 위치에 따라 처리"
 events = []
 adr = ["ADR-003", "ADR-011", "ADR-013"]
@@ -101,8 +87,6 @@ claims = ["V-JRN-1", "V-JRN-2", "V-JRN-3", "V-JRN-5", "V-REPLAY-1", "V-BOOT-2", 
 [[contract]]
 id = "C-SNAP"
 title = "스냅샷"
-file = "docs/contracts/recovery.md"
-anchor = "c-snap-스냅샷"
 summary = "내구화된 상태에서만 뜨고 원자적으로 나타난다. 실패해도 저널이 완전하다"
 events = []
 adr = ["ADR-011"]
@@ -112,8 +96,6 @@ claims = ["V-JRN-4", "V-PERF-3"]
 [[contract]]
 id = "C-BOOT"
 title = "재시작"
-file = "docs/contracts/recovery.md"
-anchor = "c-boot-재시작"
 summary = "결과 기록 없는 전송은 불명으로 표시한다. 신규 주문은 다시 보내지 않고 취소와 조회만 다시 한다"
 events = ["booted", "config_activated"]
 adr = ["ADR-005", "ADR-002"]
@@ -123,8 +105,6 @@ claims = ["V-BOOT-1", "V-CFG-1", "V-BOOT-2", "V-COMMIT-4"]
 [[contract]]
 id = "C-LINK"
 title = "링크 상태"
-file = "docs/contracts/reconciliation.md"
-anchor = "c-link-링크-상태"
 summary = "스트림 연결의 성립과 상실. 올라올 때마다 세션이 바뀌고 재확인이 필요하다"
 events = ["link_changed"]
 adr = ["ADR-014"]
@@ -134,8 +114,6 @@ claims = ["V-RECON-1", "V-LINK-1"]
 [[contract]]
 id = "C-RECON"
 title = "재확인과 대조"
-file = "docs/contracts/reconciliation.md"
-anchor = "c-recon-재확인과-대조"
 summary = "주문별 증거, 체결 동기화, 열린 주문 훑기, 포지션 구간 검사"
 events = ["fills_synced", "open_orders_swept", "positions_verified", "status_noted", "order_recheck"]
 adr = ["ADR-014"]
@@ -145,8 +123,6 @@ claims = ["V-RECON-1", "V-RECON-2"]
 [[contract]]
 id = "C-MISMATCH"
 title = "불일치와 조정"
-file = "docs/contracts/reconciliation.md"
-anchor = "c-mismatch-불일치"
 summary = "차이는 기록되고 신규 주문을 막는다. 운영자가 건별로 확인하고 명시적으로 조정한다"
 events = ["mismatch_raised", "mismatch_acked", "position_adjusted", "venue_change_settled"]
 adr = ["ADR-014"]
@@ -156,7 +132,6 @@ claims = ["V-RECON-1", "V-EXT-1", "V-MIS-1", "V-VENUE-EXEC-1"]
 [[contract]]
 id = "C-OVERLOAD"
 title = "과부하와 저장 공간"
-file = "docs/contracts/overload.md"
 summary = "큐별 상한과 가득 찼을 때의 동작. 저장 공간 부족과 저장 실패"
 events = ["storage_low_changed"]
 adr = ["ADR-010"]
@@ -166,8 +141,6 @@ claims = ["V-OVL-1", "V-OVL-2", "V-OVL-3", "V-API-3", "V-PERF-2"]
 [[contract]]
 id = "C-OPS"
 title = "운영 명령"
-file = "docs/contracts/api.md"
-anchor = "운영-명령"
 summary = "중지·재개·전체 취소·주문 종결·참조 가격. 모두 사유와 함께 저널에 기록된다"
 events = ["operator_halted", "operator_resumed", "ref_price_updated"]
 adr = ["ADR-008", "ADR-015"]
@@ -177,7 +150,6 @@ claims = ["V-API-1", "V-CANCEL-1"]
 [[contract]]
 id = "C-API"
 title = "로컬 API"
-file = "docs/contracts/api.md"
 summary = "프로토콜, 권한, 입력 검증, 연결별 상한"
 events = []
 adr = ["ADR-015"]
@@ -187,7 +159,6 @@ claims = ["V-API-1", "V-API-2", "V-API-3", "V-DASH-1"]
 [[contract]]
 id = "C-GW"
 title = "게이트웨이 계약"
-file = "docs/contracts/gateway.md"
 summary = "게이트웨이가 지켜야 하는 의무 13가지와 중단 지점"
 events = []
 adr = ["ADR-005", "ADR-014", "ADR-017", "ADR-021"]
@@ -208,7 +179,6 @@ claims = ["V-TAIL-1", "V-TAIL-2"]
 [[contract]]
 id = "C-MARGIN"
 title = "증거금 규칙"
-file = "docs/contracts/margin.md"
 summary = "계좌 레버리지 검사, 일 손실·유지증거금 여유·계좌 유지증거금률(교차 계좌, U17d)로 들어가는 감소 전용 상태, 보고 끊김 취소, 거래소 설정 확인. 차단 표, 증거금 보고 수신·신선도, 계좌 레버리지 검사, 일 손실과 감소 전용 상태 진입, 운영자의 해제와 기준 재설정, 거래소 설정과 계좌 모드, 보고 끊김 취소, 유지증거금 여유, 시뮬레이션의 증거금 모형과 불변식 검사까지 구현(ADR-018)"
 events = ["margin_reported", "margin_report_rejected", "day_base_set", "reducing_entered", "reducing_cleared", "venue_setting_noted", "account_mode_noted"]
 adr = ["ADR-008", "ADR-018"]
@@ -219,7 +189,6 @@ claims = ["V-MARGIN-1", "V-MARGIN-2", "V-MARGIN-3", "V-MARGIN-4", "V-MARGIN-5", 
 [[contract]]
 id = "C-ALERT"
 title = "직접 알림"
-file = "docs/contracts/alerts.md"
 summary = "노드가 공개된(내구화된) 상태에서 거래 안전 조건을 계산해 텔레그램으로 직접 보낸다. 조건 표, 유예, 내보내는 시점, 놓칠 수 있는 것과 한계, 치명 알림과 게이트웨이 막힘의 예외, 종료 전 전송. 저널 이벤트는 더하지 않는다"
 events = []
 adr = ["ADR-029", "ADR-004", "ADR-016"]
@@ -230,7 +199,6 @@ claims = ["V-ALERT-1", "V-ALERT-2", "V-ALERT-3", "V-ALERT-4", "V-ALERT-5"]
 [[contract]]
 id = "C-HOLD"
 title = "운영자가 푸는 보류"
-file = "docs/contracts/holds.md"
 summary = "킬 래치(감소 전용 포함 모든 주문 거절), 워처 불일치, 거래소 변경(일반 주문만). 워처의 watcher_mismatch·watcher_kill, clear_hold의 거절 코드(강제 없음), 프로세스마다의 킬 확인, 내구화 뒤의 Kill·KillStop 명령과 unsupported 답, 시작 전에 읽고 내구화된 해제 뒤에 지우는 킬 마커, 상태와 알림"
 events = ["hold_set", "hold_cleared"]
 adr = ["ADR-030", "ADR-008", "ADR-004"]
@@ -241,7 +209,6 @@ claims = ["V-HOLD-1", "V-HOLD-2", "V-HOLD-3", "V-HOLD-4", "V-HOLD-5", "V-HOLD-6"
 [[contract]]
 id = "C-KILL"
 title = "Bybit 킬 스위치"
-file = "docs/contracts/kill.md"
 summary = "개인 스트림을 마지막 생존 증거 뒤 kill_after_ms 동안 잃으면 킬을 거는 트리거(시작 확인 전에는 무장하지 않음, 코어 큐 대기는 끊김이 아님), 래치가 내구화된 뒤 도는 확인 루프(1초마다 일괄 취소, 0건 뒤 30초 감시, 비상 예산 2/1초, 루프 중 생성 거절), P1 알림 규칙(10분에 12개 이하, 포지션 묶음), 확인 뒤 새 계기의 다시 무장(kill_rearmed), 설정과 상태"
 events = ["kill_loop_ended", "kill_rearmed"]
 adr = ["ADR-030", "ADR-028", "ADR-004"]
@@ -252,7 +219,6 @@ claims = ["V-KILL-1", "V-KILL-2", "V-KILL-3", "V-KILL-4", "V-KILL-5"]
 [[contract]]
 id = "C-LIVE"
 title = "전략 연결 감시와 모니터링 게이트"
-file = "docs/contracts/liveness.md"
 summary = "1부: [liveness]에 적힌 전략의 마지막 거래 연결이 닫히거나 liveness_ms 동안 요청(ping 포함)이 없으면 노드가 Input::Session(Lost)를 한 번 넣고, 코어가 strategy_link_lost와 같은 기록에서 그 전략의 걸린 일반 주문만 규칙 취소하며 그 전략의 일반 주문만 보류한다. 그 전략의 hello가 Input::Session(Hello)로 풀고, hello의 답은 복구가 내구화된 뒤. 큐가 가득이면 잃음은 틱마다 다시. mainnet은 사용 중인 전략이 모두 적혀야 시작. 상태와 알림 strategy_link:<s>. 2부: [core.policy.monitor]가 있으면 monitor.sock(자기 uid, 연결 둘, 연결마다 초당 둘)의 heartbeat를 watcher_heartbeat로 기록하고 코어가 기록 시각으로 판단한다. 하트비트가 30초 없거나 그 하트비트에서 W1·W2가 없거나 10초 넘게 이전이면 monitor_changed{false}와 보류 Unmonitored(일반 주문만), 60초 더 가면 틱마다 걸린 일반 주문의 규칙 취소(연결이 올라와 있을 때). 모든 시작과 게이트를 켜는 설정은 감시 안 됨으로 시작. 신선한 하트비트가 monitor_changed{true}로 푼다. 미래의 검사 시각은 거절. mainnet은 게이트 없이 시작하지 않음. 알림 hold:unmonitored(유예 30초)"
 events = ["strategy_link_lost", "strategy_link_restored", "watcher_heartbeat", "monitor_changed"]
 adr = ["ADR-030", "ADR-008", "ADR-015", "ADR-004"]
@@ -263,7 +229,6 @@ claims = ["V-LIVE-1", "V-LIVE-2", "V-LIVE-3", "V-LIVE-4", "V-GATE-1", "V-GATE-2"
 [[contract]]
 id = "C-WATCH"
 title = "독립 워처"
-file = "docs/contracts/watcher.md"
 summary = "1부: crate watcher는 oms-*·md-* crate도 다른 작업 공간 crate도 쓰지 않고(개발 의존성 http-fake만), watcher-conformance만 그것을 OMS 코드와 함께 링크한다. tools/ci/watcher_independent.sh가 선언된 의존성(모든 종류와 target), 호스트 그래프의 도달, 역방향, #[path]·include!·속성 안의 path =와 심볼릭 링크, 패키지 밖 소스의 target을 보고 0/1/2로 끝난다(CI, 자체 시험 22건). 독자 저널 읽기: ADR-011과 C-TAIL만으로, 읽기 전용, LOCK 없음, 상한 너머 금지, 프레임 하나씩, 회전과 헤더 다시 읽기, 상한 이하 손상은 위치를 두고 오류. Io·Damaged·NoStart는 다시 읽고 UnknownEvent·Schema·Format·Instance는 재시작까지 래치. 시작마다 기록 1부터 재생, 저장 상태 없음. 아는 이벤트는 C-TAIL 표의 51개. 2부: 저널 상태 JournalState(C-TAIL 상태 표의 규칙과 C-WATCH 2부의 시각, 표의 확인·결과 불명·종결, 키, 바닥, 보류, 기준일 행은 U19a2 검토 1 M1에서 더함: 주문 정보는 order_accepted부터 purged까지, 열린 주문, 체결·거래소 변경·펀딩 키, 종목별 포지션 = 체결 + 거래소 변경 + 조정, 주문별 fact_at, 종목별 last_change_at, 보류, 기준일, 올라가기만 하는 체결 바닥). 규칙에 맞지 않는 기록은 State 오류로 래치. 코어와의 적합성은 이벤트 51개를 모두 쓰는 시나리오에서 기록마다. 재생은 100만 건당 약 1.3초. 3부: 자기 Bybit GET 서명(정렬된 질의, 보낼 수 없는 값은 보내기 전에 거절, 머리글 다섯)과 클라이언트(IPv4, 리다이렉트·프록시 없음), 응답 부류 not_sent·no_answer·rate_limited·clock·refused·auth·ip_banned·unreadable, 키 거절은 재시작까지 Bybit 요청 없음(watcher_auth_rejected), 403은 응답부터 600초 모든 요청과 IP 반향 멈춤, 10초 창 60개의 요청 제한(넘으면 기다림), 보내기 전에 세는 요청, 지표 등록부와 큐 없는 VM 가져오기(watcher_up). 4부(U19a4): 설정 파일(모르는 키 거부, 스펙 표의 기본값과 범위, mainnet은 mainnet_confirmed = true일 때만, loopback만의 status_url·vm_url, https 반향, 데이터 디렉터리 밖의 자격 파일, 거부는 한 줄)과 자격 파일(링크를 따르지 않고 FIFO를 기다리지 않는 한 핸들, 이 uid의 0600·0400 일반 파일, api_key·api_secret만, 오류는 내용을 인용하지 않음). 4부(U19a4b): 시작 확인은 sans-IO Start(query-api: 하위 계정 키, sub_account_uid, IP에 묶인 키; expiredAt에서 내림한 watcher_api_key_days_left, 해당 없으면 없음; 반향의 공인 IP가 ips에 있을 때만 watcher_public_ip_ok 1; 기호마다 instruments-info의 settleCoin USDT). 규칙 위반은 종료 2, auth는 요청 없이 떠 있음, 그 밖의 답은 답 + 5초(403은 + 600초)에 다시. IP 재확인 IpCheck는 마지막 답 + ip_check_ms마다, 실패는 0과 남은 날 유지, 규칙 위반은 재시작까지 모든 Bybit 요청 멈춤(Client::stop_key). 5부(U19a5): sans-IO 검사 엔진(첫 라운드와 하트비트는 start_ms, 겹치지 않고 늦은 라운드는 한 번, 거래소 → 그 라운드만의 /api/status → 상한까지 저널 → 비교, 다른 인스턴스와 그 요청 때의 last_seq보다 낮은 상한은 래치, 래치 뒤 라운드는 묻지 않음, 요청마다 기한 = 낸 시각 + request_timeout_ms + 11초, 길 잃은 답은 버림). 두 라운드 규칙: 첫 sighting은 보류 중, 두 번째에 min_age_ms 미만이면 미룸(성공 아님), 이상이면 확정(정체마다 한 번 세고 Mismatch 하나, detail 1024바이트). W1: order/realtime 50개씩 20쪽까지(OMS의 쪽 규칙), foreign·closed_in_journal·open_after_terminal·details·missing_at_venue, 확인되지 않았거나 결과 불명인 주문은 비교하지 않음, 나이는 fact_at 또는 첫 sighting. 6부(U19a6): W2는 position/list 200개씩 5쪽까지(W1의 쪽 규칙, 한 기호의 두 행과 크기 있는 빈·없는 방향과 음수 크기는 unreadable), 기호마다 d = 거래소 − 저널 포지션, 정체의 값은 d. 저널의 last_change_at과 거래소의 updatedTime(없으면 그 크기를 처음 본 라운드 seen_at, 행이 없으면 크기 0) 중 알려진 것이 어리면 첫 sighting에도 미룸(성공 아님), 모르는 시각은 늙음. 첫 완전한 읽기의 크기에는 seen_at이 없고, 모든 쪽을 읽은 뒤 실패한 라운드의 크기는 마지막 거래소 답의 시각으로 남고, 쪽 사이에서 실패한 라운드는 아무것도 남기지 않는다. 범위를 넘은 d는 값 overflow인 차이. 7부(U19a7): /api/status 클라이언트(loopback, 리다이렉트 없음), admin.sock의 watcher_mismatch(보내기마다 연결, hello 먼저), 엔진의 다시 보내기 규칙(확정된 차이는 held 답까지 빚, already held·저널의 보류·실패는 갚지 않음, 보류 꺼짐은 최근 답 뒤에 낸 상태 요청의 상한에서, mismatch_resend_ms, 검사마다 진행 중 보내기 하나와 그 기한, W1~W3은 아직 보는 차이를 해제 뒤 다시), monitor.sock 하트비트(연결 하나, hello 먼저, W1~W4 성공 시각 또는 null, 실패 뒤 다음 하트비트에 다시 연결), 실행(설정을 읽은 때부터 지표, 시작 확인, /api/status 기다림, 재생, W1~W4 엔진, 내내 IP 재확인, 종료 0, 거부 2)과 바이너리 watcher --config. 8부(U19a8): W4는 execution/list를 고정된 끝과 시작 max(워터마크 − 겹침, ⌈바닥/1000⌉)(7일로 자름)의 창으로 훑고, 라운드마다 w4_max_pages쪽까지(더 길면 다음 라운드가 커서로 이음, 성공 시각은 끝난 훑기에서만), 빈 쪽이나 빈 커서(가득 찬 쪽도, 알려진 한계)에서 끝, 실패한 쪽은 같은 커서로 다시, 연달아 3번이나 50라운드면 같은 시작과 새 끝으로 다시 시작. execType으로 먼저 나눠 Trade는 체결과, AdlTrade·BustTrade·Delivery·Settle은 거래소 변경과 키로 비교, Funding은 비교 없음, 모르는 형은 끝난 훑기에서 바로 확정, 필드 없는 행과 execTime이 훑기의 끝 뒤인 행은 unreadable_row, 바닥 아래 행과 수량 0인 Trade·거래소 변경 행은 무시. 두 훑기와 execTime 나이로 확정, 어린 차이는 훑기를 실패시키지 않음. 워터마크는 확정되지 않은 가장 오래된 행 아래로만, 뒤로 가지 않음. held로 갚고 그 답 뒤의 상한에서 보류 꺼짐을 본 W4 정체는 거둠(메모리에만). 9부(U19a9): W3은 wallet-balance의 UNIFIED 계좌 하나를 OMS의 공식으로 판단(account_mm_rate: maintenance > 0이고 maintenance × 10 000 ≥ 한도 × margin_balance; daily_loss: 오늘의 UTC 기준이 있을 때만 (base − totalEquity) × 10 000 > 한도 × base), 정체는 종류뿐, 두 라운드 연속에서 나이 없이 확정, 위반이 남으면 해제 뒤 다시 보냄. W2는 W4가 맞춘 가장 새 execTime이 updatedTime·seen_at보다 새면 그것을 씀. 하트비트의 W3·W4는 성공 시각. 예산은 측정: 5초에 체결 30이면 1분에 162요청(2.7/s), 100이면 3.2/s(정상 상태 3.3, 완료 기준과의 충돌, 소유자 질문 1), 열린 주문 500이면 가드가 W1 라운드를 늘리되 W1·W2 나이는 10초 아래. 10부(U19b1a, ADR-032): [telegram] token_file(mainnet 필수, testnet은 warn 한 줄), 토큰 파일은 alert-direct와 같은 JSON에 자격 파일의 파일 규칙과 git 저장소 밖, 시작 확인 전에 한 번 읽고 거부는 종료 코드 2, Debug는 token: <hidden>. 전달 규칙은 PR #3을 다시 씀: [WATCH P1] bybit {name} {KST} 머리, 3,500 UTF-16 분할, 보관 50개(오래된 것을 버리고 셈, 큐가 빈 뒤 알림 하나), 2xx와 ok true만 전달, 400·413 버림, 나머지 다시 보냄, 반복 규칙(시작, 5분마다 최신 문구, 해소), 저장하지 않음. 송신 태스크(U19b1b): 경로 DNS 다음 149.154.167.220 고정, 네트워크 오류면 다음 경로, 답한 경로가 맨 앞, Notify로 깨우고 남은 부분은 주입된 시계 +5초에 실행의 틱이 깨움, 네 지표, 종료 때 실제 5초 안의 마지막 흘려보내기. P1 조건(U19b1c): 불일치는 확정마다(Action::Confirmed, 다시 보내기는 아님) 검사마다 60초에 하나·모아서, auth(Client::auth_stop의 첫 문구)와 public_ip(start::PublicIp)는 틱마다 반복 규칙으로, 시작 거부는 종료 코드 2 전에 하나와 흘려보내기; 송신기는 시작 확인 전에 뜨고 [telegram]이 없으면 P1은 warn 한 줄. 11부(U19b2a): 서명된 POST는 일괄 취소 하나(경로와 본문 상수, 보내는 바이트 위의 서명, 가드·멈춤·래치를 지남, success 0은 refused, 소스에 다른 POST와 일반 메서드 없음), [kill] 루프 필드(OMS의 kill_* 기본값과 범위), [kill]이면 키는 readOnly 0·ContractTrade Order·Withdraw 없음(시작은 종료 2, 재확인은 규칙 멈춤), 킬 알림 문구(워처 킬, StopOutcome 다섯, 키 래치·403 멈춤의 진행 줄, 포지션을 읽지 않는 중단 알림)와 포지션 묶음(수량·손익·마크·강제청산가까지 0.01 % 내림, 모르면 모름, 20행), 포지션 읽기(5쪽, 읽기 시작부터의 기한, 래치·멈춤이면 묻지 않음); 아직 아무것도 일괄 취소를 보내지 않음. 12부(U19b3a): [w5] probe_ms·silence_ms(≥ 3 × probe_ms + 3 × request_timeout_ms + 1,000, [kill]과 함께: 잃은 탐침 하나도 틈보다 짧은 멈춤 하나도 쏘지 않게), [kill] marker(OMS의 규칙)·oms_unit(systemd 단위 이름)·systemd·stop_wait_ms, mainnet은 [kill] 필수(testnet은 warn 한 줄, W5 꺼짐); sans-IO W5(시작 확인 뒤에만 무장, probe_ms마다 탐침 하나·둘은 없음, 답 없는 탐침은 낸 시각 + request_timeout_ms + 1초에 실패, 2xx JSON과 16진수 16자리 instance_id만 정상, silence_ms와 마지막 정상 응답 뒤 실패한 탐침이 있어야 한 번 쏨, 틈 규칙, 킬 뒤 정상 응답 하나까지 다시 무장하지 않음, 빚진 정지와 그 P1 둘); 뒤로 가지 않는 clock::Steady; watcher_kill 클라이언트 oms::admin_kill; 단위 하나를 멈추는 stop::Stopper(고정 인자, 비차단 stderr를 끝난 뒤 읽음, 기한에 죽이면 Unconfirmed). 킬 순서(U19b3b): sans-IO Kill이 K1 마커(기한 2초, 실패나 기한에도 계속) → K2 watcher_kill(기한 2 × request_timeout_ms + 1초, latched·already latched만 정지, 기한 정각이라도 poll 전의 답은 받음) → 정지하지 못했으면 K3 systemctl stop(stop_wait_ms, 지나면 확인 못 함) → 루프의 순서로 내고 첫 일괄 취소는 그 뒤에만; 머리의 자유 문구는 200자, X8 줄은 K2 실패와 확인되지 않은 멈춤에서; halt_owed = 래치도 경로를 확인한 마커와 함께인 멈춤도 없음(StopOutcome 다섯), 빚이 있으면 루프 동안 앞 시도의 끝에서 5초마다 watcher_kill(둘은 없음), 래치하면 LateHalt 알림 하나와 마지막 줄 Latched; 모든 단계의 중단(루프 전에는 그때까지의 머리와 진행 중); 마커 쓰기는 있는 것을 건드리지 않고 임시 이름 0600·sync_all·hard_link·디렉터리 sync_all, 문구는 512바이트·detail은 1,024바이트를 글자 경계에서, OMS의 read_kill_marker가 읽음(watcher-conformance); 실행은 아직 W5와 킬을 돌리지 않음"
 events = []
 adr = ["ADR-031", "ADR-032", "ADR-025", "ADR-011"]

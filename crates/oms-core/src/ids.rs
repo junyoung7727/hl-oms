@@ -2,7 +2,7 @@
 //!
 //! String identifiers are validated on construction and on deserialisation, so
 //! an invalid identifier cannot exist inside the core. Lifetimes and scopes of
-//! each identifier are described in docs/contracts/identifiers.md.
+//! each identifier are decided in ADR-006 and ADR-022.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;

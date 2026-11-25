@@ -336,7 +336,7 @@ pub fn run(root: &Path) -> i32 {
     let adr_ids = ids(&decisions, "decisions", &mut errors);
     let contract_ids = ids(&contracts, "contracts", &mut errors);
     let claim_ids = ids(&claims, "claims", &mut errors);
-    ids(&assumptions, "assumptions", &mut errors);
+    let assumption_ids = ids(&assumptions, "assumptions", &mut errors);
     ids(&requirements, "requirements", &mut errors);
     ids(&user_decisions, "user decisions", &mut errors);
 
@@ -439,7 +439,8 @@ pub fn run(root: &Path) -> i32 {
     for c in &contracts {
         let id = s(c, "id");
         check_refs(id, c, &mut errors);
-        if !exists(s(c, "file")) {
+        // A contract names a document only when it has one (C-TAIL).
+        if !s(c, "file").is_empty() && !exists(s(c, "file")) {
             errors.push(format!("{id}: no such file {}", s(c, "file")));
         }
         for e in list(c, "events") {
@@ -492,6 +493,7 @@ pub fn run(root: &Path) -> i32 {
     for d in &decisions {
         check_adr_status(root, d, &adr_ids, &mut errors);
     }
+    check_explanation(root, &claim_ids, &assumption_ids, &mut errors);
     if !errors.is_empty() {
         eprintln!("registry has {} problems:", errors.len());
         for e in &errors {
@@ -654,8 +656,9 @@ pub fn run(root: &Path) -> i32 {
             .map(|id| format!("{id}({})", ko_status(claim_state.get(id).map(String::as_str).unwrap_or(""))))
             .collect();
         md += &format!(
-            "| [{}](../../{}) | {} | {} | {} | {} | {} |\n",
-            s(c, "id"), s(c, "file"), cell(s(c, "title")),
+            "| {} | {} | {} | {} | {} | {} |\n",
+            if s(c, "file").is_empty() { s(c, "id").to_string() } else { format!("[{}](../../{})", s(c, "id"), s(c, "file")) },
+            cell(s(c, "title")),
             list(c, "events").iter().map(|e| format!("`{e}`")).collect::<Vec<_>>().join(" "),
             list(c, "adr").join(", "),
             list(c, "code").iter().map(|e| format!("`{e}`")).collect::<Vec<_>>().join("<br>"),
@@ -782,6 +785,85 @@ fn check_adr_status(root: &Path, d: &Value, adr_ids: &BTreeSet<String>, errors: 
         || value.strip_prefix("대체됨 → ").is_some_and(|by| adr_ids.contains(by) && by != id);
     if !ok {
         errors.push(format!("{id}: status {value:?} is not `채택` or `대체됨 → ADR-0xx` (a date `(YYYY-MM-DD)` may follow)"));
+    }
+}
+
+fn git(root: &Path, args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new("git").arg("-C").arg(root).args(args).output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// IDs of one kind (`V-` claims, `A-` assumptions) found in a line of text.
+fn ids_in(line: &str, prefix: &str) -> Vec<String> {
+    line.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+        .filter(|w| w.starts_with(prefix) && w.len() > prefix.len())
+        .map(|w| w.trim_end_matches('-').to_string())
+        .collect()
+}
+
+/// docs/explanation.md: the first line names the commit it describes, and
+/// every situation names the claims that check it and the assumptions it
+/// rests on. All of them must exist.
+fn check_explanation(root: &Path, claim_ids: &BTreeSet<String>, assumption_ids: &BTreeSet<String>, errors: &mut Vec<String>) {
+    const FILE: &str = "docs/explanation.md";
+    let Ok(text) = std::fs::read_to_string(root.join(FILE)) else {
+        errors.push(format!("{FILE}: missing"));
+        return;
+    };
+    let first = text.lines().next().unwrap_or("");
+    let commit = first
+        .strip_prefix("> 이 설명은 커밋 `")
+        .and_then(|r| r.split_once("` 기준이다."))
+        .map(|(c, _)| c.to_string())
+        .unwrap_or_default();
+    if commit.is_empty() {
+        errors.push(format!("{FILE}: the first line must be \"> 이 설명은 커밋 `<sha>` 기준이다.\""));
+    } else if git(root, &["rev-parse", "--verify", "--quiet", &format!("{commit}^{{commit}}")]).is_none() {
+        errors.push(format!("{FILE}: commit {commit} is not in this repository's history"));
+    } else if let Some(n) = git(root, &["rev-list", "--count", &format!("{commit}..HEAD"), "--", "crates", ":!crates/xtask"]) {
+        if n != "0" {
+            // A warning, not a failure: the code moved since the text was checked.
+            // xtask is left out: it builds documents, it does not trade.
+            eprintln!("::warning file={FILE}::crates/ changed in {n} commits after {commit}, the commit this explanation describes");
+        }
+    }
+    let mut sections = 0;
+    let mut section = String::new();
+    let mut has_tests = true;
+    for line in text.lines() {
+        if let Some(h) = line.strip_prefix("## ") {
+            if !has_tests {
+                errors.push(format!("{FILE}: section {section:?} has no `- 시험:` line"));
+            }
+            section = h.to_string();
+            sections += 1;
+            has_tests = false;
+        }
+        if let Some(rest) = line.strip_prefix("- 시험:") {
+            let found = ids_in(rest, "V-");
+            if found.is_empty() {
+                errors.push(format!("{FILE}: section {section:?} names no claim"));
+            }
+            for c in found {
+                if !claim_ids.contains(&c) {
+                    errors.push(format!("{FILE}: section {section:?} names unknown claim {c}"));
+                }
+            }
+            has_tests = true;
+        }
+        if let Some(rest) = line.strip_prefix("- 가정과 상태:") {
+            for a in ids_in(rest, "A-") {
+                if !assumption_ids.contains(&a) {
+                    errors.push(format!("{FILE}: section {section:?} names unknown assumption {a}"));
+                }
+            }
+        }
+    }
+    if !has_tests {
+        errors.push(format!("{FILE}: section {section:?} has no `- 시험:` line"));
+    }
+    if sections == 0 {
+        errors.push(format!("{FILE}: no situation (`## `) found"));
     }
 }
 

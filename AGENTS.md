@@ -1,26 +1,28 @@
-# hl-oms: instructions for agents
+# hl-oms: 어디에 무엇이 있나
 
-Read `README.md` first. It is the map of the documents (`docs/`), the registry (`registry/*.toml`) and the acceptance checks.
-
-Rules that the code does not show:
-
-- This repository is public. Never commit keys, wallet addresses, journals, snapshots or logs. `tools/ci/secret_scan.sh` must pass.
-- Never run a node against Hyperliquid testnet or mainnet, and never send an order, without the owner's written approval (user decisions U-01, U-09). Approved: minimum-size orders on the Bybit testnet sub-account through the `bybit-testnet` suite. Take the account lock first (`flock /mnt/nvme/gitproject/.gh-runner/locks/bybit-testnet.lock`, shared with the CI job); the suite cancels every order of the account. The key file stays outside the repository.
-- The tree is not rustfmt-clean. Do not run `cargo fmt` over existing files. Only files that a change adds must pass `rustfmt --check` (`tools/ci/rustfmt_added.sh`).
-- After any change under `crates/` or `registry/`, run `cargo run -p xtask -- docs` and commit `docs/generated/`. CI fails when they differ.
-- A claim (`registry/claims.toml`) may name only tests that exist. A journal event must be listed by a contract in `registry/contracts.toml`. Add the claim and the event in the same change that adds the test and the event.
-- Reviewers read `CODING_STANDARDS.md`. A change to a check (`tools/ci/`, lint settings, test removal) waits for the owner (`tools/ci/owner_review.sh`, ADR-033).
-
-## Agent skills
-
-### Issue tracker
-
-Issues and specs are local markdown files under `.scratch/<feature-slug>/` in this repository, committed to git. GitHub Issues are not used. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-The five default role strings (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), written on the `Status:` line of each issue file. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context: one `GLOSSARY.md` at the repository root and decisions in `docs/adr/`. See `docs/agents/domain.md`.
+| 경로 | 내용 |
+|---|---|
+| `CONTRIBUTING.md` | 작업 규칙(저장소, registry, 문서) |
+| `CODING_STANDARDS.md` | 코드 검토 기준 |
+| `README.md` | 무엇인가, 빌드·실행, 수용 시험 |
+| `docs/explanation.md` | 상황별 동작 설명(응답이 안 오는 주문, 프로세스가 죽음, …)과 시험 ID |
+| `docs/generated/requirements.md` | 요구 R01~R15별 확인 현황(로직 / 실제 Bybit), 생성됨 |
+| `docs/generated/` | registry에서 만든 표(주장과 결과, 가정, 사용자 결정, 추적표), 생성됨 |
+| `registry/requirements.toml` | 요구 R01~R15와 연결된 주장, 시험 없는 규칙. 정본 |
+| `registry/claims.toml` | 검증 주장: 무엇을, 어떤 조건에서, 어떤 시험으로 |
+| `registry/assumptions.toml` | 외부(거래소, OS)에 기대는 가정과 확인 여부 |
+| `registry/user-decisions.toml` | 소유자가 정한 것과 정해야 하는 것 |
+| `registry/contracts.toml` | 저널 이벤트 → 계약 → ADR → 코드 → 주장 색인 |
+| `registry/considerations-*.toml`, `coverage.toml`, `sources.toml` | 검토 항목과 출처 |
+| `docs/adr/` | 설계 결정(고치지 않음) |
+| `docs/operations/` | 운영 절차서(주인, 검토일) |
+| `docs/research/`, `docs/verification/`, `docs/performance/` | 조사 기록, 검증 방법, 성능 측정 |
+| `GLOSSARY.md` | 용어 |
+| `.scratch/<기능>/` | 디자인 문서(`spec.md`)와 작업 티켓(`issues/`). 규칙: `docs/agents/issue-tracker.md`, `docs/agents/triage-labels.md`, `docs/agents/domain.md`. 회고: `docs/agents/retro.md` |
+| `crates/oms-core` | 결정적 코어(I/O·시계·스레드 없음) |
+| `crates/oms-node` | 실행 계층과 게이트웨이(가상, Hyperliquid, Bybit), `omsctl`, `simvenue` |
+| `crates/oms-sim` | 결정적 시뮬레이션(장애 주입) |
+| `crates/http-fake` | loopback 가짜 HTTP/WS 서버(시험용) |
+| `crates/watcher` | 독립 워처(OMS 코드에 의존하지 않음) |
+| `crates/xtask` | 수용 시험, 변이 점검, 성능, 문서 생성기 |
+| `tools/ci/` | CI 검사 스크립트와 그 자체 시험(`selftest.sh`). 소유자 확인이 필요한 경로: `owner_review_paths.txt`, 층 규칙: `layers.toml` |
