@@ -1,7 +1,8 @@
 //! Unit rules: memory caps, timers, the collector's restart and protection
 //! settings, the trading slice, schedules, the daily-job lock, listeners,
 //! storage paths, store and vmalert flags, venues, the install map, service
-//! identity, the stack units' restart and sandbox settings, and the bounds of
+//! identity, the audit's checkout, state and lake writes, the text of command
+//! lines, the stack units' restart and sandbox settings, and the bounds of
 //! the seal, archiver and audit runs (ADR-035).
 
 use std::collections::BTreeSet;
@@ -185,6 +186,7 @@ pub fn check(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
     u14_install_map(t, p, out);
     u15_identity(p, out);
     u16_lake_writes(p, out);
+    u17_exec_text(p, out);
     u18_stack_settings(p, out);
     u19_bounded_runs(p, out);
 }
@@ -979,6 +981,44 @@ fn u16_lake_writes(p: &Parsed, out: &mut Vec<Finding>) {
     for u in named(p, AUDIT) {
         for &row in AUDIT_PATHS {
             expect(u, "U16", row, out);
+        }
+    }
+}
+
+/// The first `%` specifier of `line` that is not `%i`, `%I`, `%n` or `%%`.
+fn bad_specifier(line: &str) -> Option<String> {
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            match chars.next() {
+                Some('i' | 'I' | 'n' | '%') => {}
+                Some(x) => return Some(format!("%{x}")),
+                None => return Some("%".to_string()),
+            }
+        }
+    }
+    None
+}
+
+fn u17_exec_text(p: &Parsed, out: &mut Vec<Finding>) {
+    for u in &p.units {
+        for line in exec_lines(u) {
+            if line.contains("$(") || line.contains('`') {
+                finding(
+                    out,
+                    &u.path,
+                    "U17",
+                    "an Exec* line runs no shell: no $( or backtick",
+                );
+            }
+            if let Some(spec) = bad_specifier(line) {
+                finding(
+                    out,
+                    &u.path,
+                    "U17",
+                    format!("{spec} in an Exec* line: only %i, %I, %n and %%"),
+                );
+            }
         }
     }
 }
@@ -2253,4 +2293,47 @@ fn the_audit_never_points_at_the_kr_checkouts() {
     let mut t = Tree::real();
     t.remove(&script);
     assert_rules(&crate::check(&t), &["U12", "U14"]);
+}
+
+#[test]
+fn an_exec_line_with_shell_substitution_fails() {
+    let audit = "crypto-lake-audit@.service";
+    let script = "/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh %i";
+    // systemd runs no shell: $( and backticks reach the program as text.
+    for to in [
+        "/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh $(date +%%F)",
+        "/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh `date`",
+        // A specifier other than %i, %I, %n and %% is expanded or refused.
+        "/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh %h",
+        "/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh %i %",
+        "/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh 100%",
+    ] {
+        plant(audit, script, to, &["U17"]);
+    }
+    plant(
+        "md-archiver@.service",
+        "Nice=10\n",
+        "Nice=10\nExecStopPost=/bin/echo $(id -u)\n",
+        &["U17"],
+    );
+    plant(
+        "victoriametrics.service",
+        "-retentionPeriod=1y",
+        "-retentionPeriod=1y -x=%t",
+        &["U17"],
+    );
+    // %%, %i, %I and %n pass.
+    plant(
+        audit,
+        script,
+        "/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh %i %I %n 100%%",
+        &[],
+    );
+    // Outside Exec* lines the rule does not apply.
+    plant(
+        audit,
+        "Description=Lake verify and qdp audit for %i\n",
+        "Description=Lake verify and qdp audit for %i on %H\n",
+        &[],
+    );
 }
