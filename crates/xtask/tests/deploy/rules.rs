@@ -29,7 +29,7 @@ const WATCHDOG_AT: (&str, &str) = ("system.rules.json", "watchdog");
 /// R6: per configured venue, one alert of each name, with this severity,
 /// in this file and group, no `for`, and this expression with `<V>`
 /// replaced by the venue.
-const PER_VENUE: &[(&str, &str, &str, &str, &str)] = &[
+const PER_VENUE: &[PerVenue] = &[
     (
         "MdCollectorDown",
         "P1",
@@ -52,6 +52,36 @@ const PER_VENUE: &[(&str, &str, &str, &str, &str)] = &[
         "time() - last_over_time(lake_audit_last_run_ts{venue=\"<V>\"}[3d]) > 129600 or absent_over_time(lake_audit_last_run_ts{venue=\"<V>\"}[36h])",
     ),
 ];
+
+/// R6: the same, per trading venue (`trading` in `venues.toml`): the OMS's
+/// liveness (design §8.3 B3), the projector that is its only witness, and
+/// the journal gauge the days-left rules read (design R4 SHOULD 2).
+const TRADING_PER_VENUE: &[PerVenue] = &[
+    (
+        "JournalDiskGaugeMissing",
+        "P2",
+        "oms.rules.json",
+        "oms",
+        "absent_over_time(journal_disk_free_bytes{venue=\"<V>\"}[5m])",
+    ),
+    (
+        "OmsDown",
+        "P1",
+        "oms.rules.json",
+        "oms",
+        "max by (venue) (max_over_time(oms_up{venue=\"<V>\"}[30s])) == 0",
+    ),
+    (
+        "ProjectorDown",
+        "P2",
+        "oms.rules.json",
+        "oms",
+        "absent_over_time(projector_caught_up{venue=\"<V>\"}[2m])",
+    ),
+];
+/// R13: the file whose literal `("venue", "<V>")` labels the watcher's
+/// series; a trading venue the watcher does not label has no watcher.
+const WATCHER_METRICS: &str = "crates/watcher/src/metrics.rs";
 
 /// R7: the design's lake and disk rules: (file, group, alert or record,
 /// expr, for, severity).
@@ -301,12 +331,19 @@ pub fn collect(p: &Parsed) -> (Vec<Rule<'_>>, Vec<Finding>) {
     (rules, out)
 }
 
-pub fn check(_t: &Tree, p: &Parsed, cat: &Catalogue, out: &mut Vec<Finding>) {
+pub fn check(t: &Tree, p: &Parsed, cat: &Catalogue, out: &mut Vec<Finding>) {
     let (rules, shape) = collect(p);
     out.extend(shape);
     names_labels_functions(&rules, cat, out);
     r5_alerts(&rules, out);
-    r6_per_venue(p, &rules, out);
+    // A missing, empty or malformed venue list is U13's finding, a trading
+    // list R13's.
+    if let Some(v) = venues(p, "venues").filter(|v| !v.is_empty()) {
+        r6_per_venue(PER_VENUE, &v, &rules, out);
+    }
+    if let Some(v) = r13_trading(t, p, out) {
+        r6_per_venue(TRADING_PER_VENUE, &v, &rules, out);
+    }
     r7_design(p, &rules, out);
     r9_scrape(p, &rules, out);
 }
@@ -404,28 +441,53 @@ fn r5_alerts(rules: &[Rule], out: &mut Vec<Finding>) {
     }
 }
 
-fn venues(p: &Parsed) -> Option<Vec<String>> {
+fn venues(p: &Parsed, key: &str) -> Option<Vec<String>> {
     p.toml
         .get(VENUES)?
-        .get("venues")?
+        .get(key)?
         .as_array()?
         .iter()
         .map(|v| v.as_str().map(str::to_string))
         .collect()
 }
 
-fn r6_per_venue(p: &Parsed, rules: &[Rule], out: &mut Vec<Finding>) {
-    // A missing, empty or malformed venue list is U13's finding.
-    let Some(venues) = venues(p).filter(|v| !v.is_empty()) else {
-        return;
+/// The trading venues, when each is the watcher's venue label.
+fn r13_trading(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) -> Option<Vec<String>> {
+    let Some(venues) = venues(p, "trading").filter(|v| !v.is_empty()) else {
+        finding(
+            out,
+            VENUES,
+            "R13",
+            "trading must be a non-empty list of the venues an OMS on this PC trades",
+        );
+        return None;
     };
-    for &(name, severity, file, group, template) in PER_VENUE {
+    for v in &venues {
+        let literal = format!("(\"venue\", \"{v}\")");
+        if !t.files.get(WATCHER_METRICS).is_some_and(|s| s.contains(&literal)) {
+            finding(
+                out,
+                VENUES,
+                "R13",
+                format!(
+                    "trading venue {v}: {WATCHER_METRICS} has no {literal}, so no watcher reconciles it"
+                ),
+            );
+        }
+    }
+    Some(venues)
+}
+
+type PerVenue = (&'static str, &'static str, &'static str, &'static str, &'static str);
+
+fn r6_per_venue(table: &[PerVenue], venues: &[String], rules: &[Rule], out: &mut Vec<Finding>) {
+    for &(name, severity, file, group, template) in table {
         let path = format!("{METRICS_DIR}{file}");
         let found: Vec<&Rule> = rules
             .iter()
             .filter(|r| !r.vlogs && r.alert() == Some(name))
             .collect();
-        for v in &venues {
+        for v in venues {
             let mine: Vec<&&Rule> = found
                 .iter()
                 .filter(|r| r.label("venue") == Some(v.as_str()))
@@ -935,7 +997,11 @@ fn with_okx() -> Tree {
 /// Copies the bybit rule `name` as a rule for venue `v`, into the group
 /// that holds it.
 fn copy_for(t: &mut Tree, name: &str, v: &str) {
-    let file = if name.starts_with("Lake") { LAKE } else { MD };
+    let file = match name {
+        n if n.starts_with("Lake") => LAKE,
+        n if n.starts_with("Md") => MD,
+        _ => OMS,
+    };
     edit(t, file, |doc| {
         let rules = doc["groups"]
             .as_array_mut()
@@ -1095,6 +1161,94 @@ fn every_configured_venue_has_an_audit_stale_rule() {
         v["groups"][1]["rules"].as_array_mut().unwrap().push(r);
     });
     assert_rules(&crate::check(&t), &["R6"]);
+}
+
+/// The real tree with a second trading venue whose watcher labels it.
+fn with_trading_okx() -> Tree {
+    let mut t = Tree::real();
+    t.replace(VENUES, "trading = [\"bybit\"]", "trading = [\"bybit\", \"okx\"]");
+    let w = "crates/watcher/src/metrics.rs";
+    let text = format!("{}\n// labels(&[(\"venue\", \"okx\")])\n", t.files[w]);
+    t.set(w, &text);
+    t
+}
+
+#[test]
+fn every_trading_venue_has_its_liveness_rules() {
+    const LIVENESS: [&str; 3] = ["JournalDiskGaugeMissing", "OmsDown", "ProjectorDown"];
+    let f = crate::check(&with_trading_okx());
+    assert_rules(&f, &["R6"]);
+    for name in LIVENESS {
+        let want = format!("venue okx needs exactly one {name}");
+        assert!(f.iter().any(|x| x.text.contains(&want)), "{name}: {f:?}");
+    }
+    // OmsDown alone is not enough: the journal gauge and the projector.
+    let mut t = with_trading_okx();
+    copy_for(&mut t, "OmsDown", "okx");
+    let f = crate::check(&t);
+    assert_rules(&f, &["R6"]);
+    assert_eq!(f.len(), 2, "{f:?}");
+    let mut t = with_trading_okx();
+    for name in LIVENESS {
+        copy_for(&mut t, name, "okx");
+    }
+    assert_rules(&crate::check(&t), &[]);
+    // A trading venue the watcher does not label; the bybit rules are then
+    // for a venue the list does not hold.
+    let mut t = Tree::real();
+    t.replace(VENUES, "trading = [\"bybit\"]", "trading = [\"okx\"]");
+    let f = crate::check(&t);
+    assert_rules(&f, &["R6", "R13"]);
+    assert!(
+        f.iter()
+            .any(|x| x.rule == "R13" && x.text.contains("(\"venue\", \"okx\")")),
+        "{f:?}"
+    );
+    // No trading list, or an empty one.
+    for to in ["", "trading = []"] {
+        let mut t = Tree::real();
+        t.replace(VENUES, "trading = [\"bybit\"]", to);
+        assert_rules(&crate::check(&t), &["R13"]);
+    }
+    // The window, the severity and a for.
+    for (name, e) in [
+        (
+            "OmsDown",
+            "max by (venue) (max_over_time(oms_up{venue=\"bybit\"}[5m])) == 0",
+        ),
+        (
+            "OmsDown",
+            "max by (venue) (oms_up{venue=\"bybit\"}) == 0",
+        ),
+        (
+            "ProjectorDown",
+            "absent_over_time(projector_caught_up{venue=\"bybit\"}[1h])",
+        ),
+        (
+            "JournalDiskGaugeMissing",
+            "absent_over_time(journal_disk_free_bytes{venue=\"bybit\"}[1h])",
+        ),
+    ] {
+        set_expr(OMS, name, e, &["R6"]);
+    }
+    plant_rule(
+        OMS,
+        "OmsDown",
+        |r| r["labels"]["severity"] = Value::String("P2".into()),
+        &["R6"],
+    );
+    plant_rule(
+        OMS,
+        "ProjectorDown",
+        |r| r["for"] = Value::String("10m".into()),
+        &["R6"],
+    );
+    // A rule for a venue that the trading list does not hold.
+    let mut t = Tree::real();
+    copy_for(&mut t, "OmsDown", "okx");
+    let f = crate::check(&t);
+    assert_rules(&f, &["R6"]);
+    assert!(f[0].text.contains("does not list"), "{f:?}");
 }
 
 #[test]

@@ -1,3 +1,8 @@
 # The venues this PC collects. Each must be a registered venue of the
 # collector and of the archiver; each gets the collector liveness rule.
 venues = ["bybit"]
+
+# The venues an OMS on this PC trades. Each must be the watcher's venue
+# label (crates/watcher/src/metrics.rs); each gets the OMS, projector and
+# journal liveness rules.
+trading = ["bybit"]
