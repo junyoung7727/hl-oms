@@ -2337,3 +2337,34 @@ fn an_exec_line_with_shell_substitution_fails() {
         &[],
     );
 }
+
+#[test]
+fn the_audit_script_is_installed_executable() {
+    let dst = "dst = \"/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh\"";
+    for (from, to) in [
+        (
+            &format!("{dst}\nmode = \"0755\""),
+            &format!("{dst}\nmode = \"0644\"")[..],
+        ),
+        (
+            &dst.to_string(),
+            "dst = \"/etc/hl-oms-obs/bin/crypto-lake-audit.sh\"",
+        ),
+        // The unit's ExecStart path then has no dst either.
+        (
+            &dst.to_string(),
+            "dst = \"/usr/local/lib/hl-oms-obs/audit.sh\"",
+        ),
+    ] {
+        let mut t = Tree::real();
+        t.replace(INSTALL, from, to);
+        assert_rules(&crate::check(&t), &["U14"]);
+    }
+    // Run by sh: the first line says so.
+    let script = format!("{OBS}bin/crypto-lake-audit.sh");
+    for first in ["#!/bin/bash\n", "#!/usr/bin/env sh\n", "\n"] {
+        let mut t = Tree::real();
+        t.replace(&script, "#!/bin/sh\n", first);
+        assert_rules(&crate::check(&t), &["P1"]);
+    }
+}
