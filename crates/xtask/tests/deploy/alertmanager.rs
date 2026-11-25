@@ -64,6 +64,18 @@ const INHIBIT_TARGET: &[&str] = &[
 const INHIBIT_NAMES: &str = "Md.*|LakeSealLag|LakeDiskDaysLeft.*";
 const INHIBIT_EQUAL: &[&str] = &["venue"];
 const INHIBIT_KEYS: &[&str] = &["source_matchers", "target_matchers", "equal"];
+/// R11: keys that would hold a secret in the file, or send it elsewhere
+/// (another API host, a proxy).
+const FORBIDDEN_KEYS: &[&str] = &[
+    "bot_token",
+    "chat_id",
+    "api_url",
+    "http_config",
+    "telegram_api_url",
+];
+/// R11: the keys of every Telegram config that name its secret files.
+const SECRET_FILES: &[&str] = &["bot_token_file", "chat_id_file"];
+
 /// The metrics qdp's auditor pushes: an alert on one of them is no
 /// collector alert.
 const QDP_PREFIX: &str = "lake_audit_";
@@ -134,13 +146,149 @@ pub fn regex_matches(re: &str, name: &str) -> bool {
     })
 }
 
-pub fn check(_t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
+/// `[0-9]{6,}:[A-Za-z0-9_-]{30,}` somewhere in `text`: a Telegram bot
+/// token.
+pub fn token_shape(text: &str) -> bool {
+    let c: Vec<char> = text.chars().collect();
+    (0..c.len()).filter(|&i| c[i] == ':').any(|i| {
+        let digits = c[..i]
+            .iter()
+            .rev()
+            .take_while(|x| x.is_ascii_digit())
+            .count();
+        let rest = c[i + 1..]
+            .iter()
+            .take_while(|x| x.is_ascii_alphanumeric() || **x == '_' || **x == '-')
+            .count();
+        digits >= 6 && rest >= 30
+    })
+}
+
+/// A key holding `chat` (any case) whose value is 6 or more digits, with
+/// an optional minus (a group chat id): `chat_id: -100…`, `"chat": "…"`,
+/// `CHAT_ID=…`.
+pub fn chat_id_value(text: &str) -> bool {
+    let c: Vec<char> = text.to_ascii_lowercase().chars().collect();
+    let key = ['c', 'h', 'a', 't'];
+    (0..c.len()).filter(|&i| c[i..].starts_with(&key)).any(|i| {
+        let mut j = i + key.len();
+        let skip = |j: &mut usize, f: &dyn Fn(char) -> bool| {
+            while *j < c.len() && f(c[*j]) {
+                *j += 1;
+            }
+        };
+        skip(&mut j, &|x| {
+            x.is_ascii_alphanumeric() || x == '_' || x == '-'
+        });
+        skip(&mut j, &|x| x == '"' || x == '\'');
+        skip(&mut j, &|x| x == ' ' || x == '\t');
+        if j >= c.len() || (c[j] != ':' && c[j] != '=') {
+            return false;
+        }
+        j += 1;
+        skip(&mut j, &|x| x == ' ' || x == '\t');
+        skip(&mut j, &|x| x == '"' || x == '\'');
+        if j < c.len() && c[j] == '-' {
+            j += 1;
+        }
+        let from = j;
+        skip(&mut j, &|x| x.is_ascii_digit());
+        j - from >= 6
+    })
+}
+
+pub fn check(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
+    r11_text(t, out);
     let Some(doc) = p.json.get(AM) else {
         finding(out, AM, "R10", "missing");
         return;
     };
     r10_routes(doc, out);
     r10_inhibit(p, doc, out);
+    r11_keys(doc, out);
+    r11_files(doc, out);
+}
+
+/// No deploy file holds a token or a chat id. The finding does not repeat
+/// the value.
+fn r11_text(t: &Tree, out: &mut Vec<Finding>) {
+    for (path, text) in t.files.iter().filter(|(k, _)| k.starts_with("deploy/")) {
+        if token_shape(text) {
+            finding(
+                out,
+                path,
+                "R11",
+                "holds a Telegram token shape (digits:characters)",
+            );
+        }
+        if chat_id_value(text) {
+            finding(
+                out,
+                path,
+                "R11",
+                "holds a chat id (6 or more digits after a chat key)",
+            );
+        }
+    }
+}
+
+fn r11_keys(doc: &Value, out: &mut Vec<Finding>) {
+    let mut todo = vec![doc];
+    while let Some(v) = todo.pop() {
+        match v {
+            Value::Object(m) => {
+                for (k, x) in m {
+                    if FORBIDDEN_KEYS.contains(&k.as_str()) {
+                        finding(
+                            out,
+                            AM,
+                            "R11",
+                            format!(
+                                "key {k} is not allowed: secrets only as *_file paths, the default API only"
+                            ),
+                        );
+                    }
+                    todo.push(x);
+                }
+            }
+            Value::Array(a) => todo.extend(a),
+            _ => {}
+        }
+    }
+}
+
+fn r11_files(doc: &Value, out: &mut Vec<Finding>) {
+    let configs = doc
+        .get("receivers")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|r| r.get("telegram_configs").and_then(Value::as_array))
+        .flatten();
+    for c in configs {
+        for key in SECRET_FILES {
+            let path = c.get(*key).and_then(Value::as_str);
+            let ok = path.is_some_and(|p| {
+                p.strip_prefix("/etc/").is_some_and(|rest| {
+                    !rest.is_empty()
+                        && !rest.ends_with('/')
+                        && rest
+                            .split('/')
+                            .all(|s| !s.is_empty() && s != "." && s != "..")
+                })
+            });
+            if !ok {
+                finding(
+                    out,
+                    AM,
+                    "R11",
+                    format!(
+                        "every telegram config needs {key}, a file path under /etc/ (found {path:?})"
+                    ),
+                );
+            }
+        }
+    }
 }
 
 fn sorted(v: Option<Vec<Matcher>>) -> Option<Vec<Matcher>> {
@@ -687,4 +835,101 @@ fn the_inhibit_rule_holds_back_only_collector_alerts() {
     ] {
         assert_eq!(regex_matches(re, name), held, "{name}");
     }
+}
+
+/// The real tree with `line` added at the end of a deploy file.
+fn append(path: &str, line: &str) -> Vec<Finding> {
+    let mut t = Tree::real();
+    let text = format!("{}{line}\n", t.files[path]);
+    t.set(path, &text);
+    crate::check(&t)
+}
+
+#[test]
+fn an_inline_token_or_chat_id_fails() {
+    // Inline secrets and a redirected API in the Alertmanager config. The
+    // chat id has five digits, so only the key gives it away.
+    for (key, value) in [
+        ("bot_token", json!("x")),
+        ("chat_id", json!(12345)),
+        ("api_url", json!("http://127.0.0.1:1/")),
+        ("http_config", json!({"proxy_url": "http://127.0.0.1:1/"})),
+    ] {
+        plant(|v| telegram_mut(v, "telegram-p1")[key] = value, &["R11"]);
+    }
+    plant(
+        |v| v["global"] = json!({"telegram_api_url": "http://127.0.0.1:1/"}),
+        &["R11"],
+    );
+    plant(
+        |v| {
+            receiver_mut(v, "deadman")["webhook_configs"] = json!([{
+                "url_file": "/etc/hl-oms/deadman-url",
+                "http_config": {"bearer_token": "x"}
+            }])
+        },
+        &["R11"],
+    );
+    // A token shape or a chat id in any deploy file, text or comment. Built
+    // here so this file holds no such string.
+    let token = format!("{}:{}", "7".repeat(10), "a".repeat(35));
+    let chat = format!("chat_id: -{}", "1".repeat(10));
+    let readme = "deploy/observability/README.md";
+    let unit = "deploy/observability/systemd/alertmanager.service";
+    for (path, line) in [
+        (readme, token.clone()),
+        (unit, format!("# bot {token}")),
+        (readme, chat.clone()),
+        (readme, format!("\"chat\": \"{}\"", "2".repeat(6))),
+        (unit, format!("# CHAT_ID={}", "3".repeat(9))),
+        // The shortest shapes.
+        (readme, format!("{}:{}", "7".repeat(6), "Z_-9".repeat(8))),
+    ] {
+        let f = append(path, &line);
+        assert!(
+            f.iter().any(|x| x.rule == "R11" && x.file == path),
+            "{path}: {line}: {f:?}"
+        );
+        assert_rules(&f, &["R11"]);
+        // The finding does not repeat the secret.
+        assert!(f.iter().all(|x| !x.text.contains(&line)), "{f:?}");
+    }
+    // One digit or one character short of the shapes.
+    for line in [
+        format!("{}:{}", "7".repeat(5), "a".repeat(35)),
+        format!("{}:{}", "7".repeat(10), "a".repeat(29)),
+        format!("chat_id: {}", "1".repeat(5)),
+        format!("chat_id_file: /etc/{}", "1".repeat(9)),
+    ] {
+        assert_rules(&append(readme, &line), &[]);
+    }
+}
+
+#[test]
+fn secret_files_are_absolute_paths_under_etc() {
+    for (key, value) in [
+        ("bot_token_file", json!("alertmanager-telegram-token")),
+        ("chat_id_file", json!("/home/x/chat-id")),
+        ("bot_token_file", json!("/etc/../home/x/token")),
+        ("chat_id_file", json!("/etc/")),
+        ("bot_token_file", json!(1)),
+    ] {
+        plant(|v| telegram_mut(v, "telegram-p2")[key] = value, &["R11"]);
+    }
+    for key in ["bot_token_file", "chat_id_file"] {
+        plant(
+            |v| {
+                telegram_mut(v, "telegram-p2-noresolve")
+                    .as_object_mut()
+                    .unwrap()
+                    .remove(key);
+            },
+            &["R11"],
+        );
+    }
+    // Another file under /etc/ is the operator's choice.
+    plant(
+        |v| telegram_mut(v, "telegram-p1")["chat_id_file"] = json!("/etc/hl-oms/other-chat-id"),
+        &[],
+    );
 }
