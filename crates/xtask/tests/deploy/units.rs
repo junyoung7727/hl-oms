@@ -115,6 +115,28 @@ const AUDIT_DIR: &str = "/mnt/nvme/lake/crypto/audit";
 const KR_CHECKOUT: &str = "/mnt/nvme/gitproject/quant-data-platform";
 /// The auditor's state file in the script: the unit's state directory.
 const AUDIT_STATE: &str = "--state \"$STATE_DIRECTORY/audit-$venue.json\"";
+/// The auditor pushes to the local VictoriaMetrics only.
+const AUDIT_VM_URL: &str = "--vm-url http://127.0.0.1:8428";
+/// The script lines that decide which dates are verified again and what the
+/// unit's status says (D4), each once. The script has no test of its own in
+/// CI (D11 runs it by hand), so its text is pinned (U12).
+const AUDIT_SCRIPT_LINES: &[&str] = &[
+    "while [ \"$i\" -le 9 ]; do",
+    "future=$(find \"$stamp\" -newermt \"@$now\" -print) || future=1",
+    "if ! changed=$(sealed \"$d\" -cnewer \"$stamp\"); then",
+    "rm -f \"$stamp.new\"",
+    "exit 5",
+];
+/// The stamp is taken, then a second passes, then verify lists the files,
+/// then the stamp is kept: these lines once each, in this order.
+const AUDIT_STAMP_ORDER: &[&str] = &[
+    "if ! touch \"$stamp.new\"; then",
+    "sleep 1",
+    "if \"$MD_LAKE\" verify --venue \"$venue\" --lake \"$LAKE\" --date \"$d\" --json >/dev/null; then",
+    "if ! mv -f \"$stamp.new\" \"$stamp\"; then",
+];
+/// The lake the audit unit's path lines name; the script works in `$LAKE`.
+const AUDIT_LAKE: &str = "/mnt/nvme/lake";
 /// The audit unit's two path lines, exactly.
 const AUDIT_PATHS: &[(&str, &str, Want)] = &[
     (
@@ -711,6 +733,46 @@ fn u12_audit_checkout_and_state(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
                     "STATE_DIRECTORY is set by systemd only",
                 );
             }
+            let urls: Vec<&str> = text
+                .match_indices("--vm-url")
+                .map(|(i, _)| &text[i..])
+                .collect();
+            if urls.is_empty()
+                || !urls.iter().all(|r| {
+                    r.strip_prefix(AUDIT_VM_URL)
+                        .is_some_and(|rest| rest.chars().next().is_none_or(char::is_whitespace))
+                })
+            {
+                finding(
+                    out,
+                    &script,
+                    "U12",
+                    format!("every --vm-url must be {AUDIT_VM_URL}"),
+                );
+            }
+            let mut at = Vec::new();
+            for &line in AUDIT_SCRIPT_LINES.iter().chain(AUDIT_STAMP_ORDER) {
+                let found: Vec<usize> = (0..lines.len()).filter(|&i| lines[i] == line).collect();
+                if found.len() != 1 {
+                    finding(
+                        out,
+                        &script,
+                        "U12",
+                        format!("must hold the line {line:?} once (found {})", found.len()),
+                    );
+                }
+                if AUDIT_STAMP_ORDER.contains(&line) {
+                    at.push(found.first().copied());
+                }
+            }
+            if !at.windows(2).all(|w| w[0] < w[1]) {
+                finding(
+                    out,
+                    &script,
+                    "U12",
+                    format!("the lines {AUDIT_STAMP_ORDER:?} must come in this order"),
+                );
+            }
         }
     }
     for u in required(p, AUDIT, "U12", out) {
@@ -981,6 +1043,14 @@ fn u16_lake_writes(p: &Parsed, out: &mut Vec<Finding>) {
     for u in named(p, AUDIT) {
         for &row in AUDIT_PATHS {
             expect(u, "U16", row, out);
+        }
+        if env_values(&environment(u), "LAKE") != [AUDIT_LAKE] {
+            finding(
+                out,
+                &u.path,
+                "U16",
+                format!("LAKE is set once, as {AUDIT_LAKE}: the lake its path lines name"),
+            );
         }
     }
 }
@@ -2229,6 +2299,87 @@ fn the_audit_unit_can_write_its_verify_results() {
         );
         let f = crate::check(&t);
         assert_rules(&f, rules);
+    }
+    // Another unit that runs the audit script needs the audit directory
+    // too, not only the audit unit's pinned lines.
+    let script = |rw: &str| {
+        format!(
+            "[Unit]\nDescription=x\n\n[Service]\nType=simple\nMemoryMax=1G\nReadOnlyPaths=/mnt/nvme/lake/crypto/l0\n{rw}ExecStart=/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh %i\n"
+        )
+    };
+    for (rw, rules) in [
+        (
+            "ReadWritePaths=/mnt/nvme/lake/crypto/l0/_verify\n",
+            &["U16"][..],
+        ),
+        (
+            "ReadWritePaths=/mnt/nvme/lake/crypto/l0/_verify /mnt/nvme/lake/crypto/audit\n",
+            &[][..],
+        ),
+    ] {
+        let mut t = Tree::real();
+        add_installed(
+            &mut t,
+            "systemd/lake-audit-copy@.service",
+            &script(rw),
+            "/etc/systemd/system/lake-audit-copy@.service",
+            "0644",
+        );
+        let f = crate::check(&t);
+        assert_rules(&f, rules);
+    }
+    // The script reads and writes $LAKE: the lake the two path lines name.
+    let lake = "Environment=LAKE=/mnt/nvme/lake\n";
+    for to in [
+        "Environment=LAKE=/mnt/nvme/other\n",
+        "Environment=LAKE=/mnt/nvme/lake\nEnvironment=LAKE=/mnt/nvme/other\n",
+    ] {
+        plant(audit, lake, to, &["U16"]);
+    }
+}
+
+#[test]
+fn the_audit_script_keeps_its_verify_rules() {
+    // The lines that decide which dates are verified again and what the
+    // unit's status says (D4); each change below once passed every test.
+    let script = format!("{OBS}bin/crypto-lake-audit.sh");
+    let touch = "\tif ! touch \"$stamp.new\"; then\n\t\techo \"crypto-lake-audit: cannot write $stamp.new\" >&2\n\t\tverify_failed=1\n\t\tcontinue\n\tfi\n";
+    let verify = "\tif \"$MD_LAKE\" verify --venue \"$venue\" --lake \"$LAKE\" --date \"$d\" --json >/dev/null; then\n";
+    for (from, to) in [
+        // mtime instead of ctime: a renamed file is missed.
+        ("-cnewer \"$stamp\"", "-newer \"$stamp\""),
+        // A shorter window than the day seal's look-back.
+        ("\"$i\" -le 9", "\"$i\" -le 2"),
+        // Coarse timestamps: a file sealed in the same second as the stamp.
+        ("\tsleep 1\n", ""),
+        // The stamp taken after verify listed the files (the race).
+        (
+            &format!("{touch}\tsleep 1\n{verify}"),
+            &format!("\tsleep 1\n{verify}{touch}"),
+        ),
+        // A failed verify replaces the stamp.
+        (
+            "\t\trm -f \"$stamp.new\"\n",
+            "\t\tmv -f \"$stamp.new\" \"$stamp\"\n",
+        ),
+        // A failed verify leaves the unit green.
+        ("\texit 5\n", "\texit 0\n"),
+        // A stamp from the future hides the files sealed since.
+        ("-newermt \"@$now\"", "-newermt \"@0\""),
+        // Pushes off loopback.
+        (
+            "--vm-url http://127.0.0.1:8428",
+            "--vm-url http://10.0.0.1:8428",
+        ),
+        (
+            "--vm-url http://127.0.0.1:8428",
+            "--vm-url http://127.0.0.1:8428 --vm-url http://10.0.0.1:8428",
+        ),
+    ] {
+        let mut t = Tree::real();
+        t.replace(&script, from, to);
+        let f = crate::check(&t);
+        assert_rules(&f, &["U12"]);
     }
 }
 
