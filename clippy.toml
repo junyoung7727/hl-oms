@@ -1,0 +1,35 @@
+# Clock reads and the standard library's entry points to files, the
+# network, threads, processes, the environment and the terminal. The lint
+# is allowed in the workspace (Cargo.toml) and denied in the pure crates'
+# lib.rs, where time and data arrive as inputs (ADR-002, ADR-033 part 3).
+# These are named functions: a path that is not listed passes (the fuller
+# text check is `core_purity` in `xtask verify`).
+disallowed-methods = [
+  { path = "std::time::SystemTime::now", reason = "time arrives as an input (ADR-002)" },
+  { path = "std::time::SystemTime::elapsed", reason = "time arrives as an input (ADR-002)" },
+  { path = "std::time::Instant::now", reason = "time arrives as an input (ADR-002)" },
+  { path = "std::time::Instant::elapsed", reason = "time arrives as an input (ADR-002)" },
+  { path = "tokio::time::Instant::now", reason = "time arrives as an input (ADR-002)" },
+  { path = "tokio::time::Instant::elapsed", reason = "time arrives as an input (ADR-002)" },
+  { path = "std::fs::read", reason = "the pure crates do no I/O (ADR-002)" },
+  { path = "std::fs::read_to_string", reason = "the pure crates do no I/O (ADR-002)" },
+  { path = "std::fs::read_dir", reason = "the pure crates do no I/O (ADR-002)" },
+  { path = "std::fs::write", reason = "the pure crates do no I/O (ADR-002)" },
+  { path = "std::fs::File::open", reason = "the pure crates do no I/O (ADR-002)" },
+  { path = "std::fs::File::create", reason = "the pure crates do no I/O (ADR-002)" },
+  { path = "std::fs::OpenOptions::open", reason = "the pure crates do no I/O (ADR-002)" },
+  { path = "std::net::TcpStream::connect", reason = "the pure crates do no I/O (ADR-002)" },
+  { path = "std::net::TcpListener::bind", reason = "the pure crates do no I/O (ADR-002)" },
+  { path = "std::net::UdpSocket::bind", reason = "the pure crates do no I/O (ADR-002)" },
+  { path = "std::thread::spawn", reason = "the pure crates run on the caller's thread (ADR-002)" },
+  { path = "std::thread::sleep", reason = "time arrives as an input (ADR-002)" },
+  { path = "std::process::Command::new", reason = "the pure crates do no I/O (ADR-002)" },
+  { path = "std::process::exit", reason = "the pure crates return errors, the shell stops (ADR-002)" },
+  { path = "std::env::var", reason = "configuration arrives as an input (ADR-002)" },
+  { path = "std::env::var_os", reason = "configuration arrives as an input (ADR-002)" },
+  { path = "std::env::vars", reason = "configuration arrives as an input (ADR-002)" },
+  { path = "std::env::args", reason = "configuration arrives as an input (ADR-002)" },
+  { path = "std::io::stdin", reason = "the pure crates do no I/O (ADR-002)" },
+  { path = "std::io::stdout", reason = "the pure crates do no I/O (ADR-002)" },
+  { path = "std::io::stderr", reason = "the pure crates do no I/O (ADR-002)" },
+]

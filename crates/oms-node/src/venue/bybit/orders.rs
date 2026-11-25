@@ -474,6 +474,38 @@ mod tests {
         assert_eq!(reqs[0].header("x-bapi-sign"), Some(sig.as_str()));
     }
 
+    /// RSA (ADR-034, spec T5): an order create sent with an RSA key is
+    /// signed over the exact body sent and its `X-BAPI-SIGN` is openssl's
+    /// base64 value (`printf '%s' "1700000000000KEY5000<body>" | openssl
+    /// dgst -sha256 -sign key.pem | base64 -w0`, the test-only key).
+    #[tokio::test]
+    async fn a_create_with_an_rsa_key_is_signed_in_base64_over_the_body_sent() {
+        let api = FakeHttp::start(Http::Reply(404, "{}".into()));
+        api.route(CREATE_PATH, [placed("o-77")]);
+        let pem = crate::venue::bybit::sign::test_keys::pem_2048();
+        let rest = Rest::new(
+            &api.url(),
+            Arc::new(Credentials::rsa("KEY", &pem).unwrap()),
+            5000,
+            Duration::from_millis(300),
+        )
+        .unwrap()
+        .with_clock(clock);
+        let (out, _) = Orders::new(rest).create(&create(LATER), yes).await;
+        assert!(matches!(out, SendOutcome::Placed { .. }), "{out:?}");
+        let reqs = api.requests();
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].method, "POST");
+        assert_eq!(
+            reqs[0].body_str(),
+            r#"{"category":"linear","orderLinkId":"LINKID","orderType":"Limit","positionIdx":0,"price":"30000.5","qty":"0.002","reduceOnly":true,"side":"Sell","symbol":"BTCUSDT","timeInForce":"PostOnly"}"#
+        );
+        assert_eq!(reqs[0].header("x-bapi-sign-type"), None);
+        assert_eq!(reqs[0].header("x-bapi-sign"), Some(
+                "ThpbQFkmN21p/YqsJmbXrW10xGZAox+Au2t5NoQALPuzvTlHJBN8OiLGoTltkv2vx9o9Y7zGEkdOueJpI0t+ZhAKql5mRodsfF3X6FguKhtx9t7Y7xOqnlKBo7EX+LZjqC0qYDpibztqSu0Kbm+CyMnP9k4Uu0Uijh3ctLFl2vQuOmYxi+A3Mgi6dlCJPaIJns4Lbj0lI2pfOiFPJtDhLcDjbHSesdBlgPgkbZfZ0sqN96KbjjrR2I8en7Nxn1ih2BEYlsMxVLLw++gUtuqp7fdq4LfFK7wjHG9Zbex8HvFwjclF81QktCU3YbwquDAMrAiPaj8TUtidWt01L/kxpA=="
+            ));
+    }
+
     #[tokio::test]
     async fn an_expiry_inside_the_window_plus_one_second_sends_nothing() {
         let api = FakeHttp::start(Http::Reply(404, "{}".into()));

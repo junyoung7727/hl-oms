@@ -66,6 +66,28 @@ cargo run --release -p xtask -- digest   # 같은 다이제스트가 나와야 �
 cargo run --release -p xtask -- fsync-probe --dir <data_dir가 놓일 디렉터리>
 ```
 
+### Bybit 자격 파일 (`[venue] kind = "bybit"`의 `credentials_file`)
+
+Bybit 게이트웨이가 시작할 때 한 번 여는 파일이다([ADR-028](../adr/ADR-028-bybit-gateway.md), RSA 키는 [ADR-034](../adr/ADR-034-bybit-rsa-keys.md)). 워처의 자격 파일과 모양이 같고, 키 만들기와 Bybit 등록도 같다([워처 운영 문서](watcher.md) "자격 파일"). 두 형 가운데 정확히 하나:
+
+```toml
+# HMAC 키(System-generated)
+api_key = "..."
+api_secret = "..."
+```
+
+```toml
+# RSA 키(Self-generated): openssl genpkey가 쓴 PKCS#8 PEM 글을 머리 줄과 꼬리 줄까지 그대로
+api_key = "..."
+rsa_private_key = """
+(BEGIN PRIVATE KEY 줄부터 END PRIVATE KEY 줄까지)
+"""
+```
+
+- 데이터 디렉터리 밖, OMS를 돌리는 사용자 소유, 그룹·기타 권한 없음(`install -m 600 /dev/null <경로>`), 심볼릭 링크 아님.
+- 거부되면 노드는 `cannot start the Bybit gateway` 줄(오류 문장은 `error`)을 남기고 종료 코드 3(`bybit_gateway`, 7.4)으로 끝난다. 오류 문장은 파일 내용과 키의 바이트를 담지 않는다. 문장은 워처의 표와 같고(PKCS#1과 암호화된 PEM은 `openssl pkcs8 -topk8 -nocrypt -in old.pem -out new.pem`을 적는다) 비밀이 둘 다 없을 때만 `has neither api_secret nor rsa_private_key`로 다르다.
+- RSA 키의 요청은 base64 서명을 싣고 `X-BAPI-SIGN-TYPE`을 보내지 않는다(측정한 RSA 요청의 모양). 키가 거절되면(10004 등) 7.5의 `auth_rejected`다.
+
 ## 3. 가상 거래소로 연습
 
 ```sh

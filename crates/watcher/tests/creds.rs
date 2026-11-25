@@ -12,6 +12,7 @@ use std::path::Path;
 use std::sync::mpsc;
 use std::time::Duration;
 
+use common::rsa;
 use watcher::creds;
 
 const SECRET: &str = "watcher-made-up-secret-42";
@@ -401,5 +402,142 @@ fn the_token_file_must_be_owner_only_outside_any_repository() {
         &data,
         "[telegram] token_file must be an absolute path",
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Every 16-character piece of every test key's body: an error line that
+/// holds one quotes key material.
+fn key_pieces() -> Vec<String> {
+    let mut out = Vec::new();
+    for body in [
+        rsa::KEY_2048,
+        rsa::KEY_2048_PKCS1,
+        rsa::KEY_2048_ENCRYPTED,
+        rsa::KEY_1024,
+    ] {
+        let flat: Vec<char> = body.chars().filter(|c| *c != '\n').collect();
+        for w in flat.windows(16) {
+            out.push(w.iter().collect());
+        }
+    }
+    out
+}
+
+/// The RSA form (ADR-034, spec D1, D2, T4, T6): `api_key` and
+/// `rsa_private_key`, the PKCS#8 PEM text inline. It is read, parsed once
+/// and signs to openssl's value; `Debug` hides it. Refused, each with one
+/// line that quotes no byte of the key: both secrets, neither, a PEM key
+/// in `api_secret` (S2 of the review: it would be an HMAC secret), a PKCS#1
+/// key and an encrypted key (each naming the openssl fix), garbage PEM, a
+/// body that is not a key, a cut body, a body without the PEM lines, an
+/// empty key, a 1024-bit key. The file rules are the same as for the
+/// secret (one check here: mode 0644 is refused).
+#[test]
+fn an_rsa_credentials_file_is_read_and_its_refusals_quote_no_key() {
+    let dir = common::test_dir("creds-rsa");
+    let data = dir.join("data");
+    let etc = dir.join("etc");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::create_dir_all(&etc).unwrap();
+    let p = etc.join("creds.toml");
+    let write = |text: &str| {
+        std::fs::write(&p, text).unwrap();
+        chmod(&p, 0o600);
+    };
+    let with_key = |pem: &str| format!("api_key = \"WKEY\"\nrsa_private_key = \"\"\"\n{pem}\"\"\"\n");
+
+    write(&with_key(&rsa::pem_2048()));
+    let c = creds::load(&p, &data).unwrap();
+    assert_eq!(c.api_key(), "WKEY");
+    assert!(c.is_rsa());
+    assert_eq!(
+        format!("{c:?}"),
+        "Credentials { api_key: \"WKEY\", rsa_private_key: <hidden> }"
+    );
+    // The key read is the test key: openssl's value (tests/sign.rs).
+    let pre = "1658384314791XXXXXXXXXX5000category=option&symbol=BTC-29JUL22-25000-C";
+    assert_eq!(
+        c.sign(pre).unwrap(),
+        "kGwAVU7pufiKNgdwHDO+kJtPDvnBTOgIv4UsxfTpGa0f2PX8CWcUZSwp9+AVg5juKY+M7pZyRoSHx7Hoad0EJ2za2jyBZOvHw3OjB15AL3lDKsUVbFZX0Mv+7eox7X6rLRoy0TYLohV6Qg2NxaTGCYwWX+H25kZNjBTMUhV7tP07BXgeTR9ZJtiZ+rbOogQMC/UTXKmp7CaGlPIXvqpYqwViTPShBF1BTnZECBeFPFMV5iLXIRlYgzeCt5KtJlWjFeIwbxYI0wv7ntm+JpGpKmvTnXipBye5/S53ZzEjkFuYVHig7KKk6zWMzSUH1vV5oi4g18penJP66TzJuMSotQ=="
+    );
+    // The HMAC form still reads as before, and its Debug names the secret's field.
+    write(GOOD);
+    let c = creds::load(&p, &data).unwrap();
+    assert!(!c.is_rsa());
+    assert_eq!(
+        format!("{c:?}"),
+        "Credentials { api_key: \"WKEY\", api_secret: <hidden> }"
+    );
+
+    let half = &rsa::KEY_2048[..rsa::KEY_2048.len() / 2];
+    let cases: Vec<(String, &str)> = vec![
+        (
+            format!(
+                "api_key = \"WKEY\"\napi_secret = \"{SECRET}\"\nrsa_private_key = \"\"\"\n{}\"\"\"\n",
+                rsa::pem_2048()
+            ),
+            "has both api_secret and rsa_private_key; keep exactly one",
+        ),
+        (
+            format!("api_key = \"WKEY\"\napi_secret = \"\"\"\n{}\"\"\"\n", rsa::pem_2048()),
+            "api_secret holds a PEM private key; an RSA key goes in rsa_private_key",
+        ),
+        (
+            format!(
+                "api_key = \"WKEY\"\napi_secret = \"\"\"\n{}\"\"\"\n",
+                rsa::pem("RSA PRIVATE KEY", rsa::KEY_2048_PKCS1)
+            ),
+            "api_secret holds a PEM private key; an RSA key goes in rsa_private_key",
+        ),
+        ("api_key = \"WKEY\"\n".to_string(), "it has neither"),
+        (
+            with_key(&rsa::pem("RSA PRIVATE KEY", rsa::KEY_2048_PKCS1)),
+            "is a PKCS#1 key (BEGIN RSA PRIVATE KEY); convert it to PKCS#8 with: openssl pkcs8 -topk8 -nocrypt -in old.pem -out new.pem",
+        ),
+        (
+            with_key(&rsa::pem("ENCRYPTED PRIVATE KEY", rsa::KEY_2048_ENCRYPTED)),
+            "is encrypted (BEGIN ENCRYPTED PRIVATE KEY); write it unencrypted with: openssl pkcs8 -topk8 -nocrypt -in old.pem -out new.pem",
+        ),
+        (
+            with_key(&rsa::pem("PRIVATE KEY", "not base64 at all!\n")),
+            "is not a PEM private key",
+        ),
+        (
+            with_key(&rsa::pem("PRIVATE KEY", "AAAA\n")),
+            "is not an RSA key of 2048 bits or more",
+        ),
+        (with_key(&rsa::pem("PRIVATE KEY", half)), "rsa_private_key is not"),
+        (with_key(rsa::KEY_2048), "is not a PEM private key"),
+        (
+            "api_key = \"WKEY\"\nrsa_private_key = \"\"\n".to_string(),
+            "is not a PEM private key",
+        ),
+        (
+            with_key(&rsa::pem("PRIVATE KEY", rsa::KEY_1024)),
+            "is not an RSA key of 2048 bits or more",
+        ),
+    ];
+    let pieces = key_pieces();
+    for (text, needle) in &cases {
+        write(text);
+        let e = match creds::load(&p, &data) {
+            Ok(c) => panic!("accepted ({c:?}), expected {needle:?}"),
+            Err(e) => e,
+        };
+        assert!(e.contains(needle), "{e:?} lacks {needle:?}");
+        assert!(e.contains("creds.toml"), "the path is named: {e:?}");
+        assert!(!e.contains('\n'), "not one line: {e:?}");
+        assert!(!e.contains(SECRET), "the error quotes the secret: {e:?}");
+        if let Some(q) = pieces.iter().find(|q| e.contains(q.as_str())) {
+            panic!("the error quotes key material {q:?}: {e:?}");
+        }
+    }
+
+    // The file rules protect the key as they protect the secret.
+    write(&with_key(&rsa::pem_2048()));
+    if !rustix::process::geteuid().is_root() {
+        chmod(&p, 0o644);
+        refused(&p, &data, "must have mode 0600 or 0400");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }

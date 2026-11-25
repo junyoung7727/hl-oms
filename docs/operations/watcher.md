@@ -88,14 +88,58 @@ install -m 600 /dev/null /etc/hl-oms/watcher-bybit.toml   # 워처를 돌릴 사
 $EDITOR /etc/hl-oms/watcher-bybit.toml
 ```
 
+두 형 가운데 정확히 하나를 쓴다([ADR-034](../adr/ADR-034-bybit-rsa-keys.md)). OMS의 Bybit 자격 파일과 모양이 같다([운영 절차 §2](runbook.md)).
+
 ```toml
+# HMAC 키: Bybit가 만든 키(System-generated)
 api_key = "..."
 api_secret = "..."
 ```
 
-- 두 키만 둔다. 다른 키가 있거나 하나가 비면 시작하지 않는다.
+```toml
+# RSA 키: 직접 만든 키(Self-generated). openssl이 쓴 PEM 글을 머리 줄과 꼬리 줄까지 그대로
+api_key = "..."
+rsa_private_key = """
+(BEGIN PRIVATE KEY 줄부터 END PRIVATE KEY 줄까지)
+"""
+```
+
+RSA 키 만들기와 등록(Bybit testnet의 AI 하위 계정은 이 형만 준다):
+
+```sh
+umask 077
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out bybit-rsa.pem   # 개인 키, PKCS#8
+openssl pkey -in bybit-rsa.pem -pubout -out bybit-rsa.pub.pem                       # 공개 키
+```
+
+1. Bybit: API management → Create New Key → Self-generated API Keys에서 `bybit-rsa.pub.pem`의 공개 키를 넣고, 권한(`[kill]`이면 `ContractTrade`의 `Order`, 출금 없음)과 이 호스트의 공인 IP를 묶는다. Bybit가 보여 주는 API 키(`api_key`)를 적어 둔다. 화면의 이름은 스펙(2026-11-25)에서 왔고 이 문서가 확인하지 않았다.
+2. 자격 파일을 만든다(API 키는 비밀이 아니다. 개인 키는 이 파일에만 둔다):
+
+```sh
+install -m 600 /dev/null /etc/hl-oms/watcher-bybit.toml
+{ printf 'api_key = "%s"\nrsa_private_key = """\n' '<API 키>'; cat bybit-rsa.pem; printf '"""\n'; } > /etc/hl-oms/watcher-bybit.toml
+```
+
+3. 워처가 이 파일로 시작하는 것을 본 뒤 개인 키의 원본을 지운다. 남기면 소유자·위치 검사를 받지 않는 두 번째 비밀 파일이 된다(검토 S3). 키를 잃으면 새로 만들어 등록하면 되므로 사본을 두지 않는다. 공개 키 `bybit-rsa.pub.pem`은 비밀이 아니라 남겨도 된다.
+
+```sh
+shred -u bybit-rsa.pem   # 또는 rm bybit-rsa.pem (SSD와 저널링 파일 시스템에서는 shred도 덮어쓰기를 보장하지 않는다)
+```
+
+- `api_key`와, `api_secret` 또는 `rsa_private_key` 중 하나만 둔다. 다른 키가 있거나, 둘 다 있거나, 둘 다 없거나, 값이 비면 시작하지 않는다.
+- RSA 키는 `BEGIN PRIVATE KEY` 줄의 PKCS#8이어야 한다(위 `genpkey`가 쓰는 형). 시작할 때 한 번 읽어 파싱하고, 거부는 종료 코드 2와 아래 한 줄이다.
+
+| 오류 줄(경로 뒤) | 뜻 | 할 일 |
+|---|---|---|
+| `has both api_secret and rsa_private_key; keep exactly one` | 두 비밀이 다 있다 | 쓰지 않는 쪽을 지운다 |
+| `is not TOML with api_key and api_secret or rsa_private_key: it has neither` | 비밀이 없다 | 하나를 넣는다 |
+| `api_secret holds a PEM private key; an RSA key goes in rsa_private_key` | RSA 키를 `api_secret` 자리에 넣었다 | 키 이름을 `rsa_private_key`로 바꾼다 |
+| `rsa_private_key is a PKCS#1 key (BEGIN RSA PRIVATE KEY); convert it to PKCS#8 with: openssl pkcs8 -topk8 -nocrypt -in old.pem -out new.pem` | 옛 형(PKCS#1) | 적힌 명령으로 바꿔 다시 넣는다 |
+| `rsa_private_key is encrypted (BEGIN ENCRYPTED PRIVATE KEY); write it unencrypted with: openssl pkcs8 -topk8 -nocrypt -in old.pem -out new.pem` | 암호가 걸린 키(무인 실행은 암호를 물을 수 없다) | 적힌 명령(암호를 묻는다)으로 풀어 다시 넣는다 |
+| `rsa_private_key is not a PEM private key (BEGIN PRIVATE KEY, PKCS#8)` | 머리·꼬리 줄이 없거나 본문이 base64가 아니다 | 파일을 `genpkey`의 출력 그대로 다시 넣는다 |
+| `rsa_private_key is not an RSA key of 2048 bits or more that ring accepts (<이유>)` | 2048비트 미만, RSA가 아닌 키, 깨진 본문 | 2048비트 RSA 키를 새로 만들어 등록한다 |
 - 워처를 돌리는 사용자가 소유하고 권한은 `0600` 또는 `0400`이어야 한다. 심볼릭 링크는 받지 않는다(링크가 아닌 파일 경로를 적는다). OMS 데이터 디렉터리 안에 두지 않는다.
-- 오류 줄은 파일 내용을 인용하지 않는다. 그래도 저장소, 로그, 메시지에 이 파일을 붙이지 않는다.
+- 오류 줄은 파일 내용을 인용하지 않는다(RSA 키의 줄도 키의 바이트를 담지 않는다). 그래도 저장소, 로그, 메시지에 이 파일을 붙이지 않는다.
 
 ## 토큰 파일(U19b1a)
 

@@ -85,13 +85,15 @@ pub fn request_message(
 }
 
 /// The `auth` message: the private stream's signature over
-/// `GET/realtime` + `expires`, in the shape of the WS Trade page.
-pub fn auth_message(creds: &Credentials, expires_ms: u64) -> String {
-    json!({
+/// `GET/realtime` + `expires`, in the shape of the WS Trade page. `Err`
+/// when the signature cannot be made: the message is not sent.
+pub fn auth_message(creds: &Credentials, expires_ms: u64) -> Result<String, String> {
+    let sig = creds.ws_auth_signature(expires_ms)?;
+    Ok(json!({
         "op": "auth",
-        "args": [creds.api_key, expires_ms, creds.ws_auth_signature(expires_ms)],
+        "args": [creds.api_key, expires_ms, sig],
     })
-    .to_string()
+    .to_string())
 }
 
 /// One text frame of WS Trade.
@@ -304,10 +306,11 @@ async fn once<H: Host>(trade: &Trade, host: &H, c: &Conn, alive: &mut bool) -> E
     };
     let (mut write, mut read) = ws.split();
     let expires = wall_ms() + c.recv_window_ms;
-    if let Err(e) = write
-        .send(Message::text(auth_message(&c.creds, expires)))
-        .await
-    {
+    let auth = match auth_message(&c.creds, expires) {
+        Ok(m) => m,
+        Err(e) => return End::Retry(format!("auth not sent: {e}")),
+    };
+    if let Err(e) = write.send(Message::text(auth)).await {
         return End::Retry(format!("auth not sent: {e}"));
     }
     let deadline = Instant::now() + t.handshake;
@@ -511,11 +514,29 @@ mod tests {
     #[test]
     fn the_auth_message_is_the_private_stream_signature() {
         let creds = super::super::rest::Credentials::new("KEY", "SECRET");
-        let m: Value = serde_json::from_str(&auth_message(&creds, 1_662_350_400_000)).unwrap();
+        let m: Value =
+            serde_json::from_str(&auth_message(&creds, 1_662_350_400_000).unwrap()).unwrap();
         assert_eq!(
             m,
             json!({"op": "auth", "args": ["KEY", 1_662_350_400_000u64,
                 super::super::sign::ws_auth_signature("SECRET", 1_662_350_400_000)]})
+        );
+    }
+
+    /// RSA (ADR-034, spec T3, F2): the `auth` message signed with an RSA
+    /// key carries the base64 signature of `GET/realtime{expires}`:
+    /// openssl's value (`printf '%s' GET/realtime1662350400000 | openssl dgst
+    /// -sha256 -sign key.pem | base64 -w0`, the test-only key), not hex.
+    #[test]
+    fn the_auth_message_with_an_rsa_key_carries_the_base64_signature() {
+        let pem = crate::venue::bybit::sign::test_keys::pem_2048();
+        let creds = super::super::rest::Credentials::rsa("KEY", &pem).unwrap();
+        let m: Value =
+            serde_json::from_str(&auth_message(&creds, 1_662_350_400_000).unwrap()).unwrap();
+        assert_eq!(
+            m,
+            json!({"op": "auth", "args": ["KEY", 1_662_350_400_000u64,
+                "HZKuzRsZu3GyRpRRU9GK/xpL4DUyjo4bd+uRkRedWmZwUUr1ye+RvVNtV+LpPmx5X+1iKtlWIJGe1FNJ/jW/A0q4e2ND7FcQy9zEgbRZwVO+sbUqoN0m69zQ+mhqR5VBKXTFIcbEhzFiQKFHSC/hK5OmdSX2aCU0e0ROiA5o5p5Vcvs6jF4U1G2EF4bq5LX5BPufvpLsI4HoqBcX5Oq/gIjTxAORH2YNwzeuGh1migMEAxTpp2lRXc27qaBGhbPmYURG3QvCguBp5ctIiP2T6RTeiPgfBSYxSZZESMOs/oFVhjeRJ226Nrj7tUqcA9Gn1P4B4Y4SpIzAJ0tWLizZWg=="]})
         );
     }
 

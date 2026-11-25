@@ -7,6 +7,7 @@
 
 pub mod kill_rig;
 pub mod rig;
+pub mod rsa;
 pub mod sock;
 
 use serde_json::{Value, json};

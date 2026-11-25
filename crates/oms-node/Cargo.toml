@@ -28,9 +28,11 @@ k256 = { version = "0.14.0", features = ["ecdsa"] }
 sha3 = "0.12.0"
 rmp-serde = "1.3.1"
 hex = "0.4.3"
-# Bybit gateway
+# Bybit gateway (RSA keys: ring and base64, already in Cargo.lock; ADR-034)
 hmac = "0.13.0"
 sha2 = "0.11.0"
+ring = "0.17"
+base64 = "0.23"
 
 [lints]
 workspace = true
