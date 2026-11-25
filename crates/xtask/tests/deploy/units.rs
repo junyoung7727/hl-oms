@@ -110,6 +110,10 @@ const AUDIT_SCRIPT: &str = "crypto-lake-audit.sh";
 const L0: &str = "/mnt/nvme/lake/crypto/l0";
 const VERIFY_DIR: &str = "/mnt/nvme/lake/crypto/l0/_verify";
 const AUDIT_DIR: &str = "/mnt/nvme/lake/crypto/audit";
+/// The KR pipeline's checkouts (with `-official` and any other suffix).
+const KR_CHECKOUT: &str = "/mnt/nvme/gitproject/quant-data-platform";
+/// The auditor's state file in the script: the unit's state directory.
+const AUDIT_STATE: &str = "--state \"$STATE_DIRECTORY/audit-$venue.json\"";
 /// The audit unit's two path lines, exactly.
 const AUDIT_PATHS: &[(&str, &str, Want)] = &[
     (
@@ -176,6 +180,7 @@ pub fn check(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
     u8_listeners(p, out);
     u9_stores(p, out);
     u10_u11_flags(p, out);
+    u12_audit_checkout_and_state(t, p, out);
     u13_venues(t, p, out);
     u14_install_map(t, p, out);
     u15_identity(p, out);
@@ -654,6 +659,72 @@ fn u10_u11_flags(p: &Parsed, out: &mut Vec<Finding>) {
                     );
                 }
             }
+        }
+    }
+}
+
+fn u12_audit_checkout_and_state(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
+    for (path, text) in t.files.iter().filter(|(k, _)| k.starts_with("deploy/")) {
+        if text.contains(KR_CHECKOUT) {
+            finding(
+                out,
+                path,
+                "U12",
+                format!("names {KR_CHECKOUT}: the audit runs from its own qdp checkout"),
+            );
+        }
+    }
+    let script = format!("{OBS}bin/{AUDIT_SCRIPT}");
+    match t.files.get(&script) {
+        None => finding(out, &script, "U12", "missing"),
+        Some(text) => {
+            let lines: Vec<&str> = text.lines().map(str::trim).collect();
+            if lines.iter().filter(|l| l.starts_with("venue=")).count() != 1
+                || !lines.contains(&"venue=$1")
+            {
+                finding(
+                    out,
+                    &script,
+                    "U12",
+                    "the venue is set once, as venue=$1 (the unit's instance)",
+                );
+            }
+            let states: Vec<&str> = text
+                .match_indices("--state")
+                .map(|(i, _)| &text[i..])
+                .collect();
+            if states.is_empty() || !states.iter().all(|r| r.starts_with(AUDIT_STATE)) {
+                finding(
+                    out,
+                    &script,
+                    "U12",
+                    format!("every --state must be {AUDIT_STATE}, outside the lake"),
+                );
+            }
+            if text.contains("STATE_DIRECTORY=") {
+                finding(
+                    out,
+                    &script,
+                    "U12",
+                    "STATE_DIRECTORY is set by systemd only",
+                );
+            }
+        }
+    }
+    for u in required(p, AUDIT, "U12", out) {
+        expect(
+            u,
+            "U12",
+            ("Service", "StateDirectory", Is("qdp-crypto-audit")),
+            out,
+        );
+        if !env_values(&environment(u), "STATE_DIRECTORY").is_empty() {
+            finding(
+                out,
+                &u.path,
+                "U12",
+                "STATE_DIRECTORY is set by systemd only",
+            );
         }
     }
 }
@@ -2119,4 +2190,67 @@ fn the_audit_unit_can_write_its_verify_results() {
         let f = crate::check(&t);
         assert_rules(&f, rules);
     }
+}
+
+#[test]
+fn the_audit_never_points_at_the_kr_checkouts() {
+    let audit = "crypto-lake-audit@.service";
+    let script = format!("{OBS}bin/crypto-lake-audit.sh");
+    let kr = "/mnt/nvme/gitproject/quant-data-platform";
+    // The KR pipeline's checkouts, in the unit or any other deploy file.
+    for to in [
+        format!("Environment=QDP_CHECKOUT={kr}\n"),
+        format!("Environment=QDP_CHECKOUT={kr}-official\n"),
+    ] {
+        plant(
+            audit,
+            "Environment=QDP_CHECKOUT=/opt/qdp-crypto\n",
+            &to,
+            &["U12"],
+        );
+    }
+    let mut t = Tree::real();
+    t.replace(&script, "venue=$1\n", &format!("venue=$1\ncd {kr}/x\n"));
+    assert_rules(&crate::check(&t), &["U12"]);
+    // A comment counts too: the path is not written anywhere under deploy/.
+    plant(
+        "md-archiver@.timer",
+        "Persistent=true\n",
+        &format!("Persistent=true\n# not {kr}\n"),
+        &["U12"],
+    );
+    // The state file stays outside the lake: the unit's state directory, the
+    // instance's venue.
+    let state = "--state \"$STATE_DIRECTORY/audit-$venue.json\"";
+    for (from, to) in [
+        (state, "--state \"$LAKE/crypto/audit-$venue.json\""),
+        (state, "--state \"$STATE_DIRECTORY/audit.json\""),
+        (state, "--state=\"$STATE_DIRECTORY/audit-$venue.json\""),
+        (state, ""),
+        ("venue=$1\n", "venue=${1:-bybit}\n"),
+        ("venue=$1\n", "venue=$1\nvenue=bybit\n"),
+        ("venue=$1\n", "venue=$1\nSTATE_DIRECTORY=/mnt/nvme/lake\n"),
+    ] {
+        let mut t = Tree::real();
+        t.replace(&script, from, to);
+        let f = crate::check(&t);
+        assert_rules(&f, &["U12"]);
+    }
+    plant(audit, "StateDirectory=qdp-crypto-audit\n", "", &["U12"]);
+    plant(
+        audit,
+        "StateDirectory=qdp-crypto-audit\n",
+        "StateDirectory=qdp-crypto-audit\nEnvironment=STATE_DIRECTORY=/mnt/nvme/lake/state\n",
+        &["U12"],
+    );
+    plant(
+        audit,
+        "StateDirectory=qdp-crypto-audit\n",
+        "StateDirectory=other\n",
+        &["U12"],
+    );
+    // The script itself gone: U12 cannot see the state path, U14 its file.
+    let mut t = Tree::real();
+    t.remove(&script);
+    assert_rules(&crate::check(&t), &["U12", "U14"]);
 }
