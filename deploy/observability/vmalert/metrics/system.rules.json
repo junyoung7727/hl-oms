@@ -1,0 +1,67 @@
+{
+  "groups": [
+    {
+      "name": "watchdog",
+      "rules": [
+        {
+          "alert": "Watchdog",
+          "expr": "vector(1)",
+          "labels": {
+            "severity": "watchdog"
+          },
+          "annotations": {
+            "summary": "늘 울리는 알림. dead-man 수신자가 이것이 끊긴 것을 보고 관측 스택이 죽었음을 안다."
+          }
+        }
+      ]
+    },
+    {
+      "name": "system",
+      "interval": "10s",
+      "rules": [
+        {
+          "alert": "ObsComponentDown",
+          "expr": "up{job=~\"victorialogs|vmalert-logs|alertmanager\"} == 0",
+          "for": "2m",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "관측 구성 요소 하나가 2분 넘게 응답하지 않는다. systemctl status <job 이름>으로 본다. VictoriaMetrics와 vmalert-metrics가 죽으면 이 알림 자체가 없으므로 Watchdog이 대신한다."
+          }
+        },
+        {
+          "alert": "VmalertIterationMissed",
+          "expr": "increase(vmalert_iteration_missed_total[10m]) > 0",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "vmalert가 규칙 평가 주기를 놓쳤다. 그동안 알림이 늦다. 저장소 응답 시간과 vmalert 메모리를 본다."
+          }
+        },
+        {
+          "alert": "AlertmanagerTelegramFailing",
+          "expr": "increase(alertmanager_notifications_failed_total{integration=\"telegram\"}[10m]) > 0",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "Alertmanager가 Telegram으로 보내지 못했다. 이 알림도 Telegram으로는 오지 않을 수 있으니 대시보드에서 본다. journalctl -u alertmanager로 오류를 본다."
+          }
+        },
+        {
+          "alert": "ObsMemoryNearCap",
+          "expr": "process_resident_memory_bytes{job=\"victoriametrics\"} > 0.9 * 1073741824 or process_resident_memory_bytes{job=\"victorialogs\"} > 0.9 * 1073741824 or process_resident_memory_bytes{job=\"vmalert-metrics\"} > 0.9 * 209715200 or process_resident_memory_bytes{job=\"vmalert-logs\"} > 0.9 * 209715200 or process_resident_memory_bytes{job=\"alertmanager\"} > 0.9 * 104857600",
+          "for": "10m",
+          "labels": {
+            "severity": "P3"
+          },
+          "annotations": {
+            "summary": "관측 구성 요소의 메모리가 단위의 MemoryMax 90%를 넘었다. 상한에 닿으면 강제 종료된다. 주간 검토에서 상한이나 설정을 고친다."
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,11 +1,15 @@
 //! The deployment check: the files under `deploy/` (systemd units, timers,
-//! the slice, the install map, the venue list) against the rules of
-//! ADR-035. Pure over an in-memory tree: no network, no clock, no temp file.
+//! the slice, the install map, the venue list, the metric catalogue, the
+//! vmalert rule files, the scrape config) against the rules of ADR-035.
+//! Pure over an in-memory tree: no network, no clock, no temp file.
 //! Run before an install with `cargo test --locked -p xtask --test deploy`.
 
 #![allow(clippy::unwrap_used)]
 
+mod catalogue;
+mod expr;
 mod ini;
+mod rules;
 mod tree;
 mod units;
 
@@ -17,6 +21,8 @@ pub fn check(t: &Tree) -> Vec<Finding> {
     let mut out = Vec::new();
     let p = tree::parse(t, &mut out);
     units::check(t, &p, &mut out);
+    let cat = catalogue::build(t, &p, &mut out);
+    rules::check(t, &p, &cat, &mut out);
     out
 }
 

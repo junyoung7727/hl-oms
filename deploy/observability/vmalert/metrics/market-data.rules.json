@@ -1,0 +1,127 @@
+{
+  "groups": [
+    {
+      "name": "market-data",
+      "interval": "10s",
+      "rules": [
+        {
+          "alert": "MdCollectorDown",
+          "expr": "time() - max by (venue) (md_collector_heartbeat_ts{venue=\"bybit\"}) > 60 or absent_over_time(md_collector_heartbeat_ts{venue=\"bybit\"}[2m])",
+          "labels": {
+            "severity": "P1",
+            "venue": "bybit"
+          },
+          "annotations": {
+            "summary": "bybit 수집기의 심박이 60초 넘게 없다(또는 2분 동안 값이 없다). 원본 시세를 잃는 중이다. systemctl status md-collector@bybit와 journalctl -u md-collector@bybit로 원인을 찾고 수집기를 다시 띄운다."
+          }
+        },
+        {
+          "alert": "MdLakeGaugesMissing",
+          "expr": "absent_over_time(lake_disk_free_bytes{venue=\"bybit\"}[10m]) or absent_over_time(lake_seal_lag_hours{venue=\"bybit\"}[10m])",
+          "labels": {
+            "severity": "P2",
+            "venue": "bybit"
+          },
+          "annotations": {
+            "summary": "bybit 수집기는 살아 있는데 디스크 여유나 봉인 지연 값이 10분 넘게 오지 않는다. 그동안 남은 일수와 봉인 지연 알림은 울릴 수 없다. journalctl -u md-collector@bybit에서 statvfs나 _open 목록 오류를 찾는다."
+          }
+        },
+        {
+          "alert": "MdConnectionSilent",
+          "expr": "sum by (venue, market, channel, conn) (sum_over_time(md_msgs[2m])) == 0",
+          "for": "1m",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "돌고 있는 연결 하나가 2분 동안 메시지를 하나도 받지 못했다. 거래소 쪽 구독이 멈췄을 수 있다. journalctl -u md-collector@<거래소>에서 그 연결의 재연결·구독 기록을 본다."
+          }
+        },
+        {
+          "alert": "MdTopicsStale",
+          "expr": "count by (venue, market, channel) (md_last_msg_age_s{channel=~\"orderbook.*\"} > 60) / count by (venue, market, channel) (md_last_msg_age_s{channel=~\"orderbook.*\"}) > 0.1",
+          "for": "5m",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "호가창 토픽의 10% 넘게가 60초 넘게 메시지를 받지 못했다. D2 대시보드에서 어느 종목이 비었는지 보고, 수집기 로그에서 그 연결을 찾는다."
+          }
+        },
+        {
+          "alert": "MdRecvLagHigh",
+          "expr": "max by (venue, market) (md_recv_lag_ms{quantile=\"0.99\"}) > 1000",
+          "for": "5m",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "수신 지연 p99가 1초를 넘는다. 이 PC의 부하(연구 작업, 디스크)와 시계 오프셋을 먼저 본다. 그 구간은 거래소 간 선후 분석에서 뺀다."
+          }
+        },
+        {
+          "alert": "MdReconnectsHigh",
+          "expr": "sum by (venue, market) (increase(md_reconnects_total[10m])) > 10",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "10분에 재연결이 10번을 넘었다. 거래소 장애 공지와 이 PC의 네트워크를 본다. 재연결마다 공백이 생긴다."
+          }
+        },
+        {
+          "alert": "MdGapsHigh",
+          "expr": "sum by (venue, market) (increase(md_gaps_total[10m])) > 20",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "10분에 호가창 공백이 20번을 넘었다. 수신 지연과 재연결 알림을 함께 보고, 공백 구간은 L1 gap 행으로 남는다."
+          }
+        },
+        {
+          "alert": "MdCollectorRestarting",
+          "expr": "max by (venue) (resets(lake_l0_bytes_total[10m])) > 0",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "수집기가 심박은 보내지만 10분 안에 죽었다 다시 떴다(예: 메모리 상한에서 강제 종료, panic). 재시작마다 그 사이의 원본 데이터와 호가창 상태를 잃는다. 운영자가 직접 재시작해도 한 번 울린다. systemctl status md-collector@<거래소>와 journalctl -u md-collector@<거래소>로 종료 원인(oom-kill, panic)을 찾는다."
+          }
+        },
+        {
+          "alert": "MdQueueHigh",
+          "expr": "max by (venue, conn) (md_queue_bytes) > 8388608",
+          "for": "1m",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "L0 쓰기 대기열이 8 MiB(칸 상한 16 MiB의 절반)를 넘었다. 디스크가 느리거나 막혔다. 디스크 I/O와 연구 작업을 본다. 상한에 닿으면 그 연결은 끊긴다."
+          }
+        },
+        {
+          "alert": "MdObsPushDropping",
+          "expr": "sum by (venue, endpoint) (increase(obs_push_dropped_total[10m])) > 0",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "수집기가 VictoriaMetrics나 VictoriaLogs로 보내지 못한 줄을 버리고 있다. 지표와 로그에 구멍이 난다. 두 저장소가 살아 있는지(systemctl status victoriametrics victorialogs) 본다."
+          }
+        },
+        {
+          "alert": "ClockOffsetHigh",
+          "expr": "abs(node_clock_offset_ms) > 5",
+          "for": "5m",
+          "labels": {
+            "severity": "P2"
+          },
+          "annotations": {
+            "summary": "이 PC의 시계가 5 ms 넘게 어긋났다. chronyc tracking으로 상태를 보고, 그 구간의 수신 지연과 선후 분석은 믿지 않는다."
+          }
+        }
+      ]
+    }
+  ]
+}

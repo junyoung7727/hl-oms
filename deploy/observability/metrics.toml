@@ -1,0 +1,169 @@
+# The metric catalogue of the deployment check (ADR-035 D7): every metric
+# name a rule or a dashboard uses is a row here, a metric of the pinned qdp
+# list contracts/lake/xrepo/metrics.json, or a `record` of a rule file.
+#
+# [[metric]]: a metric hl-oms pushes. `source` is the file that contains the
+# name as a string literal (rule R2); the check fails when it does not.
+# [[stack]]: a metric of the observability stack itself, read from the
+# tools' /metrics at the versions given (scraped by victoriametrics/scrape.json;
+# ALERTS is written by vmalert). Not installed.
+
+[[metric]]
+name = "lake_l0_open_files"
+labels = ["venue"]
+source = "crates/md-collector/src/obs.rs"
+
+[[metric]]
+name = "lake_l0_bytes_total"
+labels = ["venue"]
+source = "crates/md-collector/src/obs.rs"
+
+[[metric]]
+name = "lake_l0_write_errors_total"
+labels = ["venue"]
+source = "crates/md-collector/src/obs.rs"
+
+[[metric]]
+name = "lake_disk_free_bytes"
+labels = ["venue"]
+source = "crates/md-collector/src/obs.rs"
+
+[[metric]]
+name = "md_queue_bytes"
+labels = ["venue", "conn"]
+source = "crates/md-collector/src/obs.rs"
+
+[[metric]]
+name = "md_collector_heartbeat_ts"
+labels = ["venue"]
+source = "crates/md-collector/src/obs.rs"
+
+[[metric]]
+name = "node_clock_offset_ms"
+labels = ["host"]
+source = "crates/md-collector/src/obs.rs"
+
+[[metric]]
+name = "lake_seal_lag_hours"
+labels = ["venue"]
+source = "crates/md-collector/src/obs.rs"
+
+[[metric]]
+name = "md_spread_bp"
+labels = ["venue", "market", "symbol", "channel"]
+source = "crates/md-collector/src/telemetry.rs"
+
+[[metric]]
+name = "md_mid_px"
+labels = ["venue", "market", "symbol", "channel"]
+source = "crates/md-collector/src/telemetry.rs"
+
+[[metric]]
+name = "md_depth_qty"
+labels = ["venue", "market", "symbol", "channel", "side", "levels"]
+source = "crates/md-collector/src/telemetry.rs"
+
+[[metric]]
+name = "md_recv_lag_ms"
+labels = ["venue", "market", "symbol", "channel", "quantile"]
+source = "crates/md-collector/src/telemetry.rs"
+
+[[metric]]
+name = "md_gaps_total"
+labels = ["venue", "market", "symbol", "channel"]
+source = "crates/md-collector/src/telemetry.rs"
+
+[[metric]]
+name = "md_reconnects_total"
+labels = ["venue", "market", "symbol", "channel"]
+source = "crates/md-collector/src/telemetry.rs"
+
+[[metric]]
+name = "md_last_msg_age_s"
+labels = ["venue", "market", "symbol", "channel"]
+source = "crates/md-collector/src/telemetry.rs"
+
+[[metric]]
+name = "md_msgs"
+labels = ["venue", "market", "channel", "conn"]
+source = "crates/md-collector/src/telemetry.rs"
+
+[[metric]]
+name = "md_bytes"
+labels = ["venue", "market", "channel", "conn"]
+source = "crates/md-collector/src/telemetry.rs"
+
+[[metric]]
+name = "md_recv_lag_negative_total"
+labels = ["venue"]
+source = "crates/md-collector/src/telemetry.rs"
+
+[[metric]]
+name = "obs_push_dropped_total"
+labels = ["service", "venue", "endpoint"]
+source = "crates/obs-push/src/lib.rs"
+
+[[metric]]
+name = "obs_push_queue_lines"
+labels = ["service", "venue", "endpoint"]
+source = "crates/obs-push/src/lib.rs"
+
+[[stack]]
+name = "up"
+labels = ["job", "instance"]
+component = "victoriametrics"
+version = "v1.157.0"
+
+[[stack]]
+name = "process_resident_memory_bytes"
+labels = ["job", "instance"]
+component = "victoriametrics, victorialogs, vmalert, alertmanager"
+version = "v1.157.0, v1.54.0, v1.157.0, 0.35.1"
+
+[[stack]]
+name = "vm_free_disk_space_bytes"
+labels = ["job", "instance", "path"]
+component = "victoriametrics"
+version = "v1.157.0"
+
+[[stack]]
+name = "vl_free_disk_space_bytes"
+labels = ["job", "instance", "path"]
+component = "victorialogs"
+version = "v1.54.0"
+
+[[stack]]
+name = "vmalert_iteration_missed_total"
+labels = ["job", "instance", "group", "file"]
+component = "vmalert"
+version = "v1.157.0"
+
+[[stack]]
+name = "vmalert_execution_errors_total"
+labels = ["job", "instance"]
+component = "vmalert"
+version = "v1.157.0"
+
+[[stack]]
+name = "vmalert_alerts_send_errors_total"
+labels = ["job", "instance", "addr"]
+component = "vmalert"
+version = "v1.157.0"
+
+[[stack]]
+name = "alertmanager_notifications_total"
+labels = ["job", "instance", "integration"]
+component = "alertmanager"
+version = "0.35.1"
+
+[[stack]]
+name = "alertmanager_notifications_failed_total"
+labels = ["job", "instance", "integration", "reason"]
+component = "alertmanager"
+version = "0.35.1"
+
+[[stack]]
+name = "ALERTS"
+labels = ["alertname", "alertstate", "severity", "venue", "alertgroup"]
+component = "vmalert"
+version = "v1.157.0"

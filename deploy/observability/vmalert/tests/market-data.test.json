@@ -1,0 +1,907 @@
+{
+ "rule_files": [
+  "../metrics/market-data.rules.json"
+ ],
+ "evaluation_interval": "10s",
+ "tests": [
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_collector_heartbeat_ts{venue=\"bybit\"}",
+     "values": "946684800+10x5"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "50s",
+     "groupname": "market-data",
+     "alertname": "MdCollectorDown",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "1m40s",
+     "groupname": "market-data",
+     "alertname": "MdCollectorDown",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "2m10s",
+     "groupname": "market-data",
+     "alertname": "MdCollectorDown",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P1",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "bybit 수집기의 심박이 60초 넘게 없다(또는 2분 동안 값이 없다). 원본 시세를 잃는 중이다. systemctl status md-collector@bybit와 journalctl -u md-collector@bybit로 원인을 찾고 수집기를 다시 띄운다."
+       }
+      }
+     ]
+    },
+    {
+     "eval_time": "4m",
+     "groupname": "market-data",
+     "alertname": "MdCollectorDown",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P1",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "bybit 수집기의 심박이 60초 넘게 없다(또는 2분 동안 값이 없다). 원본 시세를 잃는 중이다. systemctl status md-collector@bybit와 journalctl -u md-collector@bybit로 원인을 찾고 수집기를 다시 띄운다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_collector_heartbeat_ts{venue=\"other\"}",
+     "values": "946684800+10x29"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "3m",
+     "groupname": "market-data",
+     "alertname": "MdCollectorDown",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P1",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "bybit 수집기의 심박이 60초 넘게 없다(또는 2분 동안 값이 없다). 원본 시세를 잃는 중이다. systemctl status md-collector@bybit와 journalctl -u md-collector@bybit로 원인을 찾고 수집기를 다시 띄운다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_collector_heartbeat_ts{venue=\"bybit\"}",
+     "values": "946684800+10x120"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "10m",
+     "groupname": "market-data",
+     "alertname": "MdCollectorDown",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "20m",
+     "groupname": "market-data",
+     "alertname": "MdCollectorDown",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_collector_heartbeat_ts{venue=\"bybit\"}",
+     "values": "946684800+10x180"
+    },
+    {
+     "series": "lake_disk_free_bytes{venue=\"bybit\"}",
+     "values": "1000000000000+0x180"
+    },
+    {
+     "series": "lake_seal_lag_hours{venue=\"bybit\"}",
+     "values": "0+0x180"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "25m",
+     "groupname": "market-data",
+     "alertname": "MdLakeGaugesMissing",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_collector_heartbeat_ts{venue=\"bybit\"}",
+     "values": "946684800+10x180"
+    },
+    {
+     "series": "lake_disk_free_bytes{venue=\"bybit\"}",
+     "values": "1000000000000+0x60"
+    },
+    {
+     "series": "lake_seal_lag_hours{venue=\"bybit\"}",
+     "values": "0+0x180"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "15m",
+     "groupname": "market-data",
+     "alertname": "MdLakeGaugesMissing",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "21m",
+     "groupname": "market-data",
+     "alertname": "MdLakeGaugesMissing",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "bybit 수집기는 살아 있는데 디스크 여유나 봉인 지연 값이 10분 넘게 오지 않는다. 그동안 남은 일수와 봉인 지연 알림은 울릴 수 없다. journalctl -u md-collector@bybit에서 statvfs나 _open 목록 오류를 찾는다."
+       }
+      }
+     ]
+    },
+    {
+     "eval_time": "21m",
+     "groupname": "market-data",
+     "alertname": "MdCollectorDown",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_collector_heartbeat_ts{venue=\"bybit\"}",
+     "values": "946684800+10x180"
+    },
+    {
+     "series": "lake_disk_free_bytes{venue=\"bybit\"}",
+     "values": "1000000000000+0x180"
+    },
+    {
+     "series": "lake_seal_lag_hours{venue=\"bybit\"}",
+     "values": "0+0x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "15m",
+     "groupname": "market-data",
+     "alertname": "MdLakeGaugesMissing",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "21m",
+     "groupname": "market-data",
+     "alertname": "MdLakeGaugesMissing",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "bybit 수집기는 살아 있는데 디스크 여유나 봉인 지연 값이 10분 넘게 오지 않는다. 그동안 남은 일수와 봉인 지연 알림은 울릴 수 없다. journalctl -u md-collector@bybit에서 statvfs나 _open 목록 오류를 찾는다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_collector_heartbeat_ts{venue=\"bybit\"}",
+     "values": "946684800 946684810 946684820 946684830 _ _ 946684860 946684870 946684880 946684890 _ _ 946684920 946684930 946684940 946684950 _ _ 946684980 946684990 946685000 946685010 _ _ 946685040 946685050 946685060 946685070 _ _ 946685100 946685110 946685120 946685130 _ _ 946685160 946685170 946685180 946685190 _ _ 946685220 946685230 946685240 946685250 _ _ 946685280 946685290 946685300 946685310 _ _ 946685340 946685350 946685360 946685370 _ _ 946685400 946685410 946685420 946685430 _ _ 946685460 946685470 946685480 946685490 _ _ 946685520 946685530 946685540 946685550 _ _ 946685580 946685590 946685600 946685610 _ _ 946685640 946685650 946685660 946685670 _ _ 946685700 946685710 946685720 946685730 _ _ 946685760 946685770 946685780 946685790 _ _ 946685820 946685830 946685840 946685850 _ _ 946685880 946685890 946685900 946685910 _ _ 946685940 946685950 946685960 946685970 _ _ 946686000"
+    },
+    {
+     "series": "lake_l0_bytes_total{venue=\"bybit\"}",
+     "values": "0 10000000 20000000 30000000 _ _ 0 10000000 20000000 30000000 _ _ 0 10000000 20000000 30000000 _ _ 0 10000000 20000000 30000000 _ _ 0 10000000 20000000 30000000 _ _ 0 10000000 20000000 30000000 _ _ 0 10000000 20000000 30000000 _ _ 0 10000000 20000000 30000000 _ _ 0 10000000 20000000 30000000 _ _ 0 10000000 20000000 30000000 _ _ 0 10000000 20000000 30000000 _ _ 0 10000000 20000000 30000000 _ _ 0 10000000 20000000 30000000 _ _ 0 10000000 20000000 30000000 _ _ 0 10000000 20000000 30000000 _ _ 0 10000000 20000000 30000000 _ _ 0 10000000 20000000 30000000 _ _ 0 10000000 20000000 30000000 _ _ 0 10000000 20000000 30000000 _ _ 0 10000000 20000000 30000000 _ _ 0"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "10m",
+     "groupname": "market-data",
+     "alertname": "MdCollectorDown",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "10m30s",
+     "groupname": "market-data",
+     "alertname": "MdCollectorDown",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "10m50s",
+     "groupname": "market-data",
+     "alertname": "MdCollectorDown",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "15m",
+     "groupname": "market-data",
+     "alertname": "MdCollectorDown",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "15m40s",
+     "groupname": "market-data",
+     "alertname": "MdCollectorDown",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "15m50s",
+     "groupname": "market-data",
+     "alertname": "MdCollectorDown",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "15m",
+     "groupname": "market-data",
+     "alertname": "MdCollectorRestarting",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "수집기가 심박은 보내지만 10분 안에 죽었다 다시 떴다(예: 메모리 상한에서 강제 종료, panic). 재시작마다 그 사이의 원본 데이터와 호가창 상태를 잃는다. 운영자가 직접 재시작해도 한 번 울린다. systemctl status md-collector@<거래소>와 journalctl -u md-collector@<거래소>로 종료 원인(oom-kill, panic)을 찾는다."
+       }
+      }
+     ]
+    },
+    {
+     "eval_time": "15m40s",
+     "groupname": "market-data",
+     "alertname": "MdCollectorRestarting",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "수집기가 심박은 보내지만 10분 안에 죽었다 다시 떴다(예: 메모리 상한에서 강제 종료, panic). 재시작마다 그 사이의 원본 데이터와 호가창 상태를 잃는다. 운영자가 직접 재시작해도 한 번 울린다. systemctl status md-collector@<거래소>와 journalctl -u md-collector@<거래소>로 종료 원인(oom-kill, panic)을 찾는다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_collector_heartbeat_ts{venue=\"bybit\"}",
+     "values": "946684800+10x120"
+    },
+    {
+     "series": "lake_l0_bytes_total{venue=\"bybit\"}",
+     "values": "0+10000000x5 0+10000000x114"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "50s",
+     "groupname": "market-data",
+     "alertname": "MdCollectorRestarting",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "2m",
+     "groupname": "market-data",
+     "alertname": "MdCollectorRestarting",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "수집기가 심박은 보내지만 10분 안에 죽었다 다시 떴다(예: 메모리 상한에서 강제 종료, panic). 재시작마다 그 사이의 원본 데이터와 호가창 상태를 잃는다. 운영자가 직접 재시작해도 한 번 울린다. systemctl status md-collector@<거래소>와 journalctl -u md-collector@<거래소>로 종료 원인(oom-kill, panic)을 찾는다."
+       }
+      }
+     ]
+    },
+    {
+     "eval_time": "10m30s",
+     "groupname": "market-data",
+     "alertname": "MdCollectorRestarting",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit"
+       },
+       "exp_annotations": {
+        "summary": "수집기가 심박은 보내지만 10분 안에 죽었다 다시 떴다(예: 메모리 상한에서 강제 종료, panic). 재시작마다 그 사이의 원본 데이터와 호가창 상태를 잃는다. 운영자가 직접 재시작해도 한 번 울린다. systemctl status md-collector@<거래소>와 journalctl -u md-collector@<거래소>로 종료 원인(oom-kill, panic)을 찾는다."
+       }
+      }
+     ]
+    },
+    {
+     "eval_time": "11m30s",
+     "groupname": "market-data",
+     "alertname": "MdCollectorRestarting",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_collector_heartbeat_ts{venue=\"bybit\"}",
+     "values": "946684800+10x120"
+    },
+    {
+     "series": "lake_l0_bytes_total{venue=\"bybit\"}",
+     "values": "0+10000000x120"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "15m",
+     "groupname": "market-data",
+     "alertname": "MdCollectorDown",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "15m",
+     "groupname": "market-data",
+     "alertname": "MdCollectorRestarting",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_msgs{venue=\"bybit\",market=\"linear\",channel=\"orderbook.50\",conn=\"0\"}",
+     "values": "5+0x6 0+0x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "2m",
+     "groupname": "market-data",
+     "alertname": "MdConnectionSilent",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "4m",
+     "groupname": "market-data",
+     "alertname": "MdConnectionSilent",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit",
+        "market": "linear",
+        "channel": "orderbook.50",
+        "conn": "0"
+       },
+       "exp_annotations": {
+        "summary": "돌고 있는 연결 하나가 2분 동안 메시지를 하나도 받지 못했다. 거래소 쪽 구독이 멈췄을 수 있다. journalctl -u md-collector@<거래소>에서 그 연결의 재연결·구독 기록을 본다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_msgs{venue=\"bybit\",market=\"linear\",channel=\"orderbook.50\",conn=\"0\"}",
+     "values": "5+0x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "8m",
+     "groupname": "market-data",
+     "alertname": "MdConnectionSilent",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S0\",channel=\"orderbook.50\"}",
+     "values": "90+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S1\",channel=\"orderbook.50\"}",
+     "values": "90+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S2\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S3\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S4\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S5\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S6\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S7\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S8\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S9\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "4m",
+     "groupname": "market-data",
+     "alertname": "MdTopicsStale",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "6m",
+     "groupname": "market-data",
+     "alertname": "MdTopicsStale",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit",
+        "market": "linear",
+        "channel": "orderbook.50"
+       },
+       "exp_annotations": {
+        "summary": "호가창 토픽의 10% 넘게가 60초 넘게 메시지를 받지 못했다. D2 대시보드에서 어느 종목이 비었는지 보고, 수집기 로그에서 그 연결을 찾는다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S0\",channel=\"orderbook.50\"}",
+     "values": "90+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S1\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S2\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S3\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S4\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S5\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S6\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S7\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S8\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S9\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S10\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S11\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S12\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S13\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S14\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S15\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S16\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S17\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S18\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    },
+    {
+     "series": "md_last_msg_age_s{venue=\"bybit\",market=\"linear\",symbol=\"S19\",channel=\"orderbook.50\"}",
+     "values": "1+0x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "8m",
+     "groupname": "market-data",
+     "alertname": "MdTopicsStale",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_recv_lag_ms{venue=\"bybit\",market=\"linear\",symbol=\"S\",channel=\"orderbook.50\",quantile=\"0.99\"}",
+     "values": "1500+0x60"
+    },
+    {
+     "series": "md_recv_lag_ms{venue=\"bybit\",market=\"linear\",symbol=\"S\",channel=\"orderbook.50\",quantile=\"0.5\"}",
+     "values": "5000+0x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "4m",
+     "groupname": "market-data",
+     "alertname": "MdRecvLagHigh",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "6m",
+     "groupname": "market-data",
+     "alertname": "MdRecvLagHigh",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit",
+        "market": "linear"
+       },
+       "exp_annotations": {
+        "summary": "수신 지연 p99가 1초를 넘는다. 이 PC의 부하(연구 작업, 디스크)와 시계 오프셋을 먼저 본다. 그 구간은 거래소 간 선후 분석에서 뺀다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_recv_lag_ms{venue=\"bybit\",market=\"linear\",symbol=\"S\",channel=\"orderbook.50\",quantile=\"0.99\"}",
+     "values": "500+0x60"
+    },
+    {
+     "series": "md_recv_lag_ms{venue=\"bybit\",market=\"linear\",symbol=\"S\",channel=\"orderbook.50\",quantile=\"0.5\"}",
+     "values": "5000+0x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "8m",
+     "groupname": "market-data",
+     "alertname": "MdRecvLagHigh",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_reconnects_total{venue=\"bybit\",market=\"linear\",symbol=\"S\",channel=\"orderbook.50\"}",
+     "values": "0+1x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "9m",
+     "groupname": "market-data",
+     "alertname": "MdReconnectsHigh",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit",
+        "market": "linear"
+       },
+       "exp_annotations": {
+        "summary": "10분에 재연결이 10번을 넘었다. 거래소 장애 공지와 이 PC의 네트워크를 본다. 재연결마다 공백이 생긴다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_reconnects_total{venue=\"bybit\",market=\"linear\",symbol=\"S\",channel=\"orderbook.50\"}",
+     "values": "0+1x6 6+0x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "9m",
+     "groupname": "market-data",
+     "alertname": "MdReconnectsHigh",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_gaps_total{venue=\"bybit\",market=\"linear\",symbol=\"S\",channel=\"orderbook.50\"}",
+     "values": "0+1x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "9m",
+     "groupname": "market-data",
+     "alertname": "MdGapsHigh",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit",
+        "market": "linear"
+       },
+       "exp_annotations": {
+        "summary": "10분에 호가창 공백이 20번을 넘었다. 수신 지연과 재연결 알림을 함께 보고, 공백 구간은 L1 gap 행으로 남는다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_gaps_total{venue=\"bybit\",market=\"linear\",symbol=\"S\",channel=\"orderbook.50\"}",
+     "values": "0+1x10 10+0x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "9m",
+     "groupname": "market-data",
+     "alertname": "MdGapsHigh",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_queue_bytes{venue=\"bybit\",conn=\"3\"}",
+     "values": "9000000+0x30"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "30s",
+     "groupname": "market-data",
+     "alertname": "MdQueueHigh",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "2m",
+     "groupname": "market-data",
+     "alertname": "MdQueueHigh",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit",
+        "conn": "3"
+       },
+       "exp_annotations": {
+        "summary": "L0 쓰기 대기열이 8 MiB(칸 상한 16 MiB의 절반)를 넘었다. 디스크가 느리거나 막혔다. 디스크 I/O와 연구 작업을 본다. 상한에 닿으면 그 연결은 끊긴다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "md_queue_bytes{venue=\"bybit\",conn=\"3\"}",
+     "values": "1000+0x30"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "4m",
+     "groupname": "market-data",
+     "alertname": "MdQueueHigh",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "obs_push_dropped_total{service=\"md-collector\",venue=\"bybit\",endpoint=\"vl\"}",
+     "values": "0 0 0 5 5 5"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "50s",
+     "groupname": "market-data",
+     "alertname": "MdObsPushDropping",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit",
+        "endpoint": "vl"
+       },
+       "exp_annotations": {
+        "summary": "수집기가 VictoriaMetrics나 VictoriaLogs로 보내지 못한 줄을 버리고 있다. 지표와 로그에 구멍이 난다. 두 저장소가 살아 있는지(systemctl status victoriametrics victorialogs) 본다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "obs_push_dropped_total{service=\"md-collector\",venue=\"bybit\",endpoint=\"vl\"}",
+     "values": "0+0x30"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "4m",
+     "groupname": "market-data",
+     "alertname": "MdObsPushDropping",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "node_clock_offset_ms{host=\"h\"}",
+     "values": "-7+0x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "4m",
+     "groupname": "market-data",
+     "alertname": "ClockOffsetHigh",
+     "exp_alerts": []
+    },
+    {
+     "eval_time": "6m",
+     "groupname": "market-data",
+     "alertname": "ClockOffsetHigh",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "host": "h"
+       },
+       "exp_annotations": {
+        "summary": "이 PC의 시계가 5 ms 넘게 어긋났다. chronyc tracking으로 상태를 보고, 그 구간의 수신 지연과 선후 분석은 믿지 않는다."
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "node_clock_offset_ms{host=\"h\"}",
+     "values": "3+0x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "8m",
+     "groupname": "market-data",
+     "alertname": "ClockOffsetHigh",
+     "exp_alerts": []
+    }
+   ]
+  }
+ ]
+}
