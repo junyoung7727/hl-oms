@@ -16,6 +16,12 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 base="${1:?usage: rustfmt_added.sh <base-commit>}"
+# A process substitution hides a failing git diff from set -e: check the
+# base first, so an unknown base cannot read as "no file added".
+if ! git rev-parse --verify -q "$base^{commit}" > /dev/null; then
+  echo "rustfmt-added: cannot check: $base is not a commit here"
+  exit 2
+fi
 
 # -z: raw paths, so a file name with non-ASCII bytes is read as it is.
 mapfile -d '' -t added < <(git diff -z --name-only --no-renames --diff-filter=A "$base"...HEAD -- '*.rs')

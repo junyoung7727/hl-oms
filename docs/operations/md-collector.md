@@ -1,5 +1,8 @@
 # 시세 수집기 운영 (md-collector, md-lake)
 
+주인: 준영
+검토일: 2026-11-21
+
 수집기는 거래소마다 한 프로세스다. 받은 프레임을 모두 레이크의 1단계 파일(열린 파일·세션 파일)에 쓰고, `md-lake seal`이 매시 닫힌 시간을 봉인한다. 계약은 quant-data-platform `docs/crypto/lake-contract.md` §2, 설계는 `.scratch/md-collector/spec.md`(U5b)와 `.scratch/obs-push/spec.md`(U6: 관측·직접 알림, §5)다. 시장을 `conn_id`로 정하는 규칙은 [ADR-019](../adr/ADR-019-market-conn-slots.md)에 있다.
 
 이 저장소는 서비스를 설치하거나 켜지 않는다. `deploy/systemd/`의 파일은 틀이다.

@@ -1,6 +1,6 @@
 # ADR-034 Bybit RSA 서명 키
 
-상태: 채택. 구현(2026-11-25, 스펙 `.scratch/rsa-signing/spec.md`): 워처(`crates/watcher`)와 OMS의 Bybit 게이트웨이(`crates/oms-node/src/venue/bybit`)가 자격 파일의 RSA 키로 서명한다. 소유자 결정: 2026-11-25 00:55 KST "rsa키로 해". 계약: [C-WATCH](../contracts/watcher.md) 3부·4부, [게이트웨이 계약](../contracts/gateway.md) "서명"과 G-12. [ADR-028](ADR-028-bybit-gateway.md)(HMAC 서명과 자격 파일)과 [ADR-031](ADR-031-watcher.md)(워처의 독립성)에 RSA 형을 더한다.
+상태: 채택 (2026-11-25).
 
 ## 1. 문제와 발생 가능한 실패
 

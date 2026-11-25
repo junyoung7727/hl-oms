@@ -1,6 +1,6 @@
 # ADR-006 멱등성 키와 식별자
 
-상태: 채택. 동작 계약은 [C-IDEM](../contracts/idempotency.md), 식별자 수명은 [identifiers](../contracts/identifiers.md).
+상태: 채택.
 
 ## 1. 문제와 발생 가능한 실패
 

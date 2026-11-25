@@ -1,6 +1,6 @@
 # ADR-028 Bybit 게이트웨이
 
-상태: 만드는 중. U16b: 설정, 서명, REST 클라이언트, 시작 확인, IP 확인, cancel-all. U16c: 조회 일곱 가지와 실행 분류표, 증거금 보고. U16d: 비공개 스트림, `VenueGateway` 구현과 노드 연결, 상태 API의 막힘 이유. U17a: REST 주문·취소, 응답 분류표, 요청 한도, 틱·수량 단위 확인. U17b: WS Trade 연결, 주문·취소의 첫 경로(REST는 WS Trade가 아무것도 쓰지 않았을 때만). U17c: 참조 가격(공개 스트림의 mark price)과 가짜 Bybit 서버에 대한 노드 끝에서 끝까지 시험(저널 flush 실패 포함). U17d(이 판): 교차 계좌의 유지증거금률 규칙(증거금 보고의 `totalMaintenanceMargin`·`totalMarginBalance`, 코어 규칙 `AccountMm`, 한도 5000 bps). 실제 거래소에 나간 주문은 아직 없다(가짜 서버 시험만, U-01).
+상태: 채택 (2026-11-20).
 
 [ADR-017](ADR-017-hyperliquid-gateway.md)의 틀을 따른다.
 

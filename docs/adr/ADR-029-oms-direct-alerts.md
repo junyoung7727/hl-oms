@@ -1,6 +1,6 @@
 # ADR-029 OMS 직접 알림: 공개된(내구화된) 상태를 읽는 노드 안의 평가 스레드
 
-상태: 채택(구현, U18a2). 송신기는 `crates/alert-direct`(U6, U18a1)다. 계약은 [C-ALERT](../contracts/alerts.md). [ADR-016](ADR-016-observability.md) §8의 "알림이 없다(U-11)"를 대신한다.
+상태: 채택 (2026-11-21).
 
 ## 1. 문제와 발생 가능한 실패
 
