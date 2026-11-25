@@ -1,0 +1,652 @@
+{
+  "uid": "d3-system",
+  "title": "D3 시스템: 서비스가 살아 있고 자원이 남았나",
+  "description": "서비스 생존, 메모리 대비 상한, 디스크 여유와 일수, 시각 오프셋, 감사(설계 §8.4). 알림은 vmalert가 낸다.",
+  "tags": [
+    "hl-oms"
+  ],
+  "editable": false,
+  "timezone": "utc",
+  "refresh": "30s",
+  "schemaVersion": 41,
+  "version": 1,
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "수집기 심박 경과 (거래소별)",
+      "description": "마지막 심박 뒤 지난 초. 60초를 넘거나 2분 동안 없으면 MdCollectorDown(P1).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "time() - max by (venue) (md_collector_heartbeat_ts)",
+          "legendFormat": "{{venue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 60
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "스택 생존 (up)",
+      "description": "VictoriaMetrics가 15초마다 긁은 결과. 0이면 그 구성 요소가 응답하지 않는다(ObsComponentDown). Grafana는 긁지 않는다.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "min by (job) (up)",
+          "legendFormat": "{{job}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "메모리 / 단위 상한 (구성 요소별)",
+      "description": "상주 메모리를 단위의 MemoryMax로 나눈 값. 1이면 상한이다. 0.9를 10분 넘으면 ObsMemoryNearCap(P3). 수집기와 Grafana는 이 값을 내보내지 않는다.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "process_resident_memory_bytes{job=\"victoriametrics\"} / 1073741824 or process_resident_memory_bytes{job=\"victorialogs\"} / 1073741824 or process_resident_memory_bytes{job=\"vmalert-metrics\"} / 209715200 or process_resident_memory_bytes{job=\"vmalert-logs\"} / 209715200 or process_resident_memory_bytes{job=\"alertmanager\"} / 104857600",
+          "legendFormat": "{{job}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.9
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "레이크 디스크 여유",
+      "description": "수집기가 statvfs로 읽은 레이크 디스크의 남은 바이트.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "max by (venue) (lake_disk_free_bytes)",
+          "legendFormat": "{{venue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "레이크 디스크 남은 일수",
+      "description": "기록 규칙 lake_disk_days_left. 7일 아래 P2, 2일 아래 P1(12시간 준비 뒤).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "lake_disk_days_left",
+          "legendFormat": "{{venue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "d",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 2
+              },
+              {
+                "color": "green",
+                "value": 7
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "봉인 지연 (시간)",
+      "description": "봉인되지 않은 가장 오래된 시간이 얼마나 지났나. 2시간을 넘으면 LakeSealLag(P2).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "max by (venue) (lake_seal_lag_hours)",
+          "legendFormat": "{{venue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "시각 오프셋 (ms)",
+      "description": "chrony가 본 이 PC 시계의 차이. 절댓값 5 ms를 5분 넘으면 ClockOffsetHigh(P2).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "node_clock_offset_ms",
+          "legendFormat": "{{host}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "지표 전송 버림 (10분)",
+      "description": "obs-push가 큐가 넘쳐 버린 줄. 0보다 크면 MdObsPushDropping(P2).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "sum by (venue, endpoint) (increase(obs_push_dropped_total[10m]))",
+          "legendFormat": "{{venue}} {{endpoint}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "마지막 감사 경과",
+      "description": "qdp 감사기가 마지막으로 값을 넣은 뒤 지난 초. 36시간을 넘으면 LakeAuditStale(P2).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "time() - max by (venue) (last_over_time(lake_audit_last_run_ts[3d]))",
+          "legendFormat": "{{venue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 129600
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "26시간 안의 새 감사 실패",
+      "description": "LakeAuditFailed의 식에서 '> 0'을 뺀 값: 실패 수가 26시간 전보다 늘어난 만큼. 0보다 크면 crypto/audit/venue=<v>/date=<d>.json을 읽는다.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "max by (venue) (last_over_time(lake_audit_fail_total[26h]) - (last_over_time(lake_audit_fail_total[30d] offset 26h) or last_over_time(lake_audit_fail_total[26h]) * 0))",
+          "legendFormat": "{{venue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "감사 공백 행: clock_step",
+      "description": "감사기가 L1에서 센 시계 뒤로 감 행(최근 값). 그 구간은 수신 지연과 거래소 간 선후 분석에서 뺀다(§6).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "max by (venue) (last_over_time(lake_audit_gap_rows{kind=\"clock_step\"}[3d]))",
+          "legendFormat": "{{venue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "감사 공백 행 (종류별)",
+      "description": "감사기가 L1에서 센 공백 행, 종류별(최근 값).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 48
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "max by (venue, kind) (last_over_time(lake_audit_gap_rows[3d]))",
+          "legendFormat": "{{venue}} {{kind}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "VictoriaMetrics 디스크 여유",
+      "description": "VictoriaMetrics 저장 경로의 남은 바이트.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 48
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "vm_free_disk_space_bytes",
+          "legendFormat": "{{path}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "VictoriaLogs 디스크 여유",
+      "description": "VictoriaLogs 저장 경로의 남은 바이트.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 56
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "vl_free_disk_space_bytes",
+          "legendFormat": "{{path}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 15,
+      "type": "table",
+      "title": "울리는 알림",
+      "description": "vmalert가 지금 울리고 있는 알림(ALERTS). 보냈는지는 Alertmanager가 정한다(§10).",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 64
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vm"
+          },
+          "expr": "ALERTS{alertstate=\"firing\"}",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 16,
+      "type": "text",
+      "title": "매일 확인: 실패한 일일 작업",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 72
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "이 PC에서 매일 한 번 돌린다:\n\n```\nsystemctl --failed 'md-*' 'crypto-lake-audit*'\n```\n\n알림이 없는 실패(이 화면의 어느 값에도 나타나지 않음):\n\n- 감사의 날짜 하나 쓰기 오류(종료 코드 3, 감사기는 값을 넣은 뒤)\n- verify 실패(종료 코드 5)\n- 아카이버 실행 실패나 강제 종료(예: 4 GB 상한). 가장 오래된 날짜부터 만들므로 그 뒤 날짜가 모두 밀린다\n\n단위 상태를 내보내는 것이 없으므로 이 명령만 이것들을 보여 준다. 절차: docs/operations/observability.md §4."
+      }
+    }
+  ]
+}
