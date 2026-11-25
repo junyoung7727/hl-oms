@@ -19,6 +19,16 @@ const UNIT: &str = "grafana.service";
 /// listen on every interface, which an empty or missing `http_addr` does.
 const PLACEHOLDER: &str = "192.0.2.1";
 
+/// G2: sections whose `enabled` must be `false`: Grafana's own alerting
+/// (alerts are vmalert's and Alertmanager's, design table 8-5) and access
+/// without a login.
+const OFF: &[&str] = &["unified_alerting", "auth.anonymous"];
+
+/// G3: the admin password is read from a file under `/etc/` (mode 0640,
+/// group `hlobs`, created by the operator); the repository holds the path
+/// only.
+const SECRET_FILE: (&str, &str) = ("$__file{/etc/", "}");
+
 /// G9: where Grafana keeps its data and plugins (ADR-035 D1).
 const DATA_DISK: &str = "/mnt/nvme/";
 const DATA_KEYS: &[&str] = &["data", "plugins"];
@@ -47,6 +57,8 @@ pub fn check(_t: &Tree, p: &Parsed, _cat: &Catalogue, out: &mut Vec<Finding>) {
         return;
     };
     g1_listener(p, ini, out);
+    g2_off(ini, out);
+    g3_admin_password(ini, out);
     g9_data(ini, out);
 }
 
@@ -80,6 +92,38 @@ fn g1_listener(p: &Parsed, ini: &Ini, out: &mut Vec<Finding>) {
                 );
             }
         }
+    }
+}
+
+fn g2_off(ini: &Ini, out: &mut Vec<Finding>) {
+    for section in OFF {
+        let v = ini.values(section, "enabled");
+        if v != ["false"] {
+            finding(
+                out,
+                INI,
+                "G2",
+                format!("[{section}] enabled must be false, given once (found {v:?})"),
+            );
+        }
+    }
+}
+
+fn g3_admin_password(ini: &Ini, out: &mut Vec<Finding>) {
+    let v = ini.values("security", "admin_password");
+    let ok = matches!(v[..], [value] if value
+        .strip_prefix(SECRET_FILE.0)
+        .and_then(|rest| rest.strip_suffix(SECRET_FILE.1))
+        .is_some_and(|path| !path.contains('}') && !path.contains(char::is_whitespace)
+            && path.split('/').all(|s| !s.is_empty() && s != "." && s != "..")));
+    if !ok {
+        // Not the value: it may be the password itself.
+        finding(
+            out,
+            INI,
+            "G3",
+            "[security] admin_password must be given once as $__file{/etc/<path>} (the value is missing or is no such reference)",
+        );
     }
 }
 
@@ -191,4 +235,40 @@ fn grafana_data_stays_on_the_lake_disk() {
         "data = /mnt/nvme/observability/grafana\ndata = /var/lib/grafana\n",
         &["G9"],
     );
+}
+
+#[test]
+fn grafana_alerting_and_anonymous_access_are_off() {
+    let alerting = "[unified_alerting]\nenabled = false\n";
+    let anonymous = "[auth.anonymous]\nenabled = false\n";
+    for (from, to) in [
+        (alerting, "[unified_alerting]\nenabled = true\n"),
+        (alerting, "[unified_alerting]\n"),
+        (alerting, ""),
+        (
+            alerting,
+            "[unified_alerting]\nenabled = false\n[unified_alerting]\nenabled = true\n",
+        ),
+        (anonymous, "[auth.anonymous]\nenabled = true\n"),
+        (anonymous, "[auth.anonymous]\nenabled = False\n"),
+        (anonymous, ""),
+    ] {
+        plant(INI, from, to, &["G2"]);
+    }
+}
+
+#[test]
+fn the_admin_password_comes_from_a_file() {
+    let line = "admin_password = $__file{/etc/hl-oms/grafana-admin-password}\n";
+    for bad in [
+        "admin_password = admin\n",
+        "admin_password = $__env{GRAFANA_ADMIN}\n",
+        "admin_password = $__file{/tmp/grafana-admin-password}\n",
+        "admin_password = $__file{/etc/}\n",
+        "admin_password = $__file{/etc/../tmp/x}\n",
+        "admin_password = $__file{/etc/hl-oms/x} trailing\n",
+        "",
+    ] {
+        plant(INI, line, bad, &["G3"]);
+    }
 }
