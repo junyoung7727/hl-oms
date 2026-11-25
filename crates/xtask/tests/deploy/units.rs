@@ -2362,6 +2362,8 @@ fn the_audit_script_keeps_its_verify_rules() {
             "\t\trm -f \"$stamp.new\"\n",
             "\t\tmv -f \"$stamp.new\" \"$stamp\"\n",
         ),
+        // The new stamp removed before verify: mv then fails every day.
+        ("\tsleep 1\n", "\tsleep 1\n\trm -f \"$stamp.new\"\n"),
         // A failed verify leaves the unit green.
         ("\texit 5\n", "\texit 0\n"),
         // A stamp from the future hides the files sealed since.
