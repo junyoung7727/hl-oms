@@ -3263,6 +3263,24 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "xtask", "--test", "deploy", "grafana::grafana_alerting_and_anonymous_access_are_off"],
         guards: "ADR-035",
     },
+    Mutant {
+        id: "M360-deploy-check-stale-topic-panel-unpinned",
+        what: "rule G8 does not pin D2's stale-topic panel to MdTopicsStale: the panel can count every channel and sum over markets while titled order-book topics (ADR-035, U20a3 review 1 S1)",
+        file: "crates/xtask/tests/deploy/grafana.rs",
+        find: "        \"MdTopicsStale\",\n",
+        replace: "        \"NoSuchAlert\",\n",
+        test: &["-p", "xtask", "--test", "deploy", "grafana::the_market_data_and_system_dashboards_exist"],
+        guards: "ADR-035",
+    },
+    Mutant {
+        id: "M361-deploy-check-grafana-ini-keys-unread",
+        what: "rule G2 reads only the keys it names: [auth.proxy] enabled = true in grafana.ini logs in anyone who sends a header (ADR-035, U20a3 review 1 N1)",
+        file: "crates/xtask/tests/deploy/grafana.rs",
+        find: "if !INI_KEYS.contains(&(section.as_str(), key.as_str())) {",
+        replace: "if false && !INI_KEYS.contains(&(section.as_str(), key.as_str())) {",
+        test: &["-p", "xtask", "--test", "deploy", "grafana::grafana_alerting_and_anonymous_access_are_off"],
+        guards: "ADR-035",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
