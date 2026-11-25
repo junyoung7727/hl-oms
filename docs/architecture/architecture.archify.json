@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "hl-oms 구성: 주문 경로와 안전 장치",
+    "output": "hl-oms-architecture.html",
+    "quality_profile": "showcase",
+    "locale": "ko",
+    "repository": { "url": "https://github.com/junyoung7727/hl-oms.git", "provider": "github", "link_mode": "web", "revision": "0d7bff974e6e3eb83108f7ce5ea0256b312826b6" }
+  },
+  "components": [
+    { "id": "strategy", "type": "external", "label": "전략 프로세스", "sublabel": "이 저장소 밖", "pos": [350, 40], "size": [200, 64],
+      "sources": [{ "path": "crates/oms-api/src/lib.rs", "line": 1, "end_line": 9, "label": "전략·운영자용 소켓 프로토콜" }] },
+    { "id": "operator", "type": "external", "icon": "person", "label": "운영자", "sublabel": "omsctl", "pos": [40, 170], "size": [180, 64],
+      "sources": [{ "path": "crates/oms-api/src/ctl.rs", "line": 1, "end_line": 4, "label": "omsctl 본문" }] },
+    { "id": "sockets", "type": "security", "label": "로컬 소켓 API", "sublabel": "oms.sock · admin.sock · monitor.sock", "pos": [350, 170], "size": [200, 64],
+      "sources": [{ "path": "crates/oms-node/src/server.rs", "line": 1, "end_line": 18, "label": "신뢰 경계·자원 한도" }, { "path": "crates/oms-node/src/config.rs", "line": 141, "end_line": 143, "label": "소켓 이름" }] },
+    { "id": "core", "type": "backend", "label": "① 코어 oms-core", "sublabel": "한도·예약·주문 상태 판단", "tag": "I/O·시계 없음", "pos": [350, 300], "size": [200, 64],
+      "sources": [{ "path": "crates/oms-core/src/lib.rs", "line": 1, "end_line": 10, "label": "결정적 코어" }, { "path": "crates/oms-node/src/pipeline.rs", "line": 1, "end_line": 21, "label": "코어 스레드와 확정 단계" }] },
+    { "id": "journal", "type": "database", "label": "② 저널 oms-journal", "sublabel": "fdatasync 성공 = 확정", "pos": [350, 430], "size": [200, 64],
+      "sources": [{ "path": "crates/oms-journal/src/lib.rs", "line": 1, "end_line": 9, "label": "내구 기록의 정의" }, { "path": "crates/oms-node/src/pipeline.rs", "line": 13, "end_line": 17, "label": "확정 뒤에만 내보냄" }] },
+    { "id": "gateway", "type": "backend", "label": "③ Bybit 게이트웨이", "sublabel": "전송·결과 조회·킬 루프", "pos": [350, 560], "size": [200, 64],
+      "sources": [{ "path": "crates/oms-node/src/venue/bybit/gateway.rs", "line": 1, "end_line": 10, "label": "게이트웨이" }, { "path": "crates/oms-node/src/venue/bybit/kill.rs", "line": 1, "end_line": 12, "label": "킬 루프" }, { "path": "crates/oms-node/src/venue/bybit/stream.rs", "line": 1, "end_line": 9, "label": "비공개 스트림" }] },
+    { "id": "bybit", "type": "external", "label": "Bybit", "sublabel": "USDT 무기한 (linear)", "pos": [350, 700], "size": [200, 64],
+      "sources": [{ "path": "crates/oms-node/src/venue/bybit/gateway.rs", "line": 1, "end_line": 4, "label": "WS Trade·REST·공개 스트림" }] },
+    { "id": "telegram", "type": "external", "label": "텔레그램", "sublabel": "P1 알림 직접 전송", "pos": [710, 300], "size": [200, 64],
+      "sources": [{ "path": "crates/oms-node/src/alerts.rs", "line": 1, "end_line": 9, "label": "OMS 알림 스레드" }, { "path": "crates/watcher/src/alert.rs", "line": 1, "end_line": 3, "label": "워처 자체 전송기" }] },
+    { "id": "watcher", "type": "security", "label": "워처 watcher", "sublabel": "거래소와 저널을 따로 읽어 비교", "tag": "OMS와 코드 공유 없음", "pos": [710, 422], "size": [200, 80],
+      "sources": [{ "path": "crates/watcher/src/lib.rs", "line": 1, "end_line": 9, "label": "독립 워처" }, { "path": "crates/watcher/src/oms.rs", "line": 1, "end_line": 6, "label": "OMS와의 연결" }, { "path": "crates/watcher/src/rest.rs", "line": 1, "end_line": 6, "label": "자기 Bybit 클라이언트" }] },
+    { "id": "projector", "type": "backend", "label": "프로젝터 oms-projector", "sublabel": "저널 → oms_* 지표·로그", "pos": [40, 430], "size": [180, 64],
+      "sources": [{ "path": "crates/oms-projector/src/lib.rs", "line": 1, "end_line": 9, "label": "저널을 잠금 없이 따라 읽음" }] },
+    { "id": "metrics", "type": "database", "label": "VictoriaMetrics·Logs", "sublabel": "Grafana가 읽음", "pos": [40, 560], "size": [180, 64],
+      "sources": [{ "path": "crates/obs-push/src/lib.rs", "line": 1, "end_line": 4, "label": "막지 않는 전송" }] },
+    { "id": "collector", "type": "backend", "label": "시세 수집 md-collector", "sublabel": "레이크 L0 → Parquet", "pos": [40, 700], "size": [180, 64],
+      "sources": [{ "path": "crates/md-collector/src/lib.rs", "line": 1, "end_line": 3, "label": "거래소당 한 프로세스" }] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "OMS 프로세스 oms-node", "wraps": ["sockets", "core", "journal", "gateway"] },
+    { "kind": "region", "label": "관측 (꺼져도 매매 무관)", "wraps": ["projector", "metrics"] }
+  ],
+  "connections": [
+    { "id": "order-in", "from": "strategy", "to": "sockets", "label": "주문 요청", "variant": "emphasis" },
+    { "id": "checked-input", "from": "sockets", "to": "core", "label": "검사된 입력", "variant": "emphasis" },
+    { "id": "write-sync", "from": "core", "to": "journal", "label": "기록 → fdatasync", "variant": "emphasis" },
+    { "id": "release", "from": "journal", "to": "gateway", "label": "확정 뒤에만 전송", "variant": "emphasis" },
+    { "id": "send", "from": "gateway", "to": "bybit", "label": "주문 · 일괄 취소", "variant": "emphasis" },
+    { "id": "notify", "from": "bybit", "to": "gateway", "label": "체결 통보 · 조회 응답" },
+    { "id": "operator-cmd", "from": "operator", "to": "sockets", "label": "admin.sock" },
+    { "id": "oms-alert", "from": "core", "to": "telegram", "label": "킬 · 보류 알림" },
+    { "id": "watch-journal", "from": "watcher", "to": "journal", "label": "저널 읽기 (잠금 없이)", "variant": "dashed" },
+    { "id": "watch-oms", "from": "watcher", "to": "sockets", "label": "heartbeat · 불일치 · 킬", "variant": "security", "fromSide": "right", "toSide": "right" },
+    { "id": "watch-venue", "from": "watcher", "to": "bybit", "label": "자기 키: 읽기 · 킬 때 일괄 취소", "variant": "security", "fromSide": "bottom", "toSide": "right" },
+    { "id": "watch-alert", "from": "watcher", "to": "telegram", "label": "알림" },
+    { "id": "project", "from": "journal", "to": "projector", "label": "잠금 없이 읽기", "variant": "dashed" },
+    { "id": "push", "from": "projector", "to": "metrics", "label": "push", "variant": "dashed" },
+    { "id": "public-md", "from": "bybit", "to": "collector", "label": "공개 시세", "variant": "dashed" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "주문 경로 (굵은 선)", "items": ["확정(fdatasync 성공) 전에는 응답도 전송도 나가지 않는다", "코어는 I/O·시계·난수가 없어 같은 저널이면 같은 상태가 된다", "응답 없는 주문은 다시 보내지 않고 조회로 닫는다"] },
+    { "dot": "rose", "title": "워처", "items": ["차이를 확정하면 watcher_mismatch → OMS가 일반 주문을 보류", "OMS가 10초 무응답이면 watcher_kill, 래치가 안 되면 OMS를 멈추고 자기 키로 일괄 취소", "감시 게이트를 켜면 heartbeat가 끊길 때 OMS가 일반 주문을 막는다"] },
+    { "dot": "slate", "title": "옆길 (읽기 전용)", "items": ["관측·거래 표(oms-export)·시세 수집은 저널이나 시세를 읽기만 한다", "전략도 공개 시세를 md-feed로 Bybit에서 직접 받는다", "수집기도 텔레그램으로 직접 알린다"] }
+  ]
+}
