@@ -103,6 +103,27 @@ pub const PENDING_DST: &[&str] = &[
     "/etc/hl-oms-obs/grafana/grafana.ini",
 ];
 
+/// The audit unit, its script, and the directories that verify and the
+/// auditor write inside the read-only lake (U12, U16).
+const AUDIT: &str = "crypto-lake-audit@.service";
+const AUDIT_SCRIPT: &str = "crypto-lake-audit.sh";
+const L0: &str = "/mnt/nvme/lake/crypto/l0";
+const VERIFY_DIR: &str = "/mnt/nvme/lake/crypto/l0/_verify";
+const AUDIT_DIR: &str = "/mnt/nvme/lake/crypto/audit";
+/// The audit unit's two path lines, exactly.
+const AUDIT_PATHS: &[(&str, &str, Want)] = &[
+    (
+        "Service",
+        "ReadOnlyPaths",
+        Is("/mnt/nvme/lake/crypto/l0 /mnt/nvme/lake/crypto/l1"),
+    ),
+    (
+        "Service",
+        "ReadWritePaths",
+        Is("/mnt/nvme/lake/crypto/l0/_verify /mnt/nvme/lake/crypto/audit"),
+    ),
+];
+
 /// Files under `deploy/observability/` that are not installed (U14).
 const NOT_INSTALLED: &[&str] = &["README.md", "install.toml", "venues.toml", "metrics.toml"];
 const NOT_INSTALLED_DIRS: &[&str] = &["vmalert/tests/"];
@@ -158,6 +179,7 @@ pub fn check(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
     u13_venues(t, p, out);
     u14_install_map(t, p, out);
     u15_identity(p, out);
+    u16_lake_writes(p, out);
     u18_stack_settings(p, out);
     u19_bounded_runs(p, out);
 }
@@ -815,6 +837,77 @@ fn u15_identity(p: &Parsed, out: &mut Vec<Finding>) {
     for (name, _) in STACK {
         for u in named(p, name) {
             expect(u, "U15", ("Service", "User", Is("hlobs")), out);
+        }
+    }
+}
+
+/// The paths of a `ReadOnlyPaths=`/`ReadWritePaths=` key, without systemd's
+/// `-` (ignore if missing) and `+` prefixes and a trailing `/`.
+fn path_list(u: &Unit, key: &str) -> Vec<String> {
+    u.ini
+        .values("Service", key)
+        .into_iter()
+        .flat_map(words)
+        .map(|w| {
+            let p = w.trim_start_matches(['-', '+']);
+            match p.trim_end_matches('/') {
+                "" => "/".to_string(),
+                q => q.to_string(),
+            }
+        })
+        .collect()
+}
+
+/// `dir` is `path` or one of its parents.
+fn covers(dir: &str, path: &str) -> bool {
+    dir == "/" || dir == path || path.starts_with(&format!("{dir}/"))
+}
+
+/// Whether a command line runs `md-lake verify` or the audit script.
+fn runs(u: &Unit) -> (bool, bool) {
+    let (mut verify, mut audit) = (false, false);
+    for line in exec_lines(u) {
+        let w = words(line);
+        for (i, word) in w.iter().enumerate() {
+            let name = file_name(word);
+            verify |= name == "md-lake" && w.get(i + 1).is_some_and(|n| n == "verify");
+            audit |= name == AUDIT_SCRIPT;
+        }
+    }
+    (verify, audit)
+}
+
+fn u16_lake_writes(p: &Parsed, out: &mut Vec<Finding>) {
+    for u in &p.units {
+        let (verify, audit) = runs(u);
+        if !verify && !audit {
+            continue;
+        }
+        let mut read_only = path_list(u, "ReadOnlyPaths");
+        if u.ini.values("Service", "ProtectSystem").contains(&"strict") {
+            read_only.push("/".to_string());
+        }
+        let writes = path_list(u, "ReadWritePaths");
+        if read_only.iter().any(|d| covers(d, L0)) && !writes.iter().any(|w| w == VERIFY_DIR) {
+            finding(
+                out,
+                &u.path,
+                "U16",
+                format!("md-lake verify writes {VERIFY_DIR}: list it in ReadWritePaths="),
+            );
+        }
+        if audit && !writes.iter().any(|w| w == AUDIT_DIR) {
+            finding(
+                out,
+                &u.path,
+                "U16",
+                format!("the auditor writes {AUDIT_DIR}: list it in ReadWritePaths="),
+            );
+        }
+    }
+    for u in named(p, AUDIT) {
+        for &row in AUDIT_PATHS {
+            expect(u, "U16", row, out);
         }
     }
 }
@@ -1968,4 +2061,62 @@ fn sizes_and_globs_read_as_systemd_and_vmalert_do() {
     assert!(!glob("/a/*.json", "/a/b/x.json"));
     assert!(!glob("/a/*.json", "/a/x.yaml"));
     assert!(glob("/a/x", "/a/x"));
+}
+
+#[test]
+fn the_audit_unit_can_write_its_verify_results() {
+    let audit = "crypto-lake-audit@.service";
+    let rw = "ReadWritePaths=/mnt/nvme/lake/crypto/l0/_verify /mnt/nvme/lake/crypto/audit\n";
+    for to in [
+        // verify could not write its result inside the read-only l0.
+        "ReadWritePaths=/mnt/nvme/lake/crypto/audit\n",
+        // The auditor could not write its result.
+        "ReadWritePaths=/mnt/nvme/lake/crypto/l0/_verify\n",
+        "",
+        // Wider than the two directories the runs write.
+        "ReadWritePaths=/mnt/nvme/lake\n",
+        "ReadWritePaths=/mnt/nvme/lake/crypto/l0/_verify /mnt/nvme/lake/crypto/audit\nReadWritePaths=/mnt/nvme/lake/crypto/l1\n",
+    ] {
+        plant(audit, rw, to, &["U16"]);
+    }
+    // The read-only lines are exact too: L1 stays read-only.
+    plant(
+        audit,
+        "ReadOnlyPaths=/mnt/nvme/lake/crypto/l0 /mnt/nvme/lake/crypto/l1\n",
+        "ReadOnlyPaths=/mnt/nvme/lake/crypto/l0\n",
+        &["U16"],
+    );
+    // Any unit that runs md-lake verify under a read-only l0, or a parent of
+    // it, needs the _verify directory (the general rule, not the audit
+    // unit's pinned lines).
+    let verify = |extra: &str| {
+        format!(
+            "[Unit]\nDescription=x\n\n[Service]\nType=simple\nMemoryMax=1G\n{extra}ExecStart=/usr/local/bin/md-lake verify --venue %i --lake /mnt/nvme/lake --date 2026-12-01 --json\n"
+        )
+    };
+    for (extra, rules) in [
+        ("ReadOnlyPaths=/mnt/nvme/lake\n", &["U16"][..]),
+        ("ReadOnlyPaths=-/mnt/nvme/lake/crypto/l0\n", &["U16"][..]),
+        ("ReadOnlyPaths=/mnt\n", &["U16"][..]),
+        // ProtectSystem=strict makes the whole file system read-only.
+        ("ProtectSystem=strict\n", &["U16"][..]),
+        (
+            "ReadOnlyPaths=/mnt/nvme/lake\nReadWritePaths=/mnt/nvme/lake/crypto/l0/_verify\n",
+            &[][..],
+        ),
+        // Nothing read-only: nothing to open up.
+        ("", &[][..]),
+        ("ReadOnlyPaths=/mnt/nvme/lake/crypto/l1\n", &[][..]),
+    ] {
+        let mut t = Tree::real();
+        add_installed(
+            &mut t,
+            "systemd/md-lake-verify@.service",
+            &verify(extra),
+            "/etc/systemd/system/md-lake-verify@.service",
+            "0644",
+        );
+        let f = crate::check(&t);
+        assert_rules(&f, rules);
+    }
 }
