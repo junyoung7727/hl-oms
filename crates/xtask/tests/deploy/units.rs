@@ -2375,6 +2375,10 @@ fn the_audit_script_keeps_its_verify_rules() {
             "--vm-url http://127.0.0.1:8428",
             "--vm-url http://127.0.0.1:8428 --vm-url http://10.0.0.1:8428",
         ),
+        (
+            "--vm-url http://127.0.0.1:8428",
+            "--vm-url http://127.0.0.1:84280",
+        ),
     ] {
         let mut t = Tree::real();
         t.replace(&script, from, to);
