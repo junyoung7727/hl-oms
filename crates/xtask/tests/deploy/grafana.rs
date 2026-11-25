@@ -142,6 +142,15 @@ const LIMIT_TARGETS: &[&str] = &[
     "oms_limit{venue=~\"$venue\"}",
     "oms_limit_distance{venue=~\"$venue\"}",
 ];
+/// G8: the panel's transformations, exactly. Grafana's `merge` joins rows
+/// on every field present in all frames; the raw selectors' table frames
+/// both carry `__name__` with different values, so it is dropped first
+/// (and `Time`, the same instant in both) and the rows join on `venue`,
+/// `kind`, `symbol`.
+const LIMIT_TRANSFORMS: &str = r#"[
+    {"id": "filterFieldsByName", "options": {"exclude": {"names": ["__name__", "Time"]}}},
+    {"id": "merge", "options": {}}
+]"#;
 /// G8, G10: D4's two event panels (orders and fills; holds, kills and
 /// mismatches) on VictoriaLogs, each one query of this frame around its
 /// list of event kinds: the projector's line per journal event, every
@@ -764,17 +773,21 @@ fn g8_boards(
             .into_iter()
             .filter(|x| x.get("title").and_then(Value::as_str) == Some(LIMITS_TITLE))
             .collect();
+        let transforms: Value = serde_json::from_str(LIMIT_TRANSFORMS).expect("LIMIT_TRANSFORMS");
         let ok = matches!(found[..], [x] if panel_type(x) == "table"
             && targets(x)
                 .iter()
                 .map(|t| crate::rules::norm(t.get("expr").and_then(Value::as_str).unwrap_or("")))
-                .eq(LIMIT_TARGETS.iter().map(|e| e.to_string())));
+                .eq(LIMIT_TARGETS.iter().map(|e| e.to_string()))
+            && x.get("transformations") == Some(&transforms));
         if !ok {
             finding(
                 out,
                 path,
                 "G8",
-                format!("one table panel {LIMITS_TITLE:?} with exactly the targets {LIMIT_TARGETS:?}"),
+                format!(
+                    "one table panel {LIMITS_TITLE:?} with exactly the targets {LIMIT_TARGETS:?} and the transformations {transforms}"
+                ),
             );
         }
     }
@@ -1573,6 +1586,15 @@ fn the_trading_dashboard_shows_limits_and_distances() {
         // Not a table, or the panel gone.
         limits(|p| p["type"] = json!("timeseries")),
         limits(|p| p["title"] = json!("한도")),
+        // The rows not joined: merge alone keys on `__name__`, which differs
+        // between the two targets, so a limit and its distance stay on two
+        // rows; no merge at all; the name kept.
+        limits(|p| p["transformations"] = json!([{"id": "merge", "options": {}}])),
+        limits(|p| p["transformations"] = json!([])),
+        limits(|p| {
+            p.as_object_mut().unwrap().remove("transformations");
+        }),
+        limits(|p| p["transformations"][0]["options"]["exclude"]["names"] = json!(["Time"])),
     ];
     for f in cases {
         plant_json(D1, f, &["G8"]);

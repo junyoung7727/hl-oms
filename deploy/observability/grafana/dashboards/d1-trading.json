@@ -198,6 +198,17 @@
       },
       "transformations": [
         {
+          "id": "filterFieldsByName",
+          "options": {
+            "exclude": {
+              "names": [
+                "__name__",
+                "Time"
+              ]
+            }
+          }
+        },
+        {
           "id": "merge",
           "options": {}
         }
