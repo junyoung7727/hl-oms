@@ -290,6 +290,12 @@ Constants: `PROTECTED` = `md-collector@.service`, `oms-node.service`, `watcher.s
 
 All new rules read keys through the existing `Ini` reader (repeated keys kept, `[Unit]`/`[Service]` sections as written). A finding names the unit and the rule, never a secret.
 
+- Amendment (U20b1 review 1, S1): U20 also pins `oms-node.service` `ExecStart=` to exactly `/usr/local/bin/oms-node run --config /etc/hl-oms/oms-node.toml` and refuses every other `Exec*` key in any section; U21 does the same for `watcher.service` with `/usr/local/bin/watcher --config /etc/hl-oms/watcher.toml`.
+- Amendment (U20b1 review 1, S2): U20's other-unit scan also covers the name `watcher` (bare name counts; only `[Unit] After=`/`Before=` may name it, in any unit but `watcher.service`, the OMS unit included); U21 refuses `StartLimitIntervalSec`, `StartLimitInterval`, `StartLimitBurst`, `SuccessExitStatus` and `RestartForceExitStatus` in `watcher.service`, in any section.
+- Amendment (U20b1 review 1, S3): U22 compares the polkit text line by line (whitespace inside a line collapsed, blank lines dropped); a rule joined into one line is all `//` comment and fails.
+- Amendment (U20b1 review 1, S4): runbook §13 says that 13.3–13.5 come in U20b2 and gives the reboot first step of §13.4 now (mount and watcher check, Bybit's open orders by hand if either fails).
+- Amendment (U20b1 review 1, N4): assumption A-24 (`LimitCORE=0` keeps the core dump off disk; depends on the `core_pattern` handler; on this PC apport ignores `/usr/local/` binaries and writes no user core at limit 0).
+
 ### D5. Catalogue and venues (U20b2, U20b3)
 
 - `metrics.toml` gains one `[[metric]]` row per name in Facts "Metrics actually exported". U20b2: projector rows with `source` = `crates/oms-projector/src/metrics.rs` (and `crates/oms-projector/src/projector.rs` for `journal_disk_free_bytes`), labels `venue` plus `symbol`, `reason`, `kind` where the code adds them. U20b3: watcher rows with `source` = the file that holds the literal (Facts), labels `venue`, `host`, `watcher` plus `check`, `endpoint`, `class`, `step` where the code adds them. Rule R2 then anchors each name to its literal. The anchor files join `tree.rs` `ANCHORS` in the part that first reads them: U20b2 `crates/oms-projector/src/metrics.rs`, `projector.rs`, `crates/oms-core/src/model.rs` (R12), `crates/watcher/src/metrics.rs` (R13); U20b3 the other seven watcher files and `crates/oms-core/src/event.rs` (G10).

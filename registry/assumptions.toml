@@ -207,3 +207,12 @@ basis = "이 PC(커널 7.0)에서 bwrap --ro-bind로 재현했다(2026-11-25)"
 if_broken = "워처가 OMS에 하트비트도 watcher_mismatch도 watcher_kill도 보내지 못한다. OMS는 30초 뒤 감시 안 됨으로 일반 주문을 막고, 워처 킬의 K2가 실패해 K3만 남는다"
 detection = "워처 로그의 monitor.sock not connected, OMS의 hold:unmonitored와 모니터링 상실 P1"
 checked = "이 PC에서 bwrap으로 확인했다(2026-11-25). systemd의 ReadOnlyPaths=로 돌린 실제 워처에서는 확인하지 않았다"
+
+[[assumption]]
+id = "A-24"
+statement = "oms-node.service와 watcher.service의 LimitCORE=0이면 abort나 충돌 때 코어 덤프가 디스크에 남지 않는다. 그래서 Bybit API 비밀이 든 프로세스 메모리가 파일로 나가지 않는다"
+depends_on = "kernel.core_pattern의 처리기. 처리기가 파이프(|…)이면 커널은 RLIMIT_CORE를 스스로 적용하지 않고 %c로 넘기며, 무엇을 쓸지는 처리기가 정한다"
+basis = "이 PC(2026-11-26): /proc/sys/kernel/core_pattern = |/usr/share/apport/apport … -c%c …, apport 2.34.0. apport는 /usr/local/ 아래 실행 파일을 패키지 밖으로 보고 보고서를 만들지 않으며(/usr/share/apport/apport:1129-1137, apport/fileutils.py likely_packaged), 사용자 코어는 한도 0이면 쓰지 않는다(/usr/share/apport/apport:277-281). systemd-coredump는 설치돼 있지 않다"
+if_broken = "처리기가 한도를 무시하면(다른 처리기, 또는 apport의 unpackaged = true) OMS나 워처의 abort가 API 비밀이 든 메모리를 /var/crash 등 디스크에 쓴다"
+detection = "설치할 PC에서 cat /proc/sys/kernel/core_pattern과 처리기의 설정을 본다. 지표나 알림은 없다"
+checked = "apport의 소스를 읽었을 뿐이다. 실제 abort로 시험하지 않았고, 다른 처리기(systemd-coredump)는 보지 않았다"
