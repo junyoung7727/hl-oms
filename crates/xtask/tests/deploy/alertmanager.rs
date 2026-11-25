@@ -1072,7 +1072,8 @@ fn the_oms_inhibit_rules_hold_back_only_derived_alerts() {
         &["R10"],
     );
     plant(|v| oms_down(v)["equal"] = json!([]), &["R10"]);
-    // The watcher's alert renamed: the OMS's rule names a stale target.
+    // The watcher's alert renamed: the OMS's rule names a stale target (R7
+    // sees its pinned rule gone).
     let watcher = "deploy/observability/vmalert/metrics/watcher.rules.json";
     let mut t = Tree::real();
     t.replace(
@@ -1081,8 +1082,12 @@ fn the_oms_inhibit_rules_hold_back_only_derived_alerts() {
         "\"alert\": \"WatcherW5NotArmed\"",
     );
     let f = crate::check(&t);
-    assert_rules(&f, &["R10"]);
-    assert!(f.iter().any(|x| x.text.contains("WatcherW5Unarmed")), "{f:?}");
+    assert_rules(&f, &["R7", "R10"]);
+    assert!(
+        f.iter()
+            .any(|x| x.rule == "R10" && x.text.contains("WatcherW5Unarmed")),
+        "{f:?}"
+    );
     // A stale name: the rule file's alert renamed (R6 sees the venue's
     // rule gone).
     let oms = "deploy/observability/vmalert/metrics/oms.rules.json";

@@ -4,7 +4,7 @@
 //! summary and one Watchdog exists, R6 the liveness, lake-gauge and
 //! audit-age rules of every configured venue and the OMS, projector,
 //! journal-gauge and watcher rules of every trading venue, R7 the design's
-//! lake, disk, journal and watcher rules and the intervals of the groups
+//! lake, disk and journal rules, every watcher rule but `WatcherDown`, and the intervals of the groups
 //! that hold the pinned rules, R8 log groups are `vlogs` and metric groups are not, R9 the scrape
 //! jobs, the job names the rules use and the memory alert's caps, R12 the
 //! hold alert classes, R13 the trading venues are the watcher's; U8 also
@@ -223,6 +223,65 @@ const DESIGN: &[DesignRule] = &[
         "max by (venue) (watcher_auth_rejected) > 0",
         None,
         Some("P1"),
+    ),
+    // The watcher's P2 states (runbook §9): the public IP, a check or the
+    // heartbeat that stopped, W5 unarmed outside a kill, its journal, its
+    // own Telegram path. The thresholds and times are 판단(모델 아님).
+    (
+        "watcher.rules.json",
+        "watcher",
+        "WatcherPublicIpNotOk",
+        "min by (venue) (watcher_public_ip_ok) == 0",
+        Some("2m"),
+        Some("P2"),
+    ),
+    (
+        "watcher.rules.json",
+        "watcher",
+        "WatcherCheckStale",
+        "max by (venue, check) (watcher_check_age_s) > 30",
+        Some("1m"),
+        Some("P2"),
+    ),
+    (
+        "watcher.rules.json",
+        "watcher",
+        "WatcherHeartbeatStale",
+        "time() - max by (venue) (watcher_heartbeat_ok_ts) > 30",
+        Some("1m"),
+        Some("P2"),
+    ),
+    (
+        "watcher.rules.json",
+        "watcher",
+        "WatcherW5Unarmed",
+        "max by (venue) (watcher_w5_armed) == 0 and on(venue) max by (venue) (watcher_kill_active) == 0",
+        Some("5m"),
+        Some("P2"),
+    ),
+    (
+        "watcher.rules.json",
+        "watcher",
+        "WatcherJournalError",
+        "max by (venue) (watcher_journal_error) > 0",
+        None,
+        Some("P2"),
+    ),
+    (
+        "watcher.rules.json",
+        "watcher",
+        "WatcherAlertsFailing",
+        "max by (venue) (increase(watcher_alert_failures_total[10m])) > 0",
+        None,
+        Some("P2"),
+    ),
+    (
+        "watcher.rules.json",
+        "watcher",
+        "WatcherAlertsDropped",
+        "max by (venue) (increase(watcher_alerts_dropped_total[10m])) > 0",
+        None,
+        Some("P2"),
     ),
 ];
 /// R7: the groups that hold an R6, R7 or Watchdog rule, and their
@@ -1037,14 +1096,17 @@ fn a_rule_with_an_unknown_oms_metric_fails() {
         &["R1", "R7"],
     );
     // A watcher name the watcher does not export (it exports
-    // watcher_journal_error).
+    // watcher_journal_error). R7 pins every watcher alert but WatcherDown.
     let f = set_expr(
         WATCHER,
         "WatcherJournalError",
         "max by (venue) (watcher_journal_errors) > 0",
-        &["R1"],
+        &["R1", "R7"],
     );
-    assert!(f[0].text.contains("watcher_journal_errors"), "{f:?}");
+    assert!(
+        f.iter().any(|x| x.rule == "R1" && x.text.contains("watcher_journal_errors")),
+        "{f:?}"
+    );
 }
 
 #[test]
@@ -1769,6 +1831,58 @@ fn the_design_journal_and_key_rules_are_present() {
         "max by (venue) (watcher_kill_halt_owed) > 1",
         &["R7"],
     );
+    // The watcher's P2 alerts: a softer severity routes to `null`, a longer
+    // `for` or a looser threshold pages late or never, a removed alert pages
+    // nothing. The three that `OmsDown` holds back are also R10's names.
+    for (name, held) in [
+        ("WatcherPublicIpNotOk", false),
+        ("WatcherCheckStale", true),
+        ("WatcherHeartbeatStale", true),
+        ("WatcherW5Unarmed", true),
+        ("WatcherJournalError", false),
+        ("WatcherAlertsFailing", false),
+        ("WatcherAlertsDropped", false),
+    ] {
+        plant_rule(
+            WATCHER,
+            name,
+            |r| r["labels"]["severity"] = Value::String("P3".into()),
+            &["R7"],
+        );
+        plant_rule(WATCHER, name, |r| r["for"] = Value::String("5h".into()), &["R7"]);
+        let mut t = Tree::real();
+        edit(&mut t, WATCHER, |v| {
+            v["groups"][0]["rules"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|r| r["alert"] != name);
+        });
+        assert_rules(&crate::check(&t), if held { &["R7", "R10"] } else { &["R7"] });
+    }
+    for (name, expr) in [
+        ("WatcherPublicIpNotOk", "max by (venue) (watcher_public_ip_ok) == 0"),
+        ("WatcherCheckStale", "max by (venue, check) (watcher_check_age_s) > 3000"),
+        ("WatcherHeartbeatStale", "time() - max by (venue) (watcher_heartbeat_ok_ts) > 300"),
+        ("WatcherW5Unarmed", "max by (venue) (watcher_w5_armed) == 2 and on(venue) max by (venue) (watcher_kill_active) == 0"),
+        // Without the kill gate: fires during every kill.
+        ("WatcherW5Unarmed", "max by (venue) (watcher_w5_armed) == 0"),
+        ("WatcherJournalError", "max by (venue) (watcher_journal_error) > 1"),
+        ("WatcherAlertsFailing", "max by (venue) (increase(watcher_alert_failures_total[1m])) > 0"),
+        // The raw counter: fires for ever after the first failure.
+        ("WatcherAlertsDropped", "max by (venue) (watcher_alerts_dropped_total) > 0"),
+    ] {
+        set_expr(WATCHER, name, expr, &["R7"]);
+    }
+    for name in ["WatcherPublicIpNotOk", "WatcherCheckStale", "WatcherHeartbeatStale", "WatcherW5Unarmed"] {
+        plant_rule(
+            WATCHER,
+            name,
+            |r| {
+                r.as_object_mut().unwrap().remove("for");
+            },
+            &["R7"],
+        );
+    }
     // The recording group evaluated every hour; the OMS group every minute.
     for (file, group, interval) in [
         (OMS, "journal-recording", "1h"),
