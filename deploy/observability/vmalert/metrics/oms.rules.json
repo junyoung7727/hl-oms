@@ -76,23 +76,23 @@
             "severity": "P1"
           },
           "annotations": {
-            "summary": "OMS에 사람이 풀어야 하는 보류 {{ $labels.reason }}가 걸렸다. 새 주문이 거절된다. 원인을 본 뒤 관측 문서 §13.6의 해제 명령을 따른다(런북 7.12~7.18)."
+            "summary": "OMS에 래치 보류 {{ $labels.reason }}가 걸렸다. 새 주문이 거절된다. 원인을 본 뒤 관측 문서 §13.6의 해제 방법을 따른다(런북 7.12~7.18). storage_low만은 사람이 공간을 만들면 다음 측정(5초)에 스스로 풀린다."
           }
         },
         {
           "alert": "OmsUnmonitored",
-          "expr": "max by (venue, reason) (oms_holds{reason=~\"unmonitored\"}) > 0 and on(venue) max by (venue) (oms_up) == 1",
+          "expr": "max by (venue, reason) (oms_holds{reason=~\"unmonitored\"}) > 0 and on(venue) max by (venue) (max_over_time(oms_up[30s])) == 1",
           "for": "2m",
           "labels": {
             "severity": "P1"
           },
           "annotations": {
-            "summary": "OMS가 2분 넘게 unmonitored다: 워처의 하트비트가 오지 않는다. OMS는 새 일반 주문을 거절하고 60초 뒤 걸린 일반 주문을 스스로 취소했다. systemctl status watcher와 journalctl -u watcher를 본다(관측 문서 §13.3)."
+            "summary": "OMS가 2분 넘게 unmonitored다: 워처의 하트비트가 오지 않는다. OMS는 새 일반 주문을 거절하고 unmonitored_cancel_us(기본 60초) 뒤 걸린 일반 주문을 스스로 취소했다. systemctl status watcher와 journalctl -u watcher를 본다(관측 문서 §13.3)."
           }
         },
         {
           "alert": "OmsHoldLasting",
-          "expr": "max by (venue, reason) (oms_holds{reason=~\"link_down|resync|in_doubt|no_config|venue_setting|account_mode\"}) > 0 and on(venue) max by (venue) (oms_up) == 1",
+          "expr": "max by (venue, reason) (oms_holds{reason=~\"link_down|resync|in_doubt|no_config|venue_setting|account_mode\"}) > 0 and on(venue) max by (venue) (max_over_time(oms_up[30s])) == 1",
           "for": "5m",
           "labels": {
             "severity": "P1"

@@ -185,9 +185,11 @@ const GROUP_INTERVALS: &[(&str, &str, Option<&str>)] = &[
 ];
 /// R12: the hold alert classes (design §8.3). Every reason of `HoldReason`
 /// that `Core::holds(None)` returns is in exactly one class, and each class
-/// is the reason list of one pinned alert. Latched: only a person clears
-/// it. The gate (`unmonitored`): on at every start until the watcher's
-/// first heartbeat. Passing: clears by itself. Operator: a person did it.
+/// is the reason list of one pinned alert. Latched: pages at once, also
+/// for a stopped OMS; a person clears it, except `storage_low`, which
+/// clears by itself at the next disk measurement once space is made. The
+/// gate (`unmonitored`): on at every start until the watcher's first
+/// heartbeat. Passing: clears by itself. Operator: a person did it.
 const LATCHED: &[&str] = &[
     "kill_latched",
     "watcher_mismatch",
@@ -209,10 +211,12 @@ const OPERATOR: &[&str] = &["operator_account"];
 /// Reasons only a strategy's holds carry (`core.rs` adds them for a given
 /// strategy): the projector, which asks for the account, never pushes them.
 const STRATEGY_ONLY: &[&str] = &["operator_strategy", "strategy_link"];
-/// (alert, class, for, severity, gated on `oms_up` = 1). The passing
-/// classes alert only for a running OMS: `oms_holds` keeps the journal's
-/// last state while the OMS is down, and a planned stop leaves
-/// `unmonitored` in it.
+/// (alert, class, for, severity, gated on `oms_up`). The passing classes
+/// alert only for a running OMS: `oms_holds` keeps the journal's last
+/// state while the OMS is down, and a planned stop leaves `unmonitored` in
+/// it. The gate reads `oms_up` over `OmsDown`'s 30 s window, so it is
+/// exactly "not `OmsDown`": an OMS that misses some polls still pages a
+/// lasting hold (one missed poll would restart the `for`).
 type HoldAlert = (&'static str, &'static [&'static str], Option<&'static str>, &'static str, bool);
 const HOLD_ALERTS: &[HoldAlert] = &[
     ("OmsHoldLatched", LATCHED, None, "P1", false),
@@ -220,7 +224,7 @@ const HOLD_ALERTS: &[HoldAlert] = &[
     ("OmsHoldLasting", PASSING, Some("5m"), "P1", true),
     ("OmsOperatorHalt", OPERATOR, None, "P3", false),
 ];
-const OMS_UP_GATE: &str = " and on(venue) max by (venue) (oms_up) == 1";
+const OMS_UP_GATE: &str = " and on(venue) max by (venue) (max_over_time(oms_up[30s])) == 1";
 const MODEL: &str = "crates/oms-core/src/model.rs";
 
 /// vmalert-metrics' `-evaluationInterval` (U11 pins it): what a group
@@ -1445,7 +1449,18 @@ fn every_hold_reason_has_an_alert_class() {
             name,
             |r| {
                 let e = r["expr"].as_str().unwrap();
-                let e = e.replace(" and on(venue) max by (venue) (oms_up) == 1", "");
+                let e = e.replace(OMS_UP_GATE, "");
+                r["expr"] = Value::String(e);
+            },
+            &["R12"],
+        );
+        // The gate on one instant: each missed poll restarts the `for`.
+        plant_rule(
+            OMS,
+            name,
+            |r| {
+                let e = r["expr"].as_str().unwrap();
+                let e = e.replace(OMS_UP_GATE, " and on(venue) max by (venue) (oms_up) == 1");
                 r["expr"] = Value::String(e);
             },
             &["R12"],
@@ -1455,7 +1470,7 @@ fn every_hold_reason_has_an_alert_class() {
     set_expr(
         OMS,
         "OmsHoldLatched",
-        &format!("{LATCHED_EXPR} and on(venue) max by (venue) (oms_up) == 1"),
+        &format!("{LATCHED_EXPR}{OMS_UP_GATE}"),
         &["R12"],
     );
     // The for, the severity, another group.

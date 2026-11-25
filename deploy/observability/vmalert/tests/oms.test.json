@@ -224,7 +224,7 @@
         "reason": "kill_latched"
        },
        "exp_annotations": {
-        "summary": "OMS에 사람이 풀어야 하는 보류 kill_latched가 걸렸다. 새 주문이 거절된다. 원인을 본 뒤 관측 문서 §13.6의 해제 명령을 따른다(런북 7.12~7.18)."
+        "summary": "OMS에 래치 보류 kill_latched가 걸렸다. 새 주문이 거절된다. 원인을 본 뒤 관측 문서 §13.6의 해제 방법을 따른다(런북 7.12~7.18). storage_low만은 사람이 공간을 만들면 다음 측정(5초)에 스스로 풀린다."
        }
       }
      ]
@@ -313,7 +313,7 @@
         "reason": "unmonitored"
        },
        "exp_annotations": {
-        "summary": "OMS가 2분 넘게 unmonitored다: 워처의 하트비트가 오지 않는다. OMS는 새 일반 주문을 거절하고 60초 뒤 걸린 일반 주문을 스스로 취소했다. systemctl status watcher와 journalctl -u watcher를 본다(관측 문서 §13.3)."
+        "summary": "OMS가 2분 넘게 unmonitored다: 워처의 하트비트가 오지 않는다. OMS는 새 일반 주문을 거절하고 unmonitored_cancel_us(기본 60초) 뒤 걸린 일반 주문을 스스로 취소했다. systemctl status watcher와 journalctl -u watcher를 본다(관측 문서 §13.3)."
        }
       }
      ]
@@ -350,6 +350,45 @@
      "eval_time": "5m",
      "groupname": "oms",
      "alertname": "OmsUnmonitored",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "name": "unmonitored for 5 min while the status API misses 2 of 6 polls: OmsUnmonitored",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "oms_holds{venue=\"bybit\",reason=\"unmonitored\"}",
+     "values": "1x120"
+    },
+    {
+     "series": "oms_up{venue=\"bybit\"}",
+     "values": "1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "5m",
+     "groupname": "oms",
+     "alertname": "OmsUnmonitored",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P1",
+        "venue": "bybit",
+        "reason": "unmonitored"
+       },
+       "exp_annotations": {
+        "summary": "OMS가 2분 넘게 unmonitored다: 워처의 하트비트가 오지 않는다. OMS는 새 일반 주문을 거절하고 unmonitored_cancel_us(기본 60초) 뒤 걸린 일반 주문을 스스로 취소했다. systemctl status watcher와 journalctl -u watcher를 본다(관측 문서 §13.3)."
+       }
+      }
+     ]
+    },
+    {
+     "eval_time": "5m",
+     "groupname": "oms",
+     "alertname": "OmsDown",
      "exp_alerts": []
     }
    ]
@@ -422,6 +461,45 @@
    ]
   },
   {
+   "name": "link_down for 20 min while the status API misses 2 of 6 polls: OmsHoldLasting, no OmsDown",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "oms_holds{venue=\"bybit\",reason=\"link_down\"}",
+     "values": "1x120"
+    },
+    {
+     "series": "oms_up{venue=\"bybit\"}",
+     "values": "1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0 1 1 1 1 0 0"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "15m",
+     "groupname": "oms",
+     "alertname": "OmsHoldLasting",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P1",
+        "venue": "bybit",
+        "reason": "link_down"
+       },
+       "exp_annotations": {
+        "summary": "OMS의 보류 link_down가 5분 넘게 풀리지 않아 거래가 멈췄다. link_down·resync는 거래소 연결, in_doubt는 결과 불명 주문, no_config·venue_setting·account_mode는 설정과 거래소 계정 설정을 본다(런북 7장)."
+       }
+      }
+     ]
+    },
+    {
+     "eval_time": "15m",
+     "groupname": "oms",
+     "alertname": "OmsDown",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
    "name": "operator_account: OmsOperatorHalt only",
    "interval": "10s",
    "input_series": [
@@ -468,6 +546,28 @@
      "eval_time": "6m",
      "groupname": "oms",
      "alertname": "OmsUnmonitored",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "name": "operator_account cleared (0): no OmsOperatorHalt",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "oms_holds{venue=\"bybit\",reason=\"operator_account\"}",
+     "values": "0x60"
+    },
+    {
+     "series": "oms_up{venue=\"bybit\"}",
+     "values": "1x60"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "1m",
+     "groupname": "oms",
+     "alertname": "OmsOperatorHalt",
      "exp_alerts": []
     }
    ]
@@ -596,6 +696,74 @@
        }
       }
      ]
+    },
+    {
+     "eval_time": "3m",
+     "groupname": "oms",
+     "alertname": "OmsLimitPassed",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "name": "at a non-zero limit (distance 0): OmsLimitNear, no OmsLimitPassed",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "oms_limit_distance{venue=\"bybit\",kind=\"position_max\",symbol=\"BTCUSDT\"}",
+     "values": "0x30"
+    },
+    {
+     "series": "oms_limit{venue=\"bybit\",kind=\"position_max\",symbol=\"BTCUSDT\"}",
+     "values": "100x30"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "3m",
+     "groupname": "oms",
+     "alertname": "OmsLimitNear",
+     "exp_alerts": [
+      {
+       "exp_labels": {
+        "severity": "P2",
+        "venue": "bybit",
+        "kind": "position_max",
+        "symbol": "BTCUSDT"
+       },
+       "exp_annotations": {
+        "summary": "OMS 한도 position_max BTCUSDT까지 10% 안 남았다. 전략이 한도에 붙어 있으면 계속 울린다(관측 문서 §9)."
+       }
+      }
+     ]
+    },
+    {
+     "eval_time": "3m",
+     "groupname": "oms",
+     "alertname": "OmsLimitPassed",
+     "exp_alerts": []
+    }
+   ]
+  },
+  {
+   "name": "a limit of 0 (distance 0): no OmsLimitNear",
+   "interval": "10s",
+   "input_series": [
+    {
+     "series": "oms_limit_distance{venue=\"bybit\",kind=\"position_max\",symbol=\"BTCUSDT\"}",
+     "values": "0x30"
+    },
+    {
+     "series": "oms_limit{venue=\"bybit\",kind=\"position_max\",symbol=\"BTCUSDT\"}",
+     "values": "0x30"
+    }
+   ],
+   "alert_rule_test": [
+    {
+     "eval_time": "3m",
+     "groupname": "oms",
+     "alertname": "OmsLimitNear",
+     "exp_alerts": []
     },
     {
      "eval_time": "3m",
