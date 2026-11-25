@@ -70,7 +70,7 @@ const BOUNDED: &[&str] = &[
 const RUN_TIMEOUT: &str = "6h";
 
 /// The `MemoryMax` of each unit (U6, design §8.5).
-const MEMORY_MAX: &[(&str, &str)] = &[
+pub const MEMORY_MAX: &[(&str, &str)] = &[
     ("victoriametrics.service", "1G"),
     ("victorialogs.service", "1G"),
     ("vmalert-metrics.service", "200M"),
@@ -97,9 +97,6 @@ const LOCK: &str = "/usr/bin/flock /run/lock/hl-oms-daily.lock ";
 /// Install paths that a unit's command line names before their files exist
 /// (U14). `pending_install_paths_are_still_missing` fails once one exists.
 pub const PENDING_DST: &[&str] = &[
-    "/etc/hl-oms-obs/victoriametrics/scrape.json",
-    "/etc/hl-oms-obs/vmalert/metrics/*.json",
-    "/etc/hl-oms-obs/vmalert/logs/*.json",
     "/etc/hl-oms-obs/alertmanager/alertmanager.json",
     "/etc/hl-oms-obs/grafana/grafana.ini",
 ];
@@ -214,7 +211,7 @@ pub fn check(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
 }
 
 /// A systemd size: bytes, or a number with `K`, `M` or `G` (base 1024).
-fn size(v: &str) -> Option<u64> {
+pub fn size(v: &str) -> Option<u64> {
     let (n, mult) = match v.char_indices().last()? {
         (i, 'K') => (&v[..i], 1u64 << 10),
         (i, 'M') => (&v[..i], 1 << 20),
@@ -319,7 +316,7 @@ fn words(line: &str) -> Vec<String> {
 /// the Go, kingpin and clap parsers read it: one or two dashes, the value
 /// after `=` or in the next word. A flag at the end with no value reads as
 /// empty.
-fn flag_values(u: &Unit, name: &str) -> Vec<String> {
+pub fn flag_values(u: &Unit, name: &str) -> Vec<String> {
     let mut found = Vec::new();
     for line in exec_lines(u) {
         let w = words(line);
@@ -524,7 +521,7 @@ fn u7_daily_lock(p: &Parsed, out: &mut Vec<Finding>) {
     }
 }
 
-fn loopback_port(v: &str) -> bool {
+pub fn loopback_port(v: &str) -> bool {
     v.strip_prefix("127.0.0.1:")
         .is_some_and(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
 }
@@ -1895,8 +1892,11 @@ fn the_stores_keep_their_retention_and_memory_flags() {
 #[test]
 fn an_unregistered_venue_fails() {
     let venues = format!("{OBS}venues.toml");
+    // A listed venue also needs its liveness rules (R6).
+    let mut t = Tree::real();
+    t.set(&venues, "venues = [\"bybit\", \"okx\"]\n");
+    assert_rules(&crate::check(&t), &["R6", "U13"]);
     for text in [
-        "venues = [\"bybit\", \"okx\"]\n",
         "venues = []\n",
         "venue = [\"bybit\"]\n",
         "venues = [\"bybit\", 1]\n",

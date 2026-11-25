@@ -271,13 +271,21 @@ fn matchers(t: &[Tok], mut i: usize, s: &mut Scan) -> usize {
     i
 }
 
+/// (expr, names, labels, functions, error count).
+type Case = (
+    &'static str,
+    &'static [&'static str],
+    &'static [&'static str],
+    &'static [&'static str],
+    usize,
+);
+
 #[test]
 fn the_scanner_finds_names_labels_and_functions() {
     fn v(x: &[&str]) -> Vec<String> {
         x.iter().map(ToString::to_string).collect()
     }
-    // (expr, names, labels, functions, error count)
-    let cases: &[(&str, &[&str], &[&str], &[&str], usize)] = &[
+    let cases: &[Case] = &[
         (
             "time() - max by (venue) (md_collector_heartbeat_ts{venue=\"bybit\"}) > 60 or absent_over_time(md_collector_heartbeat_ts{venue=\"bybit\"}[2m])",
             &["md_collector_heartbeat_ts", "md_collector_heartbeat_ts"],
