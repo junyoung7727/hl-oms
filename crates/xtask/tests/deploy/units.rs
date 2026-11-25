@@ -174,6 +174,10 @@ const OMS_NO_RESTART: &[&str] = &[
 ];
 /// U20: units that start the service of their own name without naming it.
 const OMS_ACTIVATORS: &[&str] = &["oms-node.timer", "oms-node.socket", "oms-node.path"];
+/// U20, U21: the one command of each unit. A shell loop around the binary,
+/// or an `ExecStopPost=` that starts it, brings a stopped process back.
+const OMS_EXEC: &str = "/usr/local/bin/oms-node run --config /etc/hl-oms/oms-node.toml";
+const WATCHER_EXEC: &str = "/usr/local/bin/watcher --config /etc/hl-oms/watcher.toml";
 
 /// The watcher unit (U21): back after a crash, never stopped with the OMS.
 const WATCHER: &str = "watcher.service";
@@ -196,13 +200,24 @@ const NO_FOLLOW: &[&str] = &[
     "StopPropagatedFrom",
     "JoinsNamespaceOf",
 ];
+/// U21: keys that change the pinned restart policy, in any section: a start
+/// limit the watcher can reach, or a crash counted as a clean exit, leaves it
+/// down for good.
+const WATCHER_NO_GIVE_UP: &[&str] = &[
+    "StartLimitIntervalSec",
+    "StartLimitInterval",
+    "StartLimitBurst",
+    "SuccessExitStatus",
+    "RestartForceExitStatus",
+];
 
 /// U22: the OMS's user and group; the watcher must have the same ones.
 const OMS_USER: &str = "hloms";
 const PROJECTOR: &str = "oms-projector.service";
 const EXPORT: &str = "oms-export.service";
-/// U22: the one polkit rule and its text, compared without whitespace: the
-/// watcher's user may stop the OMS unit and nothing else (ADR-036).
+/// U22: the one polkit rule and its text, compared line by line without the
+/// whitespace inside lines: the watcher's user may stop the OMS unit and
+/// nothing else (ADR-036).
 const POLKIT_DIR: &str = "deploy/observability/polkit/";
 const POLKIT_DST: &str = "/etc/polkit-1/rules.d/";
 const POLKIT_RULE: &str = r#"// The watcher (user hloms) may stop the OMS unit and nothing else (ADR-036).
@@ -1243,10 +1258,26 @@ fn u19_bounded_runs(p: &Parsed, out: &mut Vec<Finding>) {
     }
 }
 
+/// The unit's one pinned `ExecStart=` and no other `Exec*` line.
+fn one_command(u: &Unit, rule: &'static str, command: &'static str, out: &mut Vec<Finding>) {
+    expect(u, rule, ("Service", "ExecStart", Is(command)), out);
+    for (section, key, _) in &u.ini.entries {
+        if key.starts_with("Exec") && !(section == "Service" && key == "ExecStart") {
+            finding(
+                out,
+                &u.path,
+                rule,
+                format!("no [{section}] {key}=: the unit runs its one command only"),
+            );
+        }
+    }
+}
+
 fn u20_oms_started_by_a_person(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
     for u in required(p, OMS, "U20", out) {
         expect(u, "U20", ("Service", "Restart", Is("no")), out);
         expect(u, "U20", ("Service", "Type", Is("simple")), out);
+        one_command(u, "U20", OMS_EXEC, out);
         for key in OMS_NO_RESTART {
             if !u.ini.any(key).is_empty() {
                 finding(
@@ -1266,19 +1297,22 @@ fn u20_oms_started_by_a_person(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
             );
         }
     }
-    // Another unit may order itself against the OMS, nothing more: a
-    // dependency, a command or an [Install] line could start it. Without the
-    // suffix systemctl still finds it, so the bare name counts.
-    for u in p.units.iter().filter(|u| u.name != OMS) {
-        for (section, key, value) in &u.ini.entries {
-            let ordering = section == "Unit" && (key == "After" || key == "Before");
-            if !ordering && value.contains(OMS.trim_end_matches(".service")) {
-                finding(
-                    out,
-                    &u.path,
-                    "U20",
-                    format!("[{section}] {key} names {OMS}: only After= and Before= may"),
-                );
+    // Another unit may order itself against the OMS or the watcher, nothing
+    // more: a dependency, a command or an [Install] line could start the OMS
+    // or stop the watcher. Without the suffix systemctl still finds the
+    // unit, so the bare name counts.
+    for name in [OMS, WATCHER] {
+        for u in p.units.iter().filter(|u| u.name != name) {
+            for (section, key, value) in &u.ini.entries {
+                let ordering = section == "Unit" && (key == "After" || key == "Before");
+                if !ordering && value.contains(name.trim_end_matches(".service")) {
+                    finding(
+                        out,
+                        &u.path,
+                        "U20",
+                        format!("[{section}] {key} names {name}: only After= and Before= may"),
+                    );
+                }
             }
         }
     }
@@ -1298,6 +1332,17 @@ fn u21_watcher_restart(p: &Parsed, out: &mut Vec<Finding>) {
     for u in required(p, WATCHER, "U21", out) {
         for &row in WATCHER_SETTINGS {
             expect(u, "U21", row, out);
+        }
+        one_command(u, "U21", WATCHER_EXEC, out);
+        for key in WATCHER_NO_GIVE_UP {
+            if !u.ini.any(key).is_empty() {
+                finding(
+                    out,
+                    &u.path,
+                    "U21",
+                    format!("no {key}=: a crashed watcher must come back"),
+                );
+            }
         }
         for key in NO_FOLLOW {
             if !u.ini.any(key).is_empty() {
@@ -1326,8 +1371,14 @@ fn u21_watcher_restart(p: &Parsed, out: &mut Vec<Finding>) {
     }
 }
 
-fn normalised(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
+/// The text line by line, the whitespace inside each line collapsed and
+/// blank lines dropped. Lines are kept: a `//` comment ends at its line, so
+/// a rule joined into one line is all comment and grants nothing.
+fn normalised(text: &str) -> Vec<String> {
+    text.lines()
+        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|l| !l.is_empty())
+        .collect()
 }
 
 fn u22_identities(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
@@ -3093,6 +3144,28 @@ fn an_oms_node_unit_that_restarts_fails() {
         &["U20"],
     );
     plant(oms, "Type=simple\n", "Type=notify\n", &["U20"]);
+    // A command line that brings it back: after a stop, or a shell loop
+    // around the binary under Restart=no.
+    let exec = "ExecStart=/usr/local/bin/oms-node run --config /etc/hl-oms/oms-node.toml\n";
+    for extra in [
+        "ExecStopPost=+/usr/bin/systemctl --no-block start oms-node.service\n",
+        "ExecStartPre=/bin/true\n",
+        "ExecStart=/usr/local/bin/oms-node run --config /etc/hl-oms/oms-node.toml\n",
+    ] {
+        plant(oms, exec, &format!("{exec}{extra}"), &["U20"]);
+    }
+    plant(
+        oms,
+        exec,
+        "ExecStart=/bin/sh -c 'while true; do /usr/local/bin/oms-node run --config /etc/hl-oms/oms-node.toml; sleep 5; done'\n",
+        &["U20"],
+    );
+    plant(
+        oms,
+        exec,
+        "ExecStart=/usr/local/bin/oms-node run --config /etc/hl-oms/other.toml\n",
+        &["U20"],
+    );
     // The unit itself gone.
     let mut t = Tree::real();
     t.remove(&unit(oms));
@@ -3214,9 +3287,58 @@ fn the_watcher_restarts_but_never_follows_the_oms() {
         // Not started at boot: no boot kill of the orders a dead OMS left.
         ("WantedBy=multi-user.target\n", ""),
         ("WantedBy=multi-user.target\n", "WantedBy=default.target\n"),
+        // Another configuration, or a second command line.
+        (
+            "ExecStart=/usr/local/bin/watcher --config /etc/hl-oms/watcher.toml\n",
+            "ExecStart=/usr/local/bin/watcher --config /etc/hl-oms/other.toml\n",
+        ),
+        ("RestartSec=5\n", "RestartSec=5\nExecStartPre=/bin/false\n"),
+        // A start limit it can reach: the second crash in 10 min leaves it
+        // down for good.
+        (
+            "RestartSec=5\n",
+            "RestartSec=5\nStartLimitIntervalSec=600\nStartLimitBurst=1\n",
+        ),
+        ("RestartSec=5\n", "RestartSec=5\nStartLimitBurst=1\n"),
+        ("RestartSec=5\n", "RestartSec=5\nStartLimitInterval=600\n"),
+        // A panic or an OOM kill counted as a clean exit: no restart.
+        (
+            "RestartSec=5\n",
+            "RestartSec=5\nSuccessExitStatus=1 101 SIGABRT SIGKILL\n",
+        ),
+        ("RestartSec=5\n", "RestartSec=5\nRestartForceExitStatus=2\n"),
     ] {
         plant(w, from, to, &["U21"]);
     }
+    // Another unit that stops the watcher: no W1-W5 and no boot kill.
+    let projector = "oms-projector.service";
+    let after = "After=network-online.target oms-node.service victoriametrics.service victorialogs.service\n";
+    for extra in [
+        "Conflicts=watcher.service\n",
+        "Conflicts=watcher\n",
+        "PropagatesStopTo=watcher.service\n",
+    ] {
+        plant(projector, after, &format!("{after}{extra}"), &["U20"]);
+    }
+    plant(
+        projector,
+        "RestartSec=10\n",
+        "RestartSec=10\nExecStartPost=/usr/bin/systemctl stop watcher.service\n",
+        &["U20"],
+    );
+    plant(
+        "oms-node.service",
+        "Wants=network-online.target\n",
+        "Wants=network-online.target\nConflicts=watcher.service\n",
+        &["U20"],
+    );
+    // Ordering is allowed.
+    plant(
+        projector,
+        after,
+        &format!("{after}Before=watcher.service\n"),
+        &[],
+    );
 }
 
 #[test]
@@ -3269,10 +3391,21 @@ fn the_stop_permission_names_only_the_oms_unit_and_stop() {
         t.replace(&rule, from, to);
         assert_rules(&crate::check(&t), &["U22"]);
     }
-    // Only whitespace differs: the same rule.
+    // Only whitespace inside lines, or blank lines, differ: the same rule.
     let mut t = Tree::real();
     t.replace(&rule, "    if (action.id", "\tif  (action.id");
+    t.replace(&rule, "polkit.addRule", "\npolkit.addRule");
     assert_rules(&crate::check(&t), &[]);
+    // One line: the first line's `//` comment then holds the whole rule, and
+    // polkitd loads a file that grants nothing.
+    let mut t = Tree::real();
+    let one = t.files[&rule].replace('\n', " ");
+    t.set(&rule, &one);
+    assert_rules(&crate::check(&t), &["U22"]);
+    // A line split after `return`: the rule returns nothing.
+    let mut t = Tree::real();
+    t.replace(&rule, "return polkit", "return\n        polkit");
+    assert_rules(&crate::check(&t), &["U22"]);
     // A second rule file, with its install entry.
     let mut t = Tree::real();
     let text = t.files[&rule].clone();
