@@ -96,10 +96,7 @@ const LOCK: &str = "/usr/bin/flock /run/lock/hl-oms-daily.lock ";
 
 /// Install paths that a unit's command line names before their files exist
 /// (U14). `pending_install_paths_are_still_missing` fails once one exists.
-pub const PENDING_DST: &[&str] = &[
-    "/etc/hl-oms-obs/alertmanager/alertmanager.json",
-    "/etc/hl-oms-obs/grafana/grafana.ini",
-];
+pub const PENDING_DST: &[&str] = &["/etc/hl-oms-obs/grafana/grafana.ini"];
 
 /// The audit unit, its script, and the directories that verify and the
 /// auditor write inside the read-only lake (U12, U16).
