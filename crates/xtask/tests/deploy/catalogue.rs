@@ -255,10 +255,10 @@ fn a_removed_recording_rule_makes_its_name_unknown() {
         "\"record\": \"lake_disk_days_left\"",
         "\"record\": \"lake_disk_days_left_v2\"",
     );
-    // The two days-left alerts read a name nobody writes; the reserved
-    // name has no writer; the design's record is gone.
+    // The two days-left alerts and the D3 panel read a name nobody writes;
+    // the reserved name has no writer; the design's record is gone.
     let f = check(&t);
-    assert_rules(&f, &["R1", "R2b", "R7"]);
+    assert_rules(&f, &["R1", "R2b", "R7", "G7"]);
     assert_eq!(f.iter().filter(|x| x.rule == "R1").count(), 2, "{f:?}");
 }
 
