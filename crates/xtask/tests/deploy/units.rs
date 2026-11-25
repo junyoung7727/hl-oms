@@ -1,8 +1,9 @@
 //! Unit rules: memory caps, timers, the collector's restart and protection
 //! settings, the trading slice, schedules, the daily-job lock, listeners,
 //! storage paths, store and vmalert flags, venues, the install map, service
-//! identity, the stack units' restart and sandbox settings, and the bounds of
-//! the seal and archiver runs (ADR-035).
+//! identity, the audit's checkout, state and lake writes, the text of command
+//! lines, the stack units' restart and sandbox settings, and the bounds of
+//! the seal, archiver and audit runs (ADR-035).
 
 use std::collections::BTreeSet;
 
@@ -61,7 +62,11 @@ const STORES: &[(&str, &str)] = &[
 
 /// Oneshot runs that hold the daily lock or the next hour's seal while they
 /// run: each ends after at most this time (U19).
-const BOUNDED: &[&str] = &["md-lake-seal@.service", "md-archiver@.service"];
+const BOUNDED: &[&str] = &[
+    "md-lake-seal@.service",
+    "md-archiver@.service",
+    "crypto-lake-audit@.service",
+];
 const RUN_TIMEOUT: &str = "6h";
 
 /// The `MemoryMax` of each unit (U6, design §8.5).
@@ -75,16 +80,18 @@ const MEMORY_MAX: &[(&str, &str)] = &[
     ("md-collector@.service", "1G"),
     ("md-lake-seal@.service", "1G"),
     ("md-archiver@.service", "4G"),
+    ("crypto-lake-audit@.service", "4G"),
 ];
 
 /// Timers and their `OnCalendar` (U5).
 const TIMERS: &[(&str, &str)] = &[
     ("md-lake-seal@.timer", "*-*-* *:05:00 UTC"),
     ("md-archiver@.timer", "*-*-* 01:10:00 UTC"),
+    ("crypto-lake-audit@.timer", "*-*-* 02:30:00 UTC"),
 ];
 
 /// Daily jobs, which run one at a time under one lock (U7).
-const DAILY: &[&str] = &["md-archiver@.service"];
+const DAILY: &[&str] = &["md-archiver@.service", "crypto-lake-audit@.service"];
 const LOCK: &str = "/usr/bin/flock /run/lock/hl-oms-daily.lock ";
 
 /// Install paths that a unit's command line names before their files exist
@@ -95,6 +102,53 @@ pub const PENDING_DST: &[&str] = &[
     "/etc/hl-oms-obs/vmalert/logs/*.json",
     "/etc/hl-oms-obs/alertmanager/alertmanager.json",
     "/etc/hl-oms-obs/grafana/grafana.ini",
+];
+
+/// The audit unit, its script, and the directories that verify and the
+/// auditor write inside the read-only lake (U12, U16).
+const AUDIT: &str = "crypto-lake-audit@.service";
+const AUDIT_SCRIPT: &str = "crypto-lake-audit.sh";
+const L0: &str = "/mnt/nvme/lake/crypto/l0";
+const VERIFY_DIR: &str = "/mnt/nvme/lake/crypto/l0/_verify";
+const AUDIT_DIR: &str = "/mnt/nvme/lake/crypto/audit";
+/// The KR pipeline's checkouts (with `-official` and any other suffix).
+const KR_CHECKOUT: &str = "/mnt/nvme/gitproject/quant-data-platform";
+/// The auditor's state file in the script: the unit's state directory.
+const AUDIT_STATE: &str = "--state \"$STATE_DIRECTORY/audit-$venue.json\"";
+/// The auditor pushes to the local VictoriaMetrics only.
+const AUDIT_VM_URL: &str = "--vm-url http://127.0.0.1:8428";
+/// The script lines that decide which dates are verified again and what the
+/// unit's status says (D4), each once. The script has no test of its own in
+/// CI (D11 runs it by hand), so its text is pinned (U12).
+const AUDIT_SCRIPT_LINES: &[&str] = &[
+    "while [ \"$i\" -le 9 ]; do",
+    "future=$(find \"$stamp\" -newermt \"@$now\" -print) || future=1",
+    "if ! changed=$(sealed \"$d\" -cnewer \"$stamp\"); then",
+    "rm -f \"$stamp.new\"",
+    "exit 5",
+];
+/// The stamp is taken, then a second passes, then verify lists the files,
+/// then the stamp is kept: these lines once each, in this order.
+const AUDIT_STAMP_ORDER: &[&str] = &[
+    "if ! touch \"$stamp.new\"; then",
+    "sleep 1",
+    "if \"$MD_LAKE\" verify --venue \"$venue\" --lake \"$LAKE\" --date \"$d\" --json >/dev/null; then",
+    "if ! mv -f \"$stamp.new\" \"$stamp\"; then",
+];
+/// The lake the audit unit's path lines name; the script works in `$LAKE`.
+const AUDIT_LAKE: &str = "/mnt/nvme/lake";
+/// The audit unit's two path lines, exactly.
+const AUDIT_PATHS: &[(&str, &str, Want)] = &[
+    (
+        "Service",
+        "ReadOnlyPaths",
+        Is("/mnt/nvme/lake/crypto/l0 /mnt/nvme/lake/crypto/l1"),
+    ),
+    (
+        "Service",
+        "ReadWritePaths",
+        Is("/mnt/nvme/lake/crypto/l0/_verify /mnt/nvme/lake/crypto/audit"),
+    ),
 ];
 
 /// Files under `deploy/observability/` that are not installed (U14).
@@ -149,9 +203,12 @@ pub fn check(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
     u8_listeners(p, out);
     u9_stores(p, out);
     u10_u11_flags(p, out);
+    u12_audit_checkout_and_state(t, p, out);
     u13_venues(t, p, out);
     u14_install_map(t, p, out);
     u15_identity(p, out);
+    u16_lake_writes(p, out);
+    u17_exec_text(p, out);
     u18_stack_settings(p, out);
     u19_bounded_runs(p, out);
 }
@@ -630,6 +687,112 @@ fn u10_u11_flags(p: &Parsed, out: &mut Vec<Finding>) {
     }
 }
 
+fn u12_audit_checkout_and_state(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
+    for (path, text) in t.files.iter().filter(|(k, _)| k.starts_with("deploy/")) {
+        if text.contains(KR_CHECKOUT) {
+            finding(
+                out,
+                path,
+                "U12",
+                format!("names {KR_CHECKOUT}: the audit runs from its own qdp checkout"),
+            );
+        }
+    }
+    let script = format!("{OBS}bin/{AUDIT_SCRIPT}");
+    match t.files.get(&script) {
+        None => finding(out, &script, "U12", "missing"),
+        Some(text) => {
+            let lines: Vec<&str> = text.lines().map(str::trim).collect();
+            if lines.iter().filter(|l| l.starts_with("venue=")).count() != 1
+                || !lines.contains(&"venue=$1")
+            {
+                finding(
+                    out,
+                    &script,
+                    "U12",
+                    "the venue is set once, as venue=$1 (the unit's instance)",
+                );
+            }
+            let states: Vec<&str> = text
+                .match_indices("--state")
+                .map(|(i, _)| &text[i..])
+                .collect();
+            if states.is_empty() || !states.iter().all(|r| r.starts_with(AUDIT_STATE)) {
+                finding(
+                    out,
+                    &script,
+                    "U12",
+                    format!("every --state must be {AUDIT_STATE}, outside the lake"),
+                );
+            }
+            if text.contains("STATE_DIRECTORY=") {
+                finding(
+                    out,
+                    &script,
+                    "U12",
+                    "STATE_DIRECTORY is set by systemd only",
+                );
+            }
+            let urls: Vec<&str> = text
+                .match_indices("--vm-url")
+                .map(|(i, _)| &text[i..])
+                .collect();
+            if urls.is_empty()
+                || !urls.iter().all(|r| {
+                    r.strip_prefix(AUDIT_VM_URL)
+                        .is_some_and(|rest| rest.chars().next().is_none_or(char::is_whitespace))
+                })
+            {
+                finding(
+                    out,
+                    &script,
+                    "U12",
+                    format!("every --vm-url must be {AUDIT_VM_URL}"),
+                );
+            }
+            let mut at = Vec::new();
+            for &line in AUDIT_SCRIPT_LINES.iter().chain(AUDIT_STAMP_ORDER) {
+                let found: Vec<usize> = (0..lines.len()).filter(|&i| lines[i] == line).collect();
+                if found.len() != 1 {
+                    finding(
+                        out,
+                        &script,
+                        "U12",
+                        format!("must hold the line {line:?} once (found {})", found.len()),
+                    );
+                }
+                if AUDIT_STAMP_ORDER.contains(&line) {
+                    at.push(found.first().copied());
+                }
+            }
+            if !at.windows(2).all(|w| w[0] < w[1]) {
+                finding(
+                    out,
+                    &script,
+                    "U12",
+                    format!("the lines {AUDIT_STAMP_ORDER:?} must come in this order"),
+                );
+            }
+        }
+    }
+    for u in required(p, AUDIT, "U12", out) {
+        expect(
+            u,
+            "U12",
+            ("Service", "StateDirectory", Is("qdp-crypto-audit")),
+            out,
+        );
+        if !env_values(&environment(u), "STATE_DIRECTORY").is_empty() {
+            finding(
+                out,
+                &u.path,
+                "U12",
+                "STATE_DIRECTORY is set by systemd only",
+            );
+        }
+    }
+}
+
 fn u13_venues(t: &Tree, p: &Parsed, out: &mut Vec<Finding>) {
     let path = format!("{OBS}venues.toml");
     let venues: Option<Vec<&str>> = p
@@ -809,6 +972,123 @@ fn u15_identity(p: &Parsed, out: &mut Vec<Finding>) {
     for (name, _) in STACK {
         for u in named(p, name) {
             expect(u, "U15", ("Service", "User", Is("hlobs")), out);
+        }
+    }
+}
+
+/// The paths of a `ReadOnlyPaths=`/`ReadWritePaths=` key, without systemd's
+/// `-` (ignore if missing) and `+` prefixes and a trailing `/`.
+fn path_list(u: &Unit, key: &str) -> Vec<String> {
+    u.ini
+        .values("Service", key)
+        .into_iter()
+        .flat_map(words)
+        .map(|w| {
+            let p = w.trim_start_matches(['-', '+']);
+            match p.trim_end_matches('/') {
+                "" => "/".to_string(),
+                q => q.to_string(),
+            }
+        })
+        .collect()
+}
+
+/// `dir` is `path` or one of its parents.
+fn covers(dir: &str, path: &str) -> bool {
+    dir == "/" || dir == path || path.starts_with(&format!("{dir}/"))
+}
+
+/// Whether a command line runs `md-lake verify` or the audit script.
+fn runs(u: &Unit) -> (bool, bool) {
+    let (mut verify, mut audit) = (false, false);
+    for line in exec_lines(u) {
+        let w = words(line);
+        for (i, word) in w.iter().enumerate() {
+            let name = file_name(word);
+            verify |= name == "md-lake" && w.get(i + 1).is_some_and(|n| n == "verify");
+            audit |= name == AUDIT_SCRIPT;
+        }
+    }
+    (verify, audit)
+}
+
+fn u16_lake_writes(p: &Parsed, out: &mut Vec<Finding>) {
+    for u in &p.units {
+        let (verify, audit) = runs(u);
+        if !verify && !audit {
+            continue;
+        }
+        let mut read_only = path_list(u, "ReadOnlyPaths");
+        if u.ini.values("Service", "ProtectSystem").contains(&"strict") {
+            read_only.push("/".to_string());
+        }
+        let writes = path_list(u, "ReadWritePaths");
+        if read_only.iter().any(|d| covers(d, L0)) && !writes.iter().any(|w| w == VERIFY_DIR) {
+            finding(
+                out,
+                &u.path,
+                "U16",
+                format!("md-lake verify writes {VERIFY_DIR}: list it in ReadWritePaths="),
+            );
+        }
+        if audit && !writes.iter().any(|w| w == AUDIT_DIR) {
+            finding(
+                out,
+                &u.path,
+                "U16",
+                format!("the auditor writes {AUDIT_DIR}: list it in ReadWritePaths="),
+            );
+        }
+    }
+    for u in named(p, AUDIT) {
+        for &row in AUDIT_PATHS {
+            expect(u, "U16", row, out);
+        }
+        if env_values(&environment(u), "LAKE") != [AUDIT_LAKE] {
+            finding(
+                out,
+                &u.path,
+                "U16",
+                format!("LAKE is set once, as {AUDIT_LAKE}: the lake its path lines name"),
+            );
+        }
+    }
+}
+
+/// The first `%` specifier of `line` that is not `%i`, `%I`, `%n` or `%%`.
+fn bad_specifier(line: &str) -> Option<String> {
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            match chars.next() {
+                Some('i' | 'I' | 'n' | '%') => {}
+                Some(x) => return Some(format!("%{x}")),
+                None => return Some("%".to_string()),
+            }
+        }
+    }
+    None
+}
+
+fn u17_exec_text(p: &Parsed, out: &mut Vec<Finding>) {
+    for u in &p.units {
+        for line in exec_lines(u) {
+            if line.contains("$(") || line.contains('`') {
+                finding(
+                    out,
+                    &u.path,
+                    "U17",
+                    "an Exec* line runs no shell: no $( or backtick",
+                );
+            }
+            if let Some(spec) = bad_specifier(line) {
+                finding(
+                    out,
+                    &u.path,
+                    "U17",
+                    format!("{spec} in an Exec* line: only %i, %I, %n and %%"),
+                );
+            }
         }
     }
 }
@@ -1187,6 +1467,12 @@ fn memory_max_follows_the_design_table() {
         "MemoryMax=4096M\n",
         &[],
     );
+    plant(
+        "crypto-lake-audit@.service",
+        "MemoryMax=4G\n",
+        "MemoryMax=8G\n",
+        &["U6"],
+    );
     for &(name, _) in MEMORY_MAX {
         let mut t = Tree::real();
         t.remove(&unit(name));
@@ -1259,6 +1545,9 @@ fn the_seal_archiver_and_audit_timers_keep_their_schedule() {
         plant(name, "Persistent=true\n", "Persistent=false\n", &["U5"]);
     }
     plant("md-lake-seal@.timer", "*:05:00", "*:02:00", &["U5"]);
+    // The audit runs after the archiver's 01:10.
+    plant("crypto-lake-audit@.timer", "02:30:00", "01:00:00", &["U5"]);
+    plant("crypto-lake-audit@.timer", "Persistent=true\n", "", &["U5"]);
 }
 
 #[test]
@@ -1285,6 +1574,19 @@ fn a_daily_job_without_the_lock_fails() {
         "md-archiver@.service",
         "Nice=10\n",
         "Nice=10\nExecStartPost=/bin/true\n",
+        &["U7"],
+    );
+    // The audit takes the same lock, before the script.
+    plant(
+        "crypto-lake-audit@.service",
+        "ExecStart=/usr/bin/flock /run/lock/hl-oms-daily.lock ",
+        "ExecStart=",
+        &["U7"],
+    );
+    plant(
+        "crypto-lake-audit@.service",
+        "Nice=10\n",
+        "Nice=10\nExecStartPre=/usr/local/bin/md-lake verify --venue %i\n",
         &["U7"],
     );
     let mut t = Tree::real();
@@ -1838,6 +2140,12 @@ fn the_seal_and_archiver_runs_are_bounded() {
         // daily lock, or stops sealing, for good.
         ("md-archiver@.service", "TimeoutStartSec=6h\n", ""),
         ("md-lake-seal@.service", "TimeoutStartSec=6h\n", ""),
+        ("crypto-lake-audit@.service", "TimeoutStartSec=6h\n", ""),
+        (
+            "crypto-lake-audit@.service",
+            "TimeoutStartSec=6h\n",
+            "TimeoutStartSec=6h\nTimeoutSec=0\n",
+        ),
         (
             "md-lake-seal@.service",
             "TimeoutStartSec=6h\n",
@@ -1934,4 +2242,286 @@ fn sizes_and_globs_read_as_systemd_and_vmalert_do() {
     assert!(!glob("/a/*.json", "/a/b/x.json"));
     assert!(!glob("/a/*.json", "/a/x.yaml"));
     assert!(glob("/a/x", "/a/x"));
+}
+
+#[test]
+fn the_audit_unit_can_write_its_verify_results() {
+    let audit = "crypto-lake-audit@.service";
+    let rw = "ReadWritePaths=/mnt/nvme/lake/crypto/l0/_verify /mnt/nvme/lake/crypto/audit\n";
+    for to in [
+        // verify could not write its result inside the read-only l0.
+        "ReadWritePaths=/mnt/nvme/lake/crypto/audit\n",
+        // The auditor could not write its result.
+        "ReadWritePaths=/mnt/nvme/lake/crypto/l0/_verify\n",
+        "",
+        // Wider than the two directories the runs write.
+        "ReadWritePaths=/mnt/nvme/lake\n",
+        "ReadWritePaths=/mnt/nvme/lake/crypto/l0/_verify /mnt/nvme/lake/crypto/audit\nReadWritePaths=/mnt/nvme/lake/crypto/l1\n",
+    ] {
+        plant(audit, rw, to, &["U16"]);
+    }
+    // The read-only lines are exact too: L1 stays read-only.
+    plant(
+        audit,
+        "ReadOnlyPaths=/mnt/nvme/lake/crypto/l0 /mnt/nvme/lake/crypto/l1\n",
+        "ReadOnlyPaths=/mnt/nvme/lake/crypto/l0\n",
+        &["U16"],
+    );
+    // Any unit that runs md-lake verify under a read-only l0, or a parent of
+    // it, needs the _verify directory (the general rule, not the audit
+    // unit's pinned lines).
+    let verify = |extra: &str| {
+        format!(
+            "[Unit]\nDescription=x\n\n[Service]\nType=simple\nMemoryMax=1G\n{extra}ExecStart=/usr/local/bin/md-lake verify --venue %i --lake /mnt/nvme/lake --date 2026-12-01 --json\n"
+        )
+    };
+    for (extra, rules) in [
+        ("ReadOnlyPaths=/mnt/nvme/lake\n", &["U16"][..]),
+        ("ReadOnlyPaths=-/mnt/nvme/lake/crypto/l0\n", &["U16"][..]),
+        ("ReadOnlyPaths=/mnt\n", &["U16"][..]),
+        // ProtectSystem=strict makes the whole file system read-only.
+        ("ProtectSystem=strict\n", &["U16"][..]),
+        (
+            "ReadOnlyPaths=/mnt/nvme/lake\nReadWritePaths=/mnt/nvme/lake/crypto/l0/_verify\n",
+            &[][..],
+        ),
+        // Nothing read-only: nothing to open up.
+        ("", &[][..]),
+        ("ReadOnlyPaths=/mnt/nvme/lake/crypto/l1\n", &[][..]),
+    ] {
+        let mut t = Tree::real();
+        add_installed(
+            &mut t,
+            "systemd/md-lake-verify@.service",
+            &verify(extra),
+            "/etc/systemd/system/md-lake-verify@.service",
+            "0644",
+        );
+        let f = crate::check(&t);
+        assert_rules(&f, rules);
+    }
+    // Another unit that runs the audit script needs the audit directory
+    // too, not only the audit unit's pinned lines.
+    let script = |rw: &str| {
+        format!(
+            "[Unit]\nDescription=x\n\n[Service]\nType=simple\nMemoryMax=1G\nReadOnlyPaths=/mnt/nvme/lake/crypto/l0\n{rw}ExecStart=/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh %i\n"
+        )
+    };
+    for (rw, rules) in [
+        (
+            "ReadWritePaths=/mnt/nvme/lake/crypto/l0/_verify\n",
+            &["U16"][..],
+        ),
+        (
+            "ReadWritePaths=/mnt/nvme/lake/crypto/l0/_verify /mnt/nvme/lake/crypto/audit\n",
+            &[][..],
+        ),
+    ] {
+        let mut t = Tree::real();
+        add_installed(
+            &mut t,
+            "systemd/lake-audit-copy@.service",
+            &script(rw),
+            "/etc/systemd/system/lake-audit-copy@.service",
+            "0644",
+        );
+        let f = crate::check(&t);
+        assert_rules(&f, rules);
+    }
+    // The script reads and writes $LAKE: the lake the two path lines name.
+    let lake = "Environment=LAKE=/mnt/nvme/lake\n";
+    for to in [
+        "Environment=LAKE=/mnt/nvme/other\n",
+        "Environment=LAKE=/mnt/nvme/lake\nEnvironment=LAKE=/mnt/nvme/other\n",
+    ] {
+        plant(audit, lake, to, &["U16"]);
+    }
+}
+
+#[test]
+fn the_audit_script_keeps_its_verify_rules() {
+    // The lines that decide which dates are verified again and what the
+    // unit's status says (D4); each change below once passed every test.
+    let script = format!("{OBS}bin/crypto-lake-audit.sh");
+    let touch = "\tif ! touch \"$stamp.new\"; then\n\t\techo \"crypto-lake-audit: cannot write $stamp.new\" >&2\n\t\tverify_failed=1\n\t\tcontinue\n\tfi\n";
+    let verify = "\tif \"$MD_LAKE\" verify --venue \"$venue\" --lake \"$LAKE\" --date \"$d\" --json >/dev/null; then\n";
+    for (from, to) in [
+        // mtime instead of ctime: a renamed file is missed.
+        ("-cnewer \"$stamp\"", "-newer \"$stamp\""),
+        // A shorter window than the day seal's look-back.
+        ("\"$i\" -le 9", "\"$i\" -le 2"),
+        // Coarse timestamps: a file sealed in the same second as the stamp.
+        ("\tsleep 1\n", ""),
+        // The stamp taken after verify listed the files (the race).
+        (
+            &format!("{touch}\tsleep 1\n{verify}"),
+            &format!("\tsleep 1\n{verify}{touch}"),
+        ),
+        // A failed verify replaces the stamp.
+        (
+            "\t\trm -f \"$stamp.new\"\n",
+            "\t\tmv -f \"$stamp.new\" \"$stamp\"\n",
+        ),
+        // The new stamp removed before verify: mv then fails every day.
+        ("\tsleep 1\n", "\tsleep 1\n\trm -f \"$stamp.new\"\n"),
+        // A failed verify leaves the unit green.
+        ("\texit 5\n", "\texit 0\n"),
+        // A stamp from the future hides the files sealed since.
+        ("-newermt \"@$now\"", "-newermt \"@0\""),
+        // Pushes off loopback.
+        (
+            "--vm-url http://127.0.0.1:8428",
+            "--vm-url http://10.0.0.1:8428",
+        ),
+        (
+            "--vm-url http://127.0.0.1:8428",
+            "--vm-url http://127.0.0.1:8428 --vm-url http://10.0.0.1:8428",
+        ),
+        (
+            "--vm-url http://127.0.0.1:8428",
+            "--vm-url http://127.0.0.1:84280",
+        ),
+    ] {
+        let mut t = Tree::real();
+        t.replace(&script, from, to);
+        let f = crate::check(&t);
+        assert_rules(&f, &["U12"]);
+    }
+}
+
+#[test]
+fn the_audit_never_points_at_the_kr_checkouts() {
+    let audit = "crypto-lake-audit@.service";
+    let script = format!("{OBS}bin/crypto-lake-audit.sh");
+    let kr = "/mnt/nvme/gitproject/quant-data-platform";
+    // The KR pipeline's checkouts, in the unit or any other deploy file.
+    for to in [
+        format!("Environment=QDP_CHECKOUT={kr}\n"),
+        format!("Environment=QDP_CHECKOUT={kr}-official\n"),
+    ] {
+        plant(
+            audit,
+            "Environment=QDP_CHECKOUT=/opt/qdp-crypto\n",
+            &to,
+            &["U12"],
+        );
+    }
+    let mut t = Tree::real();
+    t.replace(&script, "venue=$1\n", &format!("venue=$1\ncd {kr}/x\n"));
+    assert_rules(&crate::check(&t), &["U12"]);
+    // A comment counts too: the path is not written anywhere under deploy/.
+    plant(
+        "md-archiver@.timer",
+        "Persistent=true\n",
+        &format!("Persistent=true\n# not {kr}\n"),
+        &["U12"],
+    );
+    // The state file stays outside the lake: the unit's state directory, the
+    // instance's venue.
+    let state = "--state \"$STATE_DIRECTORY/audit-$venue.json\"";
+    for (from, to) in [
+        (state, "--state \"$LAKE/crypto/audit-$venue.json\""),
+        (state, "--state \"$STATE_DIRECTORY/audit.json\""),
+        (state, "--state=\"$STATE_DIRECTORY/audit-$venue.json\""),
+        (state, ""),
+        ("venue=$1\n", "venue=${1:-bybit}\n"),
+        ("venue=$1\n", "venue=$1\nvenue=bybit\n"),
+        ("venue=$1\n", "venue=$1\nSTATE_DIRECTORY=/mnt/nvme/lake\n"),
+    ] {
+        let mut t = Tree::real();
+        t.replace(&script, from, to);
+        let f = crate::check(&t);
+        assert_rules(&f, &["U12"]);
+    }
+    plant(audit, "StateDirectory=qdp-crypto-audit\n", "", &["U12"]);
+    plant(
+        audit,
+        "StateDirectory=qdp-crypto-audit\n",
+        "StateDirectory=qdp-crypto-audit\nEnvironment=STATE_DIRECTORY=/mnt/nvme/lake/state\n",
+        &["U12"],
+    );
+    plant(
+        audit,
+        "StateDirectory=qdp-crypto-audit\n",
+        "StateDirectory=other\n",
+        &["U12"],
+    );
+    // The script itself gone: U12 cannot see the state path, U14 its file.
+    let mut t = Tree::real();
+    t.remove(&script);
+    assert_rules(&crate::check(&t), &["U12", "U14"]);
+}
+
+#[test]
+fn an_exec_line_with_shell_substitution_fails() {
+    let audit = "crypto-lake-audit@.service";
+    let script = "/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh %i";
+    // systemd runs no shell: $( and backticks reach the program as text.
+    for to in [
+        "/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh $(date +%%F)",
+        "/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh `date`",
+        // A specifier other than %i, %I, %n and %% is expanded or refused.
+        "/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh %h",
+        "/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh %i %",
+        "/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh 100%",
+    ] {
+        plant(audit, script, to, &["U17"]);
+    }
+    plant(
+        "md-archiver@.service",
+        "Nice=10\n",
+        "Nice=10\nExecStopPost=/bin/echo $(id -u)\n",
+        &["U17"],
+    );
+    plant(
+        "victoriametrics.service",
+        "-retentionPeriod=1y",
+        "-retentionPeriod=1y -x=%t",
+        &["U17"],
+    );
+    // %%, %i, %I and %n pass.
+    plant(
+        audit,
+        script,
+        "/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh %i %I %n 100%%",
+        &[],
+    );
+    // Outside Exec* lines the rule does not apply.
+    plant(
+        audit,
+        "Description=Lake verify and qdp audit for %i\n",
+        "Description=Lake verify and qdp audit for %i on %H\n",
+        &[],
+    );
+}
+
+#[test]
+fn the_audit_script_is_installed_executable() {
+    let dst = "dst = \"/usr/local/lib/hl-oms-obs/crypto-lake-audit.sh\"";
+    for (from, to) in [
+        (
+            &format!("{dst}\nmode = \"0755\""),
+            &format!("{dst}\nmode = \"0644\"")[..],
+        ),
+        (
+            &dst.to_string(),
+            "dst = \"/etc/hl-oms-obs/bin/crypto-lake-audit.sh\"",
+        ),
+        // The unit's ExecStart path then has no dst either.
+        (
+            &dst.to_string(),
+            "dst = \"/usr/local/lib/hl-oms-obs/audit.sh\"",
+        ),
+    ] {
+        let mut t = Tree::real();
+        t.replace(INSTALL, from, to);
+        assert_rules(&crate::check(&t), &["U14"]);
+    }
+    // Run by sh: the first line says so.
+    let script = format!("{OBS}bin/crypto-lake-audit.sh");
+    for first in ["#!/bin/bash\n", "#!/usr/bin/env sh\n", "\n"] {
+        let mut t = Tree::real();
+        t.replace(&script, "#!/bin/sh\n", first);
+        assert_rules(&crate::check(&t), &["P1"]);
+    }
 }

@@ -3074,6 +3074,33 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "xtask", "--test", "deploy", "units::the_seal_and_archiver_runs_are_bounded"],
         guards: "ADR-035",
     },
+    Mutant {
+        id: "M339-deploy-check-skips-verify-dir",
+        what: "rule U16 skips the _verify check: a unit that runs md-lake verify under a read-only l0 passes without the _verify directory in ReadWritePaths (ADR-035, spec mutant 10)",
+        file: "crates/xtask/tests/deploy/units.rs",
+        find: "if read_only.iter().any(|d| covers(d, L0)) && !writes.iter().any(|w| w == VERIFY_DIR) {",
+        replace: "if false {",
+        test: &["-p", "xtask", "--test", "deploy", "units::the_audit_unit_can_write_its_verify_results"],
+        guards: "ADR-035",
+    },
+    Mutant {
+        id: "M340-audit-script-tests-mtime",
+        what: "the audit script compares the sealed files' mtime (-newer) with the verify stamp: a file renamed into a date after its verify is never verified, and the unit stays green (ADR-035, review 1 S1)",
+        file: "deploy/observability/bin/crypto-lake-audit.sh",
+        find: "if ! changed=$(sealed \"$d\" -cnewer \"$stamp\"); then",
+        replace: "if ! changed=$(sealed \"$d\" -newer \"$stamp\"); then",
+        test: &["-p", "xtask", "--test", "deploy", "the_deploy_tree_passes"],
+        guards: "ADR-035",
+    },
+    Mutant {
+        id: "M341-deploy-check-skips-audit-dir",
+        what: "rule U16 skips the audit-directory check: a unit that runs the audit script passes without crypto/audit in ReadWritePaths (ADR-035, review 1 S2)",
+        file: "crates/xtask/tests/deploy/units.rs",
+        find: "if audit && !writes.iter().any(|w| w == AUDIT_DIR) {",
+        replace: "if false {",
+        test: &["-p", "xtask", "--test", "deploy", "units::the_audit_unit_can_write_its_verify_results"],
+        guards: "ADR-035",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
