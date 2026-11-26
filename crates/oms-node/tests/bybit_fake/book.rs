@@ -33,6 +33,8 @@ pub const DUPLICATE: i64 = 110072;
 /// A cancel of an order that is not open.
 pub const NOT_OPEN: i64 = 110001;
 const WEEK_MS: u64 = 7 * 24 * 3600 * 1000;
+/// The paths answered without a key, before any fault.
+const PUBLIC: [&str; 3] = ["/ip", "/v5/market/time", "/v5/market/instruments-info"];
 /// Fee per unit of value (0.055 %).
 const FEE_RATE: f64 = 0.00055;
 
@@ -103,7 +105,8 @@ pub struct Book {
     pub keys: Vec<Key>,
     pub orders: Vec<Order>,
     pub executions: Vec<Execution>,
-    /// Signed size in steps, average entry price, last change.
+    /// Signed size in steps, average entry price, the latest `execTime`
+    /// that changed it.
     pub size: i64,
     pub avg_price: f64,
     pub position_updated_ms: u64,
@@ -268,7 +271,12 @@ impl Book {
     }
 
     /// Requests from `key` to `path` get `answer` until [`Book::clear_fault`].
+    /// A public path ([`PUBLIC`]) is a test error: its fault never fires.
     pub fn fault(&mut self, key: &str, path: &str, answer: Answer) {
+        assert!(
+            !PUBLIC.contains(&path),
+            "a fault on the public path {path} never fires"
+        );
         self.clear_fault(key, path);
         self.faults.push((key.into(), path.into(), answer));
     }
@@ -432,9 +440,12 @@ impl Book {
             return Err(bybit::error(10001, "category"));
         }
         let (from, to) = window(now_ms, q)?;
+        // Newest booked first, then a stable sort: equal `execTime`s stay
+        // newest first.
         let mut rows: Vec<&Execution> = self
             .executions
             .iter()
+            .rev()
             .filter(|e| (from..=to).contains(&e.time_ms))
             .filter(|e| q.get("orderLinkId").is_none_or(|l| e.link == l))
             .filter(|e| q.get("orderId").is_none_or(|i| e.order_id == i))
@@ -484,7 +495,10 @@ impl Book {
         if p.get("category") != Some("linear") || p.get("symbol") != Some(SYMBOL) {
             return (Err((10001, "category or symbol".into())), vec![]);
         }
-        if link.is_empty() || self.by_link(&link).is_some() {
+        if link.is_empty() {
+            return (Err((10001, "orderLinkId".into())), vec![]);
+        }
+        if self.by_link(&link).is_some() {
             return (
                 Err((DUPLICATE, "OrderLinkedID is duplicate".into())),
                 vec![],
@@ -734,7 +748,8 @@ impl Book {
                 self.avg_price = 0.0;
             }
             self.size = next;
-            self.position_updated_ms = time_ms;
+            // A planted row older than the last change does not date it back.
+            self.position_updated_ms = self.position_updated_ms.max(time_ms);
         }
         self.executions.len() - 1
     }

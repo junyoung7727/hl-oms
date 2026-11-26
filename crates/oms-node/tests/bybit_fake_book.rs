@@ -1304,3 +1304,74 @@ fn frames_of_concurrent_inputs_reach_the_private_stream_in_book_order() {
         "frames out of book order: {ids:?}"
     );
 }
+
+#[test]
+fn an_older_planted_execution_moves_the_position_but_not_its_updated_time_back() {
+    let mut b = book();
+    let a = create(&mut b, T0, "L1", "Buy", "0.001", "30000");
+    b.fill(T0 + 500, &a, "0.001", "30000");
+    b.plant_execution("Trade", "Buy", "0.001", "30000", "manual", T0 - 100);
+    let p = &rows(&get(
+        &mut b,
+        T0 + 600,
+        OKEY,
+        "/v5/position/list?category=linear&symbol=BTCUSDT",
+    ))[0];
+    assert_eq!(p["size"], "0.002");
+    assert_eq!(
+        p["updatedTime"],
+        (T0 + 500).to_string(),
+        "updatedTime is the latest change"
+    );
+}
+
+#[test]
+fn executions_with_the_same_exec_time_are_listed_newest_booked_first() {
+    let mut b = book();
+    let e1 = b.plant_execution("Trade", "Buy", "0.001", "30000", "manual", T0 - 10);
+    let e2 = b.plant_execution("Trade", "Buy", "0.001", "30000", "manual", T0 - 10);
+    let ids: Vec<Value> = rows(&exec_list(&mut b, T0, ""))
+        .iter()
+        .map(|r| r["execId"].clone())
+        .collect();
+    assert_eq!(ids, [json!(e2), json!(e1)]);
+}
+
+#[test]
+#[should_panic(expected = "never fires")]
+fn a_fault_on_a_public_path_is_a_test_error() {
+    book().fault(WKEY, "/v5/market/time", Answer::Reply(503, "{}".into()));
+}
+
+#[test]
+fn a_create_keeps_reduce_only_and_one_without_an_order_link_id_is_refused_with_10001() {
+    let mut b = book();
+    let mut body = create_msg("R1", "Sell", "0.001", "30000")["args"][0].clone();
+    body["reduceOnly"] = json!(true);
+    let (r, _) = post(&mut b, T0, OKEY, "/v5/order/create", body);
+    assert_eq!(r["retCode"], 0, "{r}");
+    create(&mut b, T0, "L2", "Buy", "0.001", "30000");
+    let reduce_only = |b: &mut Book, link: &str| {
+        let q = format!("/v5/order/realtime?category=linear&orderLinkId={link}");
+        rows(&get(b, T0 + 1, OKEY, &q))[0]["reduceOnly"].clone()
+    };
+    assert_eq!(reduce_only(&mut b, "R1"), json!(true));
+    assert_eq!(reduce_only(&mut b, "L2"), json!(false));
+    let mut msg = create_msg("", "Buy", "0.001", "30000");
+    msg["args"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("orderLinkId");
+    let (reply, frames) = b.ws_trade(T0 + 2, OKEY, &msg);
+    assert_eq!(reply.unwrap()["retCode"], 10001);
+    assert!(frames.is_empty());
+    let (r, _) = post(
+        &mut b,
+        T0 + 3,
+        OKEY,
+        "/v5/order/create",
+        msg["args"][0].clone(),
+    );
+    assert_eq!(r["retCode"], 10001);
+    assert_eq!(b.orders.len(), 2);
+}
