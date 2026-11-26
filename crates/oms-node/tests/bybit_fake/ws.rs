@@ -86,6 +86,20 @@ impl FakeWs {
     pub fn send(&self, text: String) {
         let _ = self.push.lock().unwrap().as_ref().unwrap().send(text);
     }
+
+    /// [`FakeWs::send`] if a connection is there; `false` if none is.
+    pub fn try_send(&self, text: String) -> bool {
+        match self.push.lock().unwrap().as_ref() {
+            Some(tx) => tx.send(text).is_ok(),
+            None => false,
+        }
+    }
+
+    /// Closes the newest connection (its task ends and drops the socket);
+    /// a client reconnects to a new one.
+    pub fn drop_connection(&self) {
+        *self.push.lock().unwrap() = None;
+    }
 }
 
 async fn serve(
