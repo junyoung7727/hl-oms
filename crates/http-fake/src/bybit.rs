@@ -43,7 +43,7 @@ pub fn with_fields(mut row: Value, more: Value) -> Value {
     row
 }
 
-/// An order row of `/v5/order/realtime` or `/history`: the keys every
+/// An order row of the open-order and order-history queries: the keys every
 /// reader needs. Prices, quantities left and times come through
 /// [`with_fields`].
 pub fn order_row(
