@@ -424,3 +424,68 @@ fn an_order_listed_on_two_pages_is_one_difference() {
     assert_eq!(r.gauge("watcher_mismatch_active", "W1"), Some(1.0));
     assert_eq!(r.gauge("watcher_differences", "W1"), Some(0.0));
 }
+
+/// `hold_set` or `hold_cleared` of the kill latch, as the OMS writes them.
+fn kill(set: bool) -> serde_json::Value {
+    if set {
+        common::ev(
+            "hold_set",
+            serde_json::json!({"hold": "kill", "source": "stream", "note": "private stream down"}),
+        )
+    } else {
+        common::ev(
+            "hold_cleared",
+            serde_json::json!({"hold": "kill", "note": "venue checked"}),
+        )
+    }
+}
+
+const MISSING: &str = "venue not open, journal open and acked";
+
+#[test]
+fn a_missing_order_during_a_kill_is_not_reported() {
+    let mut r = Rig::new("w1-kill-missing");
+    // Two acked orders; the OMS latches its kill and its cancel-all empties
+    // the venue, but it journals no close while its link is down.
+    r.write(T0 - 10_000, &[&open(1)[..], &open(2)[..]].concat());
+    r.write(T0 - 5_000, &[kill(true)]);
+    rounds(&mut r, 0..6);
+    assert!(r.mismatches.is_empty(), "{:?}", r.mismatches);
+    assert!(r.confirmed.is_empty(), "{:?}", r.confirmed);
+    assert_eq!(r.gauge("watcher_differences", "W1"), Some(0.0));
+    assert_eq!(r.engine.success(Check::W1), Some(T0 + 5000));
+}
+
+#[test]
+fn a_missing_order_is_reported_again_after_the_kill_is_cleared() {
+    let mut r = Rig::new("w1-kill-cleared");
+    r.write(T0 - 10_000, &open(1));
+    r.write(T0 - 5_000, &[kill(true)]);
+    rounds(&mut r, 0..3);
+    assert!(r.mismatches.is_empty(), "{:?}", r.mismatches);
+    // The latch is released while the journal still holds the order open
+    // (the OMS refuses that, decide.rs; the watcher does not rely on it):
+    // the difference is a first sighting again, confirmed one round later.
+    r.write(T0 + 3_000, &[kill(false)]);
+    r.at(T0 + 3_000);
+    assert!(r.mismatches.is_empty(), "{:?}", r.mismatches);
+    assert_eq!(r.gauge("watcher_differences", "W1"), Some(1.0));
+    r.at(T0 + 4_000);
+    let want = detail("missing_at_venue", &link(1), MISSING, "journal entry 14.0 s old");
+    assert_eq!(r.mismatches, vec![(T0 + 4000, Check::W1, want)]);
+}
+
+#[test]
+fn a_foreign_order_during_a_kill_is_still_reported() {
+    let mut r = Rig::new("w1-kill-foreign");
+    r.write(T0 - 10_000, &open(1));
+    r.write(T0 - 5_000, &[kill(true)]);
+    // Order 1 is gone (the kill's cancel-all); an order of another key
+    // appears at the venue: still a difference during the kill.
+    r.venue.orders = vec![row("manual-1", "v900", "BTCUSDT", "Buy")];
+    rounds(&mut r, 0..3);
+    let what = "venue BTCUSDT Buy orderLinkId \"manual-1\", journal no such order";
+    let want = detail("foreign", "v900", what, "first seen 2.0 s ago");
+    assert_eq!(r.mismatches, vec![(T0 + 2000, Check::W1, want)]);
+    assert_eq!(r.gauge("watcher_mismatches_total", "W1"), Some(1.0));
+}
