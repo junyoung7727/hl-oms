@@ -44,6 +44,11 @@ workspace = true
 # OMS_TEST_TELEGRAM_API (C-ALERT). Never enabled for the binary that is
 # deployed.
 failpoints = []
+# The OMS and watcher joint tests (tests/joint.rs): the real oms-node of a
+# failpoints build and the watcher's test build against one fake Bybit.
+# Run by `cargo run -p xtask -- joint`, which builds the watcher and omsctl
+# first.
+joint = ["failpoints"]
 
 [[test]]
 name = "pipeline"
@@ -56,6 +61,10 @@ required-features = ["failpoints"]
 [[test]]
 name = "bybit_node"
 required-features = ["failpoints"]
+
+[[test]]
+name = "joint"
+required-features = ["joint"]
 
 [dev-dependencies]
 http-fake = { path = "../http-fake" }

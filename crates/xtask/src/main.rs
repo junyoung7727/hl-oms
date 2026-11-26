@@ -7,6 +7,7 @@
 //! verify [--quick] [--live-testnet] [--bybit-testnet] run the acceptance suite, write evidence/latest
 //! docs                                              validate the registry, generate tables and dashboard data
 //! mutants [--only M03]                              selective mutation check, write evidence/mutants.json
+//! joint [--runs N] [--only <test name>]             the OMS and watcher joint tests (needs OMS_TEST_DIR)
 //! recovery-time [--dir D] [--orders N]              journal replay time after a kill, write evidence/perf/recovery.json
 //! perf [--dir D] [--rates 20,200,2000] [--seconds N] [--connections N] [--inline] [--label L]
 //!                                                   end-to-end latency under open-loop load
@@ -14,6 +15,7 @@
 
 mod bench;
 mod digest;
+mod joint;
 mod layers;
 mod loadgen;
 mod mutants;
@@ -51,6 +53,7 @@ fn main() {
         }
         Some("docs") => registry::run(&root()),
         Some("layers") => layers::run(&root()),
+        Some("joint") => joint::run(&root(), opt(&args, "--runs").as_deref(), opt(&args, "--only").as_deref()),
         Some("mutants") => mutants::run(&root(), opt(&args, "--only").as_deref()),
         Some("recovery-time") => perf::recovery_time(
             opt(&args, "--dir").unwrap_or_else(|| "data/perf".into()).into(),
@@ -91,6 +94,7 @@ fn main() {
                 "usage: xtask <command>\n\
                  \x20 verify [--quick] [--live-testnet] [--bybit-testnet] [--extended <dir on a real disk>]   acceptance suite -> evidence/latest/\n\
                  \x20 mutants [--only <id>]                 do the tests notice deliberately broken code -> evidence/mutants.json\n\
+                 \x20 joint [--runs N] [--only <test name>]  the OMS and watcher joint tests; OMS_TEST_DIR outside git, at most 58 bytes\n\
                  \x20 perf --label L [--dir D] [--seconds N] [--rates a,b,c] [--connections N] [--inline] [--default-limits]\n\
                  \x20 recovery-time [--dir D] [--orders N]\n\
                  \x20 fsync-probe --dir D [--label L] [--count N] [--bytes N]\n\

@@ -87,6 +87,15 @@ pub fn suites(quick: bool, live: bool, bybit: bool, extended: Option<&str>) -> V
             args: &["test", "-p", "oms-node", "--test", "e2e", "--test", "review_node", "--", "--nocapture", "--test-threads=4"],
             env: env(&[("OMS_KILL_ROUNDS", if quick { "6" } else { "20" })]),
         },
+        // Not behind a flag: a plain `verify` cannot leave it out. Without
+        // OMS_TEST_DIR (outside any git work tree, at most 58 bytes)
+        // `xtask joint` exits 2 and the suite counts as failed.
+        Suite {
+            name: "joint",
+            what: "the real oms-node (failpoints build, Bybit gateway) and the real watcher (its test build) run together against one stateful fake Bybit, a fake Telegram, a fake VictoriaMetrics and a fake systemctl, loopback only: J0 the rig refuses a watcher without its test hook and the test build refuses to run unwired; J1 a whole life cycle at the deployed timers (gate opens on fresh W1/W2, partial and full fill, a cancel, three rounds of every check without a mismatch); needs OMS_TEST_DIR",
+            args: &["run", "--locked", "-q", "-p", "xtask", "--", "joint", "--runs", "1"],
+            env: env(&[]),
+        },
     ];
     if live {
         v.push(Suite {
@@ -157,6 +166,8 @@ fn notes(output: &str) -> Vec<String> {
                 || l.starts_with("40 requests")
                 || l.starts_with("testnet BTC")
                 || l.starts_with("skipped:")
+                || l.starts_with("joint run")
+                || l.starts_with("joint:")
         })
         .map(|l| l.chars().take(600).collect())
         .collect()
