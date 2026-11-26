@@ -10,7 +10,7 @@
 #![allow(clippy::unwrap_used)]
 
 use futures_util::{SinkExt, StreamExt};
-use http_fake::{Answer as Http, FakeHttp};
+use http_fake::{Answer as Http, FakeHttp, bybit};
 use oms_api::client::{Client, now_us};
 use oms_api::*;
 use oms_core::*;
@@ -27,14 +27,11 @@ use tokio_tungstenite::tungstenite::Message;
 const CREATE_PATH: &str = "/v5/order/create";
 
 fn ok(result: Value) -> Http {
-    Http::Reply(
-        200,
-        json!({"retCode": 0, "retMsg": "OK", "result": result, "time": 1}).to_string(),
-    )
+    bybit::ok(result)
 }
 
 fn list(rows: Vec<Value>) -> Http {
-    ok(json!({"category": "linear", "list": rows, "nextPageCursor": ""}))
+    bybit::list(rows, "")
 }
 
 /// The REST venue and the IP echo on one loopback server: the boot checks
@@ -43,11 +40,13 @@ fn rest_venue() -> Arc<FakeHttp> {
     let api = FakeHttp::start(Http::Reply(404, "{}".into()));
     api.route(
         "/v5/user/query-api",
-        [ok(json!({
-            "isMaster": false, "userID": 4242, "parentUid": "1000", "readOnly": 0,
-            "ips": ["127.0.0.1"],
-            "permissions": {"ContractTrade": ["Order", "Position"], "Spot": []}
-        }))],
+        [ok(bybit::query_api_key(
+            4242,
+            "1000",
+            0,
+            json!({"ContractTrade": ["Order", "Position"], "Spot": []}),
+            &["127.0.0.1"],
+        ))],
     );
     api.route(
         "/v5/account/info",
@@ -57,24 +56,17 @@ fn rest_venue() -> Arc<FakeHttp> {
     );
     api.route(
         "/v5/market/instruments-info",
-        [ok(
-            json!({"category": "linear", "list": [{"symbol": "BTCUSDT", "settleCoin": "USDT", "status": "Trading",
-            "priceFilter": {"tickSize": "0.10"}, "lotSizeFilter": {"qtyStep": "0.001"}}], "nextPageCursor": ""}),
-        )],
+        [list(vec![bybit::instrument_row("BTCUSDT", "0.10", "0.001")])],
     );
     api.route(
         "/v5/position/list",
-        [list(vec![
-            json!({"symbol": "BTCUSDT", "positionIdx": 0, "size": "0", "side": ""}),
-        ])],
+        [list(vec![bybit::position_row("BTCUSDT", "", "0")])],
     );
     // A venue clock far ahead (year 2096): the local clock is behind, so
     // the clock check passes whenever the test runs.
     api.route(
         "/v5/market/time",
-        [ok(
-            json!({"timeSecond": "4000000000", "timeNano": "4000000000000000000"}),
-        )],
+        [ok(bybit::market_time(4_000_000_000_000_000_000))],
     );
     api.route("/ip", [Http::Reply(200, "127.0.0.1\n".into())]);
     api.route("/v5/execution/list", [list(vec![])]);
@@ -83,19 +75,18 @@ fn rest_venue() -> Arc<FakeHttp> {
     // The kill loop's cancel-all (U18b2): nothing open to cancel.
     api.route(
         "/v5/order/cancel-all",
-        [ok(json!({"list": [], "success": "1"}))],
+        [ok(bybit::cancel_all(&[]))],
     );
     Arc::new(api)
 }
 
 /// An open order of ours as the venue lists it.
 fn open_order(link: &str) -> Value {
-    json!({
-        "orderId": "o-ws-1", "orderLinkId": link, "symbol": "BTCUSDT", "side": "Buy",
-        "price": "30000", "qty": "0.001", "orderStatus": "New", "cancelType": "UNKNOWN",
-        "rejectReason": "EC_NoError", "leavesQty": "0.001", "cumExecQty": "0",
-        "updatedTime": "1700000000123"
-    })
+    bybit::with_fields(
+        bybit::order_row(link, "o-ws-1", "BTCUSDT", "Buy", "0.001", "New"),
+        json!({"price": "30000", "cancelType": "UNKNOWN", "rejectReason": "EC_NoError",
+            "leavesQty": "0.001", "cumExecQty": "0", "updatedTime": "1700000000123"}),
+    )
 }
 
 #[derive(Clone, Copy, PartialEq)]
