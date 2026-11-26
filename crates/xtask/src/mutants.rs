@@ -3778,19 +3778,87 @@ fn scenario_failure(text: &str) -> Result<String, String> {
     if file == crate::joint::JOINT_TESTS && !unwrap { Ok(message.to_string()) } else { Err(message.to_string()) }
 }
 
-/// Before a joint mutant's `cargo test`: `OMS_TEST_DIR` under the rules of
-/// `xtask joint`, its run directory `r<pid>-m` emptied (one joint mutant
-/// runs at a time), and the three binaries built from the mutated copy
-/// into `r<pid>-mbin`. `Err` is the note of a mutant that is not killed.
-fn joint_prebuild(work: &Path, target_dir: &Path) -> Result<(PathBuf, crate::joint::Bins), String> {
-    let base = crate::joint::check_test_dir(std::env::var("OMS_TEST_DIR").ok().as_deref())?;
-    crate::joint::make_test_dir(&base)?;
+/// What one mutant's run does outside this process. The runner's are
+/// [`RealSteps`]; a test gives fakes, so the order of a joint mutant's
+/// steps, the tree it builds and the directory it scans are tested without
+/// cargo.
+trait Steps {
+    /// `OMS_TEST_DIR` under the rules of `xtask joint`, created.
+    fn test_base(&mut self) -> Result<PathBuf, String>;
+    /// The watcher, `omsctl` and `oms-node` built from `root`.
+    fn build(&mut self, root: &Path, target_dir: &Path, bin_dir: &Path) -> Result<crate::joint::Bins, String>;
+    /// Runs a mutant's `cargo test`: whether it passed, and its output.
+    fn test(&mut self, cmd: Command) -> Result<(bool, String), String>;
+    /// The orphan scan of `xtask joint` on `run_dir`.
+    fn scan(&mut self, run_dir: &Path, bins: &[PathBuf]) -> Vec<String>;
+}
+
+struct RealSteps;
+
+impl Steps for RealSteps {
+    fn test_base(&mut self) -> Result<PathBuf, String> {
+        let base = crate::joint::check_test_dir(std::env::var("OMS_TEST_DIR").ok().as_deref())?;
+        crate::joint::make_test_dir(&base)?;
+        Ok(base)
+    }
+    fn build(&mut self, root: &Path, target_dir: &Path, bin_dir: &Path) -> Result<crate::joint::Bins, String> {
+        crate::joint::build(root, Some(target_dir), bin_dir)
+    }
+    fn test(&mut self, mut cmd: Command) -> Result<(bool, String), String> {
+        let o = cmd.output().map_err(|e| format!("cargo did not run: {e}"))?;
+        Ok((o.status.success(), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))))
+    }
+    fn scan(&mut self, run_dir: &Path, bins: &[PathBuf]) -> Vec<String> {
+        crate::joint::orphan_scan(run_dir, bins)
+    }
+}
+
+/// One mutant: `m` applied to `original` in `work`, its test run, the
+/// source restored; whether it was killed and the note.
+fn run_mutant(m: &Mutant, original: &str, work: &Path, target_dir: &Path, steps: &mut impl Steps) -> (bool, String) {
+    let path = work.join(m.file);
+    let _ = std::fs::write(&path, original.replacen(m.find, m.replace, 1));
+    let result = if is_joint(m.test) {
+        joint_mutant(m.test, work, target_dir, steps)
+    } else {
+        match steps.test(test_command(m.test, work, target_dir, None)) {
+            Err(note) => (false, note),
+            Ok((success, text)) => verdict(success, &text, false, &[]),
+        }
+    };
+    let _ = std::fs::write(&path, original);
+    result
+}
+
+/// A joint mutant (ADR-039), its file already mutated in `work`: the
+/// test directory, its run directory `r<pid>-m` emptied (one joint mutant
+/// runs at a time), the three binaries built from the mutated copy into
+/// `r<pid>-mbin` (the joint test spawns the watcher and `omsctl` it is
+/// given), the test, then the orphan scan of `xtask joint` on the run
+/// directory: a process left behind is signalled and makes the run no
+/// kill. A failed step before the test is no kill, with its note.
+fn joint_mutant(test: &[&str], work: &Path, target_dir: &Path, steps: &mut impl Steps) -> (bool, String) {
+    let base = match steps.test_base() {
+        Ok(base) => base,
+        Err(note) => return (false, note),
+    };
     let me = std::process::id();
     let run_dir = base.join(format!("r{me}-m"));
     let _ = std::fs::remove_dir_all(&run_dir);
-    std::fs::create_dir_all(&run_dir).map_err(|e| format!("create {}: {e}", run_dir.display()))?;
-    let bins = crate::joint::build(work, Some(target_dir), &base.join(format!("r{me}-mbin"))).map_err(|e| format!("the mutant did not compile (joint prebuild): {e}"))?;
-    Ok((run_dir, bins))
+    if let Err(e) = std::fs::create_dir_all(&run_dir) {
+        return (false, format!("create {}: {e}", run_dir.display()));
+    }
+    let bins = match steps.build(work, target_dir, &base.join(format!("r{me}-mbin"))) {
+        Ok(bins) => bins,
+        Err(e) => return (false, format!("the mutant did not compile (joint prebuild): {e}")),
+    };
+    let prebuilt = (run_dir, bins);
+    let out = steps.test(test_command(test, work, target_dir, Some(&prebuilt)));
+    let orphans = steps.scan(&prebuilt.0, &prebuilt.1.all());
+    match out {
+        Err(note) => (false, note),
+        Ok((success, text)) => verdict(success, &text, true, &orphans),
+    }
 }
 
 /// The `cargo test` of one mutant in `work`. A joint mutant's (`prebuilt`:
@@ -3867,31 +3935,8 @@ pub fn run(root: &Path, only: Option<&str>) -> i32 {
             survived += 1;
             continue;
         }
-        let _ = std::fs::write(&path, original.replacen(m.find, m.replace, 1));
         let t = Instant::now();
-        let joint = is_joint(m.test);
-        // A joint test spawns the watcher and omsctl binaries it is given,
-        // so they are built from the mutated copy first (ADR-039).
-        let prebuilt = if joint { Some(joint_prebuild(&work, &target_dir)) } else { None };
-        let out = match &prebuilt {
-            Some(Err(note)) => Err(note.clone()),
-            Some(Ok(p)) => test_command(m.test, &work, &target_dir, Some(p)).output().map_err(|e| format!("cargo did not run: {e}")),
-            None => test_command(m.test, &work, &target_dir, None).output().map_err(|e| format!("cargo did not run: {e}")),
-        };
-        // The scan of `xtask joint`: a process left behind is signalled and
-        // makes the run no kill.
-        let orphans = match &prebuilt {
-            Some(Ok((run_dir, bins))) => crate::joint::orphan_scan(run_dir, &bins.all()),
-            _ => Vec::new(),
-        };
-        let _ = std::fs::write(&path, &original);
-        let (killed, note) = match out {
-            Err(note) => (false, note),
-            Ok(o) => {
-                let text = format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
-                verdict(o.status.success(), &text, joint, &orphans)
-            }
-        };
+        let (killed, note) = run_mutant(m, &original, &work, &target_dir, &mut RealSteps);
         if !killed {
             survived += 1;
         }
@@ -4017,6 +4062,100 @@ mod tests {
         assert_eq!(verdict(false, &first, true, &[]), (false, "not a scenario failure: fake bybit: bad request".into()));
         let none = format!("test j1_x ... FAILED\n{FAILED}");
         assert_eq!(verdict(false, &none, true, &[]), (false, "not a scenario failure: no panic in the output".into()));
+    }
+
+    /// A fake of the steps that leave this process: it logs each call,
+    /// whether the mutated text is in the tree it is given and whether the
+    /// run directory is empty when the test starts.
+    struct FakeSteps {
+        base: Result<PathBuf, String>,
+        built: Result<(), String>,
+        result: (bool, String),
+        orphans: Vec<String>,
+        log: Vec<String>,
+    }
+
+    const MUTATED: &str = "MUTATED";
+
+    impl Steps for FakeSteps {
+        fn test_base(&mut self) -> Result<PathBuf, String> {
+            self.log.push("base".into());
+            self.base.clone()
+        }
+        fn build(&mut self, root: &Path, target_dir: &Path, bin_dir: &Path) -> Result<joint::Bins, String> {
+            let mutated = std::fs::read_to_string(root.join("src/a.rs")).unwrap_or_default().contains(MUTATED);
+            self.log.push(format!("build {} mutated={mutated} target={}", root.display(), target_dir.display()));
+            self.built.clone()?;
+            Ok(joint::Bins { watcher: bin_dir.join("watcher"), omsctl: bin_dir.join("omsctl"), node: target_dir.join("debug/oms-node") })
+        }
+        fn test(&mut self, cmd: Command) -> Result<(bool, String), String> {
+            let dir = envs(&cmd).into_iter().find(|(k, _)| k == "OMS_TEST_DIR").map(|(_, v)| v);
+            let empty = dir.as_ref().map(|d| std::fs::read_dir(d).map(|mut r| r.next().is_none()).unwrap_or(false));
+            let work = cmd.get_current_dir().map(Path::to_path_buf).unwrap_or_default();
+            let mutated = std::fs::read_to_string(work.join("src/a.rs")).unwrap_or_default().contains(MUTATED);
+            self.log.push(format!("test run_dir={dir:?} empty={empty:?} mutated={mutated}"));
+            Ok(self.result.clone())
+        }
+        fn scan(&mut self, run_dir: &Path, bins: &[PathBuf]) -> Vec<String> {
+            self.log.push(format!("scan {} bins={}", run_dir.display(), bins.len()));
+            self.orphans.clone()
+        }
+    }
+
+    const JOINT_M: Mutant = Mutant { id: "M0-joint", what: "", file: "src/a.rs", find: "keep", replace: MUTATED, test: &["-p", "oms-node", "--features", "joint", "--test", "joint"], guards: "" };
+    const PLAIN_M: Mutant = Mutant { id: "M0-plain", what: "", file: "src/a.rs", find: "keep", replace: MUTATED, test: &["-p", "watcher"], guards: "" };
+
+    /// A joint mutant's run, in order: the test directory, its run
+    /// directory emptied, the three binaries built from the copy that holds
+    /// the mutation, the test in that directory, then the orphan scan of
+    /// that directory, whose result decides the verdict whatever the test
+    /// did; the source is restored after. A failed build or test directory
+    /// stops the run as no kill. Any other mutant runs only its test
+    /// (review U19c3b 1, S1).
+    #[test]
+    fn a_joint_mutant_is_built_from_the_mutated_copy_tested_in_an_emptied_run_directory_and_scanned_after() {
+        let scratch = std::env::temp_dir().join(format!("xtask-mutant-steps-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&scratch);
+        let (work, base) = (scratch.join("work"), scratch.join("base"));
+        let target = work.join("target");
+        std::fs::create_dir_all(work.join("src")).expect("test setup");
+        std::fs::write(work.join("src/a.rs"), "fn keep() {}").expect("test setup");
+        let run_dir = base.join(format!("r{}-m", std::process::id()));
+        let fake = |orphans: Vec<String>| FakeSteps {
+            base: Ok(base.clone()),
+            built: Ok(()),
+            result: (false, format!("thread 'j' panicked at {}:9:9:\nthe gate opens\n{FAILED}", joint::JOINT_TESTS)),
+            orphans,
+            log: Vec::new(),
+        };
+        for orphans in [Vec::new(), vec!["orphan process 7 x".to_string()]] {
+            std::fs::create_dir_all(&run_dir).expect("test setup");
+            std::fs::write(run_dir.join("stale"), "").expect("test setup");
+            let mut steps = fake(orphans.clone());
+            let got = run_mutant(&JOINT_M, "fn keep() {}", &work, &target, &mut steps);
+            let want = if orphans.is_empty() { (true, "the gate opens".to_string()) } else { (false, "orphan process after the run: orphan process 7 x".to_string()) };
+            assert_eq!(got, want);
+            assert_eq!(
+                steps.log,
+                [
+                    "base".to_string(),
+                    format!("build {} mutated=true target={}", work.display(), target.display()),
+                    format!("test run_dir={:?} empty=Some(true) mutated=true", Some(run_dir.display().to_string())),
+                    format!("scan {} bins=3", run_dir.display()),
+                ]
+            );
+            assert_eq!(std::fs::read_to_string(work.join("src/a.rs")).expect("restored"), "fn keep() {}");
+        }
+        let mut failed = FakeSteps { built: Err("error: could not compile `watcher`".into()), ..fake(Vec::new()) };
+        assert_eq!(run_mutant(&JOINT_M, "fn keep() {}", &work, &target, &mut failed), (false, "the mutant did not compile (joint prebuild): error: could not compile `watcher`".into()));
+        assert_eq!(failed.log.len(), 2, "{:?}", failed.log);
+        let mut no_base = FakeSteps { base: Err("OMS_TEST_DIR is not set".into()), ..fake(Vec::new()) };
+        assert_eq!(run_mutant(&JOINT_M, "fn keep() {}", &work, &target, &mut no_base), (false, "OMS_TEST_DIR is not set".into()));
+        assert_eq!(no_base.log, ["base"]);
+        let mut plain = FakeSteps { result: (false, FAILED.to_string()), ..fake(vec!["ignored".into()]) };
+        assert_eq!(run_mutant(&PLAIN_M, "fn keep() {}", &work, &target, &mut plain), (true, String::new()));
+        assert_eq!(plain.log, ["test run_dir=None empty=None mutated=true"]);
+        std::fs::remove_dir_all(&scratch).expect("test setup");
     }
 
     /// A process left behind by a joint run is a rig defect, so the run is
