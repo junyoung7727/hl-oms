@@ -11,10 +11,17 @@
 //! | `closed_in_journal` | open at the venue; closed in the journal | `orderLinkId` |
 //! | `open_after_terminal` | open at the venue; `venue_terminal` and no `order_closed` in the journal | `orderLinkId` |
 //! | `details` | open in both; symbol or side differ | `orderLinkId` |
-//! | `missing_at_venue` | open, acked, not in doubt, not terminal in the journal; not open at the venue | `orderLinkId` |
+//! | `missing_at_venue` | open, acked, not in doubt, not terminal in the journal; not open at the venue; the journal holds no kill latch | `orderLinkId` |
 //!
 //! The age of a known order is its `fact_at`; of a foreign one, the first
 //! round that saw it.
+//!
+//! While the journal holds the kill latch (`hold_set{kill}`, ADR-040) an
+//! order missing at the venue is not a difference: the kill cancels every
+//! order at the venue, the latch is durable before its first cancel-all,
+//! and the OMS journals the closes only when its reconcile runs (not while
+//! its link is down). The other kinds are compared as always; a fill
+//! behind a missing order is still seen by W2 and W4.
 
 use std::collections::BTreeSet;
 
@@ -180,6 +187,9 @@ impl Logic for W1 {
             }
         }
         for id in &state.open {
+            if state.holds.kill {
+                break;
+            }
             let Some(o) = state.orders.get(id) else {
                 continue;
             };

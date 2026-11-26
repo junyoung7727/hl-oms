@@ -398,6 +398,34 @@ marker = "{marker}"
         std::fs::write(self.dir.join("o/oms.toml"), config).unwrap();
     }
 
+    /// The OMS's timer line `key = …` gets `value` now (its configuration
+    /// is written by [`World::new`]); a key the timers do not write is a
+    /// test error. Before the OMS's first start only.
+    pub fn set_oms(&self, key: &str, value: u64) {
+        let path = self.dir.join("o/oms.toml");
+        let config = std::fs::read_to_string(&path).unwrap();
+        let prefix = format!("{key} = ");
+        let line = config
+            .lines()
+            .find(|l| l.starts_with(&prefix))
+            .unwrap_or_else(|| panic!("the OMS's timers write no line {key}"))
+            .to_string();
+        std::fs::write(
+            &path,
+            config.replacen(&line, &format!("{prefix}{value}"), 1),
+        )
+        .unwrap();
+    }
+
+    /// The lines of the fake `systemctl`'s log, one per call.
+    pub fn systemctl_log(&self) -> Vec<String> {
+        std::fs::read_to_string(self.dir.join("systemctl.log"))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
     /// The watcher's timer line `key = …` gets `value` when its
     /// configuration is written; a key the timers do not write is a test
     /// error.
@@ -696,7 +724,9 @@ pub fn version_guard(bin: &Path) -> Result<(), String> {
 }
 
 /// The fake `systemctl` (POSIX sh). One line per call in `systemctl.log`:
-/// the argv, whether the marker exists, the time in ms. For
+/// the argv, whether the marker exists, the wall-clock time in ms (from
+/// `date +%s%N`: some `date` builds, e.g. uutils coreutils 0.10, print
+/// `%3N` without its leading zeros). For
 /// `--no-ask-password stop -- <UNIT>` it signals the pid of `o/oms.pid`
 /// only if that process's command line holds the rig's `o/oms.toml`:
 /// SIGTERM then SIGCONT (systemd follows the stop signal with SIGCONT,
@@ -708,7 +738,7 @@ fn systemctl_script(dir: &Path) -> String {
         r#"#!/bin/sh
 marker=absent
 [ -e "{d}/s/kill.marker" ] && marker=present
-echo "$* marker=$marker $(date +%s%3N)" >> "{d}/systemctl.log"
+echo "$* marker=$marker $(( $(date +%s%N) / 1000000 ))" >> "{d}/systemctl.log"
 [ "$*" = "--no-ask-password stop -- {UNIT}" ] || {{ echo "systemctl: not the rig's stop: $*" >&2; exit 1; }}
 [ -f "{d}/o/oms.pid" ] || {{ echo "systemctl: no o/oms.pid" >&2; exit 1; }}
 pid=$(cat "{d}/o/oms.pid")
@@ -984,6 +1014,12 @@ impl Oms {
 
     /// `JOINT_OMSCTL_BIN --socket <admin.sock> args…`: exit code and stdout.
     pub fn omsctl(&self, args: &[&str]) -> (Option<i32>, String) {
+        let (code, out, _) = self.omsctl_full(args);
+        (code, out)
+    }
+
+    /// [`Oms::omsctl`] with its stderr too (a refusal is printed there).
+    pub fn omsctl_full(&self, args: &[&str]) -> (Option<i32>, String, String) {
         let out = Command::new(env_path("JOINT_OMSCTL_BIN"))
             .arg("--socket")
             .arg(self.data().join("admin.sock"))
@@ -994,6 +1030,7 @@ impl Oms {
         (
             out.status.code(),
             String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
         )
     }
 

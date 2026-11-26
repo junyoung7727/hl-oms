@@ -1,0 +1,74 @@
+# ADR-040 킬 동안의 W1
+
+상태: 채택 (2026-11-26).
+
+검증 문서: [docs/verification/joint.md](../verification/joint.md). 앞선 결정: [ADR-031](ADR-031-watcher.md)(독립 워처와 W1~W4), [ADR-030](ADR-030-kill-switch-holds.md)(보류와 킬 래치), [ADR-039](ADR-039-oms-watcher-joint-tests.md)(합동 시험).
+
+## 1. 문제와 발생 가능한 실패
+
+- OMS의 킬은 계좌의 모든 미체결 주문을 거래소에서 일괄 취소한다(OMS가 내지 않은 주문도). OMS의 대조기는 링크가 올라 있을 때만 돈다(`crates/oms-node/src/venue/reconciler.rs`). 비공개 스트림이 끊겨 걸린 킬(10초, [설명](../explanation.md) 6절의 1) 동안에는 일괄 취소가 거래소의 주문을 지워도 저널은 그 주문들을 열리고 확인된 채로 둔다.
+- 워처의 W1은 "저널에서 열리고 확인됐는데 거래소에 없는 주문"을 `missing_at_venue`로 비교하고, 나이는 저널의 그 기록 시각에서 잰다. 킬 동안의 주문은 이미 오래돼 있으므로 두 라운드 뒤 곧바로 확정되고 워처는 `watcher_mismatch`를 보낸다.
+- 두 프로그램은 각자 쓰인 규칙을 지킨다. 두 규칙이 함께, OMS가 링크 없이 킬할 때마다 거짓 불일치 보류와 `[WATCH P1]`을 낸다. 합동 시험 J4(V-JOINT-4)를 이 결정 전의 워처로 돌리면 래치 약 1초 뒤 두 주문 모두에 `W1 missing_at_venue`(journal entry 12.7 s old)가 확정되고 `hold_set{watcher_mismatch}`가 기록됐다(발견 F1).
+- 킬이 걸린 OMS는 이미 새 주문을 모두 거절하므로, 이 보류는 위험을 줄이지 않고 운영자가 풀어야 할 보류 하나와 거짓 경보 하나를 더한다.
+
+## 2. 일반적으로 만족해야 하는 성질
+
+- 워처는 거래소와 저널이 정말 어긋날 때 알린다. 위험을 줄이는 쪽의 차이(거래소에서 취소된 주문)로 거래를 한 번 더 멈추지 않는다.
+- 노출을 늘리는 차이(거래소에만 있는 주문, 저널에서 닫혔는데 거래소에 열린 주문, 체결)는 킬 동안에도 놓치지 않는다.
+- 예외는 그 원인이 끝나면 함께 끝난다.
+- 워처는 OMS 코드에 의존하지 않는다(ADR-031): 판단은 저널과 거래소에서만 온다.
+
+## 3. 제약
+
+| 사실 | 출처 |
+|---|---|
+| 킬 래치(`hold_set{kill}`)는 첫 일괄 취소 전에 내구화된다 | `crates/oms-node/tests/bybit_node.rs`의 `a_ten_second_stream_outage_latches_kill_through_a_restart_until_clear_hold_kill`(V-KILL-2) |
+| 워처의 한 라운드는 거래소 쪽을 다 읽은 뒤 상태 API의 상한까지 저널을 읽는다: 주문이 사라진 것을 본 라운드는 래치도 읽는다 | `crates/watcher/src/engine.rs`(`read_to`), V-WATCH-5 |
+| 저널 상태는 `hold_set`·`hold_cleared`에서 킬 래치를 이미 따른다 | `crates/watcher/src/state.rs`(`holds.kill`) |
+| `clear_hold kill`은 코어 장부에 열린 주문이 남아 있으면 거절된다 | `crates/oms-core/src/decide.rs`(6절의 8) |
+| 킬은 포지션을 닫지 않는다; 사라진 주문 뒤의 체결은 W2(포지션)와 W4(실행 목록)가 본다 | 6절의 7, 9절의 3·5 |
+
+## 4. 필수 조건과 선택 조건
+
+필수: J4에서 거짓 불일치 없음, 킬 동안에도 `foreign`·`closed_in_journal`·`open_after_terminal`·`details`와 W2·W3·W4는 그대로, 해제 뒤 `missing_at_venue`가 다시 비교됨, 워처에 새 의존성 없음. 선택: OMS의 저널이 킬 동안에도 거래소와 맞는 것.
+
+## 5. 대안
+
+- A. 워처의 W1이 저널에 킬 래치가 있는 동안 `missing_at_venue`를 보고하지 않는다. 다른 종류는 그대로.
+- B. OMS가 링크가 끊긴 동안에도 킬 루프의 취소 뒤 주문마다 REST로 상태를 물어 닫힘을 저널에 쓴다(대조기의 변경).
+- C. 워처가 킬 래치 동안 W1 전체를 쉰다.
+- D. 바꾸지 않고 운영 절차서에 "OMS 킬 뒤의 워처 불일치는 거짓"이라고 적는다.
+
+## 6. 비교
+
+| | 장점 | 실패 모드 | 비용 |
+|---|---|---|---|
+| A | 작은 변경(W1 비교 하나); 판단이 저널과 거래소에서만 옴; 노출을 늘리는 차이는 그대로 봄 | 킬 동안 거래소에서 사라진 주문이 취소가 아닌 체결이었으면 W1은 말하지 않는다(W2·W4가 본다); 저널에 래치가 남는 한 예외도 남는다 | 워처 한 곳, 시험 셋 |
+| B | 저널이 거래소와 맞게 됨; 워처는 그대로 | 링크가 끊긴 동안의 REST 상태 물음이 대조기의 "링크가 올라 있을 때만" 규칙과 그 근거(스트림과의 순서)를 바꾼다; 계좌 제한 예산을 더 쓴다; OMS의 핵심 경로 변경 | 대조기·게이트웨이, 새 시험 |
+| C | 가장 단순 | 킬 동안 거래소에만 있는 주문(누군가 거래소 화면에서 낸 주문)을 놓친다 | 한 줄 |
+| D | 코드 변경 없음 | 킬마다 거짓 P1과 보류 하나; 사람이 매번 판단 | 절차서 한 줄 |
+
+## 7. 선택과 이유
+
+A. 킬 동안 거래소에서 사라진 주문은 노출을 줄이는 쪽이고, 그 뒤에 체결이 있었다면 W2와 W4가 본다. 래치는 첫 일괄 취소 전에 내구화되고 워처의 라운드는 거래소를 읽은 뒤 저널을 읽으므로, 주문이 사라진 것을 본 라운드는 래치도 본다. `clear_hold kill`은 코어 장부에 열린 주문이 없어야 받아들여지므로 예외는 OMS가 따라잡은 뒤까지 남지 않는다. B는 소유자가 고를 수 있는 대안으로 남긴다(U-22).
+
+- `crates/watcher/src/w1.rs` `compare`: `state.holds.kill`이 참이면 `missing_at_venue`를 만들지 않는다. 다른 W1 종류, W2, W3, W4는 그대로다.
+- 시험: `watcher/a_missing_order_during_a_kill_is_not_reported`, `watcher/a_missing_order_is_reported_again_after_the_kill_is_cleared`, `watcher/a_foreign_order_during_a_kill_is_still_reported`, `watcher/the_venue_side_kinds_during_a_kill_are_still_reported`(V-WATCH-15), 합동 시험 J4와 J3(V-JOINT-4, V-JOINT-3).
+
+## 8. 포기한 장점, 남은 위험, 소유자가 정할 것
+
+- 포기: 킬 동안 W1이 "거래소에서 사라진 주문"을 따로 알리는 것. 사라진 주문이 체결이었는지는 W2·W4만 본다.
+- 위험: 래치가 저널에 있는 동안 OMS가 자기 주문을 잃어도(킬 말고 다른 까닭으로) W1은 말하지 않는다. 킬이 걸린 OMS는 새 주문을 내지 않고, 해제에는 빈 장부가 필요하다.
+- 위험: 워처 킬 뒤 OMS가 꺼져 있는 동안 저널에는 래치가 없다(마커는 OMS가 다음 시작에 읽는다). 그동안 W1은 상태 API의 답이 없어 판단하지 않는다(설명 9절의 1). 다시 시작한 OMS는 부트 기록(마커의 래치 `hold_set{kill, source: marker}`가 같은 기록에 있다)과 설정을 control 레인에 넣고 설정의 답(둘 다 내구화된 뒤)을 기다린 다음에야 소켓을 열고 HTTP 서버(`/api/status`)를 띄운다(`crates/oms-node/src/node.rs`의 `Input::Boot`·`Input::Config`와 `http::serve`, 코드를 읽은 것이고 그 순서만을 겨냥한 시험은 없다). 그래서 상태 API가 처음 답할 때 래치는 이미 내구화된 순번 안에 있고, 워처의 라운드는 그 순번까지 읽으므로 래치를 본다. J3은 래치가 `booted`와 같은 기록에 있음을 확인한다.
+- 소유자가 정할 것: U-22(어느 프로그램을 바꿀 것인가; 기본값 A).
+
+## 9. 근거
+
+- 발견: J4를 이 결정 전의 워처로 돌린 실행(`W1 missing_at_venue …; seen 2 rounds, journal entry 12.7 s old`, 두 주문, 래치 약 1초 뒤 `hold_set{watcher_mismatch}`). J3는 결정 전의 워처로도 3번 모두 통과했다: 다시 시작한 OMS가 W1의 둘째 라운드 전에 두 주문을 닫았다.
+- 변이: M418(예외를 없앰, J4), M419(예외가 모든 W1 종류를 덮음, `a_foreign_order_during_a_kill_is_still_reported`), M420(예외가 우리 주문의 거래소 쪽 종류 `closed_in_journal`·`open_after_terminal`·`details`까지 덮음, `the_venue_side_kinds_during_a_kill_are_still_reported`; 검토 1 S1).
+
+## 10. 재검토 조건
+
+- OMS의 대조기가 링크가 끊긴 동안에도 주문 상태를 묻게 될 때(대안 B).
+- W1에 새 종류를 더할 때.
+- 킬이 일괄 취소 말고 다른 방법(주문별 취소)을 쓰게 될 때.
