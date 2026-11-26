@@ -988,3 +988,319 @@ fn fake_bybit_serves_rest_signed_by_the_oms_client_and_pushes_frames_to_the_priv
         end.await.unwrap();
     });
 }
+
+/// Each refusal of the fake with its answer kind in the log: a program
+/// that sends such a request meets the same answer in a joint test.
+#[test]
+fn each_refused_request_gets_its_documented_answer() {
+    let mut b = book();
+    create(&mut b, T0, "L1", "Buy", "0.001", "30000");
+    let realtime = "/v5/order/realtime?category=linear&settleCoin=USDT";
+    // A fault comes after the key and the signature: a request refused
+    // for them never reaches it.
+    b.fault(WKEY, "/v5/order/realtime", Answer::Reply(503, "{}".into()));
+    let without = |header: &str| {
+        let mut r = signed("GET", realtime, "", WKEY, WSECRET);
+        r.headers.retain(|(k, _)| k != header);
+        r
+    };
+    let w = |target: &str| signed("GET", target, "", WKEY, WSECRET);
+    let create_body = |category: &str, symbol: &str| {
+        json!({"category": category, "symbol": symbol, "side": "Buy", "orderType": "Limit",
+            "qty": "0.001", "price": "30000", "orderLinkId": format!("{category}-{symbol}")})
+        .to_string()
+    };
+    let cases = [
+        ("an unknown path", w("/v5/order/amend"), "http 404"),
+        (
+            "cancel-all over GET",
+            w("/v5/order/cancel-all?category=linear&settleCoin=USDT"),
+            "http 404",
+        ),
+        (
+            "no X-BAPI-TIMESTAMP",
+            without("x-bapi-timestamp"),
+            "ret 10004",
+        ),
+        (
+            "no X-BAPI-RECV-WINDOW",
+            without("x-bapi-recv-window"),
+            "ret 10004",
+        ),
+        (
+            "a bad signature on a faulted path",
+            signed("GET", realtime, "", WKEY, OSECRET),
+            "ret 10004",
+        ),
+        (
+            "an execution page above 100",
+            w("/v5/execution/list?category=linear&settleCoin=USDT&limit=101"),
+            "ret 10001",
+        ),
+        (
+            "a position list without category",
+            w("/v5/position/list?symbol=BTCUSDT"),
+            "ret 10001",
+        ),
+        (
+            "a position list of another category",
+            w("/v5/position/list?category=inverse&symbol=BTCUSDT"),
+            "ret 10001",
+        ),
+        (
+            "a create in another category",
+            signed(
+                "POST",
+                "/v5/order/create",
+                &create_body("inverse", SYMBOL),
+                OKEY,
+                OSECRET,
+            ),
+            "ret 10001",
+        ),
+        (
+            "a create of another symbol",
+            signed(
+                "POST",
+                "/v5/order/create",
+                &create_body("linear", "ETHUSDT"),
+                OKEY,
+                OSECRET,
+            ),
+            "ret 10001",
+        ),
+        ("the faulted path, signed", w(realtime), "fault"),
+        (
+            "an execution page of 100",
+            w("/v5/execution/list?category=linear&settleCoin=USDT&limit=100"),
+            "ok",
+        ),
+    ];
+    for (name, req, want) in cases {
+        let (a, frames) = b.http(T0 + 1, &req);
+        assert!(frames.is_empty(), "{name}");
+        assert_eq!(b.log.last().unwrap().answer, want, "{name}: {a:?}");
+        assert!(
+            !matches!(a, Answer::Reply(403, _)),
+            "{name}: the fake never answers 403"
+        );
+    }
+    assert_eq!(b.orders.len(), 1, "no refused create was booked");
+}
+
+#[test]
+fn the_order_and_execution_lists_filter_by_symbol_settle_coin_and_order_id() {
+    let mut b = book();
+    let a = create(&mut b, T0, "L1", "Buy", "0.002", "30000");
+    let c = create(&mut b, T0 + 1, "L2", "Buy", "0.001", "30000");
+    let d = create(&mut b, T0 + 2, "L3", "Buy", "0.001", "30000");
+    b.fill(T0 + 3, &a, "0.001", "30000");
+    b.cancel_at_venue(T0 + 4, &c);
+    b.cancel_at_venue(T0 + 5, &d);
+    let n = |b: &mut Book, target: &str| rows(&get(b, T0 + 10, WKEY, target)).len();
+    let rt = "/v5/order/realtime?category=linear";
+    assert_eq!(n(&mut b, &format!("{rt}&symbol=BTCUSDT")), 1);
+    assert_eq!(n(&mut b, &format!("{rt}&symbol=ETHUSDT")), 0);
+    assert_eq!(n(&mut b, &format!("{rt}&settleCoin=USDC")), 0);
+    assert_eq!(n(&mut b, &format!("{rt}&settleCoin=USDT&orderId={a}")), 1);
+    let hist = "/v5/order/history?category=linear&settleCoin=USDT";
+    assert_eq!(n(&mut b, hist), 2);
+    let one = rows(&get(&mut b, T0 + 10, WKEY, &format!("{hist}&orderId={c}")));
+    assert_eq!(one.len(), 1, "history by orderId: {one:?}");
+    assert_eq!(one[0]["orderLinkId"], "L2");
+    assert_eq!(
+        n(&mut b, "/v5/order/history?category=linear&symbol=ETHUSDT"),
+        0
+    );
+    let ex = "/v5/execution/list?category=linear";
+    assert_eq!(n(&mut b, &format!("{ex}&symbol=BTCUSDT")), 1);
+    assert_eq!(n(&mut b, &format!("{ex}&symbol=ETHUSDT")), 0);
+    assert_eq!(n(&mut b, &format!("{ex}&settleCoin=USDC")), 0);
+}
+
+#[test]
+fn every_position_changing_execution_type_moves_the_position_and_funding_does_not() {
+    let mut b = book();
+    let steps = [
+        ("AdlTrade", "Sell", "0.001", -1),
+        ("BustTrade", "Buy", "0.002", 1),
+        ("Delivery", "Buy", "0.001", 2),
+        ("Settle", "Sell", "0.001", 1),
+        ("Funding", "Sell", "0.001", 1),
+    ];
+    for (i, (exec_type, side, qty, size)) in steps.into_iter().enumerate() {
+        b.plant_execution(exec_type, side, qty, "30000", "", T0 + i as u64);
+        assert_eq!(b.size, size, "after {exec_type}");
+    }
+    let p = &rows(&get(
+        &mut b,
+        T0 + 10,
+        OKEY,
+        "/v5/position/list?category=linear&symbol=BTCUSDT",
+    ))[0];
+    assert_eq!(
+        (p["side"].as_str(), p["size"].as_str()),
+        (Some("Buy"), Some("0.001"))
+    );
+    assert_eq!(
+        p["updatedTime"],
+        (T0 + 3).to_string(),
+        "funding dates nothing"
+    );
+}
+
+fn rest_client(base: &str, key: &str, secret: &str) -> rest::Rest {
+    rest::Rest::new(
+        base,
+        Arc::new(rest::Credentials::new(key, secret)),
+        5000,
+        Duration::from_secs(3),
+    )
+    .unwrap()
+}
+
+/// The private stream of a fresh fake, subscribed.
+async fn subscribed(fake: &FakeBybit) -> Ws {
+    use futures_util::SinkExt;
+    let (mut private, _) = tokio_tungstenite::connect_async(&fake.private.url)
+        .await
+        .unwrap();
+    private
+        .send(tokio_tungstenite::tungstenite::Message::text(
+            stream::subscribe_message(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(next(&mut private).await.unwrap()["op"], "subscribe");
+    private
+}
+
+/// What the joint scenarios lean on: a REST request's frames are pushed
+/// (the watcher's cancel-all, the OMS's REST fallback), and a venue cancel
+/// is pushed only when the test asks (J2a).
+#[test]
+fn fake_bybit_pushes_the_frames_of_rest_requests_and_a_venue_cancel_only_when_asked() {
+    let fake = FakeBybit::start();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let (oms, watcher) = (
+        rest_client(&fake.api.url(), OKEY, OSECRET),
+        rest_client(&fake.api.url(), WKEY, WSECRET),
+    );
+    rt.block_on(async {
+        let mut private = subscribed(&fake).await;
+        let order = |f: &Value| {
+            assert_eq!(f["topic"], "order.linear", "{f}");
+            let r = &f["data"][0];
+            (
+                r["orderLinkId"].as_str().unwrap().to_string(),
+                r["orderStatus"].as_str().unwrap().to_string(),
+            )
+        };
+        let body = json!({"category": "linear", "symbol": SYMBOL, "side": "Buy",
+            "orderType": "Limit", "qty": "0.001", "price": "30000", "orderLinkId": "R1"});
+        oms.post("/v5/order/create", &body).await.unwrap();
+        assert_eq!(
+            order(&next(&mut private).await.unwrap()),
+            ("R1".into(), "New".into())
+        );
+        let cancel = json!({"category": "linear", "symbol": SYMBOL, "orderLinkId": "R1"});
+        oms.post("/v5/order/cancel", &cancel).await.unwrap();
+        assert_eq!(
+            order(&next(&mut private).await.unwrap()),
+            ("R1".into(), "Cancelled".into())
+        );
+        let planted = fake.with(|b, now| b.plant_order(now, "manual-1", "Buy", "0.001", "29000"));
+        let all = json!({"category": "linear", "settleCoin": "USDT"});
+        watcher.post("/v5/order/cancel-all", &all).await.unwrap();
+        assert_eq!(
+            order(&next(&mut private).await.unwrap()),
+            ("manual-1".into(), "Cancelled".into())
+        );
+        assert_eq!(
+            fake.with(|b, _| b.order(&planted).unwrap().status),
+            "Cancelled"
+        );
+        // A venue cancel the operator's page does not push.
+        let (quiet, loud) = fake.with(|b, now| {
+            (
+                b.plant_order(now, "manual-2", "Buy", "0.001", "29000"),
+                b.plant_order(now, "manual-3", "Buy", "0.001", "29000"),
+            )
+        });
+        fake.cancel_at_venue(&quiet, false);
+        let pushed = tokio::time::timeout(Duration::from_millis(300), next(&mut private)).await;
+        assert!(
+            pushed.is_err(),
+            "a frame for an unpushed cancel: {pushed:?}"
+        );
+        assert_eq!(
+            fake.with(|b, _| b.order(&quiet).unwrap().status),
+            "Cancelled"
+        );
+        fake.cancel_at_venue(&loud, true);
+        assert_eq!(
+            order(&next(&mut private).await.unwrap()),
+            ("manual-3".into(), "Cancelled".into())
+        );
+    });
+}
+
+/// Inputs from two threads at once (the test's fills, REST cancels on the
+/// server's thread): the frames arrive in the order the book made them,
+/// as one account's private topic does on a real venue.
+#[test]
+fn frames_of_concurrent_inputs_reach_the_private_stream_in_book_order() {
+    const N: usize = 40;
+    let fake = FakeBybit::start();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let mut private = rt.block_on(subscribed(&fake));
+    let (fills, cancels): (Vec<String>, Vec<String>) = fake.with(|b, now| {
+        (0..N)
+            .map(|i| {
+                (
+                    b.plant_order(now, &format!("F{i}"), "Buy", "0.002", "30000"),
+                    b.plant_order(now, &format!("C{i}"), "Buy", "0.001", "30000"),
+                )
+            })
+            .unzip()
+    });
+    let base = fake.api.url();
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            for id in &fills {
+                fake.fill(id, "0.001", "30000");
+            }
+        });
+        s.spawn(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let oms = rest_client(&base, OKEY, OSECRET);
+            for id in &cancels {
+                let body = json!({"category": "linear", "symbol": SYMBOL, "orderId": id});
+                rt.block_on(oms.post("/v5/order/cancel", &body)).unwrap();
+            }
+        });
+    });
+    // Two frames per fill, one per cancel.
+    let ids: Vec<u64> = rt.block_on(async {
+        let mut ids = Vec::new();
+        while ids.len() < 3 * N {
+            let f = next(&mut private).await.unwrap();
+            let id = f["id"].as_str().unwrap();
+            ids.push(id.strip_prefix("f-").unwrap().parse().unwrap());
+        }
+        ids
+    });
+    assert!(
+        ids.windows(2).all(|w| w[0] < w[1]),
+        "frames out of book order: {ids:?}"
+    );
+}
