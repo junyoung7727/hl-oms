@@ -2,7 +2,14 @@
 //! it too) and the three WebSockets, all answering from one
 //! [`Book`] on the wall clock, loopback only. Both programs compare venue
 //! times with their own wall clocks, so the book gets `SystemTime`
-//! milliseconds.
+//! milliseconds; a backward step of the wall clock gives the book an older
+//! `now_ms` (the fake keeps no order on it). The ticker interval runs on
+//! the steady clock, so such a step does not delay a ticker.
+//!
+//! Every input's frames are pushed while the book is still locked, so they
+//! reach the private stream in the order the book made them, whichever
+//! thread made them (the WS Trade task, the REST server's thread, the
+//! test).
 
 use super::book::{Book, two_keys};
 use super::ws::{FakeWs, Kind, OnOrder};
@@ -46,6 +53,19 @@ fn push(private: &FakeWs, frames: Vec<String>) {
     }
 }
 
+/// Runs `f` on the book with the wall clock and pushes the frames it
+/// returns before the book is unlocked (`try_send` does not block).
+fn apply<R>(
+    book: &Mutex<Book>,
+    private: &FakeWs,
+    f: impl FnOnce(&mut Book, u64) -> (R, Vec<String>),
+) -> R {
+    let mut b = book.lock().unwrap();
+    let (r, frames) = f(&mut b, now_ms());
+    push(private, frames);
+    r
+}
+
 impl FakeBybit {
     /// The account with the OMS's and the watcher's keys
     /// ([`super::book::two_keys`]).
@@ -78,12 +98,18 @@ impl FakeBybit {
                 } else {
                     None
                 };
-                let (reply, frames) = book.lock().unwrap().ws_trade(now_ms(), &key, m);
+                let reply = apply(&book, &private, |b, now| {
+                    let (reply, frames) = b.ws_trade(now, &key, m);
+                    match silent {
+                        Some(_) => (None, Vec::new()),
+                        None => (reply, frames),
+                    }
+                });
+                // The hook runs outside the lock: it may read the book.
                 if let Some(h) = silent {
                     h();
                     return None;
                 }
-                push(&private, frames);
                 reply
             })
         };
@@ -93,11 +119,7 @@ impl FakeBybit {
         let api = FakeHttp::start(Answer::Reply(404, "{}".into()));
         {
             let (book, private) = (book.clone(), private.clone());
-            api.respond(move |req| {
-                let (answer, frames) = book.lock().unwrap().http(now_ms(), req);
-                push(&private, frames);
-                Some(answer)
-            });
+            api.respond(move |req| Some(apply(&book, &private, |b, now| b.http(now, req))));
         }
         rt.spawn(ticker_pump(book.clone(), public.clone()));
         FakeBybit {
@@ -125,16 +147,17 @@ impl FakeBybit {
 
     /// [`Book::fill`], its frames pushed.
     pub fn fill(&self, order_id: &str, qty: &str, price: &str) {
-        let frames = self.with(|b, now| b.fill(now, order_id, qty, price));
-        push(&self.private, frames);
+        apply(&self.book, &self.private, |b, now| {
+            ((), b.fill(now, order_id, qty, price))
+        });
     }
 
     /// [`Book::cancel_at_venue`]; the frame pushed only if `pushed`.
     pub fn cancel_at_venue(&self, order_id: &str, pushed: bool) {
-        let frames = self.with(|b, now| b.cancel_at_venue(now, order_id));
-        if pushed {
-            push(&self.private, frames);
-        }
+        apply(&self.book, &self.private, |b, now| {
+            let frames = b.cancel_at_venue(now, order_id);
+            ((), if pushed { frames } else { Vec::new() })
+        });
     }
 
     /// The next `order.create` is booked, `hook` runs, and neither a reply
@@ -145,17 +168,17 @@ impl FakeBybit {
 }
 
 /// A ticker snapshot after each new subscribe on the public stream, then
-/// one every [`TICKER_EVERY_MS`]. Ends with the runtime.
+/// one every [`TICKER_EVERY_MS`] of the steady clock; its `ts` is the
+/// wall clock. Ends with the runtime.
 async fn ticker_pump(book: Arc<Mutex<Book>>, public: Arc<FakeWs>) {
-    let (mut subscribes, mut last) = (0, 0);
+    let (mut subscribes, mut last) = (0, tokio::time::Instant::now());
     loop {
         tokio::time::sleep(Duration::from_millis(50)).await;
         let n = public.received("subscribe").len();
-        let now = now_ms();
-        if n > subscribes || (n > 0 && now >= last + TICKER_EVERY_MS) {
+        if n > subscribes || (n > 0 && last.elapsed() >= Duration::from_millis(TICKER_EVERY_MS)) {
             subscribes = n;
-            last = now;
-            let t = book.lock().unwrap().ticker(now);
+            last = tokio::time::Instant::now();
+            let t = book.lock().unwrap().ticker(now_ms());
             public.try_send(t);
         }
     }
