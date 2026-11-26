@@ -98,3 +98,54 @@ jobs:
       - name: ADRs are not edited (only their status line)
         if: github.event_name == 'pull_request'
         run: tools/ci/adr_immutable.sh "${{ github.event.pull_request.base.sha }}"
+
+  # The OMS and watcher joint tests (docs/verification/joint.md, ADR-039):
+  # both real binaries against one fake Bybit, five runs in a row. A
+  # parallel job, so the check job's 30 minutes stay as they are.
+  joint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      # As in check: .cargo/config.toml names a build directory that exists
+      # only on the development machine.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Toolchain (rust-toolchain.toml)
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustc --version
+          cargo clippy --version
+
+      # Its own key: the check job's cache holds no build with the joint
+      # or test-endpoints features, and a shared key would skip saving this
+      # job's own.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            target
+          key: joint-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+
+      # The workspace clippy skips the joint target (required-features)
+      # and never builds the watcher's test feature.
+      - name: Clippy (oms-node joint)
+        run: cargo clippy --locked -p oms-node --features joint --all-targets -- -D warnings
+
+      - name: Clippy (watcher test-endpoints)
+        run: cargo clippy --locked -p watcher --features test-endpoints --all-targets -- -D warnings
+
+      # OMS_TEST_DIR only here: the runner context is not available in a
+      # job's env. It lies outside the checkout (no git work tree) and has
+      # fewer than 58 bytes; xtask joint creates it.
+      - name: Joint tests, five runs
+        env:
+          OMS_TEST_DIR: ${{ runner.temp }}/joint
+        run: cargo run --locked -q -p xtask -- joint --runs 5
