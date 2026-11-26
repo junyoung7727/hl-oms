@@ -21,8 +21,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use http_fake::{Answer, FakeHttp};
-use serde_json::{Value, json};
+use http_fake::{Answer, FakeHttp, bybit};
+use serde_json::Value;
 use watcher::clock::{Clock, ManualClock};
 use watcher::config::Kill;
 use watcher::kill::{Action, Arrived, Inflight, KillLoop, Notice, Report, StopOutcome};
@@ -62,30 +62,18 @@ pub fn slow(answer: Answer, advance_ms: u64) -> Reply {
     Reply { answer, advance_ms }
 }
 
-fn ok(result: Value) -> Answer {
-    Answer::Reply(
-        200,
-        format!(r#"{{"retCode":0,"retMsg":"OK","result":{result},"time":1}}"#),
-    )
-}
-
 /// A cancel-all that Bybit accepted with `n` orders in its list.
 pub fn cancel_ok(n: usize) -> Answer {
-    let list: Vec<Value> = (0..n)
-        .map(|i| json!({"orderId": format!("o{i}"), "orderLinkId": ""}))
-        .collect();
-    ok(json!({"list": list, "success": "1"}))
+    let list: Vec<(String, String)> = (0..n).map(|i| (format!("o{i}"), String::new())).collect();
+    bybit::ok(bybit::cancel_all(&list))
 }
 
 /// One page of `/v5/order/realtime` with `n` open orders.
 pub fn open_orders(n: usize, cursor: &str) -> Answer {
     let list: Vec<Value> = (0..n)
-        .map(|i| {
-            json!({"orderLinkId": format!("l{i}"), "orderId": format!("o{i}"),
-                "symbol": "BTCUSDT", "side": "Buy", "qty": "1", "orderStatus": "New"})
-        })
+        .map(|i| bybit::order_row(&format!("l{i}"), &format!("o{i}"), "BTCUSDT", "Buy", "1", "New"))
         .collect();
-    ok(json!({"category": "linear", "list": list, "nextPageCursor": cursor}))
+    bybit::list(list, cursor)
 }
 
 pub fn http(status: u16) -> Answer {
