@@ -1693,6 +1693,13 @@ fn events_of(oms: &Oms, name: &str, id: OrderId) -> Vec<(Ts, Event)> {
         .collect()
 }
 
+/// The time (ms) from `died` (the reaper saw the exit) to now, right after
+/// [`Oms::start`] returned with the restarted OMS up.
+fn oms_down_ms(oms: &Oms, died: Instant) -> u128 {
+    assert!(oms.exit().is_none(), "the restarted OMS ended");
+    died.elapsed().as_millis()
+}
+
 /// The one order the journal accepted (a crashed node's reply may never
 /// have left).
 fn the_accepted_order(w: &World, oms: &Oms) -> OrderId {
@@ -1774,7 +1781,7 @@ fn j5a_a_node_killed_while_its_create_is_at_the_venue_restarts_into_one_order_an
         Duration::from_secs(10),
         || oms.exit().is_some(),
     );
-    let (status, _) = oms.exit().unwrap();
+    let (status, died) = oms.exit().unwrap();
     assert_eq!(status.signal(), Some(9), "not killed by SIGKILL: {status:?}");
     let id = the_accepted_order(&w, &oms);
     // The reply leaves before the gateway gets the command, but the
@@ -1799,6 +1806,10 @@ fn j5a_a_node_killed_while_its_create_is_at_the_venue_restarts_into_one_order_an
     // The operator restarts the OMS.
     let from = w.log_len();
     oms.start(&[]);
+    println!(
+        "j5a: the OMS was down {} ms (its exit seen to the restarted one up)",
+        oms_down_ms(&oms, died)
+    );
     assert_ne!(oms.pid(), Some(first_pid));
     let doubt = events_of(&oms, "order_in_doubt", id);
     assert!(
@@ -1825,6 +1836,11 @@ fn j5a_a_node_killed_while_its_create_is_at_the_venue_restarts_into_one_order_an
             let creates = w.fake.with(|b, _| b.creates_for(&link));
             if creates > 1 {
                 w.fail(&format!("{creates} creates for {link} after the restart"));
+            }
+            if let Some(r) = closed(&oms, id) {
+                w.fail(&format!(
+                    "the restarted OMS closed the order as {r:?} while it is open at the venue"
+                ));
             }
             let o = oms.order(id);
             o.phase == Phase::Working && o.doubt.is_none()
@@ -1896,7 +1912,7 @@ fn j5b_a_node_stopped_after_the_flush_before_the_send_closes_the_order_as_not_pl
         Duration::from_secs(10),
         || oms.exit().is_some(),
     );
-    let (status, _) = oms.exit().unwrap();
+    let (status, died) = oms.exit().unwrap();
     assert!(!status.success(), "{status:?}");
     let log = oms.log();
     assert!(
@@ -1911,6 +1927,10 @@ fn j5b_a_node_stopped_after_the_flush_before_the_send_closes_the_order_as_not_pl
     // The operator restarts the OMS.
     let from = w.log_len();
     oms.start(&[]);
+    println!(
+        "j5b: the OMS was down {} ms (its exit seen to the restarted one up)",
+        oms_down_ms(&oms, died)
+    );
     assert_ne!(oms.pid(), Some(first_pid));
     let doubt = events_of(&oms, "order_in_doubt", id);
     assert!(
