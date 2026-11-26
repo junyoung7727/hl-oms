@@ -13,7 +13,7 @@
 mod bybit_fake;
 mod joint_rig;
 
-use bybit_fake::book::{SYMBOL, WKEY};
+use bybit_fake::book::{OKEY, SYMBOL, WKEY};
 use joint_rig::*;
 use oms_core::*;
 use serde_json::json;
@@ -464,6 +464,17 @@ fn holds_of(oms: &Oms, hold: HoldKind) -> Vec<(Ts, HoldSource, String)> {
         .collect()
 }
 
+/// The record times (µs) of `monitor_changed{monitored: m}`.
+fn monitor_changes(oms: &Oms, m: bool) -> Vec<Ts> {
+    oms.events("monitor_changed")
+        .into_iter()
+        .filter_map(|(at, e)| match e {
+            Event::MonitorChanged { monitored, .. } if monitored == m => Some(at),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The fake Telegram's message bodies with `prefix` that hold `text`.
 fn telegram_with(w: &World, prefix: &str, text: &str) -> Vec<String> {
     w.telegram_messages()
@@ -619,6 +630,259 @@ fn j2a_a_venue_only_order_holds_plain_orders_after_two_rounds_and_two_seconds_un
         watcher.log_lines("")
     );
     assert!(watcher.exit().is_none(), "the watcher ended");
+    w.assert_venue_invariants();
+}
+
+/// The OMS's Short `[core.policy.monitor]` and `[runtime] tick_ms`
+/// (`joint_rig::Timers::Short`), in µs.
+const HEARTBEAT_MAX_AGE_US: u64 = 10_000_000;
+const CHECK_MAX_AGE_US: u64 = 5_000_000;
+const UNMONITORED_CANCEL_US: u64 = 10_000_000;
+const TICK_US: u64 = 50_000;
+
+/// The watcher's heartbeat records: record time (µs) and check times.
+fn heartbeats(oms: &Oms) -> Vec<(Ts, std::collections::BTreeMap<String, Option<Ts>>)> {
+    oms.records()
+        .into_iter()
+        .flat_map(|r| {
+            r.events.into_iter().filter_map(move |e| match e {
+                Event::WatcherHeartbeat { checks, .. } => Some((r.at, checks)),
+                _ => None,
+            })
+        })
+        .collect()
+}
+
+/// The times (ms) of the OMS's cancels of `link` at the fake (WS Trade or
+/// REST, `OKEY`).
+fn okey_cancels(w: &World, link: &str) -> Vec<u64> {
+    w.fake.with(|b, _| {
+        b.log
+            .iter()
+            .filter(|l| l.key == OKEY && (l.path == "order.cancel" || l.path == "/v5/order/cancel"))
+            .filter(|l| {
+                serde_json::from_str::<serde_json::Value>(&l.body)
+                    .ok()
+                    .is_some_and(|v| v["orderLinkId"] == link)
+            })
+            .map(|l| l.at_ms)
+            .collect()
+    })
+}
+
+/// J6a: the watcher stopped (SIGTERM) sends no heartbeat; the OMS stays
+/// monitored for `heartbeat_max_age` after the last heartbeat record, then
+/// closes the gate within a tick and a second, refuses plain orders and,
+/// `unmonitored_cancel` after that record, cancels the resting plain
+/// order once. The restarted watcher opens the gate again within 10 s of
+/// its boot replay, and a plain order is accepted.
+#[test]
+fn j6a_a_stopped_watcher_closes_the_gate_after_the_heartbeat_limit_and_its_return_opens_it() {
+    let w = World::new("j6a", Timers::Short, Duration::from_secs(90));
+    let (oms, mut watcher) = start_both(&w);
+    let r = working(&w, &oms, "r1", "29000");
+    let link = oms.link(r);
+
+    watcher.sigterm();
+    w.wait("the watcher ends", Duration::from_secs(5), || {
+        watcher.exit().is_some()
+    });
+    assert_eq!(
+        watcher.exit().unwrap().0.code(),
+        Some(0),
+        "the watcher's exit"
+    );
+    w.wait("the gate closes", Duration::from_secs(15), || {
+        !monitor_changes(&oms, false).is_empty()
+    });
+    let closed_at = monitor_changes(&oms, false)[0];
+    let last_beat = heartbeats(&oms)
+        .into_iter()
+        .map(|(at, _)| at)
+        .filter(|at| *at <= closed_at)
+        .max()
+        .unwrap();
+    let delay = closed_at - last_beat;
+    println!("gate closed after {} ms", delay / 1_000);
+    assert!(
+        delay > HEARTBEAT_MAX_AGE_US,
+        "the gate closed {delay} µs after the last heartbeat record"
+    );
+    assert!(
+        delay <= HEARTBEAT_MAX_AGE_US + TICK_US + 1_000_000,
+        "the gate closed {delay} µs after the last heartbeat record"
+    );
+    assert!(
+        heartbeats(&oms).iter().all(|(at, _)| *at <= closed_at),
+        "a heartbeat after the watcher ended"
+    );
+    let reasons = refused(&w, &oms, "unmonitored");
+    assert!(
+        reasons.contains(&RejectReason::Hold(HoldReason::Unmonitored)),
+        "{reasons:?}"
+    );
+
+    // Stage 2: one cancel of R, strictly after unmonitored_cancel.
+    let due_ms = (closed_at + UNMONITORED_CANCEL_US) / 1_000;
+    let by_ms = due_ms + (TICK_US + 1_000_000) / 1_000;
+    w.wait("the stage-2 cancel of R", Duration::from_secs(15), || {
+        !okey_cancels(&w, &link).is_empty()
+    });
+    let cancels = okey_cancels(&w, &link);
+    assert!(
+        cancels[0] >= due_ms && cancels[0] <= by_ms,
+        "the cancel of R at {} ms; due after {due_ms}, by {by_ms}",
+        cancels[0]
+    );
+    println!(
+        "stage-2 cancel {} ms after the gate closed",
+        cancels[0] - closed_at / 1_000
+    );
+    w.wait("R is closed Cancelled", Duration::from_secs(10), || {
+        matches!(closed(&oms, r), Some(CloseReason::Canceled { .. }))
+    });
+    assert_eq!(
+        okey_cancels(&w, &link).len(),
+        1,
+        "R was cancelled more than once"
+    );
+
+    // The watcher returns.
+    watcher.start();
+    w.wait("the watcher's boot replay", Duration::from_secs(20), || {
+        watcher.log_containing("boot replay done").len() >= 2
+    });
+    let replayed = Instant::now();
+    w.wait(
+        "the gate opens within 10 s of the boot replay",
+        Duration::from_secs(10),
+        || monitored(&oms) == Some(true),
+    );
+    println!(
+        "gate opened {} ms after the boot replay line was seen",
+        replayed.elapsed().as_millis()
+    );
+    let _ = working(&w, &oms, "back", "29000");
+    assert_watcher_quiet(&w, &oms, &watcher);
+    w.assert_venue_invariants();
+}
+
+/// J6b: the watcher keeps sending heartbeats while its W1 and W2 requests
+/// fail (503 for its key only); the heartbeats carry the last success
+/// times unchanged, and the OMS closes the gate at the first heartbeat
+/// recorded more than `check_max_age` after the older of them, and
+/// refuses a plain order; its own requests are still answered (its cancel
+/// of a resting order goes through). When the requests succeed again the
+/// gate opens within two heartbeats. Failed rounds judge nothing: no
+/// mismatch throughout.
+#[test]
+fn j6b_failing_watcher_checks_close_the_gate_after_the_check_age_limit() {
+    let w = World::new("j6b", Timers::Short, Duration::from_secs(60));
+    let heartbeat_ms = w.watcher_timer("heartbeat_ms").unwrap();
+    let (oms, watcher) = start_both(&w);
+    let r = working(&w, &oms, "r1", "29000");
+    let paths = ["/v5/order/realtime", "/v5/position/list"];
+    let from = w.fake.with(|b, _| {
+        for p in paths {
+            b.fault(WKEY, p, http_fake::Answer::Reply(503, "{}".into()));
+        }
+        b.log.len()
+    });
+    w.wait("the gate closes", Duration::from_secs(10), || {
+        !monitor_changes(&oms, false).is_empty()
+    });
+    let closed_at = monitor_changes(&oms, false)[0];
+    // Two more heartbeats after the close: the checks stay frozen.
+    w.wait(
+        "two heartbeats after the close",
+        Duration::from_secs(5),
+        || {
+            heartbeats(&oms)
+                .iter()
+                .filter(|(at, _)| *at > closed_at)
+                .count()
+                >= 2
+        },
+    );
+    let beats = heartbeats(&oms);
+    let (_, at_close) = beats
+        .iter()
+        .find(|(at, _)| *at == closed_at)
+        .cloned()
+        .unwrap_or_else(|| w.fail("the gate closed in a record without a heartbeat"));
+    let w1w2 =
+        |c: &std::collections::BTreeMap<String, Option<Ts>>| (c["W1"].unwrap(), c["W2"].unwrap());
+    let (t1, t2) = w1w2(&at_close);
+    for (at, c) in beats.iter().filter(|(at, _)| *at > closed_at) {
+        assert_eq!(w1w2(c), (t1, t2), "W1/W2 moved in the heartbeat at {at}");
+    }
+    let older = t1.min(t2);
+    let delay = closed_at - older;
+    println!(
+        "gate closed {} ms after the older of the last W1/W2 successes",
+        delay / 1_000
+    );
+    assert!(delay > CHECK_MAX_AGE_US, "closed {delay} µs after {older}");
+    assert!(
+        delay <= CHECK_MAX_AGE_US + heartbeat_ms * 1_000 + 1_000_000,
+        "closed {delay} µs after {older}"
+    );
+    let reasons = refused(&w, &oms, "stale-checks");
+    assert!(
+        reasons.contains(&RejectReason::Hold(HoldReason::Unmonitored)),
+        "{reasons:?}"
+    );
+    // The OMS's own requests are answered: its cancel of R goes through.
+    assert!(
+        matches!(oms.cancel(r), CancelReply::Requested { .. }),
+        "the cancel of R while unmonitored"
+    );
+    w.wait("R is closed Cancelled", Duration::from_secs(10), || {
+        matches!(closed(&oms, r), Some(CloseReason::Canceled { .. }))
+    });
+    let theirs = w.fake.with(|b, _| {
+        b.log
+            .iter()
+            .skip(from)
+            .filter(|l| l.key == OKEY)
+            .map(|l| l.answer.clone())
+            .collect::<Vec<_>>()
+    });
+    assert!(
+        !theirs.is_empty() && theirs.iter().all(|a| a == "ok"),
+        "the OMS's requests during the fault: {theirs:?}"
+    );
+    let failed = w.fake.with(|b, _| {
+        b.log
+            .iter()
+            .skip(from)
+            .filter(|l| l.key == WKEY && paths.contains(&l.path.as_str()) && l.answer == "fault")
+            .count()
+    });
+    assert!(failed >= 4, "{failed} faulted W1/W2 requests");
+    println!(
+        "j6b: {failed} faulted W1/W2 requests, {} OMS requests answered meanwhile",
+        theirs.len()
+    );
+
+    // The requests succeed again: the gate opens within two heartbeats.
+    w.fake.with(|b, _| {
+        for p in paths {
+            b.clear_fault(WKEY, p);
+        }
+    });
+    let cleared = Instant::now();
+    w.wait(
+        "the gate opens within two heartbeats",
+        Duration::from_millis(2 * heartbeat_ms + 1_000),
+        || monitored(&oms) == Some(true),
+    );
+    println!(
+        "gate opened {} ms after the faults were removed",
+        cleared.elapsed().as_millis()
+    );
+    let _ = working(&w, &oms, "fresh", "29000");
+    assert_watcher_quiet(&w, &oms, &watcher);
     w.assert_venue_invariants();
 }
 
