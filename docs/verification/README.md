@@ -39,6 +39,8 @@ cargo run --release -p xtask -- docs              # 결과를 주장과 묶어 �
 
 가짜 Bybit의 공용 부품: 응답 봉투와 목록 쪽, 주문·포지션·체결·지갑·키·상품·시각 행은 `http_fake::bybit`(`crates/http-fake/src/bybit.rs`, 시험 `crates/http-fake/tests/bybit.rs`)가 만들고, 노드 시험(`bybit_node`)과 워처 시험의 리그(`crates/watcher/tests/common/rig.rs`, `kill_rig.rs`)가 함께 쓴다. 노드 시험의 가짜 WebSocket(비공개 스트림, WS Trade, 공개 스트림)과 디스크의 저널 읽기는 `crates/oms-node/tests/bybit_fake/`에 있다. 어느 것도 "Bybit가 이렇게 동작한다"의 증거가 아니다(행의 모양은 시험이 손으로 쓰던 것과 같다).
 
+상태가 있는 가짜 Bybit는 같은 디렉터리의 `book.rs`(`Book`: 계좌 하나의 주문·체결·포지션 장부, 시각을 입력으로 받는 sans-IO)와 `venue.rs`(`FakeBybit`: `respond`로 답하는 REST 서버 하나와 세 스트림, 키별 서명 확인, 키·경로별 장애, 요청 기록, 시세 펌프)다. OMS와 워처가 같은 장부를 읽는다. 시험 `crates/oms-node/tests/bybit_fake_book.rs`는 입력마다의 상태 변화를 고정 시각에서 보고, 가짜의 프레임을 OMS 자신의 파서(`stream::parse`, `stream::order_input`, `exec::classify`, `ticker::parse`)로 읽고, 가짜의 응답이 기록된 testnet 응답(`crates/http-fake/recorded/bybit-testnet/`)의 키를 모두 가지는지 본다. 이것도 Bybit 동작의 증거가 아니다: 중복 주문 코드(110072), 수수료율, 지갑 값은 판단(모델 아님)이다.
+
 ### 보관된 실행 (소스 `762a4acf55af90fb`, 2026-11-16 23:28 ~ 23:40 KST, 저장소는 500GB SSD, 빌드 출력과 시험 자료는 970 EVO Plus 2TB)
 
 결과 파일: `evidence/latest/results.json`, `evidence/mutants.json`. `--extended`로 실행했고 `--live-testnet`은 주지 않았다. 실제 거래소에는 접속하지 않았다.
