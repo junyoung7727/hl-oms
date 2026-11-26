@@ -1822,6 +1822,10 @@ fn j5a_a_node_killed_while_its_create_is_at_the_venue_restarts_into_one_order_an
         "the restarted OMS finds the order open and works it",
         Duration::from_secs(10),
         || {
+            let creates = w.fake.with(|b, _| b.creates_for(&link));
+            if creates > 1 {
+                w.fail(&format!("{creates} creates for {link} after the restart"));
+            }
             let o = oms.order(id);
             o.phase == Phase::Working && o.doubt.is_none()
         },
