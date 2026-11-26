@@ -927,6 +927,17 @@ fn fake_bybit_serves_rest_signed_by_the_oms_client_and_pushes_frames_to_the_priv
             "execution.linear"
         );
         assert_eq!(next(&mut private).await.unwrap()["topic"], "order.linear");
+        // A silent private stream (a half-open network) carries no frame.
+        fake.private
+            .silent
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let planted = fake.with(|b, now| b.plant_order(now, "manual-1", "Buy", "0.001", "29000"));
+        fake.cancel_at_venue(&planted, true);
+        let pushed = tokio::time::timeout(Duration::from_millis(300), private.next()).await;
+        assert!(pushed.is_err(), "a frame on a silent stream: {pushed:?}");
+        fake.private
+            .silent
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         // A silent create: booked, the hook runs, no reply, no frame.
         let (tx, rx) = std::sync::mpsc::channel();
         fake.silent_for_next_create(Box::new(move || tx.send(()).unwrap()));
