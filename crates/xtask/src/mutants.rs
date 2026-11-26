@@ -3803,6 +3803,15 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "w1", "a_foreign_order_during_a_kill_is_still_reported"],
         guards: "C-WATCH / V-WATCH-15",
     },
+    Mutant {
+        id: "M420-watcher-w1-skips-own-order-kinds-during-a-kill",
+        what: "the watcher's W1 kill exemption also skips closed_in_journal, open_after_terminal and details: during a kill an order of ours still open at the venue, though closed or ended in the journal, goes unseen (review 1 S1)",
+        file: "crates/watcher/src/w1.rs",
+        find: "            at_venue.insert(id);\n",
+        replace: "            at_venue.insert(id);\n            if state.holds.kill {\n                continue;\n            }\n",
+        test: &["-p", "watcher", "--test", "w1", "the_venue_side_kinds_during_a_kill_are_still_reported"],
+        guards: "C-WATCH / V-WATCH-15",
+    },
 ];
 
 /// A mutant whose test is a joint test (`--features joint`, ADR-039): its
