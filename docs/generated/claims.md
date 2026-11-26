@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `50c83aa5cbc29741`, 검증 결과의 다이제스트 `7f76e9bbc5ac8483`.
+> 소스 다이제스트 `b573f12fa018c83d`, 검증 결과의 다이제스트 `7f76e9bbc5ac8483`.
 
-주장 132건: 통과 0, 실패 0, 미실행 132. 결과는 현재 소스(다이제스트 `50c83aa5cbc29741`)에서 돌린 것만 센다. 다른 소스의 결과는 미실행으로 센다.
+주장 132건: 통과 0, 실패 0, 미실행 132. 결과는 현재 소스(다이제스트 `b573f12fa018c83d`)에서 돌린 것만 센다. 다른 소스의 결과는 미실행으로 센다.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -3438,14 +3438,15 @@
 - 실제 구성요소: oms-node 바이너리(failpoints 빌드: 코어, 저널, 게이트웨이, 대조기, 관문, 직접 알림, /api/status), 워처 바이너리(test-endpoints 빌드: 시작 확인, 저널 읽기, W1~W4, W5, 하트비트, 지표, 알림), omsctl, 저널 파일, Unix 소켓, HTTP, 시스템 시계
 - 모의·시뮬레이션: Bybit(상태가 있는 가짜 FakeBybit: REST, 비공개 스트림, WS Trade, 공개 스트림, 두 키의 서명 확인), Telegram(http-fake), VictoriaMetrics(http-fake), systemctl(sh 스크립트, 이 시험에서는 불리지 않음)
 - 주입한 장애: 없음(정상 수명 주기). J0: 시험 빌드가 아닌 워처 바이너리, WATCHER_TEST_ENDPOINTS 없는 시험 빌드. 저장소 밖 mut.py의 리그·xtask 변이
-- 판정 기준과 근거: J0: 가드가 'printed "watcher 0.1.0": not the watcher's test build'로 거부하고 w/watcher.toml이 없음; 배선 없는 시험 빌드의 종료 코드 2, stderr 한 줄 'this build is for tests: WATCHER_TEST_ENDPOINTS is required', 가짜 Bybit·Telegram·VM의 요청 0. J1: 위의 순서와 창 모두, OMS 관문 정책이 코드 기본값(30초, 10초, 60초)이고 하트비트 기록 사이가 4초 이상(워처 기본 heartbeat_ms 5,000; 여유는 판단(모델 아님)), 시험 예산 120초 안. 리그: git 작업 트리 안의 기준 디렉터리, 상대 경로, 100바이트 소켓 경로가 거부되고(99바이트는 받음), OMS_TEST_ 변수를 준 Oms::start는 프로세스를 띄우기 전에 멈춘다
+- 판정 기준과 근거: J0: 가드가 'printed "watcher 0.1.0": not the watcher's test build'로 거부하고 w/watcher.toml이 없음; 배선 없는 시험 빌드의 종료 코드 2, stderr 한 줄 'this build is for tests: WATCHER_TEST_ENDPOINTS is required', 가짜 Bybit·Telegram·VM의 요청 0. J1: 위의 순서와 창 모두, OMS 관문 정책이 코드 기본값(30초, 10초, 60초)이고 하트비트 기록 사이가 평균 4초 이상이고 어느 둘도 2.5초 미만이 아님(워처 기본 heartbeat_ms 5,000; 여유는 판단(모델 아님)), 시험 예산 120초 안. 리그: git 작업 트리 안의 기준 디렉터리, 상대 경로, 100바이트 소켓 경로가 거부되고(99바이트는 받음; 지어낸 절대 경로로 재어 OMS_TEST_DIR 길이와 무관), OMS_TEST_ 변수를 준 Oms::start는 프로세스를 띄우기 전에 멈춘다. 첫 시작에서 [http] 포트가 잡혀 있으면 OMS를 끝내고 포트를 옮겨 다시 띄워 새 포트의 /api/status가 답하고 부팅 기록이 하나이며, 옮긴 포트도 잡혀 있거나 저널·워처 설정이 이미 있으면 'joint rig precondition:'으로 멈추고 OMS가 남지 않는다
 - 재현: `OMS_TEST_DIR=<git 밖, 58바이트 이하> cargo run --locked -q -p xtask -- joint --runs 5`
 - 뒷받침하는 것: C-JOINT, C-WATCH, C-LIVE, C-TAIL, ADR-039, ADR-031
-- 확인하지 않은 범위: 실제 Bybit testnet의 합동 실행(주문 허가와 별도 단위), 실제 systemd·polkit의 K3(A-22), 전원 손실·디스크 가득·/api/status가 답하는 동안 걸린 OMS 코어, 킬 마커 unlink 경쟁(U18b1 N4), 합동 설정의 [core.policy.margin](U-18: 그래서 watcher_mismatch 보류 아래의 감소 전용 주문과 '킬은 감소 전용도 거부'는 합동으로 보이지 않는다), 합동 시험의 RSA 키(V-WATCH-14, V-BYBIT-RSA-1), Hyperliquid·Binance·OKX, 실제 admin.sock에 쓰인 watcher_kill 요청과 OMS의 'latched' 답·hold_set{kill, source: watcher}(U-21), 재시작을 넘는 워처 상태. 이 주장의 시험은 불일치·관문 닫힘·킬·충돌을 일으키지 않는다(그것은 V-JOINT-2~6의 몫이고 아직 시험이 없다). 짧은 시간값(Timers::Short)은 이 주장의 시험이 쓰지 않는다. 시간값과 예산은 판단(모델 아님)이고 5회 연속 통과가 근거다. 가짜 Bybit의 동작(곧바로 적용하는 일괄 취소, 시각 확인 없음, WS auth 서명 확인 없음)은 Bybit의 증거가 아니다
+- 확인하지 않은 범위: 실제 Bybit testnet의 합동 실행(주문 허가와 별도 단위), 실제 systemd·polkit의 K3(A-22), 전원 손실·디스크 가득·/api/status가 답하는 동안 걸린 OMS 코어, 킬 마커 unlink 경쟁(U18b1 N4), 합동 설정의 [core.policy.margin](U-18: 그래서 watcher_mismatch 보류 아래의 감소 전용 주문과 '킬은 감소 전용도 거부'는 합동으로 보이지 않는다), 합동 시험의 RSA 키(V-WATCH-14, V-BYBIT-RSA-1), Hyperliquid·Binance·OKX, 실제 admin.sock에 쓰인 watcher_kill 요청과 OMS의 'latched' 답·hold_set{kill, source: watcher}(U-21), 재시작을 넘는 워처 상태. 이 주장의 시험은 불일치·관문 닫힘·킬·충돌을 일으키지 않는다(그것은 V-JOINT-2~6의 몫이고 아직 시험이 없다). 짧은 시간값(Timers::Short)은 이 주장의 시험이 쓰지 않는다. 시간값과 예산은 판단(모델 아님)이고 5회 연속 통과가 근거다. 가짜 Bybit의 동작(곧바로 적용하는 일괄 취소, 시각 확인 없음, WS auth 서명 확인 없음)은 Bybit의 증거가 아니다. 리그는 oms-node를 복사하지 않고 <target>/debug/oms-node를 띄운다: 실행 중에 같은 대상 디렉터리에서 기본 기능 빌드가 그 파일을 바꾸면 나중의 Oms::start가 OMS_TEST_BYBIT_WIRING을 모르는 빌드를 띄울 수 있고, oms-node version에 기능 표시가 없어 리그가 확인하지 못한다(검토 1 N1). xtask joint는 cargo test에 시간 상한을 두지 않고 리그의 기다림마다의 상한에 기댄다(omsctl 호출에는 상한이 없다; 검토 1 N6). 실패한 실행의 디렉터리와 r<pid>-bin/은 지우지 않는다(검토 1 N5)
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
 | `joint/j0_the_rig_refuses_a_watcher_built_without_test_endpoints_and_a_test_build_without_wiring_exits_2` | 미실행 |  |
 | `joint/j1_a_whole_life_cycle_at_the_deployed_timers_has_no_mismatch_and_opens_the_gate` | 미실행 |  |
 | `joint/the_rig_refuses_a_base_in_a_git_work_tree_a_long_socket_path_and_an_oms_test_variable` | 미실행 |  |
+| `joint/the_rig_moves_a_taken_http_port_once_and_a_second_taken_port_is_a_precondition` | 미실행 |  |
 
