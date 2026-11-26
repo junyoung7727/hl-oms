@@ -268,6 +268,9 @@ pub struct World {
     port: Arc<Mutex<u16>>,
     deadline: Instant,
     budget: Duration,
+    /// Timer lines of the watcher's configuration that a test replaces
+    /// ([`World::set_watcher`]).
+    watcher_set: Vec<(String, u64)>,
 }
 
 impl World {
@@ -297,6 +300,7 @@ impl World {
             port: Arc::new(Mutex::new(free_port())),
             deadline: Instant::now() + budget,
             budget,
+            watcher_set: Vec::new(),
         };
         write_mode(&w.dir.join("telegram.json"), TOKEN, 0o600);
         write_mode(
@@ -394,9 +398,31 @@ marker = "{marker}"
         std::fs::write(self.dir.join("o/oms.toml"), config).unwrap();
     }
 
+    /// The watcher's timer line `key = …` gets `value` when its
+    /// configuration is written; a key the timers do not write is a test
+    /// error.
+    pub fn set_watcher(&mut self, key: &str, value: u64) {
+        self.watcher_set.push((key.to_string(), value));
+    }
+
+    /// The watcher's timer `key` as its configuration has it (after
+    /// [`World::set_watcher`]); `None` if the timers do not write it.
+    pub fn watcher_timer(&self, key: &str) -> Option<u64> {
+        if let Some((_, v)) = self.watcher_set.iter().rev().find(|(k, _)| k == key) {
+            return Some(*v);
+        }
+        let prefix = format!("{key} = ");
+        self.timers
+            .watcher()
+            .iter()
+            .flat_map(|t| t.lines())
+            .find_map(|l| l.strip_prefix(prefix.as_str()))
+            .and_then(|v| v.parse().ok())
+    }
+
     fn write_watcher_config(&self) {
         let [intervals, rules, http, w5, kill] = self.timers.watcher();
-        let config = format!(
+        let mut config = format!(
             r#"name = "{WATCHER_NAME}"
 network = "testnet"
 credentials_file = "{creds}"
@@ -431,6 +457,15 @@ oms_unit = "{UNIT}"
             token = self.dir.join("telegram.json").display(),
             marker = self.marker().display(),
         );
+        for (key, value) in &self.watcher_set {
+            let prefix = format!("{key} = ");
+            let line = config
+                .lines()
+                .find(|l| l.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("the watcher's timers write no line {key}"))
+                .to_string();
+            config = config.replacen(&line, &format!("{prefix}{value}"), 1);
+        }
         std::fs::write(self.dir.join("w/watcher.toml"), config).unwrap();
     }
 
@@ -556,6 +591,25 @@ oms_unit = "{UNIT}"
             b.log
                 .iter()
                 .filter(|l| l.key == key && l.path == path)
+                .map(|l| l.at_ms)
+                .collect()
+        })
+    }
+
+    /// The fake's request log's length now: an index for
+    /// [`World::answers_after`].
+    pub fn log_len(&self) -> usize {
+        self.fake.with(|b, _| b.log.len())
+    }
+
+    /// The times (ms) of the answers the fake gave `key` on `path` after
+    /// log index `from`, faulted answers left out.
+    pub fn answers_after(&self, key: &str, path: &str, from: usize) -> Vec<u64> {
+        self.fake.with(|b, _| {
+            b.log
+                .iter()
+                .skip(from)
+                .filter(|l| l.key == key && l.path == path && l.answer != "fault")
                 .map(|l| l.at_ms)
                 .collect()
         })

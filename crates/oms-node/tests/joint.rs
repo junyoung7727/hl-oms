@@ -377,6 +377,251 @@ fn j1_a_whole_life_cycle_at_the_deployed_timers_has_no_mismatch_and_opens_the_ga
     w.assert_venue_invariants();
 }
 
+/// The OMS and the watcher of `w` started in the documented order (OMS
+/// first, unmonitored), the gate open and a reference price there.
+fn start_both(w: &World) -> (Oms, Watcher) {
+    let mut oms = w.oms();
+    oms.start(&[]);
+    w.wait(
+        "the OMS is up, linked and unmonitored",
+        Duration::from_secs(20),
+        || {
+            oms.status_admin().is_some_and(|s| {
+                s["core"]["link"]["up"] == true
+                    && s["core"]["boot"].as_u64().unwrap_or(0) > 0
+                    && s["core"]["needs"] == json!([])
+                    && s["core"]["holds"] == json!(["unmonitored"])
+            })
+        },
+    );
+    let mut watcher = w.watcher();
+    watcher.start();
+    w.wait("the gate opens", Duration::from_secs(30), || {
+        monitored(&oms) == Some(true)
+    });
+    w.wait(
+        "a reference price from the ticker",
+        Duration::from_secs(15),
+        || !oms.events("ref_price_updated").is_empty(),
+    );
+    (oms, watcher)
+}
+
+/// The gate's verdict in `/api/status`.
+fn monitored(oms: &Oms) -> Option<bool> {
+    oms.status_http()
+        .and_then(|s| s["core"]["monitor"]["monitored"].as_bool())
+}
+
+/// A plain buy of 0.001 at `px`, accepted and working.
+fn working(w: &World, oms: &Oms, key: &str, px: &str) -> OrderId {
+    let NewOrderReply::Accepted { order_id } = oms.new_order(key, Side::Buy, "0.001", px, false)
+    else {
+        w.fail(&format!("the plain order {key} was not accepted"))
+    };
+    w.wait(
+        &format!("order {key} is working"),
+        Duration::from_secs(10),
+        || phase(oms, order_id) == Phase::Working,
+    );
+    order_id
+}
+
+/// `core.holds` in `/api/status`.
+fn status_holds(oms: &Oms) -> Vec<String> {
+    oms.status_http()
+        .and_then(|s| {
+            s["core"]["holds"].as_array().map(|a| {
+                a.iter()
+                    .filter_map(|h| h.as_str().map(str::to_string))
+                    .collect()
+            })
+        })
+        .unwrap_or_default()
+}
+
+/// The rejection reasons of a new plain order, or a failure if it was
+/// accepted.
+fn refused(w: &World, oms: &Oms, key: &str) -> Vec<RejectReason> {
+    match oms.new_order(key, Side::Buy, "0.001", "29000", false) {
+        NewOrderReply::Rejected { reasons } => reasons,
+        r => w.fail(&format!("the plain order {key} was not refused: {r:?}")),
+    }
+}
+
+/// Every `hold_set` of `hold`: record time (µs), source, note.
+fn holds_of(oms: &Oms, hold: HoldKind) -> Vec<(Ts, HoldSource, String)> {
+    oms.events("hold_set")
+        .into_iter()
+        .filter_map(|(at, e)| match e {
+            Event::HoldSet {
+                hold: h,
+                source,
+                note,
+            } if h == hold => Some((at, source, note)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The fake Telegram's message bodies with `prefix` that hold `text`.
+fn telegram_with(w: &World, prefix: &str, text: &str) -> Vec<String> {
+    w.telegram_messages()
+        .into_iter()
+        .filter(|(p, b)| p == prefix && b.contains(text))
+        .map(|(_, b)| b)
+        .collect()
+}
+
+/// The OMS's direct alert of a `watcher_mismatch` hold
+/// (`alerts.rs`, `HoldReason::WatcherMismatch`).
+const OMS_WATCHER_HOLD: &str = "워처가 불일치를 확정함";
+
+/// `omsctl clear-hold --reason <reason> --note <note>`: it must answer
+/// `cleared`.
+fn clear_hold(w: &World, oms: &Oms, reason: &str, note: &str) {
+    let (code, out) = oms.omsctl(&["clear-hold", "--reason", reason, "--note", note]);
+    if code != Some(0) || !out.contains("cleared") {
+        w.fail(&format!("clear-hold {reason}: exit {code:?}, {out:?}"));
+    }
+}
+
+/// J2a: a venue-only order (made on the venue's web page) is confirmed by
+/// W1 only after it was seen in two completed rounds and `min_age_ms`
+/// after it was first seen; the OMS then holds plain orders
+/// (`hold_set{watcher_mismatch}` from W1, both direct alerts), refuses a
+/// new one and still accepts a cancel. After the operator cancelled the
+/// order at the venue and two W1 rounds no longer saw it, `clear-hold`
+/// restores trading and no hold comes back.
+#[test]
+fn j2a_a_venue_only_order_holds_plain_orders_after_two_rounds_and_two_seconds_until_clear_hold() {
+    let w = World::new("j2a", Timers::Short, Duration::from_secs(60));
+    let min_age = w.watcher_timer("min_age_ms").unwrap();
+    let (oms, watcher) = start_both(&w);
+    let r = working(&w, &oms, "r1", "29000");
+
+    // F, planted under the book's lock: every W1 answer after `from`
+    // holds it.
+    let (from, f) = w.fake.with(|b, now| {
+        let from = b.log.len();
+        (
+            from,
+            b.plant_order(now, "manual-1", "Buy", "0.001", "29500"),
+        )
+    });
+    w.wait(
+        "W1 confirms F and the OMS holds",
+        Duration::from_secs(15),
+        || !holds_of(&oms, HoldKind::WatcherMismatch).is_empty(),
+    );
+    let holds = holds_of(&oms, HoldKind::WatcherMismatch);
+    let (at, source, note) = holds[0].clone();
+    let seen = w.answers_after(WKEY, "/v5/order/realtime", from);
+    let (first, second) = (seen[0], *seen.get(1).unwrap_or(&u64::MAX));
+    let earliest = (first + min_age).max(second);
+    let at_ms = at / 1_000;
+    assert!(
+        at_ms >= earliest,
+        "the hold at {at_ms} ms, before first_seen {first} + {min_age} ms or the second W1 answer {second}"
+    );
+    assert!(
+        at_ms <= earliest + 5_000,
+        "the hold at {at_ms} ms, more than 5 s after {earliest}"
+    );
+    println!(
+        "j2a: hold {} ms after the first W1 answer that held F",
+        at_ms - first
+    );
+    assert_eq!(holds.len(), 1, "{holds:?}");
+    assert_eq!(source, HoldSource::W1, "{note}");
+    assert!(note.starts_with("W1 foreign "), "the hold's note: {note}");
+    // `/api/status` shows the published state, a moment after the record.
+    w.wait(
+        "/api/status holds watcher_mismatch",
+        Duration::from_secs(2),
+        || status_holds(&oms).contains(&"watcher_mismatch".to_string()),
+    );
+    let lines = watcher.log_lines("error: confirmed difference: W1 foreign ");
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    w.wait("both direct alerts", Duration::from_secs(10), || {
+        !telegram_with(&w, "[WATCH P1]", "워처 W1 불일치 확정").is_empty()
+            && !telegram_with(&w, "[OMS P1]", OMS_WATCHER_HOLD).is_empty()
+    });
+    let watch = telegram_with(&w, "[WATCH P1]", "불일치 확정");
+    assert_eq!(watch.len(), 1, "{watch:?}");
+
+    // Under the hold: a new plain order is refused, the cancel of R is not.
+    let reasons = refused(&w, &oms, "under-hold");
+    assert!(
+        reasons.contains(&RejectReason::Hold(HoldReason::WatcherMismatch)),
+        "{reasons:?}"
+    );
+    assert!(
+        matches!(oms.cancel(r), CancelReply::Requested { .. }),
+        "the cancel of R under the hold"
+    );
+    w.wait("R is closed Cancelled", Duration::from_secs(10), || {
+        matches!(closed(&oms, r), Some(CloseReason::Canceled { .. }))
+    });
+    assert_eq!(
+        w.fake
+            .with(|b, _| b.by_link(&oms.link(r)).map(|o| o.status)),
+        Some("Cancelled"),
+        "R at the venue"
+    );
+
+    // The operator cancels F on the venue's page (no frame); two W1
+    // rounds without it, then the release.
+    w.fake.cancel_at_venue(&f, false);
+    let gone = w.log_len();
+    w.wait("two W1 rounds without F", Duration::from_secs(10), || {
+        w.answers_after(WKEY, "/v5/order/realtime", gone).len() >= 2
+    });
+    clear_hold(
+        &w,
+        &oms,
+        "watcher_mismatch",
+        "manual-1 cancelled at the venue",
+    );
+    let cleared = oms.events("hold_cleared").into_iter().any(|(_, e)| {
+        matches!(
+            e,
+            Event::HoldCleared {
+                hold: HoldKind::WatcherMismatch,
+                ..
+            }
+        )
+    });
+    assert!(
+        cleared,
+        "no hold_cleared{{watcher_mismatch}} in the journal"
+    );
+    let after = working(&w, &oms, "after-clear", "29000");
+    assert!(
+        w.fake.with(|b, _| b.by_link(&oms.link(after)).is_some()),
+        "the order after the release is not at the venue"
+    );
+
+    // No hold comes back: mismatch_resend_ms and two more W1 rounds.
+    let resend = Duration::from_millis(w.watcher_timer("mismatch_resend_ms").unwrap());
+    let (since, idx) = (Instant::now(), w.log_len());
+    w.wait(
+        "mismatch_resend_ms and two W1 rounds after the release",
+        Duration::from_secs(10),
+        || since.elapsed() >= resend && w.answers_after(WKEY, "/v5/order/realtime", idx).len() >= 2,
+    );
+    let holds = holds_of(&oms, HoldKind::WatcherMismatch);
+    assert_eq!(holds.len(), 1, "a hold came back: {holds:?}");
+    assert_eq!(
+        watcher.log_lines("error: confirmed difference:").len(),
+        1,
+        "{:?}",
+        watcher.log_lines("")
+    );
+    assert!(watcher.exit().is_none(), "the watcher ended");
+    w.assert_venue_invariants();
+}
+
 /// The rig's own rules: a base directory inside a git work tree, a
 /// relative one and a socket path of 100 bytes or more are refused; a
 /// start of the OMS with an `OMS_TEST_` variable is a test error, before
