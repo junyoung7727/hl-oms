@@ -528,6 +528,15 @@ fn start_alerts(cfg: &NodeConfig, published: &Arc<Published>, fatal: &Arc<Fatal>
         return Err("[alert] telegram was not loaded".into());
     };
     let mut ac = alert_direct::AlertConfig::new(tg, alerts::PREFIX, &cfg.venue_label());
+    // A failpoints build (the node tests) sends only to its loopback fake
+    // and refuses `[alert]` without one, before any sender exists.
+    #[cfg(feature = "failpoints")]
+    {
+        let base = alerts::test_build_route(a.test_api.as_deref())?;
+        warn!("the direct alerts use the test endpoint", "url": base.to_string());
+        ac.routes = vec![alert_direct::Route::direct(base)?];
+    }
+    #[cfg(not(feature = "failpoints"))]
     if let Some(base) = &a.test_api {
         warn!("the direct alerts use the test endpoint", "url": base.clone());
         ac.routes = vec![alert_direct::Route::direct(base)?];
@@ -607,5 +616,29 @@ mod tests {
         std::fs::write(d.join("file"), "x").unwrap();
         assert_eq!(read_kill_marker(&d.join("file/kill.marker")).as_deref(), Some("marker unreadable: NotADirectory"));
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// V-TESTHOOK-1, the call site (review 1, S1): a failpoints build's
+    /// `start_alerts` refuses `[alert]` without `OMS_TEST_TELEGRAM_API`
+    /// and starts no sender; with a loopback base it starts. Nothing is
+    /// sent either way: no alert is queued before `Alerts::activate`.
+    #[cfg(feature = "failpoints")]
+    #[test]
+    fn a_failpoints_start_alerts_without_a_test_api_starts_no_sender() {
+        let text = "data_dir = \"/srv/oms/data\"\n\n[venue]\nkind = \"sim\"\nsocket = \"venue.sock\"\n\n[core]\nversion = 1\ninstruments = {}\nstrategies = {}\n\n[core.policy]\n\n[alert]\ntelegram = \"/etc/hl-oms/telegram.json\"\n";
+        let mut cfg: NodeConfig = toml::from_str(text).unwrap();
+        let a = cfg.alert.as_mut().unwrap();
+        a.loaded = Some(alert_direct::TelegramConfig::new("123456:ABCdef_ghi-JKL", "42").unwrap());
+        a.test_api = None;
+        let published = Arc::new(Published::new(Core::new(7), 0));
+        let fatal = Arc::new(Fatal::default());
+        let e = start_alerts(&cfg, &published, &fatal).err();
+        assert_eq!(
+            e.as_deref(),
+            Some("a failpoints build sends alerts only to a loopback fake: OMS_TEST_TELEGRAM_API is required")
+        );
+        cfg.alert.as_mut().unwrap().test_api = Some("http://127.0.0.1:9/".into());
+        let started = start_alerts(&cfg, &published, &fatal).unwrap();
+        assert!(started.is_some());
     }
 }

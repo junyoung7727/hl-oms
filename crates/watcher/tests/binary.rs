@@ -13,9 +13,14 @@ fn version_prints_and_anything_else_exits_2() {
         .expect("run watcher");
     assert_eq!(out.status.code(), Some(0));
     let text = String::from_utf8_lossy(&out.stdout);
+    let build = if cfg!(feature = "test-endpoints") {
+        " test-endpoints"
+    } else {
+        ""
+    };
     assert_eq!(
         text.trim(),
-        format!("watcher {}", env!("CARGO_PKG_VERSION"))
+        format!("watcher {}{build}", env!("CARGO_PKG_VERSION"))
     );
     for args in [
         &[][..],

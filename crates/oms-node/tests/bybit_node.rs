@@ -440,11 +440,17 @@ absence_not_found_needed = 2
             .append(true)
             .open(self.dir.join("node.log"))
             .unwrap();
-        let child = Command::new(env!("CARGO_BIN_EXE_oms-node"))
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_oms-node"));
+        // An empty wiring starts the node without the variable.
+        if self.wiring.is_empty() {
+            cmd.env_remove("OMS_TEST_BYBIT_WIRING");
+        } else {
+            cmd.env("OMS_TEST_BYBIT_WIRING", &self.wiring);
+        }
+        let child = cmd
             .arg("run")
             .arg("--config")
             .arg(self.dir.join("oms.toml"))
-            .env("OMS_TEST_BYBIT_WIRING", &self.wiring)
             .envs(env.iter().copied())
             .stderr(log)
             .stdout(Stdio::null())
@@ -561,6 +567,67 @@ fn order_op(key: &str, ttl_ms: u64) -> Op {
         expires_at: now_us() + ttl_ms * 1000,
         market_ref: None,
     }
+}
+
+/// A failpoints node never falls back to the network's endpoints: without
+/// `OMS_TEST_BYBIT_WIRING` its gateway refuses to start (exit 3), before it
+/// reads the credentials. The credentials file is removed first, so a node
+/// whose refusal were gone would also stop at the credentials, before any
+/// socket: the test cannot reach a real host whatever the gateway does.
+#[test]
+fn a_failpoints_node_without_test_wiring_refuses_its_gateway() {
+    let venue = Venue::start(Arc::new(|v: &Value| Some(placed(v))));
+    let mut node = Node::new("nowiring", &venue);
+    std::fs::remove_file(node.dir.join("bybit.toml")).unwrap();
+    node.wiring = String::new();
+    node.start(&[]);
+    let code = node.wait_exit(Duration::from_secs(20));
+    let log = node.log_tail(50);
+    assert_eq!(code, Some(3), "{log}");
+    assert!(
+        log.contains("a failpoints build talks only to loopback fakes: OMS_TEST_BYBIT_WIRING is required"),
+        "{log}"
+    );
+    assert!(!log.contains("credentials"), "the credentials were read: {log}");
+    assert!(!log.contains("uses the test endpoints"), "{log}");
+    assert!(venue.api.requests().is_empty());
+}
+
+/// A failpoints node refuses mainnet even with a loopback wiring (review
+/// 1, S1): the gateway's refusal comes from the configured network, exit
+/// 3, before the credentials (removed first, as above). The configuration
+/// is a full mainnet one (margin rules, alerts to a loopback fake, kill
+/// marker, monitoring gate, liveness), so it loads; every endpoint is
+/// 127.0.0.1 whether or not the refusal holds.
+#[test]
+fn a_failpoints_node_refuses_mainnet_even_with_a_loopback_wiring() {
+    let venue = Venue::start(Arc::new(|v: &Value| Some(placed(v))));
+    let telegram = FakeHttp::start(Http::Reply(200, r#"{"ok":true,"result":{}}"#.into()));
+    let mut node = Node::new("mainnet", &venue);
+    std::fs::remove_file(node.dir.join("bybit.toml")).unwrap();
+    let token = node.dir.join("telegram.json");
+    std::fs::write(&token, r#"{"token":"123456:ABCdef_ghi-JKL","chat_id":"42"}"#).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::create_dir_all(node.dir.join("s")).unwrap();
+    let path = node.dir.join("oms.toml");
+    let config = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("network = \"testnet\"", "network = \"mainnet\"\nmainnet_confirmed = true");
+    let config = format!(
+        "{config}\n[core.policy.margin]\nisolated = false\naccount_mm_rate_max_bps = 5000\n\n[core.policy.monitor]\n\n[alert]\ntelegram = \"{}\"\n\n[kill]\nmarker = \"{}\"\n\n[liveness]\nstrategies = {{ a = 5000 }}\n",
+        token.display(),
+        node.dir.join("s/kill.marker").display(),
+    );
+    std::fs::write(&path, config).unwrap();
+    node.start(&[("OMS_TEST_TELEGRAM_API", &telegram.url())]);
+    let code = node.wait_exit(Duration::from_secs(20));
+    let log = node.log_tail(50);
+    assert_eq!(code, Some(3), "{log}");
+    assert!(log.contains("a failpoints build never runs on mainnet"), "{log}");
+    assert!(!log.contains("credentials"), "the credentials were read: {log}");
+    assert!(!log.contains("uses the test endpoints"), "{log}");
+    assert!(venue.api.requests().is_empty());
 }
 
 /// Test 1. Before any ticker an order with a price band is refused

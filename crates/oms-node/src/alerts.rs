@@ -412,6 +412,20 @@ pub fn fatal_text(reason: &str, durable_seq: u64) -> String {
     )
 }
 
+/// Test-only: the one route of a build with the `failpoints` feature, the
+/// loopback base of `OMS_TEST_TELEGRAM_API` (`test_api`). Such a build
+/// never sends to the real Bot API: without the variable its `[alert]` is
+/// refused and the node does not start.
+#[cfg(any(test, feature = "failpoints"))]
+pub fn test_build_route(test_api: Option<&str>) -> Result<&str, String> {
+    test_api.ok_or_else(|| {
+        format!(
+            "a failpoints build sends alerts only to a loopback fake: {} is required",
+            crate::config::TEST_TELEGRAM_API
+        )
+    })
+}
+
 /// The start-failure notice (exit 3 after the configuration is active): the
 /// error kind only, no path and no token.
 pub fn start_failure_text(kind: &str) -> String {
@@ -774,6 +788,18 @@ pub fn status_json(alerts: Option<&Alerts>) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A failpoints build sends its alerts only to the loopback base of
+    /// `OMS_TEST_TELEGRAM_API`: without it `[alert]` is refused, never sent
+    /// to the real Bot API.
+    #[test]
+    fn a_failpoints_build_without_a_test_api_is_refused() {
+        assert_eq!(
+            test_build_route(None),
+            Err("a failpoints build sends alerts only to a loopback fake: OMS_TEST_TELEGRAM_API is required".to_string())
+        );
+        assert_eq!(test_build_route(Some("http://127.0.0.1:41003")), Ok("http://127.0.0.1:41003"));
+    }
 
     fn every_hold_reason() -> Vec<HoldReason> {
         let x = InstrumentId::new("X").unwrap();

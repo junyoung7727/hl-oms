@@ -74,9 +74,9 @@ pub fn suites(quick: bool, live: bool, bybit: bool, extended: Option<&str>) -> V
         },
         Suite {
             name: "pipeline",
-            what: "commit gate with an injected flush failure (real threads, real file); the process stopped at each commit boundary; the Bybit node against fake venue servers; the direct alerts at a failed flush, a fatal exit and a clean stop (loopback fake Telegram)",
+            what: "commit gate with an injected flush failure (real threads, real file); the process stopped at each commit boundary; the Bybit node against fake venue servers; the direct alerts at a failed flush, a fatal exit and a clean stop (loopback fake Telegram); the lib tests in a failpoints build (the start refusals that exist only there)",
             args: &[
-                "test", "-p", "oms-node", "--features", "failpoints", "--test", "pipeline", "--test", "crash_points", "--test", "bybit_node", "--",
+                "test", "-p", "oms-node", "--features", "failpoints", "--lib", "--test", "pipeline", "--test", "crash_points", "--test", "bybit_node", "--",
                 "--nocapture",
             ],
             env: env(&[]),

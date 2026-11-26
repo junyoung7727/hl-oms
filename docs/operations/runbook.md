@@ -58,7 +58,10 @@ T=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; p
 ls $T/release/{oms-node,omsctl,simvenue}
 $T/release/oms-node version        # 버전과 소스 다이제스트
 cargo run --release -p xtask -- digest   # 같은 다이제스트가 나와야 한다
+$T/release/watcher --version       # 정확히 watcher <버전>
 ```
+
+설치하는 바이너리는 위처럼 기능 없이 만든다(작업 공간의 어떤 crate도 시험 기능을 켜지 않는다). `/usr/local/bin/watcher --version`은 정확히 `watcher <버전>`을 찍어야 한다. `--features test-endpoints`(워처)나 `failpoints`(OMS)로 만든 바이너리는 시험용이고 설치하지 않는다: 끝점을 시험 변수(`WATCHER_TEST_ENDPOINTS`, `OMS_TEST_BYBIT_WIRING`, `OMS_TEST_TELEGRAM_API`)에서만 받고 그것 없이는, 또 mainnet에서는 시작하지 않는다(V-TESTHOOK-1). OMS의 `failpoints` 빌드는 버전 줄로 구별되지 않으므로 빌드 명령으로만 막는다.
 
 배포할 때는 `oms-node`, `omsctl`, 설정 파일, `dashboard/` 디렉터리를 옮긴다. `dashboard/` 옆에 `docs/`와 `crates/`가 없으면 화면의 문서·코드 열람만 빠진다.
 
