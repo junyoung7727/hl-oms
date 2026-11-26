@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `7e6fbd540873f2e9`, 검증 결과의 다이제스트 `7f76e9bbc5ac8483`.
+> 소스 다이제스트 `40184bfba0aceaf9`, 검증 결과의 다이제스트 `7f76e9bbc5ac8483`.
 
-주장 137건: 통과 0, 실패 0, 미실행 137. 결과는 현재 소스(다이제스트 `7e6fbd540873f2e9`)에서 돌린 것만 센다. 다른 소스의 결과는 미실행으로 센다.
+주장 137건: 통과 0, 실패 0, 미실행 137. 결과는 현재 소스(다이제스트 `40184bfba0aceaf9`)에서 돌린 것만 센다. 다른 소스의 결과는 미실행으로 센다.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -3507,7 +3507,7 @@
 - 판정 기준과 근거: 마커와 워처 키의 일괄 취소가 SIGSTOP + 4,500 ms 전에 없음(25 ms 폴링), 마커의 mtime(ms) ≤ systemctl 호출 시각 ≤ 첫 일괄 취소, OMS 종료 시각 ≤ 호출 + 5,000 ms, 워처 키의 일괄 취소 둘 이상과 그 사이의 셈 하나 이상, 킬 끝 줄을 본 시각 ≥ 둘째 일괄 취소 + 10,000 ms, 재시작 뒤 위의 상태·보류·거절·해제 순서, 끝의 거래소 불변식(키마다 초당 일괄 취소 둘 이하 포함), 시험 예산 120초 안
 - 재현: `OMS_TEST_DIR=<git 밖, 58바이트 이하> cargo run --locked -q -p xtask -- joint --runs 5`
 - 뒷받침하는 것: C-JOINT, C-WATCH, C-HOLD, C-KILL, ADR-039, ADR-032, ADR-030
-- 확인하지 않은 범위: 실제 admin.sock에 쓰인 watcher_kill 요청: OMS의 'latched' 답, hold_set{kill, source: watcher}, 그것으로 시작한 OMS의 킬 루프, 정지 뒤 K3를 건너뜀(SIGSTOP된 OMS는 hello에 답하지 않아 K2가 요청을 쓰지 않는다: hello: no reply 뒤 K3; U-21). 실제 systemd·polkit(A-22). 배포 기본 시간값(U-17: silence 10초, watch 30초, stop_wait 10초). '킬은 감소 전용 주문도 거부한다'(U-18: 증거금 정책이 없으면 모든 보류가 감소 전용을 거부하므로 이 시험은 그 규칙이 있든 없든 통과한다). 마커가 없거나 경로를 확인하지 못한 정지와 빚진 정지(StoppedUnmarked·StoppedUncheckedMarker), 정지 실패와 확인 못 함(V-WATCH-13). 워처의 킬 루프가 도는 동안 OMS를 다시 띄우는 경우(시험은 정리 완료 알림 뒤에 다시 띄운다). ADR-040의 예외 없이도 이 시험은 3번 모두 통과했다: 다시 시작한 OMS가 W1의 둘째 라운드 전에 두 주문을 닫았다(그 순서에 기대지 않는 규칙은 V-WATCH-15). 다시 시작한 OMS가 부트 기록을 내구화하기 전에 /api/status가 답하는지는 확인하지 않았다
+- 확인하지 않은 범위: 실제 admin.sock에 쓰인 watcher_kill 요청: OMS의 'latched' 답, hold_set{kill, source: watcher}, 그것으로 시작한 OMS의 킬 루프, 정지 뒤 K3를 건너뜀(SIGSTOP된 OMS는 hello에 답하지 않아 K2가 요청을 쓰지 않는다: hello: no reply 뒤 K3; U-21). 실제 systemd·polkit(A-22). 배포 기본 시간값(U-17: silence 10초, watch 30초, stop_wait 10초). '킬은 감소 전용 주문도 거부한다'(U-18: 증거금 정책이 없으면 모든 보류가 감소 전용을 거부하므로 이 시험은 그 규칙이 있든 없든 통과한다). 마커가 없거나 경로를 확인하지 못한 정지와 빚진 정지(StoppedUnmarked·StoppedUncheckedMarker), 정지 실패와 확인 못 함(V-WATCH-13). 워처의 킬 루프가 도는 동안 OMS를 다시 띄우는 경우(시험은 정리 완료 알림 뒤에 다시 띄운다). ADR-040의 예외 없이도 이 시험은 3번 모두 통과했다: 다시 시작한 OMS가 W1의 둘째 라운드 전에 두 주문을 닫았다(그 순서에 기대지 않는 규칙은 V-WATCH-15). 다시 시작한 OMS가 부트 기록을 내구화하기 전에 /api/status가 답하지 않는다는 것은 코드를 읽은 것이다(node.rs: 부트·설정 기록의 내구화 뒤에 HTTP 서버를 띄운다; 그 순서만을 겨냥한 시험은 없고, J3은 래치가 booted와 같은 기록에 있음을 본다). J3의 '킬 끝 ≥ 둘째 일괄 취소 + watch_ms'는 로그 줄을 본 시각(폴링 주기와 로그 지연만큼 늦음, 측정 여유 327~338 ms)과 비교하므로 그만큼 짧은 watch 창도 통과한다: watch_ms 규칙 자체는 V-WATCH-12·13이 수동 시계로 본다(검토 1 N3)
 
 | 시험 | 결과 | 비고 |
 |---|---|---|
@@ -3536,11 +3536,11 @@
 - 상태: **미실행**
 - 왜 중요한가: OMS의 킬은 모든 주문을 거래소에서 취소하고, 링크가 끊긴 동안 대조기가 돌지 않아 저널은 그 주문을 열린 채로 둔다. 그 차이를 확정하면 OMS 킬마다 거짓 watcher_mismatch 보류와 [WATCH P1]이 난다(발견 F1, ADR-040). 예외가 모든 종류를 덮으면 킬 동안 거래소 화면에서 낸 주문을 놓치고, 해제 뒤에도 남으면 진짜로 사라진 주문을 놓친다
 - 수준: 단위(sans-IO, 수동 시계)
-- 전제와 범위: 엔진 시험 도구(프로세스 안의 모델 거래소, 시험 저널 쓰기, 지연 0의 답): W1 1초마다, min_age_ms 2초, 시험 셋
+- 전제와 범위: 엔진 시험 도구(프로세스 안의 모델 거래소, 시험 저널 쓰기, 지연 0의 답): W1 1초마다, min_age_ms 2초, 시험 넷
 - 실제 구성요소: 워처의 Engine, W1, Tail, JournalState(hold_set·hold_cleared의 kill), 지표 등록부, ADR-011 형식으로 쓴 저널 파일
 - 모의·시뮬레이션: Bybit의 order/realtime(모델 거래소), OMS의 /api/status(시험 저널의 마지막 기록이 상한), 시계(수동)
-- 주입한 장애: 킬 래치 아래 거래소에서 사라진 확인된 주문 둘, 래치가 풀린 뒤에도 저널에 열린 주문, 래치 아래 나타난 거래소만의 주문. 변이 M418(예외 없음, J4), M419(예외가 모든 W1 종류를 덮음)와 저장소 밖 mut.py의 변이(예외가 watcher_mismatch 보류를 읽음, 예외가 뒤집힘, hold_cleared가 래치를 풀지 않음)
-- 판정 기준과 근거: 래치 동안 여섯 라운드에 Mismatch도 확정도 없고 watcher_differences{W1}이 0, 성공 시각은 마지막 라운드(T0 + 5초). 해제한 라운드에 차이 1(첫 목격)이고 Mismatch 없음, 다음 라운드에 정확히 'W1 missing_at_venue <링크>: venue not open, journal open and acked; seen 2 rounds, journal entry 14.0 s old' 하나. 래치 동안의 foreign은 T0 + 2초에 'first seen 2.0 s ago'로 확정되고 그 밖의 Mismatch는 없다
+- 주입한 장애: 킬 래치 아래 거래소에서 사라진 확인된 주문 둘, 래치가 풀린 뒤에도 저널에 열린 주문, 래치 아래 나타난 거래소만의 주문, 래치 아래 거래소에 열린 우리 주문 셋(저널에서 닫힘, 거래소 종결, 다른 기호). 변이 M418(예외 없음, J4), M419(예외가 모든 W1 종류를 덮음), M420(예외가 우리 주문의 거래소 쪽 종류를 덮음, 검토 1 S1)과 저장소 밖 mut.py의 변이(예외가 watcher_mismatch 보류를 읽음, 예외가 뒤집힘, hold_cleared가 래치를 풀지 않음)
+- 판정 기준과 근거: 래치 동안 여섯 라운드에 Mismatch도 확정도 없고 watcher_differences{W1}이 0, 성공 시각은 마지막 라운드(T0 + 5초). 해제한 라운드에 차이 1(첫 목격)이고 Mismatch 없음, 다음 라운드에 정확히 'W1 missing_at_venue <링크>: venue not open, journal open and acked; seen 2 rounds, journal entry 14.0 s old' 하나. 래치 동안의 foreign은 T0 + 2초에 'first seen 2.0 s ago'로 확정되고 그 밖의 Mismatch는 없다. 래치 동안 거래소에 열린 우리 주문 셋은 T0 + 1초에 'W1 closed_in_journal <링크 1>: venue open, journal closed; seen 2 rounds, journal entry 11.0 s old; and 2 more' 하나로 확정되고, open_after_terminal(링크 2)과 details(링크 3) 줄이 각각 하나씩 있다
 - 재현: `cargo test -p watcher --test w1`
 - 뒷받침하는 것: C-WATCH 5부, ADR-040
 - 확인하지 않은 범위: 킬 동안 거래소에서 사라진 주문이 취소가 아니라 체결이었는지는 W1이 말하지 않는다(W2·W4의 몫, V-WATCH-6·8). 래치 동안 OMS가 킬 말고 다른 까닭으로 주문을 잃는 경우도 W1은 말하지 않는다. 실제 OMS 프로세스와의 동작은 V-JOINT-4(J4)가 본다. 워처 킬 뒤 OMS가 꺼진 동안 저널에는 래치가 없다: 그동안은 상태 API가 답하지 않아 W1이 판단하지 않는다(V-WATCH-5). 해제의 '열린 주문 없음' 조건은 OMS의 규칙이고(V-HOLD-*, J4가 거절을 보인다) 워처는 그것에 기대지 않는다
@@ -3550,4 +3550,5 @@
 | `watcher/a_missing_order_during_a_kill_is_not_reported` | 미실행 |  |
 | `watcher/a_missing_order_is_reported_again_after_the_kill_is_cleared` | 미실행 |  |
 | `watcher/a_foreign_order_during_a_kill_is_still_reported` | 미실행 |  |
+| `watcher/the_venue_side_kinds_during_a_kill_are_still_reported` | 미실행 |  |
 

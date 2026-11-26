@@ -53,19 +53,19 @@
 A. 킬 동안 거래소에서 사라진 주문은 노출을 줄이는 쪽이고, 그 뒤에 체결이 있었다면 W2와 W4가 본다. 래치는 첫 일괄 취소 전에 내구화되고 워처의 라운드는 거래소를 읽은 뒤 저널을 읽으므로, 주문이 사라진 것을 본 라운드는 래치도 본다. `clear_hold kill`은 코어 장부에 열린 주문이 없어야 받아들여지므로 예외는 OMS가 따라잡은 뒤까지 남지 않는다. B는 소유자가 고를 수 있는 대안으로 남긴다(U-22).
 
 - `crates/watcher/src/w1.rs` `compare`: `state.holds.kill`이 참이면 `missing_at_venue`를 만들지 않는다. 다른 W1 종류, W2, W3, W4는 그대로다.
-- 시험: `watcher/a_missing_order_during_a_kill_is_not_reported`, `watcher/a_missing_order_is_reported_again_after_the_kill_is_cleared`, `watcher/a_foreign_order_during_a_kill_is_still_reported`(V-WATCH-15), 합동 시험 J4와 J3(V-JOINT-4, V-JOINT-3).
+- 시험: `watcher/a_missing_order_during_a_kill_is_not_reported`, `watcher/a_missing_order_is_reported_again_after_the_kill_is_cleared`, `watcher/a_foreign_order_during_a_kill_is_still_reported`, `watcher/the_venue_side_kinds_during_a_kill_are_still_reported`(V-WATCH-15), 합동 시험 J4와 J3(V-JOINT-4, V-JOINT-3).
 
 ## 8. 포기한 장점, 남은 위험, 소유자가 정할 것
 
 - 포기: 킬 동안 W1이 "거래소에서 사라진 주문"을 따로 알리는 것. 사라진 주문이 체결이었는지는 W2·W4만 본다.
 - 위험: 래치가 저널에 있는 동안 OMS가 자기 주문을 잃어도(킬 말고 다른 까닭으로) W1은 말하지 않는다. 킬이 걸린 OMS는 새 주문을 내지 않고, 해제에는 빈 장부가 필요하다.
-- 위험: 워처 킬 뒤 OMS가 꺼져 있는 동안 저널에는 래치가 없다(마커는 OMS가 다음 시작에 읽는다). 그동안 W1은 상태 API의 답이 없어 판단하지 않는다(설명 9절의 1). 다시 시작한 OMS가 부트 기록(마커의 래치)을 내구화하기 전에 상태 API가 답하는지는 확인하지 않았다. 그렇다면 그 사이의 라운드는 래치 없는 저널을 본다(합동 시험 J3에서는 거짓 불일치가 없었다).
+- 위험: 워처 킬 뒤 OMS가 꺼져 있는 동안 저널에는 래치가 없다(마커는 OMS가 다음 시작에 읽는다). 그동안 W1은 상태 API의 답이 없어 판단하지 않는다(설명 9절의 1). 다시 시작한 OMS는 부트 기록(마커의 래치 `hold_set{kill, source: marker}`가 같은 기록에 있다)과 설정을 control 레인에 넣고 설정의 답(둘 다 내구화된 뒤)을 기다린 다음에야 소켓을 열고 HTTP 서버(`/api/status`)를 띄운다(`crates/oms-node/src/node.rs`의 `Input::Boot`·`Input::Config`와 `http::serve`, 코드를 읽은 것이고 그 순서만을 겨냥한 시험은 없다). 그래서 상태 API가 처음 답할 때 래치는 이미 내구화된 순번 안에 있고, 워처의 라운드는 그 순번까지 읽으므로 래치를 본다. J3은 래치가 `booted`와 같은 기록에 있음을 확인한다.
 - 소유자가 정할 것: U-22(어느 프로그램을 바꿀 것인가; 기본값 A).
 
 ## 9. 근거
 
 - 발견: J4를 이 결정 전의 워처로 돌린 실행(`W1 missing_at_venue …; seen 2 rounds, journal entry 12.7 s old`, 두 주문, 래치 약 1초 뒤 `hold_set{watcher_mismatch}`). J3는 결정 전의 워처로도 3번 모두 통과했다: 다시 시작한 OMS가 W1의 둘째 라운드 전에 두 주문을 닫았다.
-- 변이: M418(예외를 없앰, J4), M419(예외가 모든 W1 종류를 덮음, `a_foreign_order_during_a_kill_is_still_reported`).
+- 변이: M418(예외를 없앰, J4), M419(예외가 모든 W1 종류를 덮음, `a_foreign_order_during_a_kill_is_still_reported`), M420(예외가 우리 주문의 거래소 쪽 종류 `closed_in_journal`·`open_after_terminal`·`details`까지 덮음, `the_venue_side_kinds_during_a_kill_are_still_reported`; 검토 1 S1).
 
 ## 10. 재검토 조건
 
