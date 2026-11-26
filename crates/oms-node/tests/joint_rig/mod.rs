@@ -724,7 +724,9 @@ pub fn version_guard(bin: &Path) -> Result<(), String> {
 }
 
 /// The fake `systemctl` (POSIX sh). One line per call in `systemctl.log`:
-/// the argv, whether the marker exists, the time in ms. For
+/// the argv, whether the marker exists, the wall-clock time in ms (from
+/// `date +%s%N`: some `date` builds, e.g. uutils coreutils 0.10, print
+/// `%3N` without its leading zeros). For
 /// `--no-ask-password stop -- <UNIT>` it signals the pid of `o/oms.pid`
 /// only if that process's command line holds the rig's `o/oms.toml`:
 /// SIGTERM then SIGCONT (systemd follows the stop signal with SIGCONT,
@@ -736,7 +738,7 @@ fn systemctl_script(dir: &Path) -> String {
         r#"#!/bin/sh
 marker=absent
 [ -e "{d}/s/kill.marker" ] && marker=present
-echo "$* marker=$marker $(date +%s%3N)" >> "{d}/systemctl.log"
+echo "$* marker=$marker $(( $(date +%s%N) / 1000000 ))" >> "{d}/systemctl.log"
 [ "$*" = "--no-ask-password stop -- {UNIT}" ] || {{ echo "systemctl: not the rig's stop: $*" >&2; exit 1; }}
 [ -f "{d}/o/oms.pid" ] || {{ echo "systemctl: no o/oms.pid" >&2; exit 1; }}
 pid=$(cat "{d}/o/oms.pid")

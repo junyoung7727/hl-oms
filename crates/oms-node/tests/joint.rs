@@ -1665,6 +1665,36 @@ fn j3_a_hung_oms_is_killed_by_the_watcher_and_boots_latched_until_the_operator_c
     w.assert_venue_invariants();
 }
 
+/// The fake `systemctl` logs each call with the wall clock in ms, also
+/// in the first 100 ms of a second (where a `date +%s%3N` without its
+/// leading zeros goes wrong); a call that is not the rig's stop exits 1
+/// and signals nothing.
+#[test]
+fn the_fake_systemctl_logs_the_wall_clock_in_milliseconds() {
+    let w = World::new("js", Timers::Short, Duration::from_secs(20));
+    // Bounded: at most one second to reach the first 50 ms of a second.
+    w.wait(
+        "the first 50 ms of a second",
+        Duration::from_secs(2),
+        || now_ms() % 1_000 < 50,
+    );
+    let before = now_ms();
+    let out = std::process::Command::new(w.systemctl())
+        .args(["status", "x"])
+        .output()
+        .unwrap();
+    let after = now_ms();
+    assert_eq!(out.status.code(), Some(1), "a call that is not the stop");
+    let log = w.systemctl_log();
+    assert_eq!(log.len(), 1, "{log:?}");
+    assert!(log[0].starts_with("status x marker=absent "), "{log:?}");
+    let at: u64 = log[0].rsplit(' ').next().unwrap().parse().unwrap();
+    assert!(
+        before <= at && at <= after,
+        "logged {at} ms, called between {before} and {after}"
+    );
+}
+
 /// The rig's own rules: a base directory inside a git work tree, a
 /// relative one and a socket path of 100 bytes or more are refused; a
 /// start of the OMS with an `OMS_TEST_` variable, and a watcher timer
