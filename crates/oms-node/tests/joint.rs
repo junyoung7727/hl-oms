@@ -1374,6 +1374,280 @@ fn j4_a_ten_second_stream_outage_kills_in_the_oms_and_the_watcher_raises_nothing
     w.assert_venue_invariants();
 }
 
+/// The wall-clock time (ms) of the file's last change.
+fn mtime_ms(path: &std::path::Path) -> u64 {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
+/// J3: the OMS hangs (SIGSTOP) with two plain orders resting. The
+/// watcher's W5 fires `silence_ms` after the last good `/api/status`
+/// answer, not before: K1 writes the marker, K2's `hello` gets no reply
+/// from the stopped process, K3 stops the unit with the fake `systemctl`
+/// (the marker is there at the call) and the OMS ends on the SIGTERM path
+/// within `stop_wait_ms`; then the watcher's cancel-alls (the fake leaves
+/// one order after the first) empty the book, and the kill ends after
+/// `watch_ms` of zero, with a start and a final `[WATCH P1]` notice. The
+/// restarted OMS reads the marker at boot and is latched
+/// (`hold_set{kill, source: marker}` in its boot record): plain and
+/// reduce-only orders are refused, `clear-hold kill` is refused until its
+/// own kill loop confirmed zero, then taken, the marker is removed and a
+/// plain order is accepted. The watcher across the restart: no second
+/// kill, W5 armed again, no mismatch for the orders the restarted OMS
+/// still had open in its journal while it was latched.
+#[test]
+fn j3_a_hung_oms_is_killed_by_the_watcher_and_boots_latched_until_the_operator_clears_it() {
+    let mut w = World::new("j3", Timers::Short, Duration::from_secs(120));
+    w.set_watcher("silence_ms", 6_000);
+    // The OMS's own stream kill must not latch when the stopped process
+    // resumes (spec J3): 30 s instead of 10 s.
+    w.set_oms("kill_after_ms", 30_000);
+    let silence = w.watcher_timer("silence_ms").unwrap();
+    let probe = w.watcher_timer("probe_ms").unwrap();
+    let timeout = w.watcher_timer("request_timeout_ms").unwrap();
+    let stop_wait = w.watcher_timer("stop_wait_ms").unwrap();
+    let watch = w.watcher_timer("watch_ms").unwrap();
+    let (mut oms, watcher) = start_both(&w);
+    let r1 = working(&w, &oms, "r1", "29000");
+    let r2 = working(&w, &oms, "r2", "28900");
+    w.wait("W5 is armed", Duration::from_secs(10), || {
+        metric(&w.vm, "watcher_w5_armed") == Some(1.0)
+    });
+    w.fake.with(|b, _| b.leave_one_once(WKEY));
+
+    // 1. Nothing before silence_ms after the last good probe, which can
+    // precede the SIGSTOP by probe_ms plus the time the OMS took to answer.
+    let stopped = now_ms();
+    oms.sigstop();
+    let quiet_until = stopped + silence - probe - timeout;
+    w.never(
+        "the marker or a WKEY cancel-all before silence_ms after the last good probe",
+        Duration::from_millis(quiet_until.saturating_sub(now_ms())),
+        || w.marker().exists() || !w.fake.with(|b, _| b.cancel_alls(WKEY)).is_empty(),
+    );
+
+    // 2. K1 then K3, both before the first cancel-all.
+    w.wait("the marker", Duration::from_secs(10), || {
+        w.marker().exists()
+    });
+    let marker_ms = mtime_ms(&w.marker());
+    let text = std::fs::read_to_string(w.marker()).unwrap();
+    assert!(
+        text.starts_with(&format!("watcher {WATCHER_NAME} W5")),
+        "the marker: {text:?}"
+    );
+    println!("j3: marker {} ms after the SIGSTOP", marker_ms - stopped);
+    w.wait("the systemctl stop", Duration::from_secs(5), || {
+        !w.systemctl_log().is_empty()
+    });
+    let call = w.systemctl_log()[0].clone();
+    let want = format!("--no-ask-password stop -- {UNIT} marker=present ");
+    assert!(call.starts_with(&want), "the systemctl call: {call:?}");
+    let called_ms: u64 = call.rsplit(' ').next().unwrap().parse().unwrap();
+    assert!(
+        marker_ms <= called_ms,
+        "the marker at {marker_ms} ms, after the systemctl call at {called_ms}"
+    );
+
+    // 3. The OMS ends on the SIGTERM path within stop_wait_ms.
+    w.wait(
+        "the OMS ends",
+        Duration::from_millis(stop_wait + 1_000),
+        || oms.exit().is_some(),
+    );
+    let ended_ms = now_ms();
+    assert_eq!(oms.exit().unwrap().0.code(), Some(0), "the OMS's exit");
+    assert!(
+        ended_ms <= called_ms + stop_wait,
+        "the OMS ended {} ms after the systemctl call",
+        ended_ms - called_ms
+    );
+    assert!(
+        oms.log().contains("\"msg\":\"stopped cleanly\""),
+        "not the SIGTERM path (drain, final snapshot, exit 0)"
+    );
+
+    // 4. The watcher's cancel-all loop: the first leaves one order, the
+    // count sees it, a second empties the book; the kill ends after
+    // watch_ms of zero.
+    w.wait(
+        "two WKEY cancel-alls and an empty book",
+        Duration::from_secs(10),
+        || {
+            w.fake
+                .with(|b, _| b.cancel_alls(WKEY).len() >= 2 && b.open_orders().is_empty())
+        },
+    );
+    let cancel_alls = w.fake.with(|b, _| b.cancel_alls(WKEY));
+    assert!(
+        cancel_alls[0] >= called_ms,
+        "a WKEY cancel-all at {} ms, before the systemctl call at {called_ms}",
+        cancel_alls[0]
+    );
+    let counted = w
+        .requests(WKEY, "/v5/order/realtime")
+        .iter()
+        .filter(|t| **t >= cancel_alls[0] && **t <= cancel_alls[1])
+        .count();
+    assert!(counted >= 1, "no count between the two cancel-alls");
+    let mut kill_ended_ms = 0;
+    w.wait(
+        "the watcher's kill ends",
+        Duration::from_millis(watch + 10_000),
+        || {
+            kill_ended_ms = now_ms();
+            !watcher
+                .log_containing("the kill ended: zero open orders confirmed")
+                .is_empty()
+        },
+    );
+    assert!(
+        kill_ended_ms >= cancel_alls[1] + watch,
+        "the kill ended {} ms after the second cancel-all, watch_ms {watch}",
+        kill_ended_ms - cancel_alls[1]
+    );
+    let ended = watcher.log_containing("the kill ended:");
+    assert_eq!(ended.len(), 1, "{ended:?}");
+    assert!(ended[0].contains("the halt is not owed"), "{ended:?}");
+
+    // 5. The start and final notices, each with the position block.
+    w.wait("the final kill notice", Duration::from_secs(5), || {
+        !telegram_with(&w, "[WATCH P1]", "워처 킬 정리 완료").is_empty()
+    });
+    let start = telegram_with(&w, "[WATCH P1]", "워처 킬 시작(");
+    assert_eq!(start.len(), 1, "{start:?}");
+    assert!(
+        start[0].contains("킬 마커: 씀.")
+            && start[0].contains(&format!("systemctl stop {UNIT}: 정지됨"))
+            && start[0].contains("포지션(거래소"),
+        "the start notice: {}",
+        start[0]
+    );
+    let last = telegram_with(&w, "[WATCH P1]", "워처 킬 정리 완료");
+    assert_eq!(last.len(), 1, "{last:?}");
+    assert!(
+        last[0].contains("다음 시작은 킬 마커로 래치됨") && last[0].contains("포지션(거래소"),
+        "the final notice: {}",
+        last[0]
+    );
+
+    // 6. The operator restarts the OMS: latched by the marker.
+    let boot_from = oms.records().len();
+    oms.start(&[]);
+    let s = oms.status_admin().unwrap();
+    assert_eq!(
+        s["node"]["kill_marker"]["present_at_boot"], true,
+        "{}",
+        s["node"]
+    );
+    assert!(
+        status_holds(&oms).contains(&"kill_latched".to_string()),
+        "{}",
+        s["core"]
+    );
+    let kills = holds_of(&oms, HoldKind::Kill);
+    assert_eq!(kills.len(), 1, "{kills:?}");
+    let (at, source, note) = kills[0].clone();
+    assert_eq!(source, HoldSource::Marker, "{note}");
+    assert!(
+        note.starts_with(&format!("marker: watcher {WATCHER_NAME} W5")),
+        "{note}"
+    );
+    let boot_record = oms
+        .records()
+        .into_iter()
+        .skip(boot_from)
+        .find(|r| r.at == at);
+    assert!(
+        boot_record.is_some_and(|r| r.events.iter().any(|e| e.name() == "booted")),
+        "the kill hold is not in the boot record"
+    );
+    let reasons = refused(&w, &oms, "latched");
+    assert!(
+        reasons.contains(&RejectReason::Hold(HoldReason::KillLatched)),
+        "{reasons:?}"
+    );
+    let NewOrderReply::Rejected { reasons } =
+        oms.new_order("latched-ro", Side::Sell, "0.001", "31000", true)
+    else {
+        w.fail("a reduce-only order was accepted under the kill latch")
+    };
+    assert!(
+        reasons.contains(&RejectReason::Hold(HoldReason::KillLatched)),
+        "{reasons:?}"
+    );
+    let (code, _, err) =
+        oms.omsctl_full(&["clear-hold", "--reason", "kill", "--note", "too early"]);
+    assert!(
+        code != Some(0) && err.contains("kill_unconfirmed"),
+        "clear-hold before the loop confirmed: exit {code:?}, {err:?}"
+    );
+    w.wait(
+        "the restarted OMS's kill loop confirms zero and both orders are closed",
+        Duration::from_secs(25),
+        || {
+            kill_loop_ends(&oms)
+                .iter()
+                .any(|(_, o)| *o == KillOutcome::Confirmed)
+                && closed(&oms, r1).is_some()
+                && closed(&oms, r2).is_some()
+        },
+    );
+    clear_hold(
+        &w,
+        &oms,
+        "kill",
+        "watcher kill: venue checked, zero open orders",
+    );
+    w.wait("the marker is removed", Duration::from_secs(2), || {
+        !w.marker().exists()
+    });
+    let ref_from = oms.events("ref_price_updated").len();
+    w.wait(
+        "a ticker and the gate open after the restart",
+        Duration::from_secs(20),
+        || oms.events("ref_price_updated").len() > ref_from && monitored(&oms) == Some(true),
+    );
+    let after = working(&w, &oms, "after-kill", "29000");
+    assert!(
+        w.fake.with(|b, _| b.by_link(&oms.link(after)).is_some()),
+        "the order after the release is not at the venue"
+    );
+
+    // 7. The watcher across the restart.
+    w.wait("W5 armed again", Duration::from_secs(10), || {
+        metric(&w.vm, "watcher_w5_armed") == Some(1.0)
+    });
+    let idx = w.log_len();
+    w.wait(
+        "two W1 rounds after the release",
+        Duration::from_secs(5),
+        || w.answers_after(WKEY, "/v5/order/realtime", idx).len() >= 2,
+    );
+    assert_eq!(
+        watcher.log_containing("the kill ended:").len(),
+        1,
+        "a second kill"
+    );
+    assert_eq!(w.systemctl_log().len(), 1, "{:?}", w.systemctl_log());
+    assert_eq!(
+        telegram_with(&w, "[WATCH P1]", "워처 킬 시작(").len(),
+        1,
+        "a second kill notice"
+    );
+    let from_watcher: Vec<_> = holds_of(&oms, HoldKind::Kill)
+        .into_iter()
+        .filter(|(_, s, _)| *s != HoldSource::Marker)
+        .collect();
+    assert!(from_watcher.is_empty(), "{from_watcher:?}");
+    assert_no_mismatch(&w, &oms, &watcher);
+    assert!(watcher.exit().is_none(), "the watcher ended");
+    w.assert_venue_invariants();
+}
+
 /// The rig's own rules: a base directory inside a git work tree, a
 /// relative one and a socket path of 100 bytes or more are refused; a
 /// start of the OMS with an `OMS_TEST_` variable, and a watcher timer
