@@ -489,3 +489,38 @@ fn a_foreign_order_during_a_kill_is_still_reported() {
     assert_eq!(r.mismatches, vec![(T0 + 2000, Check::W1, want)]);
     assert_eq!(r.gauge("watcher_mismatches_total", "W1"), Some(1.0));
 }
+
+#[test]
+fn the_venue_side_kinds_during_a_kill_are_still_reported() {
+    let mut r = Rig::new("w1-kill-venue-side");
+    r.write(
+        T0 - 10_000,
+        &[&open(1)[..], &open(2)[..], &open(3)[..]].concat(),
+    );
+    r.write(
+        T0 - 10_000,
+        &[of("order_closed", 1), of("venue_terminal", 2)],
+    );
+    r.write(T0 - 5_000, &[kill(true)]);
+    // Under the latch the venue still lists three of our orders: one closed
+    // in the journal, one ended at the venue, one with another symbol. The
+    // kill exemption covers only missing_at_venue.
+    r.venue.orders = vec![
+        ours(1, "BTCUSDT", "Buy"),
+        ours(2, "BTCUSDT", "Buy"),
+        ours(3, "ETHUSDT", "Buy"),
+    ];
+    rounds(&mut r, 0..2);
+    let age = "journal entry 11.0 s old";
+    let first = detail("closed_in_journal", &link(1), CLOSED, age);
+    let want = format!("{first}; and 2 more");
+    assert_eq!(r.mismatches, vec![(T0 + 1000, Check::W1, want)]);
+    let terminal = "venue open, journal ended at the venue (venue_terminal)";
+    let details = "venue ETHUSDT Buy, journal BTCUSDT Buy";
+    for line in [
+        detail("open_after_terminal", &link(2), terminal, age),
+        detail("details", &link(3), details, age),
+    ] {
+        assert_eq!(r.lines_with(&line), 1, "{line}");
+    }
+}
