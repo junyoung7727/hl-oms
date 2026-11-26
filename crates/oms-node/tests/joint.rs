@@ -633,6 +633,299 @@ fn j2a_a_venue_only_order_holds_plain_orders_after_two_rounds_and_two_seconds_un
     w.assert_venue_invariants();
 }
 
+/// The OMS's `[venue] fills_lag_ms` as the rig wrote it: its fill query
+/// ends that long before now. The rig's configuration does not set it, so
+/// it is the code default, 2,000 ms (`default_fills_lag_ms`,
+/// `oms-node/src/config.rs`).
+fn fills_lag_ms(w: &World) -> u64 {
+    std::fs::read_to_string(w.dir.join("o/oms.toml"))
+        .unwrap()
+        .lines()
+        .find_map(|l| l.strip_prefix("fills_lag_ms = "))
+        .map_or(2_000, |v| v.trim().parse().unwrap())
+}
+
+/// The times (ms) of the watcher's W4 answers after log index `from` whose
+/// window (`startTime..=endTime`) holds `exec_time`.
+fn w4_answers_holding(w: &World, from: usize, exec_time: u64) -> Vec<u64> {
+    w.fake.with(|b, _| {
+        b.log
+            .iter()
+            .skip(from)
+            .filter(|l| l.key == WKEY && l.path == "/v5/execution/list" && l.answer == "ok")
+            .filter(|l| {
+                let p = |k: &str| {
+                    l.query
+                        .split('&')
+                        .find_map(|kv| kv.strip_prefix(k))
+                        .and_then(|v| v.parse::<u64>().ok())
+                };
+                p("startTime=").is_some_and(|a| a <= exec_time)
+                    && p("endTime=").is_some_and(|e| exec_time <= e)
+            })
+            .map(|l| l.at_ms)
+            .collect()
+    })
+}
+
+/// The unacknowledged mismatches in `/api/status`: (id, kind, subject).
+fn unacked(oms: &Oms) -> Vec<(u64, String, String)> {
+    oms.status_http()
+        .and_then(|s| s["core"]["mismatches_unacked"].as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .map(|m| {
+            (
+                m["id"].as_u64().unwrap_or(0),
+                m["kind"].as_str().unwrap_or("").to_string(),
+                m["subject"].as_str().unwrap_or("").to_string(),
+            )
+        })
+        .collect()
+}
+
+/// J2b: a venue-only fill (a `Trade` execution with a foreign link,
+/// back-dated past `min_age_ms`) is confirmed by W2 (or W4) only after
+/// the second W2 answer that showed the planted size, or the second W4
+/// sweep that returned the row, whichever is first; the OMS holds plain
+/// orders, refuses a new one and accepts a cancel. The OMS books the fill
+/// itself (at the latest after a reconnect of its private stream:
+/// `external_fill_booked` and its own `ExternalFill` mismatch, at most one
+/// `PositionOutOfRange` besides); W2 and W4 then agree. `omsctl ack` and
+/// `clear-hold` restore trading, no hold comes back, and the venue's
+/// position equals the journal's.
+#[test]
+fn j2b_a_venue_only_fill_holds_after_two_w2_rounds_and_is_released_after_the_oms_books_it() {
+    let mut w = World::new("j2b", Timers::Short, Duration::from_secs(75));
+    w.set_watcher("w4_ms", 5_000);
+    let min_age = w.watcher_timer("min_age_ms").unwrap();
+    let (oms, watcher) = start_both(&w);
+    let r = working(&w, &oms, "r1", "29000");
+
+    // The back-date must stay above the OMS's fill-query lag, else the
+    // reconnect's one fill query cannot read the row.
+    let back = min_age + 500;
+    let lag = fills_lag_ms(&w);
+    assert!(
+        back > lag,
+        "the plant is back-dated {back} ms (min_age_ms + 500), not above the OMS's fills_lag_ms {lag} ms"
+    );
+    // Below the first boot's fill floor the OMS drops a fill unrecorded.
+    let floor_ms = oms
+        .events("booted")
+        .into_iter()
+        .find_map(|(_, e)| match e {
+            Event::Booted { fill_floor, .. } => Some(fill_floor / 1_000),
+            _ => None,
+        })
+        .unwrap();
+    w.wait(
+        "an execTime 1 s above the fill floor",
+        Duration::from_secs(10),
+        || now_ms().saturating_sub(back) >= floor_ms + 1_000,
+    );
+    let (from, exec_time) = w.fake.with(|b, now| {
+        let from = b.log.len();
+        let t = now - back;
+        b.plant_execution("Trade", "Buy", "0.001", "30000", "manual-fill-1", t);
+        (from, t)
+    });
+    assert_eq!(
+        w.fake.with(|b, _| b.position_updated_ms),
+        exec_time,
+        "the position's updatedTime"
+    );
+    w.wait(
+        "W2 or W4 confirms and the OMS holds",
+        Duration::from_secs(15),
+        || !holds_of(&oms, HoldKind::WatcherMismatch).is_empty(),
+    );
+    let holds = holds_of(&oms, HoldKind::WatcherMismatch);
+    let (at, source, note) = holds[0].clone();
+    let at_ms = at / 1_000;
+    let w2 = w.answers_after(WKEY, "/v5/position/list", from);
+    let w4 = w4_answers_holding(&w, from, exec_time);
+    let earliest = w2
+        .get(1)
+        .copied()
+        .unwrap_or(u64::MAX)
+        .min(w4.get(1).copied().unwrap_or(u64::MAX));
+    assert!(
+        at_ms >= earliest,
+        "the hold at {at_ms} ms, before the second W2 answer {:?} and the second W4 sweep {:?} that held the fill",
+        w2.get(1),
+        w4.get(1)
+    );
+    println!(
+        "j2b: hold {} ms after the plant, {source:?}",
+        at_ms - from_ms(&w, from)
+    );
+    assert_eq!(holds.len(), 1, "{holds:?}");
+    assert!(
+        matches!(source, HoldSource::W2 | HoldSource::W4),
+        "{source:?}: {note}"
+    );
+    assert!(
+        note.starts_with("W2 ") || note.starts_with("W4 "),
+        "the hold's note: {note}"
+    );
+    assert!(
+        !watcher
+            .log_lines("error: confirmed difference: ")
+            .is_empty(),
+        "no confirmed difference line"
+    );
+    w.wait("both direct alerts", Duration::from_secs(10), || {
+        !telegram_with(&w, "[WATCH P1]", "불일치 확정").is_empty()
+            && !telegram_with(&w, "[OMS P1]", OMS_WATCHER_HOLD).is_empty()
+    });
+    let reasons = refused(&w, &oms, "under-hold");
+    assert!(
+        reasons.contains(&RejectReason::Hold(HoldReason::WatcherMismatch)),
+        "{reasons:?}"
+    );
+    assert!(
+        matches!(oms.cancel(r), CancelReply::Requested { .. }),
+        "the cancel of R under the hold"
+    );
+    w.wait("R is closed Cancelled", Duration::from_secs(10), || {
+        matches!(closed(&oms, r), Some(CloseReason::Canceled { .. }))
+    });
+
+    // The OMS books the fill: perhaps already at the cancel of R, at the
+    // latest in the reconnect's reconcile round.
+    println!(
+        "j2b: the fill was booked before the stream drop: {}",
+        !oms.events("external_fill_booked").is_empty()
+    );
+    w.fake.private.drop_connection();
+    w.wait(
+        "the OMS books the fill and is linked",
+        Duration::from_secs(20),
+        || {
+            !oms.events("external_fill_booked").is_empty()
+                && oms.status_http().is_some_and(|s| {
+                    s["core"]["link"]["up"] == true && s["core"]["needs"] == json!([])
+                })
+                && unacked(&oms).iter().any(|(_, k, _)| k == "external_fill")
+        },
+    );
+    let mismatches = unacked(&oms);
+    let subject = "instrument:BTCUSDT";
+    let fill = mismatches
+        .iter()
+        .filter(|(_, k, s)| k == "external_fill" && s == subject)
+        .count();
+    let range = mismatches
+        .iter()
+        .filter(|(_, k, s)| k == "position_out_of_range" && s == subject)
+        .count();
+    assert!(
+        fill == 1 && range <= 1 && fill + range == mismatches.len(),
+        "the OMS's unacknowledged mismatches: {mismatches:?}"
+    );
+    let raised = oms.events("mismatch_raised").len();
+    assert_eq!(raised, mismatches.len(), "mismatches raised in the journal");
+
+    // W2 and W4 agree with the journal now: after one W4 answer that may
+    // have judged an older journal, no new confirmed difference for two
+    // rounds of W2 and two sweeps of W4.
+    let idx = w.log_len();
+    w.wait(
+        "a W4 sweep after the booking",
+        Duration::from_secs(10),
+        || !w.answers_after(WKEY, "/v5/execution/list", idx).is_empty(),
+    );
+    let confirmed = watcher.log_lines("error: confirmed difference: ");
+    let idx = w.log_len();
+    w.wait(
+        "two W2 rounds and two W4 sweeps",
+        Duration::from_secs(15),
+        || {
+            w.answers_after(WKEY, "/v5/position/list", idx).len() >= 2
+                && w.answers_after(WKEY, "/v5/execution/list", idx).len() >= 2
+        },
+    );
+    assert_eq!(
+        watcher.log_lines("error: confirmed difference: "),
+        confirmed,
+        "a difference after the OMS booked the fill"
+    );
+    let checks: std::collections::BTreeSet<String> = confirmed
+        .iter()
+        .filter_map(|l| {
+            l.strip_prefix("error: confirmed difference: ")
+                .and_then(|d| d.split(' ').next())
+                .map(str::to_string)
+        })
+        .collect();
+    assert!(
+        !checks.is_empty() && checks.iter().all(|c| c == "W2" || c == "W4"),
+        "{confirmed:?}"
+    );
+    let watch = telegram_with(&w, "[WATCH P1]", "불일치 확정");
+    assert!(
+        (1..=2).contains(&watch.len())
+            && watch
+                .iter()
+                .all(|b| b.contains("워처 W2 불일치") || b.contains("워처 W4 불일치")),
+        "{watch:?}"
+    );
+
+    // The release: every OMS mismatch acknowledged, then the hold cleared.
+    for (id, kind, _) in &mismatches {
+        let (code, out) = oms.omsctl(&[
+            "ack",
+            "--id",
+            &id.to_string(),
+            "--note",
+            &format!("{kind}: manual-fill-1 on the venue's page"),
+        ]);
+        assert_eq!(code, Some(0), "ack {id}: {out}");
+    }
+    w.wait("no unacknowledged mismatch", Duration::from_secs(5), || {
+        unacked(&oms).is_empty()
+    });
+    clear_hold(
+        &w,
+        &oms,
+        "watcher_mismatch",
+        "manual-fill-1 booked by the OMS",
+    );
+    let resend = Duration::from_millis(w.watcher_timer("mismatch_resend_ms").unwrap());
+    let (since, idx) = (Instant::now(), w.log_len());
+    w.wait(
+        "mismatch_resend_ms and two W2 rounds after the release",
+        Duration::from_secs(10),
+        || since.elapsed() >= resend && w.answers_after(WKEY, "/v5/position/list", idx).len() >= 2,
+    );
+    assert_eq!(
+        holds_of(&oms, HoldKind::WatcherMismatch).len(),
+        1,
+        "a hold came back"
+    );
+    let _ = working(&w, &oms, "after-clear", "29000");
+
+    // The venue's position is the journal's: +0.001.
+    let status = oms.status_http().unwrap();
+    assert_eq!(w.fake.with(|b, _| b.size), 1, "the book's position");
+    assert_eq!(
+        status["account"][SYMBOL]["pos"].as_str(),
+        Some("0.001"),
+        "the journal's position: {}",
+        status["account"]
+    );
+    assert!(watcher.exit().is_none(), "the watcher ended");
+    w.assert_venue_invariants();
+}
+
+/// The time (ms) of the fake's log entry at `idx`, or now if there is none
+/// yet.
+fn from_ms(w: &World, idx: usize) -> u64 {
+    w.fake
+        .with(|b, now| b.log.get(idx).map_or(now, |l| l.at_ms))
+}
+
 /// The OMS's Short `[core.policy.monitor]` and `[runtime] tick_ms`
 /// (`joint_rig::Timers::Short`), in µs.
 const HEARTBEAT_MAX_AGE_US: u64 = 10_000_000;
