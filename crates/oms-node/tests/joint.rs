@@ -1290,6 +1290,10 @@ fn j4_a_ten_second_stream_outage_kills_in_the_oms_and_the_watcher_raises_nothing
     assert_eq!(ends.len(), 1, "{ends:?}");
     let (ended_at, outcome) = ends[0];
     assert_eq!(outcome, KillOutcome::Confirmed);
+    println!(
+        "j4: the loop confirmed {} ms after the latch",
+        (ended_at - latched_at) / 1_000
+    );
     assert!(
         ended_at - latched_at >= KILL_WATCH_MS * 1_000,
         "the loop confirmed {} µs after the latch",
@@ -1520,6 +1524,12 @@ fn j3_a_hung_oms_is_killed_by_the_watcher_and_boots_latched_until_the_operator_c
     assert!(
         kill_ended_ms >= cancel_alls[1] + watch,
         "the kill ended {} ms after the second cancel-all, watch_ms {watch}",
+        kill_ended_ms - cancel_alls[1]
+    );
+    println!(
+        "j3: systemctl {} ms after the marker, the OMS ended {} ms after the call, the kill ended {} ms after the second cancel-all",
+        called_ms - marker_ms,
+        ended_ms - called_ms,
         kill_ended_ms - cancel_alls[1]
     );
     let ended = watcher.log_containing("the kill ended:");
