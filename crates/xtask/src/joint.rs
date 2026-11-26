@@ -349,7 +349,6 @@ pub fn run(root: &Path, runs: Option<&str>, only: Option<&str>) -> i32 {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -364,27 +363,27 @@ mod tests {
         for v in [None, Some("")] {
             assert!(
                 check_test_dir(v)
-                    .unwrap_err()
+                    .expect_err("refused")
                     .contains("OMS_TEST_DIR is not set")
             );
         }
         assert!(
             check_test_dir(Some("rel/dir"))
-                .unwrap_err()
+                .expect_err("refused")
                 .contains("not an absolute path")
         );
         let long = format!("/nonexistent/{}", "x".repeat(DIR_MAX - 12));
         assert_eq!(long.len(), DIR_MAX + 1);
         assert!(
             check_test_dir(Some(&long))
-                .unwrap_err()
+                .expect_err("refused")
                 .contains("at most 58")
         );
         assert!(check_test_dir(Some(&long[..DIR_MAX])).is_ok());
         // A file outside any work tree (a scratch directory may lie in one).
         assert!(
             check_test_dir(Some("/proc/version"))
-                .unwrap_err()
+                .expect_err("refused")
                 .contains("is not a directory")
         );
     }
@@ -394,9 +393,9 @@ mod tests {
     #[test]
     fn a_test_dir_inside_a_git_work_tree_is_refused_whether_it_exists_or_not() {
         let d = scratch("git");
-        std::fs::create_dir_all(d.join("repo/.git")).unwrap();
+        std::fs::create_dir_all(d.join("repo/.git")).expect("test setup");
         for p in [d.join("repo"), d.join("repo/a"), d.join("repo/missing/b")] {
-            let e = check_test_dir(p.to_str()).unwrap_err();
+            let e = check_test_dir(p.to_str()).expect_err("refused");
             assert!(e.contains("inside the git work tree"), "{e}");
         }
         // A sibling is not refused for this tree (the scratch directory
@@ -406,7 +405,7 @@ mod tests {
             .err()
             .unwrap_or_default();
         assert!(!e.contains(&format!("work tree {repo}")), "{e}");
-        std::fs::remove_dir_all(&d).unwrap();
+        std::fs::remove_dir_all(&d).expect("test setup");
     }
 
     #[test]
@@ -415,25 +414,43 @@ mod tests {
         assert_eq!(make_test_dir(&d), Ok(true));
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(
-            std::fs::metadata(&d).unwrap().permissions().mode() & 0o777,
+            std::fs::metadata(&d)
+                .expect("test setup")
+                .permissions()
+                .mode()
+                & 0o777,
             0o700
         );
         assert_eq!(make_test_dir(&d), Ok(false));
-        std::fs::remove_dir_all(d.parent().unwrap().parent().unwrap()).unwrap();
+        std::fs::remove_dir_all(
+            d.parent()
+                .expect("test setup")
+                .parent()
+                .expect("test setup"),
+        )
+        .expect("test setup");
     }
 
     #[test]
     fn a_run_passes_only_with_exit_0_ok_tests_run_and_none_ignored() {
         let ok = "test j0 ... ok\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 23.29s\n";
         assert_eq!(run_verdict(Some(0), ok), Ok(2));
-        assert!(run_verdict(Some(101), ok).unwrap_err().contains("exit"));
+        assert!(
+            run_verdict(Some(101), ok)
+                .expect_err("refused")
+                .contains("exit")
+        );
         assert!(run_verdict(None, ok).is_err());
         let failed = "test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1s\n";
-        assert!(run_verdict(Some(0), failed).unwrap_err().contains("not ok"));
+        assert!(
+            run_verdict(Some(0), failed)
+                .expect_err("refused")
+                .contains("not ok")
+        );
         let ignored = "test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1s\n";
         assert!(
             run_verdict(Some(0), ignored)
-                .unwrap_err()
+                .expect_err("refused")
                 .contains("1 ignored")
         );
         let none = "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0s\n";
@@ -485,10 +502,10 @@ mod tests {
     fn the_orphan_scan_kills_a_test_binary_and_reports_another_process() {
         let d = scratch("scan");
         let run = d.join("r1-1");
-        std::fs::create_dir_all(&run).unwrap();
+        std::fs::create_dir_all(&run).expect("test setup");
         let sh = PathBuf::from("/bin/sh");
         let copy = d.join("sh-bin");
-        std::fs::copy(&sh, &copy).unwrap();
+        std::fs::copy(&sh, &copy).expect("test setup");
         let arg = run.join("x").display().to_string();
         use std::os::unix::process::CommandExt;
         let script = "while :; do sleep 0.1; done";
@@ -496,12 +513,12 @@ mod tests {
             .arg0(&arg)
             .args(["-c", script])
             .spawn()
-            .unwrap();
+            .expect("test setup");
         let mut other = Command::new(&sh)
             .arg0(&arg)
             .args(["-c", script])
             .spawn()
-            .unwrap();
+            .expect("test setup");
         std::thread::sleep(std::time::Duration::from_millis(100));
         let found = orphan_scan(&run, std::slice::from_ref(&copy));
         assert!(
@@ -514,15 +531,15 @@ mod tests {
                 .any(|l| l.starts_with(&format!("process {} names the run directory", other.id()))),
             "{found:?}"
         );
-        let st = ours.wait().unwrap();
+        let st = ours.wait().expect("test setup");
         use std::os::unix::process::ExitStatusExt;
         assert_eq!(st.signal(), Some(9), "the test binary was not killed");
         assert!(
-            other.try_wait().unwrap().is_none(),
+            other.try_wait().expect("test setup").is_none(),
             "the other process was signalled"
         );
         let _ = other.kill();
         let _ = other.wait();
-        std::fs::remove_dir_all(&d).unwrap();
+        std::fs::remove_dir_all(&d).expect("test setup");
     }
 }
