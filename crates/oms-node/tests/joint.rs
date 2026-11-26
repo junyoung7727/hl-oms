@@ -1430,27 +1430,26 @@ fn j3_a_hung_oms_is_killed_by_the_watcher_and_boots_latched_until_the_operator_c
     );
 
     // 2. K1 then K3, both before the first cancel-all.
-    w.wait("the marker", Duration::from_secs(10), || {
-        w.marker().exists()
-    });
-    let marker_ms = mtime_ms(&w.marker());
-    let text = std::fs::read_to_string(w.marker()).unwrap();
-    assert!(
-        text.starts_with(&format!("watcher {WATCHER_NAME} W5")),
-        "the marker: {text:?}"
-    );
-    println!("j3: marker {} ms after the SIGSTOP", marker_ms - stopped);
-    w.wait("the systemctl stop", Duration::from_secs(5), || {
+    // The systemctl call is waited for first, so a stop without the
+    // marker shows as `marker=absent` in it.
+    w.wait("the systemctl stop", Duration::from_secs(15), || {
         !w.systemctl_log().is_empty()
     });
     let call = w.systemctl_log()[0].clone();
     let want = format!("--no-ask-password stop -- {UNIT} marker=present ");
     assert!(call.starts_with(&want), "the systemctl call: {call:?}");
     let called_ms: u64 = call.rsplit(' ').next().unwrap().parse().unwrap();
+    let marker_ms = mtime_ms(&w.marker());
+    let text = std::fs::read_to_string(w.marker()).unwrap_or_default();
+    assert!(
+        text.starts_with(&format!("watcher {WATCHER_NAME} W5")),
+        "the marker: {text:?}"
+    );
     assert!(
         marker_ms <= called_ms,
         "the marker at {marker_ms} ms, after the systemctl call at {called_ms}"
     );
+    println!("j3: marker {} ms after the SIGSTOP", marker_ms - stopped);
 
     // 3. The OMS ends on the SIGTERM path within stop_wait_ms.
     w.wait(
