@@ -1295,6 +1295,20 @@ fn j4_a_ten_second_stream_outage_kills_in_the_oms_and_the_watcher_raises_nothing
         "the loop confirmed {} µs after the latch",
         ended_at - latched_at
     );
+    // The loop confirmed, but the journal still holds both orders open:
+    // the release is refused, so W1's kill exemption cannot outlive the
+    // OMS's catch-up.
+    let (code, _, err) = oms.omsctl_full(&[
+        "clear-hold",
+        "--reason",
+        "kill",
+        "--note",
+        "before the reconcile",
+    ]);
+    assert!(
+        code != Some(0) && err.contains("kill_orders_open: 2 open orders"),
+        "clear-hold with the orders open in the journal: exit {code:?}, {err:?}"
+    );
     // Three W1 rounds after the confirmation, the stream still down.
     let idx = w.log_len();
     w.wait(
@@ -1583,6 +1597,10 @@ fn j3_a_hung_oms_is_killed_by_the_watcher_and_boots_latched_until_the_operator_c
     assert!(
         code != Some(0) && err.contains("kill_unconfirmed"),
         "clear-hold before the loop confirmed: exit {code:?}, {err:?}"
+    );
+    assert!(
+        w.marker().exists(),
+        "a refused clear-hold removed the marker"
     );
     w.wait(
         "the restarted OMS's kill loop confirms zero and both orders are closed",
