@@ -1757,8 +1757,10 @@ fn assert_watcher_quiet_after(w: &World, oms: &Oms, watcher: &Watcher, from: usi
 /// open by its `orderLinkId` and works it without sending it again: one
 /// create for that link over WS Trade and REST across both processes. A
 /// cancel then closes it at the venue and in the journal. The watcher
-/// raises nothing across the restart (W1 skips orders in doubt and unacked
-/// ones; W5's silence is longer than the restart).
+/// raises nothing across the restart: the order is open on both sides with
+/// the same symbol and side, so W1 has nothing to compare differently, and
+/// W5's silence is longer than the restart. W1's skip of unacked and
+/// in-doubt orders missing at the venue is shown by J5b only.
 #[test]
 fn j5a_a_node_killed_while_its_create_is_at_the_venue_restarts_into_one_order_and_no_mismatch() {
     use std::os::unix::process::ExitStatusExt;
