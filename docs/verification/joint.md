@@ -64,3 +64,22 @@ J1은 배포 기본 시간값에서 돌았다는 것도 본다: OMS 관문 정�
 | 언제 | 소스 | 명령 | 결과 |
 |---|---|---|---|
 | 2026-11-26 16:05~16:08 KST, 이 PC(Linux, `OMS_TEST_DIR`은 970 EVO Plus의 `/mnt/nvme/…`) | 커밋 `552e899`(`crates/`는 `e17c2fd`와 같음) | `xtask joint --runs 5` | 5번 모두 통과, 실행마다 시험 3건: 28.5 s(첫 실행, 빌드 확인 포함), 23.4 s, 23.4 s, 23.4 s, 23.3 s. 시험 자체의 시간은 23.2~23.3 s(J1이 거의 전부: 조용한 시간 17 s 포함) |
+
+## 6. CI가 돌리는 법
+
+- `.github/workflows/ci.yml`의 둘째 작업 `joint`: `check`와 같은 계기(pull request, main으로의 push), `ubuntu-24.04`, 시간 상한 60분(판단(모델 아님): 빌드 약 8분 + 실행 5번에 각 약 5분으로 잡은 값), `check`와 나란히 돌아 `check`의 30분은 그대로다.
+- 단계: `check`와 같은 고정 커밋의 checkout과 도구 사슬, 자기 키의 캐시 `joint-<OS>-<rust-toolchain.toml과 Cargo.lock의 해시>`(`check`의 캐시에는 `joint`·`test-endpoints` 기능의 빌드가 없고, 같은 키를 쓰면 이 작업이 자기 캐시를 저장하지 않는다), clippy 둘(`-p oms-node --features joint --all-targets`, `-p watcher --features test-endpoints --all-targets`; 작업 공간 clippy는 `required-features` 때문에 합동 대상을 건너뛰고 워처의 시험 기능을 빌드하지 않는다), 그다음 `cargo run --locked -q -p xtask -- joint --runs 5`.
+- 작업의 `env`는 `CARGO_TARGET_DIR=${{ github.workspace }}/target`(없으면 `.cargo/config.toml`이 이 PC의 `/mnt/nvme/…`를 가리킨다), `CARGO_INCREMENTAL=0`, `CARGO_TERM_COLOR=always`. `OMS_TEST_DIR`은 작업의 `env`가 아니라 `xtask joint` 단계의 `env`에만 `${{ runner.temp }}/joint`로 둔다: 작업의 `env`에서는 `runner` 문맥을 쓸 수 없고, 쓰면 워크플로 파일이 무효가 되어 `check`까지 아무 작업도 시작하지 않는다(GitHub의 문맥 표, 여기서 돌려 보지 않음). 그 경로는 checkout 밖(git 작업 트리 밖)이고 58바이트보다 짧으며(GitHub 실행기 배치에서 `/home/runner/work/_temp/joint`, 29바이트, 여기서 재지 않음) `xtask joint`가 만든다.
+- `joint`는 main 잠금 규칙이 필수 검사로 이름할 때만 머지를 막는다(U-20). 그때까지는 참고 검사다.
+
+## 7. 변이 점검
+
+- `xtask mutants`는 시험 인자에 `--features joint`가 있는 변이(합동 변이)마다 `cargo test` 전에 변이를 낸 사본에서 `xtask joint`와 같은 세 빌드를 하고(`joint::build`: 시험 빌드 워처, `omsctl`, 합동 빌드 `oms-node`, 사본의 대상 디렉터리에), 워처와 `omsctl`을 `$OMS_TEST_DIR/r<pid>-mbin/`에 복사하고 `--version`을 본 뒤 `JOINT_WATCHER_BIN`, `JOINT_OMSCTL_BIN`, `OMS_TEST_DIR=$OMS_TEST_DIR/r<pid>-m`으로 시험을 돌린다. 그래서 워처 소스의 변이가 시험이 띄우는 워처 바이너리에 들어간다. `OMS_TEST_DIR`의 규칙은 §1과 같고, 합동 변이는 한 번에 하나라 `r<pid>-m`은 변이마다 먼저 지운다. 점검이 끝나면 두 디렉터리를 지운다.
+- 합동 변이가 죽은 것으로 세지 않는 경우: 빌드 실패나 `OMS_TEST_DIR`의 규칙 위반(`the mutant did not compile (joint prebuild)`, 규칙의 줄), 실패한 출력에 `joint rig precondition:`이 있음(`rig precondition failed`: 기준 디렉터리, 소켓 경로 길이, 다시 시도한 뒤에도 쓰이는 포트, 가드에 걸린 바이너리, 빠진 변수), 시험 뒤 `xtask joint`와 같은 고아 프로세스 검사에서 실행 디렉터리를 이름하는 프로세스가 남음(`orphan process after the run`, 시험 결과와 상관없이). 그래서 합동 변이는 시나리오의 단언이나 예산으로만 죽는다. 죽은 합동 변이의 메모는 첫 panic의 메시지(실패한 단언)다.
+
+| ID | 고장 낸 내용 | 잡는 시험 |
+|---|---|---|
+| M407 | 워처가 저널을 `data_dir/journal`에서 읽는다(OMS는 거기에 쓰지 않는다): 재생이 부팅 상태에 닿지 않아 하트비트가 없고 관문이 열리지 않는다 | J1 |
+| M408 | 워처의 하트비트가 검사 시각을 밀리초가 아닌 초로 보낸다: OMS는 모든 검사를 아주 오래된 것으로 읽고 관문을 열지 않는다 | J1 |
+| M409 | 리그가 버전 가드 없이 워처 설정을 쓴다 | J0 |
+| M410 | 워처 시험 빌드가 `WATCHER_TEST_ENDPOINTS` 없는 시작을 거부하면서 종료 코드 0으로 끝난다(여전히 `run` 전에 돌아가 아무것도 보내지 않는다) | J0 |
