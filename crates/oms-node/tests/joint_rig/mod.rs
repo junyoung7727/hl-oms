@@ -669,6 +669,14 @@ exit 1
     )
 }
 
+/// [`Oms::start`]'s rule for an OMS that is up: process `pid` answers
+/// `admin` (its admin `Status`) and `http` (`/api/status`, asked only
+/// after the admin socket answered).
+pub fn up(pid: u32, admin: Option<Value>, http: impl FnOnce() -> Option<Value>) -> bool {
+    let _ = pid;
+    admin.is_some() && http().is_some()
+}
+
 /// The OMS: `start` is the only place that builds an `oms-node` command.
 pub struct Oms {
     dir: PathBuf,
@@ -722,7 +730,9 @@ impl Oms {
                 }
                 if self.exit().is_some()
                     || Instant::now() >= end
-                    || (self.status_admin().is_some() && self.status_http().is_some())
+                    || up(self.pid().unwrap(), self.status_admin(), || {
+                        self.status_http()
+                    })
                 {
                     break false;
                 }
