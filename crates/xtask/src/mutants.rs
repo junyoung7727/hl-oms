@@ -3751,7 +3751,10 @@ fn verdict(success: bool, text: &str, joint: bool, orphans: &[String]) -> (bool,
     if joint && !success && text.contains(crate::joint::RIG_PRECONDITION) {
         return (false, "rig precondition failed".to_string());
     }
-    (!success, String::new())
+    // A joint kill names the scenario's failing assertion (the line after
+    // the first panic), since a joint test fails in many ways.
+    let message = || text.lines().skip_while(|l| !l.contains(" panicked at ")).nth(1).unwrap_or_default().to_string();
+    (!success, if joint && !success { message() } else { String::new() })
 }
 
 /// Before a joint mutant's `cargo test`: `OMS_TEST_DIR` under the rules of
@@ -3932,7 +3935,7 @@ mod tests {
         assert_eq!(verdict(false, &rig, false, &[]), (true, String::new()));
         // A scenario assertion kills it.
         let scenario = format!("thread 'j1_x' panicked at crates/oms-node/tests/joint.rs:200:5:\nwaited 40s (budget 120s) for: the gate opens\n{FAILED}");
-        assert_eq!(verdict(false, &scenario, true, &[]), (true, String::new()));
+        assert_eq!(verdict(false, &scenario, true, &[]), (true, "waited 40s (budget 120s) for: the gate opens".into()));
     }
 
     /// A process left behind by a joint run is a rig defect, so the run is
