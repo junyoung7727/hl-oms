@@ -669,12 +669,14 @@ exit 1
     )
 }
 
-/// [`Oms::start`]'s rule for an OMS that is up: process `pid` answers
-/// `admin` (its admin `Status`) and `http` (`/api/status`, asked only
-/// after the admin socket answered).
+/// [`Oms::start`]'s rule for an OMS that is up: `admin` (its admin
+/// `Status`) and `http` (`/api/status`, asked only after the admin socket
+/// answered) both name process `pid`. Another server that holds the
+/// `[http]` port, such as another run's OMS, can answer `/api/status`,
+/// but not as `pid`.
 pub fn up(pid: u32, admin: Option<Value>, http: impl FnOnce() -> Option<Value>) -> bool {
-    let _ = pid;
-    admin.is_some() && http().is_some()
+    let ours = |s: &Value| s["node"]["pid"].as_u64() == Some(u64::from(pid));
+    admin.as_ref().is_some_and(ours) && http().as_ref().is_some_and(ours)
 }
 
 /// The OMS: `start` is the only place that builds an `oms-node` command.
@@ -701,8 +703,8 @@ impl Oms {
     /// test error: the wiring cannot be replaced or cleared here). Stderr
     /// goes to `o/node.log`; the pid to `o/oms.pid`, removed by the reaper
     /// before it records the exit. Waits until the admin socket and
-    /// `/api/status` answer, the process ended, or the log shows that the
-    /// `[http]` port was taken. The node keeps running without its
+    /// `/api/status` both answer as this process ([`up`]), the process
+    /// ended, or the log shows that the `[http]` port was taken. The node keeps running without its
     /// dashboard then (`dashboard stopped`), so the rig kills it; at the
     /// OMS's first start (no data directory and no watcher configuration
     /// yet) it removes the data directory, moves the port and starts once
@@ -731,7 +733,7 @@ impl Oms {
                 if self.exit().is_some()
                     || Instant::now() >= end
                     || up(self.pid().unwrap(), self.status_admin(), || {
-                        self.status_http()
+                        self.status_http_within(Duration::from_secs(1))
                     })
                 {
                     break false;
@@ -824,9 +826,16 @@ impl Oms {
 
     /// `GET /api/status` over HTTP, as the watcher asks it.
     pub fn status_http(&self) -> Option<Value> {
+        self.status_http_within(Duration::from_secs(5))
+    }
+
+    /// [`Oms::status_http`] with a read timeout of `t`: `start` asks with
+    /// a short one, so a holder of the port that never answers costs one
+    /// second of its wait, not five.
+    fn status_http_within(&self, t: Duration) -> Option<Value> {
         let port = self.port();
         let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).ok()?;
-        s.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+        s.set_read_timeout(Some(t)).ok()?;
         write!(
             s,
             "GET /api/status HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"

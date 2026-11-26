@@ -482,4 +482,75 @@ fn the_rig_moves_a_taken_http_port_once_and_a_second_taken_port_is_a_preconditio
         "{e}"
     );
     assert!(oms.pid().is_none(), "an OMS was left running");
+
+    // The holder of the port answers `/api/status` with JSON, as another
+    // OMS does: the rig still sees the taken port and moves it.
+    let w4 = World::new("jh", Timers::Short, Duration::from_secs(30));
+    let holder = std::net::TcpListener::bind(("127.0.0.1", w4.port())).unwrap();
+    let held = w4.port();
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let answers = std::thread::spawn({
+        let stop = stop.clone();
+        move || answer_status_until(&holder, &stop)
+    });
+    let mut oms = w4.oms();
+    oms.start(&[]);
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    answers.join().unwrap();
+    assert_ne!(
+        oms.port(),
+        held,
+        "a port held by an answering server was not moved"
+    );
+    let pid = u64::from(oms.pid().unwrap());
+    assert_eq!(oms.status_http().unwrap()["node"]["pid"], pid);
+}
+
+/// Answers every connection on `l` with `200` and `{}` until `stop` is
+/// set (at most 60 s).
+fn answer_status_until(l: &std::net::TcpListener, stop: &std::sync::atomic::AtomicBool) {
+    use std::io::{Read, Write};
+    l.set_nonblocking(true).unwrap();
+    let end = Instant::now() + Duration::from_secs(60);
+    while !stop.load(std::sync::atomic::Ordering::Relaxed) && Instant::now() < end {
+        match l.accept() {
+            Ok((mut s, _)) => {
+                s.set_nonblocking(false).unwrap();
+                s.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+                let _ = s.read(&mut [0; 1024]);
+                let _ = s.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                );
+            }
+            Err(_) => std::thread::sleep(Duration::from_millis(5)),
+        }
+    }
+}
+
+/// `Oms::start`'s rule for an OMS that is up: both statuses name the
+/// started process; another server's `/api/status` does not count.
+#[test]
+fn the_rig_takes_an_oms_as_up_only_when_the_admin_socket_and_api_status_name_its_pid() {
+    let ours = json!({"node": {"pid": 7}});
+    let other = json!({"node": {"pid": 8}});
+    assert!(up(7, Some(ours.clone()), || Some(ours.clone())));
+    assert!(!up(7, Some(ours.clone()), || None), "no /api/status");
+    assert!(
+        !up(7, Some(ours.clone()), || Some(json!({}))),
+        "/api/status of no node"
+    );
+    assert!(
+        !up(7, Some(ours.clone()), || Some(other.clone())),
+        "/api/status of another node"
+    );
+    assert!(
+        !up(7, Some(other.clone()), || Some(ours.clone())),
+        "admin of another node"
+    );
+    assert!(
+        !up(7, None, || panic!(
+            "/api/status asked before the admin socket answered"
+        )),
+        "no admin socket"
+    );
 }
