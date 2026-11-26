@@ -98,7 +98,7 @@ fn suite_dirs(suite: &str) -> Option<&'static [&'static str]> {
         "node-unit" => &["crates/oms-node/src", "crates/oms-node/tests"],
         "alert" => &["crates/alert-direct/src", "crates/alert-direct/tests"],
         "watcher" => &["crates/watcher/src", "crates/watcher/tests", "crates/watcher-conformance/tests"],
-        "pipeline" => &["crates/oms-node/tests"],
+        "pipeline" => &["crates/oms-node/src", "crates/oms-node/tests"],
         "e2e" | "kills-extended" => &["crates/oms-node/tests"],
         "hl-live" | "bybit-testnet" => &["crates/oms-node/tests"],
         _ => return None,
