@@ -240,7 +240,24 @@ fn prepare_bins(root: &Path, bin_dir: &Path) -> Result<(PathBuf, PathBuf, PathBu
         Ok(to)
     };
     let (watcher, omsctl) = (copy(&watcher)?, copy(&omsctl)?);
-    let v = Command::new(&watcher)
+    check_watcher_version(&watcher)?;
+    Ok((watcher, omsctl, node))
+}
+
+/// `--runs`: absent is 1; else a number from 1 to [`RUNS_MAX`].
+pub fn parse_runs(runs: Option<&str>) -> Result<u64, String> {
+    match runs.map_or(Ok(1), str::parse::<u64>) {
+        Ok(n) if (1..=RUNS_MAX).contains(&n) => Ok(n),
+        _ => Err(format!(
+            "--runs {}: a number from 1 to {RUNS_MAX}",
+            runs.unwrap_or("")
+        )),
+    }
+}
+
+/// The copied watcher's `--version` must end in ` test-endpoints`.
+pub fn check_watcher_version(watcher: &Path) -> Result<(), String> {
+    let v = Command::new(watcher)
         .arg("--version")
         .output()
         .map_err(|e| format!("{} --version: {e}", watcher.display()))?;
@@ -251,7 +268,7 @@ fn prepare_bins(root: &Path, bin_dir: &Path) -> Result<(PathBuf, PathBuf, PathBu
             watcher.display()
         ));
     }
-    Ok((watcher, omsctl, node))
+    Ok(())
 }
 
 pub fn run(root: &Path, runs: Option<&str>, only: Option<&str>) -> i32 {
@@ -262,13 +279,10 @@ pub fn run(root: &Path, runs: Option<&str>, only: Option<&str>) -> i32 {
             return 2;
         }
     };
-    let runs = match runs.map_or(Ok(1), str::parse::<u64>) {
-        Ok(n) if (1..=RUNS_MAX).contains(&n) => n,
-        _ => {
-            eprintln!(
-                "joint: --runs {}: a number from 1 to {RUNS_MAX}",
-                runs.unwrap_or("")
-            );
+    let runs = match parse_runs(runs) {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("joint: {e}");
             return 2;
         }
     };
@@ -434,6 +448,44 @@ mod tests {
                 .expect("test setup"),
         )
         .expect("test setup");
+    }
+
+    #[test]
+    fn runs_is_1_when_absent_and_else_a_number_from_1_to_99() {
+        assert_eq!(parse_runs(None), Ok(1));
+        assert_eq!(parse_runs(Some("1")), Ok(1));
+        assert_eq!(parse_runs(Some("99")), Ok(RUNS_MAX));
+        for v in ["0", "100", "abc", "", "-1"] {
+            let e = parse_runs(Some(v)).expect_err("refused");
+            assert!(e.contains("a number from 1 to 99"), "{v}: {e}");
+        }
+    }
+
+    /// A script stands in for the copied watcher.
+    #[test]
+    fn a_watcher_whose_version_does_not_end_in_test_endpoints_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = scratch("version");
+        std::fs::create_dir_all(&d).expect("test setup");
+        let script = |name: &str, line: &str| {
+            let p = d.join(name);
+            std::fs::write(&p, format!("#!/bin/sh\necho '{line}'\n")).expect("test setup");
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o700))
+                .expect("test setup");
+            p
+        };
+        let good = script("good", "watcher 0.1.0 test-endpoints");
+        assert_eq!(check_watcher_version(&good), Ok(()));
+        for (name, line) in [
+            ("plain", "watcher 0.1.0"),
+            ("inner", "watcher 0.1.0 test-endpoints extra"),
+        ] {
+            let e = check_watcher_version(&script(name, line)).expect_err("refused");
+            assert!(e.contains("not the test build"), "{e}");
+        }
+        let e = check_watcher_version(&d.join("missing")).expect_err("refused");
+        assert!(e.contains("--version"), "{e}");
+        std::fs::remove_dir_all(&d).expect("test setup");
     }
 
     #[test]
