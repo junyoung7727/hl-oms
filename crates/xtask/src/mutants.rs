@@ -3830,6 +3830,15 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "oms-node", "--features", "joint", "--test", "joint", "--", "--test-threads=1", "--exact", "j5b_a_node_stopped_after_the_flush_before_the_send_closes_the_order_as_not_placed"],
         guards: "C-JOINT / V-JOINT-5",
     },
+    Mutant {
+        id: "M423-oms-resends-an-order-on-its-ack",
+        what: "the OMS sends SendOrder again when an order is acked: the order the restart left in doubt is acked once the venue answers it open, after the gateway's boot checks, so the resend reaches the venue as a second create for the same orderLinkId (every other acked order is resent too; review 1 N2: M421's resend never reaches the venue; a joint test)",
+        file: "crates/oms-core/src/core.rs",
+        find: "            Event::OrderAccepted { order_id, .. } => {",
+        replace: "            Event::OrderAccepted { order_id, .. } | Event::OrderAcked { order_id, .. } => {",
+        test: &["-p", "oms-node", "--features", "joint", "--test", "joint", "--", "--test-threads=1", "--exact", "j5a_a_node_killed_while_its_create_is_at_the_venue_restarts_into_one_order_and_no_mismatch"],
+        guards: "C-JOINT / V-JOINT-5",
+    },
 ];
 
 /// A mutant whose test is a joint test (`--features joint`, ADR-039): its
