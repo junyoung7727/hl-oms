@@ -130,6 +130,24 @@ fn every_argument_reaches_its_key() {
         (&r["qty"], &r["orderStatus"]),
         (&json!("0.002"), &json!("PartiallyFilled"))
     );
+    let e = Execution {
+        symbol: "ETHUSDT",
+        exec_id: "e7",
+        exec_type: "Funding",
+        side: "Sell",
+        qty: "0.002",
+        price: "2500.5",
+        fee: "0.003",
+        exec_time_ms: 1_700_000_000_123,
+        order_link_id: "l7",
+        order_id: "o7",
+    };
+    assert_eq!(
+        execution_row(&e),
+        json!({"symbol": "ETHUSDT", "execId": "e7", "execType": "Funding", "side": "Sell",
+            "execQty": "0.002", "execPrice": "2500.5", "execFee": "0.003",
+            "execTime": "1700000000123", "orderLinkId": "l7", "orderId": "o7"})
+    );
     assert_eq!(
         cancel_all(&[("o7".into(), "l7".into()), ("o8".into(), "l8".into())]),
         json!({"list": [{"orderId": "o7", "orderLinkId": "l7"},
