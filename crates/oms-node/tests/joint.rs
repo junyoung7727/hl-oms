@@ -1180,6 +1180,200 @@ fn j6b_failing_watcher_checks_close_the_gate_after_the_check_age_limit() {
     w.assert_venue_invariants();
 }
 
+/// Every `kill_loop_ended`: record time (µs) and outcome.
+fn kill_loop_ends(oms: &Oms) -> Vec<(Ts, KillOutcome)> {
+    oms.events("kill_loop_ended")
+        .into_iter()
+        .filter_map(|(at, e)| match e {
+            Event::KillLoopEnded { outcome, .. } => Some((at, outcome)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The OMS's Short `[venue] kill_after_ms` and `kill_watch_ms`
+/// (`joint_rig::Timers::Short`).
+const KILL_AFTER_MS: u64 = 10_000;
+const KILL_WATCH_MS: u64 = 10_000;
+
+/// What the watcher must not have said about a difference: a
+/// `watcher_mismatch` hold, a `confirmed difference` line, a `[WATCH P1]`
+/// mismatch message.
+fn assert_no_mismatch(w: &World, oms: &Oms, watcher: &Watcher) {
+    let holds = holds_of(oms, HoldKind::WatcherMismatch);
+    let lines = watcher.log_containing("confirmed difference");
+    let watch = telegram_with(w, "[WATCH P1]", "불일치");
+    if !holds.is_empty() || !lines.is_empty() || !watch.is_empty() {
+        w.fail(&format!(
+            "a mismatch: holds {holds:?}, lines {lines:?}, telegram {watch:?}"
+        ));
+    }
+}
+
+/// J4: the private stream goes half-open (no pong, no reconnect) while two
+/// plain orders rest. The OMS latches its kill (`hold_set{kill, source:
+/// stream}`) between 9 s and 11 s after the last pong, its cancel-alls
+/// empty the book and its loop confirms zero after `kill_watch_ms`; its
+/// reconciler is off while the link is down, so the journal keeps both
+/// orders open and acked. The watcher meanwhile goes on with its rounds and
+/// heartbeats, W5 does not fire (`/api/status` answers), and it raises no
+/// mismatch through the outage and three W1 rounds after the
+/// confirmation: an order missing at the venue during a kill is not a
+/// difference (W1, C-WATCH part 5). When the stream answers again the
+/// reconcile closes both orders, `clear-hold kill` is taken, a plain order
+/// is accepted, and still no mismatch for two rounds.
+#[test]
+fn j4_a_ten_second_stream_outage_kills_in_the_oms_and_the_watcher_raises_nothing() {
+    let w = World::new("j4", Timers::Short, Duration::from_secs(90));
+    let (oms, watcher) = start_both(&w);
+    let r1 = working(&w, &oms, "r1", "29000");
+    let r2 = working(&w, &oms, "r2", "28900");
+    std::thread::sleep(Duration::from_millis(1_500));
+
+    w.fake
+        .private
+        .silent
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    std::thread::sleep(Duration::from_millis(50));
+    let last = w
+        .fake
+        .private
+        .last_pong
+        .lock()
+        .unwrap()
+        .expect("a pong before the outage");
+    let last_ms = now_ms() - last.elapsed().as_millis() as u64;
+    let at_9 = last + Duration::from_millis(KILL_AFTER_MS - 1_000);
+    w.never(
+        "the OMS latched its kill or sent a cancel-all before 9 s",
+        at_9.saturating_duration_since(Instant::now()),
+        || {
+            !holds_of(&oms, HoldKind::Kill).is_empty()
+                || !w.fake.with(|b, _| b.cancel_alls(OKEY)).is_empty()
+        },
+    );
+    w.wait(
+        "the OMS latches its kill by 11 s after the last pong",
+        (last + Duration::from_millis(KILL_AFTER_MS + 1_000))
+            .saturating_duration_since(Instant::now()),
+        || !holds_of(&oms, HoldKind::Kill).is_empty(),
+    );
+    let kills = holds_of(&oms, HoldKind::Kill);
+    assert_eq!(kills.len(), 1, "{kills:?}");
+    let (latched_at, source, note) = kills[0].clone();
+    assert_eq!(source, HoldSource::Stream, "{note}");
+    println!(
+        "j4: kill latched {} ms after the last pong",
+        latched_at / 1_000 - last_ms
+    );
+    w.wait(
+        "the OMS's cancel-alls empty the book",
+        Duration::from_secs(5),
+        || {
+            w.fake
+                .with(|b, _| !b.cancel_alls(OKEY).is_empty() && b.open_orders().is_empty())
+        },
+    );
+    // The reconciler is off while the link is down: both orders stay open
+    // in the journal.
+    assert_eq!(
+        (closed(&oms, r1), closed(&oms, r2)),
+        (None, None),
+        "an order closed in the journal while the link is down"
+    );
+    w.wait(
+        "the OMS's kill loop confirms zero",
+        Duration::from_secs(KILL_WATCH_MS / 1_000 + 10),
+        || !kill_loop_ends(&oms).is_empty(),
+    );
+    let ends = kill_loop_ends(&oms);
+    assert_eq!(ends.len(), 1, "{ends:?}");
+    let (ended_at, outcome) = ends[0];
+    assert_eq!(outcome, KillOutcome::Confirmed);
+    assert!(
+        ended_at - latched_at >= KILL_WATCH_MS * 1_000,
+        "the loop confirmed {} µs after the latch",
+        ended_at - latched_at
+    );
+    // Three W1 rounds after the confirmation, the stream still down.
+    let idx = w.log_len();
+    w.wait(
+        "three W1 rounds after the confirmation",
+        Duration::from_secs(5),
+        || w.answers_after(WKEY, "/v5/order/realtime", idx).len() >= 3,
+    );
+    assert_eq!(
+        (closed(&oms, r1), closed(&oms, r2)),
+        (None, None),
+        "an order closed in the journal while the link is down"
+    );
+    // The watcher saw the outage through: rounds and heartbeats went on,
+    // W5 did not fire.
+    let latched_ms = latched_at / 1_000;
+    let rounds = w
+        .requests(WKEY, "/v5/order/realtime")
+        .iter()
+        .filter(|t| **t > latched_ms)
+        .count();
+    let beats = heartbeats(&oms)
+        .iter()
+        .filter(|(at, _)| *at > latched_at)
+        .count();
+    assert!(
+        rounds >= 10 && beats >= 5,
+        "{rounds} W1 requests and {beats} heartbeats after the latch"
+    );
+    assert!(
+        watcher.log_containing("W5").is_empty() && !w.marker().exists(),
+        "W5 fired: {:?}",
+        watcher.log_containing("W5")
+    );
+    assert!(w.systemctl_log().is_empty(), "{:?}", w.systemctl_log());
+    assert_no_mismatch(&w, &oms, &watcher);
+
+    // The stream answers again: the link comes up and the reconcile closes
+    // both orders.
+    w.fake
+        .private
+        .silent
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    w.wait(
+        "the link is up and both orders are closed",
+        Duration::from_secs(15),
+        || {
+            oms.status_admin()
+                .is_some_and(|s| s["core"]["link"]["up"] == true)
+                && matches!(closed(&oms, r1), Some(CloseReason::Canceled { .. }))
+                && matches!(closed(&oms, r2), Some(CloseReason::Canceled { .. }))
+        },
+    );
+    clear_hold(
+        &w,
+        &oms,
+        "kill",
+        "stream back, venue checked, zero open orders",
+    );
+    w.wait(
+        "/api/status holds no kill_latched",
+        Duration::from_secs(2),
+        || !status_holds(&oms).contains(&"kill_latched".to_string()),
+    );
+    let after = working(&w, &oms, "after-kill", "29000");
+    assert!(
+        w.fake.with(|b, _| b.by_link(&oms.link(after)).is_some()),
+        "the order after the release is not at the venue"
+    );
+    let idx = w.log_len();
+    w.wait(
+        "two W1 rounds after the release",
+        Duration::from_secs(5),
+        || w.answers_after(WKEY, "/v5/order/realtime", idx).len() >= 2,
+    );
+    assert_watcher_quiet(&w, &oms, &watcher);
+    assert!(watcher.exit().is_none(), "the watcher ended");
+    w.assert_venue_invariants();
+}
+
 /// The rig's own rules: a base directory inside a git work tree, a
 /// relative one and a socket path of 100 bytes or more are refused; a
 /// start of the OMS with an `OMS_TEST_` variable, and a watcher timer
