@@ -9,32 +9,29 @@
 
 #![allow(clippy::unwrap_used)]
 
-use futures_util::{SinkExt, StreamExt};
-use http_fake::{Answer as Http, FakeHttp};
+mod bybit_fake;
+
+use bybit_fake::journal::{journal_holds, kill_events, records};
+use bybit_fake::ws::{FakeWs, Kind, OnOrder, placed};
+use http_fake::{Answer as Http, FakeHttp, bybit};
 use oms_api::client::{Client, now_us};
 use oms_api::*;
 use oms_core::*;
 use serde_json::{Value, json};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::net::TcpListener;
-use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::Message;
 
 const CREATE_PATH: &str = "/v5/order/create";
 
 fn ok(result: Value) -> Http {
-    Http::Reply(
-        200,
-        json!({"retCode": 0, "retMsg": "OK", "result": result, "time": 1}).to_string(),
-    )
+    bybit::ok(result)
 }
 
 fn list(rows: Vec<Value>) -> Http {
-    ok(json!({"category": "linear", "list": rows, "nextPageCursor": ""}))
+    bybit::list(rows, "")
 }
 
 /// The REST venue and the IP echo on one loopback server: the boot checks
@@ -43,11 +40,13 @@ fn rest_venue() -> Arc<FakeHttp> {
     let api = FakeHttp::start(Http::Reply(404, "{}".into()));
     api.route(
         "/v5/user/query-api",
-        [ok(json!({
-            "isMaster": false, "userID": 4242, "parentUid": "1000", "readOnly": 0,
-            "ips": ["127.0.0.1"],
-            "permissions": {"ContractTrade": ["Order", "Position"], "Spot": []}
-        }))],
+        [ok(bybit::query_api_key(
+            4242,
+            "1000",
+            0,
+            json!({"ContractTrade": ["Order", "Position"], "Spot": []}),
+            &["127.0.0.1"],
+        ))],
     );
     api.route(
         "/v5/account/info",
@@ -57,24 +56,17 @@ fn rest_venue() -> Arc<FakeHttp> {
     );
     api.route(
         "/v5/market/instruments-info",
-        [ok(
-            json!({"category": "linear", "list": [{"symbol": "BTCUSDT", "settleCoin": "USDT", "status": "Trading",
-            "priceFilter": {"tickSize": "0.10"}, "lotSizeFilter": {"qtyStep": "0.001"}}], "nextPageCursor": ""}),
-        )],
+        [list(vec![bybit::instrument_row("BTCUSDT", "0.10", "0.001")])],
     );
     api.route(
         "/v5/position/list",
-        [list(vec![
-            json!({"symbol": "BTCUSDT", "positionIdx": 0, "size": "0", "side": ""}),
-        ])],
+        [list(vec![bybit::position_row("BTCUSDT", "", "0")])],
     );
     // A venue clock far ahead (year 2096): the local clock is behind, so
     // the clock check passes whenever the test runs.
     api.route(
         "/v5/market/time",
-        [ok(
-            json!({"timeSecond": "4000000000", "timeNano": "4000000000000000000"}),
-        )],
+        [ok(bybit::market_time(4_000_000_000_000_000_000))],
     );
     api.route("/ip", [Http::Reply(200, "127.0.0.1\n".into())]);
     api.route("/v5/execution/list", [list(vec![])]);
@@ -83,181 +75,18 @@ fn rest_venue() -> Arc<FakeHttp> {
     // The kill loop's cancel-all (U18b2): nothing open to cancel.
     api.route(
         "/v5/order/cancel-all",
-        [ok(json!({"list": [], "success": "1"}))],
+        [ok(bybit::cancel_all(&[]))],
     );
     Arc::new(api)
 }
 
 /// An open order of ours as the venue lists it.
 fn open_order(link: &str) -> Value {
-    json!({
-        "orderId": "o-ws-1", "orderLinkId": link, "symbol": "BTCUSDT", "side": "Buy",
-        "price": "30000", "qty": "0.001", "orderStatus": "New", "cancelType": "UNKNOWN",
-        "rejectReason": "EC_NoError", "leavesQty": "0.001", "cumExecQty": "0",
-        "updatedTime": "1700000000123"
-    })
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum Kind {
-    Private,
-    Trade,
-    Public,
-}
-
-/// What the fake WS Trade answers to an order request (`None`: silence).
-type OnOrder = Arc<dyn Fn(&Value) -> Option<Value> + Send + Sync>;
-
-/// A loopback Bybit WebSocket of one kind. It answers auth, subscribe and
-/// ping in the documented shapes, hands order requests to `on_order`, and
-/// sends what a test pushes to the newest connection.
-struct FakeWs {
-    url: String,
-    /// Every text received, over all connections.
-    got: Arc<Mutex<Vec<Value>>>,
-    push: Arc<Mutex<Option<mpsc::UnboundedSender<String>>>>,
-    /// While set, the fake answers nothing (a half-open network): no
-    /// pong, and no auth or subscribe for a reconnect.
-    silent: Arc<AtomicBool>,
-    /// When the last pong was written.
-    last_pong: Arc<Mutex<Option<Instant>>>,
-}
-
-impl FakeWs {
-    fn start(rt: &tokio::runtime::Runtime, kind: Kind, on_order: Option<OnOrder>) -> FakeWs {
-        let listener = rt.block_on(TcpListener::bind("127.0.0.1:0")).unwrap();
-        let path = match kind {
-            Kind::Private => "/v5/private",
-            Kind::Trade => "/v5/trade",
-            Kind::Public => "/v5/public/linear",
-        };
-        let fake = FakeWs {
-            url: format!("ws://{}{path}", listener.local_addr().unwrap()),
-            got: Arc::default(),
-            push: Arc::default(),
-            silent: Arc::default(),
-            last_pong: Arc::default(),
-        };
-        let (got, push) = (fake.got.clone(), fake.push.clone());
-        let (silent, last_pong) = (fake.silent.clone(), fake.last_pong.clone());
-        rt.spawn(async move {
-            while let Ok((tcp, _)) = listener.accept().await {
-                let Ok(ws) = tokio_tungstenite::accept_async(tcp).await else {
-                    continue;
-                };
-                let (tx, rx) = mpsc::unbounded_channel();
-                *push.lock().unwrap() = Some(tx);
-                tokio::spawn(serve(
-                    ws,
-                    kind,
-                    got.clone(),
-                    rx,
-                    on_order.clone(),
-                    silent.clone(),
-                    last_pong.clone(),
-                ));
-            }
-        });
-        fake
-    }
-
-    fn received(&self, op: &str) -> Vec<Value> {
-        self.got
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|v| v["op"] == op)
-            .cloned()
-            .collect()
-    }
-
-    fn send(&self, text: String) {
-        let _ = self.push.lock().unwrap().as_ref().unwrap().send(text);
-    }
-}
-
-async fn serve(
-    ws: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
-    kind: Kind,
-    got: Arc<Mutex<Vec<Value>>>,
-    mut ctl: mpsc::UnboundedReceiver<String>,
-    on_order: Option<OnOrder>,
-    silent: Arc<AtomicBool>,
-    last_pong: Arc<Mutex<Option<Instant>>>,
-) {
-    let (mut write, mut read) = ws.split();
-    loop {
-        tokio::select! {
-            m = read.next() => {
-                let Some(Ok(Message::Text(t))) = m else { return };
-                let v: Value = serde_json::from_str(t.as_str()).unwrap_or_default();
-                got.lock().unwrap().push(v.clone());
-                let answer = match (kind, v["op"].as_str().unwrap_or("")) {
-                    (Kind::Private, "auth") => Some(json!({"success": true, "ret_msg": "", "op": "auth", "conn_id": "c"})),
-                    (Kind::Private, "subscribe") => Some(json!({"success": true, "ret_msg": "", "op": "subscribe", "conn_id": "c"})),
-                    (Kind::Private, "ping") => Some(json!({"req_id": v["req_id"], "op": "pong", "args": ["1"], "conn_id": "c"})),
-                    (Kind::Trade, "auth") => Some(json!({"retCode": 0, "retMsg": "OK", "op": "auth", "connId": "c"})),
-                    (Kind::Trade, "ping") => Some(json!({"reqId": v["req_id"], "retCode": 0, "retMsg": "OK", "op": "pong", "data": ["1"], "connId": "c"})),
-                    (Kind::Trade, "order.create" | "order.cancel") => on_order.as_ref().and_then(|f| f(&v)),
-                    (Kind::Public, "subscribe") => Some(json!({"success": true, "ret_msg": "", "conn_id": "c", "req_id": v["req_id"], "op": "subscribe"})),
-                    (Kind::Public, "ping") => Some(json!({"success": true, "ret_msg": "pong", "conn_id": "c", "req_id": "", "op": "ping"})),
-                    _ => None,
-                };
-                let answer = answer.filter(|_| !silent.load(Ordering::SeqCst));
-                if let Some(a) = answer {
-                    if write.send(Message::text(a.to_string())).await.is_err() {
-                        return;
-                    }
-                    if v["op"] == "ping" {
-                        *last_pong.lock().unwrap() = Some(Instant::now());
-                    }
-                }
-            }
-            c = ctl.recv() => match c {
-                Some(t) => {
-                    if write.send(Message::text(t)).await.is_err() {
-                        return;
-                    }
-                }
-                None => return,
-            },
-        }
-    }
-}
-
-/// The answer of WS Trade to an accepted create.
-fn placed(v: &Value) -> Value {
-    json!({"reqId": v["reqId"], "retCode": 0, "retMsg": "OK", "op": v["op"],
-           "data": {"orderId": "o-ws-1", "orderLinkId": v["args"][0]["orderLinkId"]},
-           "header": {"X-Bapi-Limit": "10"}, "connId": "c"})
-}
-
-/// Every valid record in the journal files on disk, read without the lock
-/// and without the node: a record being written is not one yet.
-fn records(data: &Path) -> Vec<Record> {
-    oms_journal::Tail::new(data, 0)
-        .peek_beyond(usize::MAX)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|r| serde_json::from_slice(&r.payload).unwrap())
-        .collect()
-}
-
-/// Whether the journal on disk holds the acceptance of the order whose
-/// `orderLinkId` is `link`, for the instance in the data directory.
-fn journal_holds(data: &Path, link: &str) -> bool {
-    let Some(id) = WireIdForm::Base32Pair.decode(link) else {
-        return false;
-    };
-    let instance = std::fs::read_to_string(data.join("INSTANCE"))
-        .ok()
-        .and_then(|t| u64::from_str_radix(t.trim(), 16).ok());
-    instance == Some(id.instance_id)
-        && records(data).iter().any(|r| {
-            r.events.iter().any(
-                |e| matches!(e, Event::OrderAccepted { order_id, .. } if *order_id == id.order_id),
-            )
-        })
+    bybit::with_fields(
+        bybit::order_row(link, "o-ws-1", "BTCUSDT", "Buy", "0.001", "New"),
+        json!({"price": "30000", "cancelType": "UNKNOWN", "rejectReason": "EC_NoError",
+            "leavesQty": "0.001", "cumExecQty": "0", "updatedTime": "1700000000123"}),
+    )
 }
 
 /// The fake Bybit: REST, the three streams, and the tokio runtime they run
@@ -852,25 +681,6 @@ fn an_unanswered_create_is_found_open_by_its_order_link_id_and_never_sent_again(
     );
     std::thread::sleep(Duration::from_millis(500));
     assert_eq!((venue.ws_creates(), venue.rest_creates()), (1, 0));
-}
-
-/// The kill events in the journal files on disk.
-fn kill_events(data: &Path) -> Vec<Event> {
-    records(data)
-        .into_iter()
-        .flat_map(|r| r.events)
-        .filter(|e| {
-            matches!(
-                e,
-                Event::HoldSet {
-                    hold: HoldKind::Kill,
-                    ..
-                } | Event::HoldCleared { .. }
-                    | Event::KillLoopEnded { .. }
-                    | Event::KillRearmed { .. }
-            )
-        })
-        .collect()
 }
 
 fn clear_kill(node: &Node, note: &str) -> Result<String, String> {

@@ -9,6 +9,7 @@
 //! or not at all ([`Oms::Silent`]).
 
 use super::{TestJournal, ev};
+use http_fake::bybit;
 use serde_json::{Value, json};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -73,8 +74,7 @@ pub fn of(name: &str, id: u64) -> Value {
 
 /// An open venue row.
 pub fn row(link: &str, order_id: &str, symbol: &str, side: &str) -> Value {
-    json!({"orderLinkId": link, "orderId": order_id, "symbol": symbol, "side": side,
-        "qty": "1", "orderStatus": "New"})
+    bybit::order_row(link, order_id, symbol, side, "1", "New")
 }
 
 /// The venue row of journal order `id` (orderId `v<id>`).
@@ -93,12 +93,12 @@ pub fn link(id: u64) -> String {
 
 /// A page as the venue writes it.
 pub fn page(rows: Vec<Value>, cursor: &str) -> Result<Value, RestError> {
-    Ok(json!({"category": "linear", "list": rows, "nextPageCursor": cursor}))
+    Ok(bybit::page(rows, cursor))
 }
 
 /// A `/v5/position/list` row (U19a6); `updated`: `updatedTime` (ms).
 pub fn pos(symbol: &str, side: &str, size: &str, updated: Option<u64>) -> Value {
-    let mut r = json!({"symbol": symbol, "side": side, "size": size, "positionIdx": 0});
+    let mut r = bybit::position_row(symbol, side, size);
     if let Some(t) = updated {
         r["updatedTime"] = json!(t.to_string());
     }
@@ -107,16 +107,23 @@ pub fn pos(symbol: &str, side: &str, size: &str, updated: Option<u64>) -> Value 
 
 /// An `/v5/execution/list` row (U19a8); `exec_time` in ms.
 pub fn exec(symbol: &str, id: &str, ty: &str, side: &str, qty: &str, exec_time: u64) -> Value {
-    json!({"symbol": symbol, "execId": id, "execType": ty, "side": side, "execQty": qty,
-        "execPrice": "100", "execFee": "0", "execTime": exec_time.to_string(),
-        "orderLinkId": "", "orderId": ""})
+    bybit::execution_row(&bybit::Execution {
+        symbol,
+        exec_id: id,
+        exec_type: ty,
+        side,
+        qty,
+        price: "100",
+        fee: "0",
+        exec_time_ms: exec_time,
+        order_link_id: "",
+        order_id: "",
+    })
 }
 
 /// A `/v5/account/wallet-balance` account row of type UNIFIED (U19a9).
 pub fn account(equity: &str, maintenance: &str, margin_balance: &str) -> Value {
-    json!({"accountType": "UNIFIED", "totalEquity": equity,
-        "totalMaintenanceMargin": maintenance, "totalMarginBalance": margin_balance,
-        "totalWalletBalance": margin_balance, "coin": []})
+    bybit::wallet_unified(equity, maintenance, margin_balance)
 }
 
 /// The model venue: its open orders, served 50 a page (a full page has a

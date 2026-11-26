@@ -3623,6 +3623,15 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "oms-node", "--features", "failpoints", "--lib", "node::tests::a_failpoints_start_alerts_without_a_test_api_starts_no_sender"],
         guards: "C-GW / V-TESTHOOK-1",
     },
+    Mutant {
+        id: "M400-http-fake-bybit-list-cursor-key",
+        what: "http_fake::bybit writes a list page's cursor under another key than nextPageCursor: every fake that pages through it (the watcher's rig, bybit_node) would serve a page Bybit never writes (spec mutant 8; test support)",
+        file: "crates/http-fake/src/bybit.rs",
+        find: "json!({\"category\": \"linear\", \"list\": rows, \"nextPageCursor\": cursor})",
+        replace: "json!({\"category\": \"linear\", \"list\": rows, \"cursor\": cursor})",
+        test: &["-p", "watcher", "--test", "w1", "an_order_listed_on_two_pages_is_one_difference"],
+        guards: "test support (http-fake)",
+    },
 ];
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {

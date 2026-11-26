@@ -3,6 +3,9 @@
 //! body, or no answer at all (`Answer::Hang`), or from a handler that
 //! computes it from the request (`FakeHttp::respond`). Requests need a
 //! `Content-Length` body (reqwest sends one); keep-alive is supported.
+//! [`bybit`] builds Bybit V5 answers for the fakes.
+
+pub mod bybit;
 
 use std::collections::VecDeque;
 use std::net::SocketAddr;
