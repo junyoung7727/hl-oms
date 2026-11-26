@@ -96,7 +96,7 @@ id = "R07"
 text = "halt 효과의 시점을 정의하고 취소·관측 경로 유지"
 source = "FIA24 §§1.4–1.6"
 boundary = "미전송 queue·늦은 fill"
-logic = ["V-CANCEL-1", "V-HOLD-1", "V-HOLD-2", "V-HOLD-3", "V-HOLD-4", "V-HOLD-5", "V-HOLD-6", "V-KILL-1", "V-KILL-2", "V-KILL-3", "V-KILL-4", "V-KILL-5", "V-API-1"]
+logic = ["V-CANCEL-1", "V-HOLD-1", "V-HOLD-2", "V-HOLD-3", "V-HOLD-4", "V-HOLD-5", "V-HOLD-6", "V-KILL-1", "V-KILL-2", "V-KILL-3", "V-KILL-4", "V-KILL-5", "V-API-1", "V-JOINT-1"]
 bybit = ["V-BYBIT-LIVE-3"]
 untested = [
   "워처 실행은 틱마다, W5의 모든 상태에서, clock::Steady의 시각으로 W5에 답을 주고 poll과 fire를 그 순서로 부른다",
@@ -156,7 +156,7 @@ id = "R11"
 text = "독립 근거와 대사하고 차이·정정을 감사 가능하게 처리"
 source = "FIA24 §§4.1, 4.3"
 boundary = "누락·외부 주문·bust"
-logic = ["V-RECON-1", "V-RECON-2", "V-MIS-1", "V-EXT-1", "V-WATCH-7", "V-WATCH-8", "V-WATCH-9", "V-WATCH-10", "V-BYBIT-RECORDED-1"]
+logic = ["V-RECON-1", "V-RECON-2", "V-MIS-1", "V-EXT-1", "V-WATCH-7", "V-WATCH-8", "V-WATCH-9", "V-WATCH-10", "V-BYBIT-RECORDED-1", "V-JOINT-1"]
 bybit = ["V-BYBIT-LIVE-6"]
 untested = [
   "대조 입력(열린 주문·포지션 조회)은 포지션을 직접 바꾸지 않고 증거 표시와 불일치 목록만 바꾼다. 예외 하나: 거래소 변경 뒤의 포지션 응답은 PositionAdjusted로 장부를 맞춘다(V-VENUE-EXEC-1)",

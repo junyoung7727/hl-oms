@@ -391,6 +391,10 @@ _Avoid_: journal (that is the OMS's), WAL
 The environment variable a test build takes its endpoints from, and only from: `WATCHER_TEST_ENDPOINTS` for a watcher built with the feature `test-endpoints`; `OMS_TEST_BYBIT_WIRING`, and with `[alert]` also `OMS_TEST_TELEGRAM_API`, for an `oms-node` built with `failpoints`. Every Bybit and watcher endpoint is on `127.0.0.1` (the OMS's Telegram API on a loopback address). Without it, or with `network = "mainnet"`, the test build does not start: the watcher's at all, the OMS's Bybit gateway and its `[alert]` sender (a failpoints node on the simulated venue without `[alert]` needs neither variable; the Hyperliquid gateway has no such guard). A test build is never installed; the watcher's says so on `--version` (` test-endpoints` at the end; V-TESTHOOK-1).
 _Avoid_: endpoint override (the installed build has none), failpoint (that is the journal-failure hook of the same OMS feature)
 
+**Joint test** (합동 시험):
+A process test that starts the real `oms-node` (a `failpoints` build with the Bybit gateway) and the real watcher (its `test-endpoints` build) at the same time against one stateful fake Bybit, a fake Telegram, a fake VictoriaMetrics and a fake `systemctl`, and looks at both only through their real interfaces (journal files, `/api/status`, the sockets, the watcher's stderr and metrics, the kill marker). `crates/oms-node/tests/joint.rs`, run by `cargo run -p xtask -- joint`, which needs `OMS_TEST_DIR` outside any git work tree. ADR-039, V-JOINT-1.
+_Avoid_: end-to-end test (`e2e` is the OMS with `simvenue`), integration test (the watcher's own runtime tests use fake sockets)
+
 **Trading slice** (거래 슬라이스):
 The systemd slice `trading.slice` that holds the trading services (the market-data collector, the OMS, the watcher and the projector): `CPUWeight=1000`, and a `MemoryMin` at least the sum of its units' `MemoryMin`, because cgroup v2 limits a child's reservation by its ancestors' (ADR-035).
 _Avoid_: research slice (that is where research jobs go, with `MemoryHigh=8G`), cgroup

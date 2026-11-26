@@ -359,3 +359,13 @@ alternatives = ["OMS가 꺼진 동안 워처 알림을 모두 억제", "OMS를 �
 chosen = "watcher.rules.json(그룹 watcher 10초): 거래 거래소마다 WatcherDown(watcher_up 1분 부재 P1), 곧바로 P1인 WatcherMismatchActive·WatcherKillActive·WatcherKillHaltOwed·WatcherAuthRejected, P2인 WatcherApiKeyExpiring(< 14일)·WatcherPublicIpNotOk·WatcherCheckStale·WatcherHeartbeatStale·WatcherW5Unarmed·WatcherJournalError·WatcherAlertsFailing·WatcherAlertsDropped. 셋째 억제 규칙: OmsDown이 같은 거래소의 P2·P3 WatcherCheckStale|WatcherHeartbeatStale|WatcherW5Unarmed를 막음. D1 d1-trading(한도와 거리 표, 열린 알림은 ALERTS), D4 d4-events(VictoriaLogs의 주문·체결 19종과 정지·킬·불일치 23종, 뺀 9종, 프로젝터 경고, 알림). D3의 매일 확인 명령에 'oms-export*'. 배치 검사: 지표 목록에 워처 26개, R6 WatcherDown, R7 키 규칙과 워처 P1 넷·P2 일곱, R10 억제 셋, G6 명령, G8 D1·D4와 그 고정 패널(D1 한도 표의 변환 포함), G10 이벤트 종류의 분할"
 gives_up = "걸린 OMS 동안 다른 이유로 고장 난 워처 검사의 P2(OmsDown P1만), 재부팅 뒤 OMS를 띄울 때까지 30분마다의 OmsDown·WatcherKillHaltOwed, 워처 export_ms 상한의 검사, D4에서 뺀 9종(하트비트, 기준가 등)과 워처 로그"
 revisit = "저널 이벤트 종류를 더할 때, 워처가 VictoriaLogs에 줄을 넣게 될 때, 주간 검토에서 워처 알림의 시간이나 억제 대상이 맞지 않을 때, 둘째 거래 거래소를 더할 때"
+
+[[adr]]
+id = "ADR-039"
+title = "OMS·워처 합동 프로세스 시험"
+file = "docs/adr/ADR-039-oms-watcher-joint-tests.md"
+problem = "OMS와 독립 워처는 각자 상대의 가짜에만 대고 시험했고, 두 실제 프로그램을 함께 띄운 시험이 없었다. 저널 파일과 C-TAIL 표, /api/status, admin.sock·monitor.sock, 킬 마커 경로, 같은 거래소 계좌에서 두 프로그램이 실제로 합의하는지 보이지 않았다. 두 바이너리는 각자의 시스템 시계로 돌고, 띄운 바이너리가 실제 Bybit·Telegram·systemctl에 닿으면 안 된다"
+alternatives = ["새 crate", "watcher-conformance", "두 라이브러리를 한 프로세스에 링크", "감싸개 바이너리", "시험 안에서 cargo로 워처 빌드", "oms-node 통합 시험 + 기능 joint + xtask joint"]
+chosen = "crates/oms-node/tests/joint.rs(기능 joint = failpoints, required-features), 리그 tests/joint_rig/와 상태가 있는 가짜 Bybit tests/bybit_fake/, 가짜 Telegram·VictoriaMetrics·systemctl, loopback만. Oms::start만 oms-node 명령을 만들고 두 배선 변수를 넣음, 워처는 --version이 ' test-endpoints'로 끝날 때만 설정을 받음, 리그 전제 조건 실패는 'joint rig precondition:'. xtask joint: OMS_TEST_DIR 규칙(설정, 절대, git 밖, 58바이트 이하, 없으면 0700으로 만듦), 세 빌드와 복사, 한 번에 시험 하나씩 N번, 실행 판정과 고아 프로세스 검사. verify 기본 묶음 joint. J1은 배포 기본 시간값"
+gives_up = "두 프로세스의 주입 시계 하나(실시간과 예산), 실제 systemd·polkit(A-22), 실제 Bybit의 시각과 비동기 일괄 취소, OMS_TEST_DIR 없는 xtask verify의 통과"
+revisit = "실제 Bybit testnet의 합동 실행(소유자 허가 뒤), 둘째 거래소의 워처, 두 프로그램이 같은 주입 시계를 받을 수 있게 될 때"

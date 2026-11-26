@@ -12,6 +12,7 @@ cargo run --release -p xtask -- verify --quick    # 시뮬레이션 seed와 강�
 cargo run --release -p xtask -- verify --live-testnet   # + 실제 testnet 읽기 전용 조회 (네트워크 필요)
 cargo run --release -p xtask -- verify --extended <실제 디스크의 디렉터리>   # + 시뮬레이션 seed 3000개, 강제 종료 60회
 cargo run --release -p xtask -- mutants           # 고의로 고장 낸 코드를 시험이 잡는지. 결과: evidence/mutants.json
+OMS_TEST_DIR=<git 밖, 58바이트 이하> cargo run --locked -q -p xtask -- joint --runs 5   # OMS·워처 합동 시험(joint.md)
 cargo run --release -p xtask -- fsync-probe --dir <디렉터리> --label nvme   # 장치의 동기 쓰기 시간
 cargo run --release -p xtask -- core-bench        # 코어의 판단 시간
 cargo run --release -p xtask -- perf --label nvme-final --seconds 60 --dir <실제 디스크의 디렉터리>
@@ -22,6 +23,8 @@ cargo run --release -p xtask -- docs              # 결과를 주장과 묶어 �
 
 결과 파일에는 소스 다이제스트(`crates/`의 모든 `.rs`, `Cargo.toml`, `Cargo.lock`의 해시)가 들어 있다.
 소스를 고치면 다이제스트가 달라지고, 그 전의 결과는 문서와 화면에서 "이전 버전 결과"로 표시된다. 통과로 세지 않는다.
+
+`verify`의 기본 묶음에 `joint`가 있으므로 `verify`(`--quick` 포함)에는 `OMS_TEST_DIR`이 필요하다: 절대 경로, git 작업 트리 밖, 58바이트 이하(없는 디렉터리는 만든다). 없거나 규칙에 맞지 않으면 `xtask joint`가 종료 코드 2로 끝나고 그 묶음은 실패로 기록된다(건너뜀도 통과도 아님). 자세한 것은 [joint.md](joint.md).
 
 | 묶음 | 내용 | 실제로 실행하는 것 | 모의하는 것 |
 |---|---|---|---|
@@ -35,6 +38,7 @@ cargo run --release -p xtask -- docs              # 결과를 주장과 묶어 �
 | `pipeline` | 커밋 관문에 flush 실패를 주입. 커밋 경계마다 프로세스를 멈춤. 직접 알림의 flush 실패·치명 종료·정상 종료(U18a2). failpoints 빌드의 라이브러리 시험(`--lib`: 그 빌드에만 있는 시작 거부, U19c1) | 실제 스레드, 실제 파일, 실제 프로세스 | flush 실패와 중단 지점은 주입(`failpoints` 기능). 텔레그램은 loopback 가짜(`OMS_TEST_TELEGRAM_API`) |
 | `e2e` | 실제 `oms-node`와 `simvenue` 프로세스. 간격 검토의 프로세스 시험 8건 | 프로세스, 소켓, 파일 시스템, SIGKILL | 거래소 |
 | `sim-extended`, `kills-extended` | `--extended`일 때만. 시뮬레이션 seed 3000개, 실제 디스크에서 강제 종료 60회 | 위와 같다 | 위와 같다 |
+| `joint` | OMS·워처 합동 시험(`xtask joint --runs 1`, [joint.md](joint.md)): 리그의 가드와 배선 없는 시험 빌드(J0), 배포 기본 시간값의 한 수명 주기(J1) | `oms-node`(failpoints 빌드)와 워처(시험 빌드) 프로세스, `omsctl`, 저널 파일, 소켓, HTTP, 시스템 시계 | 거래소(상태가 있는 가짜 Bybit 하나), 텔레그램, VictoriaMetrics, `systemctl` |
 | `hl-live` | 실제 testnet에 읽기 전용 조회와 스트림 구독 | 실제 네트워크와 거래소 | 주문은 보내지 않는다 |
 
 가짜 Bybit의 공용 부품: 응답 봉투와 목록 쪽, 주문·포지션·체결·지갑·키·상품·시각 행은 `http_fake::bybit`(`crates/http-fake/src/bybit.rs`, 시험 `crates/http-fake/tests/bybit.rs`)가 만들고, 노드 시험(`bybit_node`)과 워처 시험의 리그(`crates/watcher/tests/common/rig.rs`, `kill_rig.rs`)가 함께 쓴다. 노드 시험의 가짜 WebSocket(비공개 스트림, WS Trade, 공개 스트림)과 디스크의 저널 읽기는 `crates/oms-node/tests/bybit_fake/`에 있다. 어느 것도 "Bybit가 이렇게 동작한다"의 증거가 아니다(행의 모양은 시험이 손으로 쓰던 것과 같다).
@@ -126,6 +130,8 @@ cargo run --release -p xtask -- docs              # 결과를 주장과 묶어 �
 | 문서가 비워 둔 거래소 동작 35건 | 실주문으로만 알 수 있다 | 문서에 없는 응답에서는 결론을 내지 않게 했다. 항목별 해석은 [ADR-017](../adr/ADR-017-hyperliquid-gateway.md)의 표에 있고, 그 해석이 틀렸을 때의 결과도 거기에 적었다. 실험 목록은 [조사 문서 §4](../research/hyperliquid-protocol.md) |
 | 며칠 이상의 연속 운용 | 하지 않았다 | 가장 긴 실행은 60초 부하(V-PERF-1, V-PERF-2)와 강제 종료 60회(V-COMMIT-5)다. 시뮬레이션의 `margin_days`는 가상 시간 50시간이고 실제 시간이 아니다(V-MARGIN-12) |
 | 다른 하드웨어·파일 시스템 | 개발 호스트 한 대 | 측정 조건을 결과에 적었다 |
+| OMS와 워처를 함께 띄운 장애 시나리오(불일치, 관문 닫힘, 킬, 충돌) | 합동 묶음(`joint`)에는 아직 정상 수명 주기(J1)와 리그의 가드(J0)뿐이다 | 두 프로그램은 각자 상대의 가짜에 대고 시험했다. 합동으로 증명하지 않는 것의 목록은 [joint.md](joint.md) §4 |
+| 실제 `admin.sock`에 쓰인 `watcher_kill` 요청과 그 답 | 워처가 킬하는 경우의 OMS는 멈춰 있어 `hello`에 답하지 않는다 | 두 끝을 따로 시험했다(U-21) |
 | 증거금 규칙이 실제 거래소에서 뜻대로 동작하는지 | 실제 거래소에 접속하지 않았다. 증거금 조회는 testnet에도 한 번도 보내지 않았다(U-01) | 규칙의 입력(계좌 가치, 격리 증거금, 최대 레버리지, 거래소 설정, 계좌 모드)의 뜻은 문서에서 읽은 가정 T1~T11이다. §11에 전부 적었다 |
 | 증거금 정책을 켠 노드의 응답 지연 | 부하 측정의 설정에 정책이 없다 | 코어만 잰 판단 시간이 있다(V-PERF-5, 성능 문서) |
 | 디스크가 실제로 가득 찬 상태 | 만들지 않았다 | 여유 부족 차단은 입력을 주입해 시험했다. 쓰기 실패는 주입으로 시험했다 |

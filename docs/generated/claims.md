@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `f298b3dfddb8e468`, 검증 결과의 다이제스트 `7f76e9bbc5ac8483`.
+> 소스 다이제스트 `057dad55a7067491`, 검증 결과의 다이제스트 `7f76e9bbc5ac8483`.
 
-주장 131건: 통과 0, 실패 0, 미실행 131. 결과는 현재 소스(다이제스트 `f298b3dfddb8e468`)에서 돌린 것만 센다. 다른 소스의 결과는 미실행으로 센다.
+주장 132건: 통과 0, 실패 0, 미실행 132. 결과는 현재 소스(다이제스트 `057dad55a7067491`)에서 돌린 것만 센다. 다른 소스의 결과는 미실행으로 센다.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -138,6 +138,7 @@
 | V-WATCH-14 | 워처는 자격 파일의 RSA 키(rsa_private_key, PKCS#8 PEM 글)로도 서명한다: 같은 문자열(timestamp + api_key + recv_window + 질의 또는 본문)의 RSA-SHA256 PKCS#1 v1.5 서명을 표준 base64(패딩 있음)로 X-BAPI-SIGN에 싣고 X-BAPI-SIGN-TYPE은 보내지 않는다. GET과 일괄 취소 POST가 모두 Credentials::sign을 지난다. 자격 파일은 api_key와 api_secret 또는 rsa_private_key 중 정확히 하나만 받고, 둘 다·둘 다 없음·PKCS#1·암호화된 PEM·PEM이 아닌 글·키가 아닌 본문·잘린 본문·빈 키·1024비트 키는 키의 바이트를 담지 않는 한 줄로 시작을 거부하며(PKCS#1과 암호화된 PEM은 openssl 변환 명령을 적는다), Debug는 키를 찍지 않는다. HMAC 키의 서명은 전과 바이트까지 같다. api_secret에 PEM 개인 키가 있으면 HMAC 비밀로 쓰지 않고 rsa_private_key 자리를 말하는 한 줄로 시작을 거부한다 | 단위, 통합(loopback) | 미실행 | `cargo test -p watcher --test sign --test creds --test client` |
 | V-BYBIT-RSA-1 | OMS의 Bybit 게이트웨이는 자격 파일의 RSA 키(rsa_private_key, PKCS#8 PEM 글)로도 서명한다: REST(GET의 질의, POST의 본문)는 같은 문자열의 RSA-SHA256 PKCS#1 v1.5 서명을 표준 base64로 X-BAPI-SIGN에 싣고 X-BAPI-SIGN-TYPE은 보내지 않으며, 비공개 스트림과 WS Trade의 auth는 GET/realtime + expires의 같은 서명을 base64로 싣는다. 모든 서명이 Credentials::sign을 지나고 서명을 만들지 못한 요청은 보내지 않는다(NotSent, auth not sent). 자격 파일은 api_key와 api_secret 또는 rsa_private_key 중 정확히 하나만 받고 워처와 같은 거부를 키의 바이트 없이 한 줄로 내며, Debug는 키를 찍지 않는다. HMAC 키의 서명은 전과 바이트까지 같다. api_secret에 PEM 개인 키가 있으면 HMAC 비밀로 쓰지 않고 rsa_private_key 자리를 말하는 한 줄로 거부한다 | 단위, 통합(loopback) | 미실행 | `cargo test -p oms-node --lib venue::bybit` |
 | V-TESTHOOK-1 | 두 프로그램의 시험 빌드는 loopback 가짜에만 붙는다. 워처의 시험 빌드(기능 test-endpoints)는 모든 끝점을 WATCHER_TEST_ENDPOINTS 하나에서만 받고(rest, ip_echo_url, telegram, systemctl; 모르는 필드와 빠진 필드는 거부) Endpoints::of를 부르지 않으며, rest·ip_echo_url·telegram은 사용자 부분·질의·조각 없는 http://127.0.0.1:<포트>, systemctl은 ..이 없는 절대 경로의 실행 가능한 일반 파일로 링크가 아니고 실제 경로가 /usr·/bin·/sbin 밖이어야 한다(/usr/bin/systemctl도 그 링크도 거부). network = "mainnet"이면 변수가 있어도, 변수가 없으면 testnet에서도 시작을 거부한다(종료 코드 2, 한 줄). OMS의 failpoints 빌드는 Bybit 게이트웨이를 OMS_TEST_BYBIT_WIRING(다섯 끝점 모두 127.0.0.1) 없이는 시작하지 않고(네트워크의 끝점으로 돌아가지 않음, 자격 파일을 읽기 전), mainnet이면 배선이 있어도 거부하며(종료 코드 3), [alert]가 있으면 OMS_TEST_TELEGRAM_API(loopback http) 없이는 직접 알림을 시작하지 않는다(송신기가 생기기 전, 종료 코드 3). 기본 빌드의 watcher --version은 정확히 'watcher <버전>'이고 시험 빌드는 뒤에 ' test-endpoints'를 붙인다 | 단위, 프로세스(loopback) | 미실행 | `cargo test -p watcher --test test_endpoints --test test_endpoints_default; cargo test -p oms-node --lib -- venue::bybit::gateway::tests alerts::tests; cargo test -p oms-node --features failpoints --lib node::tests::a_failpoints_start_alerts; cargo test -p oms-node --features failpoints --test bybit_node a_failpoints_node_` |
+| V-JOINT-1 | 배포 기본 시간값(두 프로그램 설정의 코드 기본값)으로 실제 oms-node와 실제 워처를 상태가 있는 가짜 Bybit 하나에 함께 띄우면: OMS는 감시 없음(unmonitored)으로 시작해 하트비트 전에는 일반 주문을 Hold(Unmonitored)로 거부하고, 관문은 W1·W2가 신선한 워처 'joint'의 하트비트가 기록된 바로 그 기록에서 열린다(monitor_changed{monitored: true}, 첫 하트비트 전이 아님). 주문 A(0.002 매수)의 부분 체결과 나머지 체결이 fill_booked 둘과 order_closed{Filled}로, 주문 B의 취소가 order_closed{Canceled}와 가짜의 Cancelled로 끝난 뒤, 마지막 주문 사건 뒤의 W1~W4 요청 각 3번 이상과 3 × w4_ms + min_age_ms(17초) 동안: watcher_mismatch 보류도 워처가 원인인 보류도 없고, [WATCH P1]도, 워처의 'confirmed difference'·watcher_mismatch·watcher_kill 줄도, 킬 마커도 없다. watcher_heartbeat 기록마다 W1~W4 시각은 기록 시각 이전 15초 안이고 마지막 기록에는 넷이 모두 있다. 끝에서 가짜의 포지션 +0.002 = OMS 장부의 포지션, 열린 주문은 양쪽 모두 0이고, 거래소 불변식이 성립한다. 리그는 시험 빌드가 아닌 워처 바이너리에 설정을 쓰지 않고, 배선 없이 띄운 시험 빌드는 종료 코드 2와 그 한 줄로 끝나며 가짜에 요청하지 않는다 | 프로세스(두 실제 바이너리, loopback 가짜) | 미실행 | `OMS_TEST_DIR=<git 밖, 58바이트 이하> cargo run --locked -q -p xtask -- joint --runs 5` |
 
 ## V-NUM-1 — 십진 문자열과 1e-8 정수 사이의 변환은 정확하며, 표현할 수 없는 입력은 반올림하지 않고 거부한다. 전략 이름은 [A-Za-z0-9_.:-]의 1~32자만 받는다. 문자열 식별자는 만들 때와 역직렬화할 때 같은 검사로 거부한다
 
@@ -3427,4 +3428,23 @@
 | `pipeline/node::tests::a_failpoints_start_alerts_without_a_test_api_starts_no_sender` | 미실행 |  |
 | `pipeline/a_failpoints_node_without_test_wiring_refuses_its_gateway` | 미실행 |  |
 | `pipeline/a_failpoints_node_refuses_mainnet_even_with_a_loopback_wiring` | 미실행 |  |
+
+## V-JOINT-1 — 배포 기본 시간값(두 프로그램 설정의 코드 기본값)으로 실제 oms-node와 실제 워처를 상태가 있는 가짜 Bybit 하나에 함께 띄우면: OMS는 감시 없음(unmonitored)으로 시작해 하트비트 전에는 일반 주문을 Hold(Unmonitored)로 거부하고, 관문은 W1·W2가 신선한 워처 'joint'의 하트비트가 기록된 바로 그 기록에서 열린다(monitor_changed{monitored: true}, 첫 하트비트 전이 아님). 주문 A(0.002 매수)의 부분 체결과 나머지 체결이 fill_booked 둘과 order_closed{Filled}로, 주문 B의 취소가 order_closed{Canceled}와 가짜의 Cancelled로 끝난 뒤, 마지막 주문 사건 뒤의 W1~W4 요청 각 3번 이상과 3 × w4_ms + min_age_ms(17초) 동안: watcher_mismatch 보류도 워처가 원인인 보류도 없고, [WATCH P1]도, 워처의 'confirmed difference'·watcher_mismatch·watcher_kill 줄도, 킬 마커도 없다. watcher_heartbeat 기록마다 W1~W4 시각은 기록 시각 이전 15초 안이고 마지막 기록에는 넷이 모두 있다. 끝에서 가짜의 포지션 +0.002 = OMS 장부의 포지션, 열린 주문은 양쪽 모두 0이고, 거래소 불변식이 성립한다. 리그는 시험 빌드가 아닌 워처 바이너리에 설정을 쓰지 않고, 배선 없이 띄운 시험 빌드는 종료 코드 2와 그 한 줄로 끝나며 가짜에 요청하지 않는다
+
+- 상태: **미실행**
+- 왜 중요한가: 두 프로그램은 서로의 가짜에만 대고 시험했다. 정상 수명 주기에서 두 실제 프로그램이 저널 파일과 C-TAIL 표, /api/status, monitor.sock 하트비트, 같은 거래소 계좌에 대해 합의하지 않으면 거짓 불일치로 보류가 걸리거나 관문이 열리지 않아 거래가 멈춘다. 배포 기본 시간값에서 한 번은 보여야 한다
+- 수준: 프로세스(두 실제 바이너리, loopback 가짜)
+- 전제와 범위: Bybit testnet 설정, BTCUSDT 하나, 전략 a 하나, 배포 기본 시간값(OMS [runtime]·[venue]·[core.policy.monitor]의 기본, 워처 [intervals]·[rules]·[http]·[w5]·[kill]의 기본), [alert]·[kill] marker·[core.policy.monitor] 있음, [core.policy.margin]·[liveness] 없음, 주문 둘(부분·전체 체결, 취소), 한 번에 시험 하나
+- 실제 구성요소: oms-node 바이너리(failpoints 빌드: 코어, 저널, 게이트웨이, 대조기, 관문, 직접 알림, /api/status), 워처 바이너리(test-endpoints 빌드: 시작 확인, 저널 읽기, W1~W4, W5, 하트비트, 지표, 알림), omsctl, 저널 파일, Unix 소켓, HTTP, 시스템 시계
+- 모의·시뮬레이션: Bybit(상태가 있는 가짜 FakeBybit: REST, 비공개 스트림, WS Trade, 공개 스트림, 두 키의 서명 확인), Telegram(http-fake), VictoriaMetrics(http-fake), systemctl(sh 스크립트, 이 시험에서는 불리지 않음)
+- 주입한 장애: 없음(정상 수명 주기). J0: 시험 빌드가 아닌 워처 바이너리, WATCHER_TEST_ENDPOINTS 없는 시험 빌드. 저장소 밖 mut.py의 리그·xtask 변이
+- 판정 기준과 근거: J0: 가드가 'printed "watcher 0.1.0": not the watcher's test build'로 거부하고 w/watcher.toml이 없음; 배선 없는 시험 빌드의 종료 코드 2, stderr 한 줄 'this build is for tests: WATCHER_TEST_ENDPOINTS is required', 가짜 Bybit·Telegram·VM의 요청 0. J1: 위의 순서와 창 모두, 시험 예산 120초 안
+- 재현: `OMS_TEST_DIR=<git 밖, 58바이트 이하> cargo run --locked -q -p xtask -- joint --runs 5`
+- 뒷받침하는 것: C-JOINT, C-WATCH, C-LIVE, C-TAIL, ADR-039, ADR-031
+- 확인하지 않은 범위: 실제 Bybit testnet의 합동 실행(주문 허가와 별도 단위), 실제 systemd·polkit의 K3(A-22), 전원 손실·디스크 가득·/api/status가 답하는 동안 걸린 OMS 코어, 킬 마커 unlink 경쟁(U18b1 N4), 합동 설정의 [core.policy.margin](U-18: 그래서 watcher_mismatch 보류 아래의 감소 전용 주문과 '킬은 감소 전용도 거부'는 합동으로 보이지 않는다), 합동 시험의 RSA 키(V-WATCH-14, V-BYBIT-RSA-1), Hyperliquid·Binance·OKX, 실제 admin.sock에 쓰인 watcher_kill 요청과 OMS의 'latched' 답·hold_set{kill, source: watcher}(U-21), 재시작을 넘는 워처 상태. 이 주장의 시험은 불일치·관문 닫힘·킬·충돌을 일으키지 않는다(그것은 V-JOINT-2~6의 몫이고 아직 시험이 없다). 짧은 시간값(Timers::Short)은 이 주장의 시험이 쓰지 않는다. 시간값과 예산은 판단(모델 아님)이고 5회 연속 통과가 근거다. 가짜 Bybit의 동작(곧바로 적용하는 일괄 취소, 시각 확인 없음, WS auth 서명 확인 없음)은 Bybit의 증거가 아니다
+
+| 시험 | 결과 | 비고 |
+|---|---|---|
+| `joint/j0_the_rig_refuses_a_watcher_built_without_test_endpoints_and_a_test_build_without_wiring_exits_2` | 미실행 |  |
+| `joint/j1_a_whole_life_cycle_at_the_deployed_timers_has_no_mismatch_and_opens_the_gate` | 미실행 |  |
 
