@@ -242,4 +242,4 @@ summary = "두 실제 바이너리(failpoints 빌드의 oms-node와 Bybit 게이
 events = []
 adr = ["ADR-039", "ADR-031", "ADR-030", "ADR-040"]
 code = ["crates/oms-node/tests/joint.rs", "crates/oms-node/tests/joint_rig", "crates/oms-node/tests/bybit_fake", "crates/xtask/src/joint.rs"]
-claims = ["V-JOINT-1", "V-JOINT-2", "V-JOINT-6", "V-JOINT-3", "V-JOINT-4"]
+claims = ["V-JOINT-1", "V-JOINT-2", "V-JOINT-6", "V-JOINT-3", "V-JOINT-4", "V-JOINT-5"]

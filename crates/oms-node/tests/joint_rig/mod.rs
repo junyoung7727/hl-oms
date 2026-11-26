@@ -977,19 +977,32 @@ impl Oms {
         px: &str,
         reduce_only: bool,
     ) -> NewOrderReply {
-        self.client()
-            .new_order(Op::NewOrder {
-                client_order_id: ClientOrderId::new(key).unwrap(),
-                instrument: InstrumentId::new("BTCUSDT").unwrap(),
-                side,
-                qty: Qty::parse(qty).unwrap(),
-                px: Px::parse(px).unwrap(),
-                tif: Tif::Gtc,
-                reduce_only,
-                expires_at: now_us() + 30_000_000,
-                market_ref: None,
-            })
+        self.try_new_order(key, side, qty, px, reduce_only, now_us() + 30_000_000)
             .unwrap()
+    }
+
+    /// [`Oms::new_order`] with its `expires_at` (µs), and the client's
+    /// error kept: a node that stops before its reply gives an error.
+    pub fn try_new_order(
+        &self,
+        key: &str,
+        side: Side,
+        qty: &str,
+        px: &str,
+        reduce_only: bool,
+        expires_at: Ts,
+    ) -> Result<NewOrderReply, oms_api::client::ClientError> {
+        self.client().new_order(Op::NewOrder {
+            client_order_id: ClientOrderId::new(key).unwrap(),
+            instrument: InstrumentId::new("BTCUSDT").unwrap(),
+            side,
+            qty: Qty::parse(qty).unwrap(),
+            px: Px::parse(px).unwrap(),
+            tif: Tif::Gtc,
+            reduce_only,
+            expires_at,
+            market_ref: None,
+        })
     }
 
     pub fn cancel(&self, id: OrderId) -> CancelReply {
@@ -1065,6 +1078,14 @@ impl Oms {
     }
     pub fn sigkill(&self) {
         self.signal(Signal::KILL)
+    }
+
+    /// A closure that sends SIGKILL to the running OMS, for a hook that
+    /// runs on another thread (the fake's [`FakeBybit::silent_for_next_create`]).
+    pub fn sigkill_hook(&self) -> Box<dyn FnOnce() + Send> {
+        let pid = self.pid().expect("the OMS was started");
+        assert!(self.exit().is_none(), "the OMS is not running");
+        Box::new(move || send_signal(pid, Signal::KILL))
     }
 }
 

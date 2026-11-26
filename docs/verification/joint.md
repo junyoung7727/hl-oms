@@ -1,6 +1,6 @@
 # OMS·워처 합동 시험
 
-실제 `oms-node`(failpoints 빌드, Bybit 게이트웨이)와 실제 워처(기능 `test-endpoints`의 시험 빌드)를 함께 띄우고, 상태가 있는 가짜 Bybit 하나(`crates/oms-node/tests/bybit_fake/`: 두 키, 장부 하나), 가짜 Telegram, 가짜 VictoriaMetrics, 가짜 `systemctl`에 loopback으로만 붙인다. 시험은 두 프로그램을 실제 인터페이스로만 본다: 저널 파일, `/api/status`(워처가 묻는 그대로 HTTP)와 admin `Status`, 거래 소켓과 `omsctl`, 워처의 stderr와 지표, 킬 마커, 가짜들의 기록. 결정: [ADR-039](../adr/ADR-039-oms-watcher-joint-tests.md), 이 묶음이 찾은 어긋남의 수정은 [ADR-040](../adr/ADR-040-w1-during-a-kill.md). 주장: V-JOINT-1, V-JOINT-2, V-JOINT-3, V-JOINT-4, V-JOINT-6.
+실제 `oms-node`(failpoints 빌드, Bybit 게이트웨이)와 실제 워처(기능 `test-endpoints`의 시험 빌드)를 함께 띄우고, 상태가 있는 가짜 Bybit 하나(`crates/oms-node/tests/bybit_fake/`: 두 키, 장부 하나), 가짜 Telegram, 가짜 VictoriaMetrics, 가짜 `systemctl`에 loopback으로만 붙인다. 시험은 두 프로그램을 실제 인터페이스로만 본다: 저널 파일, `/api/status`(워처가 묻는 그대로 HTTP)와 admin `Status`, 거래 소켓과 `omsctl`, 워처의 stderr와 지표, 킬 마커, 가짜들의 기록. 결정: [ADR-039](../adr/ADR-039-oms-watcher-joint-tests.md), 이 묶음이 찾은 어긋남의 수정은 [ADR-040](../adr/ADR-040-w1-during-a-kill.md). 주장: V-JOINT-1, V-JOINT-2, V-JOINT-3, V-JOINT-4, V-JOINT-5, V-JOINT-6.
 
 ## 1. 돌리는 법
 
@@ -38,7 +38,9 @@ cargo run --locked -q -p xtask -- joint --only j1     # 이름에 j1이 든 시�
 | `j2a_a_venue_only_order_holds_plain_orders_after_two_rounds_and_two_seconds_until_clear_hold` | 거래소에만 있는 주문 `manual-1`: `hold_set{watcher_mismatch}`(출처 W1, 메모 `W1 foreign …`)은 그 주문을 담은 첫 W1 답 + `min_age_ms`(2초)와 둘째 W1 답 가운데 늦은 것보다 앞서지 않고 그 뒤 5초 안에 하나 기록된다. `/api/status`의 보류, 워처의 `confirmed difference` 한 줄, 워처의 `[WATCH P1]` 하나, OMS의 `[OMS P1]`. 새 일반 주문은 `Hold(WatcherMismatch)`로 거절되고 걸린 주문의 취소는 가짜와 저널에서 닫힌다. 거래소에서 그 주문을 취소하고 W1 두 라운드 뒤 `omsctl clear-hold --reason watcher_mismatch` → `cleared`, `hold_cleared`, 새 일반 주문이 가짜에 닿고 `mismatch_resend_ms`와 W1 두 라운드 동안 보류가 돌아오지 않는다 |
 | `j2b_a_venue_only_fill_holds_after_two_w2_rounds_and_is_released_after_the_oms_books_it` | 거래소에만 있는 체결(외부 `orderLinkId`의 `Trade` 0.001, `min_age_ms + 500` ms 전, OMS의 `fill_floor` + 1초 이상; 리그는 먼저 `min_age_ms + 500 > fills_lag_ms`를 단언한다), `w4_ms` 5초: 보류는 그 포지션을 보인 둘째 W2 답과 그 행을 돌려준 둘째 W4 답 가운데 이른 것보다 앞서지 않는다(출처 W2 또는 W4). 확정 줄과 `[WATCH P1]`(하나나 둘)은 W2·W4의 것뿐. 거절과 취소는 J2a와 같다. 비공개 스트림을 끊으면 OMS가 다시 붙어 체결을 올리고(`external_fill_booked`, `ExternalFill` 하나와 많아야 `PositionOutOfRange` 하나, 둘 다 `instrument:BTCUSDT`), 그 뒤 W2 두 라운드와 W4 두 답 동안 새 확정이 없다. 불일치마다 `omsctl ack`, `clear-hold` 뒤 보류가 돌아오지 않고 새 일반 주문이 받아들여지며, 가짜와 OMS의 포지션이 +0.001로 같다 |
 | `j3_a_hung_oms_is_killed_by_the_watcher_and_boots_latched_until_the_operator_clears_it` | 걸린 OMS(SIGSTOP, 걸린 일반 주문 둘, 워처 `silence_ms` 6초, OMS `kill_after_ms` 30초): SIGSTOP + `silence_ms` − `probe_ms` − `request_timeout_ms`(4.5초) 전에는 마커도 워처 키의 일괄 취소도 없다. 가짜 `systemctl`의 첫 호출은 `--no-ask-password stop -- oms-node-joint.service marker=present`이고 마커(`watcher joint W5 …`)는 그보다 먼저, 워처 키의 첫 일괄 취소는 그 뒤다. OMS는 그 호출 뒤 `stop_wait_ms`(5초) 안에 SIGTERM 경로(`stopped cleanly`, 종료 0)로 끝난다. 가짜가 첫 일괄 취소 뒤 주문 하나를 남기면 워처는 세고 다시 일괄 취소해 0건으로 만들고 둘째 일괄 취소 + `watch_ms`(10초) 뒤 `the kill ended: zero open orders confirmed … the halt is not owed`로 끝낸다. `[WATCH P1]` 시작 알림(`킬 마커: 씀.`, `systemctl stop … 정지됨`, 포지션)과 정리 완료 알림(`다음 시작은 킬 마커로 래치됨`, 포지션) 하나씩. 다시 띄운 OMS: `present_at_boot` 참, `kill_latched`, 부트 기록의 `hold_set{kill, source: marker}`(메모 `marker: watcher joint W5 …`) 하나, 일반·감소 전용 주문은 `Hold(KillLatched)`로 거절, 루프가 확인하기 전의 `clear-hold --reason kill`은 `kill_unconfirmed`로 거절되고 마커는 남음, 확인과 대조의 닫힘 뒤 `cleared`, 마커 지워짐, 기준가와 관문 뒤 일반 주문이 가짜에 닿음. 워처는 둘째 킬이 없고(systemctl 호출 하나, 시작 알림 하나), W5가 다시 무장되고(`watcher_w5_armed` 1), 불일치가 없다 |
-| `j4_a_ten_second_stream_outage_kills_in_the_oms_and_the_watcher_raises_nothing` | 비공개 스트림이 반쯤 열림(pong도 다시 붙기의 auth도 없음), 걸린 일반 주문 둘: 마지막 pong 뒤 9초 전에는 래치도 일괄 취소도 없고 11초 안에 `hold_set{kill, source: stream}` 하나, `OKEY`의 일괄 취소로 장부가 비고 래치 + `kill_watch_ms`(10초) 뒤 `kill_loop_ended{Confirmed}` 하나. 링크가 내려간 동안 두 주문은 저널에서 열려 있고 `clear-hold --reason kill`은 `kill_orders_open: 2 open orders`로 거절된다. 워처는 래치 뒤에도 W1 요청 10개 이상과 하트비트 5개 이상을 이어 가고, W5 줄·마커·systemctl 호출이 없고, 확인 뒤 W1 세 라운드까지 불일치 보류·`confirmed difference`·불일치 `[WATCH P1]`이 없다. 스트림이 돌아오면 대조가 두 주문을 취소로 닫고 `clear-hold`가 `cleared`, 일반 주문이 가짜에 닿고, W1 두 라운드 동안 워처는 아무것도 내지 않는다. ADR-040 전의 워처로는 래치 약 1초 뒤 두 주문의 `W1 missing_at_venue`가 확정되어 `hold_set{watcher_mismatch}`가 기록됐다(발견 F1) |
+| `j4_a_ten_second_stream_outage_kills_in_the_oms_and_the_watcher_raises_nothing` | 비공개 스트림이 반쯤 열림(pong도 다시 붙기의 auth도 없음), 걸린 일반 주문 둘: 마지막 pong 뒤 9초 전에는 래치도 일괄 취소도 없고 11초 안에 `hold_set{kill, source: stream}` 하나, `OKEY`의 일괄 취소로 장부가 비고 래치 + `kill_watch_ms`(10초) 뒤 `kill_loop_ended{Confirmed}` 하나. 링크가 내려간 동안 두 주문은 저널에서 열려 있고 `clear-hold --reason kill`은 `kill_orders_open: 2 open orders`로 거절된다. 워처는 래치 뒤에도 W1 요청 10개 이상과 하트비트 5개 이상을 이어 가고, W5 줄·마커·systemctl 호출이 없고, 확인 뒤 W1 세 라운드까지 불일치 보류·`confirmed difference`·불일치 `[WATCH P1]`이 없다. 스트림이 돌아오면 대조가 두 주문을 취소로 닫고 `clear-hold`가 `cleared`, `/api/status`의 보류가 모두 비면(새 링크 세션의 재동기화가 끝남, 5초 안) 일반 주문이 가짜에 닿고, W1 두 라운드 동안 워처는 아무것도 내지 않는다. ADR-040 전의 워처로는 래치 약 1초 뒤 두 주문의 `W1 missing_at_venue`가 확정되어 `hold_set{watcher_mismatch}`가 기록됐다(발견 F1) |
+| `j5a_a_node_killed_while_its_create_is_at_the_venue_restarts_into_one_order_and_no_mismatch` | 전송 중의 죽음(워처 `silence_ms` 20초): 가짜가 OMS의 WS Trade `order.create`를 읽는 순간 주문을 장부에 올리고 자기 스레드에서 OMS에 SIGKILL을 보내며, 그 생성의 답도 `order` 프레임도 보내지 않는다(거래소가 요청을 읽었다는 것이 정해진다; 시험의 신호가 거래소보다 먼저 닿는 일이 없다). 죽은 OMS(종료 신호 9)의 저널에는 그 주문의 `order_accepted`만 있고 가짜에는 열린 주문 하나와 그 `orderLinkId`의 생성 하나가 있다. 다시 띄운 OMS는 둘째 `booted`와 같은 기록에 `order_in_doubt{Restart}` 하나를 쓰고, `OKEY`의 realtime 조회(`orderLinkId`)로 그것을 열린 주문으로 찾아 결과 불명 없는 `Working`으로 두며, 그 링크의 생성은 WS Trade와 REST, 두 프로세스를 합쳐 하나다. 관문이 다시 열린 뒤의 취소는 저널(`Canceled`)과 가짜(`Cancelled`)에서 닫는다. 워처는 내내 불일치·워처 보류·`[WATCH P1]`·`confirmed difference`·W5의 킬 줄·마커·`systemctl` 호출을 내지 않고 계속 돈다. 주문이 저널과 거래소에 같은 기호·방향으로 열려 있어 W1이 다르게 볼 것이 없으므로, 이 시험은 W1의 건너뜀 규칙을 보이지 않는다(J5b가 보인다) |
+| `j5b_a_node_stopped_after_the_flush_before_the_send_closes_the_order_as_not_placed` | 내구화 뒤 전송 전의 멈춤(failpoint `OMS_CRASH_AT=after_sync`: 새 주문의 기록을 fdatasync한 뒤 응답과 전송 전에 `abort`, `crash_points.rs`의 같은 이름 시험과 같은 경계; 주문 5초 유효): 전략은 응답을 받지 못하고 가짜에는 생성이 없다. 다시 띄운 OMS는 `order_in_doubt{Restart}`를 쓰고 생성 없이 `orderLinkId` 조회(재시작 뒤 realtime 둘 이상, history 넷 이상)를 이어 가며, `expires_at` + `absence_margin_us`(0.3초) 뒤에 묻고 서로 여유 이상 떨어진 찾지 못함 둘(`absence_noted` 둘)을 기록한 기록 안에서만 `order_closed{NotPlaced}`를 쓴다. 그 뒤에도 생성은 0이고, 관문이 다시 열리면 일반 주문이 받아들여진다. 워처는 J5a와 같이 아무것도 내지 않는다. 주문은 저널에만 있으므로, 접수되지 않았거나 결과 불명인 주문을 거래소에 없어도 비교하지 않는 W1의 규칙은 이 시험이 합동으로 보인다(두 조건을 함께 없애면 실패한다; 하나씩은 §4) |
 | `j6a_a_stopped_watcher_closes_the_gate_after_the_heartbeat_limit_and_its_return_opens_it` | 워처를 SIGTERM으로 멈추면(5초 안에 종료 0) OMS는 마지막 하트비트 기록 뒤 `heartbeat_max_age`(10초)보다 늦고 그 + 틱 + 1초 이내에 `monitor_changed{monitored: false}`를 기록하고 일반 주문을 `Hold(Unmonitored)`로 거절하며, 그 기록 + `unmonitored_cancel`(10초) 뒤 + 틱 + 1초 이내에 걸린 일반 주문을 `OKEY`로 한 번 취소한다. 워처를 다시 띄우면 `boot replay done` 줄 뒤 10초 안에 관문이 열리고 주문이 받아들여진다. `--nocapture`에서 `gate closed after <ms> ms`를 찍는다 |
 | `j6b_failing_watcher_checks_close_the_gate_after_the_check_age_limit` | 워처 키의 W1·W2 경로에 503: 하트비트는 계속 기록되고 W1·W2 시각은 그대로이며, 관문은 하트비트가 기록된 그 기록에서 오래된 성공 시각 + `check_max_age`(5초)보다 늦고 그 + `heartbeat_ms` + 1초 이내에 닫힌다. 닫힌 동안 일반 주문은 거절되고 OMS의 취소는 거래소에 닿는다(OMS 요청은 모두 `ok`). 고장을 걷으면 두 하트비트 + 1초 안에 열리고 주문이 받아들여진다. 내내 불일치가 없다 |
 | `the_fake_systemctl_logs_the_wall_clock_in_milliseconds` | 가짜 `systemctl`은 한 초의 첫 50 ms 안에 부른 호출도 부르기 전과 뒤 사이의 벽시계 ms로 적고, 리그의 정지가 아닌 호출은 종료 1이다 |
@@ -64,7 +66,12 @@ J1은 배포 기본 시간값에서 돌았다는 것도 본다: OMS 관문 정�
 | Hyperliquid, Binance, OKX | 소유자가 미룸; 그것들에는 워처가 없다 | — |
 | 실제 `admin.sock`에 쓰인 `watcher_kill` 요청: OMS의 `"latched"` 답, `hold_set{kill, source: watcher}`, 그것으로 시작한 OMS의 킬 루프, 정지 뒤 K3를 건너뜀 | W5가 쏘는 시나리오에서 멈춘 OMS는 `hello`에 답하지 않아 K2가 요청을 쓰지 못한다 | U-21 |
 | 재시작을 넘는 워처 상태 | 설계상 기록 1부터 재생한다 | — |
-| 충돌의 합동 시나리오 | 이 묶음의 지금 시험은 J0~J4, J6이다 | 시나리오 J5(V-JOINT-5) |
+| REST 생성 중의 죽음 | 가짜의 훅은 WS Trade 생성에만 걸린다. REST 생성은 WS Trade가 한 바이트도 쓰지 않았을 때만 쓰인다 | — |
+| 쓴 뒤 fdatasync 전, 응답 뒤 전송 전에 멈춘 노드 | J5b는 fdatasync 뒤의 경계 하나다 | V-COMMIT-2, V-COMMIT-4(가상 거래소의 실제 프로세스) |
+| 결과 불명인 채 체결된 주문, 재시작이 잃은 취소(`LostOnRestart`) | J5의 주문에는 체결도 진행 중이던 취소도 없다 | V-DOUBT-*, V-BOOT-1 |
+| 재시작이 W5의 `silence_ms`보다 오래 걸리는 것 | J5는 `silence_ms`를 20초로 두어 재시작보다 길게 잡았다(판단(모델 아님)). 더 길면 W5가 킬한다(J3) | — |
+| W1의 두 조건(접수되지 않음, 결과 불명) 하나씩 | 다시 띄운 OMS에서 J5의 주문은 둘 다이므로 하나만 빠진 비교는 이 시험이 가려내지 못한다(mut.py V7) | 워처의 단위 시험 |
+| 여유보다 가까운 찾지 못함 둘을 하나로 세는 규칙 | 게이트웨이의 조회 간격이 여유(0.3초)보다 넓어 J5b에서는 그런 둘이 생기지 않는다(mut.py V3) | V-ABSENCE-N-1 |
 | 워처의 킬 루프가 도는 동안 OMS를 다시 띄우는 것 | J3은 워처의 정리 완료 알림 뒤에 다시 띄운다 | — |
 | 킬 동안 거래소에서 사라진 주문 뒤의 체결, 킬 동안 나타난 거래소만의 주문 | J4에는 체결도 새 주문도 없다 | V-WATCH-6·8(W2·W4), V-WATCH-15(단위 시험) |
 | 다시 시작한 OMS가 부트 기록(마커의 래치)을 내구화하기 전에 `/api/status`가 답하는가 | 답하지 않는다: 부트·설정 기록이 내구화된 뒤에야 HTTP 서버가 뜬다(`oms-node/src/node.rs`, 코드를 읽은 것; 그 순서만을 겨냥한 시험은 없다). J3은 래치가 `booted`와 같은 기록에 있음을 확인한다 | ADR-040 §8 |
@@ -82,6 +89,8 @@ J1은 배포 기본 시간값에서 돌았다는 것도 본다: OMS 관문 정�
 | 2026-11-26 22:13~22:20 KST, 이 PC(같은 디스크) | 커밋 `0ed69a9`(J2a, J2b, J6a, J6b가 더해짐) | `xtask joint --runs 5` | 5번 모두 통과, 실행마다 시험 10건: 88.4 s(첫 실행, 빌드 확인 포함), 82.6 s, 83.8 s, 82.7 s, 82.7 s |
 
 | 2026-11-27 00:12~00:25 KST, 이 PC(같은 디스크) | 커밋 `3a3e943`(J3, J4와 리그 시험 `the_fake_systemctl_logs_the_wall_clock_in_milliseconds`가 더해짐; 워처의 W1은 ADR-040) | `xtask joint --runs 5` | 5번 모두 통과, 실행마다 시험 13건: 151.0 s(첫 실행, 빌드 확인 포함), 145.1 s, 146.0 s, 146.9 s, 146.4 s |
+
+| 2026-11-27 01:59~02:13 KST, 이 PC(같은 디스크) | 커밋 `c7f6858`(J5a, J5b가 더해짐: 이 묶음의 시나리오 J0~J6이 모두 있다) | `xtask joint --runs 5` | 5번 모두 통과, 실행마다 시험 15건: 175.6 s(첫 실행, 빌드 확인 포함), 169.9 s, 170.0 s, 170.0 s, 170.1 s |
 
 잰 값(커밋 `0ed69a9`, `--nocapture`로 J2·J6을 손으로 3번, 짧은 시간값, 이 PC; 측정값이고 다른 호스트나 부하에서의 범위가 아니다):
 
@@ -109,6 +118,18 @@ J6a의 닫힘은 판정 틱(50 ms)이 `heartbeat_max_age`를 넘긴 첫 틱이�
 | J4: 래치에서 `kill_loop_ended{Confirmed}`까지 | 10,053 ms | 10,052 ms | 10,093 ms | ≥ 10,000 ms(`kill_watch_ms`) |
 
 J3의 마커는 SIGSTOP 뒤 약 5.8~5.9초다: 마지막 정상 탐침이 SIGSTOP보다 앞서고, W5는 `silence_ms`(6초)와 그 뒤 실패한 탐침 하나를 기다린다. 이 측정 전의 한 실행(커밋 `ff2aefd`)에서 J3은 첫 일괄 취소가 `systemctl` 호출보다 336 ms 앞선다고 실패했다: 호출은 실제로 …284.048초였고(OMS가 …284.054초에 멈추기 시작함) `date +%3N`이 `048`을 `483`으로 찍었다. 프로그램의 어긋남이 아니라 리그의 시각이었고, 리그를 고쳤다(§2).
+
+잰 값(커밋 `b929dd6`, `--nocapture`로 J5a·J5b를 손으로 3번, 짧은 시간값, 이 PC; 측정값이고 다른 호스트나 부하에서의 범위가 아니다):
+
+| 무엇 | 1 | 2 | 3 | 시험의 창 |
+|---|---|---|---|---|
+| J5a: OMS가 꺼져 있던 시간(거두는 스레드가 본 종료에서 다시 띄운 OMS가 `up`까지) | 87 ms | 93 ms | 85 ms | 단언하지 않음(`silence_ms` 20초보다 짧아야 W5가 쏘지 않는다) |
+| J5a: 다시 띄운 OMS가 `up`인 때부터 그 주문이 `Working`·결과 불명 없음까지 | 305 ms | 308 ms | 307 ms | ≤ 10,000 ms |
+| J5b: OMS가 꺼져 있던 시간 | 416 ms | 415 ms | 401 ms | 단언하지 않음 |
+| J5b: 센 찾지 못함 둘의 물은 시각(`expires_at` 뒤) | +4,611, +9,710 ms | +4,412, +9,511 ms | +4,506, +9,506 ms | 둘 다 ≥ +300 ms(`absence_margin_us`), 서로 ≥ 300 ms |
+| J5b: `expires_at`에서 `order_closed{NotPlaced}` 기록까지 | 9,793 ms | 9,594 ms | 9,589 ms | 시험 예산 안(재시작 뒤 20초) |
+
+J5b의 찾지 못함은 약 5초 간격이다: 결과 불명 주문의 상태 조회 사이가 여유(0.3초)보다 훨씬 넓어서, 여유보다 가까운 둘을 하나로 세는 규칙은 이 시험에서 쓰이지 않는다(§4, mut.py V3). J5a의 OMS는 SIGKILL 뒤 0.1초 안에 다시 떠, 워처의 W1은 그 사이 판단하지 않고 W5는 쏘지 않는다.
 
 ## 6. CI가 돌리는 법
 
@@ -139,3 +160,6 @@ J3의 마커는 SIGSTOP 뒤 약 5.8~5.9초다: 마지막 정상 탐침이 SIGSTO
 | M418 | 워처의 W1이 저널에 킬 래치가 있는 동안에도 거래소에 없는 주문을 확정한다(ADR-040의 예외 없음) | J4 |
 | M419 | 워처의 W1이 킬 래치 동안 아무 종류도 비교하지 않는다(예외가 `foreign`까지 덮음) | `watcher/a_foreign_order_during_a_kill_is_still_reported` |
 | M420 | 워처의 W1이 킬 래치 동안 우리 주문의 거래소 쪽 종류(`closed_in_journal`, `open_after_terminal`, `details`)를 건너뛴다 | `watcher/the_venue_side_kinds_during_a_kill_are_still_reported` |
+| M421 | OMS가 재시작이 남긴 결과 불명 주문(`order_in_doubt{Restart}`)에 `SendOrder`를 낸다. 이 묶음에서는 그 전송이 게이트웨이의 부팅 검사 전에 나가 `NotSent`(`unchecked: the boot checks have not run yet`)로 닫히므로, 거래소에 열린 주문이 저널에서 닫힌다(검사 뒤에 나갔다면 같은 `orderLinkId`의 둘째 생성; J5a는 둘 다 곧바로 실패로 본다) | J5a |
+| M422 | OMS가 만료 + 여유 뒤의 첫 찾지 못함에 `NotPlaced`로 닫는다(Bybit는 둘이 필요하다, `absence_not_found_needed` 2) | J5b |
+| M423 | OMS가 주문의 접수(`order_acked`)에 `SendOrder`를 다시 낸다: 재시작이 남긴 결과 불명 주문은 거래소가 열려 있다고 답해 접수되는데, 그때는 게이트웨이의 부팅 검사가 끝난 뒤라 다시 보낸 것이 거래소에 같은 `orderLinkId`의 둘째 생성으로 닿는다(다른 접수된 주문도 다시 보낸다). M421의 재전송은 거래소에 닿지 않으므로 J5a의 '생성 하나' 단언은 이 변이가 보인다(검토 1 N2) | J5a |

@@ -380,8 +380,13 @@ fn j1_a_whole_life_cycle_at_the_deployed_timers_has_no_mismatch_and_opens_the_ga
 /// The OMS and the watcher of `w` started in the documented order (OMS
 /// first, unmonitored), the gate open and a reference price there.
 fn start_both(w: &World) -> (Oms, Watcher) {
+    start_both_with(w, &[])
+}
+
+/// [`start_both`] with the OMS's `extra_env` (J5b's failpoint).
+fn start_both_with(w: &World, extra_env: &[(&str, &str)]) -> (Oms, Watcher) {
     let mut oms = w.oms();
-    oms.start(&[]);
+    oms.start(extra_env);
     w.wait(
         "the OMS is up, linked and unmonitored",
         Duration::from_secs(20),
@@ -415,9 +420,11 @@ fn monitored(oms: &Oms) -> Option<bool> {
 
 /// A plain buy of 0.001 at `px`, accepted and working.
 fn working(w: &World, oms: &Oms, key: &str, px: &str) -> OrderId {
-    let NewOrderReply::Accepted { order_id } = oms.new_order(key, Side::Buy, "0.001", px, false)
-    else {
-        w.fail(&format!("the plain order {key} was not accepted"))
+    let reply = oms.new_order(key, Side::Buy, "0.001", px, false);
+    let NewOrderReply::Accepted { order_id } = reply else {
+        w.fail(&format!(
+            "the plain order {key} was not accepted: {reply:?}"
+        ))
     };
     w.wait(
         &format!("order {key} is working"),
@@ -1371,10 +1378,18 @@ fn j4_a_ten_second_stream_outage_kills_in_the_oms_and_the_watcher_raises_nothing
         "kill",
         "stream back, venue checked, zero open orders",
     );
+    // The orders close on their status answers alone; the new link
+    // session's resync (fills, open orders, positions) may still be due
+    // then, and its hold refuses the order as the latch does. One
+    // reconcile round of 100 ms ends it; 5 s also covers a retry of each
+    // account query, paced at one per second (판단(모델 아님)).
     w.wait(
-        "/api/status holds no kill_latched",
-        Duration::from_secs(2),
-        || !status_holds(&oms).contains(&"kill_latched".to_string()),
+        "/api/status holds nothing: no kill_latched, the resync done",
+        Duration::from_secs(5),
+        || {
+            oms.status_http()
+                .is_some_and(|s| s["core"]["holds"] == json!([]))
+        },
     );
     let after = working(&w, &oms, "after-kill", "29000");
     assert!(
@@ -1672,6 +1687,333 @@ fn j3_a_hung_oms_is_killed_by_the_watcher_and_boots_latched_until_the_operator_c
     assert!(from_watcher.is_empty(), "{from_watcher:?}");
     assert_no_mismatch(&w, &oms, &watcher);
     assert!(watcher.exit().is_none(), "the watcher ended");
+    w.assert_venue_invariants();
+}
+
+/// The OMS's Short `[core.policy] absence_margin_us`
+/// (`joint_rig::Timers::Short`).
+const ABSENCE_MARGIN_US: u64 = 300_000;
+
+/// The journal's events about order `id` named `name`, with their record
+/// times.
+fn events_of(oms: &Oms, name: &str, id: OrderId) -> Vec<(Ts, Event)> {
+    oms.events(name)
+        .into_iter()
+        .filter(|(_, e)| e.order_id() == Some(id))
+        .collect()
+}
+
+/// The time (ms) from `died` (the reaper saw the exit) to now, right after
+/// [`Oms::start`] returned with the restarted OMS up.
+fn oms_down_ms(oms: &Oms, died: Instant) -> u128 {
+    assert!(oms.exit().is_none(), "the restarted OMS ended");
+    died.elapsed().as_millis()
+}
+
+/// The one order the journal accepted (a crashed node's reply may never
+/// have left).
+fn the_accepted_order(w: &World, oms: &Oms) -> OrderId {
+    let ids: Vec<OrderId> = oms
+        .events("order_accepted")
+        .into_iter()
+        .filter_map(|(_, e)| e.order_id())
+        .collect();
+    match ids[..] {
+        [id] => id,
+        _ => w.fail(&format!("not one accepted order in the journal: {ids:?}")),
+    }
+}
+
+/// The OKEY lookups at the fake after log index `from` of `path` whose
+/// query names `orderLinkId=<link>`, with their answers.
+fn lookups_by_link(w: &World, from: usize, path: &str, link: &str) -> Vec<String> {
+    let by = format!("orderLinkId={link}");
+    w.fake.with(|b, _| {
+        b.log
+            .iter()
+            .skip(from)
+            .filter(|l| l.key == OKEY && l.path == path && l.query.contains(&by))
+            .map(|l| l.answer.clone())
+            .collect()
+    })
+}
+
+/// What a restart of the OMS must not have caused in the watcher: besides
+/// [`assert_watcher_quiet`], no W5 kill line and no `systemctl` call; the
+/// watcher still runs. Waits first for `min_age_ms` and three W1 rounds
+/// after log index `from`, so a difference seen then would be confirmed.
+fn assert_watcher_quiet_after(w: &World, oms: &Oms, watcher: &Watcher, from: usize) {
+    let start = Instant::now();
+    w.wait(
+        "min_age_ms and three W1 rounds",
+        Duration::from_secs(10),
+        || {
+            start.elapsed() >= Duration::from_millis(w.timers.min_age_ms())
+                && w.answers_after(WKEY, "/v5/order/realtime", from).len() >= 3
+        },
+    );
+    assert_watcher_quiet(w, oms, watcher);
+    let w5 = watcher.log_containing("error: W5");
+    assert!(w5.is_empty(), "W5 fired: {w5:?}");
+    assert!(w.systemctl_log().is_empty(), "{:?}", w.systemctl_log());
+    assert!(watcher.exit().is_none(), "the watcher ended");
+}
+
+/// J5a: the node is killed (SIGKILL) at the moment its WS Trade create
+/// reaches the venue: the fake books the order, sends the signal from its
+/// own thread and neither answers nor pushes an `order` frame, so the
+/// journal holds the accepted order without a send result. The restarted
+/// node marks it `order_in_doubt{Restart}` in its boot record, finds it
+/// open by its `orderLinkId` and works it without sending it again: one
+/// create for that link over WS Trade and REST across both processes. A
+/// cancel then closes it at the venue and in the journal. The watcher
+/// raises nothing across the restart: the order is open on both sides with
+/// the same symbol and side, so W1 has nothing to compare differently, and
+/// W5's silence is longer than the restart. W1's skip of unacked and
+/// in-doubt orders missing at the venue is shown by J5b only.
+#[test]
+fn j5a_a_node_killed_while_its_create_is_at_the_venue_restarts_into_one_order_and_no_mismatch() {
+    use std::os::unix::process::ExitStatusExt;
+    let mut w = World::new("j5a", Timers::Short, Duration::from_secs(60));
+    w.set_watcher("silence_ms", 20_000);
+    let (mut oms, watcher) = start_both(&w);
+    let first_pid = oms.pid().unwrap();
+
+    w.fake.silent_for_next_create(oms.sigkill_hook());
+    let seen = oms.try_new_order(
+        "j5a",
+        Side::Buy,
+        "0.001",
+        "29000",
+        false,
+        oms_api::client::now_us() + 30_000_000,
+    );
+    w.wait(
+        "the fake's create hook kills the OMS",
+        Duration::from_secs(10),
+        || oms.exit().is_some(),
+    );
+    let (status, died) = oms.exit().unwrap();
+    assert_eq!(status.signal(), Some(9), "not killed by SIGKILL: {status:?}");
+    let id = the_accepted_order(&w, &oms);
+    // The reply leaves before the gateway gets the command, but the
+    // signal may still beat its write to the socket.
+    match &seen {
+        Ok(NewOrderReply::Accepted { order_id }) => assert_eq!(*order_id, id),
+        Ok(r) => w.fail(&format!("the order was not accepted: {r:?}")),
+        Err(_) => {}
+    }
+    let link = oms.link(id);
+    assert_eq!(
+        w.fake
+            .with(|b, _| b.by_link(&link).map(|o| (o.is_open(), b.creates_for(&link)))),
+        Some((true, 1)),
+        "the create did not reach the venue once"
+    );
+    for name in ["order_acked", "order_in_doubt", "order_closed"] {
+        let e = events_of(&oms, name, id);
+        assert!(e.is_empty(), "the killed node recorded {name}: {e:?}");
+    }
+
+    // The operator restarts the OMS.
+    let from = w.log_len();
+    oms.start(&[]);
+    println!(
+        "j5a: the OMS was down {} ms (its exit seen to the restarted one up)",
+        oms_down_ms(&oms, died)
+    );
+    assert_ne!(oms.pid(), Some(first_pid));
+    let doubt = events_of(&oms, "order_in_doubt", id);
+    assert!(
+        matches!(
+            doubt[..],
+            [(
+                _,
+                Event::OrderInDoubt {
+                    reason: DoubtReason::Restart,
+                    ..
+                }
+            )]
+        ),
+        "{doubt:?}"
+    );
+    let boots: Vec<Ts> = oms.events("booted").into_iter().map(|(at, _)| at).collect();
+    assert_eq!(boots.len(), 2, "{boots:?}");
+    assert_eq!(doubt[0].0, boots[1], "the doubt is not in the boot record");
+    let up = Instant::now();
+    w.wait(
+        "the restarted OMS finds the order open and works it",
+        Duration::from_secs(10),
+        || {
+            let creates = w.fake.with(|b, _| b.creates_for(&link));
+            if creates > 1 {
+                w.fail(&format!("{creates} creates for {link} after the restart"));
+            }
+            if let Some(r) = closed(&oms, id) {
+                w.fail(&format!(
+                    "the restarted OMS closed the order as {r:?} while it is open at the venue"
+                ));
+            }
+            let o = oms.order(id);
+            o.phase == Phase::Working && o.doubt.is_none()
+        },
+    );
+    println!(
+        "j5a: the order worked {} ms after the restarted OMS was up",
+        up.elapsed().as_millis()
+    );
+    let found = lookups_by_link(&w, from, "/v5/order/realtime", &link);
+    assert!(
+        found.first().is_some_and(|a| a == "ok"),
+        "no answered realtime lookup by orderLinkId after the restart: {found:?}"
+    );
+    assert!(
+        events_of(&oms, "order_closed", id).is_empty(),
+        "the order was closed while it is open at the venue"
+    );
+    w.wait("the gate opens again", Duration::from_secs(20), || {
+        monitored(&oms) == Some(true)
+    });
+
+    assert!(
+        matches!(oms.cancel(id), CancelReply::Requested { .. }),
+        "the cancel was not taken"
+    );
+    w.wait(
+        "the cancel closes the order in the journal and at the venue",
+        Duration::from_secs(10),
+        || {
+            matches!(closed(&oms, id), Some(CloseReason::Canceled { .. }))
+                && w.fake
+                    .with(|b, _| b.by_link(&link).map(|o| o.status))
+                    == Some("Cancelled")
+        },
+    );
+    assert_watcher_quiet_after(&w, &oms, &watcher, w.log_len());
+    assert_eq!(
+        w.fake.with(|b, _| (b.creates_for(&link), b.open_orders().len())),
+        (1, 0),
+        "creates for the link, open orders at the venue"
+    );
+    w.assert_venue_invariants();
+}
+
+/// J5b: the node stops itself (the failpoint `after_sync`, an abort as a
+/// SIGKILL would be) after the flush of the accepted order and before the
+/// reply and the send. Nothing reaches the venue. The restarted node marks
+/// the order `order_in_doubt{Restart}`; it sends no create, and only
+/// after `expires_at + absence_margin_us` does it count not-found answers
+/// to its lookups by `orderLinkId` (realtime, then history): after two,
+/// at least the margin apart, `order_closed{NotPlaced}`. Trading goes on
+/// (a plain order is accepted). The watcher raises nothing.
+#[test]
+fn j5b_a_node_stopped_after_the_flush_before_the_send_closes_the_order_as_not_placed() {
+    let mut w = World::new("j5b", Timers::Short, Duration::from_secs(60));
+    w.set_watcher("silence_ms", 20_000);
+    let (mut oms, watcher) = start_both_with(&w, &[("OMS_CRASH_AT", "after_sync")]);
+    let first_pid = oms.pid().unwrap();
+
+    let expires_at = oms_api::client::now_us() + 5_000_000;
+    let seen = oms.try_new_order("j5b", Side::Buy, "0.001", "29000", false, expires_at);
+    assert!(
+        seen.is_err(),
+        "a reply left before the read model learned the record: {seen:?}"
+    );
+    w.wait(
+        "the node stops at the failpoint",
+        Duration::from_secs(10),
+        || oms.exit().is_some(),
+    );
+    let (status, died) = oms.exit().unwrap();
+    assert!(!status.success(), "{status:?}");
+    let log = oms.log();
+    assert!(
+        log.contains("failpoint: aborting") && log.contains("after_sync"),
+        "not stopped at after_sync"
+    );
+    let id = the_accepted_order(&w, &oms);
+    let link = oms.link(id);
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(w.fake.with(|b, _| b.creates_for(&link)), 0, "sent before the stop");
+
+    // The operator restarts the OMS.
+    let from = w.log_len();
+    oms.start(&[]);
+    println!(
+        "j5b: the OMS was down {} ms (its exit seen to the restarted one up)",
+        oms_down_ms(&oms, died)
+    );
+    assert_ne!(oms.pid(), Some(first_pid));
+    let doubt = events_of(&oms, "order_in_doubt", id);
+    assert!(
+        matches!(
+            doubt[..],
+            [(
+                _,
+                Event::OrderInDoubt {
+                    reason: DoubtReason::Restart,
+                    ..
+                }
+            )]
+        ),
+        "{doubt:?}"
+    );
+    w.wait(
+        "the restarted OMS closes the order as not placed",
+        Duration::from_secs(20),
+        || closed(&oms, id).is_some(),
+    );
+    let Some(CloseReason::NotPlaced { evidence }) = closed(&oms, id) else {
+        w.fail(&format!("closed as {:?}", closed(&oms, id)))
+    };
+    let close_at = events_of(&oms, "order_closed", id)[0].0;
+    let noted: Vec<(Ts, Ts)> = events_of(&oms, "absence_noted", id)
+        .into_iter()
+        .filter_map(|(at, e)| match e {
+            Event::AbsenceNoted { queried_at, .. } => Some((at, queried_at)),
+            _ => None,
+        })
+        .collect();
+    let threshold = expires_at + ABSENCE_MARGIN_US;
+    assert!(
+        noted.len() >= 2
+            && noted.iter().all(|(at, q)| *at <= close_at && *q >= threshold)
+            && noted
+                .windows(2)
+                .all(|p| p[1].1 >= p[0].1 + ABSENCE_MARGIN_US),
+        "not two not-found answers after expires_at + margin ({threshold}), a margin apart, before the close at {close_at}: {noted:?}; {evidence}"
+    );
+    println!(
+        "j5b: not placed {} ms after expires_at; not-found answers queried at +{:?} ms",
+        close_at.saturating_sub(expires_at) / 1_000,
+        noted
+            .iter()
+            .map(|(_, q)| q.saturating_sub(expires_at) / 1_000)
+            .collect::<Vec<_>>()
+    );
+    let realtime = lookups_by_link(&w, from, "/v5/order/realtime", &link);
+    let history = lookups_by_link(&w, from, "/v5/order/history", &link);
+    assert!(
+        realtime.len() >= 2 && history.len() >= 4,
+        "lookups by orderLinkId: realtime {realtime:?}, history {history:?}"
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        w.fake.with(|b, _| b.creates_for(&link)),
+        0,
+        "the order was sent after the restart"
+    );
+
+    w.wait("the gate opens again", Duration::from_secs(20), || {
+        monitored(&oms) == Some(true)
+    });
+    let after = working(&w, &oms, "after", "28900");
+    assert_watcher_quiet_after(&w, &oms, &watcher, w.log_len());
+    assert_eq!(
+        w.fake.with(|b, _| (b.creates_for(&link), b.creates_for(&oms.link(after)))),
+        (0, 1),
+        "creates for the stopped order and for the order after"
+    );
     w.assert_venue_invariants();
 }
 

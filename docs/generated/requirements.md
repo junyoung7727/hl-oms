@@ -1,7 +1,7 @@
 # 요구사항별 확인 현황(R01~R15)
 
 > 자동 생성 문서다. 고치려면 `registry/requirements.toml`이나 `registry/claims.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 결과는 현재 소스(다이제스트 `40184bfba0aceaf9`)에서 돌린 것만 센다. 다른 소스에서 돌린 결과는 **미실행**으로 센다.
+> 결과는 현재 소스(다이제스트 `3b9cd3293e1e9b00`)에서 돌린 것만 센다. 다른 소스에서 돌린 결과는 **미실행**으로 센다.
 
 - 로직(코어+가짜): 코어와 가짜 거래소·시뮬레이션·loopback 가짜 Bybit로 확인한다. 장애 주입과 강제 종료는 여기서만 원할 때 재현할 수 있다.
 - 실제 Bybit: 테스트넷에 실제로 보낸 시험(`bybit-testnet` 묶음)만 센다. 어떤 가짜도 이 칸에 들어가지 않는다.
@@ -14,12 +14,12 @@
 | R03 | 시세·참조 입력의 유효성 및 적용 가능한 주문 가격 검사를 수행 | 주장 4: 통과 0 · **■ 미실행 4** | **■ 시험 없음** |
 | R04 | 긴급 시장가 매수는 추정+버퍼로 예약하고 근거 보존 | **■ 시험 없음** | **■ 시험 없음** |
 | R05 | 초과/부족 인식 시 실제 기장+신규 위험 차단 | 주장 5: 통과 0 · **■ 미실행 5** | 주장 1: 통과 0 · **■ 미실행 1** |
-| R06 | 결과 불명·장애·중복 수신으로 책임이 사라지거나 늘지 않음 | 주장 16: 통과 0 · **■ 미실행 16** | 주장 2: 통과 0 · **■ 미실행 2** |
+| R06 | 결과 불명·장애·중복 수신으로 책임이 사라지거나 늘지 않음 | 주장 17: 통과 0 · **■ 미실행 17** | 주장 2: 통과 0 · **■ 미실행 2** |
 | R07 | halt 효과의 시점을 정의하고 취소·관측 경로 유지 | 주장 18: 통과 0 · **■ 미실행 18** | 주장 1: 통과 0 · **■ 미실행 1** |
 | R08 | 계좌·전략의 자동 실행 반복과 총체결량을 별도 제한, 승인 재개 | **■ 시험 없음** | **■ 시험 없음** |
 | R09 | 새 주문의 메시지 제한으로 취소 요청을 로컬에서 거절하지 않음 | 주장 4: 통과 0 · **■ 미실행 4** | **■ 시험 없음** |
 | R10 | 동일 소유 계좌의 전략 간 self-match 정책을 명시 | **■ 시험 없음** | 주장 1: 통과 0 · **■ 미실행 1** |
-| R11 | 독립 근거와 대사하고 차이·정정을 감사 가능하게 처리 | 주장 15: 통과 0 · **■ 미실행 15** | 주장 1: 통과 0 · **■ 미실행 1** |
+| R11 | 독립 근거와 대사하고 차이·정정을 감사 가능하게 처리 | 주장 16: 통과 0 · **■ 미실행 16** | 주장 1: 통과 0 · **■ 미실행 1** |
 | R12 | 체결 원천·정책대로 전략에 귀속, 공통 평가로 합계 대사 | 주장 3: 통과 0 · **■ 미실행 3** | **■ 시험 없음** |
 | R13 | 설정·권한·릴리스 버전과 승인 근거 연결 | 주장 1: 통과 0 · **■ 미실행 1** | **■ 시험 없음** |
 | R14 | 허용 요청을 처리하고 지원 부하에서 응답/관측 지연을 충족 | 주장 3: 통과 0 · **■ 미실행 3** | **■ 시험 없음** |
@@ -101,9 +101,9 @@
 
 - 출처: FIA15 §4, FIA24 §4.1에서 강화
 - 판정 경계: 전송 전후 crash·중복
-- 로직(코어+가짜): 주장 16: 통과 0 · **■ 미실행 16**
+- 로직(코어+가짜): 주장 17: 통과 0 · **■ 미실행 17**
 - 실제 Bybit: 주장 2: 통과 0 · **■ 미실행 2**
-- 확인하지 않은 범위: recv_window 거절(A-01)과 orderLinkId 중복(110072)은 테스트넷에서 확인했다(V-BYBIT-LIVE-1, V-BYBIT-LIVE-2). 노드 프로세스를 테스트넷에 붙인 결과 불명 해소(조회로 Unknown을 닫기)는 돌리지 않았다
+- 확인하지 않은 범위: recv_window 거절(A-01)과 orderLinkId 중복(110072)은 테스트넷에서 확인했다(V-BYBIT-LIVE-1, V-BYBIT-LIVE-2). 노드 프로세스를 테스트넷에 붙인 결과 불명 해소(조회로 Unknown을 닫기)는 돌리지 않았다(실제 oms-node와 워처를 가짜 Bybit 하나에 붙여서는 V-JOINT-5에서 돌렸다: 생성이 거래소에 닿은 순간의 SIGKILL, 내구화 뒤 전송 전의 멈춤)
 - 시험이 없는 규칙:
   - 연결이 끊겨도 큐에 들어간 요청은 처리되고 그 응답만 버려진다
   - 가상 거래소 게이트웨이의 체결 키는 t<tid>다
@@ -147,6 +147,7 @@
 | [V-FUZZ-1](claims.md) | 로직 | **■ 미실행** | 가정을 지키지 않는 임의의 거래소 입력(순서 역전, 중복, 낡은 상태, 식별자 없는 체결, 부재 응답, 링크 변동, 재시작)에서도 코어는 결함으로 멈추지 않고, 불변조건과 재생 일치가 유지되고, 주문당 전송은 한 번이며, 차단 중 수용이 없고, 새 체결은 반드시 기장되거나 대기하고, 정직하게 정리된 뒤에는 차단이 남지 않는다 |
 | [V-WIRE-ID-1](claims.md) | 로직 | **■ 미실행** | 고객 주문번호 형식 Base32Pair는 VenueClientId와 일대일이고 27자(36자 이하, 0-9a-v와 -)이며 같은 입력에 같은 문자열을 내고, 서로 다른 100만 개 주문에 서로 다른 100만 개 문자열을 낸다. 해석은 그 형식이 쓴 문자열만 받는다(대문자·다른 길이·다른 구분자·64비트 초과·16진수 형식은 None). Hex128은 to_hex와 같은 문자열을 내고 소문자 16진수만 해석하며, 가상 거래소와 Hyperliquid 게이트웨이는 Hex128을 선언하고 보내는 번호를 그 형식으로 만든다 |
 | [V-BYBIT-ORDERS-1](claims.md) | 로직 | **■ 미실행** | Bybit 게이트웨이는 주문과 취소마다 결과 하나를 돌려주고 REST 요청을 많아야 하나 보내며 다시 보내지 않는다. 생성은 orderLinkId = 우리 고객 주문번호, category linear, Limit, 단방향(positionIdx 0)으로 보내고 보낸 본문에 서명한다. 요청 시각 + recv_window + 1초가 expires_at보다 늦거나, 막힘이 있거나, 거래하지 않는 종목이거나, 접속이 되지 않으면 보내지 않고 NotSent다. retCode 0은 생성이면 orderId가 있을 때만 Placed(Open, 누적 수량 없음), 취소면 Confirmed. 오류 문서의 0 아닌 코드는 UNKNOWN_CODES가 아니면 Rejected, 그 밖의 모든 응답(문서에 없는 코드, 2xx가 아닌 HTTP, 시간 초과, 끊김, 읽을 수 없는 본문)은 Unknown이다. HTTP 403과 retCode 10018은 IP 차단 멈춤을, HTTP 401과 키 거부 retCode는 키 거부를 건다. 요청은 자리를 잡은 때부터 응답 + 1초까지(응답이 없으면 요청 시각 + recv_window + 1초 + 1초까지) 세므로 보낸 때와 응답(또는 마지막 도착 가능 시각) 사이 어디에 도착하든 어느 1초에도 주문은 8개, 주문과 취소는 합쳐 10개를 넘지 않고, 주문이 8개를 다 써도 취소는 바로 나가며, 차면 기다린다(버리지 않는다). 아무 바이트도 나가지 않은 요청은 자리를 바로 돌려준다. 시작 확인은 설정의 px_tick·qty_step이 거래소 tickSize·qtyStep의 배수가 아니면 막고, 로컬 시계가 거래소보다 500ms 넘게 앞설 수 있으면(시작 확인 전, IP 확인 주기마다, 막힌 동안 10초마다, 왕복 250ms 넘는 측정은 판정 안 함) 생성만 막고 취소와 스트림은 막지 않는다. 서명은 hex(HMAC_SHA256(secret, timestamp + api_key + recv_window + payload))이고 payload는 GET이면 키 순서로 정렬해 보내는 질의 문자열, POST면 보내는 본문 그대로이며, 질의 값은 인코딩하지 않고 뜻을 바꾸는 문자가 있으면 보내지 않는다 |
+| [V-JOINT-5](claims.md) | 로직 | **■ 미실행** | 짧은 시간값(OMS reconcile 100 ms, absence_margin_us 300,000, absence_not_found_needed 2, venue_enforces_expiry; 워처 W1 500 ms, min_age_ms 2,000, [w5] silence_ms 20,000)으로 두 실제 프로그램을 함께 띄우고 관문이 열린 뒤: (J5a) OMS의 WS Trade order.create가 가짜 Bybit에 닿은 순간 가짜가 주문을 장부에 올리고 자기 스레드에서 OMS에 SIGKILL을 보내며 답도 order 프레임도 보내지 않으면, 죽은 OMS의 저널에는 그 주문의 order_accepted만 있고(order_acked·order_in_doubt·order_closed 없음) 거래소에는 열린 주문 하나와 그 orderLinkId의 생성 하나가 있다. 다시 띄운 OMS는 둘째 booted와 같은 기록에 order_in_doubt{Restart} 하나를 쓰고, OKEY의 realtime 조회(orderLinkId=그 링크)로 그것을 열린 주문으로 찾아 Working·결과 불명 없음으로 두며, 그 링크의 생성은 WS Trade와 REST를 합쳐 두 프로세스에 걸쳐 하나다. 그 뒤 취소는 저널(Canceled)과 거래소(Cancelled)에서 닫힌다. (J5b) failpoint OMS_CRASH_AT=after_sync로 새 주문의 기록이 내구화된 뒤 응답과 전송 전에 노드가 멈추면(abort, SIGKILL처럼), 전략은 응답을 받지 않고 거래소에는 생성이 없다. 다시 띄운 OMS는 order_in_doubt{Restart}를 쓰고, 생성 없이 orderLinkId 조회(realtime 둘 이상, history 넷 이상)를 이어 가며, expires_at + absence_margin_us 뒤에 묻고 서로 여유 이상 떨어진 찾지 못함 둘(absence_noted 둘)을 기록한 뒤에만 order_closed{NotPlaced}를 기록하고(이 시험에서 센 둘은 약 5초 떨어져 있어 '여유 이상 떨어짐'은 실패할 수 없다: 그 규칙은 V-ABSENCE-N-1의 몫), 그 뒤 일반 주문을 받는다. 두 시험에서 워처는 OMS의 죽음과 재시작을 넘어 watcher_mismatch 보류, 워처에서 온 보류, [WATCH P1], confirmed difference 줄, W5의 킬 줄, 킬 마커, systemctl 호출을 내지 않고 계속 돈다. J5a의 주문은 저널과 거래소에 같은 기호·방향으로 열려 있어 W1이 다르게 볼 것이 없다. '결과 불명이거나 접수되지 않은 주문은 거래소에 없어도 비교하지 않는다'는 W1의 규칙은 J5b(저널에만 있는 주문)만 보인다 |
 | [V-BYBIT-LIVE-1](claims.md) | 실제 Bybit | **■ 미실행** | 실제 Bybit 테스트넷은 요청 시각이 recv_window(5초)보다 오래됐거나 거래소 시계보다 1초 넘게 앞선 주문 요청을 10002로 거절하고, 그 주문은 거래소에 없다. 4초 지났거나 0.5초 앞선 요청은 시각 검사를 통과한다. 게이트웨이는 거절을 Rejected로 읽고, 상태 조회(실시간, 이력 두 번)는 그 주문을 '없음'으로 답한다 |
 | [V-BYBIT-LIVE-2](claims.md) | 실제 Bybit | **■ 미실행** | 실제 Bybit 테스트넷은 같은 orderLinkId의 두 번째 주문 요청을 110072로 답하고 주문을 하나 더 만들지 않는다. 첫 주문이 취소된 뒤에도 같은 orderLinkId는 다시 받지 않는다(110072). 게이트웨이는 110072를 Unknown으로 읽는다(주문이 이미 있을 수 있으므로) |
 
@@ -239,9 +240,9 @@
 
 - 출처: FIA24 §§4.1, 4.3
 - 판정 경계: 누락·외부 주문·bust
-- 로직(코어+가짜): 주장 15: 통과 0 · **■ 미실행 15**
+- 로직(코어+가짜): 주장 16: 통과 0 · **■ 미실행 16**
 - 실제 Bybit: 주장 1: 통과 0 · **■ 미실행 1**
-- 확인하지 않은 범위: 체결 정정·취소(bust)는 시험하지 않았다(Bybit의 BustTrade는 청산 인수이지 체결 취소가 아니다). 워처를 실제 Bybit에 붙여 돌린 적이 없다(실제 OMS와는 합동 시험 V-JOINT-1·2·3·4·6에서 가짜 Bybit 하나에 붙여 돌렸다)
+- 확인하지 않은 범위: 체결 정정·취소(bust)는 시험하지 않았다(Bybit의 BustTrade는 청산 인수이지 체결 취소가 아니다). 워처를 실제 Bybit에 붙여 돌린 적이 없다(실제 OMS와는 합동 시험 V-JOINT-1~6에서 가짜 Bybit 하나에 붙여 돌렸다)
 - 시험이 없는 규칙:
   - 대조 입력(열린 주문·포지션 조회)은 포지션을 직접 바꾸지 않고 증거 표시와 불일치 목록만 바꾼다. 예외 하나: 거래소 변경 뒤의 포지션 응답은 PositionAdjusted로 장부를 맞춘다(V-VENUE-EXEC-1)
   - 워처의 요청 제한(10초 창에 60개)은 모든 Bybit 경로와 IP 반향을 합쳐 센다
@@ -285,6 +286,7 @@
 | [V-WATCH-15](claims.md) | 로직 | **■ 미실행** | 워처의 W1은 저널에 킬 래치(hold_set{kill})가 있는 동안 '저널에서 열리고 확인됐고 결과 불명이 아니고 거래소 종결이 아닌데 거래소에 열려 있지 않은 주문'(missing_at_venue)을 차이로 보지 않는다. 래치가 풀리면(hold_cleared{kill}) 그 주문은 다시 첫 목격부터 비교되고 두 라운드 규칙으로 확정된다. 래치 동안에도 거래소에만 있는 주문(foreign)과 다른 W1 종류(closed_in_journal, open_after_terminal, details), W2, W3, W4는 그대로 비교한다 |
 | [V-JOINT-3](claims.md) | 로직 | **■ 미실행** | 짧은 시간값(워처 [w5] probe_ms 500·silence_ms 6,000, request_timeout 1초, [kill] round 1초·watch 10초·watch_every 1초·stop_wait 5초; OMS kill_after_ms 30,000)으로 두 실제 프로그램을 함께 띄우고 관문이 열려 W5가 무장된 뒤 걸린 일반 주문 둘이 있을 때 OMS를 SIGSTOP으로 멈추면: SIGSTOP + silence_ms − probe_ms − request_timeout_ms 전에는 킬 마커도 워처 키의 일괄 취소도 없다. 가짜 systemctl의 첫 호출은 '--no-ask-password stop -- oms-node-joint.service marker=present'이고, 마커('watcher joint W5'로 시작)는 그 호출보다 먼저 쓰였으며, 워처 키의 첫 일괄 취소는 그 호출 뒤다. OMS는 그 호출 뒤 stop_wait_ms 안에 SIGTERM 경로('stopped cleanly', 종료 0)로 끝난다. 가짜가 워처 키의 첫 일괄 취소 뒤 주문 하나를 남기면 워처는 세고(실시간 조회) 다시 일괄 취소해 장부를 0으로 만들고, 둘째 일괄 취소 + watch_ms 뒤에 'the kill ended: zero open orders confirmed … the halt is not owed' 한 줄로 끝낸다. [WATCH P1] 시작 알림 하나('킬 마커: 씀.', 'systemctl stop oms-node-joint.service: 정지됨', 포지션 묶음)와 정리 완료 알림 하나('다음 시작은 킬 마커로 래치됨', 포지션 묶음). 운영자가 OMS를 다시 띄우면 node.kill_marker.present_at_boot가 참이고 core.holds에 kill_latched, 부트 기록(booted와 같은 기록)에 hold_set{kill, source: marker}(메모가 'marker: watcher joint W5'로 시작) 하나. 일반 주문과 감소 전용 주문은 Hold(KillLatched)로 거절되고, clear-hold --reason kill은 OMS 자신의 루프가 0건을 확인할 때까지 kill_unconfirmed로 거절되며 마커는 남는다. 확인되고 대조가 두 주문을 닫은 뒤 clear-hold는 cleared로 받아들여지고 마커가 지워지며, 기준가와 관문이 돌아온 뒤 일반 주문이 받아들여져 가짜에 닿는다. 워처는 그동안 둘째 킬을 하지 않고(systemctl 호출 하나, 시작 알림 하나, 'the kill ended' 한 줄), W5가 다시 무장되며(watcher_w5_armed 1), watcher_mismatch 보류·confirmed difference 줄·불일치 [WATCH P1]을 내지 않는다. 저널에 source가 marker가 아닌 kill 보류는 없다 |
 | [V-JOINT-4](claims.md) | 로직 | **■ 미실행** | 짧은 시간값(OMS ping 1초, kill_after_ms 10,000, kill_watch_ms 10,000, kill_watch_every_ms 1,000; 워처 W1·W2 500 ms, min_age_ms 2,000, heartbeat 1초, [w5] silence_ms 10,000)으로 두 실제 프로그램을 함께 띄우고 관문이 열린 뒤 걸린 일반 주문 둘이 있을 때 비공개 스트림을 반쯤 열린 채로 두면(가짜가 pong도 다시 붙기의 auth도 답하지 않음): OMS는 마지막 pong 뒤 9초 전에는 킬 래치도 일괄 취소도 없고 11초 안에 hold_set{kill, source: stream} 하나를 기록하며, OKEY의 일괄 취소로 장부를 비우고, 래치 + kill_watch_ms 뒤에 kill_loop_ended{Confirmed} 하나를 기록한다. 링크가 내려간 동안 두 주문은 저널에서 열려 있고, 그동안 clear-hold --reason kill은 'kill_orders_open: 2 open orders'로 거절된다. 워처는 래치 뒤에도 W1 요청(10개 이상)과 하트비트 기록(5개 이상)을 이어 가고, W5는 쏘지 않으며(W5 줄·마커·systemctl 호출 없음), 스트림이 끊긴 때부터 확인 뒤 W1 세 라운드까지 watcher_mismatch 보류, confirmed difference 줄, 워처 불일치 [WATCH P1]을 내지 않는다. 스트림이 다시 답하면 링크가 오르고 대조가 두 주문을 취소로 닫고, clear-hold --reason kill이 cleared로 받아들여져 /api/status에서 kill_latched가 사라지며, 일반 주문이 받아들여져 가짜에 닿고, 그 뒤 W1 두 라운드 동안 워처는 아무것도 내지 않는다 |
+| [V-JOINT-5](claims.md) | 로직 | **■ 미실행** | 짧은 시간값(OMS reconcile 100 ms, absence_margin_us 300,000, absence_not_found_needed 2, venue_enforces_expiry; 워처 W1 500 ms, min_age_ms 2,000, [w5] silence_ms 20,000)으로 두 실제 프로그램을 함께 띄우고 관문이 열린 뒤: (J5a) OMS의 WS Trade order.create가 가짜 Bybit에 닿은 순간 가짜가 주문을 장부에 올리고 자기 스레드에서 OMS에 SIGKILL을 보내며 답도 order 프레임도 보내지 않으면, 죽은 OMS의 저널에는 그 주문의 order_accepted만 있고(order_acked·order_in_doubt·order_closed 없음) 거래소에는 열린 주문 하나와 그 orderLinkId의 생성 하나가 있다. 다시 띄운 OMS는 둘째 booted와 같은 기록에 order_in_doubt{Restart} 하나를 쓰고, OKEY의 realtime 조회(orderLinkId=그 링크)로 그것을 열린 주문으로 찾아 Working·결과 불명 없음으로 두며, 그 링크의 생성은 WS Trade와 REST를 합쳐 두 프로세스에 걸쳐 하나다. 그 뒤 취소는 저널(Canceled)과 거래소(Cancelled)에서 닫힌다. (J5b) failpoint OMS_CRASH_AT=after_sync로 새 주문의 기록이 내구화된 뒤 응답과 전송 전에 노드가 멈추면(abort, SIGKILL처럼), 전략은 응답을 받지 않고 거래소에는 생성이 없다. 다시 띄운 OMS는 order_in_doubt{Restart}를 쓰고, 생성 없이 orderLinkId 조회(realtime 둘 이상, history 넷 이상)를 이어 가며, expires_at + absence_margin_us 뒤에 묻고 서로 여유 이상 떨어진 찾지 못함 둘(absence_noted 둘)을 기록한 뒤에만 order_closed{NotPlaced}를 기록하고(이 시험에서 센 둘은 약 5초 떨어져 있어 '여유 이상 떨어짐'은 실패할 수 없다: 그 규칙은 V-ABSENCE-N-1의 몫), 그 뒤 일반 주문을 받는다. 두 시험에서 워처는 OMS의 죽음과 재시작을 넘어 watcher_mismatch 보류, 워처에서 온 보류, [WATCH P1], confirmed difference 줄, W5의 킬 줄, 킬 마커, systemctl 호출을 내지 않고 계속 돈다. J5a의 주문은 저널과 거래소에 같은 기호·방향으로 열려 있어 W1이 다르게 볼 것이 없다. '결과 불명이거나 접수되지 않은 주문은 거래소에 없어도 비교하지 않는다'는 W1의 규칙은 J5b(저널에만 있는 주문)만 보인다 |
 | [V-BYBIT-LIVE-6](claims.md) | 실제 Bybit | **■ 미실행** | 실제 Bybit 테스트넷의 조회 응답(열린 주문, 포지션, 체결, 증거금 보고, 계좌 모드, 종목 설정)을 게이트웨이의 조회(Queries)가 실패 없이 코어 입력으로 바꾼다. 거래소의 응답 모양(키와 값의 종류)이 crates/http-fake/recorded/bybit-testnet/에 녹화한 모양과 같다 |
 
 ## R12 — 체결 원천·정책대로 전략에 귀속, 공통 평가로 합계 대사
