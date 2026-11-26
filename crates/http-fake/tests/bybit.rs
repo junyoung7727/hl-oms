@@ -112,3 +112,27 @@ fn the_rows_have_the_keys_the_old_helpers_wrote() {
     );
     assert_eq!(cancel_all(&[]), json!({"list": [], "success": "1"}));
 }
+
+/// Each argument reaches its key: values that no builder writes by itself.
+#[test]
+fn every_argument_reaches_its_key() {
+    let r = order_row("l7", "o7", "ETHUSDT", "Sell", "0.002", "PartiallyFilled");
+    assert_eq!(
+        (&r["orderLinkId"], &r["orderId"], &r["symbol"], &r["side"]),
+        (
+            &json!("l7"),
+            &json!("o7"),
+            &json!("ETHUSDT"),
+            &json!("Sell")
+        )
+    );
+    assert_eq!(
+        (&r["qty"], &r["orderStatus"]),
+        (&json!("0.002"), &json!("PartiallyFilled"))
+    );
+    assert_eq!(
+        cancel_all(&[("o7".into(), "l7".into()), ("o8".into(), "l8".into())]),
+        json!({"list": [{"orderId": "o7", "orderLinkId": "l7"},
+            {"orderId": "o8", "orderLinkId": "l8"}], "success": "1"})
+    );
+}
