@@ -436,6 +436,7 @@ oms_unit = "{UNIT}"
             wiring: self.fake.wiring(),
             telegram: self.telegram.url(),
             port: self.port.clone(),
+            retry_port: None,
             proc: None,
         }
     }
@@ -674,6 +675,7 @@ pub struct Oms {
     wiring: String,
     telegram: String,
     port: Arc<Mutex<u16>>,
+    retry_port: Option<u16>,
     proc: Option<Proc>,
 }
 
@@ -690,9 +692,15 @@ impl Oms {
     /// variables, then `extra_env` (a name that begins `OMS_TEST_` is a
     /// test error: the wiring cannot be replaced or cleared here). Stderr
     /// goes to `o/node.log`; the pid to `o/oms.pid`, removed by the reaper
-    /// before it records the exit. Waits until the admin socket answers or
-    /// the process ended; if it ended because the `[http]` port was taken,
-    /// moves the port and starts once more.
+    /// before it records the exit. Waits until the admin socket and
+    /// `/api/status` answer, the process ended, or the log shows that the
+    /// `[http]` port was taken. The node keeps running without its
+    /// dashboard then (`dashboard stopped`), so the rig kills it; at the
+    /// OMS's first start (no data directory and no watcher configuration
+    /// yet) it removes the data directory, moves the port and starts once
+    /// more. A port taken again, or taken at a later start (the journal
+    /// and the watcher's `status_url` hold the old one), is a precondition
+    /// failure.
     pub fn start(&mut self, extra_env: &[(&str, &str)]) {
         if let Some((name, _)) = extra_env.iter().find(|(n, _)| n.starts_with("OMS_TEST_")) {
             panic!("Oms::start: {name} is set by the rig only");
@@ -701,27 +709,46 @@ impl Oms {
             self.proc.as_ref().is_none_or(|p| p.exit().is_some()),
             "the OMS is still running"
         );
+        let first = !self.data().exists() && !self.dir.join("w/watcher.toml").exists();
         for attempt in 0..2 {
             let from = std::fs::metadata(self.dir.join("o/node.log")).map_or(0, |m| m.len());
             self.spawn(extra_env);
+            let taken = format!("bind 127.0.0.1:{}: Address already in use", self.port());
             let end = Instant::now() + Duration::from_secs(20);
-            while Instant::now() < end && self.exit().is_none() && self.status_admin().is_none() {
+            let in_use = loop {
+                let log = self.log();
+                if log.get(from as usize..).unwrap_or("").contains(&taken) {
+                    break true;
+                }
+                if self.exit().is_some()
+                    || Instant::now() >= end
+                    || (self.status_admin().is_some() && self.status_http().is_some())
+                {
+                    break false;
+                }
                 std::thread::sleep(Duration::from_millis(25));
-            }
-            let log = std::fs::read_to_string(self.dir.join("o/node.log")).unwrap_or_default();
-            let new = log.get(from as usize..).unwrap_or("");
-            if self.exit().is_none() || !new.contains("Address already in use") {
+            };
+            if !in_use {
                 return;
             }
+            // Dropping the process sends SIGCONT and SIGKILL and waits.
+            self.proc = None;
             if attempt == 1 {
                 precondition(format!(
                     "the [http] port {} is still in use after a retry",
                     self.port()
                 ));
             }
+            if !first {
+                precondition(format!(
+                    "the [http] port {} is in use and the journal or the watcher's status_url already holds it: not moved",
+                    self.port()
+                ));
+            }
+            let _ = std::fs::remove_dir_all(self.data());
             let mut p = self.port.lock().unwrap();
             let old = *p;
-            *p = free_port();
+            *p = self.retry_port.take().unwrap_or_else(free_port);
             let cfg = std::fs::read_to_string(self.config()).unwrap();
             std::fs::write(
                 self.config(),
@@ -732,6 +759,12 @@ impl Oms {
             )
             .unwrap();
         }
+    }
+
+    /// The port a retry of [`Oms::start`] moves to, instead of a free one
+    /// (the rig's own test).
+    pub fn retry_on_port(&mut self, port: u16) {
+        self.retry_port = Some(port);
     }
 
     fn spawn(&mut self, extra_env: &[(&str, &str)]) {

@@ -54,9 +54,11 @@ fn fills_of(oms: &Oms, id: OrderId) -> usize {
 }
 
 /// What the watcher must never have caused: a `watcher_mismatch` hold or a
-/// kill from it in the journal, a `[WATCH P1]`, a `confirmed difference`
-/// line, a request on `admin.sock` (its log names `watcher_mismatch` or
-/// `watcher_kill` when it sends one), the kill marker.
+/// kill from it in the journal (a `watcher_mismatch` or `watcher_kill`
+/// request on `admin.sock` shows there), a `[WATCH P1]`, a `confirmed
+/// difference` line, the kill marker. The watcher logs no line of its own
+/// for those two requests, so the greps for their names only catch an
+/// alert text that names them.
 fn assert_watcher_quiet(w: &World, oms: &Oms, watcher: &Watcher) {
     let holds: Vec<Event> = oms
         .events("hold_set")
@@ -334,11 +336,19 @@ fn j1_a_whole_life_cycle_at_the_deployed_timers_has_no_mismatch_and_opens_the_ga
             }
         }
     }
-    // The watcher's deployed heartbeat_ms (5,000): no two heartbeat
-    // records closer than 4 s (the margin 판단(모델 아님)).
+    // The watcher's deployed heartbeat_ms (5,000): on average at least 4 s
+    // between heartbeat records, and no two closer than 2.5 s, so one
+    // record late by up to 2.5 s does not fail the test (both margins
+    // 판단(모델 아님)).
+    let span = beats.last().unwrap().0 - beats[0].0;
+    let mean = span / (beats.len() as u64 - 1);
+    assert!(
+        mean >= 4_000_000,
+        "heartbeats {mean} µs apart on average: not the deployed heartbeat_ms"
+    );
     for pair in beats.windows(2) {
         assert!(
-            pair[1].0 - pair[0].0 >= 4_000_000,
+            pair[1].0 - pair[0].0 >= 2_500_000,
             "heartbeats {} µs apart: not the deployed heartbeat_ms",
             pair[1].0 - pair[0].0
         );
@@ -386,12 +396,14 @@ fn the_rig_refuses_a_base_in_a_git_work_tree_a_long_socket_path_and_an_oms_test_
         )
         .is_err()
     );
-    let base = w.dir.join("ok");
+    // Made-up absolute paths, so the lengths do not depend on where the
+    // suite runs (check_base only measures them and looks for `.git`).
+    let base = std::path::Path::new("/joint-rig-base");
     // The longest socket path is `<dir>/o/d/monitor.sock`, 17 bytes more.
     let fits = base.join("x".repeat(SOCKET_PATH_MAX - 1 - 17 - base.as_os_str().len() - 1));
-    assert_eq!(check_base(&base, &fits), Ok(()));
+    assert_eq!(check_base(base, &fits), Ok(()));
     let long = base.join("x".repeat(SOCKET_PATH_MAX - 17 - base.as_os_str().len() - 1));
-    let e = check_base(&base, &long).unwrap_err();
+    let e = check_base(base, &long).unwrap_err();
     assert!(e.contains("has 100 bytes, at most 99 allowed"), "{e}");
 
     let mut oms = w.oms();
@@ -400,4 +412,74 @@ fn the_rig_refuses_a_base_in_a_git_work_tree_a_long_socket_path_and_an_oms_test_
     }));
     assert!(refused.is_err(), "Oms::start took an OMS_TEST_ variable");
     assert!(oms.pid().is_none(), "an OMS was started");
+}
+
+/// The panic message of `f`, which must panic.
+fn panic_of(f: impl FnOnce()) -> String {
+    let e = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).expect_err("no panic");
+    e.downcast_ref::<String>().cloned().unwrap_or_default()
+}
+
+/// The `[http]` port rule of the rig: a port taken at the OMS's first
+/// start is moved once (the dashboard's bind fails while the node keeps
+/// running, so the rig reads the bind error in the log, not an exit); a
+/// port taken again after the move, or taken when a journal or a watcher
+/// configuration already exists, is a precondition failure, and no OMS
+/// is left running.
+#[test]
+fn the_rig_moves_a_taken_http_port_once_and_a_second_taken_port_is_a_precondition() {
+    let w = World::new("jp", Timers::Short, Duration::from_secs(90));
+    let held = w.port();
+    let _taken = std::net::TcpListener::bind(("127.0.0.1", held)).unwrap();
+    let mut oms = w.oms();
+    oms.start(&[]);
+    assert!(oms.exit().is_none(), "the OMS ended: {}", oms.log());
+    assert_ne!(oms.port(), held, "the port was not moved");
+    assert_eq!(w.port(), oms.port(), "the world's port is not the OMS's");
+    assert!(
+        oms.status_http().is_some(),
+        "no /api/status on the new port"
+    );
+    w.wait("the boot record", Duration::from_secs(10), || {
+        !oms.events("booted").is_empty()
+    });
+    let boots = oms.events("booted").len();
+    assert_eq!(boots, 1, "the journal of the first attempt was kept");
+    drop(oms);
+
+    // A later start: the journal exists, so the port is not moved.
+    let _taken_again = std::net::TcpListener::bind(("127.0.0.1", w.port())).unwrap();
+    let mut again = w.oms();
+    let e = panic_of(|| again.start(&[]));
+    assert!(
+        e.starts_with(PRECONDITION) && e.contains("already holds it"),
+        "{e}"
+    );
+    assert!(again.pid().is_none(), "an OMS was left running");
+
+    // The first start, but the port of the retry is taken too.
+    let w2 = World::new("jq", Timers::Short, Duration::from_secs(30));
+    let _first = std::net::TcpListener::bind(("127.0.0.1", w2.port())).unwrap();
+    let second = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut oms = w2.oms();
+    oms.retry_on_port(second.local_addr().unwrap().port());
+    let e = panic_of(|| oms.start(&[]));
+    assert!(
+        e.starts_with(PRECONDITION) && e.contains("still in use after a retry"),
+        "{e}"
+    );
+    assert!(oms.pid().is_none(), "an OMS was left running");
+
+    // The first start after the watcher's configuration was written: its
+    // status_url names the port, so it is not moved.
+    let w3 = World::new("js", Timers::Short, Duration::from_secs(30));
+    let _watcher = w3.watcher();
+    let _held = std::net::TcpListener::bind(("127.0.0.1", w3.port())).unwrap();
+    let mut oms = w3.oms();
+    let e = panic_of(|| oms.start(&[]));
+    assert!(
+        e.starts_with(PRECONDITION) && e.contains("already holds it"),
+        "{e}"
+    );
+    assert!(oms.pid().is_none(), "an OMS was left running");
 }
