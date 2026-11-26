@@ -26,7 +26,7 @@ cargo run --locked -q -p xtask -- joint --only j1     # 이름에 j1이 든 시�
 - 가짜 `systemctl`: 부를 때마다 `systemctl.log`에 인자, 그때 마커가 있었는지(`marker=present|absent`), 밀리초 시각을 한 줄. `--no-ask-password stop -- oms-node-joint.service`이면 `o/oms.pid`의 프로세스가 리그의 `o/oms.toml`을 명령 줄에 가질 때만 SIGTERM 다음 SIGCONT를 보내고(systemd.kill(5)) 5,000 ms(판단(모델 아님))까지 그것이 끝나기를 기다린다. 그 밖의 인자는 종료 1.
 - 기다림은 25 ms 간격의 폴링이고 자기 상한과 시험의 예산 가운데 먼저 오는 것에서 멈춘다. 실패하면 두 로그와 가짜의 요청 기록의 꼬리를 담아 멈춘다. 리그 자신의 전제 조건(기준 디렉터리, 소켓 경로 길이, 바이너리 변수와 가드, 다시 시도한 뒤에도 쓰이는 포트, 나중의 시작에서 쓰이는 포트)은 `joint rig precondition:`으로 시작한다.
 - 자식마다 거두는 스레드가 20 ms마다 `try_wait`하고 종료 상태와 시각을 지킨다. OMS의 것은 종료를 기록하기 전에 `o/oms.pid`를 지운다. 리그를 버리면 살아 있는 자식에게 SIGCONT 다음 SIGKILL을 보내고 기다린다.
-- 시간값: `Timers::Deployed`(두 설정이 시간값을 적지 않음: 코드의 기본값)와 `Timers::Short`(스펙의 표). 시험은 워처 설정이 쓰이기 전에 그 시간값 줄 하나를 바꿀 수 있다(`World::set_watcher`, J2b의 `w4_ms = 5000`; 시간값이 쓰지 않는 줄이면 시험 오류). 두 설정 모두 testnet이고 `[core.policy.margin]`, `[liveness]`가 없다.
+- 시간값: `Timers::Deployed`(두 설정이 시간값을 적지 않음: 코드의 기본값)와 `Timers::Short`(스펙의 표). 시험은 워처 설정이 쓰이기 전에 그 시간값 줄 하나를 바꿀 수 있다(`World::set_watcher`, J2b의 `w4_ms = 5000`; 시간값이 쓰지 않는 줄이면 시험 오류이고, 리그 자기 시험 `the_rig_refuses_a_base_in_a_git_work_tree_a_long_socket_path_and_an_oms_test_variable`이 그것을 보인다). `Timers::Short`는 OMS의 `[venue] fills_lag_ms = 2000`도 적는다: J2b의 단언 `min_age_ms + 500 > fills_lag_ms`는 리그가 적은 그 줄을 읽고, 줄이 없으면 시험 오류다(코드 기본값의 사본과 비교하지 않는다). 두 설정 모두 testnet이고 `[core.policy.margin]`, `[liveness]`가 없다.
 - 창의 시각: 가짜 Bybit의 요청 기록(키, 경로, 쿼리, 답의 종류, 벽시계 ms)과 저널 기록의 시각(OMS의 벽시계 µs)은 같은 호스트의 시계다. 심기는 장부의 잠금 안에서 기록의 길이를 함께 재므로, 그 뒤의 워처 키 답은 모두 심은 것을 담는다(`World::answers_after`, 고장 응답은 뺀다).
 
 ## 3. 무엇을 증명하나
