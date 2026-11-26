@@ -3812,6 +3812,24 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "watcher", "--test", "w1", "the_venue_side_kinds_during_a_kill_are_still_reported"],
         guards: "C-WATCH / V-WATCH-15",
     },
+    Mutant {
+        id: "M421-oms-resends-an-order-in-doubt-at-boot",
+        what: "the OMS sends SendOrder for an order the restart left in doubt (order_in_doubt{Restart} in the boot record): an order whose create reached the venue before a SIGKILL is created twice (spec mutant 28; a joint test)",
+        file: "crates/oms-core/src/core.rs",
+        find: "            Event::OrderAccepted { order_id, .. } => {",
+        replace: "            Event::OrderAccepted { order_id, .. } | Event::OrderInDoubt { order_id, reason: DoubtReason::Restart, .. } => {",
+        test: &["-p", "oms-node", "--features", "joint", "--test", "joint", "--", "--test-threads=1", "--exact", "j5a_a_node_killed_while_its_create_is_at_the_venue_restarts_into_one_order_and_no_mismatch"],
+        guards: "C-JOINT / V-JOINT-5",
+    },
+    Mutant {
+        id: "M422-oms-not-placed-after-one-not-found-answer",
+        what: "the OMS closes an order in doubt as NotPlaced after its first not-found answer past expiry plus margin, although Bybit needs two (absence_not_found_needed 2): one lagging answer closes an order that may exist (spec mutant 29; a joint test)",
+        file: "crates/oms-core/src/decide.rs",
+        find: "if absence.map_or(0, |a| a.count) + 1 < needed {",
+        replace: "if absence.map_or(0, |a| a.count) + 1 < 1 {",
+        test: &["-p", "oms-node", "--features", "joint", "--test", "joint", "--", "--test-threads=1", "--exact", "j5b_a_node_stopped_after_the_flush_before_the_send_closes_the_order_as_not_placed"],
+        guards: "C-JOINT / V-JOINT-5",
+    },
 ];
 
 /// A mutant whose test is a joint test (`--features joint`, ADR-039): its
