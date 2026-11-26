@@ -34,6 +34,9 @@ cargo run --locked -q -p xtask -- joint --only j1     # 이름에 j1이 든 시�
 |---|---|
 | `j0_the_rig_refuses_a_watcher_built_without_test_endpoints_and_a_test_build_without_wiring_exits_2` | 리그의 가드가 `watcher 0.1.0`을 찍는 스크립트를 설정을 쓰기 전에 거부한다. 실제 시험 빌드를 `WATCHER_TEST_ENDPOINTS` 없이 띄우면 종료 코드 2와 한 줄 `this build is for tests: WATCHER_TEST_ENDPOINTS is required`로 끝나고 가짜 Bybit·Telegram·VictoriaMetrics는 요청을 받지 않는다(실제 호스트로의 요청은 이 시험이 볼 수 없다: 시험 빌드에 그 길이 없다는 것은 V-TESTHOOK-1) |
 | `j1_a_whole_life_cycle_at_the_deployed_timers_has_no_mismatch_and_opens_the_gate` | 배포 기본 시간값에서: OMS는 감시 없음으로 시작해 하트비트 전 일반 주문을 거부하고, W1·W2가 신선한 하트비트의 기록에서 관문이 열린다. 주문 A의 부분·전체 체결, 주문 B의 취소. 그 뒤 W1~W4 요청 각 3번 이상과 17초 동안 불일치·워처 보류·`[WATCH P1]`·`confirmed difference`·킬 마커가 없다. 하트비트 기록의 검사 시각은 기록 시각 이전 15초 안. 끝에서 가짜와 OMS의 포지션(+0.002)과 열린 주문(0)이 같고, 거래소 불변식(워처 키의 주문 생성·수정·취소 없음, `orderLinkId`마다 생성 하나 이하, 키마다 초당 일괄 취소 둘 이하)이 성립한다 |
+| `the_rig_refuses_a_base_in_a_git_work_tree_a_long_socket_path_and_an_oms_test_variable` | 리그 자신의 규칙: git 작업 트리 안(없는 하위 경로도)과 상대 경로의 기준 디렉터리, 100바이트 소켓 경로를 거부하고 99바이트는 받는다. `OMS_TEST_`로 시작하는 추가 변수를 준 `Oms::start`는 프로세스를 띄우기 전에 멈춘다 |
+
+J1은 배포 기본 시간값에서 돌았다는 것도 본다: OMS 관문 정책이 코드 기본값이고, 하트비트 기록 사이가 4초 이상이다(워처 기본 `heartbeat_ms` 5,000, 여유 판단(모델 아님)).
 
 ## 4. 증명하지 않는 것
 
