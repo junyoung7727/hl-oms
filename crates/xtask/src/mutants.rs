@@ -3737,7 +3737,7 @@ fn is_joint(test: &[&str]) -> bool {
 /// nothing. A joint run is no kill when a process was left behind
 /// (`orphans`, whatever the result) or when it failed on the rig's own
 /// precondition ([`crate::joint::RIG_PRECONDITION`]): only a scenario
-/// assertion or a budget kills a joint mutant.
+/// assertion or a budget kills a joint mutant ([`scenario_failure`]).
 fn verdict(success: bool, text: &str, joint: bool, orphans: &[String]) -> (bool, String) {
     if text.contains("could not compile") {
         return (false, "the mutant did not compile".to_string());
@@ -3751,10 +3751,31 @@ fn verdict(success: bool, text: &str, joint: bool, orphans: &[String]) -> (bool,
     if joint && !success && text.contains(crate::joint::RIG_PRECONDITION) {
         return (false, "rig precondition failed".to_string());
     }
-    // A joint kill names the scenario's failing assertion (the line after
-    // the first panic), since a joint test fails in many ways.
-    let message = || text.lines().skip_while(|l| !l.contains(" panicked at ")).nth(1).unwrap_or_default().to_string();
-    (!success, if joint && !success { message() } else { String::new() })
+    if joint && !success {
+        return match scenario_failure(text) {
+            Ok(message) => (true, message),
+            Err(message) => (false, format!("not a scenario failure: {message}")),
+        };
+    }
+    (!success, String::new())
+}
+
+/// The first panic of a failed joint run, `Ok` when it is a scenario's:
+/// an assertion in [`crate::joint::JOINT_TESTS`] that is not an `unwrap`,
+/// or a failed wait or check of the rig ([`crate::joint::RIG_SCENARIO`]).
+/// Its message (first line, the rig's prefix cut) is the note either way,
+/// so a kill names the failing assertion. A panic elsewhere (a rig file
+/// write, a fake's thread) says nothing about the mutant.
+fn scenario_failure(text: &str) -> Result<String, String> {
+    let mut lines = text.lines().skip_while(|l| !l.contains(" panicked at "));
+    let at = lines.next().ok_or("no panic in the output")?;
+    let file = at.split(" panicked at ").nth(1).and_then(|l| l.split(':').next()).unwrap_or_default();
+    let message = lines.next().unwrap_or_default();
+    if let Some(rest) = message.strip_prefix(crate::joint::RIG_SCENARIO) {
+        return Ok(rest.trim_start().to_string());
+    }
+    let unwrap = message.starts_with("called `Result::unwrap()`") || message.starts_with("called `Option::unwrap()`");
+    if file == crate::joint::JOINT_TESTS && !unwrap { Ok(message.to_string()) } else { Err(message.to_string()) }
 }
 
 /// Before a joint mutant's `cargo test`: `OMS_TEST_DIR` under the rules of
@@ -3968,6 +3989,34 @@ mod tests {
         // A scenario assertion kills it.
         let scenario = format!("thread 'j1_x' panicked at crates/oms-node/tests/joint.rs:200:5:\nwaited 40s (budget 120s) for: the gate opens\n{FAILED}");
         assert_eq!(verdict(false, &scenario, true, &[]), (true, "waited 40s (budget 120s) for: the gate opens".into()));
+    }
+
+    /// Only a scenario failure kills a joint mutant: its first panic is an
+    /// assertion in the scenario file or a failed wait or check of the rig
+    /// (`World::fail`). Any other panic (a rig file write on a full disk, an
+    /// `unwrap`, a fake's thread) proves nothing about the mutant, and its
+    /// message is the note (review U19c3b 1, S2).
+    #[test]
+    fn a_failing_joint_run_is_a_kill_only_on_a_scenario_failure() {
+        let panic = |file: &str, msg: &str| format!("thread 'j1_x' panicked at {file}:389:9:\n{msg}\nnote: run with `RUST_BACKTRACE=1`\n");
+        let rig = "crates/oms-node/tests/joint_rig/mod.rs";
+        let full = "called `Result::unwrap()` on an `Err` value: Os { code: 28, kind: StorageFull, message: \"No space left on device\" }";
+        let disk = format!("{}{FAILED}", panic(rig, full));
+        assert_eq!(verdict(false, &disk, true, &[]), (false, format!("not a scenario failure: {full}")));
+        // The same failure kills a mutant that is not a joint one, as before.
+        assert_eq!(verdict(false, &disk, false, &[]), (true, String::new()));
+        let unwrap = format!("{}{FAILED}", panic(joint::JOINT_TESTS, "called `Option::unwrap()` on a `None` value"));
+        assert_eq!(verdict(false, &unwrap, true, &[]), (false, "not a scenario failure: called `Option::unwrap()` on a `None` value".into()));
+        let assertion = format!("{}{FAILED}", panic(joint::JOINT_TESTS, "the guard took a default build: \"\""));
+        assert_eq!(verdict(false, &assertion, true, &[]), (true, "the guard took a default build: \"\"".into()));
+        let wait = format!("{}{FAILED}", panic(rig, &format!("{} waited 40s (budget 120s) for: the gate opens", joint::RIG_SCENARIO)));
+        assert_eq!(verdict(false, &wait, true, &[]), (true, "waited 40s (budget 120s) for: the gate opens".into()));
+        // The first panic decides: a fake's thread that panicked before the
+        // scenario failed may be the cause.
+        let first = format!("{}{}{FAILED}", panic(rig, "fake bybit: bad request"), panic(joint::JOINT_TESTS, "the gate opens"));
+        assert_eq!(verdict(false, &first, true, &[]), (false, "not a scenario failure: fake bybit: bad request".into()));
+        let none = format!("test j1_x ... FAILED\n{FAILED}");
+        assert_eq!(verdict(false, &none, true, &[]), (false, "not a scenario failure: no panic in the output".into()));
     }
 
     /// A process left behind by a joint run is a rig defect, so the run is

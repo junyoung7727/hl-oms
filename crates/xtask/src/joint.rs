@@ -30,6 +30,14 @@ pub const RUNS_MAX: u64 = 99;
 /// programs under test.
 pub const RIG_PRECONDITION: &str = "joint rig precondition:";
 
+/// The start of every failed wait or check of a scenario in the rig (the
+/// rig's `SCENARIO`, from `World::fail`).
+pub const RIG_SCENARIO: &str = "joint scenario:";
+
+/// The file of the joint scenarios: a panic there is a scenario's own
+/// assertion.
+pub const JOINT_TESTS: &str = "crates/oms-node/tests/joint.rs";
+
 /// The three test binaries of one build: the watcher and `omsctl` as
 /// copied, `oms-node` where cargo put it.
 pub struct Bins {
@@ -546,6 +554,21 @@ mod tests {
         let text = std::fs::read_to_string(&rig).expect("test setup");
         let line = format!("pub const PRECONDITION: &str = \"{RIG_PRECONDITION}\";");
         assert!(text.contains(&line), "{} has no line {line}", rig.display());
+    }
+
+    /// The mutant runner counts a joint failure as a kill only from a panic
+    /// that starts with this text, or from the scenario file; both must be
+    /// the rig's.
+    #[test]
+    fn the_rig_scenario_text_and_the_scenario_file_are_the_rigs_own() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let rig = root.join("crates/oms-node/tests/joint_rig/mod.rs");
+        let text = std::fs::read_to_string(&rig).expect("test setup");
+        let line = format!("pub const SCENARIO: &str = \"{RIG_SCENARIO}\";");
+        assert!(text.contains(&line), "{} has no line {line}", rig.display());
+        assert!(text.contains("\"{SCENARIO} {what}"), "World::fail does not start with SCENARIO");
+        let tests = std::fs::read_to_string(root.join(JOINT_TESTS)).expect("the scenario file");
+        assert!(tests.contains("mod joint_rig;"), "{JOINT_TESTS} is not the joint target");
     }
 
     #[test]

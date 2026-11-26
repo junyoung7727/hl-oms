@@ -8,8 +8,9 @@
 //! logs.
 //!
 //! The two binaries run on their system clocks, so every wait here is a
-//! poll with its own timeout inside the test's budget. A failed wait
-//! panics with the tails of both logs and of the fake's request log. A
+//! poll with its own timeout inside the test's budget. A failed wait or
+//! check ([`World::fail`]) panics with a message that starts [`SCENARIO`]
+//! and the tails of both logs and of the fake's request log. A
 //! precondition of the rig itself (a base directory inside a git work
 //! tree, a socket path too long, a missing or wrong binary, a port still in
 //! use) panics with a message that starts [`PRECONDITION`], so it is never
@@ -39,6 +40,10 @@ use std::time::{Duration, Instant};
 
 /// The start of every panic about the rig's own preconditions.
 pub const PRECONDITION: &str = "joint rig precondition:";
+/// The start of every panic about a scenario's failed wait or check: the
+/// mutant runner counts a joint test's failure as a kill only from such a
+/// panic or an assertion in `tests/joint.rs`.
+pub const SCENARIO: &str = "joint scenario:";
 /// The OMS's systemd unit as the watcher names it; the fake `systemctl`
 /// stops only this one.
 pub const UNIT: &str = "oms-node-joint.service";
@@ -502,10 +507,11 @@ oms_unit = "{UNIT}"
         }
     }
 
-    /// Panics with `what` and the tails of both logs and the fake's log.
+    /// Panics with [`SCENARIO`], `what` and the tails of both logs and the
+    /// fake's log.
     pub fn fail(&self, what: &str) -> ! {
         panic!(
-            "{what}\n--- node.log\n{}\n--- watcher.log\n{}\n--- fake requests\n{}",
+            "{SCENARIO} {what}\n--- node.log\n{}\n--- watcher.log\n{}\n--- fake requests\n{}",
             tail(&self.dir.join("o/node.log"), 40),
             tail(&self.dir.join("w/watcher.log"), 40),
             self.fake_log_tail(30)
