@@ -634,15 +634,16 @@ fn j2a_a_venue_only_order_holds_plain_orders_after_two_rounds_and_two_seconds_un
 }
 
 /// The OMS's `[venue] fills_lag_ms` as the rig wrote it: its fill query
-/// ends that long before now. The rig's configuration does not set it, so
-/// it is the code default, 2,000 ms (`default_fills_lag_ms`,
-/// `oms-node/src/config.rs`).
+/// ends that long before now. `Timers::Short` writes the line; a
+/// configuration without it is a test error, so the guard never compares
+/// against a copy of the code default.
 fn fills_lag_ms(w: &World) -> u64 {
     std::fs::read_to_string(w.dir.join("o/oms.toml"))
         .unwrap()
         .lines()
         .find_map(|l| l.strip_prefix("fills_lag_ms = "))
-        .map_or(2_000, |v| v.trim().parse().unwrap())
+        .map(|v| v.trim().parse().unwrap())
+        .unwrap_or_else(|| panic!("the OMS configuration the rig wrote has no fills_lag_ms line"))
 }
 
 /// The times (ms) of the watcher's W4 answers after log index `from` whose
@@ -966,8 +967,8 @@ fn okey_cancels(w: &World, link: &str) -> Vec<u64> {
 /// J6a: the watcher stopped (SIGTERM) sends no heartbeat; the OMS stays
 /// monitored for `heartbeat_max_age` after the last heartbeat record, then
 /// closes the gate within a tick and a second, refuses plain orders and,
-/// `unmonitored_cancel` after that record, cancels the resting plain
-/// order once. The restarted watcher opens the gate again within 10 s of
+/// `unmonitored_cancel` after the close record (`monitor_changed`),
+/// cancels the resting plain order once. The restarted watcher opens the gate again within 10 s of
 /// its boot replay, and a plain order is accepted.
 #[test]
 fn j6a_a_stopped_watcher_closes_the_gate_after_the_heartbeat_limit_and_its_return_opens_it() {
@@ -1181,11 +1182,12 @@ fn j6b_failing_watcher_checks_close_the_gate_after_the_check_age_limit() {
 
 /// The rig's own rules: a base directory inside a git work tree, a
 /// relative one and a socket path of 100 bytes or more are refused; a
-/// start of the OMS with an `OMS_TEST_` variable is a test error, before
+/// start of the OMS with an `OMS_TEST_` variable, and a watcher timer
+/// override of a line the timers do not write, are test errors, before
 /// any process starts.
 #[test]
 fn the_rig_refuses_a_base_in_a_git_work_tree_a_long_socket_path_and_an_oms_test_variable() {
-    let w = World::new("jr", Timers::Short, Duration::from_secs(20));
+    let mut w = World::new("jr", Timers::Short, Duration::from_secs(20));
     let tree = w.dir.join("repo");
     std::fs::create_dir_all(tree.join(".git")).unwrap();
     let inside = tree.join("missing/base");
@@ -1214,6 +1216,17 @@ fn the_rig_refuses_a_base_in_a_git_work_tree_a_long_socket_path_and_an_oms_test_
     }));
     assert!(refused.is_err(), "Oms::start took an OMS_TEST_ variable");
     assert!(oms.pid().is_none(), "an OMS was started");
+
+    w.set_watcher("no_such_ms", 1);
+    let e = panic_of(|| drop(w.watcher()));
+    assert!(
+        e.contains("the watcher's timers write no line no_such_ms"),
+        "{e}"
+    );
+    assert!(
+        !w.dir.join("w/watcher.toml").exists(),
+        "a watcher configuration was written"
+    );
 }
 
 /// The panic message of `f`, which must panic.

@@ -150,7 +150,7 @@ impl Timers {
             ),
             Timers::Short => (
                 "tick_ms = 50\nreconcile_ms = 100\nsweep_ms = 60000\n",
-                "ping_interval_ms = 1000\nrequest_timeout_ms = 1000\nrecv_window_ms = 1000\nref_price_interval_ms = 1000\nkill_after_ms = 10000\nkill_watch_ms = 10000\nkill_watch_every_ms = 1000\n",
+                "ping_interval_ms = 1000\nrequest_timeout_ms = 1000\nrecv_window_ms = 1000\nref_price_interval_ms = 1000\nfills_lag_ms = 2000\nkill_after_ms = 10000\nkill_watch_ms = 10000\nkill_watch_every_ms = 1000\n",
                 "absence_margin_us = 300000\nabsence_not_found_needed = 2\nvenue_enforces_expiry = true\nmax_expiry_horizon_us = 60000000\n",
                 "heartbeat_max_age_us = 10000000\ncheck_max_age_us = 5000000\nunmonitored_cancel_us = 10000000\n",
             ),
