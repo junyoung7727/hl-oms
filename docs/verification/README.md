@@ -37,6 +37,8 @@ cargo run --release -p xtask -- docs              # 결과를 주장과 묶어 �
 | `sim-extended`, `kills-extended` | `--extended`일 때만. 시뮬레이션 seed 3000개, 실제 디스크에서 강제 종료 60회 | 위와 같다 | 위와 같다 |
 | `hl-live` | 실제 testnet에 읽기 전용 조회와 스트림 구독 | 실제 네트워크와 거래소 | 주문은 보내지 않는다 |
 
+가짜 Bybit의 공용 부품: 응답 봉투와 목록 쪽, 주문·포지션·체결·지갑·키·상품·시각 행은 `http_fake::bybit`(`crates/http-fake/src/bybit.rs`, 시험 `crates/http-fake/tests/bybit.rs`)가 만들고, 노드 시험(`bybit_node`)과 워처 시험의 리그(`crates/watcher/tests/common/rig.rs`, `kill_rig.rs`)가 함께 쓴다. 노드 시험의 가짜 WebSocket(비공개 스트림, WS Trade, 공개 스트림)과 디스크의 저널 읽기는 `crates/oms-node/tests/bybit_fake/`에 있다. 어느 것도 "Bybit가 이렇게 동작한다"의 증거가 아니다(행의 모양은 시험이 손으로 쓰던 것과 같다).
+
 ### 보관된 실행 (소스 `762a4acf55af90fb`, 2026-11-16 23:28 ~ 23:40 KST, 저장소는 500GB SSD, 빌드 출력과 시험 자료는 970 EVO Plus 2TB)
 
 결과 파일: `evidence/latest/results.json`, `evidence/mutants.json`. `--extended`로 실행했고 `--live-testnet`은 주지 않았다. 실제 거래소에는 접속하지 않았다.
