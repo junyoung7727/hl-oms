@@ -92,7 +92,7 @@ pub fn suites(quick: bool, live: bool, bybit: bool, extended: Option<&str>) -> V
         // `xtask joint` exits 2 and the suite counts as failed.
         Suite {
             name: "joint",
-            what: "the real oms-node (failpoints build, Bybit gateway) and the real watcher (its test build) run together against one stateful fake Bybit, a fake Telegram, a fake VictoriaMetrics and a fake systemctl, loopback only: J0 the rig refuses a watcher without its test hook and the test build refuses to run unwired; J1 a whole life cycle at the deployed timers (gate opens on fresh W1/W2, partial and full fill, a cancel, three rounds of every check without a mismatch); needs OMS_TEST_DIR",
+            what: "the real oms-node (failpoints build, Bybit gateway) and the real watcher (its test build) run together against one stateful fake Bybit, a fake Telegram, a fake VictoriaMetrics and a fake systemctl, loopback only: J0 the rig refuses a watcher without its test hook and the test build refuses to run unwired; J1 a whole life cycle at the deployed timers (gate opens on fresh W1/W2, partial and full fill, a cancel, three rounds of every check without a mismatch); J2 a venue-only order and a venue-only fill hold plain orders only after two rounds and min_age_ms, cancels still go, clear-hold (and ack) restore trading; J6 a stopped watcher and failing W1/W2 close the gate after its limits and their return opens it; needs OMS_TEST_DIR",
             args: &["run", "--locked", "-q", "-p", "xtask", "--", "joint", "--runs", "1"],
             env: env(&[]),
         },

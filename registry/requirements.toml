@@ -52,7 +52,7 @@ id = "R05"
 text = "초과/부족 인식 시 실제 기장+신규 위험 차단"
 source = "프로젝트 D; FIA24 §§4.1–4.2 배경"
 boundary = "음수 여유·지연 비용"
-logic = ["V-FILL-1", "V-EXT-1", "V-MIS-1", "V-VENUE-EXEC-1"]
+logic = ["V-FILL-1", "V-EXT-1", "V-MIS-1", "V-VENUE-EXEC-1", "V-JOINT-2"]
 bybit = ["V-BYBIT-LIVE-4"]
 untested = []
 gap = "수량은 확인했지만 금액(예약보다 비싸게 체결, 101.01 예약 대 102 실제)은 예약이 없어 다루지 않는다. 펀딩은 어느 한도에도 들어가지 않는다. Bybit 체결 행에서 코어까지 끝에서 끝으로 가는 시험이 없다"
@@ -96,7 +96,7 @@ id = "R07"
 text = "halt 효과의 시점을 정의하고 취소·관측 경로 유지"
 source = "FIA24 §§1.4–1.6"
 boundary = "미전송 queue·늦은 fill"
-logic = ["V-CANCEL-1", "V-HOLD-1", "V-HOLD-2", "V-HOLD-3", "V-HOLD-4", "V-HOLD-5", "V-HOLD-6", "V-KILL-1", "V-KILL-2", "V-KILL-3", "V-KILL-4", "V-KILL-5", "V-API-1", "V-JOINT-1"]
+logic = ["V-CANCEL-1", "V-HOLD-1", "V-HOLD-2", "V-HOLD-3", "V-HOLD-4", "V-HOLD-5", "V-HOLD-6", "V-KILL-1", "V-KILL-2", "V-KILL-3", "V-KILL-4", "V-KILL-5", "V-API-1", "V-JOINT-1", "V-JOINT-2", "V-JOINT-6"]
 bybit = ["V-BYBIT-LIVE-3"]
 untested = [
   "워처 실행은 틱마다, W5의 모든 상태에서, clock::Steady의 시각으로 W5에 답을 주고 poll과 fire를 그 순서로 부른다",
@@ -156,7 +156,7 @@ id = "R11"
 text = "독립 근거와 대사하고 차이·정정을 감사 가능하게 처리"
 source = "FIA24 §§4.1, 4.3"
 boundary = "누락·외부 주문·bust"
-logic = ["V-RECON-1", "V-RECON-2", "V-MIS-1", "V-EXT-1", "V-WATCH-7", "V-WATCH-8", "V-WATCH-9", "V-WATCH-10", "V-BYBIT-RECORDED-1", "V-JOINT-1"]
+logic = ["V-RECON-1", "V-RECON-2", "V-MIS-1", "V-EXT-1", "V-WATCH-7", "V-WATCH-8", "V-WATCH-9", "V-WATCH-10", "V-BYBIT-RECORDED-1", "V-JOINT-1", "V-JOINT-2", "V-JOINT-6"]
 bybit = ["V-BYBIT-LIVE-6"]
 untested = [
   "대조 입력(열린 주문·포지션 조회)은 포지션을 직접 바꾸지 않고 증거 표시와 불일치 목록만 바꾼다. 예외 하나: 거래소 변경 뒤의 포지션 응답은 PositionAdjusted로 장부를 맞춘다(V-VENUE-EXEC-1)",
@@ -184,7 +184,7 @@ untested = [
   "불일치 ID는 코어가 1부터 하나씩 올려 매기는 u32이고, 적용할 때 다음 ID와 다르면 CoreFault다",
   "대조기의 상태 조회 재시도 간격(0.5초, 1초, 2초, 그 뒤 5초마다)은 대조기만 가진 휘발 상태이고, 재시작으로 잃어도 조회가 한 번 더 나갈 뿐 판단은 바뀌지 않는다",
 ]
-gap = "체결 정정·취소(bust)는 시험하지 않았다(Bybit의 BustTrade는 청산 인수이지 체결 취소가 아니다). 워처를 실제 OMS와 실제 Bybit에 붙여 돌린 적이 없다"
+gap = "체결 정정·취소(bust)는 시험하지 않았다(Bybit의 BustTrade는 청산 인수이지 체결 취소가 아니다). 워처를 실제 Bybit에 붙여 돌린 적이 없다(실제 OMS와는 합동 시험 V-JOINT-1·2·6에서 가짜 Bybit 하나에 붙여 돌렸다)"
 
 [[requirement]]
 id = "R12"
