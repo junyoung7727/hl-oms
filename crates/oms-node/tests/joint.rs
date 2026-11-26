@@ -420,9 +420,11 @@ fn monitored(oms: &Oms) -> Option<bool> {
 
 /// A plain buy of 0.001 at `px`, accepted and working.
 fn working(w: &World, oms: &Oms, key: &str, px: &str) -> OrderId {
-    let NewOrderReply::Accepted { order_id } = oms.new_order(key, Side::Buy, "0.001", px, false)
-    else {
-        w.fail(&format!("the plain order {key} was not accepted"))
+    let reply = oms.new_order(key, Side::Buy, "0.001", px, false);
+    let NewOrderReply::Accepted { order_id } = reply else {
+        w.fail(&format!(
+            "the plain order {key} was not accepted: {reply:?}"
+        ))
     };
     w.wait(
         &format!("order {key} is working"),
@@ -1376,10 +1378,18 @@ fn j4_a_ten_second_stream_outage_kills_in_the_oms_and_the_watcher_raises_nothing
         "kill",
         "stream back, venue checked, zero open orders",
     );
+    // The orders close on their status answers alone; the new link
+    // session's resync (fills, open orders, positions) may still be due
+    // then, and its hold refuses the order as the latch does. One
+    // reconcile round of 100 ms ends it; 5 s also covers a retry of each
+    // account query, paced at one per second (판단(모델 아님)).
     w.wait(
-        "/api/status holds no kill_latched",
-        Duration::from_secs(2),
-        || !status_holds(&oms).contains(&"kill_latched".to_string()),
+        "/api/status holds nothing: no kill_latched, the resync done",
+        Duration::from_secs(5),
+        || {
+            oms.status_http()
+                .is_some_and(|s| s["core"]["holds"] == json!([]))
+        },
     );
     let after = working(&w, &oms, "after-kill", "29000");
     assert!(
