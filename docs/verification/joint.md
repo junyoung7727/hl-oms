@@ -37,6 +37,7 @@ cargo run --locked -q -p xtask -- joint --only j1     # 이름에 j1이 든 시�
 | `the_rig_refuses_a_base_in_a_git_work_tree_a_long_socket_path_and_an_oms_test_variable` | 리그 자신의 규칙: git 작업 트리 안(없는 하위 경로도)과 상대 경로의 기준 디렉터리, 100바이트 소켓 경로를 거부하고 99바이트는 받는다. `OMS_TEST_`로 시작하는 추가 변수를 준 `Oms::start`는 프로세스를 띄우기 전에 멈춘다. 소켓 길이는 지어낸 절대 경로로 재므로 `OMS_TEST_DIR`의 길이(58바이트까지)와 상관없다 |
 | `the_rig_moves_a_taken_http_port_once_and_a_second_taken_port_is_a_precondition` | 첫 시작에서 `[http]` 포트가 잡혀 있으면 리그가 대시보드 없이 돈 OMS를 끝내고 포트를 옮겨 다시 띄운다: 새 포트에서 `/api/status`가 답하고 저널에는 부팅이 하나다. 포트를 쥔 쪽이 `/api/status`에 `200`과 JSON으로 답해도 포트를 옮기고, 새 포트의 `/api/status`는 OMS의 pid를 말한다. 옮긴 포트도 잡혀 있거나, 저널이나 워처 설정이 이미 있는 시작에서 포트가 잡혀 있으면 `joint rig precondition:`으로 멈추고 OMS가 남지 않는다 |
 | `the_rig_takes_an_oms_as_up_only_when_the_admin_socket_and_api_status_name_its_pid` | 규칙 `up`: 두 상태가 모두 시작한 프로세스의 pid를 말할 때만 참이다. `/api/status`가 없거나, `{}`이거나, 다른 pid이거나, admin이 다른 pid이면 거짓이고, admin이 답하지 않으면 `/api/status`를 묻지 않는다 |
+| `the_rig_waits_for_the_bind_error_when_a_holder_answers_api_status` | `Oms::start`의 기다림(`port_taken`): admin이 이미 답하는 동안 포트를 쥔 쪽이 `/api/status`에 `{}`로 답해도 끝나지 않고 다음 차례에 로그의 bind 오류로 끝난다(포트 잡힘). 두 상태가 이 pid로 답하거나 프로세스가 끝나면 첫 차례에 끝난다 |
 
 J1은 배포 기본 시간값에서 돌았다는 것도 본다: OMS 관문 정책이 코드 기본값이고, 하트비트 기록 사이가 평균 4초 이상이고 어느 둘도 2.5초보다 가깝지 않다(워처 기본 `heartbeat_ms` 5,000; 기록 하나가 2.5초까지 늦어도 통과하게 한 여유, 둘 다 판단(모델 아님)).
 
