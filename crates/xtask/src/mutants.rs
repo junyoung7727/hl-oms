@@ -3772,6 +3772,18 @@ fn joint_prebuild(work: &Path, target_dir: &Path) -> Result<(PathBuf, crate::joi
     Ok((run_dir, bins))
 }
 
+/// The `cargo test` of one mutant in `work`. A joint mutant's (`prebuilt`:
+/// its run directory and the binaries built from the mutated copy) also
+/// gets those binaries and that directory.
+fn test_command(test: &[&str], work: &Path, target_dir: &Path, prebuilt: Option<&(PathBuf, crate::joint::Bins)>) -> Command {
+    let mut cmd = Command::new("cargo");
+    cmd.arg("test").args(test).current_dir(work).env("CARGO_TARGET_DIR", target_dir).env("OMS_SIM_SEEDS", "60");
+    if let Some((run_dir, bins)) = prebuilt {
+        cmd.env("JOINT_WATCHER_BIN", &bins.watcher).env("JOINT_OMSCTL_BIN", &bins.omsctl).env("OMS_TEST_DIR", run_dir);
+    }
+    cmd
+}
+
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(to)?;
     for e in std::fs::read_dir(from)? {
@@ -3837,17 +3849,13 @@ pub fn run(root: &Path, only: Option<&str>) -> i32 {
         let _ = std::fs::write(&path, original.replacen(m.find, m.replace, 1));
         let t = Instant::now();
         let joint = is_joint(m.test);
-        let mut cmd = Command::new("cargo");
-        cmd.arg("test").args(m.test).current_dir(&work).env("CARGO_TARGET_DIR", &target_dir).env("OMS_SIM_SEEDS", "60");
         // A joint test spawns the watcher and omsctl binaries it is given,
         // so they are built from the mutated copy first (ADR-039).
         let prebuilt = if joint { Some(joint_prebuild(&work, &target_dir)) } else { None };
-        if let Some(Ok((run_dir, bins))) = &prebuilt {
-            cmd.env("JOINT_WATCHER_BIN", &bins.watcher).env("JOINT_OMSCTL_BIN", &bins.omsctl).env("OMS_TEST_DIR", run_dir);
-        }
         let out = match &prebuilt {
             Some(Err(note)) => Err(note.clone()),
-            _ => cmd.output().map_err(|e| format!("cargo did not run: {e}")),
+            Some(Ok(p)) => test_command(m.test, &work, &target_dir, Some(p)).output().map_err(|e| format!("cargo did not run: {e}")),
+            None => test_command(m.test, &work, &target_dir, None).output().map_err(|e| format!("cargo did not run: {e}")),
         };
         // The scan of `xtask joint`: a process left behind is signalled and
         // makes the run no kill.
@@ -3912,6 +3920,30 @@ mod tests {
     }
 
     const FAILED: &str = "test j0_x ... FAILED\ntest result: FAILED. 0 passed; 1 failed; 0 ignored\n";
+
+    fn envs(cmd: &Command) -> Vec<(String, String)> {
+        cmd.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()).unwrap_or_default())).collect()
+    }
+
+    /// A joint mutant's test spawns the binaries built from the mutated
+    /// copy and works in its own run directory; any other mutant's test
+    /// gets neither.
+    #[test]
+    fn a_joint_mutants_test_gets_the_built_binaries_and_its_run_directory() {
+        let (work, target) = (Path::new("/w"), Path::new("/w/target"));
+        let bins = joint::Bins { watcher: "/t/r1-mbin/watcher".into(), omsctl: "/t/r1-mbin/omsctl".into(), node: "/w/target/debug/oms-node".into() };
+        let prebuilt = (PathBuf::from("/t/r1-m"), bins);
+        let cmd = test_command(&["-p", "oms-node", "--features", "joint", "--test", "joint"], work, target, Some(&prebuilt));
+        let e = envs(&cmd);
+        for (k, v) in [("JOINT_WATCHER_BIN", "/t/r1-mbin/watcher"), ("JOINT_OMSCTL_BIN", "/t/r1-mbin/omsctl"), ("OMS_TEST_DIR", "/t/r1-m"), ("CARGO_TARGET_DIR", "/w/target")] {
+            assert!(e.contains(&(k.to_string(), v.to_string())), "{k}: {e:?}");
+        }
+        assert_eq!(cmd.get_current_dir(), Some(work));
+        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(args, ["test", "-p", "oms-node", "--features", "joint", "--test", "joint"]);
+        let plain = envs(&test_command(&["-p", "watcher"], work, target, None));
+        assert!(plain.iter().all(|(k, _)| !k.starts_with("JOINT_") && k != "OMS_TEST_DIR"), "{plain:?}");
+    }
 
     #[test]
     fn a_failing_run_is_a_kill_only_when_it_compiled_and_ran() {
