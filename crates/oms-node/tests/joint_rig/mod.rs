@@ -679,6 +679,30 @@ pub fn up(pid: u32, admin: Option<Value>, http: impl FnOnce() -> Option<Value>) 
     admin.as_ref().is_some_and(ours) && http().as_ref().is_some_and(ours)
 }
 
+/// [`Oms::start`]'s wait after a spawn, one round every 25 ms: `true`
+/// when the new part of the log holds `taken` (the `[http]` bind error;
+/// read first in each round), `false` when the process ended, `end`
+/// passed, or the OMS is [`up`] as `pid` on `admin` and `http`.
+pub fn port_taken(
+    pid: u32,
+    taken: &str,
+    log: impl Fn() -> String,
+    exited: impl Fn() -> bool,
+    admin: impl Fn() -> Option<Value>,
+    http: impl Fn() -> Option<Value>,
+    end: Instant,
+) -> bool {
+    loop {
+        if log().contains(taken) {
+            return true;
+        }
+        if exited() || Instant::now() >= end || up(pid, admin(), &http) {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
 /// The OMS: `start` is the only place that builds an `oms-node` command.
 pub struct Oms {
     dir: PathBuf,
@@ -724,22 +748,15 @@ impl Oms {
             let from = std::fs::metadata(self.dir.join("o/node.log")).map_or(0, |m| m.len());
             self.spawn(extra_env);
             let taken = format!("bind 127.0.0.1:{}: Address already in use", self.port());
-            let end = Instant::now() + Duration::from_secs(20);
-            let in_use = loop {
-                let log = self.log();
-                if log.get(from as usize..).unwrap_or("").contains(&taken) {
-                    break true;
-                }
-                if self.exit().is_some()
-                    || Instant::now() >= end
-                    || up(self.pid().unwrap(), self.status_admin(), || {
-                        self.status_http_within(Duration::from_secs(1))
-                    })
-                {
-                    break false;
-                }
-                std::thread::sleep(Duration::from_millis(25));
-            };
+            let in_use = port_taken(
+                self.pid().unwrap(),
+                &taken,
+                || self.log().get(from as usize..).unwrap_or("").to_string(),
+                || self.exit().is_some(),
+                || self.status_admin(),
+                || self.status_http_within(Duration::from_secs(1)),
+                Instant::now() + Duration::from_secs(20),
+            );
             if !in_use {
                 return;
             }

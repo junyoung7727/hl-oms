@@ -527,6 +527,36 @@ fn answer_status_until(l: &std::net::TcpListener, stop: &std::sync::atomic::Atom
     }
 }
 
+/// `Oms::start`'s wait: a holder of the port that answers `/api/status`
+/// while the admin socket already answers does not end it; the bind
+/// error in the log does, in the next round. An OMS that answers on both
+/// ends it at once, as does an exit.
+#[test]
+fn the_rig_waits_for_the_bind_error_when_a_holder_answers_api_status() {
+    let taken = "bind 127.0.0.1:1: Address already in use";
+    let rounds = std::cell::Cell::new(0);
+    let end = Instant::now() + Duration::from_secs(5);
+    let ours = || Some(json!({"node": {"pid": 7}}));
+    let log = || {
+        rounds.set(rounds.get() + 1);
+        if rounds.get() > 1 {
+            taken.to_string()
+        } else {
+            String::new()
+        }
+    };
+    let holder = || Some(json!({}));
+    assert!(port_taken(7, taken, log, || false, ours, holder, end));
+    assert_eq!(rounds.get(), 2, "the wait ended in the first round");
+
+    rounds.set(0);
+    assert!(!port_taken(7, taken, log, || false, ours, ours, end));
+    assert_eq!(rounds.get(), 1);
+    rounds.set(0);
+    assert!(!port_taken(7, taken, log, || true, || None, || None, end));
+    assert_eq!(rounds.get(), 1);
+}
+
 /// `Oms::start`'s rule for an OMS that is up: both statuses name the
 /// started process; another server's `/api/status` does not count.
 #[test]
