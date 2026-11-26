@@ -109,6 +109,16 @@ pub fn run_verdict(code: Option<i32>, output: &str) -> Result<usize, String> {
     Ok(passed)
 }
 
+/// A run's verdict with its orphan scan: an orphan fails the run whatever
+/// the tests said.
+pub fn with_orphans(verdict: Result<usize, String>, orphans: &[String]) -> Result<usize, String> {
+    match (verdict, orphans.is_empty()) {
+        (r, true) => r,
+        (Ok(_), false) => Err(orphans.join("; ")),
+        (Err(e), false) => Err(format!("{e}; {}", orphans.join("; "))),
+    }
+}
+
 /// What the orphan scan does with a process whose command line names the
 /// run directory: one of the test binaries is signalled, anything else is
 /// only reported.
@@ -320,12 +330,7 @@ pub fn run(root: &Path, runs: Option<&str>, only: Option<&str>) -> i32 {
         print!("{stdout}");
         eprint!("{stderr}");
         let orphans = orphan_scan(&run_dir, &bins);
-        // An orphan fails the run whatever the tests said.
-        let verdict = match (run_verdict(out.status.code(), &stdout), orphans.is_empty()) {
-            (r, true) => r,
-            (Ok(_), false) => Err(orphans.join("; ")),
-            (Err(e), false) => Err(format!("{e}; {}", orphans.join("; "))),
-        };
+        let verdict = with_orphans(run_verdict(out.status.code(), &stdout), &orphans);
         match verdict {
             Ok(n) => {
                 println!(
@@ -456,6 +461,17 @@ mod tests {
         let none = "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0s\n";
         assert_eq!(run_verdict(Some(0), none), Err("no test ran".into()));
         assert_eq!(run_verdict(Some(0), ""), Err("no test ran".into()));
+    }
+
+    #[test]
+    fn an_orphan_fails_a_passing_run_and_is_named_in_a_failed_one() {
+        let orphan = vec!["orphan process 7 /t/r1-bin/watcher".to_string()];
+        assert_eq!(with_orphans(Ok(2), &[]), Ok(2));
+        assert_eq!(with_orphans(Ok(2), &orphan), Err(orphan[0].clone()));
+        assert_eq!(
+            with_orphans(Err("exit Some(101)".into()), &orphan),
+            Err(format!("exit Some(101); {}", orphan[0]))
+        );
     }
 
     #[test]
