@@ -171,6 +171,14 @@ fn j1_a_whole_life_cycle_at_the_deployed_timers_has_no_mismatch_and_opens_the_ga
         "{reasons:?}"
     );
 
+    // The deployed timers: the OMS's gate policy is its code default.
+    let policy = oms.status_admin().unwrap()["core"]["monitor"]["policy"].clone();
+    assert_eq!(
+        policy,
+        json!({"heartbeat_max_age_us": 30_000_000, "check_max_age_us": 10_000_000, "unmonitored_cancel_us": 60_000_000}),
+        "not the deployed gate policy"
+    );
+
     let mut watcher = w.watcher();
     watcher.start();
     w.wait("the gate opens", Duration::from_secs(40), || {
@@ -326,6 +334,15 @@ fn j1_a_whole_life_cycle_at_the_deployed_timers_has_no_mismatch_and_opens_the_ga
             }
         }
     }
+    // The watcher's deployed heartbeat_ms (5,000): no two heartbeat
+    // records closer than 4 s (the margin 판단(모델 아님)).
+    for pair in beats.windows(2) {
+        assert!(
+            pair[1].0 - pair[0].0 >= 4_000_000,
+            "heartbeats {} µs apart: not the deployed heartbeat_ms",
+            pair[1].0 - pair[0].0
+        );
+    }
     let (_, newest) = beats.last().unwrap();
     assert!(
         CHECKS
@@ -348,4 +365,39 @@ fn j1_a_whole_life_cycle_at_the_deployed_timers_has_no_mismatch_and_opens_the_ga
         status["account"]
     );
     w.assert_venue_invariants();
+}
+
+/// The rig's own rules: a base directory inside a git work tree, a
+/// relative one and a socket path of 100 bytes or more are refused; a
+/// start of the OMS with an `OMS_TEST_` variable is a test error, before
+/// any process starts.
+#[test]
+fn the_rig_refuses_a_base_in_a_git_work_tree_a_long_socket_path_and_an_oms_test_variable() {
+    let w = World::new("jr", Timers::Short, Duration::from_secs(20));
+    let tree = w.dir.join("repo");
+    std::fs::create_dir_all(tree.join(".git")).unwrap();
+    let inside = tree.join("missing/base");
+    let e = check_base(&inside, &inside.join("j1-1")).unwrap_err();
+    assert!(e.contains("inside the git work tree"), "{e}");
+    assert!(
+        check_base(
+            std::path::Path::new("rel"),
+            std::path::Path::new("rel/j1-1")
+        )
+        .is_err()
+    );
+    let base = w.dir.join("ok");
+    // The longest socket path is `<dir>/o/d/monitor.sock`, 17 bytes more.
+    let fits = base.join("x".repeat(SOCKET_PATH_MAX - 1 - 17 - base.as_os_str().len() - 1));
+    assert_eq!(check_base(&base, &fits), Ok(()));
+    let long = base.join("x".repeat(SOCKET_PATH_MAX - 17 - base.as_os_str().len() - 1));
+    let e = check_base(&base, &long).unwrap_err();
+    assert!(e.contains("has 100 bytes, at most 99 allowed"), "{e}");
+
+    let mut oms = w.oms();
+    let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        oms.start(&[("OMS_TEST_BYBIT_WIRING", "{}")]);
+    }));
+    assert!(refused.is_err(), "Oms::start took an OMS_TEST_ variable");
+    assert!(oms.pid().is_none(), "an OMS was started");
 }

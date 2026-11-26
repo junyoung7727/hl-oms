@@ -72,6 +72,34 @@ pub fn git_work_tree(p: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
+/// The rig's rules on the base directory and a test directory under it:
+/// absolute, outside any git work tree (the watcher refuses a token file
+/// there), and every socket path below [`SOCKET_PATH_MAX`] bytes.
+pub fn check_base(base: &Path, dir: &Path) -> Result<(), String> {
+    if !base.is_absolute() {
+        return Err(format!("OMS_TEST_DIR {} is not absolute", base.display()));
+    }
+    if let Some(tree) = git_work_tree(base) {
+        return Err(format!(
+            "OMS_TEST_DIR {} is inside the git work tree {}: the watcher refuses a token file there",
+            base.display(),
+            tree.display()
+        ));
+    }
+    for sock in ["oms.sock", "admin.sock", "monitor.sock"] {
+        let p = dir.join("o/d").join(sock);
+        let n = p.as_os_str().len();
+        if n >= SOCKET_PATH_MAX {
+            return Err(format!(
+                "the socket path {} has {n} bytes, at most {} allowed",
+                p.display(),
+                SOCKET_PATH_MAX - 1
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn mode(path: &Path, mode: u32) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
 }
@@ -244,27 +272,9 @@ impl World {
     pub fn new(tag: &str, timers: Timers, budget: Duration) -> World {
         assert!(tag.len() <= 3, "a tag has at most 3 bytes");
         let base = env_path("OMS_TEST_DIR");
-        if !base.is_absolute() {
-            precondition(format!("OMS_TEST_DIR {} is not absolute", base.display()));
-        }
-        if let Some(tree) = git_work_tree(&base) {
-            precondition(format!(
-                "OMS_TEST_DIR {} is inside the git work tree {}: the watcher refuses a token file there",
-                base.display(),
-                tree.display()
-            ));
-        }
         let dir = base.join(format!("{tag}-{}", std::process::id()));
-        for sock in ["oms.sock", "admin.sock", "monitor.sock"] {
-            let p = dir.join("o/d").join(sock);
-            let n = p.as_os_str().len();
-            if n >= SOCKET_PATH_MAX {
-                precondition(format!(
-                    "the socket path {} has {n} bytes, at most {} allowed",
-                    p.display(),
-                    SOCKET_PATH_MAX - 1
-                ));
-            }
+        if let Err(e) = check_base(&base, &dir) {
+            precondition(e);
         }
         let _ = std::fs::remove_dir_all(&dir);
         for d in ["o", "w", "s", "bin"] {
