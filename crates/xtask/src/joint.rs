@@ -461,17 +461,24 @@ mod tests {
         }
     }
 
-    /// A script stands in for the copied watcher.
+    /// A script stands in for the copied watcher. A child shell writes it:
+    /// a file this process held open for writing can be inherited by a
+    /// concurrent test's fork, and running it then fails with ETXTBSY.
     #[test]
     fn a_watcher_whose_version_does_not_end_in_test_endpoints_is_refused() {
-        use std::os::unix::fs::PermissionsExt;
         let d = scratch("version");
         std::fs::create_dir_all(&d).expect("test setup");
         let script = |name: &str, line: &str| {
             let p = d.join(name);
-            std::fs::write(&p, format!("#!/bin/sh\necho '{line}'\n")).expect("test setup");
-            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o700))
+            let st = Command::new("/bin/sh")
+                .arg("-c")
+                .arg(r#"printf '#!/bin/sh\necho "%s"\n' "$2" > "$1" && chmod 700 "$1""#)
+                .arg("sh")
+                .arg(&p)
+                .arg(line)
+                .status()
                 .expect("test setup");
+            assert!(st.success(), "test setup");
             p
         };
         let good = script("good", "watcher 0.1.0 test-endpoints");
@@ -573,7 +580,14 @@ mod tests {
         std::fs::create_dir_all(&run).expect("test setup");
         let sh = PathBuf::from("/bin/sh");
         let copy = d.join("sh-bin");
-        std::fs::copy(&sh, &copy).expect("test setup");
+        // A child copies it, so no fork of this process holds it open for
+        // writing when it runs (ETXTBSY).
+        let st = Command::new("cp")
+            .arg(&sh)
+            .arg(&copy)
+            .status()
+            .expect("test setup");
+        assert!(st.success(), "test setup");
         let arg = run.join("x").display().to_string();
         use std::os::unix::process::CommandExt;
         let script = "while :; do sleep 0.1; done";
