@@ -58,13 +58,13 @@ pub fn order_row(
         "qty": qty, "orderStatus": status})
 }
 
-/// A `/v5/position/list` row in one-way mode (`positionIdx` 0); `side`
+/// A row of the position query in one-way mode (`positionIdx` 0); `side`
 /// `""` when flat.
 pub fn position_row(symbol: &str, side: &str, size: &str) -> Value {
     json!({"symbol": symbol, "side": side, "size": size, "positionIdx": 0})
 }
 
-/// The fields of an `/v5/execution/list` row.
+/// The fields of a row of the execution query.
 #[derive(Debug, Clone, Copy)]
 pub struct Execution<'a> {
     pub symbol: &'a str,
@@ -80,7 +80,7 @@ pub struct Execution<'a> {
     pub order_id: &'a str,
 }
 
-/// An `/v5/execution/list` row.
+/// A row of the execution query.
 pub fn execution_row(e: &Execution) -> Value {
     json!({"symbol": e.symbol, "execId": e.exec_id, "execType": e.exec_type, "side": e.side,
         "execQty": e.qty, "execPrice": e.price, "execFee": e.fee,
@@ -88,7 +88,7 @@ pub fn execution_row(e: &Execution) -> Value {
         "orderId": e.order_id})
 }
 
-/// A `/v5/account/wallet-balance` account row of type UNIFIED; the wallet
+/// An account row of the wallet-balance query, of type UNIFIED; the wallet
 /// balance is the margin balance, and no coin rows.
 pub fn wallet_unified(equity: &str, maintenance: &str, margin_balance: &str) -> Value {
     json!({"accountType": "UNIFIED", "totalEquity": equity,
@@ -96,7 +96,7 @@ pub fn wallet_unified(equity: &str, maintenance: &str, margin_balance: &str) -> 
         "totalWalletBalance": margin_balance, "coin": []})
 }
 
-/// The `result` of `/v5/user/query-api` for a sub-account key
+/// The `result` of the API-key query for a sub-account key
 /// (`isMaster` false).
 pub fn query_api_key(
     user_id: u64,
@@ -109,13 +109,13 @@ pub fn query_api_key(
         "readOnly": read_only, "ips": ips, "permissions": permissions})
 }
 
-/// A linear USDT instrument row of `/v5/market/instruments-info`, trading.
+/// A linear USDT instrument row of the instruments query, trading.
 pub fn instrument_row(symbol: &str, tick: &str, step: &str) -> Value {
     json!({"symbol": symbol, "settleCoin": "USDT", "status": "Trading",
         "priceFilter": {"tickSize": tick}, "lotSizeFilter": {"qtyStep": step}})
 }
 
-/// The `result` of `/v5/market/time` at `time_ns` (ns since the epoch).
+/// The `result` of the server-time query at `time_ns` (ns since the epoch).
 pub fn market_time(time_ns: u64) -> Value {
     json!({"timeSecond": (time_ns / 1_000_000_000).to_string(), "timeNano": time_ns.to_string()})
 }
