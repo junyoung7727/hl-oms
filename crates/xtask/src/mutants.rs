@@ -3722,6 +3722,33 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "oms-node", "--features", "joint", "--test", "joint", "--", "--test-threads=1", "--exact", "j0_the_rig_refuses_a_watcher_built_without_test_endpoints_and_a_test_build_without_wiring_exits_2"],
         guards: "C-JOINT / V-JOINT-1",
     },
+    Mutant {
+        id: "M411-oms-watcher-mismatch-held-without-a-record",
+        what: "the OMS answers the watcher's watcher_mismatch with \"held\" and records nothing: the watcher counts it as paid, no hold refuses a plain order (spec mutant 19; a joint test: oms-node is rebuilt from the mutated copy)",
+        file: "crates/oms-node/src/server.rs",
+        find: "            let input = Input::Watcher(WatcherInput::Mismatch { check, detail });\n            submit(s, ctx, Lane::Control, id, input, permit)",
+        replace: "            let _ = (check, detail, permit);\n            Some(Response::ok(id, \"held\".to_string()))",
+        test: &["-p", "oms-node", "--features", "joint", "--test", "joint", "--", "--test-threads=1", "--exact", "j2a_a_venue_only_order_holds_plain_orders_after_two_rounds_and_two_seconds_until_clear_hold"],
+        guards: "C-JOINT / V-JOINT-2",
+    },
+    Mutant {
+        id: "M412-oms-gate-ignores-the-check-age",
+        what: "the OMS's monitoring gate ignores the age of W1/W2 in the heartbeat: a watcher whose checks fail but whose heartbeats go on keeps the gate open (spec mutant 20; a joint test)",
+        file: "crates/oms-core/src/core.rs",
+        find: "Some(t) if last.at.saturating_sub(t) > policy.check_max_age_us => {",
+        replace: "Some(t) if false && last.at.saturating_sub(t) > policy.check_max_age_us => {",
+        test: &["-p", "oms-node", "--features", "joint", "--test", "joint", "--", "--test-threads=1", "--exact", "j6b_failing_watcher_checks_close_the_gate_after_the_check_age_limit"],
+        guards: "C-JOINT / V-JOINT-6",
+    },
+    Mutant {
+        id: "M413-watcher-w2-confirms-after-one-round",
+        what: "the watcher confirms a W2 difference at its first sighting instead of in the second completed round: a venue-only fill holds plain orders one round early (spec mutant 21; a joint test: the watcher is rebuilt from the mutated copy)",
+        file: "crates/watcher/src/engine.rs",
+        find: "            if before.is_none() {\n                continue;\n            }",
+        replace: "            if before.is_none() && check != Check::W2 {\n                continue;\n            }",
+        test: &["-p", "oms-node", "--features", "joint", "--test", "joint", "--", "--test-threads=1", "--exact", "j2b_a_venue_only_fill_holds_after_two_w2_rounds_and_is_released_after_the_oms_books_it"],
+        guards: "C-JOINT / V-JOINT-2",
+    },
 ];
 
 /// A mutant whose test is a joint test (`--features joint`, ADR-039): its

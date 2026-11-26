@@ -1,7 +1,7 @@
 # 요구사항별 확인 현황(R01~R15)
 
 > 자동 생성 문서다. 고치려면 `registry/requirements.toml`이나 `registry/claims.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 결과는 현재 소스(다이제스트 `0894c79ce01d12ed`)에서 돌린 것만 센다. 다른 소스에서 돌린 결과는 **미실행**으로 센다.
+> 결과는 현재 소스(다이제스트 `6495563eb75372e3`)에서 돌린 것만 센다. 다른 소스에서 돌린 결과는 **미실행**으로 센다.
 
 - 로직(코어+가짜): 코어와 가짜 거래소·시뮬레이션·loopback 가짜 Bybit로 확인한다. 장애 주입과 강제 종료는 여기서만 원할 때 재현할 수 있다.
 - 실제 Bybit: 테스트넷에 실제로 보낸 시험(`bybit-testnet` 묶음)만 센다. 어떤 가짜도 이 칸에 들어가지 않는다.
@@ -13,13 +13,13 @@
 | R02 | 잠재 체결의 계좌/전략 수량을 공동 검사·예약 | 주장 5: 통과 0 · **■ 미실행 5** | **■ 시험 없음** |
 | R03 | 시세·참조 입력의 유효성 및 적용 가능한 주문 가격 검사를 수행 | 주장 4: 통과 0 · **■ 미실행 4** | **■ 시험 없음** |
 | R04 | 긴급 시장가 매수는 추정+버퍼로 예약하고 근거 보존 | **■ 시험 없음** | **■ 시험 없음** |
-| R05 | 초과/부족 인식 시 실제 기장+신규 위험 차단 | 주장 4: 통과 0 · **■ 미실행 4** | 주장 1: 통과 0 · **■ 미실행 1** |
+| R05 | 초과/부족 인식 시 실제 기장+신규 위험 차단 | 주장 5: 통과 0 · **■ 미실행 5** | 주장 1: 통과 0 · **■ 미실행 1** |
 | R06 | 결과 불명·장애·중복 수신으로 책임이 사라지거나 늘지 않음 | 주장 16: 통과 0 · **■ 미실행 16** | 주장 2: 통과 0 · **■ 미실행 2** |
-| R07 | halt 효과의 시점을 정의하고 취소·관측 경로 유지 | 주장 14: 통과 0 · **■ 미실행 14** | 주장 1: 통과 0 · **■ 미실행 1** |
+| R07 | halt 효과의 시점을 정의하고 취소·관측 경로 유지 | 주장 16: 통과 0 · **■ 미실행 16** | 주장 1: 통과 0 · **■ 미실행 1** |
 | R08 | 계좌·전략의 자동 실행 반복과 총체결량을 별도 제한, 승인 재개 | **■ 시험 없음** | **■ 시험 없음** |
 | R09 | 새 주문의 메시지 제한으로 취소 요청을 로컬에서 거절하지 않음 | 주장 4: 통과 0 · **■ 미실행 4** | **■ 시험 없음** |
 | R10 | 동일 소유 계좌의 전략 간 self-match 정책을 명시 | **■ 시험 없음** | 주장 1: 통과 0 · **■ 미실행 1** |
-| R11 | 독립 근거와 대사하고 차이·정정을 감사 가능하게 처리 | 주장 10: 통과 0 · **■ 미실행 10** | 주장 1: 통과 0 · **■ 미실행 1** |
+| R11 | 독립 근거와 대사하고 차이·정정을 감사 가능하게 처리 | 주장 12: 통과 0 · **■ 미실행 12** | 주장 1: 통과 0 · **■ 미실행 1** |
 | R12 | 체결 원천·정책대로 전략에 귀속, 공통 평가로 합계 대사 | 주장 3: 통과 0 · **■ 미실행 3** | **■ 시험 없음** |
 | R13 | 설정·권한·릴리스 버전과 승인 근거 연결 | 주장 1: 통과 0 · **■ 미실행 1** | **■ 시험 없음** |
 | R14 | 허용 요청을 처리하고 지원 부하에서 응답/관측 지연을 충족 | 주장 3: 통과 0 · **■ 미실행 3** | **■ 시험 없음** |
@@ -84,9 +84,9 @@
 
 - 출처: 프로젝트 D; FIA24 §§4.1–4.2 배경
 - 판정 경계: 음수 여유·지연 비용
-- 로직(코어+가짜): 주장 4: 통과 0 · **■ 미실행 4**
+- 로직(코어+가짜): 주장 5: 통과 0 · **■ 미실행 5**
 - 실제 Bybit: 주장 1: 통과 0 · **■ 미실행 1**
-- 확인하지 않은 범위: 수량은 확인했지만 금액(예약보다 비싸게 체결, 101.01 예약 대 102 실제)은 예약이 없어 다루지 않는다. 펀딩은 어느 한도에도 들어가지 않는다. Bybit 체결 행에서 코어까지 끝에서 끝으로 가는 시험이 없다
+- 확인하지 않은 범위: 수량은 확인했지만 금액(예약보다 비싸게 체결, 101.01 예약 대 102 실제)은 예약이 없어 다루지 않는다. 펀딩은 어느 한도에도 들어가지 않는다. 실제 Bybit의 체결 행에서 코어까지 끝에서 끝으로 가는 시험은 없다(가짜 Bybit의 행은 V-JOINT-2의 J2b에서 실제 oms-node가 게이트웨이로 읽어 기장한다)
 
 | 주장 | 칸 | 상태 | 주장 내용 |
 |---|---|---|---|
@@ -94,6 +94,7 @@
 | [V-EXT-1](claims.md) | 로직 | **■ 미실행** | OMS가 내지 않은 체결은 기장되고 불일치로 표시되어 신규 주문을 막으며, 운영자가 확인해야 풀린다 |
 | [V-MIS-1](claims.md) | 로직 | **■ 미실행** | 불일치 14종 각각을 일으키는 시험이 있고, 같은 대상의 반복은 확인되기 전까지 한 건으로 남는다. 운영자가 resolve_order로 닫은 주문에 뒤늦게 온 체결도 기장되고 FillAfterClose로 제기된다 |
 | [V-VENUE-EXEC-1](claims.md) | 로직 | **■ 미실행** | 펀딩 입력은 포지션·주문·예약·체결 수를 바꾸지 않고 한 번만 기록된다. 거래소 포지션 변경은 부호 있는 수량을 계좌와 미귀속 장부에 더하고 VenuePositionChange 불일치로 일반 주문을 막으며(감소 전용은 통과) 재생 뒤에도 남는다. 분류 못 한 실행은 기장 없이 UnclassifiedExecution 불일치로 막는다. 변경 뒤 그보다 늦게 물은 현재 세션의 포지션 응답 중 그 종목에 열린 주문과 대기 체결이 없을 때의 첫 응답이 다르면 PositionAdjusted(snapshot_after_venue_change) 한 건으로 맞추고 같으면 VenueChangeSettled만 남기며(열린 주문이 있는 동안은 맞추지 않아 오는 중인 체결을 두 번 세지 않는다), 저널만으로 계산한 포지션이 거래소 값과 같다. 분류 못 한 실행의 키는 같은 키로 나중에 온 체결의 기장을 막지 않는다. 운영자 조정은 reason 없이 스키마 1과 같은 바이트로 쓰인다 |
+| [V-JOINT-2](claims.md) | 로직 | **■ 미실행** | 짧은 시간값으로 실제 oms-node와 실제 워처를 상태가 있는 가짜 Bybit 하나에 함께 띄우고 관문이 열린 뒤 걸린 일반 주문 R이 있을 때, 거래소에만 있는 주문 F(orderLinkId manual-1, 거래소 화면에서 낸 것: 장부와 REST에만 있고 스트림으로 오지 않음)를 심으면: hold_set{watcher_mismatch}(출처 W1, 메모가 'W1 foreign '으로 시작)은 F를 담은 워처 키의 첫 W1 답 + min_age_ms와 둘째 W1 답 가운데 늦은 것보다 앞서지 않고 그 뒤 5초 안에 하나 기록되고, /api/status의 core.holds에 watcher_mismatch가 들며, 워처의 'confirmed difference: W1 foreign' 줄 하나, 워처 불일치의 [WATCH P1] 하나, OMS의 watcher_mismatch [OMS P1]이 간다. 보류 아래 새 일반 주문은 Hold(WatcherMismatch)로 거절되고 R의 취소는 받아들여져 가짜에서 Cancelled, 저널에서 order_closed{Canceled}가 된다. 운영자가 거래소에서 F를 취소하고(프레임 없음) W1 두 라운드가 지난 뒤 omsctl clear-hold --reason watcher_mismatch는 cleared로 답하고 hold_cleared가 기록되며, 새 일반 주문이 받아들여져 가짜에 닿고, mismatch_resend_ms와 W1 두 라운드 동안 보류도 새 확정도 없다. 거래소에만 있는 체결(외부 orderLinkId의 Trade 매수 0.001; execTime과 포지션 updatedTime이 min_age_ms + 500 ms 전이고 OMS 첫 부팅의 fill_floor + 1초 이상)이면: 보류는 그 포지션을 보인 워처 키의 둘째 W2 답과 그 행을 돌려준 둘째 W4 답 가운데 이른 것보다 앞서지 않고(출처 W2 또는 W4, 메모도), 워처의 확정 줄과 불일치 [WATCH P1](하나나 둘)은 W2·W4의 것뿐이며, OMS의 [OMS P1], 거절, R의 취소는 위와 같다. OMS는 그 체결을 스스로 올린다(늦어도 비공개 스트림이 다시 붙은 뒤: external_fill_booked, 확인 안 된 불일치는 instrument:BTCUSDT의 ExternalFill 하나와 많아야 PositionOutOfRange 하나뿐이고 저널의 mismatch_raised 수와 같다). 그 뒤 W4 한 답을 지나고 W2 두 라운드와 W4 두 답 동안 새 확정이 없고, 불일치마다 omsctl ack, 그다음 clear-hold 뒤 mismatch_resend_ms와 W2 두 라운드 동안 보류가 돌아오지 않으며 새 일반 주문이 받아들여지고, 가짜의 포지션 +0.001 = OMS 장부의 포지션이다. 두 시험 모두 워처가 끝나지 않고 끝에서 거래소 불변식이 성립한다 |
 | [V-BYBIT-LIVE-4](claims.md) | 실제 Bybit | **■ 미실행** | 실제 Bybit 테스트넷의 실행 행(/v5/execution/list)이 게이트웨이의 분류(exec::classify)에서 우리 주문의 체결로 읽힌다: orderLinkId가 우리 인스턴스와 주문 번호로 풀리고, 방향과 수량의 합이 주문과 같고, 테이커 수수료는 비용(양수)이다. 감소 전용 IOC가 포지션을 0으로 닫는다 |
 
 ## R06 — 결과 불명·장애·중복 수신으로 책임이 사라지거나 늘지 않음
@@ -153,7 +154,7 @@
 
 - 출처: FIA24 §§1.4–1.6
 - 판정 경계: 미전송 queue·늦은 fill
-- 로직(코어+가짜): 주장 14: 통과 0 · **■ 미실행 14**
+- 로직(코어+가짜): 주장 16: 통과 0 · **■ 미실행 16**
 - 실제 Bybit: 주장 1: 통과 0 · **■ 미실행 1**
 - 확인하지 않은 범위: 일괄 취소와 열린 주문 세기는 테스트넷에서 확인했지만(V-BYBIT-LIVE-3) 킬 루프 전체(래치, 회차, 30초 지켜보기)를 테스트넷에 붙여 돌리지 않았다.
 - 시험이 없는 규칙:
@@ -193,6 +194,8 @@
 | [V-KILL-5](claims.md) | 로직 | **■ 미실행** | 이 프로세스의 루프가 거래소에서 0건을 확인한 뒤(confirmed) 새 킬 계기(StreamLost, watcher_kill)가 오면 코어는 kill_rearmed{source, note}로 확인(confirmed_at, outcome)을 지우고 새 Kill을 부르며, 래치의 첫 메모는 그대로다. 새 루프가 확인하기 전 clear-hold는 kill_unconfirmed로 거절되고, 재실행이 같은 상태를 만든다. 확인 전의 두 번째 계기와 unsupported 답 뒤의 계기는 아무것도 쓰지 않는다. [venue]의 킬 필드 다섯은 설계 기본값으로 읽히고 각 경계 밖 한 걸음은 거절된다(kill_after_ms는 2 × ping 이상) |
 | [V-API-1](claims.md) | 로직 | **■ 미실행** | 전략 연결은 자기 주문만 보고 취소하며, 운영 명령은 운영 소켓에서만 받아들여진다. 알 수 없는 전략과 잘못된 요청은 거절된다 |
 | [V-JOINT-1](claims.md) | 로직 | **■ 미실행** | 배포 기본 시간값(두 프로그램 설정의 코드 기본값)으로 실제 oms-node와 실제 워처를 상태가 있는 가짜 Bybit 하나에 함께 띄우면: OMS는 감시 없음(unmonitored)으로 시작해 하트비트 전에는 일반 주문을 Hold(Unmonitored)로 거부하고, 관문은 W1·W2가 신선한 워처 'joint'의 하트비트가 기록된 바로 그 기록에서 열린다(monitor_changed{monitored: true}, 첫 하트비트 전이 아님). 주문 A(0.002 매수)의 부분 체결과 나머지 체결이 fill_booked 둘과 order_closed{Filled}로, 주문 B의 취소가 order_closed{Canceled}와 가짜의 Cancelled로 끝난 뒤, 마지막 주문 사건 뒤의 W1~W4 요청 각 3번 이상과 3 × w4_ms + min_age_ms(17초) 동안: watcher_mismatch 보류도 워처가 원인인 보류도 없고, [WATCH P1]도, 워처의 'confirmed difference'·watcher_mismatch·watcher_kill 줄도, 킬 마커도 없다. watcher_heartbeat 기록마다 W1~W4 시각은 기록 시각 이전 15초 안이고 마지막 기록에는 넷이 모두 있다. 끝에서 가짜의 포지션 +0.002 = OMS 장부의 포지션, 열린 주문은 양쪽 모두 0이고, 거래소 불변식이 성립한다. 리그는 시험 빌드가 아닌 워처 바이너리에 설정을 쓰지 않고, 배선 없이 띄운 시험 빌드는 종료 코드 2와 그 한 줄로 끝나며 가짜에 요청하지 않는다 |
+| [V-JOINT-2](claims.md) | 로직 | **■ 미실행** | 짧은 시간값으로 실제 oms-node와 실제 워처를 상태가 있는 가짜 Bybit 하나에 함께 띄우고 관문이 열린 뒤 걸린 일반 주문 R이 있을 때, 거래소에만 있는 주문 F(orderLinkId manual-1, 거래소 화면에서 낸 것: 장부와 REST에만 있고 스트림으로 오지 않음)를 심으면: hold_set{watcher_mismatch}(출처 W1, 메모가 'W1 foreign '으로 시작)은 F를 담은 워처 키의 첫 W1 답 + min_age_ms와 둘째 W1 답 가운데 늦은 것보다 앞서지 않고 그 뒤 5초 안에 하나 기록되고, /api/status의 core.holds에 watcher_mismatch가 들며, 워처의 'confirmed difference: W1 foreign' 줄 하나, 워처 불일치의 [WATCH P1] 하나, OMS의 watcher_mismatch [OMS P1]이 간다. 보류 아래 새 일반 주문은 Hold(WatcherMismatch)로 거절되고 R의 취소는 받아들여져 가짜에서 Cancelled, 저널에서 order_closed{Canceled}가 된다. 운영자가 거래소에서 F를 취소하고(프레임 없음) W1 두 라운드가 지난 뒤 omsctl clear-hold --reason watcher_mismatch는 cleared로 답하고 hold_cleared가 기록되며, 새 일반 주문이 받아들여져 가짜에 닿고, mismatch_resend_ms와 W1 두 라운드 동안 보류도 새 확정도 없다. 거래소에만 있는 체결(외부 orderLinkId의 Trade 매수 0.001; execTime과 포지션 updatedTime이 min_age_ms + 500 ms 전이고 OMS 첫 부팅의 fill_floor + 1초 이상)이면: 보류는 그 포지션을 보인 워처 키의 둘째 W2 답과 그 행을 돌려준 둘째 W4 답 가운데 이른 것보다 앞서지 않고(출처 W2 또는 W4, 메모도), 워처의 확정 줄과 불일치 [WATCH P1](하나나 둘)은 W2·W4의 것뿐이며, OMS의 [OMS P1], 거절, R의 취소는 위와 같다. OMS는 그 체결을 스스로 올린다(늦어도 비공개 스트림이 다시 붙은 뒤: external_fill_booked, 확인 안 된 불일치는 instrument:BTCUSDT의 ExternalFill 하나와 많아야 PositionOutOfRange 하나뿐이고 저널의 mismatch_raised 수와 같다). 그 뒤 W4 한 답을 지나고 W2 두 라운드와 W4 두 답 동안 새 확정이 없고, 불일치마다 omsctl ack, 그다음 clear-hold 뒤 mismatch_resend_ms와 W2 두 라운드 동안 보류가 돌아오지 않으며 새 일반 주문이 받아들여지고, 가짜의 포지션 +0.001 = OMS 장부의 포지션이다. 두 시험 모두 워처가 끝나지 않고 끝에서 거래소 불변식이 성립한다 |
+| [V-JOINT-6](claims.md) | 로직 | **■ 미실행** | 짧은 시간값(OMS [core.policy.monitor] heartbeat_max_age 10초, check_max_age 5초, unmonitored_cancel 10초, tick 50 ms; 워처 heartbeat_ms 1초, W1·W2 500 ms)으로 두 실제 프로그램을 함께 띄우고 관문이 열린 뒤 걸린 일반 주문 R이 있을 때: 워처를 SIGTERM으로 멈추면 5초 안에 종료 코드 0으로 끝나고, OMS는 마지막 watcher_heartbeat 기록 뒤 heartbeat_max_age보다 늦고 그 + tick + 1초 이내에 monitor_changed{monitored: false}를 기록하며(그 뒤 하트비트 기록 없음) 일반 주문을 Hold(Unmonitored)로 거절하고, R의 OKEY 취소를 그 기록 시각 + unmonitored_cancel 이후 그 + tick + 1초 이내에 한 번 보내 저널에서 취소로 닫는다. 워처를 다시 띄우면 둘째 'boot replay done' 줄을 본 뒤 10초 안에 관문이 열리고 일반 주문이 받아들여진다. 워처 키의 W1·W2 요청이 503으로 실패하면 하트비트는 계속 기록되고 그 W1·W2 시각은 닫힌 기록과 그 뒤 두 기록에서 같으며, 관문은 하트비트가 기록된 그 기록에서 두 시각 가운데 오래된 것 + check_max_age보다 늦고 그 + heartbeat_ms + 1초 이내에 닫히고, 그동안 일반 주문은 Hold(Unmonitored)로 거절되고 OMS의 R 취소는 거래소에 닿아 답받는다(그 사이 OKEY 요청은 모두 ok). 실패가 끝나면 2 × heartbeat_ms + 1초 안에 관문이 열리고 일반 주문이 받아들여진다. 두 시험 내내 워처가 원인인 보류, [WATCH P1], confirmed difference·watcher_mismatch·watcher_kill 줄, 킬 마커가 없고 끝에서 거래소 불변식이 성립한다 |
 | [V-BYBIT-LIVE-3](claims.md) | 실제 Bybit | **■ 미실행** | 실제 Bybit 테스트넷에서 킬 루프의 두 요청이 읽힌다: 일괄 취소(linear, USDT)는 걸린 주문 셋을 모두 취소했다고 답하고(빈 계좌에서는 빈 목록과 success 1), 그 뒤 열린 주문 수가 10초 안에 0이 된다. 시계 검사(/v5/market/time)가 앞섬 한도 안으로 판정한다 |
 
 ## R08 — 계좌·전략의 자동 실행 반복과 총체결량을 별도 제한, 승인 재개
@@ -234,9 +237,9 @@
 
 - 출처: FIA24 §§4.1, 4.3
 - 판정 경계: 누락·외부 주문·bust
-- 로직(코어+가짜): 주장 10: 통과 0 · **■ 미실행 10**
+- 로직(코어+가짜): 주장 12: 통과 0 · **■ 미실행 12**
 - 실제 Bybit: 주장 1: 통과 0 · **■ 미실행 1**
-- 확인하지 않은 범위: 체결 정정·취소(bust)는 시험하지 않았다(Bybit의 BustTrade는 청산 인수이지 체결 취소가 아니다). 워처를 실제 OMS와 실제 Bybit에 붙여 돌린 적이 없다
+- 확인하지 않은 범위: 체결 정정·취소(bust)는 시험하지 않았다(Bybit의 BustTrade는 청산 인수이지 체결 취소가 아니다). 워처를 실제 Bybit에 붙여 돌린 적이 없다(실제 OMS와는 합동 시험 V-JOINT-1·2·6에서 가짜 Bybit 하나에 붙여 돌렸다)
 - 시험이 없는 규칙:
   - 대조 입력(열린 주문·포지션 조회)은 포지션을 직접 바꾸지 않고 증거 표시와 불일치 목록만 바꾼다. 예외 하나: 거래소 변경 뒤의 포지션 응답은 PositionAdjusted로 장부를 맞춘다(V-VENUE-EXEC-1)
   - 워처의 요청 제한(10초 창에 60개)은 모든 Bybit 경로와 IP 반향을 합쳐 센다
@@ -275,6 +278,8 @@
 | [V-WATCH-10](claims.md) | 로직 | **■ 미실행** | W1·W2·W3·W4를 설계 간격(1초, 1초, 2초, 5초)으로 돌린 모의 1분(수동 시계, 실제 rest::Guard를 거친 모델 거래소, 요청 지연 0)에서 5초에 체결 30개를 고르게 주면 대조 요청은 W1 60 + W2 60 + W3 30 + W4 12 = 162개, 초당 2.7 이하이고 차이도 실패한 라운드도 없다. 5초에 100개면 192개(초당 3.2; 정상 상태는 훑기당 4쪽, 초당 3.3)로 설계 예산을 넘지만 W4는 12 훑기를 모두 자기 라운드에서 끝내고 정상 상태의 창은 15초다. 열린 주문 500개(W1 라운드 11쪽)에서는 가드가 10초에 60을 지키며 W1 라운드를 늘리지만 하트비트마다 W1·W2의 나이는 10초 아래다 |
 | [V-BYBIT-RECORDED-1](claims.md) | 로직 | **■ 미실행** | 가짜 Bybit가 테스트넷에서 녹화한 실제 응답을 그대로 보낼 때, 게이트웨이가 그것을 읽는다: 오래된 요청(10002)·최소 수량 미만(10001)·모르는 주문의 취소(110001)는 Rejected, 빈 일괄 취소는 취소 0건, 열린 주문·포지션·실행 행은 코어 입력(우리 주문의 체결, 비용인 수수료), 증거금 보고·계좌 모드·종목 설정은 실패 없이 읽힌다 |
 | [V-JOINT-1](claims.md) | 로직 | **■ 미실행** | 배포 기본 시간값(두 프로그램 설정의 코드 기본값)으로 실제 oms-node와 실제 워처를 상태가 있는 가짜 Bybit 하나에 함께 띄우면: OMS는 감시 없음(unmonitored)으로 시작해 하트비트 전에는 일반 주문을 Hold(Unmonitored)로 거부하고, 관문은 W1·W2가 신선한 워처 'joint'의 하트비트가 기록된 바로 그 기록에서 열린다(monitor_changed{monitored: true}, 첫 하트비트 전이 아님). 주문 A(0.002 매수)의 부분 체결과 나머지 체결이 fill_booked 둘과 order_closed{Filled}로, 주문 B의 취소가 order_closed{Canceled}와 가짜의 Cancelled로 끝난 뒤, 마지막 주문 사건 뒤의 W1~W4 요청 각 3번 이상과 3 × w4_ms + min_age_ms(17초) 동안: watcher_mismatch 보류도 워처가 원인인 보류도 없고, [WATCH P1]도, 워처의 'confirmed difference'·watcher_mismatch·watcher_kill 줄도, 킬 마커도 없다. watcher_heartbeat 기록마다 W1~W4 시각은 기록 시각 이전 15초 안이고 마지막 기록에는 넷이 모두 있다. 끝에서 가짜의 포지션 +0.002 = OMS 장부의 포지션, 열린 주문은 양쪽 모두 0이고, 거래소 불변식이 성립한다. 리그는 시험 빌드가 아닌 워처 바이너리에 설정을 쓰지 않고, 배선 없이 띄운 시험 빌드는 종료 코드 2와 그 한 줄로 끝나며 가짜에 요청하지 않는다 |
+| [V-JOINT-2](claims.md) | 로직 | **■ 미실행** | 짧은 시간값으로 실제 oms-node와 실제 워처를 상태가 있는 가짜 Bybit 하나에 함께 띄우고 관문이 열린 뒤 걸린 일반 주문 R이 있을 때, 거래소에만 있는 주문 F(orderLinkId manual-1, 거래소 화면에서 낸 것: 장부와 REST에만 있고 스트림으로 오지 않음)를 심으면: hold_set{watcher_mismatch}(출처 W1, 메모가 'W1 foreign '으로 시작)은 F를 담은 워처 키의 첫 W1 답 + min_age_ms와 둘째 W1 답 가운데 늦은 것보다 앞서지 않고 그 뒤 5초 안에 하나 기록되고, /api/status의 core.holds에 watcher_mismatch가 들며, 워처의 'confirmed difference: W1 foreign' 줄 하나, 워처 불일치의 [WATCH P1] 하나, OMS의 watcher_mismatch [OMS P1]이 간다. 보류 아래 새 일반 주문은 Hold(WatcherMismatch)로 거절되고 R의 취소는 받아들여져 가짜에서 Cancelled, 저널에서 order_closed{Canceled}가 된다. 운영자가 거래소에서 F를 취소하고(프레임 없음) W1 두 라운드가 지난 뒤 omsctl clear-hold --reason watcher_mismatch는 cleared로 답하고 hold_cleared가 기록되며, 새 일반 주문이 받아들여져 가짜에 닿고, mismatch_resend_ms와 W1 두 라운드 동안 보류도 새 확정도 없다. 거래소에만 있는 체결(외부 orderLinkId의 Trade 매수 0.001; execTime과 포지션 updatedTime이 min_age_ms + 500 ms 전이고 OMS 첫 부팅의 fill_floor + 1초 이상)이면: 보류는 그 포지션을 보인 워처 키의 둘째 W2 답과 그 행을 돌려준 둘째 W4 답 가운데 이른 것보다 앞서지 않고(출처 W2 또는 W4, 메모도), 워처의 확정 줄과 불일치 [WATCH P1](하나나 둘)은 W2·W4의 것뿐이며, OMS의 [OMS P1], 거절, R의 취소는 위와 같다. OMS는 그 체결을 스스로 올린다(늦어도 비공개 스트림이 다시 붙은 뒤: external_fill_booked, 확인 안 된 불일치는 instrument:BTCUSDT의 ExternalFill 하나와 많아야 PositionOutOfRange 하나뿐이고 저널의 mismatch_raised 수와 같다). 그 뒤 W4 한 답을 지나고 W2 두 라운드와 W4 두 답 동안 새 확정이 없고, 불일치마다 omsctl ack, 그다음 clear-hold 뒤 mismatch_resend_ms와 W2 두 라운드 동안 보류가 돌아오지 않으며 새 일반 주문이 받아들여지고, 가짜의 포지션 +0.001 = OMS 장부의 포지션이다. 두 시험 모두 워처가 끝나지 않고 끝에서 거래소 불변식이 성립한다 |
+| [V-JOINT-6](claims.md) | 로직 | **■ 미실행** | 짧은 시간값(OMS [core.policy.monitor] heartbeat_max_age 10초, check_max_age 5초, unmonitored_cancel 10초, tick 50 ms; 워처 heartbeat_ms 1초, W1·W2 500 ms)으로 두 실제 프로그램을 함께 띄우고 관문이 열린 뒤 걸린 일반 주문 R이 있을 때: 워처를 SIGTERM으로 멈추면 5초 안에 종료 코드 0으로 끝나고, OMS는 마지막 watcher_heartbeat 기록 뒤 heartbeat_max_age보다 늦고 그 + tick + 1초 이내에 monitor_changed{monitored: false}를 기록하며(그 뒤 하트비트 기록 없음) 일반 주문을 Hold(Unmonitored)로 거절하고, R의 OKEY 취소를 그 기록 시각 + unmonitored_cancel 이후 그 + tick + 1초 이내에 한 번 보내 저널에서 취소로 닫는다. 워처를 다시 띄우면 둘째 'boot replay done' 줄을 본 뒤 10초 안에 관문이 열리고 일반 주문이 받아들여진다. 워처 키의 W1·W2 요청이 503으로 실패하면 하트비트는 계속 기록되고 그 W1·W2 시각은 닫힌 기록과 그 뒤 두 기록에서 같으며, 관문은 하트비트가 기록된 그 기록에서 두 시각 가운데 오래된 것 + check_max_age보다 늦고 그 + heartbeat_ms + 1초 이내에 닫히고, 그동안 일반 주문은 Hold(Unmonitored)로 거절되고 OMS의 R 취소는 거래소에 닿아 답받는다(그 사이 OKEY 요청은 모두 ok). 실패가 끝나면 2 × heartbeat_ms + 1초 안에 관문이 열리고 일반 주문이 받아들여진다. 두 시험 내내 워처가 원인인 보류, [WATCH P1], confirmed difference·watcher_mismatch·watcher_kill 줄, 킬 마커가 없고 끝에서 거래소 불변식이 성립한다 |
 | [V-BYBIT-LIVE-6](claims.md) | 실제 Bybit | **■ 미실행** | 실제 Bybit 테스트넷의 조회 응답(열린 주문, 포지션, 체결, 증거금 보고, 계좌 모드, 종목 설정)을 게이트웨이의 조회(Queries)가 실패 없이 코어 입력으로 바꾼다. 거래소의 응답 모양(키와 값의 종류)이 crates/http-fake/recorded/bybit-testnet/에 녹화한 모양과 같다 |
 
 ## R12 — 체결 원천·정책대로 전략에 귀속, 공통 평가로 합계 대사

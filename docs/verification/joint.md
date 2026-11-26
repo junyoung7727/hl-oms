@@ -1,6 +1,6 @@
 # OMS·워처 합동 시험
 
-실제 `oms-node`(failpoints 빌드, Bybit 게이트웨이)와 실제 워처(기능 `test-endpoints`의 시험 빌드)를 함께 띄우고, 상태가 있는 가짜 Bybit 하나(`crates/oms-node/tests/bybit_fake/`: 두 키, 장부 하나), 가짜 Telegram, 가짜 VictoriaMetrics, 가짜 `systemctl`에 loopback으로만 붙인다. 시험은 두 프로그램을 실제 인터페이스로만 본다: 저널 파일, `/api/status`(워처가 묻는 그대로 HTTP)와 admin `Status`, 거래 소켓과 `omsctl`, 워처의 stderr와 지표, 킬 마커, 가짜들의 기록. 결정: [ADR-039](../adr/ADR-039-oms-watcher-joint-tests.md). 주장: V-JOINT-1.
+실제 `oms-node`(failpoints 빌드, Bybit 게이트웨이)와 실제 워처(기능 `test-endpoints`의 시험 빌드)를 함께 띄우고, 상태가 있는 가짜 Bybit 하나(`crates/oms-node/tests/bybit_fake/`: 두 키, 장부 하나), 가짜 Telegram, 가짜 VictoriaMetrics, 가짜 `systemctl`에 loopback으로만 붙인다. 시험은 두 프로그램을 실제 인터페이스로만 본다: 저널 파일, `/api/status`(워처가 묻는 그대로 HTTP)와 admin `Status`, 거래 소켓과 `omsctl`, 워처의 stderr와 지표, 킬 마커, 가짜들의 기록. 결정: [ADR-039](../adr/ADR-039-oms-watcher-joint-tests.md). 주장: V-JOINT-1, V-JOINT-2, V-JOINT-6.
 
 ## 1. 돌리는 법
 
@@ -26,7 +26,8 @@ cargo run --locked -q -p xtask -- joint --only j1     # 이름에 j1이 든 시�
 - 가짜 `systemctl`: 부를 때마다 `systemctl.log`에 인자, 그때 마커가 있었는지(`marker=present|absent`), 밀리초 시각을 한 줄. `--no-ask-password stop -- oms-node-joint.service`이면 `o/oms.pid`의 프로세스가 리그의 `o/oms.toml`을 명령 줄에 가질 때만 SIGTERM 다음 SIGCONT를 보내고(systemd.kill(5)) 5,000 ms(판단(모델 아님))까지 그것이 끝나기를 기다린다. 그 밖의 인자는 종료 1.
 - 기다림은 25 ms 간격의 폴링이고 자기 상한과 시험의 예산 가운데 먼저 오는 것에서 멈춘다. 실패하면 두 로그와 가짜의 요청 기록의 꼬리를 담아 멈춘다. 리그 자신의 전제 조건(기준 디렉터리, 소켓 경로 길이, 바이너리 변수와 가드, 다시 시도한 뒤에도 쓰이는 포트, 나중의 시작에서 쓰이는 포트)은 `joint rig precondition:`으로 시작한다.
 - 자식마다 거두는 스레드가 20 ms마다 `try_wait`하고 종료 상태와 시각을 지킨다. OMS의 것은 종료를 기록하기 전에 `o/oms.pid`를 지운다. 리그를 버리면 살아 있는 자식에게 SIGCONT 다음 SIGKILL을 보내고 기다린다.
-- 시간값: `Timers::Deployed`(두 설정이 시간값을 적지 않음: 코드의 기본값)와 `Timers::Short`(스펙의 표). 두 설정 모두 testnet이고 `[core.policy.margin]`, `[liveness]`가 없다.
+- 시간값: `Timers::Deployed`(두 설정이 시간값을 적지 않음: 코드의 기본값)와 `Timers::Short`(스펙의 표). 시험은 워처 설정이 쓰이기 전에 그 시간값 줄 하나를 바꿀 수 있다(`World::set_watcher`, J2b의 `w4_ms = 5000`; 시간값이 쓰지 않는 줄이면 시험 오류이고, 리그 자기 시험 `the_rig_refuses_a_base_in_a_git_work_tree_a_long_socket_path_and_an_oms_test_variable`이 그것을 보인다). `Timers::Short`는 OMS의 `[venue] fills_lag_ms = 2000`도 적는다: J2b의 단언 `min_age_ms + 500 > fills_lag_ms`는 리그가 적은 그 줄을 읽고, 줄이 없으면 시험 오류다(코드 기본값의 사본과 비교하지 않는다). 두 설정 모두 testnet이고 `[core.policy.margin]`, `[liveness]`가 없다.
+- 창의 시각: 가짜 Bybit의 요청 기록(키, 경로, 쿼리, 답의 종류, 벽시계 ms)과 저널 기록의 시각(OMS의 벽시계 µs)은 같은 호스트의 시계다. 심기는 장부의 잠금 안에서 기록의 길이를 함께 재므로, 그 뒤의 워처 키 답은 모두 심은 것을 담는다(`World::answers_after`, 고장 응답은 뺀다).
 
 ## 3. 무엇을 증명하나
 
@@ -34,6 +35,10 @@ cargo run --locked -q -p xtask -- joint --only j1     # 이름에 j1이 든 시�
 |---|---|
 | `j0_the_rig_refuses_a_watcher_built_without_test_endpoints_and_a_test_build_without_wiring_exits_2` | 리그의 가드가 `watcher 0.1.0`을 찍는 스크립트를 설정을 쓰기 전에 거부한다. 실제 시험 빌드를 `WATCHER_TEST_ENDPOINTS` 없이 띄우면 종료 코드 2와 한 줄 `this build is for tests: WATCHER_TEST_ENDPOINTS is required`로 끝나고 가짜 Bybit·Telegram·VictoriaMetrics는 요청을 받지 않는다(실제 호스트로의 요청은 이 시험이 볼 수 없다: 시험 빌드에 그 길이 없다는 것은 V-TESTHOOK-1) |
 | `j1_a_whole_life_cycle_at_the_deployed_timers_has_no_mismatch_and_opens_the_gate` | 배포 기본 시간값에서: OMS는 감시 없음으로 시작해 하트비트 전 일반 주문을 거부하고, W1·W2가 신선한 하트비트의 기록에서 관문이 열린다. 주문 A의 부분·전체 체결, 주문 B의 취소. 그 뒤 W1~W4 요청 각 3번 이상과 17초 동안 불일치·워처 보류·`[WATCH P1]`·`confirmed difference`·킬 마커가 없다. 하트비트 기록의 검사 시각은 기록 시각 이전 15초 안. 끝에서 가짜와 OMS의 포지션(+0.002)과 열린 주문(0)이 같고, 거래소 불변식(워처 키의 주문 생성·수정·취소 없음, `orderLinkId`마다 생성 하나 이하, 키마다 초당 일괄 취소 둘 이하)이 성립한다 |
+| `j2a_a_venue_only_order_holds_plain_orders_after_two_rounds_and_two_seconds_until_clear_hold` | 거래소에만 있는 주문 `manual-1`: `hold_set{watcher_mismatch}`(출처 W1, 메모 `W1 foreign …`)은 그 주문을 담은 첫 W1 답 + `min_age_ms`(2초)와 둘째 W1 답 가운데 늦은 것보다 앞서지 않고 그 뒤 5초 안에 하나 기록된다. `/api/status`의 보류, 워처의 `confirmed difference` 한 줄, 워처의 `[WATCH P1]` 하나, OMS의 `[OMS P1]`. 새 일반 주문은 `Hold(WatcherMismatch)`로 거절되고 걸린 주문의 취소는 가짜와 저널에서 닫힌다. 거래소에서 그 주문을 취소하고 W1 두 라운드 뒤 `omsctl clear-hold --reason watcher_mismatch` → `cleared`, `hold_cleared`, 새 일반 주문이 가짜에 닿고 `mismatch_resend_ms`와 W1 두 라운드 동안 보류가 돌아오지 않는다 |
+| `j2b_a_venue_only_fill_holds_after_two_w2_rounds_and_is_released_after_the_oms_books_it` | 거래소에만 있는 체결(외부 `orderLinkId`의 `Trade` 0.001, `min_age_ms + 500` ms 전, OMS의 `fill_floor` + 1초 이상; 리그는 먼저 `min_age_ms + 500 > fills_lag_ms`를 단언한다), `w4_ms` 5초: 보류는 그 포지션을 보인 둘째 W2 답과 그 행을 돌려준 둘째 W4 답 가운데 이른 것보다 앞서지 않는다(출처 W2 또는 W4). 확정 줄과 `[WATCH P1]`(하나나 둘)은 W2·W4의 것뿐. 거절과 취소는 J2a와 같다. 비공개 스트림을 끊으면 OMS가 다시 붙어 체결을 올리고(`external_fill_booked`, `ExternalFill` 하나와 많아야 `PositionOutOfRange` 하나, 둘 다 `instrument:BTCUSDT`), 그 뒤 W2 두 라운드와 W4 두 답 동안 새 확정이 없다. 불일치마다 `omsctl ack`, `clear-hold` 뒤 보류가 돌아오지 않고 새 일반 주문이 받아들여지며, 가짜와 OMS의 포지션이 +0.001로 같다 |
+| `j6a_a_stopped_watcher_closes_the_gate_after_the_heartbeat_limit_and_its_return_opens_it` | 워처를 SIGTERM으로 멈추면(5초 안에 종료 0) OMS는 마지막 하트비트 기록 뒤 `heartbeat_max_age`(10초)보다 늦고 그 + 틱 + 1초 이내에 `monitor_changed{monitored: false}`를 기록하고 일반 주문을 `Hold(Unmonitored)`로 거절하며, 그 기록 + `unmonitored_cancel`(10초) 뒤 + 틱 + 1초 이내에 걸린 일반 주문을 `OKEY`로 한 번 취소한다. 워처를 다시 띄우면 `boot replay done` 줄 뒤 10초 안에 관문이 열리고 주문이 받아들여진다. `--nocapture`에서 `gate closed after <ms> ms`를 찍는다 |
+| `j6b_failing_watcher_checks_close_the_gate_after_the_check_age_limit` | 워처 키의 W1·W2 경로에 503: 하트비트는 계속 기록되고 W1·W2 시각은 그대로이며, 관문은 하트비트가 기록된 그 기록에서 오래된 성공 시각 + `check_max_age`(5초)보다 늦고 그 + `heartbeat_ms` + 1초 이내에 닫힌다. 닫힌 동안 일반 주문은 거절되고 OMS의 취소는 거래소에 닿는다(OMS 요청은 모두 `ok`). 고장을 걷으면 두 하트비트 + 1초 안에 열리고 주문이 받아들여진다. 내내 불일치가 없다 |
 | `the_rig_refuses_a_base_in_a_git_work_tree_a_long_socket_path_and_an_oms_test_variable` | 리그 자신의 규칙: git 작업 트리 안(없는 하위 경로도)과 상대 경로의 기준 디렉터리, 100바이트 소켓 경로를 거부하고 99바이트는 받는다. `OMS_TEST_`로 시작하는 추가 변수를 준 `Oms::start`는 프로세스를 띄우기 전에 멈춘다. 소켓 길이는 지어낸 절대 경로로 재므로 `OMS_TEST_DIR`의 길이(58바이트까지)와 상관없다 |
 | `the_rig_moves_a_taken_http_port_once_and_a_second_taken_port_is_a_precondition` | 첫 시작에서 `[http]` 포트가 잡혀 있으면 리그가 대시보드 없이 돈 OMS를 끝내고 포트를 옮겨 다시 띄운다: 새 포트에서 `/api/status`가 답하고 저널에는 부팅이 하나다. 포트를 쥔 쪽이 `/api/status`에 `200`과 JSON으로 답해도 포트를 옮기고, 새 포트의 `/api/status`는 OMS의 pid를 말한다. 옮긴 포트도 잡혀 있거나, 저널이나 워처 설정이 이미 있는 시작에서 포트가 잡혀 있으면 `joint rig precondition:`으로 멈추고 OMS가 남지 않는다 |
 | `the_rig_takes_an_oms_as_up_only_when_the_admin_socket_and_api_status_name_its_pid` | 규칙 `up`: 두 상태가 모두 시작한 프로세스의 pid를 말할 때만 참이다. `/api/status`가 없거나, `{}`이거나, 다른 pid이거나, admin이 다른 pid이면 거짓이고, admin이 답하지 않으면 `/api/status`를 묻지 않는다 |
@@ -56,7 +61,10 @@ J1은 배포 기본 시간값에서 돌았다는 것도 본다: OMS 관문 정�
 | Hyperliquid, Binance, OKX | 소유자가 미룸; 그것들에는 워처가 없다 | — |
 | 실제 `admin.sock`에 쓰인 `watcher_kill` 요청: OMS의 `"latched"` 답, `hold_set{kill, source: watcher}`, 그것으로 시작한 OMS의 킬 루프, 정지 뒤 K3를 건너뜀 | W5가 쏘는 시나리오에서 멈춘 OMS는 `hello`에 답하지 않아 K2가 요청을 쓰지 못한다 | U-21 |
 | 재시작을 넘는 워처 상태 | 설계상 기록 1부터 재생한다 | — |
-| 불일치, 관문 닫힘, 킬, 충돌의 합동 시나리오 | 이 묶음의 지금 시험은 J0과 J1뿐이다 | 시나리오 J2~J6(V-JOINT-2~6) |
+| 킬과 충돌의 합동 시나리오 | 이 묶음의 지금 시험은 J0, J1, J2, J6이다 | 시나리오 J3~J5(V-JOINT-3~5) |
+| 배포 기본 시간값의 J2와 J6 | J1만 기본값으로 돈다(U-17). 관문의 닫힘 시각은 같은 식이지만 30초·10초·60초로 재지 않았다 | U-17 |
+| 보류를 푼 뒤 차이가 남아 워처가 다시 보내는 것, W3의 불일치, W4만의 확정 | J2의 두 시험은 풀기 전에 차이가 사라지고, J2b에서는 보통 W2가 먼저 확정한다 | V-WATCH-* |
+| SIGKILL·SIGSTOP으로 멈춘 워처, 링크가 내려간 동안의 2단계 취소 | J6a는 SIGTERM만, 링크는 올라 있다 | — |
 | 가짜 Bybit의 동작이 실제 Bybit와 같다는 것 | 일괄 취소를 곧바로 적용하고, 타임스탬프와 WS `auth` 서명을 확인하지 않는다 | `docs/verification/README.md` §1의 가짜 설명 |
 
 ## 5. 실행 기록
@@ -64,6 +72,21 @@ J1은 배포 기본 시간값에서 돌았다는 것도 본다: OMS 관문 정�
 | 언제 | 소스 | 명령 | 결과 |
 |---|---|---|---|
 | 2026-11-26 16:05~16:08 KST, 이 PC(Linux, `OMS_TEST_DIR`은 970 EVO Plus의 `/mnt/nvme/…`) | 커밋 `552e899`(`crates/`는 `e17c2fd`와 같음) | `xtask joint --runs 5` | 5번 모두 통과, 실행마다 시험 3건: 28.5 s(첫 실행, 빌드 확인 포함), 23.4 s, 23.4 s, 23.4 s, 23.3 s. 시험 자체의 시간은 23.2~23.3 s(J1이 거의 전부: 조용한 시간 17 s 포함) |
+| 2026-11-26 22:13~22:20 KST, 이 PC(같은 디스크) | 커밋 `0ed69a9`(J2a, J2b, J6a, J6b가 더해짐) | `xtask joint --runs 5` | 5번 모두 통과, 실행마다 시험 10건: 88.4 s(첫 실행, 빌드 확인 포함), 82.6 s, 83.8 s, 82.7 s, 82.7 s |
+
+잰 값(커밋 `0ed69a9`, `--nocapture`로 J2·J6을 손으로 3번, 짧은 시간값, 이 PC; 측정값이고 다른 호스트나 부하에서의 범위가 아니다):
+
+| 무엇 | 1 | 2 | 3 | 시험의 창 |
+|---|---|---|---|---|
+| J2a: F를 담은 첫 W1 답에서 보류까지 | 2,043 ms | 2,044 ms | 2,038 ms | ≥ 2,000 ms이고 둘째 W1 답 뒤, 그 + 5,000 ms 이내 |
+| J2b: 비공개 스트림을 끊기 전에 OMS가 체결을 올렸나 | 아니오 | 아니오 | 아니오 | 단언하지 않음 |
+| J6a: 마지막 하트비트 기록에서 관문 닫힘까지 | 10,028 ms | 10,010 ms | 10,027 ms | (10,000, 11,050] ms |
+| J6a: 관문 닫힘에서 2단계 취소까지 | 10,056 ms | 10,011 ms | 10,010 ms | [10,000, 11,050] ms |
+| J6a: `boot replay done`을 본 뒤 관문이 열리기까지 | 1,136 ms | 1,134 ms | 1,136 ms | ≤ 10,000 ms |
+| J6b: 오래된 W1·W2 성공 시각에서 관문 닫힘까지 | 5,089 ms | 5,088 ms | 5,090 ms | (5,000, 7,000] ms |
+| J6b: 고장을 걷은 뒤 관문이 열리기까지 | 984 ms | 988 ms | 980 ms | ≤ 3,000 ms |
+
+J6a의 닫힘은 판정 틱(50 ms)이 `heartbeat_max_age`를 넘긴 첫 틱이고, J6b의 닫힘은 오래된 성공 시각 + 5초 뒤에 기록된 첫 하트비트(1초마다)다. 배포 기본값(30초, 10초, 60초, 틱 250 ms, 워처 하트비트 5초)에서는 같은 식으로 30초 + 틱까지와 10초 + 5초까지가 되지만 그 값으로는 재지 않았다(판단(모델 아님), 식에서 나온 값).
 
 ## 6. CI가 돌리는 법
 
@@ -84,3 +107,6 @@ J1은 배포 기본 시간값에서 돌았다는 것도 본다: OMS 관문 정�
 | M408 | 워처의 하트비트가 검사 시각을 밀리초가 아닌 초로 보낸다: OMS는 모든 검사를 아주 오래된 것으로 읽고 관문을 열지 않는다 | J1 |
 | M409 | 리그가 버전 가드 없이 워처 설정을 쓴다 | J0 |
 | M410 | 워처 시험 빌드가 `WATCHER_TEST_ENDPOINTS` 없는 시작을 거부하면서 종료 코드 0으로 끝난다(여전히 `run` 전에 돌아가 아무것도 보내지 않는다) | J0 |
+| M411 | OMS가 워처의 `watcher_mismatch`에 아무것도 기록하지 않고 `"held"`로 답한다: 워처는 갚은 것으로 보고, 일반 주문을 거절하는 보류가 없다 | J2a |
+| M412 | OMS의 관문이 하트비트 안의 W1·W2 나이를 무시한다: 검사가 실패해도 하트비트가 오면 열려 있다 | J6b |
+| M413 | 워처가 W2 차이를 둘째 라운드가 아닌 첫 목격에서 확정한다 | J2b |
