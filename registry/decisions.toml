@@ -369,3 +369,13 @@ alternatives = ["새 crate", "watcher-conformance", "두 라이브러리를 한 
 chosen = "crates/oms-node/tests/joint.rs(기능 joint = failpoints, required-features), 리그 tests/joint_rig/와 상태가 있는 가짜 Bybit tests/bybit_fake/, 가짜 Telegram·VictoriaMetrics·systemctl, loopback만. Oms::start만 oms-node 명령을 만들고 두 배선 변수를 넣음, 워처는 --version이 ' test-endpoints'로 끝날 때만 설정을 받음, 리그 전제 조건 실패는 'joint rig precondition:'. xtask joint: OMS_TEST_DIR 규칙(설정, 절대, git 밖, 58바이트 이하, 없으면 0700으로 만듦), 세 빌드와 복사, 한 번에 시험 하나씩 N번, 실행 판정과 고아 프로세스 검사. verify 기본 묶음 joint. J1은 배포 기본 시간값"
 gives_up = "두 프로세스의 주입 시계 하나(실시간과 예산), 실제 systemd·polkit(A-22), 실제 Bybit의 시각과 비동기 일괄 취소, OMS_TEST_DIR 없는 xtask verify의 통과"
 revisit = "실제 Bybit testnet의 합동 실행(소유자 허가 뒤), 둘째 거래소의 워처, 두 프로그램이 같은 주입 시계를 받을 수 있게 될 때"
+
+[[adr]]
+id = "ADR-040"
+title = "킬 동안의 W1"
+file = "docs/adr/ADR-040-w1-during-a-kill.md"
+problem = "OMS의 킬은 계좌의 모든 주문을 거래소에서 취소하지만 대조기는 링크가 올라 있을 때만 돌아, 비공개 스트림이 끊겨 걸린 킬 동안 저널은 그 주문을 열리고 확인된 채로 둔다. 워처의 W1은 그것을 missing_at_venue로 두 라운드 뒤 확정해 OMS 킬마다 거짓 watcher_mismatch 보류와 [WATCH P1]을 냈다(합동 시험 J4, 발견 F1)"
+alternatives = ["저널에 킬 래치가 있는 동안 W1의 missing_at_venue만 보지 않음", "OMS가 링크가 끊긴 동안에도 REST 상태 물음으로 닫힘을 저널에 씀", "킬 래치 동안 W1 전체를 쉼", "바꾸지 않고 절차서에 적음"]
+chosen = "crates/watcher/src/w1.rs compare: state.holds.kill이면 missing_at_venue를 만들지 않음. foreign·closed_in_journal·open_after_terminal·details와 W2·W3·W4는 그대로. 래치는 첫 일괄 취소 전에 내구화되고 라운드는 거래소 뒤에 저널을 읽으므로 주문이 사라진 것을 본 라운드는 래치도 봄; clear_hold kill은 열린 주문이 있으면 거절되므로 예외가 OMS의 따라잡기 뒤까지 남지 않음"
+gives_up = "킬 동안 W1이 거래소에서 사라진 주문을 알리는 것(그 뒤의 체결은 W2·W4가 봄), 래치 동안 다른 까닭으로 잃은 주문의 W1 경보"
+revisit = "OMS의 대조기가 링크가 끊긴 동안에도 주문 상태를 묻게 될 때, W1에 새 종류를 더할 때, 킬이 일괄 취소가 아닌 방법을 쓰게 될 때"
