@@ -3686,6 +3686,42 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "oms-node", "--test", "bybit_fake_book", "the_settle_coin_list_has_no_flat_rows_and_the_symbol_list_has_one"],
         guards: "test support (oms-node tests/bybit_fake)",
     },
+    Mutant {
+        id: "M407-watcher-journal-other-path",
+        what: "the watcher reads the journal segments from data_dir/journal, where the OMS writes none: its replay never reaches the boot status, it sends no heartbeat and the OMS's gate stays closed (spec mutant 15; a joint test: the watcher binary is rebuilt from the mutated copy)",
+        file: "crates/watcher/src/runtime.rs",
+        find: "tail: Tail::open(&self.cfg.data_dir),",
+        replace: "tail: Tail::open(&self.cfg.data_dir.join(\"journal\")),",
+        test: &["-p", "oms-node", "--features", "joint", "--test", "joint", "--", "--test-threads=1", "--exact", "j1_a_whole_life_cycle_at_the_deployed_timers_has_no_mismatch_and_opens_the_gate"],
+        guards: "C-JOINT / V-JOINT-1",
+    },
+    Mutant {
+        id: "M408-watcher-heartbeat-in-seconds",
+        what: "the watcher's heartbeat sends its check times in seconds instead of milliseconds: the OMS reads every check as decades old and its gate never opens (spec mutant 16; a joint test)",
+        file: "crates/watcher/src/oms.rs",
+        find: "let v = t.map_or(\"null\".to_string(), |t| t.to_string());",
+        replace: "let v = t.map_or(\"null\".to_string(), |t| (t / 1000).to_string());",
+        test: &["-p", "oms-node", "--features", "joint", "--test", "joint", "--", "--test-threads=1", "--exact", "j1_a_whole_life_cycle_at_the_deployed_timers_has_no_mismatch_and_opens_the_gate"],
+        guards: "C-JOINT / V-JOINT-1",
+    },
+    Mutant {
+        id: "M409-joint-rig-version-guard-skipped",
+        what: "the joint rig writes a watcher configuration without running its version guard: a watcher built without test-endpoints would get a configuration from a test (spec mutant 17; test support)",
+        file: "crates/oms-node/tests/joint_rig/mod.rs",
+        find: "        version_guard(bin)?;\n        self.write_watcher_config();",
+        replace: "        self.write_watcher_config();",
+        test: &["-p", "oms-node", "--features", "joint", "--test", "joint", "--", "--test-threads=1", "--exact", "j0_the_rig_refuses_a_watcher_built_without_test_endpoints_and_a_test_build_without_wiring_exits_2"],
+        guards: "C-JOINT / V-JOINT-1",
+    },
+    Mutant {
+        id: "M410-watcher-test-build-refusal-exits-0",
+        what: "the watcher's test build refuses a start without WATCHER_TEST_ENDPOINTS but exits 0 instead of 2, so a unit manager would read the refusal as a clean stop (spec mutant 18; it still returns before run, so nothing is sent)",
+        file: "crates/watcher/src/main.rs",
+        find: "                Err(e) => {\n                    eprintln!(\"watcher: {e}\");\n                    return 2;\n                }",
+        replace: "                Err(e) => {\n                    eprintln!(\"watcher: {e}\");\n                    return 0;\n                }",
+        test: &["-p", "oms-node", "--features", "joint", "--test", "joint", "--", "--test-threads=1", "--exact", "j0_the_rig_refuses_a_watcher_built_without_test_endpoints_and_a_test_build_without_wiring_exits_2"],
+        guards: "C-JOINT / V-JOINT-1",
+    },
 ];
 
 /// A mutant whose test is a joint test (`--features joint`, ADR-039): its
