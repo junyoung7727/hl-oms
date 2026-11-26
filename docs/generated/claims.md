@@ -1,9 +1,9 @@
 # 검증 주장과 결과
 
 > 자동 생성 문서다. 고치려면 `registry/*.toml`을 고치고 `cargo run -p xtask -- docs`를 실행한다.
-> 소스 다이제스트 `39aa62adc3f08feb`, 검증 결과의 다이제스트 `7f76e9bbc5ac8483`.
+> 소스 다이제스트 `0894c79ce01d12ed`, 검증 결과의 다이제스트 `7f76e9bbc5ac8483`.
 
-주장 132건: 통과 0, 실패 0, 미실행 132. 결과는 현재 소스(다이제스트 `39aa62adc3f08feb`)에서 돌린 것만 센다. 다른 소스의 결과는 미실행으로 센다.
+주장 132건: 통과 0, 실패 0, 미실행 132. 결과는 현재 소스(다이제스트 `0894c79ce01d12ed`)에서 돌린 것만 센다. 다른 소스의 결과는 미실행으로 센다.
 
 | ID | 주장 | 수준 | 상태 | 재현 |
 |---|---|---|---|---|
@@ -3437,7 +3437,7 @@
 - 전제와 범위: Bybit testnet 설정, BTCUSDT 하나, 전략 a 하나, 배포 기본 시간값(OMS [runtime]·[venue]·[core.policy.monitor]의 기본, 워처 [intervals]·[rules]·[http]·[w5]·[kill]의 기본), [alert]·[kill] marker·[core.policy.monitor] 있음, [core.policy.margin]·[liveness] 없음, 주문 둘(부분·전체 체결, 취소), 한 번에 시험 하나
 - 실제 구성요소: oms-node 바이너리(failpoints 빌드: 코어, 저널, 게이트웨이, 대조기, 관문, 직접 알림, /api/status), 워처 바이너리(test-endpoints 빌드: 시작 확인, 저널 읽기, W1~W4, W5, 하트비트, 지표, 알림), omsctl, 저널 파일, Unix 소켓, HTTP, 시스템 시계
 - 모의·시뮬레이션: Bybit(상태가 있는 가짜 FakeBybit: REST, 비공개 스트림, WS Trade, 공개 스트림, 두 키의 서명 확인), Telegram(http-fake), VictoriaMetrics(http-fake), systemctl(sh 스크립트, 이 시험에서는 불리지 않음)
-- 주입한 장애: 없음(정상 수명 주기). J0: 시험 빌드가 아닌 워처 바이너리, WATCHER_TEST_ENDPOINTS 없는 시험 빌드. 저장소 밖 mut.py의 리그·xtask 변이
+- 주입한 장애: 없음(정상 수명 주기). J0: 시험 빌드가 아닌 워처 바이너리, WATCHER_TEST_ENDPOINTS 없는 시험 빌드. 변이 M407~M410(xtask mutants가 변이를 낸 사본에서 두 바이너리를 빌드해 J0·J1로 돌림)과 저장소 밖 mut.py의 리그·xtask 변이
 - 판정 기준과 근거: J0: 가드가 'printed "watcher 0.1.0": not the watcher's test build'로 거부하고 w/watcher.toml이 없음; 배선 없는 시험 빌드의 종료 코드 2, stderr 한 줄 'this build is for tests: WATCHER_TEST_ENDPOINTS is required', 가짜 Bybit·Telegram·VM의 요청 0. J1: 위의 순서와 창 모두, OMS 관문 정책이 코드 기본값(30초, 10초, 60초)이고 하트비트 기록 사이가 평균 4초 이상이고 어느 둘도 2.5초 미만이 아님(워처 기본 heartbeat_ms 5,000; 여유는 판단(모델 아님)), 시험 예산 120초 안. 리그: git 작업 트리 안의 기준 디렉터리, 상대 경로, 100바이트 소켓 경로가 거부되고(99바이트는 받음; 지어낸 절대 경로로 재어 OMS_TEST_DIR 길이와 무관), OMS_TEST_ 변수를 준 Oms::start는 프로세스를 띄우기 전에 멈춘다. 첫 시작에서 [http] 포트가 잡혀 있으면 OMS를 끝내고 포트를 옮겨 다시 띄워 새 포트의 /api/status가 답하고 부팅 기록이 하나이며, 포트를 쥔 쪽이 /api/status에 200과 JSON으로 답해도 옮기며(두 상태가 모두 시작한 pid를 말할 때만 OMS가 떴다고 본다: /api/status 없음, {}, 다른 pid, admin의 다른 pid는 거짓; 기다림은 admin이 답하는 동안 /api/status에 답한 다른 서버에서 끝나지 않고 로그의 bind 오류로 끝난다), 옮긴 포트도 잡혀 있거나 저널·워처 설정이 이미 있으면 'joint rig precondition:'으로 멈추고 OMS가 남지 않는다
 - 재현: `OMS_TEST_DIR=<git 밖, 58바이트 이하> cargo run --locked -q -p xtask -- joint --runs 5`
 - 뒷받침하는 것: C-JOINT, C-WATCH, C-LIVE, C-TAIL, ADR-039, ADR-031

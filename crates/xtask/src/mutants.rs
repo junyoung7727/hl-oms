@@ -3686,7 +3686,192 @@ const MUTANTS: &[Mutant] = &[
         test: &["-p", "oms-node", "--test", "bybit_fake_book", "the_settle_coin_list_has_no_flat_rows_and_the_symbol_list_has_one"],
         guards: "test support (oms-node tests/bybit_fake)",
     },
+    Mutant {
+        id: "M407-watcher-journal-other-path",
+        what: "the watcher reads the journal segments from data_dir/journal, where the OMS writes none: its replay never reaches the boot status, it sends no heartbeat and the OMS's gate stays closed (spec mutant 15; a joint test: the watcher binary is rebuilt from the mutated copy)",
+        file: "crates/watcher/src/runtime.rs",
+        find: "tail: Tail::open(&self.cfg.data_dir),",
+        replace: "tail: Tail::open(&self.cfg.data_dir.join(\"journal\")),",
+        test: &["-p", "oms-node", "--features", "joint", "--test", "joint", "--", "--test-threads=1", "--exact", "j1_a_whole_life_cycle_at_the_deployed_timers_has_no_mismatch_and_opens_the_gate"],
+        guards: "C-JOINT / V-JOINT-1",
+    },
+    Mutant {
+        id: "M408-watcher-heartbeat-in-seconds",
+        what: "the watcher's heartbeat sends its check times in seconds instead of milliseconds: the OMS reads every check as decades old and its gate never opens (spec mutant 16; a joint test)",
+        file: "crates/watcher/src/oms.rs",
+        find: "let v = t.map_or(\"null\".to_string(), |t| t.to_string());",
+        replace: "let v = t.map_or(\"null\".to_string(), |t| (t / 1000).to_string());",
+        test: &["-p", "oms-node", "--features", "joint", "--test", "joint", "--", "--test-threads=1", "--exact", "j1_a_whole_life_cycle_at_the_deployed_timers_has_no_mismatch_and_opens_the_gate"],
+        guards: "C-JOINT / V-JOINT-1",
+    },
+    Mutant {
+        id: "M409-joint-rig-version-guard-skipped",
+        what: "the joint rig writes a watcher configuration without running its version guard: a watcher built without test-endpoints would get a configuration from a test (spec mutant 17; test support)",
+        file: "crates/oms-node/tests/joint_rig/mod.rs",
+        find: "        version_guard(bin)?;\n        self.write_watcher_config();",
+        replace: "        self.write_watcher_config();",
+        test: &["-p", "oms-node", "--features", "joint", "--test", "joint", "--", "--test-threads=1", "--exact", "j0_the_rig_refuses_a_watcher_built_without_test_endpoints_and_a_test_build_without_wiring_exits_2"],
+        guards: "C-JOINT / V-JOINT-1",
+    },
+    Mutant {
+        id: "M410-watcher-test-build-refusal-exits-0",
+        what: "the watcher's test build refuses a start without WATCHER_TEST_ENDPOINTS but exits 0 instead of 2, so a unit manager would read the refusal as a clean stop (spec mutant 18; it still returns before run, so nothing is sent)",
+        file: "crates/watcher/src/main.rs",
+        find: "                Err(e) => {\n                    eprintln!(\"watcher: {e}\");\n                    return 2;\n                }",
+        replace: "                Err(e) => {\n                    eprintln!(\"watcher: {e}\");\n                    return 0;\n                }",
+        test: &["-p", "oms-node", "--features", "joint", "--test", "joint", "--", "--test-threads=1", "--exact", "j0_the_rig_refuses_a_watcher_built_without_test_endpoints_and_a_test_build_without_wiring_exits_2"],
+        guards: "C-JOINT / V-JOINT-1",
+    },
 ];
+
+/// A mutant whose test is a joint test (`--features joint`, ADR-039): its
+/// run first builds the watcher, `omsctl` and `oms-node` from the mutated
+/// copy, as `xtask joint` does.
+fn is_joint(test: &[&str]) -> bool {
+    let joint = |list: &str| list.split(',').any(|f| f == "joint");
+    test.windows(2).any(|w| w[0] == "--features" && joint(w[1])) || test.iter().any(|a| a.strip_prefix("--features=").is_some_and(joint))
+}
+
+/// Whether a mutant was killed, and why not, from its `cargo test` run. A
+/// mutant that does not compile, or whose test did not run, proves
+/// nothing. A joint run is no kill when a process was left behind
+/// (`orphans`, whatever the result) or when it failed on the rig's own
+/// precondition ([`crate::joint::RIG_PRECONDITION`]): only a scenario
+/// assertion or a budget kills a joint mutant ([`scenario_failure`]).
+fn verdict(success: bool, text: &str, joint: bool, orphans: &[String]) -> (bool, String) {
+    if text.contains("could not compile") {
+        return (false, "the mutant did not compile".to_string());
+    }
+    if joint && !orphans.is_empty() {
+        return (false, format!("orphan process after the run: {}", orphans.join("; ")));
+    }
+    if !text.contains("test result:") {
+        return (false, "no test ran".to_string());
+    }
+    if joint && !success && text.contains(crate::joint::RIG_PRECONDITION) {
+        return (false, "rig precondition failed".to_string());
+    }
+    if joint && !success {
+        return match scenario_failure(text) {
+            Ok(message) => (true, message),
+            Err(message) => (false, format!("not a scenario failure: {message}")),
+        };
+    }
+    (!success, String::new())
+}
+
+/// The first panic of a failed joint run, `Ok` when it is a scenario's:
+/// an assertion in [`crate::joint::JOINT_TESTS`] that is not an `unwrap`,
+/// or a failed wait or check of the rig ([`crate::joint::RIG_SCENARIO`]).
+/// Its message (first line, the rig's prefix cut) is the note either way,
+/// so a kill names the failing assertion. A panic elsewhere (a rig file
+/// write, a fake's thread) says nothing about the mutant.
+fn scenario_failure(text: &str) -> Result<String, String> {
+    let mut lines = text.lines().skip_while(|l| !l.contains(" panicked at "));
+    let at = lines.next().ok_or("no panic in the output")?;
+    let file = at.split(" panicked at ").nth(1).and_then(|l| l.split(':').next()).unwrap_or_default();
+    let message = lines.next().unwrap_or_default();
+    if let Some(rest) = message.strip_prefix(crate::joint::RIG_SCENARIO) {
+        return Ok(rest.trim_start().to_string());
+    }
+    let unwrap = message.starts_with("called `Result::unwrap()`") || message.starts_with("called `Option::unwrap()`");
+    if file == crate::joint::JOINT_TESTS && !unwrap { Ok(message.to_string()) } else { Err(message.to_string()) }
+}
+
+/// What one mutant's run does outside this process. The runner's are
+/// [`RealSteps`]; a test gives fakes, so the order of a joint mutant's
+/// steps, the tree it builds and the directory it scans are tested without
+/// cargo.
+trait Steps {
+    /// `OMS_TEST_DIR` under the rules of `xtask joint`, created.
+    fn test_base(&mut self) -> Result<PathBuf, String>;
+    /// The watcher, `omsctl` and `oms-node` built from `root`.
+    fn build(&mut self, root: &Path, target_dir: &Path, bin_dir: &Path) -> Result<crate::joint::Bins, String>;
+    /// Runs a mutant's `cargo test`: whether it passed, and its output.
+    fn test(&mut self, cmd: Command) -> Result<(bool, String), String>;
+    /// The orphan scan of `xtask joint` on `run_dir`.
+    fn scan(&mut self, run_dir: &Path, bins: &[PathBuf]) -> Vec<String>;
+}
+
+struct RealSteps;
+
+impl Steps for RealSteps {
+    fn test_base(&mut self) -> Result<PathBuf, String> {
+        let base = crate::joint::check_test_dir(std::env::var("OMS_TEST_DIR").ok().as_deref())?;
+        crate::joint::make_test_dir(&base)?;
+        Ok(base)
+    }
+    fn build(&mut self, root: &Path, target_dir: &Path, bin_dir: &Path) -> Result<crate::joint::Bins, String> {
+        crate::joint::build(root, Some(target_dir), bin_dir)
+    }
+    fn test(&mut self, mut cmd: Command) -> Result<(bool, String), String> {
+        let o = cmd.output().map_err(|e| format!("cargo did not run: {e}"))?;
+        Ok((o.status.success(), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))))
+    }
+    fn scan(&mut self, run_dir: &Path, bins: &[PathBuf]) -> Vec<String> {
+        crate::joint::orphan_scan(run_dir, bins)
+    }
+}
+
+/// One mutant: `m` applied to `original` in `work`, its test run, the
+/// source restored; whether it was killed and the note.
+fn run_mutant(m: &Mutant, original: &str, work: &Path, target_dir: &Path, steps: &mut impl Steps) -> (bool, String) {
+    let path = work.join(m.file);
+    let _ = std::fs::write(&path, original.replacen(m.find, m.replace, 1));
+    let result = if is_joint(m.test) {
+        joint_mutant(m.test, work, target_dir, steps)
+    } else {
+        match steps.test(test_command(m.test, work, target_dir, None)) {
+            Err(note) => (false, note),
+            Ok((success, text)) => verdict(success, &text, false, &[]),
+        }
+    };
+    let _ = std::fs::write(&path, original);
+    result
+}
+
+/// A joint mutant (ADR-039), its file already mutated in `work`: the
+/// test directory, its run directory `r<pid>-m` emptied (one joint mutant
+/// runs at a time), the three binaries built from the mutated copy into
+/// `r<pid>-mbin` (the joint test spawns the watcher and `omsctl` it is
+/// given), the test, then the orphan scan of `xtask joint` on the run
+/// directory: a process left behind is signalled and makes the run no
+/// kill. A failed step before the test is no kill, with its note.
+fn joint_mutant(test: &[&str], work: &Path, target_dir: &Path, steps: &mut impl Steps) -> (bool, String) {
+    let base = match steps.test_base() {
+        Ok(base) => base,
+        Err(note) => return (false, note),
+    };
+    let me = std::process::id();
+    let run_dir = base.join(format!("r{me}-m"));
+    let _ = std::fs::remove_dir_all(&run_dir);
+    if let Err(e) = std::fs::create_dir_all(&run_dir) {
+        return (false, format!("create {}: {e}", run_dir.display()));
+    }
+    let bins = match steps.build(work, target_dir, &base.join(format!("r{me}-mbin"))) {
+        Ok(bins) => bins,
+        Err(e) => return (false, format!("the mutant did not compile (joint prebuild): {e}")),
+    };
+    let prebuilt = (run_dir, bins);
+    let out = steps.test(test_command(test, work, target_dir, Some(&prebuilt)));
+    let orphans = steps.scan(&prebuilt.0, &prebuilt.1.all());
+    match out {
+        Err(note) => (false, note),
+        Ok((success, text)) => verdict(success, &text, true, &orphans),
+    }
+}
+
+/// The `cargo test` of one mutant in `work`. A joint mutant's (`prebuilt`:
+/// its run directory and the binaries built from the mutated copy) also
+/// gets those binaries and that directory.
+fn test_command(test: &[&str], work: &Path, target_dir: &Path, prebuilt: Option<&(PathBuf, crate::joint::Bins)>) -> Command {
+    let mut cmd = Command::new("cargo");
+    cmd.arg("test").args(test).current_dir(work).env("CARGO_TARGET_DIR", target_dir).env("OMS_SIM_SEEDS", "60");
+    if let Some((run_dir, bins)) = prebuilt {
+        cmd.env("JOINT_WATCHER_BIN", &bins.watcher).env("JOINT_OMSCTL_BIN", &bins.omsctl).env("OMS_TEST_DIR", run_dir);
+    }
+    cmd
+}
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(to)?;
@@ -3750,32 +3935,8 @@ pub fn run(root: &Path, only: Option<&str>) -> i32 {
             survived += 1;
             continue;
         }
-        let _ = std::fs::write(&path, original.replacen(m.find, m.replace, 1));
         let t = Instant::now();
-        let out = Command::new("cargo")
-            .arg("test")
-            .args(m.test)
-            .current_dir(&work)
-            .env("CARGO_TARGET_DIR", &target_dir)
-            .env("OMS_SIM_SEEDS", "60")
-            .output();
-        let _ = std::fs::write(&path, &original);
-        let (killed, note) = match out {
-            Err(e) => (false, format!("cargo did not run: {e}")),
-            Ok(o) => {
-                let text = format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
-                let compiled = !text.contains("could not compile");
-                let ran = text.contains("test result:");
-                if !compiled {
-                    // A mutant that does not compile proves nothing.
-                    (false, "the mutant did not compile".to_string())
-                } else if !ran {
-                    (false, "no test ran".to_string())
-                } else {
-                    (!o.status.success(), String::new())
-                }
-            }
-        };
+        let (killed, note) = run_mutant(m, &original, &work, &target_dir, &mut RealSteps);
         if !killed {
             survived += 1;
         }
@@ -3785,6 +3946,12 @@ pub fn run(root: &Path, only: Option<&str>) -> i32 {
             "test": format!("cargo test {}", m.test.join(" ")),
             "killed": killed, "note": note,
         }));
+    }
+    if let Ok(base) = std::env::var("OMS_TEST_DIR") {
+        let me = std::process::id();
+        for dir in [format!("r{me}-m"), format!("r{me}-mbin")] {
+            let _ = std::fs::remove_dir_all(Path::new(&base).join(dir));
+        }
     }
     let report = serde_json::json!({
         "source_digest": digest,
@@ -3797,4 +3964,210 @@ pub fn run(root: &Path, only: Option<&str>) -> i32 {
         eprintln!("written {}", path.display());
     }
     i32::from(survived > 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::joint;
+
+    #[test]
+    fn a_joint_mutant_is_named_by_its_features_joint_argument() {
+        assert!(is_joint(&["-p", "oms-node", "--features", "joint", "--test", "joint", "--", "--test-threads=1", "j1_"]));
+        assert!(is_joint(&["-p", "oms-node", "--features", "failpoints,joint", "--test", "joint"]));
+        assert!(is_joint(&["-p", "oms-node", "--features=joint", "--test", "joint"]));
+        assert!(!is_joint(&["-p", "oms-node", "--features", "failpoints", "--test", "bybit_node", "joint"]));
+        assert!(!is_joint(&["-p", "watcher", "--test", "test_endpoints", "a_test_build_without_wiring_is_refused"]));
+        // A test of the joint target cannot run without the feature, so a
+        // listed one always has it and gets the prebuild.
+        for m in MUTANTS.iter().filter(|m| m.test.contains(&"joint") && m.test.contains(&"--test")) {
+            assert!(is_joint(m.test), "{} runs the joint target without --features joint", m.id);
+        }
+    }
+
+    const FAILED: &str = "test j0_x ... FAILED\ntest result: FAILED. 0 passed; 1 failed; 0 ignored\n";
+
+    fn envs(cmd: &Command) -> Vec<(String, String)> {
+        cmd.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()).unwrap_or_default())).collect()
+    }
+
+    /// A joint mutant's test spawns the binaries built from the mutated
+    /// copy and works in its own run directory; any other mutant's test
+    /// gets neither.
+    #[test]
+    fn a_joint_mutants_test_gets_the_built_binaries_and_its_run_directory() {
+        let (work, target) = (Path::new("/w"), Path::new("/w/target"));
+        let bins = joint::Bins { watcher: "/t/r1-mbin/watcher".into(), omsctl: "/t/r1-mbin/omsctl".into(), node: "/w/target/debug/oms-node".into() };
+        let prebuilt = (PathBuf::from("/t/r1-m"), bins);
+        let cmd = test_command(&["-p", "oms-node", "--features", "joint", "--test", "joint"], work, target, Some(&prebuilt));
+        let e = envs(&cmd);
+        for (k, v) in [("JOINT_WATCHER_BIN", "/t/r1-mbin/watcher"), ("JOINT_OMSCTL_BIN", "/t/r1-mbin/omsctl"), ("OMS_TEST_DIR", "/t/r1-m"), ("CARGO_TARGET_DIR", "/w/target")] {
+            assert!(e.contains(&(k.to_string(), v.to_string())), "{k}: {e:?}");
+        }
+        assert_eq!(cmd.get_current_dir(), Some(work));
+        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(args, ["test", "-p", "oms-node", "--features", "joint", "--test", "joint"]);
+        let plain = envs(&test_command(&["-p", "watcher"], work, target, None));
+        assert!(plain.iter().all(|(k, _)| !k.starts_with("JOINT_") && k != "OMS_TEST_DIR"), "{plain:?}");
+    }
+
+    #[test]
+    fn a_failing_run_is_a_kill_only_when_it_compiled_and_ran() {
+        assert_eq!(verdict(false, FAILED, false, &[]), (true, String::new()));
+        assert_eq!(verdict(true, "test result: ok. 1 passed; 0 failed\n", false, &[]), (false, String::new()));
+        let broken = "error[E0308]: mismatched types\nerror: could not compile `watcher`";
+        assert_eq!(verdict(false, broken, false, &[]), (false, "the mutant did not compile".into()));
+        assert_eq!(verdict(false, broken, true, &[]), (false, "the mutant did not compile".into()));
+        assert_eq!(verdict(false, "error: no test target named `x`", false, &[]), (false, "no test ran".into()));
+    }
+
+    /// A joint test that fails on the rig's own precondition (a base in a
+    /// git work tree, a socket path too long, a port still in use, a
+    /// binary that fails the guard, a missing variable) proves nothing
+    /// about the mutant. Only for a joint mutant: elsewhere the text means
+    /// nothing.
+    #[test]
+    fn a_failing_joint_run_on_a_rig_precondition_is_not_a_kill() {
+        let rig = format!("thread 'j1_x' panicked at crates/oms-node/tests/joint_rig/mod.rs:61:14:\n{} JOINT_WATCHER_BIN is not set\n{FAILED}", joint::RIG_PRECONDITION);
+        assert_eq!(verdict(false, &rig, true, &[]), (false, "rig precondition failed".into()));
+        assert_eq!(verdict(false, &rig, false, &[]), (true, String::new()));
+        // A scenario assertion kills it.
+        let scenario = format!("thread 'j1_x' panicked at crates/oms-node/tests/joint.rs:200:5:\nwaited 40s (budget 120s) for: the gate opens\n{FAILED}");
+        assert_eq!(verdict(false, &scenario, true, &[]), (true, "waited 40s (budget 120s) for: the gate opens".into()));
+    }
+
+    /// Only a scenario failure kills a joint mutant: its first panic is an
+    /// assertion in the scenario file or a failed wait or check of the rig
+    /// (`World::fail`). Any other panic (a rig file write on a full disk, an
+    /// `unwrap`, a fake's thread) proves nothing about the mutant, and its
+    /// message is the note (review U19c3b 1, S2).
+    #[test]
+    fn a_failing_joint_run_is_a_kill_only_on_a_scenario_failure() {
+        let panic = |file: &str, msg: &str| format!("thread 'j1_x' panicked at {file}:389:9:\n{msg}\nnote: run with `RUST_BACKTRACE=1`\n");
+        let rig = "crates/oms-node/tests/joint_rig/mod.rs";
+        let full = "called `Result::unwrap()` on an `Err` value: Os { code: 28, kind: StorageFull, message: \"No space left on device\" }";
+        let disk = format!("{}{FAILED}", panic(rig, full));
+        assert_eq!(verdict(false, &disk, true, &[]), (false, format!("not a scenario failure: {full}")));
+        // The same failure kills a mutant that is not a joint one, as before.
+        assert_eq!(verdict(false, &disk, false, &[]), (true, String::new()));
+        let unwrap = format!("{}{FAILED}", panic(joint::JOINT_TESTS, "called `Option::unwrap()` on a `None` value"));
+        assert_eq!(verdict(false, &unwrap, true, &[]), (false, "not a scenario failure: called `Option::unwrap()` on a `None` value".into()));
+        let assertion = format!("{}{FAILED}", panic(joint::JOINT_TESTS, "the guard took a default build: \"\""));
+        assert_eq!(verdict(false, &assertion, true, &[]), (true, "the guard took a default build: \"\"".into()));
+        let wait = format!("{}{FAILED}", panic(rig, &format!("{} waited 40s (budget 120s) for: the gate opens", joint::RIG_SCENARIO)));
+        assert_eq!(verdict(false, &wait, true, &[]), (true, "waited 40s (budget 120s) for: the gate opens".into()));
+        // The first panic decides: a fake's thread that panicked before the
+        // scenario failed may be the cause.
+        let first = format!("{}{}{FAILED}", panic(rig, "fake bybit: bad request"), panic(joint::JOINT_TESTS, "the gate opens"));
+        assert_eq!(verdict(false, &first, true, &[]), (false, "not a scenario failure: fake bybit: bad request".into()));
+        let none = format!("test j1_x ... FAILED\n{FAILED}");
+        assert_eq!(verdict(false, &none, true, &[]), (false, "not a scenario failure: no panic in the output".into()));
+    }
+
+    /// A fake of the steps that leave this process: it logs each call,
+    /// whether the mutated text is in the tree it is given and whether the
+    /// run directory is empty when the test starts.
+    struct FakeSteps {
+        base: Result<PathBuf, String>,
+        built: Result<(), String>,
+        result: (bool, String),
+        orphans: Vec<String>,
+        log: Vec<String>,
+    }
+
+    const MUTATED: &str = "MUTATED";
+
+    impl Steps for FakeSteps {
+        fn test_base(&mut self) -> Result<PathBuf, String> {
+            self.log.push("base".into());
+            self.base.clone()
+        }
+        fn build(&mut self, root: &Path, target_dir: &Path, bin_dir: &Path) -> Result<joint::Bins, String> {
+            let mutated = std::fs::read_to_string(root.join("src/a.rs")).unwrap_or_default().contains(MUTATED);
+            self.log.push(format!("build {} mutated={mutated} target={}", root.display(), target_dir.display()));
+            self.built.clone()?;
+            Ok(joint::Bins { watcher: bin_dir.join("watcher"), omsctl: bin_dir.join("omsctl"), node: target_dir.join("debug/oms-node") })
+        }
+        fn test(&mut self, cmd: Command) -> Result<(bool, String), String> {
+            let dir = envs(&cmd).into_iter().find(|(k, _)| k == "OMS_TEST_DIR").map(|(_, v)| v);
+            let empty = dir.as_ref().map(|d| std::fs::read_dir(d).map(|mut r| r.next().is_none()).unwrap_or(false));
+            let work = cmd.get_current_dir().map(Path::to_path_buf).unwrap_or_default();
+            let mutated = std::fs::read_to_string(work.join("src/a.rs")).unwrap_or_default().contains(MUTATED);
+            self.log.push(format!("test run_dir={dir:?} empty={empty:?} mutated={mutated}"));
+            Ok(self.result.clone())
+        }
+        fn scan(&mut self, run_dir: &Path, bins: &[PathBuf]) -> Vec<String> {
+            self.log.push(format!("scan {} bins={}", run_dir.display(), bins.len()));
+            self.orphans.clone()
+        }
+    }
+
+    const JOINT_M: Mutant = Mutant { id: "M0-joint", what: "", file: "src/a.rs", find: "keep", replace: MUTATED, test: &["-p", "oms-node", "--features", "joint", "--test", "joint"], guards: "" };
+    const PLAIN_M: Mutant = Mutant { id: "M0-plain", what: "", file: "src/a.rs", find: "keep", replace: MUTATED, test: &["-p", "watcher"], guards: "" };
+
+    /// A joint mutant's run, in order: the test directory, its run
+    /// directory emptied, the three binaries built from the copy that holds
+    /// the mutation, the test in that directory, then the orphan scan of
+    /// that directory, whose result decides the verdict whatever the test
+    /// did; the source is restored after. A failed build or test directory
+    /// stops the run as no kill. Any other mutant runs only its test
+    /// (review U19c3b 1, S1).
+    #[test]
+    fn a_joint_mutant_is_built_from_the_mutated_copy_tested_in_an_emptied_run_directory_and_scanned_after() {
+        let scratch = std::env::temp_dir().join(format!("xtask-mutant-steps-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&scratch);
+        let (work, base) = (scratch.join("work"), scratch.join("base"));
+        let target = work.join("target");
+        std::fs::create_dir_all(work.join("src")).expect("test setup");
+        std::fs::write(work.join("src/a.rs"), "fn keep() {}").expect("test setup");
+        let run_dir = base.join(format!("r{}-m", std::process::id()));
+        let fake = |orphans: Vec<String>| FakeSteps {
+            base: Ok(base.clone()),
+            built: Ok(()),
+            result: (false, format!("thread 'j' panicked at {}:9:9:\nthe gate opens\n{FAILED}", joint::JOINT_TESTS)),
+            orphans,
+            log: Vec::new(),
+        };
+        for orphans in [Vec::new(), vec!["orphan process 7 x".to_string()]] {
+            std::fs::create_dir_all(&run_dir).expect("test setup");
+            std::fs::write(run_dir.join("stale"), "").expect("test setup");
+            let mut steps = fake(orphans.clone());
+            let got = run_mutant(&JOINT_M, "fn keep() {}", &work, &target, &mut steps);
+            let want = if orphans.is_empty() { (true, "the gate opens".to_string()) } else { (false, "orphan process after the run: orphan process 7 x".to_string()) };
+            assert_eq!(got, want);
+            assert_eq!(
+                steps.log,
+                [
+                    "base".to_string(),
+                    format!("build {} mutated=true target={}", work.display(), target.display()),
+                    format!("test run_dir={:?} empty=Some(true) mutated=true", Some(run_dir.display().to_string())),
+                    format!("scan {} bins=3", run_dir.display()),
+                ]
+            );
+            assert_eq!(std::fs::read_to_string(work.join("src/a.rs")).expect("restored"), "fn keep() {}");
+        }
+        let mut failed = FakeSteps { built: Err("error: could not compile `watcher`".into()), ..fake(Vec::new()) };
+        assert_eq!(run_mutant(&JOINT_M, "fn keep() {}", &work, &target, &mut failed), (false, "the mutant did not compile (joint prebuild): error: could not compile `watcher`".into()));
+        assert_eq!(failed.log.len(), 2, "{:?}", failed.log);
+        let mut no_base = FakeSteps { base: Err("OMS_TEST_DIR is not set".into()), ..fake(Vec::new()) };
+        assert_eq!(run_mutant(&JOINT_M, "fn keep() {}", &work, &target, &mut no_base), (false, "OMS_TEST_DIR is not set".into()));
+        assert_eq!(no_base.log, ["base"]);
+        let mut plain = FakeSteps { result: (false, FAILED.to_string()), ..fake(vec!["ignored".into()]) };
+        assert_eq!(run_mutant(&PLAIN_M, "fn keep() {}", &work, &target, &mut plain), (true, String::new()));
+        assert_eq!(plain.log, ["test run_dir=None empty=None mutated=true"]);
+        std::fs::remove_dir_all(&scratch).expect("test setup");
+    }
+
+    /// A process left behind by a joint run is a rig defect, so the run is
+    /// no kill whether the test failed or passed.
+    #[test]
+    fn an_orphan_makes_a_joint_run_no_kill_whatever_the_result() {
+        let orphan = vec!["orphan process 7 /t/r1-mbin/watcher".to_string()];
+        for (success, text) in [(false, FAILED), (true, "test result: ok. 1 passed; 0 failed\n")] {
+            let (killed, note) = verdict(success, text, true, &orphan);
+            assert!(!killed, "{text}");
+            assert!(note.starts_with("orphan process"), "{note}");
+            assert!(note.contains("/t/r1-mbin/watcher"), "{note}");
+        }
+    }
 }

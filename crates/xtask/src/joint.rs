@@ -25,6 +25,33 @@ pub const DIR_MAX: usize = 58;
 /// `--runs` at most (the run directory `r<pid>-<k>` has room for two
 /// digits).
 pub const RUNS_MAX: u64 = 99;
+/// The start of every panic about the rig's own preconditions (the rig's
+/// `PRECONDITION`): a run that fails with it says nothing about the
+/// programs under test.
+pub const RIG_PRECONDITION: &str = "joint rig precondition:";
+
+/// The start of every failed wait or check of a scenario in the rig (the
+/// rig's `SCENARIO`, from `World::fail`).
+pub const RIG_SCENARIO: &str = "joint scenario:";
+
+/// The file of the joint scenarios: a panic there is a scenario's own
+/// assertion.
+pub const JOINT_TESTS: &str = "crates/oms-node/tests/joint.rs";
+
+/// The three test binaries of one build: the watcher and `omsctl` as
+/// copied, `oms-node` where cargo put it.
+pub struct Bins {
+    pub watcher: PathBuf,
+    pub omsctl: PathBuf,
+    pub node: PathBuf,
+}
+
+impl Bins {
+    /// The executables the orphan scan signals.
+    pub fn all(&self) -> [PathBuf; 3] {
+        [self.watcher.clone(), self.omsctl.clone(), self.node.clone()]
+    }
+}
 
 /// The git work tree `p` lies in: the first of `p` and its ancestors that
 /// holds `.git`, whether `p` exists or not.
@@ -199,14 +226,23 @@ pub fn orphan_scan(run_dir: &Path, bins: &[PathBuf]) -> Vec<String> {
 
 /// Builds one binary and returns the executable of its `compiler-artifact`
 /// message.
-fn build(root: &Path, args: &[&str], bin: &str) -> Result<PathBuf, String> {
-    let out = Command::new("cargo")
-        .arg("build")
+fn build_bin(
+    root: &Path,
+    target_dir: Option<&Path>,
+    args: &[&str],
+    bin: &str,
+) -> Result<PathBuf, String> {
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build")
         .args(["--locked", "--message-format=json-render-diagnostics"])
         .args(args)
         .args(["--bin", bin])
         .current_dir(root)
-        .stderr(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit());
+    if let Some(t) = target_dir {
+        cmd.env("CARGO_TARGET_DIR", t);
+    }
+    let out = cmd
         .output()
         .map_err(|e| format!("cargo build {bin}: {e}"))?;
     if !out.status.success() {
@@ -221,16 +257,24 @@ fn build(root: &Path, args: &[&str], bin: &str) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("cargo named no executable for {bin}"))
 }
 
-/// Step 2: the three binaries; the watcher and `omsctl` copied into
-/// `bin_dir`. Returns (watcher, omsctl, oms-node).
-fn prepare_bins(root: &Path, bin_dir: &Path) -> Result<(PathBuf, PathBuf, PathBuf), String> {
-    let watcher = build(
+/// Step 2: the three binaries of the source at `root`, into `target_dir`
+/// (`None`: cargo's own choice); the watcher and `omsctl` copied into
+/// `bin_dir`. The mutant runner calls it too, so a mutant in the watcher's
+/// source is the watcher a joint test spawns.
+pub fn build(root: &Path, target_dir: Option<&Path>, bin_dir: &Path) -> Result<Bins, String> {
+    let watcher = build_bin(
         root,
+        target_dir,
         &["-p", "watcher", "--features", "test-endpoints"],
         "watcher",
     )?;
-    let omsctl = build(root, &["-p", "oms-api"], "omsctl")?;
-    let node = build(root, &["-p", "oms-node", "--features", "joint"], "oms-node")?;
+    let omsctl = build_bin(root, target_dir, &["-p", "oms-api"], "omsctl")?;
+    let node = build_bin(
+        root,
+        target_dir,
+        &["-p", "oms-node", "--features", "joint"],
+        "oms-node",
+    )?;
     let _ = std::fs::remove_dir_all(bin_dir);
     std::fs::create_dir_all(bin_dir).map_err(|e| format!("create {}: {e}", bin_dir.display()))?;
     let copy = |from: &Path| -> Result<PathBuf, String> {
@@ -241,7 +285,11 @@ fn prepare_bins(root: &Path, bin_dir: &Path) -> Result<(PathBuf, PathBuf, PathBu
     };
     let (watcher, omsctl) = (copy(&watcher)?, copy(&omsctl)?);
     check_watcher_version(&watcher)?;
-    Ok((watcher, omsctl, node))
+    Ok(Bins {
+        watcher,
+        omsctl,
+        node,
+    })
 }
 
 /// `--runs`: absent is 1; else a number from 1 to [`RUNS_MAX`].
@@ -296,14 +344,17 @@ pub fn run(root: &Path, runs: Option<&str>, only: Option<&str>) -> i32 {
     }
     let me = std::process::id();
     let bin_dir = dir.join(format!("r{me}-bin"));
-    let (watcher, omsctl, node) = match prepare_bins(root, &bin_dir) {
+    let built = match build(root, None, &bin_dir) {
         Ok(b) => b,
         Err(e) => {
             eprintln!("joint: {e}");
             return 2;
         }
     };
-    let bins = [watcher.clone(), omsctl.clone(), node];
+    let bins = built.all();
+    let Bins {
+        watcher, omsctl, ..
+    } = built;
     for k in 1..=runs {
         let run_dir = dir.join(format!("r{me}-{k}"));
         let _ = std::fs::remove_dir_all(&run_dir);
@@ -493,6 +544,31 @@ mod tests {
         let e = check_watcher_version(&d.join("missing")).expect_err("refused");
         assert!(e.contains("--version"), "{e}");
         std::fs::remove_dir_all(&d).expect("test setup");
+    }
+
+    /// The mutant runner reads a failure that starts with this text as the
+    /// rig's, not the scenario's; it must be the rig's own constant.
+    #[test]
+    fn the_rig_precondition_text_is_the_rigs_own() {
+        let rig = Path::new(env!("CARGO_MANIFEST_DIR")).join("../oms-node/tests/joint_rig/mod.rs");
+        let text = std::fs::read_to_string(&rig).expect("test setup");
+        let line = format!("pub const PRECONDITION: &str = \"{RIG_PRECONDITION}\";");
+        assert!(text.contains(&line), "{} has no line {line}", rig.display());
+    }
+
+    /// The mutant runner counts a joint failure as a kill only from a panic
+    /// that starts with this text, or from the scenario file; both must be
+    /// the rig's.
+    #[test]
+    fn the_rig_scenario_text_and_the_scenario_file_are_the_rigs_own() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let rig = root.join("crates/oms-node/tests/joint_rig/mod.rs");
+        let text = std::fs::read_to_string(&rig).expect("test setup");
+        let line = format!("pub const SCENARIO: &str = \"{RIG_SCENARIO}\";");
+        assert!(text.contains(&line), "{} has no line {line}", rig.display());
+        assert!(text.contains("\"{SCENARIO} {what}"), "World::fail does not start with SCENARIO");
+        let tests = std::fs::read_to_string(root.join(JOINT_TESTS)).expect("the scenario file");
+        assert!(tests.contains("mod joint_rig;"), "{JOINT_TESTS} is not the joint target");
     }
 
     #[test]
