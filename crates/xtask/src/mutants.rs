@@ -3814,7 +3814,7 @@ const MUTANTS: &[Mutant] = &[
     },
     Mutant {
         id: "M421-oms-resends-an-order-in-doubt-at-boot",
-        what: "the OMS sends SendOrder for an order the restart left in doubt (order_in_doubt{Restart} in the boot record): an order whose create reached the venue before a SIGKILL is created twice (spec mutant 28; a joint test)",
+        what: "the OMS sends SendOrder for an order the restart left in doubt (order_in_doubt{Restart} in the boot record): sent before the gateway's boot checks it is closed NotSent while open at the venue, sent after them it is created twice (spec mutant 28; a joint test)",
         file: "crates/oms-core/src/core.rs",
         find: "            Event::OrderAccepted { order_id, .. } => {",
         replace: "            Event::OrderAccepted { order_id, .. } | Event::OrderInDoubt { order_id, reason: DoubtReason::Restart, .. } => {",
